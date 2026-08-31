@@ -192,11 +192,15 @@ export function opaqueServerErrors(
         c.header('x-request-id', parsed.requestId);
         return;
       }
-      // Broker outages and capacity denials are expected, actionable degraded
-      // states rather than route exceptions. Preserve only their fixed codes;
-      // the bridge logs the underlying detail and never puts it in this body.
+      // Broker outages, capacity denials, and media-engine readiness failures
+      // are expected, actionable degraded states rather than route exceptions.
+      // Preserve only their fixed codes; the route/provider logs the underlying
+      // detail and never puts it in this body.
       if (
-        (parsed.error === 'machine_engine_unavailable' || parsed.error === 'capacity_denied') &&
+        (parsed.error === 'machine_engine_unavailable' ||
+          parsed.error === 'capacity_denied' ||
+          parsed.error === 'speech_to_text_not_ready' ||
+          parsed.error === 'speech_to_text_failed') &&
         Object.keys(parsed as Record<string, unknown>).length === 1
       ) {
         return;

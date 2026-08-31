@@ -34,12 +34,12 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { duckdbInstalledBinary } from './duckdb-pin.js';
 import { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.js';
 import { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 import { isBinaryQuarantined, readLlamaQuarantine } from './llama-quarantine.js';
 import type { LlamaQuarantineEntry } from './llama-quarantine.js';
-import { duckdbInstalledBinary } from './duckdb-pin.js';
 import { resolvePlatformKey } from './platform-key.js';
 
 export type NativeBinaryName =

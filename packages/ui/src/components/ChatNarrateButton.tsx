@@ -6,10 +6,15 @@ import {
 } from '@bendyline/squisq-editor-react/recorder';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { ProgressiveSpeechToText } from './progressive-speech-to-text.js';
+import { listMicrophoneInputs, resolveMicrophoneInput } from './microphone-input.js';
+import {
+  ProgressiveSpeechToText,
+  normalizeSpeechTranscript,
+} from './progressive-speech-to-text.js';
 import { microphoneTakeAsWav } from './speech-audio-wav.js';
 
 type NarrateStatus = 'idle' | 'requesting' | 'recording' | 'transcribing';
+const WAVEFORM_BAR_COUNT = 12;
 
 export interface ChatNarrateButtonProps {
   projectId: string;
@@ -25,6 +30,7 @@ export function ChatNarrateButton({
   onError,
 }: ChatNarrateButtonProps) {
   const [status, setStatus] = useState<NarrateStatus>('idle');
+  const [waveformLevels, setWaveformLevels] = useState<number[]>(() => emptyWaveform());
   const sessionRef = useRef<ProgressiveSpeechToText | null>(null);
   const mountedRef = useRef(true);
   const startingRef = useRef(false);
@@ -50,6 +56,7 @@ export function ChatNarrateButton({
     sessionRef.current = null;
     startingRef.current = false;
     setStatus('idle');
+    setWaveformLevels(emptyWaveform());
   }, [projectId]);
 
   const stop = useCallback(async () => {
@@ -69,20 +76,37 @@ export function ChatNarrateButton({
     startingRef.current = true;
     const lifecycle = lifecycleRef.current;
     setStatus('requesting');
+    setWaveformLevels(emptyWaveform());
     onError(null);
     let stream: MediaStream | null = null;
     try {
+      const config = await api.getConfig().catch(() => undefined);
+      const microphonePreference = {
+        ...(config?.microphoneDeviceId ? { deviceId: config.microphoneDeviceId } : {}),
+        ...(config?.microphoneDeviceLabel ? { label: config.microphoneDeviceLabel } : {}),
+      };
+      const inputs =
+        microphonePreference.deviceId || microphonePreference.label
+          ? await listMicrophoneInputs().catch(() => [])
+          : [];
+      const preferredInput = resolveMicrophoneInput(inputs, microphonePreference);
+      const preferredDeviceId = preferredInput?.deviceId ?? microphonePreference.deviceId;
       // Squisq's requestMicStream is the shared wrapper around
       // navigator.mediaDevices.getUserMedia({ audio: …, video: false }).
       stream = await requestMicStream({
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        ...(preferredDeviceId ? { deviceId: { exact: preferredDeviceId } } : {}),
       });
       if (!mountedRef.current || lifecycle !== lifecycleRef.current) {
         for (const track of stream.getTracks()) track.stop();
         return;
       }
+      const activeMicrophoneLabel =
+        stream.getAudioTracks?.()[0]?.label?.trim() ||
+        preferredInput?.label ||
+        microphonePreference.label;
       const format = resolveFormat('audio');
       const session = new ProgressiveSpeechToText({
         stream,
@@ -94,9 +118,25 @@ export function ChatNarrateButton({
             projectId,
             signal,
           });
-          return response.text;
+          const text = normalizeSpeechTranscript(response.text);
+          if (!text) return '';
+          onError(null);
+          return text;
         },
         onTranscript,
+        onAudioLevel: (level) => {
+          if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
+          const visualLevel = normalizeWaveformLevel(level);
+          setWaveformLevels((current) => [...current.slice(1), visualLevel]);
+        },
+        onLongPause: (hadTranscript) => {
+          if (!hadTranscript) {
+            onError(
+              `No speech detected${activeMicrophoneLabel ? ` from ${activeMicrophoneLabel}` : ''}. Choose the microphone in Settings → Device Integration if this isn't the expected input.`,
+            );
+          }
+          void stop();
+        },
         onError: (caught) => {
           // A failed take will not become more useful by keeping the mic open
           // and sending another one. Release it immediately and surface one
@@ -125,7 +165,7 @@ export function ChatNarrateButton({
     } finally {
       if (lifecycle === lifecycleRef.current) startingRef.current = false;
     }
-  }, [disabled, onError, onTranscript, projectId, supported]);
+  }, [disabled, onError, onTranscript, projectId, stop, supported]);
 
   const recording = status === 'recording';
   const unavailable = !supported;
@@ -144,7 +184,7 @@ export function ChatNarrateButton({
   const title = unavailable
     ? 'Voice input is unavailable in this browser'
     : recording
-      ? 'Stop narrating and add the remaining speech to this prompt'
+      ? 'Listening — short pauses add speech; click to finish now'
       : status === 'transcribing'
         ? 'Adding the remaining speech to this prompt'
         : 'Narrate this prompt with your microphone';
@@ -162,8 +202,34 @@ export function ChatNarrateButton({
       title={title}
     >
       <MicrophoneGlyph />
+      {recording && <MicrophoneWaveform levels={waveformLevels} />}
       {recording && <span className="chat-narrate-live-dot" aria-hidden="true" />}
     </button>
+  );
+}
+
+function emptyWaveform(): number[] {
+  return Array.from({ length: WAVEFORM_BAR_COUNT }, () => 0);
+}
+
+/** Map typical microphone RMS values into a legible 0–1 display envelope. */
+function normalizeWaveformLevel(level: number): number {
+  return Math.min(1, Math.max(0, level * 14));
+}
+
+function MicrophoneWaveform({ levels }: { levels: readonly number[] }) {
+  return (
+    <span className="chat-narrate-waveform" data-testid="microphone-waveform" aria-hidden="true">
+      {levels.map((level, index) => (
+        <span
+          // Position is the identity in this fixed-length rolling buffer.
+          // biome-ignore lint/suspicious/noArrayIndexKey: bars never reorder.
+          key={index}
+          className="chat-narrate-waveform-bar"
+          style={{ height: `${2 + level * 14}px` }}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -183,11 +249,21 @@ function humanizeNarrationError(caught: unknown): string {
   if (error.name === 'NotAllowedError' || /permission|not allowed|denied/i.test(message)) {
     return 'Microphone access was not granted. Allow it in your system settings, then try again.';
   }
+  if (error.name === 'OverconstrainedError' || /constraint|selected microphone/i.test(message)) {
+    return 'The selected microphone is unavailable. Choose another in Settings → Device Integration.';
+  }
   if (error.name === 'NotFoundError' || /requested device not found|no microphone/i.test(message)) {
     return 'No microphone is available.';
   }
-  if (/no stt model|download one from settings|speech-to-text model/i.test(message)) {
+  if (
+    /speech_to_text_not_ready|no stt model|download one from settings|speech-to-text model/i.test(
+      message,
+    )
+  ) {
     return 'Speech-to-text is not ready. Download a model in Settings → Audio, then try again.';
+  }
+  if (/speech_to_text_failed/i.test(message)) {
+    return 'Speech-to-text could not transcribe this recording. Check Settings → Audio, then try again.';
   }
   return `Could not narrate this prompt: ${message}`;
 }

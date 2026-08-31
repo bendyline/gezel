@@ -473,9 +473,8 @@ block the user waiting for an LLM round-trip to decorate the new entity
 
 **Gallery dialogs.** When a creation flow starts from a catalog of
 starting points (project types, craftbooks), use the shared gallery-dialog
-layout: header with title + search, a category rail on the left, a card
-gallery in the middle, and a right-hand pane holding the selection's hero
-+ properties form + footer actions. The CSS skeleton is the `gz-npd-*`
+layout: header with title + search, a category rail on the left, and a card
+gallery filling the rest. The CSS skeleton is the `gz-npd-*`
 block in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)
 (named for the New Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
 modifier for task-only pieces. New gallery surfaces should reuse the
@@ -483,26 +482,36 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
-**A gallery dialog splits in two when the choice is worth reading.** The
-right-hand pane is fine for a starting point you pick by name (project
-types), but a craftbook is a page: a paragraph of description, four to a
-dozen named steps with their own one-liners, and a parameter form. Clamped
-into a 19rem column, the description lost its tail to a five-line clamp and
-the params stacked below the fold — so New Task is now a **two-step wizard**
-(`gz-ntd-step-pick` / `gz-ntd-step-configure` in
+**A gallery dialog is a two-step wizard.** Both tenants are: New Task and
+New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
 [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
-Step 1 is the catalog alone: rail + gallery across the full dialog, with the
-*project* picker in the header, because that choice decides which craftbooks
-are applicable and recommended. Choosing a card — the blank card included —
-advances to step 2: the recipe in full on the left, the properties form on
-the right, and one back key returning to the gallery with the choice still
-lit. Three rules keep it from reading as two different dialogs: the dialog
-keeps its size and its footer bar across both steps so the frame never
-jumps, the selection survives going back, and nothing is created until the
-second screen (the picker's footnote says so, and Enter in the search field
-must not submit the form). Reach for the split when the selection carries
-substantial detail or configuration; a catalog of one-line choices should
-stay a single screen with the pane.
+The old third column — a 19rem pane holding the selection's hero and its
+whole form — could not carry what these choices actually are. A craftbook is
+a page: a paragraph of description, four to a dozen named steps with their
+own one-liners, and a parameter form. A project type is a crew, a toolset, a
+set of scheduled routines and a stack of craftbooks — the reason a person
+picks it over a blank workspace. Clamped into the pane, the description lost
+its tail to a five-line clamp and the params stacked below the fold.
+
+Step 1 is the catalog alone: rail + gallery across the full dialog. New
+Task also puts the *project* picker in that header, because that choice
+decides which craftbooks are applicable and recommended. Choosing a card —
+the blank card included — advances to step 2: what the starting point is and
+what it brings on the left, the properties form on the right, and one back
+key returning to the gallery with the choice still lit. Three rules keep it
+from reading as two different dialogs: the dialog keeps its size and its
+footer bar across both steps so the frame never jumps, the selection
+survives going back, and nothing is created until the second screen (the
+picker's footnote says so, and Enter in the search field must not submit the
+form).
+
+**Step 2 goes to one centered column when there is nothing to read.** Two
+columns are for a selection whose brief earns one — a craftbook's steps, a
+project type's crew and tooling. A built-in project kind's brief is a
+sentence and two lines (`data-lean`), and New Task's blank card has none at
+all (`data-blank`); a full-width column beside either leaves two-thirds of
+the dialog standing empty. Both stack into one centered column instead, at
+the same dialog size.
 
 **Shelve a big catalog by subject, not by lifecycle.** A rail whose shelves
 answer "where in a project's life does this fit?" collapses on a large
@@ -1193,6 +1202,33 @@ These use small-radius plates with short rooftop leaders, prioritize functions
 and methods when labels collide, and appear progressively as each building gets
 large enough on screen. Keep the ordinary street view unlabeled and preserve
 hover details as the fallback for tags suppressed by density.
+
+## Social preview cards
+
+Every published Handboek page carries a 1200×630 Open Graph card, rendered at
+export time by [og-image.ts](../packages/service/src/handboek/og-image.ts). It
+is the first thing anyone sees of gezel when a docs link is shared, and it is
+seen at thumbnail size in someone else's feed — so it is a poster, not a page.
+
+The recipe is fixed on purpose, and there is only one:
+
+- **A kicker and a headline. Nothing else.** A thin title band carries
+  `gezel · <area>` (release notes add their version) with the terracotta accent
+  bar; the rest of the canvas is the headline, set in Playfair at whatever size
+  fills it. No body text, no logo lockup, no decoration.
+- **Under 80 characters.** Past that the type has to shrink out of poster
+  scale and the card stops working at the size it is actually read. Aim for
+  30–50.
+- **The site palette, flat.** Parchment `#eae5d6`, ink `#1c1c1c`, terracotta
+  `#b0724c` — the same tokens as the Handboek page it previews, so the card and
+  the page it opens are visibly the same thing.
+- **No texture layers.** Squisq's built-in themes add a `noise` background;
+  noise is random pixel data across the whole canvas, and it tripled the encoded
+  PNG (736KB against 213KB) for something invisible at preview size.
+
+A dashboard mosaic is the opposite of all of this and is not an option here,
+even though the renderer underneath is the dashboard renderer. If a card needs
+more than one idea on it, the headline is wrong, not the layout.
 
 ## When in doubt
 

@@ -45,11 +45,11 @@ networkConcurrency: 8
 minimumReleaseAgeExclude:
   - "@anthropic-ai/sdk@0.113.0"
   - "@bendyline/gilde"
-  - "@bendyline/squisq-cli@2.7.1"
-  - "@bendyline/squisq-editor-react@2.10.2"
+  - "@bendyline/squisq-cli@2.7.2"
+  - "@bendyline/squisq-editor-react@2.10.3"
   - "@bendyline/squisq-formats@2.5.1"
-  - "@bendyline/squisq-react@2.10.0"
-  - '@bendyline/squisq-video-react@2.4.1 || 2.4.2'
+  - "@bendyline/squisq-react@2.10.1"
+  - '@bendyline/squisq-video-react@2.4.1 || 2.4.2 || 2.4.3'
   - '@bendyline/squisq-video@2.3.1 || 2.3.2'
   - "@bendyline/squisq@2.10.0"
   - "@csstools/css-calc@3.3.0"

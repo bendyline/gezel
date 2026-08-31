@@ -673,7 +673,7 @@ export function NewTaskDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content className={`gz-npd gz-ntd gz-ntd-step-${step}`}>
+        <Dialog.Content className={`gz-npd gz-ntd gz-npd-step-${step}`}>
           <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
             {step === 'pick' ? (
               <>
@@ -821,8 +821,8 @@ export function NewTaskDialog({
                     ))}
                   </div>
                 </div>
-                <div className="gz-npd-pane-footer gz-ntd-pick-footer">
-                  <p className="gz-ntd-footnote">
+                <div className="gz-npd-pane-footer gz-npd-pick-footer">
+                  <p className="gz-npd-footnote">
                     Pick one to see what it does — nothing is created until the next screen.
                   </p>
                   <Dialog.Actions>
@@ -834,13 +834,13 @@ export function NewTaskDialog({
               </>
             ) : (
               <>
-                <header className="gz-npd-header gz-ntd-detail-header">
-                  <button type="button" className="gz-ntd-back" onClick={backToPicker}>
+                <header className="gz-npd-header gz-npd-detail-header">
+                  <button type="button" className="gz-npd-back" onClick={backToPicker}>
                     <span aria-hidden="true">‹</span>
                     {selectedBook ? 'Craftbooks' : 'Back'}
                   </button>
-                  <div className="gz-ntd-detail-id">
-                    <span className="gz-ntd-detail-art" aria-hidden="true">
+                  <div className="gz-npd-detail-id">
+                    <span className="gz-npd-detail-art" aria-hidden="true">
                       {selectedBook ? (
                         <CatalogArtwork
                           {...(selectedBook.item.iconSvg
@@ -874,13 +874,13 @@ export function NewTaskDialog({
                   )}
                 </header>
                 <div
-                  className="gz-ntd-detail"
+                  className="gz-npd-detail"
                   data-blank={selectedBook ? undefined : 'true'}
                   key={selectedBookId ?? '__general'}
                 >
                   {selectedBook && (
-                    <div className="gz-ntd-brief">
-                      <p className="gz-ntd-brief-lede">{selectedBook.manifest.description}</p>
+                    <div className="gz-npd-brief">
+                      <p className="gz-npd-brief-lede">{selectedBook.manifest.description}</p>
                       {selectedBook.manifest.basedOn && (
                         <p className="gz-ntd-based-on">
                           Based on{' '}
@@ -916,9 +916,9 @@ export function NewTaskDialog({
                       </div>
                     </div>
                   )}
-                  <div className="gz-ntd-setup">
+                  <div className="gz-npd-setup">
                     {!selectedBook && (
-                      <p className="gz-ntd-brief-lede">{modeCopy.generalDescription}</p>
+                      <p className="gz-npd-brief-lede">{modeCopy.generalDescription}</p>
                     )}
                     <div className="gz-npd-pane-form">
                       <label>
@@ -1067,15 +1067,15 @@ export function NewTaskDialog({
                     beside the button — never inside the scrolling body above,
                     where a message lands below the fold on a pane parked at
                     the top and the launch reads as a dead button. */}
-                <div className="gz-npd-pane-footer gz-ntd-detail-footer">
+                <div className="gz-npd-pane-footer gz-npd-detail-footer">
                   {error ? (
-                    <p className="error small gz-ntd-submit-error" role="alert">
+                    <p className="error small gz-npd-submit-error" role="alert">
                       {error}
                     </p>
                   ) : pullHint && !explicitPullNumber ? (
-                    <p className="gz-ntd-footnote gz-ntd-launch-hint">{pullHint}</p>
+                    <p className="gz-npd-footnote gz-ntd-launch-hint">{pullHint}</p>
                   ) : (
-                    <p className="gz-ntd-footnote">
+                    <p className="gz-npd-footnote">
                       {creationMode === 'one-time' && selectedBook
                         ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
                         : modeCopy.footnote}

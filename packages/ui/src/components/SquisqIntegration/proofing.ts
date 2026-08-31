@@ -28,9 +28,50 @@ import type {
   ProofingIgnoreStore,
   ProofingProvider,
 } from '@bendyline/squisq-editor-react';
+import type { ProofCategory } from '@bendyline/squisq/proof';
 
 const DICTIONARY_STORAGE_KEY = 'gezel:proof-dictionary';
 const IGNORE_STORAGE_KEY = 'gezel:proof-ignored';
+
+/**
+ * Which kinds of squiggle the reader wants, from Settings → General →
+ * Documents (`config.inlineSpellChecking` / `inlineGrammarChecking`).
+ */
+export interface ProofingPreferences {
+  spelling: boolean;
+  grammar: boolean;
+}
+
+export const DEFAULT_PROOFING_PREFERENCES: ProofingPreferences = { spelling: true, grammar: true };
+
+/**
+ * Live preference state, read by the provider on every pass.
+ *
+ * Module scope rather than provider config because the engine is a
+ * singleton built once per page load (below) while the setting can move
+ * at any time; a value captured at construction would need a Settings
+ * change to reach a provider that is never rebuilt.
+ */
+let preferences: ProofingPreferences = { ...DEFAULT_PROOFING_PREFERENCES };
+
+export function setProofingPreferences(next: ProofingPreferences): void {
+  preferences = { ...next };
+}
+
+export function getProofingPreferences(): ProofingPreferences {
+  return preferences;
+}
+
+/**
+ * harper's `style` tier (Readability, Redundancy, Formatting…) rides with
+ * grammar: the two toggles the user gets are "is the word wrong" and "is
+ * the sentence wrong", and style advice belongs to the second. Grouping
+ * it with spelling instead would put prose opinions behind a checkbox
+ * labelled "spell checking".
+ */
+function categoryAllowed(category: ProofCategory): boolean {
+  return category === 'spelling' ? preferences.spelling : preferences.grammar;
+}
 
 /**
  * Cap on remembered per-document dismissal sets. localStorage is a
@@ -87,11 +128,30 @@ let provider: ProofingProvider | null = null;
  * the file.
  */
 export function gezelProofingProvider(): ProofingProvider {
-  provider ??= createHarperProofingProvider({
-    wasmUrl: '/harper/harper_wasm_bg.wasm',
-    initialWords: readDictionary(),
-    onDictionaryWord: appendDictionaryWord,
-  });
+  if (!provider) {
+    const engine = createHarperProofingProvider({
+      wasmUrl: '/harper/harper_wasm_bg.wasm',
+      initialWords: readDictionary(),
+      onDictionaryWord: appendDictionaryWord,
+    });
+    // Category filtering sits here rather than in the editor because the
+    // provider is the engine adapter the host owns. The engine still
+    // lints everything and keeps every lint addressable by id, so
+    // "Ignore" and "Add to dictionary" on a shown finding behave exactly
+    // as they do unfiltered — only what the editor is told about shrinks.
+    // Spread-and-override rather than method-by-method delegation: the
+    // harper adapter returns a plain object literal whose methods close
+    // over its own state (no `this`), so a copy works — and a method a
+    // future squisq release adds keeps working instead of silently
+    // disappearing from the surface.
+    provider = {
+      ...engine,
+      async lint(text, options) {
+        const findings = await engine.lint(text, options);
+        return findings.filter((finding) => categoryAllowed(finding.category));
+      },
+    };
+  }
   return provider;
 }
 

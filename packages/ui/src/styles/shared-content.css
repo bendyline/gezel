@@ -1231,10 +1231,40 @@
    retains the Insert menu, and omits its document-formatting controls. These
    child/overflow selectors are a compatibility brace for Squisq 2.5.0; newer
    linked builds express the split through `showFormattingControls` and
-   `showInsertControls`. Keeping the actions lane leaves Insert on the left
-   and Send pinned at the right. */
+   `showInsertControls`. */
 .chat-editor-wrap .squisq-toolbar-actions > :not(:has(button[aria-label="Insert"])),
 .chat-editor-wrap .squisq-toolbar-overflow {
+  display: none;
+}
+
+/* The generic Insert action is followed by the chat-specific image and file
+   shortcuts supplied through Squisq's after-actions slot. Give that compact
+   cluster its natural width, then let the host spacer keep narration and Send
+   pinned to the opposite edge. */
+.chat-editor-wrap .squisq-toolbar-actions {
+  flex: 0 0 auto;
+}
+
+.chat-composer-attachment-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.chat-composer-attachment-actions .squisq-toolbar-button > svg {
+  display: block;
+}
+
+.chat-composer-toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The dedicated Attach file action owns the empty-state affordance. Reveal
+   Squisq's Files toggle only after it has a count, when it becomes the compact
+   show/hide control for the populated accessory bin. */
+.chat-editor-wrap .squisq-toolbar-files-toggle:not(:has(.squisq-toolbar-files-badge)) {
   display: none;
 }
 
@@ -1626,6 +1656,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   position: relative;
   display: inline-grid;
   place-items: center;
+  box-sizing: border-box;
   width: 2rem;
   height: 1.75rem;
   margin: 2px;
@@ -1637,10 +1668,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   box-shadow: var(--key-shadow);
   transition:
     background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out,
-    box-shadow 120ms ease-out, transform 120ms ease-out;
+    box-shadow 120ms ease-out, transform 120ms ease-out, width 160ms ease-out,
+    padding 160ms ease-out;
 }
 
 .chat-narrate-btn svg {
+  flex: 0 0 auto;
   width: 1rem;
   height: 1rem;
   stroke-width: 1.35;
@@ -1658,6 +1691,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .chat-narrate-btn-recording {
+  display: inline-flex;
+  justify-content: flex-start;
+  width: 6.25rem;
+  padding: 0 0.55rem;
+  gap: 0.4rem;
   border-color: color-mix(in srgb, var(--danger) 72%, var(--border));
   background: color-mix(in srgb, var(--danger) 13%, var(--surface));
   color: var(--danger);
@@ -1678,6 +1716,26 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   height: 5px;
   border-radius: 50%;
   background: var(--danger);
+}
+
+.chat-narrate-waveform {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 1rem;
+  overflow: hidden;
+}
+
+.chat-narrate-waveform-bar {
+  flex: 0 0 2px;
+  min-height: 2px;
+  max-height: 1rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.7;
+  transition: height 60ms linear;
 }
 
 .chat-narrate-btn[aria-busy="true"] {
@@ -1968,6 +2026,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-narrate-btn,
+  .chat-narrate-waveform-bar {
+    transition: none;
+  }
+
   .document-narration-progress::after {
     animation: none;
   }

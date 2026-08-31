@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BLOCKED_REMOTE_MEDIA_URL, createGezelMediaProvider } from './GezelMediaProvider.js';
 
-vi.mock('../api.js', () => ({ api: {} }));
+const uploadProjectAttachment = vi.hoisted(() =>
+  vi.fn(async () => ({
+    relativePath: 'attachments/generated.md',
+    filename: 'generated.md',
+    url: '/api/projects/project-1/attachments/generated.md',
+  })),
+);
+
+vi.mock('../api.js', () => ({ api: { uploadProjectAttachment } }));
 
 describe('GezelMediaProvider renderer egress', () => {
   it.each([
@@ -27,5 +35,19 @@ describe('GezelMediaProvider renderer egress', () => {
   it('leaves an unrecognized relative reference on the local origin', async () => {
     const provider = createGezelMediaProvider({ projectId: 'project-1' });
     await expect(provider.resolveUrl('local/image.png')).resolves.toBe('local/image.png');
+  });
+
+  it('passes the original filename through when adding an accessory file', async () => {
+    const provider = createGezelMediaProvider({ projectId: 'project-1' });
+
+    await expect(
+      provider.addMedia('project_notes.md', new Blob(['# Notes']), 'text/markdown'),
+    ).resolves.toBe('attachments/generated.md');
+    expect(uploadProjectAttachment).toHaveBeenCalledWith(
+      'project-1',
+      expect.any(Blob),
+      'text/markdown',
+      'project_notes.md',
+    );
   });
 });

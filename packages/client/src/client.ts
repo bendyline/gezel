@@ -1241,6 +1241,10 @@ export interface ConfigResponse {
   narrateAssistantReplies?: boolean;
   /** Catalog id of the whisper.cpp model transcription runs on. */
   defaultSttModel?: string;
+  /** Preferred browser microphone for prompt narration. */
+  microphoneDeviceId?: string;
+  /** Device-label fallback when the origin-scoped browser id changes. */
+  microphoneDeviceLabel?: string;
   /**
    * Global AI engagement mode — panic-button control over proactive
    * behavior. Materialized on GET so the Settings UI can bind directly.
@@ -1289,6 +1293,17 @@ export interface ConfigResponse {
    * quick-export action survives the embedded daemon's changing loopback port.
    */
   documentExportOptions?: import('@bendyline/gezel').DocumentExportOptions;
+  /**
+   * Whether the document editors paint red spelling squiggles. Default
+   * `true`.
+   */
+  inlineSpellChecking?: boolean;
+  /**
+   * Whether the document editors paint grammar/style squiggles. Default
+   * `true`. Off with `inlineSpellChecking` also off means the proofing
+   * engine never loads.
+   */
+  inlineGrammarChecking?: boolean;
   /**
    * Which side the primary navigation sidebar sits on. Cross-boot source
    * of truth (same ephemeral-port reasoning as `themePref`). Absent =
@@ -3146,7 +3161,7 @@ export class GezelClient {
 
   // ── Per-session image attachments ──
   //
-  // Project-scoped attachments — images (and future file types) pasted
+  // Project-scoped attachments — images and files pasted
   // or uploaded in a chat. Saved once per project under
   // `artifacts/attachments/` so every session in the project can
   // reference them, and the Artifacts tab browses them. The
@@ -3158,8 +3173,10 @@ export class GezelClient {
     projectId: string,
     data: Blob | ArrayBuffer | Uint8Array,
     mimeType: string,
+    filename?: string,
   ): Promise<{ relativePath: string; filename: string; url: string }> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/attachments`;
+    const filenameQuery = filename ? `?filename=${encodeURIComponent(filename)}` : '';
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/attachments${filenameQuery}`;
     const body =
       data instanceof Blob
         ? data

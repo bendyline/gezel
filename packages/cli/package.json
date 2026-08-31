@@ -48,7 +48,7 @@
     "@bendyline/gezel-service": "workspace:*",
     "@bendyline/squisq": "2.10.0",
     "@bendyline/squisq-formats": "2.5.1",
-    "@bendyline/squisq-react": "2.10.0",
+    "@bendyline/squisq-react": "2.10.1",
     "commander": "^15.0.0",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",

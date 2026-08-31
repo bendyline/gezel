@@ -2184,8 +2184,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       log.info(`[duckdb] using pinned build (${resolved.source}): ${resolved.path}`);
     } else {
       log.warn(
-        `[duckdb] using an unverified DuckDB (${resolved.source}): ${resolved.path} — ` +
-          'sandbox behaviour is only measured against the pinned build',
+        `[duckdb] using an unverified DuckDB (${resolved.source}): ${resolved.path} — sandbox behaviour is only measured against the pinned build`,
       );
     }
   }

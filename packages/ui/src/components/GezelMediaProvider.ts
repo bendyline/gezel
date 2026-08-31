@@ -106,12 +106,12 @@ export function createGezelMediaProvider(opts: {
 
   return {
     async addMedia(
-      _name: string,
+      name: string,
       data: ArrayBuffer | Blob | Uint8Array,
       mimeType: string,
     ): Promise<string> {
       const blob = await toBlob(data, mimeType);
-      const res = await api.uploadProjectAttachment(opts.projectId, blob, mimeType);
+      const res = await api.uploadProjectAttachment(opts.projectId, blob, mimeType, name);
       // Prime the cache so the editor renders the just-pasted image
       // instantly — no round-trip through `resolveUrl`.
       blobUrlCache.set(res.relativePath, URL.createObjectURL(blob));

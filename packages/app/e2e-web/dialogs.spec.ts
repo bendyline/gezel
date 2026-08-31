@@ -38,8 +38,26 @@ test.describe('dialogs', () => {
       area: 'dialogs',
       clip: dialog,
       selector: '[role=dialog]',
-      description: 'Create-project dialog — name, about, mission',
+      description: 'Create-project dialog, step 1 — the starting-point gallery',
     });
+
+    // Step 2: what the chosen starting point is and what it brings, beside
+    // its form. One back key returns to the gallery.
+    await dialog.getByRole('radio', { name: 'General', exact: true }).click();
+    const configured = page.getByRole('dialog', { name: 'General' });
+    await expect(configured.locator('.gz-npd-brief')).toBeVisible();
+    await settle(page);
+    await shot(page, 'create-project-configure', {
+      area: 'dialogs',
+      clip: configured,
+      selector: '[role=dialog]',
+      description: 'Create-project dialog, step 2 — the ingredients beside the form',
+    });
+    await configured.getByRole('button', { name: /Project types/ }).click();
+    await expect(dialog.getByRole('radio', { name: 'General', exact: true })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
     await page.keyboard.press('Escape');
   });
 });

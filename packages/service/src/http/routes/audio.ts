@@ -182,7 +182,9 @@ export function audioRoutes(ctx: ServiceContext): Hono {
         ...(out.segments ? { segments: out.segments } : {}),
       });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      const detail = err instanceof Error ? err.message : String(err);
+      log.warn(`[transcribe] failed: ${detail}`);
+      return c.json({ error: speechToTextErrorCode(err) }, 503);
     }
   });
 
@@ -413,6 +415,18 @@ export function audioRoutes(ctx: ServiceContext): Hono {
   });
 
   return app;
+}
+
+/** Stable, non-sensitive UI code for expected speech-engine failures. */
+export function speechToTextErrorCode(
+  error: unknown,
+): 'speech_to_text_not_ready' | 'speech_to_text_failed' {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no stt model|speech-to-text model|download one from settings|audio engine enabled|not wired up/i.test(
+    message,
+  )
+    ? 'speech_to_text_not_ready'
+    : 'speech_to_text_failed';
 }
 
 function audioArtifactFilename(sessionId: string | undefined): string {

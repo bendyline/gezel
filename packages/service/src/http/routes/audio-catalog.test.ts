@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isKokoroRuntimeAvailable } from '../../providers/audio/kokoro.js';
-import { buildAudioCatalog } from './audio.js';
+import { buildAudioCatalog, speechToTextErrorCode } from './audio.js';
 
 describe('audio catalog runtime capabilities', () => {
   it('advertises Kokoro only when its optional runtime is installed', () => {
@@ -25,5 +25,18 @@ describe('audio catalog runtime capabilities', () => {
         return 'installed';
       }),
     ).toBe(false);
+  });
+
+  it('maps provider failures to stable, non-sensitive narration error codes', () => {
+    expect(
+      speechToTextErrorCode(
+        new Error(
+          'No STT model is available locally. Download one from Settings → Audio before transcribing.',
+        ),
+      ),
+    ).toBe('speech_to_text_not_ready');
+    expect(speechToTextErrorCode(new Error('C:\\private\\engine detail'))).toBe(
+      'speech_to_text_failed',
+    );
   });
 });

@@ -9,12 +9,12 @@ import {
   createDocumentLinkProvider,
   createDocumentsContentContainer,
   gezelProofingIgnoreStore,
-  gezelProofingProvider,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
   relativePath,
   renderOutsideInDocument,
   runtimePathForTarget,
+  useProofingCapability,
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
@@ -180,6 +180,7 @@ function OutsideInEditor({
   onEnableEditing: () => void | Promise<void>;
 }) {
   const editorTheme = useEffectiveTheme();
+  const proofing = useProofingCapability();
   const container = useMemo(
     () =>
       createDocumentsContentContainer({
@@ -265,7 +266,7 @@ function OutsideInEditor({
           fullWidth
           workspaceContainer={container}
           documentLinkProvider={documentLinkProvider}
-          proofing={gezelProofingProvider()}
+          proofing={proofing}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
           versionBasename={basename(prepared.sourcePath)}

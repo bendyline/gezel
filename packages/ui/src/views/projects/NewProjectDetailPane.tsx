@@ -12,17 +12,16 @@ import {
 } from './new-project-meta.js';
 
 /**
- * Presentational top half of the New Project dialog's right pane: the
- * selected type's art, name, category eyebrow, description, and a
- * "Gezellen and Tools" summary. For catalog types the summary is derived from
- * the manifest's composition (crew gezels render as poppetje headshots,
- * seeded deterministically from the template id — a stable illustration,
- * not the exact figure the created gezel will get). Built-in kinds carry
- * hand-written `give` lines instead.
+ * Presentational pieces for step 2 of the New Project dialog: the selected
+ * starting point's art and name (header), and its brief — the description
+ * plus a "Gezellen and Tools" summary of what the project arrives with.
+ * For catalog types the summary is derived from the manifest's composition
+ * (crew gezels render as poppetje headshots, seeded deterministically from
+ * the template id — a stable illustration, not the exact figure the created
+ * gezel will get). Built-in kinds carry hand-written `give` lines instead.
  *
- * The form fields below this stay in `NewProjectDialog` — they are wired
- * into a dozen pieces of dialog state and moving them would mean a
- * thirty-prop component.
+ * The form fields stay in `NewProjectDialog` — they are wired into a dozen
+ * pieces of dialog state and moving them would mean a thirty-prop component.
  */
 
 export type PaneSelection =
@@ -42,16 +41,79 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-export function NewProjectPaneHero({ selection }: { selection: PaneSelection }) {
-  const isCatalog = selection.source === 'catalog';
-  const manifest = isCatalog ? selection.item.manifest : null;
-  const catalogType = manifest?.kind === 'project-type' ? manifest : null;
+function catalogTypeOf(selection: PaneSelection) {
+  if (selection.source !== 'catalog') return null;
+  const manifest = selection.item.manifest;
+  return manifest.kind === 'project-type' ? manifest : null;
+}
 
-  const category = isCatalog
-    ? categoryMeta(categorizeCatalogType(selection.item))
-    : categoryMeta(selection.kind.category);
-  const name = isCatalog ? (manifest?.name ?? '') : selection.kind.label;
-  const description = isCatalog ? (manifest?.description ?? '') : selection.kind.description;
+/** Name + category eyebrow for the step-2 header. */
+export function selectionIdentity(selection: PaneSelection): {
+  name: string;
+  categoryLabel: string;
+  description: string;
+} {
+  if (selection.source === 'catalog') {
+    const manifest = selection.item.manifest;
+    return {
+      name: manifest.name,
+      categoryLabel: categoryMeta(categorizeCatalogType(selection.item)).label,
+      description: manifest.description,
+    };
+  }
+  return {
+    name: selection.kind.label,
+    categoryLabel: categoryMeta(selection.kind.category).label,
+    description: selection.kind.description,
+  };
+}
+
+/**
+ * The selection's artwork, sized by the tile it sits in. A catalog type that
+ * declares its own `icon` glyph wins over the item's shipped art, matching
+ * the gallery card.
+ */
+export function SelectionArt({
+  selection,
+  size,
+}: {
+  selection: PaneSelection;
+  size: number;
+}) {
+  const isCatalog = selection.source === 'catalog';
+  const catalogType = catalogTypeOf(selection);
+  const useItemArt = isCatalog && !catalogType?.icon;
+  return (
+    <CatalogArtwork
+      {...(useItemArt && selection.source === 'catalog' && selection.item.iconSvg
+        ? { iconSvg: selection.item.iconSvg }
+        : {})}
+      {...(useItemArt && selection.source === 'catalog' && selection.item.logoUrl
+        ? { logoUrl: selection.item.logoUrl }
+        : {})}
+      svgClassName="gz-npd-hero-art-svg"
+      fallback={
+        <ProjectGlyph
+          glyph={
+            selection.source === 'catalog'
+              ? catalogProjectTypeGlyph(selection.item)
+              : selection.kind.glyph
+          }
+          size={size}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * What this starting point is, and what it brings — the left column of step
+ * 2. A project type's crew and tooling are the reason a person picks it, so
+ * they get the reading width rather than a 19rem pane's five-line clamp.
+ */
+export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
+  const catalogType = catalogTypeOf(selection);
+  const { description } = selectionIdentity(selection);
 
   const crew = catalogType ? (catalogType.gezels ?? []) : [];
   const rows: { glyph: ProjectGlyphId; text: string }[] = [];
@@ -71,31 +133,12 @@ export function NewProjectPaneHero({ selection }: { selection: PaneSelection }) 
     if (craftbookCount > 0)
       rows.push({ glyph: 'sheet', text: plural(craftbookCount, 'craftbook') });
   }
-  const giveLines = isCatalog ? [] : selection.kind.give;
+  const giveLines = selection.source === 'builtin' ? selection.kind.give : [];
   const hasGive = crew.length > 0 || rows.length > 0 || giveLines.length > 0;
 
   return (
-    <div className="gz-npd-hero">
-      <div className="gz-npd-hero-art" aria-hidden="true">
-        <CatalogArtwork
-          {...(isCatalog && !catalogType?.icon && selection.item.iconSvg
-            ? { iconSvg: selection.item.iconSvg }
-            : {})}
-          {...(isCatalog && !catalogType?.icon && selection.item.logoUrl
-            ? { logoUrl: selection.item.logoUrl }
-            : {})}
-          svgClassName="gz-npd-hero-art-svg"
-          fallback={
-            <ProjectGlyph
-              glyph={isCatalog ? catalogProjectTypeGlyph(selection.item) : selection.kind.glyph}
-              size={34}
-            />
-          }
-        />
-      </div>
-      <p className="gz-npd-hero-eyebrow">{category.label}</p>
-      <h4 className="gz-npd-hero-name">{name}</h4>
-      <p className="gz-npd-hero-description">{description}</p>
+    <>
+      <p className="gz-npd-brief-lede">{description}</p>
       {hasGive && (
         <div className="gz-npd-give">
           <p className="gz-npd-give-eyebrow">Gezellen and Tools</p>
@@ -137,6 +180,6 @@ export function NewProjectPaneHero({ selection }: { selection: PaneSelection }) 
           </ul>
         </div>
       )}
-    </div>
+    </>
   );
 }

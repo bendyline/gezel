@@ -81,4 +81,18 @@ describe('opaqueServerErrors', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: 'capacity_denied' });
   });
+
+  it.each(['speech_to_text_not_ready', 'speech_to_text_failed'])(
+    'preserves the fixed narration error code %s',
+    async (error) => {
+      const app = new Hono();
+      app.use('*', opaqueServerErrors({ error: () => {} }));
+      app.get('/speech', (c) => c.json({ error }, 503));
+
+      const response = await app.request('/speech');
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error });
+    },
+  );
 });

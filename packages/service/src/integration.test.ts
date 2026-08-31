@@ -173,6 +173,8 @@ describe('operational API surface', () => {
       defaultVideoModel: 'ltx-2.3-22b-fp8',
       videoGenerationConfirmation: 'always-allow',
       defaultSttModel: 'whisper-small.en',
+      microphoneDeviceId: 'browser-mic-123',
+      microphoneDeviceLabel: 'Studio microphone',
     };
     const update = await api('PUT', '/api/config', overrides);
     expect(update.status).toBe(200);

@@ -224,3 +224,4 @@ packages/catalog/scripts/harvested-auth/
 # a mid-pattern slash anchors to the repo root, which would miss
 # packages/cli (the same reason `.gezel/village.json` above is root-only).
 **/.gezel/index/
+/.codex-tmp

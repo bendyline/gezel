@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { duckdbInstallDir } from './duckdb-pin.js';
 import { discoverNativeBinaries } from './discover.js';
+import { duckdbInstallDir } from './duckdb-pin.js';
 import { recordLlamaQuarantine } from './llama-quarantine.js';
 
 let home: string;

@@ -48,6 +48,8 @@ export interface CuratedArticle {
   title: string;
   order: number;
   summary?: string;
+  /** Poster headline for the page's Open Graph card. Overrides any distilled one. */
+  ogHeadline?: string;
   /** Optional collapsible shelf within the article's broader area. */
   subcategory?: HandboekTocSubcategory;
   /** Article body — squisq-flavored markdown, macros not yet expanded. */
@@ -147,6 +149,8 @@ export function parseCuratedArticle(
   const order = typeof fm.order === 'number' ? fm.order : 999;
   const summary =
     typeof fm.summary === 'string' && fm.summary.trim() ? fm.summary.trim() : undefined;
+  const ogHeadline =
+    typeof fm.ogHeadline === 'string' && fm.ogHeadline.trim() ? fm.ogHeadline.trim() : undefined;
   const defaultDuration =
     typeof fm.defaultDuration === 'number' && fm.defaultDuration > 0
       ? fm.defaultDuration
@@ -162,6 +166,7 @@ export function parseCuratedArticle(
     title,
     order,
     summary,
+    ogHeadline,
     subcategory,
     body: trimmed,
     defaultDuration,

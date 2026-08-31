@@ -731,18 +731,53 @@ handboek
     '--site-url <url>',
     'URL of the surrounding site; adds a wordmark link back out of the docs',
   )
-  .action(async (opts: { out: string; css: string[]; siteUrl?: string }) => {
-    type HandboekExportModule = typeof import('../handboek-export.js');
-    const handboekModule = '../handboek-export.js';
-    const { runHandboekExport } = (await import(handboekModule)) as HandboekExportModule;
-    const result = await runHandboekExport({
-      out: opts.out,
-      css: opts.css,
-      siteUrl: opts.siteUrl,
-    });
-    console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
-    for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
-  });
+  .option(
+    '--canonical-base <url>',
+    'absolute URL the export root is published at (e.g. https://gezel.com/docs/); enables canonical and Open Graph tags',
+  )
+  .option('--og-out <dir>', 'directory to render Open Graph cards into; must be outside --out')
+  .option(
+    '--og-base <url>',
+    'absolute URL the card directory is served from (e.g. https://gezel.com/og/); required with --og-out',
+  )
+  .action(
+    async (opts: {
+      out: string;
+      css: string[];
+      siteUrl?: string;
+      canonicalBase?: string;
+      ogOut?: string;
+      ogBase?: string;
+    }) => {
+      if (Boolean(opts.ogOut) !== Boolean(opts.ogBase)) {
+        console.error('--og-out and --og-base go together: cards need a directory and a URL.');
+        process.exitCode = 1;
+        return;
+      }
+      type HandboekExportModule = typeof import('../handboek-export.js');
+      const handboekModule = '../handboek-export.js';
+      const { runHandboekExport } = (await import(handboekModule)) as HandboekExportModule;
+      const result = await runHandboekExport({
+        out: opts.out,
+        css: opts.css,
+        siteUrl: opts.siteUrl,
+        canonicalBase: opts.canonicalBase,
+        ogOut: opts.ogOut,
+        ogBase: opts.ogBase,
+      });
+      console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+      for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
+      const cards = result.cards;
+      if (cards?.skipped) {
+        console.error(`  no Open Graph cards: ${cards.skipped}`);
+      } else if (cards) {
+        console.log(
+          `Open Graph cards: ${cards.rendered} rendered, ${cards.reused} reused, ${cards.swept} swept`,
+        );
+        for (const id of cards.failed) console.error(`  card failed: ${id}`);
+      }
+    },
+  );
 
 const knowledge = program
   .command('knowledge')

@@ -19,7 +19,12 @@ import { connectMailboxOAuth, linkImapMailbox } from '../../components/mail-link
 import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
-import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
+import {
+  NewProjectBrief,
+  type PaneSelection,
+  SelectionArt,
+  selectionIdentity,
+} from './NewProjectDetailPane.js';
 import {
   PROJECT_CATEGORIES,
   PROJECT_KINDS,
@@ -191,6 +196,19 @@ export function NewProjectDialog({
   const [typeParams, setTypeParams] = useState<Record<string, unknown>>({});
   const [projectTypeQuery, setProjectTypeQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<'all' | ProjectTypeCategory>('all');
+  /**
+   * Wizard step. `pick` is the catalog — rail + gallery across the whole
+   * dialog. `configure` is the chosen starting point in full: what it is,
+   * the crew and tooling it arrives with, and its form. Same skeleton the
+   * New Task dialog uses (`gz-npd-step-*`).
+   */
+  const [step, setStep] = useState<'pick' | 'configure'>('pick');
+  /**
+   * Whether a built-in kind is a *choice* rather than the `general` default
+   * the form falls back to — both read as `kind === 'general'`, and only the
+   * former should light the card when the user steps back to the gallery.
+   */
+  const [kindChosen, setKindChosen] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
   // Email kind: the address is the project name; provider + IMAP config inline.
   const [emailAddress, setEmailAddress] = useState('');
@@ -251,6 +269,8 @@ export function NewProjectDialog({
     setTypeParams({});
     setProjectTypeQuery('');
     setActiveCategory('all');
+    setStep('pick');
+    setKindChosen(false);
     setError('');
     setBusy(false);
     lastAutofilledUrl.current = null;
@@ -336,6 +356,12 @@ export function NewProjectDialog({
     repoPreviewAbort.current?.abort();
     repoPreviewAbort.current = null;
     setRepoPreviewPhase(null);
+  }, []);
+
+  /** Back to the catalog. The selection survives, so the card is still lit. */
+  const backToPicker = useCallback(() => {
+    setStep('pick');
+    setError('');
   }, []);
 
   const handleRepoChange = useCallback(
@@ -544,10 +570,14 @@ export function NewProjectDialog({
           availableProjectKinds.find((candidate) => candidate.id === kind) ??
           availableProjectKinds[0]!,
       };
+  const selectionMeta = selectionIdentity(paneSelection);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      // Enter in the picker's search box submits the form implicitly; nothing
+      // is configured yet, so nothing may be created from there.
+      if (step !== 'configure') return;
       setError('');
 
       // CUSTOM PROJECT TYPE: creation and materialization are one server-owned
@@ -711,6 +741,7 @@ export function NewProjectDialog({
       selectedType,
       typeParams,
       isSolo,
+      step,
       onClose,
       onCreated,
     ],
@@ -725,358 +756,423 @@ export function NewProjectDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content className="gz-npd">
+        <Dialog.Content className={`gz-npd gz-npd-step-${step}`}>
           <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
-            <header className="gz-npd-header">
-              <div className="gz-npd-header-copy">
-                <Dialog.Title asChild>
-                  <h3>{titleText}</h3>
-                </Dialog.Title>
-                <p className="gz-npd-header-sub">
-                  {isSolo
-                    ? 'A job is a solo project — one Builder handles the work end to end.'
-                    : 'Pick a starting point — blank, connected, or purpose-built.'}
-                </p>
-              </div>
-              <label className="gz-npd-search">
-                <span className="sr-only">Search project types</span>
-                <input
-                  type="search"
-                  value={projectTypeQuery}
-                  onChange={(event) => setProjectTypeQuery(event.target.value)}
-                  placeholder="Search types…"
-                />
-              </label>
-            </header>
-            <div className="gz-npd-body">
-              <nav className="gz-npd-rail" aria-label="Project type categories">
-                <button
-                  type="button"
-                  className={`gz-npd-rail-item${!searching && activeCategory === 'all' ? ' active' : ''}`}
-                  onClick={() => setActiveCategory('all')}
-                >
-                  <span className="gz-npd-rail-label">All</span>
-                </button>
-                {railEntries.map((entry) => (
-                  <button
-                    key={entry.cat.id}
-                    type="button"
-                    className={`gz-npd-rail-item${!searching && activeCategory === entry.cat.id ? ' active' : ''}`}
-                    onClick={() => setActiveCategory(entry.cat.id)}
-                  >
-                    <ProjectGlyph glyph={entry.cat.glyph} size={16} />
-                    <span className="gz-npd-rail-label">{entry.cat.label}</span>
-                    <span className="gz-npd-rail-count">{entry.count}</span>
-                  </button>
-                ))}
-              </nav>
-              <div className="gz-npd-gallery" role="radiogroup" aria-label="Project type">
-                {visibleSections.map((section) => (
-                  <section key={section.cat.id} className="gz-npd-section">
-                    <div className="gz-npd-section-head">
-                      <span className="gz-npd-section-title">{section.cat.label}</span>
-                      <span className="gz-npd-section-tagline">{section.cat.tagline}</span>
-                    </div>
-                    <div className="gz-npd-grid">
-                      {section.builtins.map((item, index) => (
-                        <TypeCard
-                          key={item.id}
-                          label={item.label}
-                          description={item.description}
-                          glyph={item.glyph}
-                          index={index}
-                          active={!selectedTypeId && item.id === kind}
-                          {...(item.soon ? { disabled: true, badge: 'Soon' } : {})}
-                          onSelect={() => {
-                            if (item.soon) return;
-                            if (kind === 'github' && item.id !== 'github') cancelRepoPreview();
-                            setKind(item.id as ProjectKindId);
-                            setSelectedTypeId(null);
-                            setTypeParams({});
-                            if (!nameManuallyEdited) setName('');
-                          }}
-                        />
-                      ))}
-                      {section.types.map((item, index) => (
-                        <TypeCard
-                          key={item.manifest.id}
-                          label={item.manifest.name}
-                          description={item.manifest.description}
-                          glyph={catalogProjectTypeGlyph(item)}
-                          index={section.builtins.length + index}
-                          active={item.manifest.id === selectedTypeId}
-                          {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
-                          item.iconSvg
-                            ? { iconSvg: item.iconSvg }
-                            : {})}
-                          {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
-                          item.logoUrl
-                            ? { logoUrl: item.logoUrl }
-                            : {})}
-                          onSelect={() => {
-                            if (kind === 'github') cancelRepoPreview();
-                            setSelectedTypeId(item.manifest.id);
-                            // A purpose-built type owns the whole form. Seed
-                            // its parameter defaults before showing its editor.
-                            setKind('general');
-                            const schema =
-                              item.manifest.kind === 'project-type'
-                                ? (item.manifest.params as SquisqAnnotatedSchema | undefined)
-                                : undefined;
-                            const defaults = seedParamDefaults(schema);
-                            setTypeParams(defaults);
-                            if (!nameManuallyEdited) setName(suggestProjectName(item, defaults));
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                ))}
-                {visibleSections.length === 0 && (
-                  <p className="gz-npd-empty">No project types match your search.</p>
-                )}
-              </div>
-              <aside className="gz-npd-pane">
-                <div className="gz-npd-pane-scroll" key={selectedTypeId ?? kind}>
-                  <NewProjectPaneHero selection={paneSelection} />
-                  <div className="gz-npd-pane-form">
-                    {selectedType && selectedTypeParams && (
-                      <div className="gz-npd-params">
-                        <GezelJsonEditor
-                          schema={selectedTypeParams}
-                          value={typeParams}
-                          onChange={(next) => {
-                            const nextParams = (next ?? {}) as Record<string, unknown>;
-                            setTypeParams(nextParams);
-                            if (!nameManuallyEdited) {
-                              setName(suggestProjectName(selectedType, nextParams));
-                            }
-                          }}
-                          density="compact"
-                        />
-                      </div>
-                    )}
-                    {kind === 'github' && (
-                      <div className="gz-npd-field">
-                        <span className="gz-new-project-github-label">
-                          <label htmlFor={githubRepoInputId}>
-                            GitHub repository <span className="muted">(optional)</span>
-                          </label>
-                          <GitHubSignInChip onChange={setGitHubIdentity} compact />
-                        </span>
-                        <GitHubRepoCombobox
-                          inputId={githubRepoInputId}
-                          value={repoUrl}
-                          onChange={handleRepoChange}
-                          onBlur={() => void handleRepoPreview()}
-                          onSelect={(picked) => {
-                            handleRepoChange(picked);
-                            // Pass the picked value directly: state updates land
-                            // on the next render, while the preview should begin
-                            // immediately from this selection.
-                            void handleRepoPreview(picked);
-                          }}
-                          repos={githubRepos}
-                        />
-                        {repoPreviewPhase && (
-                          <RepoPreviewProgress
-                            phase={repoPreviewPhase}
-                            onCancel={cancelRepoPreview}
-                          />
-                        )}
-                        {!repoPreviewPhase && repoUrlHint && (
-                          <small className="error">
-                            {repoUrlHint.message}
-                            {repoUrlHint.fixUrl && (
-                              <>
-                                {' '}
-                                <a
-                                  href={repoUrlHint.fixUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  Open GitHub authorization page →
-                                </a>
-                              </>
-                            )}
-                          </small>
-                        )}
-                      </div>
-                    )}
-                    {/* Folder sits above Name: picking the folder is the first move,
-                and it suggests the Name (and drafts About) from what it finds. */}
-                    {kind === 'folder' && (
-                      <label>
-                        Folder
-                        <div className="gz-folder-row">
-                          <input
-                            value={folderPath}
-                            onChange={(e) => setFolderPath(e.target.value)}
-                            onBlur={() => void applyFolderPath(folderPath)}
-                            placeholder={folderPathPlaceholder}
-                          />
-                          {window.__GEZEL__?.selectDirectory && (
-                            <button
-                              type="button"
-                              className="gz-folder-browse"
-                              onClick={() => void pickFolder()}
-                            >
-                              Browse…
-                            </button>
-                          )}
+            {step === 'pick' ? (
+              <>
+                <header className="gz-npd-header">
+                  <div className="gz-npd-header-copy">
+                    <Dialog.Title asChild>
+                      <h3>{titleText}</h3>
+                    </Dialog.Title>
+                    <p className="gz-npd-header-sub">
+                      {isSolo
+                        ? 'A job is a solo project — one Builder handles the work end to end.'
+                        : 'Pick a starting point — blank, connected, or purpose-built.'}
+                    </p>
+                  </div>
+                  <label className="gz-npd-search">
+                    <span className="sr-only">Search project types</span>
+                    <input
+                      type="search"
+                      value={projectTypeQuery}
+                      onChange={(event) => setProjectTypeQuery(event.target.value)}
+                      placeholder="Search types…"
+                    />
+                  </label>
+                </header>
+                <div className="gz-npd-body">
+                  <nav className="gz-npd-rail" aria-label="Project type categories">
+                    <button
+                      type="button"
+                      className={`gz-npd-rail-item${!searching && activeCategory === 'all' ? ' active' : ''}`}
+                      onClick={() => setActiveCategory('all')}
+                    >
+                      <span className="gz-npd-rail-label">All</span>
+                    </button>
+                    {railEntries.map((entry) => (
+                      <button
+                        key={entry.cat.id}
+                        type="button"
+                        className={`gz-npd-rail-item${!searching && activeCategory === entry.cat.id ? ' active' : ''}`}
+                        onClick={() => setActiveCategory(entry.cat.id)}
+                      >
+                        <ProjectGlyph glyph={entry.cat.glyph} size={16} />
+                        <span className="gz-npd-rail-label">{entry.cat.label}</span>
+                        <span className="gz-npd-rail-count">{entry.count}</span>
+                      </button>
+                    ))}
+                  </nav>
+                  <div className="gz-npd-gallery" role="radiogroup" aria-label="Project type">
+                    {visibleSections.map((section) => (
+                      <section key={section.cat.id} className="gz-npd-section">
+                        <div className="gz-npd-section-head">
+                          <span className="gz-npd-section-title">{section.cat.label}</span>
+                          <span className="gz-npd-section-tagline">{section.cat.tagline}</span>
                         </div>
-                        <small className="muted">
-                          Gezels read — and, with permission, write — files in this folder.
-                        </small>
-                      </label>
-                    )}
-                    {kind === 'email' ? (
-                      <label>
-                        Email address
-                        <input
-                          type="email"
-                          value={emailAddress}
-                          onChange={(e) => setEmailAddress(e.target.value)}
-                          placeholder="you@example.com"
-                          autoComplete="email"
-                        />
-                        <small className="muted">The project is named after this address.</small>
-                      </label>
-                    ) : (
-                      <label>
-                        Name
-                        <input
-                          value={name}
-                          onChange={(e) => {
-                            setName(e.target.value);
-                            setNameManuallyEdited(true);
-                          }}
-                          placeholder={
-                            isSolo ? 'e.g. Bird-feeder prototype' : "e.g. Eliza's Pet Shop"
-                          }
-                        />
-                        {selectedType && name && !nameManuallyEdited && (
-                          <small className="muted">
-                            Suggested from your choices — edit it anytime.
-                          </small>
-                        )}
-                        {kind === 'folder' && name && !nameManuallyEdited && (
-                          <small className="muted">
-                            Suggested from the folder — edit it anytime.
-                          </small>
-                        )}
-                      </label>
-                    )}
-                    {kind === 'email' && (
-                      <>
-                        <div className="gz-type-field">
-                          <span className="gz-type-field-label">Provider</span>
-                          <div
-                            className="gz-type-picker"
-                            role="radiogroup"
-                            aria-label="Mail provider"
-                          >
-                            {EMAIL_PROVIDERS.map((p) => {
-                              const active = p.id === emailProvider;
-                              return (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  // biome-ignore lint/a11y/useSemanticElements: chip in a role="radiogroup"; a native radio input would break the chip styling and rich content.
-                                  role="radio"
-                                  aria-checked={active}
-                                  className={`gz-type-chip${active ? ' active' : ''}`}
-                                  onClick={() => setEmailProvider(p.id)}
-                                >
-                                  {p.label}
-                                </button>
-                              );
-                            })}
-                          </div>
+                        <div className="gz-npd-grid">
+                          {section.builtins.map((item, index) => (
+                            <TypeCard
+                              key={item.id}
+                              label={item.label}
+                              description={item.description}
+                              glyph={item.glyph}
+                              index={index}
+                              active={kindChosen && !selectedTypeId && item.id === kind}
+                              {...(item.soon ? { disabled: true, badge: 'Soon' } : {})}
+                              onSelect={() => {
+                                if (item.soon) return;
+                                if (kind === 'github' && item.id !== 'github') cancelRepoPreview();
+                                setKind(item.id as ProjectKindId);
+                                setKindChosen(true);
+                                setSelectedTypeId(null);
+                                setTypeParams({});
+                                if (!nameManuallyEdited) setName('');
+                                setError('');
+                                setStep('configure');
+                              }}
+                            />
+                          ))}
+                          {section.types.map((item, index) => (
+                            <TypeCard
+                              key={item.manifest.id}
+                              label={item.manifest.name}
+                              description={item.manifest.description}
+                              glyph={catalogProjectTypeGlyph(item)}
+                              index={section.builtins.length + index}
+                              active={item.manifest.id === selectedTypeId}
+                              {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
+                              item.iconSvg
+                                ? { iconSvg: item.iconSvg }
+                                : {})}
+                              {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
+                              item.logoUrl
+                                ? { logoUrl: item.logoUrl }
+                                : {})}
+                              onSelect={() => {
+                                if (kind === 'github') cancelRepoPreview();
+                                setSelectedTypeId(item.manifest.id);
+                                // A purpose-built type owns the whole form. Seed
+                                // its parameter defaults before showing its editor.
+                                setKind('general');
+                                setKindChosen(false);
+                                const schema =
+                                  item.manifest.kind === 'project-type'
+                                    ? (item.manifest.params as SquisqAnnotatedSchema | undefined)
+                                    : undefined;
+                                const defaults = seedParamDefaults(schema);
+                                setTypeParams(defaults);
+                                if (!nameManuallyEdited)
+                                  setName(suggestProjectName(item, defaults));
+                                setError('');
+                                setStep('configure');
+                              }}
+                            />
+                          ))}
                         </div>
-                        {emailProvider === 'imap' ? (
-                          <>
-                            <label>
-                              IMAP host
-                              <input
-                                value={imapHost}
-                                onChange={(e) => setImapHost(e.target.value)}
-                                placeholder="imap.example.com"
-                              />
-                            </label>
-                            <div className="gz-imap-row">
-                              <label className="gz-imap-port">
-                                Port <span className="muted">(optional)</span>
-                                <input
-                                  value={imapPort}
-                                  onChange={(e) => setImapPort(e.target.value)}
-                                  placeholder="993"
-                                  inputMode="numeric"
-                                />
-                              </label>
-                              <label className="gz-imap-tls">
-                                <input
-                                  type="checkbox"
-                                  checked={imapSecure}
-                                  onChange={(e) => setImapSecure(e.target.checked)}
-                                />
-                                Use TLS
-                              </label>
-                            </div>
-                            <label>
-                              Password / app password
-                              <input
-                                type="password"
-                                value={imapPass}
-                                onChange={(e) => setImapPass(e.target.value)}
-                                placeholder="app password"
-                                autoComplete="off"
-                              />
-                            </label>
-                            <small className="muted">
-                              Gmail and Outlook.com also work over IMAP with an app password. The
-                              username is your email address.
-                            </small>
-                          </>
-                        ) : (
-                          <p className="muted small">
-                            {EMAIL_PROVIDERS.find((p) => p.id === emailProvider)?.label} connects
-                            via OAuth. Create the project, then click <strong>Connect</strong> in
-                            its Mail tab to authorize in the browser. Synced messages become
-                            searchable files; sending is consent-gated.
-                          </p>
-                        )}
-                      </>
-                    )}
-                    {kind !== 'email' && !selectedTypeId && (
-                      <>
-                        <label>
-                          {isSolo ? 'Job description' : 'About'}{' '}
-                          <span className="muted">{kind === 'folder' ? '(optional)' : ''}</span>
-                          <textarea
-                            value={about}
-                            onChange={(e) => setAbout(e.target.value)}
-                            placeholder={
-                              kind === 'folder' ? folderAboutPlaceholder : aboutPlaceholder
-                            }
-                            rows={4}
-                          />
-                        </label>
-                        <label>
-                          Mission objectives <span className="muted">(optional)</span>
-                          <textarea
-                            value={mission}
-                            onChange={(e) => setMission(e.target.value)}
-                            placeholder={missionPlaceholder}
-                            rows={3}
-                          />
-                        </label>
-                      </>
+                      </section>
+                    ))}
+                    {visibleSections.length === 0 && (
+                      <p className="gz-npd-empty">No project types match your search.</p>
                     )}
                   </div>
-                  {error && <p className="error small">{error}</p>}
                 </div>
-                <div className="gz-npd-pane-footer">
+                <div className="gz-npd-pane-footer gz-npd-pick-footer">
+                  <p className="gz-npd-footnote">
+                    Pick one to see what it brings — nothing is created until the next screen.
+                  </p>
+                  <Dialog.Actions>
+                    <button type="button" onClick={onClose}>
+                      Cancel
+                    </button>
+                  </Dialog.Actions>
+                </div>
+              </>
+            ) : (
+              <>
+                <header className="gz-npd-header gz-npd-detail-header">
+                  <button type="button" className="gz-npd-back" onClick={backToPicker}>
+                    <span aria-hidden="true">‹</span>
+                    Project types
+                  </button>
+                  <div className="gz-npd-detail-id">
+                    <span className="gz-npd-detail-art" aria-hidden="true">
+                      <SelectionArt selection={paneSelection} size={26} />
+                    </span>
+                    <div className="gz-npd-header-copy">
+                      <p className="gz-npd-hero-eyebrow">{selectionMeta.categoryLabel}</p>
+                      <Dialog.Title asChild>
+                        <h3 className="gz-npd-hero-name">{selectionMeta.name}</h3>
+                      </Dialog.Title>
+                    </div>
+                  </div>
+                </header>
+                {/* A purpose-built type brings a crew and tooling worth a
+                    column of its own; a built-in kind's brief is a sentence
+                    and two lines, so it stacks above the form instead of
+                    leaving two-thirds of the dialog empty. */}
+                <div
+                  className="gz-npd-detail"
+                  data-lean={selectedType ? undefined : 'true'}
+                  key={selectedTypeId ?? kind}
+                >
+                  <div className="gz-npd-brief">
+                    <NewProjectBrief selection={paneSelection} />
+                  </div>
+                  <div className="gz-npd-setup">
+                    <div className="gz-npd-pane-form">
+                      {selectedType && selectedTypeParams && (
+                        <div className="gz-npd-params">
+                          <GezelJsonEditor
+                            schema={selectedTypeParams}
+                            value={typeParams}
+                            onChange={(next) => {
+                              const nextParams = (next ?? {}) as Record<string, unknown>;
+                              setTypeParams(nextParams);
+                              if (!nameManuallyEdited) {
+                                setName(suggestProjectName(selectedType, nextParams));
+                              }
+                            }}
+                            density="compact"
+                          />
+                        </div>
+                      )}
+                      {kind === 'github' && (
+                        <div className="gz-npd-field">
+                          <span className="gz-new-project-github-label">
+                            <label htmlFor={githubRepoInputId}>
+                              GitHub repository <span className="muted">(optional)</span>
+                            </label>
+                            <GitHubSignInChip onChange={setGitHubIdentity} compact />
+                          </span>
+                          <GitHubRepoCombobox
+                            inputId={githubRepoInputId}
+                            value={repoUrl}
+                            onChange={handleRepoChange}
+                            onBlur={() => void handleRepoPreview()}
+                            onSelect={(picked) => {
+                              handleRepoChange(picked);
+                              // Pass the picked value directly: state updates land
+                              // on the next render, while the preview should begin
+                              // immediately from this selection.
+                              void handleRepoPreview(picked);
+                            }}
+                            repos={githubRepos}
+                          />
+                          {repoPreviewPhase && (
+                            <RepoPreviewProgress
+                              phase={repoPreviewPhase}
+                              onCancel={cancelRepoPreview}
+                            />
+                          )}
+                          {!repoPreviewPhase && repoUrlHint && (
+                            <small className="error">
+                              {repoUrlHint.message}
+                              {repoUrlHint.fixUrl && (
+                                <>
+                                  {' '}
+                                  <a
+                                    href={repoUrlHint.fixUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    Open GitHub authorization page →
+                                  </a>
+                                </>
+                              )}
+                            </small>
+                          )}
+                        </div>
+                      )}
+                      {/* Folder sits above Name: picking the folder is the first move,
+                and it suggests the Name (and drafts About) from what it finds. */}
+                      {kind === 'folder' && (
+                        <label>
+                          Folder
+                          <div className="gz-folder-row">
+                            <input
+                              value={folderPath}
+                              onChange={(e) => setFolderPath(e.target.value)}
+                              onBlur={() => void applyFolderPath(folderPath)}
+                              placeholder={folderPathPlaceholder}
+                            />
+                            {window.__GEZEL__?.selectDirectory && (
+                              <button
+                                type="button"
+                                className="gz-folder-browse"
+                                onClick={() => void pickFolder()}
+                              >
+                                Browse…
+                              </button>
+                            )}
+                          </div>
+                          <small className="muted">
+                            Gezels read — and, with permission, write — files in this folder.
+                          </small>
+                        </label>
+                      )}
+                      {kind === 'email' ? (
+                        <label>
+                          Email address
+                          <input
+                            type="email"
+                            value={emailAddress}
+                            onChange={(e) => setEmailAddress(e.target.value)}
+                            placeholder="you@example.com"
+                            autoComplete="email"
+                          />
+                          <small className="muted">The project is named after this address.</small>
+                        </label>
+                      ) : (
+                        <label>
+                          Name
+                          <input
+                            value={name}
+                            onChange={(e) => {
+                              setName(e.target.value);
+                              setNameManuallyEdited(true);
+                            }}
+                            placeholder={
+                              isSolo ? 'e.g. Bird-feeder prototype' : "e.g. Eliza's Pet Shop"
+                            }
+                          />
+                          {selectedType && name && !nameManuallyEdited && (
+                            <small className="muted">
+                              Suggested from your choices — edit it anytime.
+                            </small>
+                          )}
+                          {kind === 'folder' && name && !nameManuallyEdited && (
+                            <small className="muted">
+                              Suggested from the folder — edit it anytime.
+                            </small>
+                          )}
+                        </label>
+                      )}
+                      {kind === 'email' && (
+                        <>
+                          <div className="gz-type-field">
+                            <span className="gz-type-field-label">Provider</span>
+                            <div
+                              className="gz-type-picker"
+                              role="radiogroup"
+                              aria-label="Mail provider"
+                            >
+                              {EMAIL_PROVIDERS.map((p) => {
+                                const active = p.id === emailProvider;
+                                return (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    // biome-ignore lint/a11y/useSemanticElements: chip in a role="radiogroup"; a native radio input would break the chip styling and rich content.
+                                    role="radio"
+                                    aria-checked={active}
+                                    className={`gz-type-chip${active ? ' active' : ''}`}
+                                    onClick={() => setEmailProvider(p.id)}
+                                  >
+                                    {p.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          {emailProvider === 'imap' ? (
+                            <>
+                              <label>
+                                IMAP host
+                                <input
+                                  value={imapHost}
+                                  onChange={(e) => setImapHost(e.target.value)}
+                                  placeholder="imap.example.com"
+                                />
+                              </label>
+                              <div className="gz-imap-row">
+                                <label className="gz-imap-port">
+                                  Port <span className="muted">(optional)</span>
+                                  <input
+                                    value={imapPort}
+                                    onChange={(e) => setImapPort(e.target.value)}
+                                    placeholder="993"
+                                    inputMode="numeric"
+                                  />
+                                </label>
+                                <label className="gz-imap-tls">
+                                  <input
+                                    type="checkbox"
+                                    checked={imapSecure}
+                                    onChange={(e) => setImapSecure(e.target.checked)}
+                                  />
+                                  Use TLS
+                                </label>
+                              </div>
+                              <label>
+                                Password / app password
+                                <input
+                                  type="password"
+                                  value={imapPass}
+                                  onChange={(e) => setImapPass(e.target.value)}
+                                  placeholder="app password"
+                                  autoComplete="off"
+                                />
+                              </label>
+                              <small className="muted">
+                                Gmail and Outlook.com also work over IMAP with an app password. The
+                                username is your email address.
+                              </small>
+                            </>
+                          ) : (
+                            <p className="muted small">
+                              {EMAIL_PROVIDERS.find((p) => p.id === emailProvider)?.label} connects
+                              via OAuth. Create the project, then click <strong>Connect</strong> in
+                              its Mail tab to authorize in the browser. Synced messages become
+                              searchable files; sending is consent-gated.
+                            </p>
+                          )}
+                        </>
+                      )}
+                      {kind !== 'email' && !selectedTypeId && (
+                        <>
+                          <label>
+                            {isSolo ? 'Job description' : 'About'}{' '}
+                            <span className="muted">{kind === 'folder' ? '(optional)' : ''}</span>
+                            <textarea
+                              value={about}
+                              onChange={(e) => setAbout(e.target.value)}
+                              placeholder={
+                                kind === 'folder' ? folderAboutPlaceholder : aboutPlaceholder
+                              }
+                              rows={4}
+                            />
+                          </label>
+                          <label>
+                            Mission objectives <span className="muted">(optional)</span>
+                            <textarea
+                              value={mission}
+                              onChange={(e) => setMission(e.target.value)}
+                              placeholder={missionPlaceholder}
+                              rows={3}
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {/* Every submit failure renders HERE, in the fixed footer
+                    beside the button — never inside the scrolling column
+                    above, where a message lands below the fold on a form
+                    parked at the top and Create reads as a dead button. */}
+                <div className="gz-npd-pane-footer gz-npd-detail-footer">
+                  {error ? (
+                    <p className="error small gz-npd-submit-error" role="alert">
+                      {error}
+                    </p>
+                  ) : (
+                    <p className="gz-npd-footnote">
+                      {selectedType
+                        ? 'Creating sets up the crew, tools, and starting files in one go.'
+                        : 'Nothing is created until you press Create.'}
+                    </p>
+                  )}
                   <Dialog.Actions>
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel
@@ -1086,8 +1182,8 @@ export function NewProjectDialog({
                     </button>
                   </Dialog.Actions>
                 </div>
-              </aside>
-            </div>
+              </>
+            )}
           </form>
         </Dialog.Content>
       </Dialog.Portal>

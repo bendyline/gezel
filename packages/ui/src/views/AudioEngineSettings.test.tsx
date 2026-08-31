@@ -36,6 +36,7 @@ describe('AudioEngineSettings', () => {
         { id: 'af_breeze', name: 'Breeze', language: 'en' },
       ],
     } as never);
+    vi.mocked(api.getConfig).mockResolvedValue({} as never);
   });
 
   it('renders both engine sections with their model managers', async () => {
@@ -68,7 +69,7 @@ describe('AudioEngineSettings', () => {
     });
 
     // Switch the voice selector to af_breeze and update the text.
-    const voiceSelect = screen.getByRole('combobox') as HTMLSelectElement;
+    const voiceSelect = screen.getByLabelText('Voice') as HTMLSelectElement;
     fireEvent.change(voiceSelect, { target: { value: 'af_breeze' } });
     const textInput = screen.getByRole('textbox') as HTMLInputElement;
     const user = userEvent.setup();

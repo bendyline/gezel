@@ -2038,7 +2038,7 @@
   margin-top: 0.4rem;
 }
 
-.gz-ntd-footnote {
+.gz-npd-footnote {
   margin: 0 0 0.5rem;
   color: var(--text-muted);
   font-size: 0.72rem;
@@ -2047,7 +2047,7 @@
 /* Takes the footnote's slot on failure, so the reason sits against the
    button that produced it. Wraps rather than clips — a connector prep
    error is a whole sentence naming the fix. */
-.gz-ntd-submit-error {
+.gz-npd-submit-error {
   margin: 0 0 0.5rem;
   font-size: 0.72rem;
   line-height: 1.35;
@@ -2061,23 +2061,26 @@
   line-height: 1.35;
 }
 
-/* ── New Task: the two-step wizard ────────────────────────────────────
-   Step 1 (`gz-ntd-step-pick`) is the catalog with no properties pane, so
-   the rail + gallery take the whole dialog. Step 2 (`gz-ntd-step-configure`)
-   replaces it with the chosen recipe at full size: what it does and every
-   step it runs on the left, its parameters and task properties on the
-   right. A craftbook is a page of reading, and the old 19rem pane clamped
-   its description to five lines and stacked the params under it. The
-   dialog's height and footer are identical across both steps, so the frame
-   never jumps — only what is inside it changes. */
+/* ── The gallery dialog's two-step wizard (shared) ──────────────────
+   Both gallery dialogs use it: New Task and New Project. Step 1
+   (`gz-npd-step-pick`) is the catalog with no properties pane, so the rail
+   + gallery take the whole dialog. Step 2 (`gz-npd-step-configure`)
+   replaces it with the chosen starting point at full size: what it is and
+   what it brings on the left, its parameters and properties on the right.
+   A craftbook is a page of reading, and a project type carries a crew and a
+   toolset; the old 19rem pane clamped the description to five lines and
+   stacked the params under it. The dialog's height and footer are identical
+   across both steps, so the frame never jumps — only what is inside it
+   changes. The few task-only rules below are marked as such. */
 
-.gz-ntd-step-pick .gz-npd-body {
+.gz-npd-step-pick .gz-npd-body {
   grid-template-columns: 15rem minmax(0, 1fr);
 }
 
-/* Header controls — the project the gallery is drawn for, then search. The
-   project belongs on THIS step: it decides which craftbooks are applicable
-   and which are recommended, so changing it re-stocks the shelves. */
+/* Header controls (New Task only) — the project the gallery is drawn for,
+   then search. The project belongs on THIS step: it decides which
+   craftbooks are applicable and which are recommended, so changing it
+   re-stocks the shelves. */
 .gz-ntd-header-controls {
   display: flex;
   align-items: flex-end;
@@ -2116,29 +2119,29 @@
 
 /* Both steps end on the same bar: a line of guidance on the left, keys on
    the right. */
-.gz-ntd-pick-footer,
-.gz-ntd-detail-footer {
+.gz-npd-pick-footer,
+.gz-npd-detail-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
 }
 
-.gz-ntd-pick-footer .gz-ntd-footnote,
-.gz-ntd-detail-footer .gz-ntd-footnote,
-.gz-ntd-detail-footer .gz-ntd-submit-error {
+.gz-npd-pick-footer .gz-npd-footnote,
+.gz-npd-detail-footer .gz-npd-footnote,
+.gz-npd-detail-footer .gz-npd-submit-error {
   margin: 0;
   min-width: 0;
 }
 
 /* — Step 2 header: back key, identity, project — */
-.gz-ntd-detail-header {
+.gz-npd-detail-header {
   align-items: center;
   justify-content: flex-start;
   gap: 0.9rem;
 }
 
-.gz-ntd-back {
+.gz-npd-back {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -2154,24 +2157,24 @@
   transition: color 120ms ease-out, border-color 120ms ease-out;
 }
 
-.gz-ntd-back:hover {
+.gz-npd-back:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
-.gz-ntd-back span {
+.gz-npd-back span {
   font-size: 1rem;
   line-height: 1;
 }
 
-.gz-ntd-detail-id {
+.gz-npd-detail-id {
   display: flex;
   align-items: center;
   gap: 0.7rem;
   min-width: 0;
 }
 
-.gz-ntd-detail-art {
+.gz-npd-detail-art {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2187,12 +2190,13 @@
   color: var(--accent);
 }
 
-.gz-ntd-detail-art img,
-.gz-ntd-detail-art svg {
+.gz-npd-detail-art img,
+.gz-npd-detail-art svg {
   width: 1.9rem;
   height: 1.9rem;
 }
 
+/* New Task only: the project the task lands in, stated in step 2's header. */
 .gz-ntd-detail-project {
   margin: 0 0 0 auto;
   flex: none;
@@ -2201,7 +2205,7 @@
 }
 
 /* — Step 2 body: the brief, then the setup — */
-.gz-ntd-detail {
+.gz-npd-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(20rem, 25rem);
   flex: 1;
@@ -2209,7 +2213,7 @@
   animation: gz-npd-pane-in 140ms ease-out;
 }
 
-.gz-ntd-brief {
+.gz-npd-brief {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
@@ -2221,7 +2225,7 @@
 /* The manifest's own words, unclamped — this screen exists to show them.
    Measure-capped: a craftbook description is a paragraph, and the full
    width of this column runs past a comfortable line. */
-.gz-ntd-brief-lede {
+.gz-npd-brief-lede {
   margin: 0;
   max-width: 62ch;
   color: var(--text);
@@ -2229,7 +2233,7 @@
   line-height: 1.55;
 }
 
-.gz-ntd-setup {
+.gz-npd-setup {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
@@ -2240,7 +2244,7 @@
   background: var(--panel);
 }
 
-.gz-ntd-setup .gz-npd-params {
+.gz-npd-setup .gz-npd-params {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -2248,11 +2252,11 @@
 
 /* A blank task has no recipe to read, so the brief column is not drawn and
    the form takes the middle of the dialog instead of hugging one edge. */
-.gz-ntd-detail[data-blank="true"] {
+.gz-npd-detail[data-blank="true"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.gz-ntd-detail[data-blank="true"] .gz-ntd-setup {
+.gz-npd-detail[data-blank="true"] .gz-npd-setup {
   width: 100%;
   max-width: 38rem;
   box-sizing: border-box;
@@ -2261,18 +2265,47 @@
   background: none;
 }
 
-/* The recipe reads as prose here rather than as a pane preview: bigger
-   type, and each step's own description under its name. */
-.gz-ntd-detail .gz-ntd-steps {
+/* A starting point whose whole brief is a sentence and two lines — a
+   built-in project kind — does not earn a column of its own. Brief and form
+   stack in one centered column instead, so the frame stays the same size
+   without two-thirds of it standing empty. (New Task's blank card takes the
+   same route through `data-blank`, which draws no brief at all.) */
+.gz-npd-detail[data-lean="true"] {
+  display: block;
+  overflow-y: auto;
+}
+
+.gz-npd-detail[data-lean="true"] .gz-npd-brief,
+.gz-npd-detail[data-lean="true"] .gz-npd-setup {
+  width: 100%;
+  max-width: 40rem;
+  box-sizing: border-box;
+  margin: 0 auto;
+  overflow: visible;
+  border-left: none;
+  background: none;
+}
+
+.gz-npd-detail[data-lean="true"] .gz-npd-brief {
+  padding-bottom: 0;
+}
+
+.gz-npd-detail[data-lean="true"] .gz-npd-setup {
+  padding-top: 0.75rem;
+}
+
+/* New Task only. The recipe reads as prose here rather than as a pane
+   preview: bigger type, and each step's own description under its name. */
+.gz-npd-detail .gz-ntd-steps {
   gap: 0.6rem;
   padding: 0.85rem 1rem;
 }
 
-.gz-ntd-detail .gz-ntd-steps-list {
+.gz-npd-detail .gz-ntd-steps-list {
   gap: 0.55rem;
 }
 
-.gz-ntd-detail .gz-ntd-steps-list li {
+.gz-npd-detail .gz-ntd-steps-list li {
   font-size: 0.82rem;
 }
 
@@ -2296,27 +2329,28 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gz-ntd-detail {
+  .gz-npd-detail {
     animation: none;
   }
 }
 
 @media (max-width: 900px) {
   /* One column, one scroller: the brief above the setup. */
-  .gz-ntd-detail,
-  .gz-ntd-detail[data-blank="true"] {
+  .gz-npd-detail,
+  .gz-npd-detail[data-blank="true"],
+  .gz-npd-detail[data-lean="true"] {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
   }
 
-  .gz-ntd-brief,
-  .gz-ntd-setup {
+  .gz-npd-brief,
+  .gz-npd-setup {
     flex: none;
     overflow: visible;
   }
 
-  .gz-ntd-setup {
+  .gz-npd-setup {
     border-left: none;
     border-top: 1px solid var(--border);
   }
@@ -2333,8 +2367,8 @@
     width: 100%;
   }
 
-  .gz-ntd-pick-footer,
-  .gz-ntd-detail-footer {
+  .gz-npd-pick-footer,
+  .gz-npd-detail-footer {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.5rem;

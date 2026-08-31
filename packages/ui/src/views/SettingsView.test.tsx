@@ -16,6 +16,9 @@ vi.mock('./FoldersSettings.js', () => ({ FoldersSettings: stub('folders-settings
 vi.mock('./ImageEngineSettings.js', () => ({ ImageEngineSettings: stub('image-settings') }));
 vi.mock('./LlamaCppSettings.js', () => ({ LlamaCppSettings: stub('llamacpp-settings') }));
 vi.mock('./MlxSettings.js', () => ({ MlxSettings: stub('mlx-settings') }));
+vi.mock('./MicrophoneSettings.js', () => ({
+  MicrophoneSettings: stub('microphone-settings'),
+}));
 vi.mock('./OllamaSettings.js', () => ({
   OllamaSettings: stub('ollama-settings'),
   TimeoutRow: stub('timeout-row'),
@@ -142,6 +145,13 @@ describe('SettingsView', () => {
     });
   });
 
+  it('hosts microphone settings under Device Integration', async () => {
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-deviceIntegration'));
+
+    expect(await screen.findByTestId('microphone-settings')).toBeInTheDocument();
+  });
+
   it('persists the automatic update-check preference from About settings', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
@@ -168,6 +178,31 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
+  it('labels the role-assignment pickers by role-based name in boring mode', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      boekwachterGezelId: 'noor',
+      roleBasedNameOnlyMode: true,
+    } as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        { id: 'gz-meester', name: 'Brigitte', role: 'Meester', roleBasedName: 'meester' },
+        { id: 'noor', name: 'Noor', role: 'Boekwachter', roleBasedName: 'boekwachter' },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-team'));
+
+    // The card above each picker and the picker's own options both name the
+    // gezel — neither may leak the friendly name while boring mode is on.
+    await waitFor(() => expect(screen.getAllByText('meester').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('boekwachter').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Brigitte/)).toBeNull();
+    expect(screen.queryByText(/Noor/)).toBeNull();
+  });
+
   it('defaults very early work-in-progress features off and persists the toggle', async () => {
     vi.mocked(api.updateConfig).mockResolvedValue({
       provider: 'mock',
@@ -185,6 +220,30 @@ describe('SettingsView', () => {
 
     await waitFor(() =>
       expect(api.updateConfig).toHaveBeenCalledWith({ showWorkInProgressFeatures: true }),
+    );
+  });
+
+  it('defaults both inline checking toggles on and persists a change', async () => {
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mock',
+      inlineGrammarChecking: false,
+    } as never);
+
+    render(<SettingsView />);
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+
+    const spelling = await screen.findByRole('checkbox', { name: 'Show inline spell checking' });
+    const grammar = await screen.findByRole('checkbox', { name: 'Show inline grammar checking' });
+    expect(spelling).toBeChecked();
+    expect(grammar).toBeChecked();
+    expect(
+      screen.getByText('(Grammar checking is currently only available for English)'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(grammar);
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ inlineGrammarChecking: false }),
     );
   });
 

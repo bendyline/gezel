@@ -1,4 +1,8 @@
-import { EditorShell, type MentionCandidate } from '@bendyline/squisq-editor-react';
+import {
+  EditorShell,
+  type MentionCandidate,
+  useEditorContext,
+} from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { type GezelSummary, displayName, parseTaskRef } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
@@ -6,6 +10,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from '../api.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
+import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -190,6 +195,51 @@ export interface ChatComposerProps {
    * `taskRef` or `craftbookRef` don't need it. See `composer-drafts.ts`.
    */
   draftScope?: string;
+}
+
+interface ComposerNarrateButtonProps {
+  projectId: string;
+  disabled: boolean;
+  onAppendTranscript: (text: string) => string | null;
+  onError: (message: string | null) => void;
+}
+
+// Squisq's sibling source owns this cross-repo option; the currently published
+// editor type predates it. A spread keeps Gezel buildable against that pin while
+// the local/new Squisq runtime consumes the flag normally.
+const CHAT_ACCESSORY_BIN_PROPS = { showFilesWhenNotEmpty: true } as const;
+
+/**
+ * Bridge prompt narration into Squisq's live editor state.
+ *
+ * This component deliberately lives inside EditorShell so it can use the
+ * editor context. Updating through `replaceAll` keeps the toolbar mounted;
+ * remounting EditorShell for every progressive STT fragment would also
+ * unmount ChatNarrateButton and cancel its still-active microphone session.
+ */
+function ComposerNarrateButton({
+  projectId,
+  disabled,
+  onAppendTranscript,
+  onError,
+}: ComposerNarrateButtonProps) {
+  const { replaceAll } = useEditorContext();
+  const handleTranscript = useCallback(
+    (text: string) => {
+      const nextDraft = onAppendTranscript(text);
+      if (nextDraft !== null) replaceAll(nextDraft);
+    },
+    [onAppendTranscript, replaceAll],
+  );
+
+  return (
+    <ChatNarrateButton
+      projectId={projectId}
+      disabled={disabled}
+      onTranscript={handleTranscript}
+      onError={onError}
+    />
+  );
 }
 
 /**
@@ -648,10 +698,12 @@ export function ChatComposer({
   // Progressive STT returns one finalized fragment per self-contained audio
   // segment. Append each fragment to whatever is currently in the editor so
   // narration extends an existing prompt and never replaces typing that
-  // happened while the microphone was live.
-  const appendNarratedText = useCallback((text: string) => {
+  // happened while the microphone was live. Return the merged source so the
+  // toolbar bridge can update Squisq without remounting the editor (and the
+  // still-recording microphone button along with it).
+  const appendNarratedText = useCallback((text: string): string | null => {
     const spoken = text.trim();
-    if (!spoken) return;
+    if (!spoken) return null;
     const current = draftRef.current;
     const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
     draftRef.current = merged;
@@ -662,9 +714,7 @@ export function ChatComposer({
     setOpenCommandQuery(parseOpenChatQuery(merged));
     const next = extractMentionTokens(merged);
     setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
-    // EditorShell intentionally treats its source as initial content. Remount
-    // from the lossless draft ref so the newly transcribed text is visible.
-    setEditorRevision((revision) => revision + 1);
+    return merged;
   }, []);
 
   const beginDraftSubmission = useCallback((): ComposerDraftSnapshot | null => {
@@ -1170,7 +1220,14 @@ export function ChatComposer({
           </div>
         </div>
       )}
-      {error && <p className="error chat-composer-error">{error}</p>}
+      {error && (
+        <div className="chat-composer-error" role="alert">
+          <span className="chat-composer-error-mark" aria-hidden="true">
+            ✗
+          </span>
+          <span className="chat-composer-error-text">{error}</span>
+        </div>
+      )}
       <div className="chat-composer-to">
         <span className="chat-composer-to-label muted">To:</span>
         <GezelIcon
@@ -1314,22 +1371,23 @@ export function ChatComposer({
           uxFont="var(--font-ui)"
           showPlayTab={false}
           showStatusBar={false}
-          // Hide the Files-panel toggle — in the chat composer, the
-          // "attach a file" affordance is meant to land the image in
-          // the message body, not a separate side library. Paste
-          // (⌘V), drag-drop into the editor, and the Toolbar's 🖼
-          // image button all already insert an image node directly
-          // via the MediaProvider.
-          showFilesToggle={false}
+          // The direct shortcuts upload into Squisq's accessory bin. Keep its
+          // toggle available once populated and open the bin when the first
+          // attachment arrives so non-image files have a visible home.
+          showFilesToggle
+          {...CHAT_ACCESSORY_BIN_PROPS}
           fullWidth
           thinMargins
           submitOnEnter={() => submitRef.current()}
+          toolbarSlotAfterActions={
+            <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+          }
           toolbarSlotRight={
             <>
-              <ChatNarrateButton
+              <ComposerNarrateButton
                 projectId={projectId}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}
-                onTranscript={appendNarratedText}
+                onAppendTranscript={appendNarratedText}
                 onError={setError}
               />
               {openCommandQuery !== null ? (
