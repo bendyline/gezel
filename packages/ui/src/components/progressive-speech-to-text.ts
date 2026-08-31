@@ -18,7 +18,9 @@ export interface ProgressiveSpeechToTextOptions {
   onError: (error: Error) => void;
 }
 
-const DEFAULT_SEGMENT_MS = 8_000;
+// Four seconds keeps dictation visibly progressive without making Whisper
+// spend most of its time on tiny, context-poor fragments.
+const DEFAULT_SEGMENT_MS = 4_000;
 
 export class ProgressiveSpeechToText {
   private readonly stream: MediaStream;

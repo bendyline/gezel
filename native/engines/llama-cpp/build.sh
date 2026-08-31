@@ -223,18 +223,44 @@ if [[ -d "$build_dir" ]]; then
 fi
 
 cmake -S "$src" -B "$build_dir" "${cmake_flags[@]}"
-# Cap parallelism on every Linux build. GitHub-hosted ubuntu runners
-# have 16GB RAM; llama.cpp's template-heavy ggml compile easily eats
-# 2-4GB per object file across all backends (not just CUDA/Vulkan —
-# the CPU build OOM'd on `-j` = 4 cores in CI, surfacing as "runner
-# lost communication with the server"). `-j 2` is slower but
-# survives. Override with LLAMA_BUILD_JOBS=N. macOS runners have
-# more headroom and aren't constrained here.
+# Cap parallelism. GitHub-hosted ubuntu runners have 16GB RAM;
+# llama.cpp's template-heavy ggml compile easily eats 2-4GB per object
+# file across all backends (not just CUDA/Vulkan — the CPU build OOM'd
+# on `-j` = 4 cores in CI, surfacing as "runner lost communication with
+# the server"). `-j 2` is slower but survives. Override with
+# LLAMA_BUILD_JOBS=N.
+#
+# macOS was exempted here on the theory that it had more headroom. It
+# does not: the hosted arm64 runner is a ~7GB box, and `src/models/` is
+# ~150 independent translation units that make fans out in one burst
+# under an unlimited `-j`. The symptom was never a compile error — it
+# was the *npm* install for llama.cpp's embedded web UI, which the
+# same build runs concurrently. On darwin it self-reported "added 1053
+# packages ... in 1h"; the identical cold `npm ci` takes 3.5 min on the
+# Windows runner and 18s on Linux, and 1462 packages install in 41s on
+# a macos-latest runner that isn't compiling at the same time. Run
+# 33351677171 lost the runner outright at 46 min ("received a shutdown
+# signal", exit 143) still inside that install. Unlimited `-j` buys
+# nothing over core count anyway, so derive the cap from cores AND RAM
+# and keep a well-provisioned local Mac fast.
 jobs_flag="-j"
-if [[ "$os" == "Linux" ]]; then
-  jobs_flag="-j${LLAMA_BUILD_JOBS:-2}"
-elif [[ -n "${LLAMA_BUILD_JOBS:-}" ]]; then
+if [[ -n "${LLAMA_BUILD_JOBS:-}" ]]; then
   jobs_flag="-j${LLAMA_BUILD_JOBS}"
+elif [[ "$os" == "Linux" ]]; then
+  jobs_flag="-j2"
+elif [[ "$os" == "Darwin" ]]; then
+  # bash 3.2 on the macOS runner: plain arithmetic only, no arrays.
+  build_cores="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 2)"
+  build_mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 2147483648) / 1073741824 ))
+  # ~1.5GB per concurrent C++ job.
+  build_jobs=$(( build_mem_gb * 2 / 3 ))
+  if [[ "$build_cores" -lt "$build_jobs" ]]; then
+    build_jobs="$build_cores"
+  fi
+  if [[ "$build_jobs" -lt 2 ]]; then
+    build_jobs=2
+  fi
+  jobs_flag="-j${build_jobs}"
 fi
 echo "[build] parallelism: $jobs_flag"
 cmake --build "$build_dir" --config Release --target llama-server $jobs_flag

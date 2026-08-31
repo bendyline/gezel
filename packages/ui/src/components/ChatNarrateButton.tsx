@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ProgressiveSpeechToText } from './progressive-speech-to-text.js';
+import { microphoneTakeAsWav } from './speech-audio-wav.js';
 
 type NarrateStatus = 'idle' | 'requesting' | 'recording' | 'transcribing';
 
@@ -87,15 +88,27 @@ export function ChatNarrateButton({
         stream,
         ...(format.mimeType ? { mimeType: format.mimeType } : {}),
         transcribe: async (blob, mimeType, signal) => {
+          const upload = await microphoneTakeAsWav(blob);
           const response = await api.transcribeAudio({
-            audio: { data: await blobToBase64(blob), mimeType },
+            audio: { data: await blobToBase64(upload), mimeType: upload.type || mimeType },
             projectId,
             signal,
           });
           return response.text;
         },
         onTranscript,
-        onError: (caught) => onError(humanizeNarrationError(caught)),
+        onError: (caught) => {
+          // A failed take will not become more useful by keeping the mic open
+          // and sending another one. Release it immediately and surface one
+          // actionable error.
+          session.cancel();
+          if (sessionRef.current !== session) return;
+          sessionRef.current = null;
+          if (mountedRef.current && lifecycle === lifecycleRef.current) {
+            setStatus('idle');
+            onError(humanizeNarrationError(caught));
+          }
+        },
       });
       sessionRef.current = session;
       session.start();
@@ -166,19 +179,26 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 function humanizeNarrationError(caught: unknown): string {
   const error = caught instanceof Error ? caught : new Error(String(caught));
-  if (error.name === 'NotAllowedError' || /permission|not allowed|denied/i.test(error.message)) {
+  const message = apiErrorDetail(error) ?? error.message;
+  if (error.name === 'NotAllowedError' || /permission|not allowed|denied/i.test(message)) {
     return 'Microphone access was not granted. Allow it in your system settings, then try again.';
   }
-  if (
-    error.name === 'NotFoundError' ||
-    /requested device not found|no microphone/i.test(error.message)
-  ) {
+  if (error.name === 'NotFoundError' || /requested device not found|no microphone/i.test(message)) {
     return 'No microphone is available.';
   }
-  if (/no stt model|download one from settings|speech-to-text model/i.test(error.message)) {
+  if (/no stt model|download one from settings|speech-to-text model/i.test(message)) {
     return 'Speech-to-text is not ready. Download a model in Settings → Audio, then try again.';
   }
-  return `Could not narrate this prompt: ${error.message}`;
+  return `Could not narrate this prompt: ${message}`;
+}
+
+function apiErrorDetail(error: Error): string | null {
+  const details = (error as Error & { details?: unknown }).details;
+  if (details && typeof details === 'object' && 'error' in details) {
+    const value = (details as { error?: unknown }).error;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return typeof details === 'string' && details.trim() ? details.trim() : null;
 }
 
 function MicrophoneGlyph() {
