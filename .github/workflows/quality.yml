@@ -211,8 +211,13 @@ jobs:
     # suite; repeating daemon integration here would consume the timeout
     # without adding coverage for render/input timing regressions.
     # A progressing run reached the previous 40 min ceiling on 2026-08-15;
-    # leave enough headroom for ordinary hosted-runner variance.
-    timeout-minutes: 50
+    # leave enough headroom for ordinary hosted-runner variance. On 2026-08-31
+    # the 50 min ceiling caught a healthy run mid-pass-3 with ~45s of work
+    # left, and the run before it had passed with 8s to spare — the margin,
+    # not the suite, was deciding the result. A job timeout surfaces as
+    # "The operation was canceled", indistinguishable from a concurrency
+    # cancel, so read the elapsed time before hunting for a hung test.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
