@@ -87,6 +87,7 @@ export function evalSpecFromTestSpec(
     tags: spec.tags,
     ...(spec.mocks.length > 0 ? { mocks: spec.mocks } : {}),
     testSpecVersion: loaded.version,
+    ...(loaded.stepPathTokens.length > 0 ? { stepPathTokens: loaded.stepPathTokens } : {}),
     ...(loaded.hasSpawn || override?.runAsCraftbookTask ? { runAsCraftbookTask: true } : {}),
     ...(override?.timeoutMs !== undefined ? { timeoutMs: override.timeoutMs } : {}),
     ...(override?.progressTimeoutMs !== undefined

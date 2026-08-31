@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
 import { promisify } from 'node:util';
 import type { GateCheck, StepSniff } from '@bendyline/gezel';
 import { verifyBinaryDocumentBytes } from '@bendyline/gezel';
-import { evaluateGate } from '@bendyline/gezel-service';
+import { type GateEvalDeps, evaluateGate } from '@bendyline/gezel-service';
 import {
   type WorkspaceLike,
   containsPattern,
@@ -63,8 +63,9 @@ export function isEvalOnlyCheck(check: { kind: string }): boolean {
 async function delegateToRuntimeEvaluator(
   check: GateCheck,
   ws: CraftbookEvalWorkspace,
+  deps?: GateEvalDeps,
 ): Promise<string | null> {
-  const result = await evaluateGate([check], ws);
+  const result = await evaluateGate([check], ws, deps);
   if (result.pass) return null;
   return result.failures[0] ?? `gate check ${check.kind} failed`;
 }
@@ -72,10 +73,11 @@ async function delegateToRuntimeEvaluator(
 export async function evaluateCraftbookGateChecks(
   checks: readonly CraftbookEvalGateCheck[],
   ws: CraftbookEvalWorkspace,
+  deps?: GateEvalDeps,
 ): Promise<CraftbookEvalGateResult> {
   const failures: string[] = [];
   for (const check of checks) {
-    const failure = await evaluateOne(check, ws);
+    const failure = await evaluateOne(check, ws, deps);
     if (failure) failures.push(failure);
   }
   return { pass: failures.length === 0, failures };
@@ -84,6 +86,7 @@ export async function evaluateCraftbookGateChecks(
 async function evaluateOne(
   check: CraftbookEvalGateCheck,
   ws: CraftbookEvalWorkspace,
+  deps?: GateEvalDeps,
 ): Promise<string | null> {
   // Artifact-drawer checks delegate straight to the runtime evaluator,
   // which owns the workspace↔artifact reader swap — the local fast paths
@@ -93,7 +96,7 @@ async function evaluateOne(
   // them, so delegating would judge an unknown check rather than the file.
   // Each one handles both surfaces itself.
   if ((check as { artifact?: boolean }).artifact === true && !isEvalOnlyCheck(check)) {
-    return delegateToRuntimeEvaluator(check as GateCheck, ws);
+    return delegateToRuntimeEvaluator(check as GateCheck, ws, deps);
   }
   switch (check.kind) {
     case 'minBytes': {
@@ -247,7 +250,7 @@ async function evaluateOne(
       // (craftbook-receipt-intake trial: "unsupported gate check kind:
       // recordSchema" burned four repair rounds on a schema-valid check
       // this switch simply never learned).
-      return delegateToRuntimeEvaluator(check as GateCheck, ws);
+      return delegateToRuntimeEvaluator(check as GateCheck, ws, deps);
   }
 }
 
