@@ -663,13 +663,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   } | null>(null);
   const [workspaceSourceReveal, setWorkspaceSourceReveal] =
     useState<WorkspaceSourceRevealRequest | null>(null);
-  // Output-pane visibility override. `null` = follow the auto default
-  // (visible when the workspace has a previewable index.html); an
-  // explicit boolean is the user's toggle choice, persisted onto the
-  // project as `outputPaneVisible` so it survives reloads, project
-  // switches, and a daemon port change. See the toggle in the
-  // entity-tabs-row and [ProjectOutputPane](../components/ProjectOutputPane.tsx).
-  const [outputOverride, setOutputOverride] = useState<boolean | null>(null);
+  // In-session output-pane choice, held only until the write to
+  // `project.outputPaneVisible` lands (and, for a pre-server-side install,
+  // until the localStorage value is migrated). The PROJECT is the source of
+  // truth for visibility — never mirror it into state and read the mirror,
+  // or the pane flashes open for a frame on every project whose stored
+  // answer is "hidden", because an effect cannot run before the first
+  // commit that has the project. Carries its project id so a choice made on
+  // one project can never resolve the pane for the next one. See the toggle
+  // in the entity-tabs-row and
+  // [ProjectOutputPane](../components/ProjectOutputPane.tsx).
+  const [outputOverride, setOutputOverride] = useState<{
+    projectId: string;
+    visible: boolean;
+  } | null>(null);
   // When the selected project has an applied custom project type that pins an
   // Output page (its dashboard), this holds that page so the output pane can
   // show it ahead of the workspace auto-ranker. See docs/project-types.md.
@@ -2081,10 +2088,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     () => workspaceHtmlFiles.some((p) => /(^|\/)index\.html?$/i.test(p)),
     [workspaceHtmlFiles],
   );
-  // Load the persisted per-project override whenever the project changes.
-  // `project.outputPaneVisible` is the source of truth; a leftover
-  // localStorage value from before the choice moved server-side is adopted
-  // once and then dropped, so the two can never disagree afterwards.
+  // Retire a leftover localStorage value from before the choice moved
+  // server-side: adopt it once, then drop it, so the two can never
+  // disagree afterwards. A project that already carries the flag needs
+  // nothing here — it is read straight off `selected` below.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the selected project id.
   useEffect(() => {
     if (!selected) {
@@ -2092,24 +2099,22 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       return;
     }
     if (typeof selected.outputPaneVisible === 'boolean') {
-      setOutputOverride(selected.outputPaneVisible);
       forgetLegacyOutputVisible(selected.id);
       return;
     }
     const legacy = readLegacyOutputVisible(selected.id);
-    setOutputOverride(legacy);
-    if (legacy !== null) {
-      const projectId = selected.id;
-      void api
-        .updateProject(projectId, { outputPaneVisible: legacy })
-        .then((updated) => {
-          forgetLegacyOutputVisible(projectId);
-          setSelected((current) => (current?.id === projectId ? updated : current));
-        })
-        .catch(() => {
-          /* keep the cached value; the next load retries the migration */
-        });
-    }
+    if (legacy === null) return;
+    const projectId = selected.id;
+    setOutputOverride({ projectId, visible: legacy });
+    void api
+      .updateProject(projectId, { outputPaneVisible: legacy })
+      .then((updated) => {
+        forgetLegacyOutputVisible(projectId);
+        setSelected((current) => (current?.id === projectId ? updated : current));
+      })
+      .catch(() => {
+        /* keep the cached value; the next load retries the migration */
+      });
   }, [selected?.id]);
   // Resolve the pinned type page (if any) whenever the selected project's
   // applied project type changes. The provenance on project.json carries the
@@ -2159,13 +2164,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   // A pinned type page makes the pane worth showing even without a workspace
   // index.html — the user's explicit toggle still wins.
+  const pendingOutputChoice =
+    outputOverride && outputOverride.projectId === selected?.id ? outputOverride.visible : null;
   const outputVisible =
-    Boolean(selected) && (outputOverride ?? (hasIndexHtml || Boolean(typePage)));
+    Boolean(selected) &&
+    (pendingOutputChoice ?? selected?.outputPaneVisible ?? (hasIndexHtml || Boolean(typePage)));
   const toggleOutput = useCallback(() => {
     if (!selected) return;
     const next = !outputVisible;
     const projectId = selected.id;
-    setOutputOverride(next);
+    setOutputOverride({ projectId, visible: next });
     void api
       .updateProject(projectId, { outputPaneVisible: next })
       .then((updated) => {
