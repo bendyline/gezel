@@ -42,6 +42,19 @@ class FakeMediaRecorder {
   }
 }
 
+class FakeAudioContext {
+  async decodeAudioData(): Promise<AudioBuffer> {
+    return {
+      length: 4,
+      numberOfChannels: 1,
+      sampleRate: 48_000,
+      getChannelData: () => new Float32Array([0, 0.25, -0.25, 0]),
+    } as unknown as AudioBuffer;
+  }
+
+  async close(): Promise<void> {}
+}
+
 describe('ChatNarrateButton', () => {
   const stopTrack = vi.fn();
   const getUserMedia = vi.fn(
@@ -53,6 +66,7 @@ describe('ChatNarrateButton', () => {
     vi.clearAllMocks();
     FakeMediaRecorder.instances = [];
     vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+    vi.stubGlobal('AudioContext', FakeAudioContext);
     vi.stubGlobal('navigator', {
       ...navigator,
       mediaDevices: { getUserMedia },
@@ -85,14 +99,14 @@ describe('ChatNarrateButton', () => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(8_000);
+      await vi.advanceTimersByTimeAsync(4_000);
       await Promise.resolve();
     });
     expect(onTranscript).toHaveBeenCalledWith('first thought');
     expect(api.transcribeAudio).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: 'project-1',
-        audio: expect.objectContaining({ mimeType: 'audio/webm;codecs=opus' }),
+        audio: expect.objectContaining({ mimeType: 'audio/wav' }),
         signal: expect.any(AbortSignal),
       }),
     );
@@ -122,5 +136,30 @@ describe('ChatNarrateButton', () => {
     });
     expect(onError).toHaveBeenCalledWith(expect.stringMatching(/system settings/i));
     expect(screen.getByRole('button', { name: 'Narrate prompt' })).toBeEnabled();
+  });
+
+  it('stops recording and surfaces API error details after a failed take', async () => {
+    vi.mocked(api.transcribeAudio).mockRejectedValueOnce(
+      Object.assign(new Error('Gezel API error 500 on POST /api/audio/transcribe'), {
+        details: {
+          error:
+            'No STT model is available locally. Download one from Settings → Audio before transcribing.',
+        },
+      }),
+    );
+    const onError = vi.fn();
+    render(<ChatNarrateButton projectId="default" onTranscript={vi.fn()} onError={onError} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Narrate prompt' }));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await Promise.resolve();
+    });
+
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/Settings → Audio/));
+    expect(screen.getByRole('button', { name: 'Narrate prompt' })).toBeEnabled();
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(api.transcribeAudio).toHaveBeenCalledOnce();
   });
 });
