@@ -10,6 +10,7 @@
  *   const mgr = new ChatManager({ ..., providers: [['copilot', mock]] });
  */
 import { randomUUID } from 'node:crypto';
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue } from './queue.js';
 import {
@@ -476,7 +477,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
       if (streamThenHang.length > 0) this.emitDelta(streamThenHang);
       const signal = sendOpts?.queue?.signal;
       await new Promise<never>((_resolve, reject) => {
-        const fail = (): void => reject(new Error('[mock] turn cancelled by caller'));
+        const fail = (): void => reject(new Error(turnCancelledMessage()));
         if (signal?.aborted) {
           fail();
           return;
@@ -499,10 +500,12 @@ class MockSession extends StreamingSessionBase implements LLMSession {
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
 
-    const reasoningChunks = this.provider.nextScriptedReasoning();
-    if (reasoningChunks.length > 0) {
-      this.lastTurnReasoning = reasoningChunks.join('');
-      for (const chunk of reasoningChunks) this.emitReasoningDelta(chunk);
+    // Accumulate as each chunk streams rather than assigning the joined
+    // string up front: every real provider grows this field token by
+    // token, and `getCurrentTurnReasoningLength()` is read mid-turn.
+    for (const chunk of this.provider.nextScriptedReasoning()) {
+      this.lastTurnReasoning = (this.lastTurnReasoning ?? '') + chunk;
+      this.emitReasoningDelta(chunk);
     }
 
     // External tools mode: when the session was created with
@@ -580,6 +583,15 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnReasoning(): string | undefined {
     return this.lastTurnReasoning;
+  }
+
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return (this.lastTurnReasoning ?? '').length;
   }
 
   getRegisteredToolNames(): string[] {

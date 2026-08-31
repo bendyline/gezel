@@ -31,6 +31,8 @@ export function bumpStepActivation(
       lastGateReject: _lastGateReject,
       redriveCount: _redriveCount,
       lastRedriveAt: _lastRedriveAt,
+      restartResumeCount: _restartResumeCount,
+      lastRestartResumeAt: _lastRestartResumeAt,
       ...rest
     } = step;
     void _done;
@@ -40,6 +42,8 @@ export function bumpStepActivation(
     void _lastGateReject;
     void _redriveCount;
     void _lastRedriveAt;
+    void _restartResumeCount;
+    void _lastRestartResumeAt;
 
     const bumped = {
       ...rest,

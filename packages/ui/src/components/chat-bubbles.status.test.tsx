@@ -155,3 +155,41 @@ describe('StreamingBubble — waiting for the engine vs wedged mid-turn', () => 
     expect(screen.getByText(/may have wedged mid-turn/)).toBeInTheDocument();
   });
 });
+
+describe('StreamingBubble elapsed clock', () => {
+  it('stops counting once the turn has failed', async () => {
+    // A dead turn kept ticking: the failed shell read "11:15" and climbing
+    // on a turn that had aborted 40 seconds earlier, so the first question
+    // it raised was "is this still running?" instead of "what went wrong?".
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now() - 90_000;
+      const { rerender, container } = render(
+        <StreamingBubble
+          authorLabel="Koray"
+          authorIcon={null}
+          segments={[]}
+          startedAt={startedAt}
+          error="[Mac AI] no first byte from the engine"
+        />,
+      );
+      const clock = () => container.querySelector('.msg-live-status')?.textContent ?? '';
+      const before = clock();
+      expect(before).toMatch(/1:30/);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      rerender(
+        <StreamingBubble
+          authorLabel="Koray"
+          authorIcon={null}
+          segments={[]}
+          startedAt={startedAt}
+          error="[Mac AI] no first byte from the engine"
+        />,
+      );
+      expect(clock()).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

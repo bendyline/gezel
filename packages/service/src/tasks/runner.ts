@@ -129,6 +129,13 @@ export interface TaskRehydrationResult {
   taskRefs: string[];
   /** Eligible work subject to Night Shift admission. */
   nightShiftTaskRefs: string[];
+  /**
+   * Tasks NOT resumed because the step has already been resumed past its
+   * restart budget without finishing — each is paused for a human. Named
+   * separately so a boot that resumes less than it found says so instead
+   * of reporting a shorter list with no explanation.
+   */
+  heldTaskRefs: string[];
 }
 
 export interface TaskRunnerDispatcher {
@@ -210,6 +217,17 @@ export interface TaskRunnerOptions {
     task: Task;
   }>;
   /**
+   * Count (and bound) restart resumes of one active step. Production wires
+   * `TaskManager.noteRestartResume`, which pauses the task once a step has
+   * been resumed past its budget without finishing. Optional for
+   * lightweight runner tests; absent means resume without bookkeeping.
+   */
+  noteRestartResume?: (
+    projectId: string,
+    num: number,
+    stepId: string,
+  ) => Promise<{ count: number; exhausted: boolean }>;
+  /**
    * Tick cadence. 5000ms is plenty — a tick too fast is noise; too
    * slow and the queue feels sluggish after a provider drains.
    */
@@ -250,6 +268,7 @@ export class TaskRunner {
   private readonly store: Store;
   private readonly dispatcher: TaskRunnerDispatcher;
   private readonly prepareActiveStep: TaskRunnerOptions['prepareActiveStep'];
+  private readonly noteRestartResume: TaskRunnerOptions['noteRestartResume'];
   private readonly tickIntervalMs: number;
   private readonly now: () => number;
   private readonly isNightShiftActive: () => boolean;
@@ -281,6 +300,7 @@ export class TaskRunner {
     this.store = opts.store;
     this.dispatcher = opts.dispatcher;
     this.prepareActiveStep = opts.prepareActiveStep;
+    this.noteRestartResume = opts.noteRestartResume;
     this.tickIntervalMs = opts.tickIntervalMs ?? 5_000;
     this.now = opts.now ?? Date.now;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
@@ -497,11 +517,12 @@ export class TaskRunner {
    * `tick`, so a double-enqueue won't produce two handoff sessions.
    */
   async rehydrateFromStore(
-    opts: { nightShiftOnly?: boolean; projectId?: string } = {},
+    opts: { nightShiftOnly?: boolean; projectId?: string; afterRestart?: boolean } = {},
   ): Promise<TaskRehydrationResult> {
     const result: TaskRehydrationResult = {
       taskRefs: [],
       nightShiftTaskRefs: [],
+      heldTaskRefs: [],
     };
     const projects = await this.store.listProjects();
     for (const proj of projects) {
@@ -523,6 +544,23 @@ export class TaskRunner {
         if (!step) continue;
         const assigneeId = stepOwnerGezelId(task, step);
         if (!assigneeId) continue;
+        // Only a real restart counts. The night-shift and per-project
+        // callers rehydrate a running process's queue — charging those to
+        // the budget would pause a healthy task for being looked at.
+        if (opts.afterRestart && this.noteRestartResume) {
+          const { count, exhausted } = await this.noteRestartResume(
+            proj.id,
+            task.num,
+            step.id,
+          ).catch(() => ({ count: 0, exhausted: false }));
+          if (exhausted) {
+            log.warn(
+              `[task-runner] ${task.ref} step "${step.id}" not resumed: ${count - 1} restarts without finishing — task paused for help`,
+            );
+            result.heldTaskRefs.push(task.ref);
+            continue;
+          }
+        }
         result.taskRefs.push(task.ref);
         if (task.nightShift?.enabled === true) result.nightShiftTaskRefs.push(task.ref);
         // No process-local turn survives a restart, but the persisted task

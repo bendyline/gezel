@@ -47,6 +47,8 @@ import {
   MeesterStatusStateSchema,
   NEW_THREAD_TITLE,
   PROJECT_GEZEL_LOCAL_ID,
+  type PendingGezelMessage,
+  PendingHandoffQueueSchema,
   type PendingImports,
   PendingImportsSchema,
   type Project,
@@ -119,6 +121,7 @@ import {
   meesterStatusDir,
   meesterStatusFile,
   meesterStatusStateFile,
+  pendingHandoffsFile,
   projectActivityFile,
   projectArtifactsDir,
   projectBoekwachterIssuesFile,
@@ -1497,6 +1500,33 @@ export class Store {
   }
 
   // ---------- config ----------
+
+  /**
+   * Gezel-to-gezel messages accepted but never dispatched — see
+   * {@link PendingGezelMessageSchema}. Small (a parked handoff lives
+   * seconds to minutes) and rewritten wholesale, so no journal shape is
+   * warranted; a corrupt or absent file reads as an empty queue, because
+   * losing a replay is strictly better than failing a boot over it.
+   */
+  async readPendingHandoffs(): Promise<PendingGezelMessage[]> {
+    const file = pendingHandoffsFile(this.home);
+    try {
+      const parsed = PendingHandoffQueueSchema.safeParse(JSON.parse(await readFile(file, 'utf8')));
+      return parsed.success ? parsed.data.messages : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async writePendingHandoffs(messages: PendingGezelMessage[]): Promise<void> {
+    const file = pendingHandoffsFile(this.home);
+    if (messages.length === 0) {
+      await rm(file, { force: true }).catch(() => {});
+      return;
+    }
+    await mkdir(dirname(file), { recursive: true });
+    await writeFileAtomic(file, `${JSON.stringify({ version: 1, messages }, null, 2)}\n`);
+  }
 
   async readConfig(): Promise<GezelConfig> {
     const p = gezelPaths(this.home);
@@ -5517,6 +5547,7 @@ export class Store {
           archived: session.archived,
           ...(session.source ? { source: session.source } : {}),
           ...(session.lastTurnError ? { lastTurnError: session.lastTurnError } : {}),
+          ...(session.turnStartedAt ? { turnStartedAt: session.turnStartedAt } : {}),
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),

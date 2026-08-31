@@ -16,6 +16,7 @@ import {
   type GezelGender,
   type HookSpec,
   type InstalledToolset,
+  KeyedLock,
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ModelTier,
   NEW_THREAD_TITLE,
@@ -28,6 +29,7 @@ import {
   type TaskCraftbookStep,
   type TaskNote,
   type ToolsetManifest,
+  type TurnCancelReason,
   awakeTimeoutSignal,
   createAwakeTimeout,
   createLogger,
@@ -39,6 +41,7 @@ import {
   isLocalProvider,
   isOutsideInInternalPath,
   isProactiveAllowed,
+  isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
   normalizeScriptRefs,
@@ -46,6 +49,7 @@ import {
   parseGezelMentionId,
   parseTaskRef,
   profileKind,
+  projectAllowsAmbientWork,
   projectGezelId,
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
@@ -56,6 +60,7 @@ import {
   roleDeliverableScripts,
   stepDeliverablePath,
   tierAtLeast,
+  turnCancelledMessage,
   validateScriptInput,
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
@@ -792,6 +797,58 @@ type BuiltSessionOpts = SessionOpts & {
   toolCapWarnings?: string[];
 };
 
+/**
+ * Arguments for {@link ChatManager.messageGezel}. Named because the durable
+ * parked-handoff record ({@link PendingGezelMessage}) has to reconstruct this
+ * exact call after a restart — an inline shape would let the two drift with
+ * no compiler complaint, and the drift would only show as a message that
+ * comes back after a boot missing whatever field was added.
+ */
+export interface MessageGezelArgs {
+  fromGezelId: string;
+  fromSessionId?: string;
+  toGezelIdOrName: string;
+  projectId?: string;
+  text: string;
+  /** One-way feedback that must not wake the sender with the recipient's reply. */
+  suppressReply?: boolean;
+  /** Internal task context for scheduler re-drives. */
+  taskRef?: string;
+  /** Exact step paired with taskRef when re-driving task work. */
+  stepId?: string;
+  /**
+   * Provider-queue lane for the target's reply turn. Defaults to
+   * `interactive`. The scheduler passes `background` for ambient
+   * project nudges so they yield to user-driven chat sharing the
+   * same provider.
+   */
+  lane?: Lane;
+  /** Ambient housekeeping turn — held by local-engine admission
+   *  control until a quiet window. The scheduler passes true for
+   *  project nudges. */
+  ambient?: boolean;
+  /**
+   * Shape-of-deliverable hint for this specific message. Since
+   * `messageGezel` reuses the target's main project session (not a
+   * fresh consultation session), we don't stamp this onto the
+   * session record — instead we annotate the seed message text so
+   * the model sees the file-deliverable expectation at the top of
+   * the prompt it's responding to. The target's role about.md
+   * (e.g. the Researcher template) is the durable mechanism; this
+   * annotation is the per-message reinforcement.
+   */
+  expectedDeliverable?: ExpectedDeliverable;
+}
+
+/**
+ * Ceiling on turns re-driven in one boot. A stamp only survives when a turn
+ * never settled, so the realistic count is the handful that were live when
+ * the app closed — but a long-dead crash could leave a pile, and a boot that
+ * quietly fires fifty local-model turns is its own outage. Anything past the
+ * cap is logged, never silently dropped.
+ */
+const MAX_RESUMED_TURNS_PER_BOOT = 20;
+
 interface InflightTurn {
   userText: string;
   startedAt: number;
@@ -800,6 +857,12 @@ interface InflightTurn {
   providerStarted?: boolean;
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
+  /**
+   * Why `cancelInflight` stopped this turn. Only the caller knows — the
+   * provider sees an aborted signal and nothing more — so the reason rides
+   * here and becomes the warning on the salvaged `turn-aborted` bubble.
+   */
+  cancelReason?: TurnCancelReason;
   /**
    * Per-turn buffers copied off the session-keyed maps by
    * `cancelInflight`, before it releases the session slot.
@@ -1178,6 +1241,8 @@ export class ChatManager {
    * land before the sender starts consuming follow-up nudges.
    */
   private readonly afterSessionIdle = new Map<string, Array<() => void>>();
+  /** Serializes read-modify-write on the whole-file parked-handoff queue. */
+  private readonly pendingHandoffLock = new KeyedLock();
   /**
    * One live async file handoff per sender/target/project/path/intent. Models can
    * emit the same `message_gezel` call several times while the sender turn
@@ -2778,11 +2843,19 @@ export class ChatManager {
    * the next `send()` rebuilds from scratch. The user message that was
    * persisted at the start of the turn stays on disk — cancel undoes
    * the assistant turn, not the user's question.
+   *
+   * `reason` is what the salvaged `turn-aborted` bubble tells the user.
+   * Only the caller knows it — from here down the turn is just an aborted
+   * signal — so pass the one that fits rather than taking the default.
    */
-  async cancelInflight(sessionId: string): Promise<{ cancelled: boolean }> {
+  async cancelInflight(
+    sessionId: string,
+    reason: TurnCancelReason = 'unspecified',
+  ): Promise<{ cancelled: boolean }> {
     const entry = this.inflight.get(sessionId);
     if (!entry) return { cancelled: false };
     entry.cancelled = true;
+    entry.cancelReason = reason;
     this.inflight.delete(sessionId);
     this.queueWaitingSince.delete(sessionId);
     this.telemetry.noteTurnEnd(sessionId);
@@ -2904,7 +2977,9 @@ export class ChatManager {
     }
 
     const results = await Promise.allSettled(
-      Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
+      Array.from(this.inflight.keys()).map((sessionId) =>
+        this.cancelInflight(sessionId, 'emergency-stop'),
+      ),
     );
     const cancelledTurns = results.reduce(
       (total, result) => total + (result.status === 'fulfilled' && result.value.cancelled ? 1 : 0),
@@ -2981,7 +3056,7 @@ export class ChatManager {
         `queue#${sessionId.slice(0, 8)} INTERRUPT entry=${entry.id.slice(0, 8)} depth=${q.length}`,
       );
       this.publishQueueEnqueued(sessionId, entry);
-      void this.cancelInflight(sessionId)
+      void this.cancelInflight(sessionId, 'user-interrupt')
         .catch((err) => {
           // Cancel is best-effort teardown; the entry is already queued
           // and will drain either below or via the unwind. Never reject
@@ -4037,41 +4112,7 @@ export class ChatManager {
    * return promptly. Failures surface in the target's session (via its
    * own error/done events), not as a tool-call error in the sender's chat.
    */
-  async messageGezel(args: {
-    fromGezelId: string;
-    fromSessionId?: string;
-    toGezelIdOrName: string;
-    projectId?: string;
-    text: string;
-    /** One-way feedback that must not wake the sender with the recipient's reply. */
-    suppressReply?: boolean;
-    /** Internal task context for scheduler re-drives. */
-    taskRef?: string;
-    /** Exact step paired with taskRef when re-driving task work. */
-    stepId?: string;
-    /**
-     * Provider-queue lane for the target's reply turn. Defaults to
-     * `interactive`. The scheduler passes `background` for ambient
-     * project nudges so they yield to user-driven chat sharing the
-     * same provider.
-     */
-    lane?: Lane;
-    /** Ambient housekeeping turn — held by local-engine admission
-     *  control until a quiet window. The scheduler passes true for
-     *  project nudges. */
-    ambient?: boolean;
-    /**
-     * Shape-of-deliverable hint for this specific message. Since
-     * `messageGezel` reuses the target's main project session (not a
-     * fresh consultation session), we don't stamp this onto the
-     * session record — instead we annotate the seed message text so
-     * the model sees the file-deliverable expectation at the top of
-     * the prompt it's responding to. The target's role about.md
-     * (e.g. the Researcher template) is the durable mechanism; this
-     * annotation is the per-message reinforcement.
-     */
-    expectedDeliverable?: ExpectedDeliverable;
-  }): Promise<{
+  async messageGezel(args: MessageGezelArgs): Promise<{
     sessionId: string;
     toGezelName: string;
     toGezelId: string;
@@ -4317,9 +4358,14 @@ export class ChatManager {
           : '—'
       })`;
     let dispatched = false;
+    // Set only when this handoff parks (below). Cleared here rather than at
+    // the park callback because the watchdog dispatches too, and a record
+    // that outlives its dispatch is a message the next boot sends twice.
+    let parkedHandoffId: string | null = null;
     const dispatchTargetSend = () => {
       if (dispatched) return; // once-guard: park-flush AND watchdog can both call this
       dispatched = true;
+      if (parkedHandoffId) void this.clearPendingHandoff(parkedHandoffId);
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
       const targetSend = this.sendWithBusyRetry(session.id, seed, {
         from: { gezelId: args.fromGezelId, gezelName: fromName },
@@ -4390,6 +4436,12 @@ export class ChatManager {
 
     if (args.fromSessionId && this.inflight.has(args.fromSessionId)) {
       log.info(`[chat] ${htag}: parked — sender is mid-turn; will dispatch when it idles`);
+      // The park is a closure in this process's memory, and it is the one
+      // hop of a handoff with no durable trace anywhere: past dispatch the
+      // seed is a persisted user message on the recipient's session, which
+      // boot recovery can finish. Record the intent so a restart can
+      // re-issue this exact call.
+      parkedHandoffId = await this.recordPendingHandoff(args);
       this.runAfterSessionIdle(args.fromSessionId, dispatchTargetSend);
       // Watchdog for the parked-callback hop — the one place a handoff
       // can strand silently (sender's idle-flush missed → recipient
@@ -5737,6 +5789,203 @@ export class ChatManager {
     return { accepted: true, sessionId };
   }
 
+  /**
+   * Durable record of a handoff that parked waiting for its sender to go
+   * idle. Serialized through one lock because several gezels can park at the
+   * same instant and this is a read-modify-write of a whole-file queue.
+   */
+  private async recordPendingHandoff(args: MessageGezelArgs): Promise<string> {
+    const id = randomUUID();
+    await this.pendingHandoffLock.run('queue', async () => {
+      const queue = await this.store.readPendingHandoffs();
+      queue.push({
+        id,
+        at: nowIso(),
+        fromGezelId: args.fromGezelId,
+        ...(args.fromSessionId ? { fromSessionId: args.fromSessionId } : {}),
+        toGezelIdOrName: args.toGezelIdOrName,
+        ...(args.projectId ? { projectId: args.projectId } : {}),
+        text: args.text,
+        ...(args.suppressReply ? { suppressReply: true } : {}),
+        ...(args.taskRef ? { taskRef: args.taskRef } : {}),
+        ...(args.stepId ? { stepId: args.stepId } : {}),
+        ...(args.lane ? { lane: args.lane } : {}),
+        ...(args.ambient ? { ambient: true } : {}),
+        ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
+      });
+      await this.store.writePendingHandoffs(queue);
+    });
+    return id;
+  }
+
+  private async clearPendingHandoff(id: string): Promise<void> {
+    await this.pendingHandoffLock
+      .run('queue', async () => {
+        const queue = await this.store.readPendingHandoffs();
+        const remaining = queue.filter((entry) => entry.id !== id);
+        if (remaining.length !== queue.length) await this.store.writePendingHandoffs(remaining);
+      })
+      .catch((err) => {
+        // A stale record re-sends one message after the next boot. Noisy,
+        // not harmful — and far better than failing the dispatch it belongs to.
+        log.warn(
+          `[chat] could not clear pending handoff ${id.slice(0, 8)}: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+  }
+
+  /**
+   * Boot recovery: re-issue gezel-to-gezel messages that were accepted but
+   * never dispatched. The queue is drained BEFORE any is re-issued — each
+   * re-issued `messageGezel` can park again and write its own fresh record,
+   * and a drain afterwards would delete those too.
+   */
+  async replayPendingHandoffs(): Promise<{ replayed: number }> {
+    const queued = await this.store.readPendingHandoffs();
+    if (queued.length === 0) return { replayed: 0 };
+    const config = await this.store.readConfig().catch(() => ({}));
+    if (!isTaskWorkAllowed(config)) {
+      log.info(
+        `[chat] ${queued.length} parked handoff(s) held — engagement mode does not allow starting them`,
+      );
+      return { replayed: 0 };
+    }
+    await this.pendingHandoffLock.run('queue', () => this.store.writePendingHandoffs([]));
+    let replayed = 0;
+    for (const entry of queued) {
+      if (this.shuttingDown) break;
+      // The sender's own turn died with the process, so there is nothing
+      // left to wait for: dropping `fromSessionId` sends now instead of
+      // parking against a session that will never go idle again. It stays
+      // in the record for provenance, not for routing.
+      const { id, at, fromSessionId, ...rest } = entry;
+      const delivered = await this.messageGezel(rest)
+        .then(() => true)
+        .catch((err) => {
+          log.warn(
+            `[chat] parked handoff ${id.slice(0, 8)} (${entry.fromGezelId}→${entry.toGezelIdOrName}) could not be re-sent: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+          return false;
+        });
+      if (delivered) replayed++;
+    }
+    if (replayed > 0) {
+      log.info(`[chat] re-sent ${replayed} handoff(s) that were parked when the process stopped`);
+    }
+    return { replayed };
+  }
+
+  /**
+   * Boot recovery: finish the turns the previous process never got to.
+   *
+   * `turnStartedAt` is stamped when a turn starts and cleared when it
+   * settles, so a session still carrying one on disk is a turn that died
+   * with its process — a quit mid-reply, or a crash. The user's message (or
+   * a sending gezel's handoff seed) is already persisted; only the reply is
+   * missing, so re-driving is the same move `retryLastTurn` makes, minus a
+   * human clicking it.
+   *
+   * What it deliberately does NOT resume:
+   * - **Task sessions.** `TaskRunner.rehydrateFromStore` re-dispatches those
+   *   from the task record with its own restart seed. Two writers on one
+   *   session is worse than a late turn.
+   * - **Turns the user stopped.** The stamp is cleared for `user-stop`,
+   *   `user-interrupt`, and `emergency-stop` at abort time — resuming what
+   *   someone deliberately halted is the one unforgivable version of this
+   *   feature. Same for an ordinary failure, which keeps `lastTurnError`
+   *   and the Retry button instead of re-running on its own.
+   * - **Anything, while engagement is off or reactive.** Same gate the task
+   *   runner uses: nothing starts on its own in those modes.
+   *
+   * Resumed turns run in the background lane, so a person who starts typing
+   * the moment the app opens is never queued behind the backlog.
+   */
+  async resumeInterruptedTurns(): Promise<{ resumed: string[]; skipped: number }> {
+    const config = await this.store.readConfig().catch(() => ({}));
+    if (!isTaskWorkAllowed(config)) {
+      log.info('[chat] interrupted-turn resume held — engagement mode does not allow it');
+      return { resumed: [], skipped: 0 };
+    }
+    const summaries = await this.store.listSessions().catch(() => []);
+    const candidates = summaries
+      .filter((summary) => summary.turnStartedAt && !summary.archived && !summary.taskRef)
+      .sort((a, b) => (a.turnStartedAt! < b.turnStartedAt! ? 1 : -1));
+    const projectAllows = new Map<string, boolean>();
+    const resumed: string[] = [];
+    let skipped = 0;
+    for (const summary of candidates) {
+      if (this.shuttingDown) break;
+      if (resumed.length >= MAX_RESUMED_TURNS_PER_BOOT) {
+        skipped++;
+        continue;
+      }
+      let allowed = projectAllows.get(summary.projectId);
+      if (allowed === undefined) {
+        const project = await this.store.getProject(summary.projectId).catch(() => null);
+        allowed = project ? projectAllowsAmbientWork(project) : false;
+        projectAllows.set(summary.projectId, allowed);
+      }
+      if (!allowed) {
+        skipped++;
+        continue;
+      }
+      const restarted = await this.resumeInterruptedTurn(summary.id).catch((err) => {
+        log.warn(
+          `[chat] could not resume ${summary.id.slice(0, 8)}: ${err instanceof Error ? err.message : err}`,
+        );
+        return false;
+      });
+      if (restarted) resumed.push(summary.id);
+      else skipped++;
+    }
+    if (resumed.length > 0 || skipped > 0) {
+      const capNote =
+        candidates.length > MAX_RESUMED_TURNS_PER_BOOT
+          ? ` (capped at ${MAX_RESUMED_TURNS_PER_BOOT} per boot; ${candidates.length} carried a stamp)`
+          : '';
+      log.info(
+        `[chat] interrupted-turn resume: ${resumed.length} restarted, ${skipped} skipped${capNote}`,
+      );
+    }
+    return { resumed, skipped };
+  }
+
+  /**
+   * Re-drive one interrupted turn. The stamp is cleared and persisted
+   * BEFORE the send: a turn that dies the same way twice would otherwise
+   * be resumed on every boot forever. The new turn stamps it again.
+   */
+  private async resumeInterruptedTurn(sessionId: string): Promise<boolean> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record?.turnStartedAt) return false;
+    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+      return false;
+    }
+    const input = [...record.messages].reverse().find((message) => message.role === 'user');
+    if (!input) return false;
+    record.turnStartedAt = undefined;
+    await this.store.writeSession(record);
+    const state = this.states.get(sessionId);
+    if (state) state.record.turnStartedAt = undefined;
+    log.info(
+      `[chat] resuming interrupted turn on ${sessionId.slice(0, 8)} (${record.gezelId}) — the previous process stopped before it replied`,
+    );
+    const send = this.send(sessionId, input.content, {
+      hidden: true,
+      lane: 'background',
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.origin === 'system' ? { messageOrigin: 'system' as const } : {}),
+    }).catch((err) => {
+      log.warn(
+        `[chat] resumed turn on ${sessionId.slice(0, 8)} failed: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    this.trackBackground(send);
+    return true;
+  }
+
   async archiveSession(sessionId: string): Promise<ChatSession> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
@@ -6579,6 +6828,11 @@ export class ChatManager {
       ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     state.record.messages.push(userMessage);
+    // Stamped here rather than at cancel time: this write already happens,
+    // and a process that dies without unwinding never reaches a cancel path
+    // at all. Whatever still carries a stamp at boot is a turn nobody
+    // finished. Cleared on every terminal write below.
+    state.record.turnStartedAt = nowIso();
     if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
       state.record.title =
         deriveThreadTitleFromMessages(state.record.messages.slice(0, -1), {
@@ -7273,7 +7527,9 @@ export class ChatManager {
         const iterStartedAt = nowIso();
         let finalContent: string;
         try {
-          if (inflightTurn.cancelled) throw new Error('Turn cancelled by user.');
+          if (inflightTurn.cancelled) {
+            throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
+          }
           inflightTurn.providerStarted = true;
           this.telemetry.noteProviderRequestStart(sessionId);
           finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
@@ -7350,7 +7606,7 @@ export class ChatManager {
         // manager authoritative if an adapter returns after cancellation.
         // Do not commit a late "successful" reply after the user stopped it.
         if (inflightTurn.cancelled) {
-          throw new Error('Turn cancelled by user.');
+          throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
         }
         log.debug(`response: ${debugOn ? finalContent : finalContent.slice(0, 80)}`);
 
@@ -7695,6 +7951,7 @@ export class ChatManager {
         // clears it. Otherwise the banner would linger across successes.
         state.record.lastTurnError = undefined;
         state.record.lastTurnErrorDetail = undefined;
+        state.record.turnStartedAt = undefined;
         await this.store.writeSession(state.record);
 
         // Publish each turn so the timeline renders incremental progress —
@@ -8483,12 +8740,26 @@ export class ChatManager {
           state.record.lastTurnError = userMessage.slice(0, 500);
           state.record.lastTurnErrorDetail = errorDetail;
         }
+        // A deliberate cancel is not a fault, and the provider's own
+        // wording for it names neither who stopped the turn nor why — it
+        // only ever saw an aborted signal. `cancelInflight` recorded the
+        // reason; that sentence is what the bubble shows.
+        const abortHeadline = intentionallyCancelled
+          ? turnCancelledMessage(inflightTurn.cancelReason)
+          : message;
+        // Keep the turn-start stamp ONLY for a turn the app itself ended:
+        // that is the one worth finishing on the next boot. A stop the user
+        // asked for stays stopped, and an ordinary failure keeps
+        // `lastTurnError` + the Retry button rather than re-running unasked.
+        if (inflightTurn.cancelReason !== 'service-restart') {
+          state.record.turnStartedAt = undefined;
+        }
         const abortMessage: ChatMessage = {
           role: 'assistant',
           content: salvagedContent,
           at: nowIso(),
           synthetic: 'turn-aborted',
-          warnings: [message, ...drainedWarnings],
+          warnings: [abortHeadline, ...drainedWarnings],
           ...(salvagedReasoning && salvagedReasoning.length > 0
             ? {
                 reasoning: salvagedReasoning,
@@ -9944,7 +10215,9 @@ export class ChatManager {
       this.rejectQueuedForSession(sessionId, 'service shutting down');
     }
     await Promise.allSettled(
-      Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
+      Array.from(this.inflight.keys()).map((sessionId) =>
+        this.cancelInflight(sessionId, 'service-restart'),
+      ),
     );
     // A turn that reached its post-send hook while cancellation was settling
     // may have raced the first clear. Keep the shutdown boundary timer-free.
@@ -15579,6 +15852,16 @@ export class ChatManager {
       // onto the persisted ChatMessageToolCall so the inline diff
       // viewer has something to render. Unknown fields stay on info
       // but don't leak into the schema — keeps the wire shape stable.
+      // Where in the turn's reasoning trace this call fired, for the
+      // marker the Thinking expander splices in. Read from the live
+      // session's own accumulator — the string that will be persisted —
+      // rather than counting `reasoning_delta` events, which several
+      // providers don't build their trace from. Undefined for providers
+      // that don't implement the getter; the field is then omitted and
+      // the expander renders an unmarked trace.
+      const reasoningOffset = this.states
+        .get(record.id)
+        ?.session?.getCurrentTurnReasoningLength?.();
       const trustedDiffTool =
         info.name === 'replace_in_file' ||
         info.name === 'replace_lines' ||
@@ -15632,6 +15915,7 @@ export class ChatManager {
         ...(addedLines !== undefined ? { addedLines } : {}),
         ...(removedLines !== undefined ? { removedLines } : {}),
         ...(card ? { card } : {}),
+        ...(reasoningOffset !== undefined ? { afterReasoningChars: reasoningOffset } : {}),
       };
       // Accumulate for persistence on the final assistant message. `send()`
       // clears this array at turn start and drains it at turn end.

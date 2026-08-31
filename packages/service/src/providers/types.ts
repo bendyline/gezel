@@ -891,6 +891,25 @@ export interface LLMSession {
    */
   getLastTurnReasoning?(): string | undefined;
   /**
+   * Length, in characters, of the reasoning trace accumulated SO FAR in
+   * the current turn — i.e. what `getLastTurnReasoning()` would return
+   * if the turn ended at this instant. Read by ChatManager at the moment
+   * a tool call fires, and stamped on the persisted
+   * `ChatMessageToolCall.afterReasoningChars` so the chat bubble can
+   * splice a marker into the trace at the point the model stopped
+   * deliberating and acted.
+   *
+   * Implement it against the same field `getLastTurnReasoning` returns.
+   * Counting `onReasoningDelta` chunks in the manager instead would
+   * index into a different string for every provider that builds its
+   * trace by extracting `<think>` blocks per tool-loop iteration.
+   *
+   * Optional: a provider that doesn't implement it simply leaves the
+   * offset off the persisted call, and the bubble renders the trace
+   * without markers.
+   */
+  getCurrentTurnReasoningLength?(): number;
+  /**
    * Tool-call bodies the salvage layer couldn't parse on the most
    * recent turn. Populated when `MAX_MALFORMED_RETRIES` was exhausted
    * — the runtime gave up trying to repair them and the model never

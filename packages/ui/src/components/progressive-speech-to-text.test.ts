@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpeechActivityMonitor } from './microphone-speech-activity.js';
-import {
-  ProgressiveSpeechToText,
-  extendRecognitionPrompt,
-} from './progressive-speech-to-text.js';
+import { ProgressiveSpeechToText, extendRecognitionPrompt } from './progressive-speech-to-text.js';
 
 class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = [];
@@ -70,9 +67,7 @@ describe('ProgressiveSpeechToText', () => {
     const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
     const onTranscript = vi.fn();
     const transcribe = vi
-      .fn<
-        (blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>
-      >()
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>>()
       .mockResolvedValueOnce('first phrase')
       .mockResolvedValueOnce('second phrase');
     const recorder = new ProgressiveSpeechToText({
@@ -143,9 +138,7 @@ describe('ProgressiveSpeechToText', () => {
     const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
     const onTranscript = vi.fn();
     const transcribe = vi
-      .fn<
-        (blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>
-      >()
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>>()
       .mockResolvedValueOnce('[BLANK_AUDIO]')
       .mockResolvedValueOnce('actual speech');
     const recorder = new ProgressiveSpeechToText({
@@ -172,9 +165,7 @@ describe('ProgressiveSpeechToText', () => {
     const onTranscript = vi.fn();
     const onAudioLevel = vi.fn();
     const transcribe = vi
-      .fn<
-        (blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>
-      >()
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>>()
       .mockResolvedValueOnce('1 2')
       .mockResolvedValueOnce('3 4')
       .mockResolvedValue('');
@@ -232,9 +223,7 @@ describe('ProgressiveSpeechToText', () => {
     const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
     const onLongPause = vi.fn();
     const transcribe = vi
-      .fn<
-        (blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>
-      >()
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal, prompt: string) => Promise<string>>()
       .mockResolvedValueOnce('one two')
       .mockResolvedValue('');
     const recorder = new ProgressiveSpeechToText({

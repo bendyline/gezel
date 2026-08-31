@@ -11,13 +11,21 @@ import type { InlineWarning, ToolActivity } from './chat-bubbles.js';
  * renders these in DOM order so tool calls appear inline with the
  * surrounding prose ("here's what I read · here's what I wrote ·
  * now I'm going to write this") instead of all stacked at the top
- * of the bubble. Built by appending each `delta` / `tool` event in
- * arrival order.
+ * of the bubble. Built by appending each `delta` / `reasoning_delta`
+ * / `tool` event in arrival order.
+ *
+ * Reasoning is a segment rather than a slot-level accumulator so the
+ * think phase flows in wire order too. Held outside the ordering it
+ * rendered in one capped, internally-scrolling box pinned above every
+ * segment — on a long tool-loop turn the user watching the bottom of
+ * the thread saw only tool rows and the thinking dots while the live
+ * trace grew off-screen at the top of the bubble.
  */
 export type LiveSegment =
   | { kind: 'text'; content: string }
   | { kind: 'tool'; tool: ToolActivity }
-  | { kind: 'intent'; label: string };
+  | { kind: 'intent'; label: string }
+  | { kind: 'reasoning'; content: string };
 
 /**
  * Live "growing" terminal output bubble. Mirrors `LiveSlot`'s
@@ -136,14 +144,6 @@ export interface LiveSlot {
    */
   wirePulseCount?: number;
   /**
-   * Live private-reasoning text, accumulated from `reasoning_delta`
-   * events while the model's think phase streams. Rendered as a distinct
-   * dimmed "thinking" block above the reply; discarded when the turn
-   * commits (the persisted message carries the same trace on its
-   * `reasoning` field, rendered behind the collapsed expander instead).
-   */
-  liveReasoning?: string;
-  /**
    * Live tool-argument stream, accumulated from `tool_args_delta`
    * events while the model generates a structured tool call (most
    * visibly a multi-minute `write_file` whose tokens never arrive as
@@ -248,6 +248,47 @@ export function staleLiveSessionIds(
     if (!currentSlot.error && !inflight.has(sessionId)) stale.push(sessionId);
   }
   return stale;
+}
+
+/**
+ * Errored live slots whose persisted `turn-aborted` twin has arrived.
+ *
+ * A failed turn is kept on screen so the user can read what streamed before
+ * it died — but the daemon also persists that salvage as a synthetic
+ * `turn-aborted` message carrying the same reason as a warning. Once that
+ * row lands, the live shell is a second copy of one failure: two author
+ * rows, the reason twice, and an elapsed timer still counting on a turn
+ * that is already over. Retiring the shell also un-suppresses the
+ * session-error banner, which carries the same Retry / Acknowledge actions
+ * the shell was holding — the actions move, they do not disappear.
+ *
+ * `acknowledgeFailedTurn` has always done this on click, for exactly this
+ * reason. This is the same retirement, taken when the twin actually
+ * arrives rather than when someone gets around to acknowledging it.
+ *
+ * The `startedAt` comparison matters: a session that failed, was retried,
+ * and failed again holds an older twin that must not retire the newer
+ * shell.
+ */
+export function erroredSlotsWithPersistedTwin(
+  current: ReadonlyMap<string, { error?: string; startedAt: number }>,
+  rows: Iterable<{ sessionId: string; synthetic?: string; at: string }>,
+): string[] {
+  const twinAt = new Map<string, number>();
+  for (const row of rows) {
+    if (row.synthetic !== 'turn-aborted') continue;
+    const at = Date.parse(row.at);
+    if (!Number.isFinite(at)) continue;
+    const seen = twinAt.get(row.sessionId);
+    if (seen === undefined || at > seen) twinAt.set(row.sessionId, at);
+  }
+  const retire: string[] = [];
+  for (const [sessionId, slot] of current) {
+    if (!slot.error) continue;
+    const at = twinAt.get(sessionId);
+    if (at !== undefined && at >= slot.startedAt) retire.push(sessionId);
+  }
+  return retire;
 }
 
 /** Whether any text segment carries non-empty content — used to

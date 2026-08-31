@@ -8,6 +8,37 @@
   min-height: 0;
 }
 
+/* The wordless stand-in shown while a project's chat pane resolves its
+   roster and default recipient (`ProjectChatPlaceholder`). It reuses the
+   real `.project-chat-compose-shell` / `-main` classes, so the frame it
+   draws is the composer's own geometry and palette — the hydrated pane
+   replaces it without anything moving. The two rules below stand in for
+   the composer's children, and read their metrics from the same custom
+   properties the shell declares. No shimmer: a project switch settles in
+   well under a second, and a pulse would be louder than the flash it
+   replaces. */
+
+.project-chat-placeholder-timeline {
+  flex: 1;
+  min-height: 0;
+}
+
+.project-chat-placeholder-band {
+  min-height: var(--compose-top-row-height);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--compose-band-rule);
+}
+
+.project-chat-placeholder-entry {
+  height: var(--compose-entry-height);
+}
+
+/* The chat pane's own children carry their gutters, so a bare paragraph
+   dropped in its place has none and sits flush against the window frame. */
+.project-chat-empty {
+  margin: 0.75rem;
+}
+
 /* ── Thinking indicator (chat surfaces) ── */
 
 .msg-thinking .msg-body {
@@ -1655,15 +1686,50 @@
   overflow-y: auto;
 }
 
+/* Inline breadcrumb spliced into the trace at the offset a tool call
+   fired (ChatMessageToolCall.afterReasoningChars). Small-caps chip, not
+   a block: the trace is pre-wrapped plain text and a block-level mark
+   would break its line flow. `inline-block` keeps the chip itself from
+   wrapping mid-label while still sitting in the text run. The neutral
+   badge recipe (`--text-2xs`, `--radius-sm`, `--border`) shared with
+   chat's `automatic` — it is an annotation, never a control. */
+.msg-reasoning-mark {
+  display: inline-block;
+  margin: 0.15rem 0.3rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  vertical-align: baseline;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg-reasoning-mark.failed {
+  border-color: var(--danger, #d06a6a);
+  color: var(--danger, #d06a6a);
+}
+
 /* Live think-phase stream — the always-open, dimmed counterpart to
-   `.msg-reasoning`, shown above the reply while ds4 reasons. Left-stripe
-   aside marks it as the model thinking (not the answer); it collapses
-   into the disclosure above once the turn commits. Same muted tokens as
-   the committed expander so the streaming view matches the final view. */
+   `.msg-reasoning`, rendered in wire order among the turn's other
+   segments so the trace stays beside the tool rows it reasoned about
+   rather than pinned to the top of the bubble. Left-stripe aside marks
+   it as the model thinking (not the answer); it collapses into the
+   disclosure above once the turn commits. Same muted tokens as the
+   committed expander so the streaming view matches the final view. */
 .msg-stream-reasoning {
   align-self: flex-start;
   max-width: 100%;
-  margin: 0 0 0.5rem;
+  /* No margin of its own: the block is one segment among the turn's
+     others, and `.msg-stream-segment + .msg-stream-segment` already
+     owns the spacing between them. */
+  margin: 0;
   padding-left: 0.6rem;
   border-left: 2px solid var(--border);
 }

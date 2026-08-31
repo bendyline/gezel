@@ -858,6 +858,31 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.content).toBe('Partial answer the user already saw');
   }, 20_000);
 
+  it('names what stopped the turn on the aborted bubble', async () => {
+    // The old copy was the provider's: `[Mac AI] turn cancelled by
+    // caller`. It blamed the engine, which had done nothing wrong, and
+    // "caller" is the call stack's word for this manager — unresolvable
+    // by the person reading the bubble. Only the cancelling caller knows
+    // why, so the reason rides on `cancelInflight` and lands here.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('half a reply');
+    const pending = manager.send(session.id, 'go').catch(() => {
+      /* cancel surfaces as events, not a rejection */
+    });
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    await manager.cancelInflight(session.id, 'service-restart');
+    await pending;
+
+    const aborted = (await store.getSession('ada', session.id))!.messages.at(-1)!;
+    expect(aborted.synthetic).toBe('turn-aborted');
+    expect(aborted.warnings?.[0]).toBe('Gezel shut down while this turn was still running.');
+    expect(aborted.warnings?.[0]).not.toMatch(/caller/i);
+  }, 20_000);
+
   it('scrubs reasoning markup off the turn-aborted message instead of baking it into content', async () => {
     // The salvaged buffer is RAW — the turn died before the provider's
     // end-of-turn reasoning extraction ran. Persisting it verbatim put
@@ -1739,6 +1764,153 @@ describe('ChatManager — archive + delete', () => {
     await manager.deleteSession(a.id);
     expect(await store.getSession('ada', a.id)).toBeNull();
   });
+});
+
+describe('ChatManager — boot recovery', () => {
+  /** Drive a turn to the point where it is live, then kill it as a shutdown would. */
+  async function interruptedSession(): Promise<string> {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('half a reply');
+    const pending = manager.send(session.id, 'what is the status?').catch(() => {
+      /* the cancel surfaces as events */
+    });
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    await manager.cancelInflight(session.id, 'service-restart');
+    await pending;
+    return session.id;
+  }
+
+  it('keeps the turn-start stamp when the app ends the turn, and re-drives it', async () => {
+    const sessionId = await interruptedSession();
+    expect((await store.getSession('ada', sessionId))!.turnStartedAt).toBeTruthy();
+
+    mock.script('here is the status');
+    const { resumed } = await manager.resumeInterruptedTurns();
+    expect(resumed).toEqual([sessionId]);
+    await manager.drainBackground();
+
+    const disk = await store.getSession('ada', sessionId);
+    // The user's question is not duplicated — the resume seed is hidden,
+    // exactly as the Retry button's re-send is.
+    expect(disk!.messages.filter((m) => m.role === 'user' && !m.hidden)).toHaveLength(1);
+    expect(disk!.messages.at(-1)!.content).toBe('here is the status');
+    expect(disk!.turnStartedAt).toBeUndefined();
+  }, 20_000);
+
+  it('leaves a turn the user stopped alone', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('half a reply');
+    const pending = manager.send(session.id, 'go').catch(() => {});
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    await manager.cancelInflight(session.id, 'user-stop');
+    await pending;
+
+    expect((await store.getSession('ada', session.id))!.turnStartedAt).toBeUndefined();
+    expect((await manager.resumeInterruptedTurns()).resumed).toEqual([]);
+  }, 20_000);
+
+  it('leaves task sessions to the task runner', async () => {
+    const sessionId = await interruptedSession();
+    const record = (await store.getSession('ada', sessionId))!;
+    record.taskRef = 'default/7';
+    await store.writeSession(record);
+
+    expect((await manager.resumeInterruptedTurns()).resumed).toEqual([]);
+  }, 20_000);
+
+  it('holds every resume while engagement is reactive', async () => {
+    const sessionId = await interruptedSession();
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+
+    expect((await manager.resumeInterruptedTurns()).resumed).toEqual([]);
+    // Held, not discarded: the stamp survives for a later boot.
+    expect((await store.getSession('ada', sessionId))!.turnStartedAt).toBeTruthy();
+  }, 20_000);
+});
+
+describe('ChatManager — parked handoff durability', () => {
+  it('records a parked handoff and drops the record once it dispatches', async () => {
+    await store.createGezel({ name: 'Bo', role: 'Reviewer' });
+    const sender = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('thinking out loud');
+    const senderTurn = manager.send(sender.id, 'go').catch(() => {});
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    // Parks: the sender is mid-turn, so delivery waits for it to idle.
+    await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: sender.id,
+      toGezelIdOrName: 'bo',
+      text: 'please review the draft',
+    });
+    const parked = await store.readPendingHandoffs();
+    expect(parked).toHaveLength(1);
+    expect(parked[0]).toMatchObject({ fromGezelId: 'ada', toGezelIdOrName: 'bo' });
+
+    mock.script('on it');
+    await manager.cancelInflight(sender.id, 'user-stop');
+    await senderTurn;
+    await manager.drainBackground();
+
+    // Dispatched — the record must not outlive it, or the next boot sends twice.
+    await vi.waitFor(async () => expect(await store.readPendingHandoffs()).toHaveLength(0), {
+      timeout: 5000,
+      interval: 25,
+    });
+  }, 20_000);
+
+  it('re-sends a handoff that was still parked when the process stopped', async () => {
+    await store.createGezel({ name: 'Bo', role: 'Reviewer' });
+    // What the previous process left behind: accepted, never dispatched.
+    await store.writePendingHandoffs([
+      {
+        id: 'parked-1',
+        at: new Date().toISOString(),
+        fromGezelId: 'ada',
+        fromSessionId: 'a-session-that-died-with-the-process',
+        toGezelIdOrName: 'bo',
+        text: 'please review the draft',
+      },
+    ]);
+    mock.script('on it');
+
+    expect(await manager.replayPendingHandoffs()).toEqual({ replayed: 1 });
+    await manager.drainBackground();
+
+    expect(await store.readPendingHandoffs()).toEqual([]);
+    const bo = await store.listSessions({ gezelId: 'bo' });
+    expect(bo).toHaveLength(1);
+    const delivered = await store.getSession('bo', bo[0]!.id);
+    expect(delivered!.messages.some((m) => m.content.includes('please review the draft'))).toBe(
+      true,
+    );
+  }, 20_000);
+
+  it('holds parked handoffs while engagement is reactive', async () => {
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+    await store.writePendingHandoffs([
+      {
+        id: 'parked-2',
+        at: new Date().toISOString(),
+        fromGezelId: 'ada',
+        toGezelIdOrName: 'bo',
+        text: 'please review the draft',
+      },
+    ]);
+
+    expect(await manager.replayPendingHandoffs()).toEqual({ replayed: 0 });
+    // Held, not dropped — the queue is what a later boot replays.
+    expect(await store.readPendingHandoffs()).toHaveLength(1);
+  }, 20_000);
 });
 
 describe('ChatManager — isProjectActive', () => {

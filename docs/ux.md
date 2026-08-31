@@ -740,6 +740,26 @@ reduced motion. The index popover's phase spinners
 for the file scan, a quill writing a line for the AI tiers) are the
 reference; don't reach for a generic rotating ring.
 
+**A pane that is swapped, not entered, holds its shape.** Switching projects
+remounts the whole chat pane, and for the round-trip it takes to fetch the
+roster the pane knows nothing — including whether the project has a crew at
+all. Rendering the real empty state there flashes a false claim on every
+switch. Render a wordless structural stand-in instead
+(`ProjectChatPlaceholder` / `.project-chat-placeholder-*` in
+[styles/chat.css](../packages/ui/src/styles/chat.css)): reuse the hydrated
+surface's own classes so the frame, the metrics, and the palette are
+literally the same, and let the content fill in underneath. No shimmer and no
+spinner — the wait is under a second, and a pulse is louder than the flash it
+replaces. An empty state is an *answer*; show it only once the surface has
+one. Screen readers get the truth through `aria-busy` plus one `sr-only`
+line, not through the decorative frame. A project switch does this twice, at
+two depths: the pane holds the tab strip's place while the project detail is
+fetched (`ProjectPanePlaceholder`), then the chat pane holds the composer
+frame's while the roster is. Reserve a neighbour's height by rendering that
+neighbour's own element hidden — `visibility`, so it still lays out — rather
+than by writing down a pixel figure that the rule it copies is free to
+change.
+
 **A search box answers the keystroke, not the query.** The results surface
 mounts as soon as there is something to search for — never on the response —
 because a panel that only appears once data arrives has no way to say

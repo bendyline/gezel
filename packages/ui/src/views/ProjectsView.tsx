@@ -50,6 +50,7 @@ import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
+import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
 import {
   type OutsideInLayout,
@@ -3648,7 +3649,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             />
           </>
         ) : (
-          <p className="placeholder project-loading">Loading project…</p>
+          <ProjectPanePlaceholder />
         )}
       </section>
     </div>

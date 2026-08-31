@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  AUDIO_TRANSCRIBE_PROMPT_MAX_CHARS,
-  AudioTranscribeRequestSchema,
-} from './audio.js';
+import { AUDIO_TRANSCRIBE_PROMPT_MAX_CHARS, AudioTranscribeRequestSchema } from './audio.js';
 
 describe('AudioTranscribeRequestSchema', () => {
   const audio = { data: 'UklGRg==', mimeType: 'audio/wav' };

@@ -367,6 +367,31 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(assistantMsg!.toolCalls![0]!.resultTruncated).not.toBe(true);
   }, 30_000);
 
+  it('stamps each tool call with its offset into the turn reasoning trace', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptReasoning('I should write the doc. ', 'Then confirm it landed.');
+    mock.scriptToolCalls([
+      {
+        name: 'write_document',
+        arguments: { path: 'offsets/hello.md', content: '# Offsets\n' },
+      },
+    ]);
+    mock.script('Written.');
+
+    await manager.send(session.id, 'write a doc');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsg = disk!.messages.find((m) => m.content === 'Written.');
+    const call = assistantMsg!.toolCalls![0]!;
+    // The offset indexes the trace that was actually persisted — that
+    // identity is the whole contract, since several providers build
+    // `getLastTurnReasoning()` from `<think>` extraction rather than from
+    // the delta stream the manager sees.
+    expect(call.afterReasoningChars).toBe(assistantMsg!.reasoning!.length);
+    expect(assistantMsg!.reasoning).toBe('I should write the doc. Then confirm it landed.');
+  }, 30_000);
+
   it('can script create_gezel (meester-style) and the new gezel appears on disk', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 

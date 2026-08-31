@@ -297,7 +297,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const source = await externalReadOnlySource(ctx, id);
     if (source) return c.json(externalReadOnlyError(source), 409);
-    const res = await ctx.chat.cancelInflight(id);
+    const res = await ctx.chat.cancelInflight(id, 'user-stop');
     return c.json(res);
   });
 
