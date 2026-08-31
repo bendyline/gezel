@@ -1,8 +1,8 @@
 import { join } from 'node:path';
 import { modelStorageRoots } from '../../models/storage-roots.js';
+import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
-import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
 import { patientFetch } from '../patient-fetch.js';
 import { DEFAULT_RECOGNITION_MODEL_ID } from './catalog.js';
 import { LlamaVisionProvider } from './llama-vision.js';
