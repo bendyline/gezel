@@ -572,4 +572,34 @@ describe('Windows machine-service installer security', () => {
     expect(hook).not.toMatch(/System::Call\s+'kernel32::GetLastError/);
     expect(position('Pop $1')).toBeLessThan(position('${If} $0 == -1'));
   });
+
+  it('restores the registry view to the baseline, never a hardcoded one', () => {
+    // electron-builder's onInit/un.onInit select the 64-bit view for this
+    // x64-only build, and its own uninstall-registry cleanup (DeleteRegKey on
+    // the Add/Remove and install keys) runs AFTER customUnInstall. A bracket
+    // that "restored" SetRegView 32 therefore left that cleanup deleting
+    // nonexistent Wow6432Node keys — every full uninstall orphaned the
+    // "gezel" Add/Remove Programs entry and its stale install keys. Restores
+    // must be `lastused` so the hooks hand back whatever view they were
+    // entered under.
+    const views = hook.match(/^\s*SetRegView\s+(\S+)\s*$/gm) ?? [];
+    expect(views.length).toBeGreaterThan(0);
+    for (const view of views) {
+      expect(view.trim()).toMatch(/^SetRegView (64|lastused)$/);
+    }
+    // Brackets must stay balanced: every explicit view switch is followed by
+    // exactly one lastused restore before the next switch.
+    const sequence = views.map((line) => line.trim().split(/\s+/)[1]);
+    let open = false;
+    for (const view of sequence) {
+      if (view === 'lastused') {
+        expect(open, 'SetRegView lastused without a preceding SetRegView 64').toBe(true);
+        open = false;
+      } else {
+        expect(open, 'nested SetRegView 64 — lastused only restores one level').toBe(false);
+        open = true;
+      }
+    }
+    expect(open, 'unbalanced SetRegView bracket at end of hooks').toBe(false);
+  });
 });
