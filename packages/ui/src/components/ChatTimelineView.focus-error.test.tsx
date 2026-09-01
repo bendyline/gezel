@@ -242,6 +242,25 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeDisabled();
   });
 
+  it.each([
+    ['capacity-denied', 'Not enough memory to start Gemma. Free memory and try again.'],
+    ['engine-busy', 'This machine is finishing another local-model turn.'],
+  ] as const)(
+    'treats %s as retryable availability, not a reportable app failure',
+    async (code, error) => {
+      renderTimeline(vi.fn(), [
+        message({
+          sessionLastTurnError: error,
+          sessionLastTurnErrorDetail: { code },
+        }),
+      ]);
+
+      expect(await screen.findByRole('button', { name: 'Retry' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
+    },
+  );
+
   it('acknowledges the alert without retrying the turn', async () => {
     vi.mocked(api.clearProjectErrors).mockResolvedValue({ cleared: 1 } as never);
     renderTimeline();

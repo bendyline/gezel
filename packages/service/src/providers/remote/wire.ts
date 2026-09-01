@@ -247,6 +247,7 @@ export const ErrorFrameSchema = z.object({
   type: z.literal('error'),
   code: z.string(),
   message: z.string(),
+  requestId: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------

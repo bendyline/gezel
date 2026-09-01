@@ -83,6 +83,8 @@ export interface BindContext {
   sessionId: string;
   /** Active session count per existing engine key — drives load balancing. */
   sessionsPerKey?: ReadonlyMap<string, number>;
+  /** Override the pool's bounded busy-engine drain for this bind attempt. */
+  drainWaitMs?: number;
 }
 
 const DEFAULT_FALLBACK_APPROX_BYTES = 8 * 1024 ** 3;
@@ -139,7 +141,9 @@ export class EngineRouter {
         // clones reduced, etc.). Re-spawn at the same index if budget
         // allows; otherwise fall through to least-loaded pick.
         try {
-          const provider = await this.ensure(parsed.provider, parsed.modelId, parsed.replicaIdx);
+          const provider = await this.ensure(parsed.provider, parsed.modelId, parsed.replicaIdx, {
+            ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
+          });
           return { engineKey: priorEngineKey, provider };
         } catch (err) {
           log.warn(
@@ -156,7 +160,9 @@ export class EngineRouter {
       ctx.sessionsPerKey ?? new Map(),
     );
     const engineKey = makeEngineKey(provider, modelId, replicaIdx);
-    const instance = await this.ensure(provider, modelId, replicaIdx);
+    const instance = await this.ensure(provider, modelId, replicaIdx, {
+      ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
+    });
     log.info(`bind ${ctx.sessionId} → ${engineKey}`);
     return { engineKey, provider: instance };
   }
@@ -170,12 +176,13 @@ export class EngineRouter {
     provider: LocalProviderName,
     modelId: string,
     replicaIdx: number,
+    opts: { drainWaitMs?: number } = {},
   ): Promise<LLMProvider> {
     if (!this.builders[provider]) {
       throw new Error(`EngineRouter: no builder registered for provider '${provider}'`);
     }
     const bytes = this.resolveBytes(provider, modelId);
-    return this.pool.ensure(provider, modelId, replicaIdx, bytes);
+    return this.pool.ensure(provider, modelId, replicaIdx, bytes, opts);
   }
 
   /**

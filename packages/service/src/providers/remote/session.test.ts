@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
+import { CapacityDeniedError, EngineBusyError } from '../native/capacity-broker.js';
 import { ProviderQueue } from '../queue.js';
 import { RemoteSession } from './session.js';
 
@@ -925,6 +926,87 @@ describe('RemoteSession', () => {
     ).resolves.toBe('after the queue');
     expect(calls).toBe(2);
     expect(waits).toEqual([1]);
+  });
+
+  it('queues and retries a busy engine instead of failing the turn', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          {
+            error: 'engine_busy',
+            message: 'This machine is busy finishing another local-model turn.',
+            requestId: 'busy-request',
+          },
+          { status: 503, headers: { 'Retry-After': '0' } },
+        );
+      }
+      return sseResponse([{ type: 'delta', text: 'after the model swap' }, { type: 'done' }]);
+    }) as typeof fetch;
+    const waits: number[] = [];
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 's',
+      model: 'llama-cpp:m',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('hi', {
+        queue: {
+          lane: 'interactive',
+          affinity: true,
+          onQueueWait: ({ aheadOf }) => waits.push(aheadOf),
+        },
+      }),
+    ).resolves.toBe('after the model swap');
+    expect(calls).toBe(2);
+    expect(waits).toEqual([1]);
+  });
+
+  it('preserves a capacity denial and request id without exposing HTTP syntax', async () => {
+    const fetchImpl = (async () =>
+      Response.json(
+        {
+          error: 'capacity_denied',
+          message: 'Not enough memory to start Gemma. Free memory or choose a smaller model.',
+          requestId: 'capacity-request',
+        },
+        { status: 503 },
+      )) as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 's',
+      model: 'mlx:m',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    let caught: unknown;
+    try {
+      await session.sendAndWait('hi');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(CapacityDeniedError);
+    expect(caught).not.toBeInstanceOf(EngineBusyError);
+    expect(caught).toMatchObject({
+      code: 'capacity-denied',
+      message: 'Not enough memory to start Gemma. Free memory or choose a smaller model.',
+      incidentId: 'capacity-request',
+    });
   });
 
   it('does not charge broker queue time against a continued tool-loop timeout', async () => {

@@ -244,7 +244,14 @@ describe('RemoteGezelProvider', () => {
 
   it('preserves a broker context-capacity denial as a structured local error', async () => {
     const fetchImpl = (async () =>
-      Response.json({ error: 'capacity_denied' }, { status: 503 })) as typeof fetch;
+      Response.json(
+        {
+          error: 'capacity_denied',
+          message: 'Not enough memory to start qwen.',
+          requestId: 'capacity-admit-request',
+        },
+        { status: 503 },
+      )) as typeof fetch;
     const provider = new RemoteGezelProvider({
       remoteId: 'this-machine',
       label: 'This machine',
@@ -255,7 +262,37 @@ describe('RemoteGezelProvider', () => {
       defaultModel: 'llama-cpp:qwen.gguf',
     });
 
-    await expect(provider.prepareContextWindow()).rejects.toBeInstanceOf(CapacityDeniedError);
+    await expect(provider.prepareContextWindow()).rejects.toMatchObject({
+      code: 'capacity-denied',
+      message: 'Not enough memory to start qwen.',
+      incidentId: 'capacity-admit-request',
+    });
+  });
+
+  it('waits through a busy-engine admission response', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          { error: 'engine_busy', message: 'The current turn is still running.' },
+          { status: 503, headers: { 'Retry-After': '0' } },
+        );
+      }
+      return Response.json({ model: 'llama-cpp:qwen.gguf', contextWindow: 65_536 });
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+      defaultModel: 'llama-cpp:qwen.gguf',
+    });
+
+    await expect(provider.prepareContextWindow()).resolves.toBe(65_536);
+    expect(calls).toBe(2);
   });
 
   it('does not disguise a model-not-loaded response as legacy compatibility', async () => {

@@ -3175,7 +3175,7 @@ export function ChatTimelineView({
               {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
             </button>
           )}
-          {!isUserCancelledTurnError(errorMessage) && (
+          {!isUserCancelledTurnError(errorMessage) && !isExpectedAvailabilityError(errorDetail) && (
             <ReportErrorLink
               className="timeline-session-error-link"
               report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
@@ -4004,6 +4004,10 @@ function isModelUnavailableError(message: string): boolean {
   return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
 }
 
+function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
+  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
+}
+
 /**
  * Retry is contextual, not a reflex attached to every red surface. Prefer the
  * daemon's structured classification; keep a narrow prose fallback for older
@@ -4013,6 +4017,7 @@ function isModelUnavailableError(message: string): boolean {
 export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDetail): boolean {
   if (isUserCancelledTurnError(message) || isModelUnavailableError(message)) return false;
   if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
+  if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
   if (detail?.code === 'native-engine-crash') return true;
   return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
     message,

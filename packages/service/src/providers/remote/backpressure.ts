@@ -11,6 +11,20 @@ export function isTenantConcurrencyResponse(status: number, detail: string): boo
   }
 }
 
+/**
+ * A model swap reached a resident engine that is still serving a turn. This
+ * is queue pressure, not a failed turn: callers wait and retry the same
+ * stateless request after the broker's bounded drain attempt returns.
+ */
+export function isEngineBusyResponse(status: number, detail: string): boolean {
+  if (status !== 503) return false;
+  try {
+    return (JSON.parse(detail) as { error?: string }).error === 'engine_busy';
+  } catch {
+    return false;
+  }
+}
+
 /** Honor the broker's Retry-After hint, with a bounded mixed-version fallback. */
 export function remoteBackpressureDelayMs(retryAfter: string | null, attempt: number): number {
   if (retryAfter) {

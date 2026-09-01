@@ -382,6 +382,7 @@ export class ProviderPool {
     modelId: string,
     replicaIdx: number,
     residentBytes: number,
+    opts: { drainWaitMs?: number } = {},
   ): Promise<LLMProvider> {
     if (this.retiring) {
       throw new Error('local engine pool retired after machine engine adoption');
@@ -415,11 +416,13 @@ export class ProviderPool {
     }
     const pending = this.buildLocks.get(key);
     if (pending) return pending;
-    const build = this.buildEntry(provider, modelId, replicaIdx, residentBytes).finally(() => {
-      // Identity-guarded like `evicting` below: a retry build started after
-      // this one settled must not be evicted by this one's cleanup.
-      if (this.buildLocks.get(key) === build) this.buildLocks.delete(key);
-    });
+    const build = this.buildEntry(provider, modelId, replicaIdx, residentBytes, opts).finally(
+      () => {
+        // Identity-guarded like `evicting` below: a retry build started after
+        // this one settled must not be evicted by this one's cleanup.
+        if (this.buildLocks.get(key) === build) this.buildLocks.delete(key);
+      },
+    );
     this.buildLocks.set(key, build);
     return build;
   }
@@ -429,6 +432,7 @@ export class ProviderPool {
     modelId: string,
     replicaIdx: number,
     residentBytes: number,
+    opts: { drainWaitMs?: number },
   ): Promise<LLMProvider> {
     const builder = this.builders[provider];
     if (!builder) {
@@ -444,7 +448,7 @@ export class ProviderPool {
         panicDecision.reason ?? 'Local models are paused after a recent GPU kernel panic.',
       );
     }
-    await this.makeRoom(residentBytes);
+    await this.makeRoom(residentBytes, opts.drainWaitMs);
     const key = makeEngineKey(provider, modelId, replicaIdx);
     // Pre-flight: makeRoom evicts what it can, but on a memory-tight
     // machine a model larger than the whole budget can never fit (no
@@ -483,7 +487,7 @@ export class ProviderPool {
       await built.provider.shutdown().catch((err) => {
         log.warn(`shutdown after failed reserve for ${key}: ${err}`);
       });
-      await this.makeRoom(finalBytes);
+      await this.makeRoom(finalBytes, opts.drainWaitMs);
       const r2 = this.broker.reserve(key, finalBytes);
       if (!r2.granted) {
         const c = this.broker.committed();
@@ -760,7 +764,7 @@ export class ProviderPool {
    * of paying each one serially before the new model can spawn. The
    * busy path stays serial to preserve the bounded-drain semantics.
    */
-  private async makeRoom(needed: number): Promise<void> {
+  private async makeRoom(needed: number, drainWaitMs?: number): Promise<void> {
     while (!this.broker.canReserve(needed) && this.entries.size > 0) {
       const idleBatch = this.idleVictimsFor(needed);
       if (idleBatch.length > 0) {
@@ -791,7 +795,7 @@ export class ProviderPool {
         await Promise.race([...this.evicting.values()]).catch(() => {});
         continue;
       }
-      await this.evict(victim);
+      await this.evict(victim, drainWaitMs === undefined ? undefined : { drainWaitMs });
     }
   }
 

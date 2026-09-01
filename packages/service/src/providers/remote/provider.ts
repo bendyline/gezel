@@ -13,6 +13,7 @@ import { CapacityDeniedError, MIN_VIABLE_LOCAL_CONTEXT_TOKENS } from '../native/
 import { ProviderQueue } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import {
+  isEngineBusyResponse,
   isTenantConcurrencyResponse,
   remoteBackpressureDelayMs,
   waitForRemoteCapacity,
@@ -195,18 +196,27 @@ export class RemoteGezelProvider implements LLMProvider {
       const detail = await res.text().catch(() => '');
       let code: string | undefined;
       let message: string | undefined;
+      let requestId: string | undefined;
       try {
-        const parsed = JSON.parse(detail) as { error?: string; message?: string };
+        const parsed = JSON.parse(detail) as {
+          error?: string;
+          message?: string;
+          requestId?: string;
+        };
         code = parsed.error;
         message = parsed.message;
+        requestId = parsed.requestId;
       } catch {
         /* old brokers commonly return a plain 404 body */
       }
-      if (isTenantConcurrencyResponse(res.status, detail)) {
+      if (
+        isTenantConcurrencyResponse(res.status, detail) ||
+        isEngineBusyResponse(res.status, detail)
+      ) {
         if (!waitLogged) {
           waitLogged = true;
           this.log.info(
-            `[remote-provider] ${this.opts.label} waiting for broker admission capacity`,
+            `[remote-provider] ${this.opts.label} waiting for broker admission capacity or a busy engine`,
           );
         }
         await waitForRemoteCapacity(
@@ -216,10 +226,12 @@ export class RemoteGezelProvider implements LLMProvider {
         continue;
       }
       if (code === 'capacity_denied') {
-        throw new CapacityDeniedError(
+        const error = new CapacityDeniedError(
           message ??
             `This machine cannot fit the required ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token local context.`,
         );
+        if (requestId) Object.assign(error, { incidentId: requestId });
+        throw error;
       }
       if (res.status === 404 && code !== 'model_not_loaded') {
         throw new CapacityDeniedError(

@@ -10,11 +10,15 @@
  * tool results. B persists nothing for the client.
  */
 
+import { randomUUID } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ResolvedTuning } from '../../model-profile/index.js';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
+import {
+  isCapacityDeniedError,
+  isEngineBusyError,
+} from '../../providers/native/capacity-broker.js';
 import {
   PROTOCOL_VERSION,
   RemoteAdmissionRequestSchema,
@@ -46,6 +50,44 @@ import { resolveModelTarget } from '../openai-compat/translate.js';
 import { serializeSseWrites } from './chat-events.js';
 
 const log = createLogger('remote-cache');
+
+type RemoteAvailabilityFailure = {
+  error: 'capacity_denied' | 'engine_busy';
+  message: string;
+};
+
+/** Expected placement failures are safe, actionable wire errors — not 500s. */
+function remoteAvailabilityFailure(err: unknown): RemoteAvailabilityFailure | null {
+  if (isCapacityDeniedError(err)) {
+    return {
+      error: 'capacity_denied',
+      message:
+        err instanceof Error
+          ? err.message
+          : 'This machine does not currently have enough memory to start the model.',
+    };
+  }
+  if (isEngineBusyError(err)) {
+    return {
+      error: 'engine_busy',
+      message:
+        'This machine is busy finishing another local-model turn. Gezel will continue when the engine is free.',
+    };
+  }
+  return null;
+}
+
+function remoteAvailabilityResponse(
+  c: Context,
+  failure: RemoteAvailabilityFailure,
+  operation: 'admit' | 'infer',
+) {
+  const requestId = randomUUID();
+  c.header('x-request-id', requestId);
+  if (failure.error === 'engine_busy') c.header('Retry-After', '2');
+  log.warn(`[remote-${operation}] ${failure.error} requestId=${requestId}: ${failure.message}`);
+  return c.json({ ...failure, requestId }, 503);
+}
 
 /**
  * Namespace the client's affinity keys by its authenticated origin device, so
@@ -428,6 +470,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
         ? await ctx.chat.previewContextWindowForModel(
             target.provider as 'llama-cpp' | 'mlx' | 'ds4',
             target.model,
+            { standalone: true, liveSystemPressure: true },
           )
         : ((await provider?.prepareContextWindow?.(target.model)) ??
           provider?.getContextWindow?.());
@@ -451,9 +494,8 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       if (err instanceof ModelNotInstalledError) {
         return c.json({ error: 'model_not_loaded', model: body.model }, 404);
       }
-      if (err instanceof CapacityDeniedError) {
-        return c.json({ error: 'capacity_denied' }, 503);
-      }
+      const unavailable = remoteAvailabilityFailure(err);
+      if (unavailable) return remoteAvailabilityResponse(c, unavailable, 'admit');
       throw err;
     } finally {
       await probe?.disconnect().catch(() => {});
@@ -503,7 +545,13 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     // tools-unsupported surface as proper HTTP status before streaming starts.
     let session: LLMSession;
     try {
-      const provider = await ctx.chat.getProviderForModel(target.provider, target.model);
+      const provider = await ctx.chat.getProviderForModel(target.provider, target.model, {
+        // Remote clients understand `503 engine_busy` as visible queue
+        // pressure and retry. Do not hide that state behind the pool's normal
+        // 30-second bounded drain before every attempt; same-model cache hits
+        // never enter the drain path and retain their safe batching width.
+        engineDrainWaitMs: 0,
+      });
       session = await provider.createSession({
         systemMessage: body.systemMessage,
         model: target.model,
@@ -523,6 +571,8 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       if (err instanceof ExternalToolsUnsupportedError) {
         return c.json({ error: 'tools_not_supported_for_provider', model: body.model }, 400);
       }
+      const unavailable = remoteAvailabilityFailure(err);
+      if (unavailable) return remoteAvailabilityResponse(c, unavailable, 'infer');
       throw err;
     }
 
@@ -640,10 +690,18 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
         if (reasoning) send({ type: 'reasoning', text: reasoning });
         await write({ type: 'done' });
       } catch (err) {
+        const unavailable = remoteAvailabilityFailure(err);
+        const requestId = unavailable ? randomUUID() : undefined;
+        if (unavailable && requestId) {
+          log.warn(
+            `[remote-infer] ${unavailable.error} requestId=${requestId}: ${unavailable.message}`,
+          );
+        }
         await write({
           type: 'error',
-          code: 'inference_failed',
-          message: err instanceof Error ? err.message : String(err),
+          code: unavailable?.error ?? 'inference_failed',
+          message: unavailable?.message ?? (err instanceof Error ? err.message : String(err)),
+          ...(requestId ? { requestId } : {}),
         }).catch(() => {});
       } finally {
         for (const u of unsubs) u();

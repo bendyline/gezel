@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockProvider } from '../../providers/mock.js';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
+import { CapacityDeniedError, EngineBusyError } from '../../providers/native/capacity-broker.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -142,6 +142,46 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text).toContain('"type":"done"');
     expect(text).not.toContain('"type":"error"');
     expect(text.indexOf('"type":"reasoning_delta"')).toBeLessThan(text.indexOf('"type":"done"'));
+  });
+
+  it('returns retryable queue pressure when a model swap reaches a busy engine', async () => {
+    const token = await pairDevice('device-infer-engine-busy');
+    const resolve = vi
+      .spyOn(svc.context.chat, 'getProviderForModel')
+      .mockRejectedValueOnce(new EngineBusyError('engine llama-cpp:other:0 did not drain'));
+
+    try {
+      const res = await httpFetch(`${baseUrl}/v1/remote/infer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          protocolVersion: 1,
+          model: 'llama-cpp:waiting-model',
+          systemMessage: 'You are a test.',
+          prompt: 'hello',
+          priorMessages: [],
+          queue: { lane: 'interactive', affinity: true, sessionId: 's-busy' },
+        }),
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get('retry-after')).toBe('2');
+      expect(res.headers.get('x-request-id')).toBeTruthy();
+      await expect(res.json()).resolves.toMatchObject({
+        error: 'engine_busy',
+        message: expect.stringMatching(/continue when the engine is free/i),
+        requestId: expect.any(String),
+      });
+      expect(resolve).toHaveBeenCalledWith('llama-cpp', 'waiting-model', {
+        engineDrainWaitMs: 0,
+      });
+    } finally {
+      resolve.mockRestore();
+    }
   });
 
   it('advertises caller-owned tools on B and streams captured calls back to A', async () => {
@@ -287,7 +327,10 @@ describe('remote model execution — B-side surface (e2e)', () => {
         model: 'llama-cpp:mock-local',
         contextWindow: 24_576,
       });
-      expect(preview).toHaveBeenCalledWith('llama-cpp', 'mock-local');
+      expect(preview).toHaveBeenCalledWith('llama-cpp', 'mock-local', {
+        standalone: true,
+        liveSystemPressure: true,
+      });
       expect(inferenceBind).not.toHaveBeenCalled();
     } finally {
       preview.mockRestore();
@@ -317,7 +360,12 @@ describe('remote model execution — B-side surface (e2e)', () => {
       });
 
       expect(res.status).toBe(503);
-      await expect(res.json()).resolves.toEqual({ error: 'capacity_denied' });
+      expect(res.headers.get('x-request-id')).toBeTruthy();
+      await expect(res.json()).resolves.toMatchObject({
+        error: 'capacity_denied',
+        message: 'Gemma cannot fit the required 65,536-token working window.',
+        requestId: expect.any(String),
+      });
     } finally {
       preview.mockRestore();
     }

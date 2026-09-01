@@ -185,10 +185,37 @@ export function opaqueServerErrors(
       .text()
       .catch(() => '');
     try {
-      const parsed = JSON.parse(raw) as { error?: unknown; requestId?: unknown };
+      const parsed = JSON.parse(raw) as {
+        error?: unknown;
+        message?: unknown;
+        requestId?: unknown;
+      };
       if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') {
         // Keep the correlation id in both the opaque body and the conventional
         // response header so clients can retain it without parsing JSON.
+        c.header('x-request-id', parsed.requestId);
+        return;
+      }
+      // The remote model boundary deliberately uses 503 as a scheduling /
+      // admission result. These two route-owned messages are user-facing
+      // contracts, and their request id is already opaque; preserving them is
+      // what keeps an expected busy swap or memory refusal from turning back
+      // into the generic 500-style error this middleware normally enforces.
+      const remoteAvailabilityPath =
+        c.req.path === '/v1/remote/admit' || c.req.path === '/v1/remote/infer';
+      const remoteAvailabilityCode =
+        parsed.error === 'capacity_denied' || parsed.error === 'engine_busy';
+      const remoteAvailabilityKeys = Object.keys(parsed as Record<string, unknown>);
+      if (
+        prior.status === 503 &&
+        remoteAvailabilityPath &&
+        remoteAvailabilityCode &&
+        typeof parsed.message === 'string' &&
+        parsed.message.length > 0 &&
+        parsed.message.length <= 2_000 &&
+        typeof parsed.requestId === 'string' &&
+        remoteAvailabilityKeys.every((key) => ['error', 'message', 'requestId'].includes(key))
+      ) {
         c.header('x-request-id', parsed.requestId);
         return;
       }

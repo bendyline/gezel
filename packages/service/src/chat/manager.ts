@@ -11841,7 +11841,11 @@ export class ChatManager {
     router: import('../providers/native/engine-router.js').EngineRouter,
     name: LocalProviderName,
     modelId: string,
-    opts: { sessionId: string; priorEngineKey?: string | undefined },
+    opts: {
+      sessionId: string;
+      priorEngineKey?: string | undefined;
+      engineDrainWaitMs?: number;
+    },
   ): Promise<{ engineKey: string; provider: LLMProvider }> {
     // Pre-populate the bytes cache so the router's sync resolver
     // hits on the first ensure.
@@ -11857,7 +11861,11 @@ export class ChatManager {
     return router.bindForSession(
       name,
       modelId,
-      { sessionId: opts.sessionId, sessionsPerKey },
+      {
+        sessionId: opts.sessionId,
+        sessionsPerKey,
+        ...(opts.engineDrainWaitMs !== undefined ? { drainWaitMs: opts.engineDrainWaitMs } : {}),
+      },
       opts.priorEngineKey,
     );
   }
@@ -11882,7 +11890,11 @@ export class ChatManager {
    *      evicts an idle resident model under memory pressure. This is
    *      what lets `/v1` swap local models per request.
    */
-  async getProviderForModel(name: ProviderName, modelId?: string): Promise<LLMProvider> {
+  async getProviderForModel(
+    name: ProviderName,
+    modelId?: string,
+    opts: { engineDrainWaitMs?: number } = {},
+  ): Promise<LLMProvider> {
     if (name === 'remote') return this.getRemoteProvider(modelId);
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
@@ -11947,6 +11959,9 @@ export class ChatManager {
       // Synthetic id — one-shot requests have no session record; the
       // bind still load-balances across resident replicas.
       sessionId: `v1:${randomUUID()}`,
+      ...(opts.engineDrainWaitMs !== undefined
+        ? { engineDrainWaitMs: opts.engineDrainWaitMs }
+        : {}),
     });
     return provider;
   }
@@ -12263,17 +12278,16 @@ export class ChatManager {
    * chat needs the live memory clamp so the user daemon can size its prompt,
    * but it must not load the model or evict somebody else's resident engine.
    *
-   * `standalone` is for callers writing the answer somewhere durable rather
-   * than spending it on one turn. Live pricing charges the model for whatever
-   * else happens to be resident, so a preview taken while another engine is
-   * warm collapses to the local context floor — fine for a decision
-   * made and discarded in the same second, wrong for a config file read back
-   * days later. See {@link previewLocalEnginePlan}'s `standalone` note.
+   * `standalone` prices the target as the eventual sole resident: inventory
+   * callers use it for stable device fitness, while remote admission combines
+   * it with `liveSystemPressure` because a competing Gezel engine is
+   * evictable/queueable but memory held by other applications is not. See
+   * {@link previewLocalEnginePlan}'s `standalone` note.
    */
   async previewContextWindowForModel(
     name: LocalProviderName,
     modelId: string,
-    opts: { standalone?: boolean } = {},
+    opts: { standalone?: boolean; liveSystemPressure?: boolean } = {},
   ): Promise<number | undefined> {
     return (await this.previewLocalEnginePlan(name, modelId, opts)).contextWindow;
   }
@@ -12315,21 +12329,19 @@ export class ChatManager {
    * which never passed live RAM, priced the same question correctly. A 4.7 GB
    * model was denied the same way. Adding an engine must not re-open that.
    *
-   * Deliberately carries no `freeSystemRamBytes`. A preview answers a policy
-   * question ("what window would this model get?"), where live free RAM is
-   * both the wrong input and a self-referential one — our own resident engine
-   * is what depressed it, so consulting it makes one running model deny every
-   * row in the list, itself included (see
-   * {@link CtxMemoryClampInput.freeSystemRamBytes}). Real placement belongs to
-   * the launch path: `buildLlamaCppProvider` passes `availableSystemRamBytes()`
-   * and is the only caller that should. Confining grown KV to fast memory is
-   * not lost with it — `planAdaptiveContextGrowth` applies that clamp itself
-   * from `budgetKind` + `vramBytes`.
+   * Policy previews deliberately carry no `freeSystemRamBytes`: live free RAM
+   * is self-referential there — a warm engine can depress it and make every
+   * inventory row, itself included, fluctuate. Imminent placement callers may
+   * opt into `liveSystemPressure`; that is the broker `/admit` path and must
+   * use the same reclaimable-aware clamp as provider construction. Confining
+   * grown KV to fast memory is not lost for policy previews —
+   * `planAdaptiveContextGrowth` applies that clamp itself from `budgetKind` +
+   * `vramBytes`.
    */
   private async previewCapacityInputs(
     provider: LocalProviderName,
     modelId: string,
-    opts: { standalone?: boolean },
+    opts: { standalone?: boolean; liveSystemPressure?: boolean },
   ): Promise<{
     /** Admission budget for the whole resident set. */
     budgetBytes: number;
@@ -12342,6 +12354,8 @@ export class ChatManager {
     budgetKind: CapacityCommitted['pools']['kind'];
     /** Reservations held by models OTHER than this one. */
     committedOtherBytes: number;
+    /** Reclaimable-aware RAM available for an imminent placement. */
+    freeSystemRamBytes?: number;
   }> {
     const { computeCapacityBudget } = await import('../providers/native/capacity-broker.js');
     const router = this.engineRouter ?? this.engineRouterCache;
@@ -12350,6 +12364,7 @@ export class ChatManager {
     // rather than per-field, so a snapshot never contributes half a picture.
     const enforced = snapshot?.enforced ? snapshot : undefined;
     const live = computeCapacityBudget();
+    const committedOtherBytes = this.committedOtherBytesFor(snapshot, provider, modelId);
     return {
       budgetBytes: enforced?.budgetBytes ?? live.budgetBytes,
       fastBudgetBytes:
@@ -12359,9 +12374,15 @@ export class ChatManager {
       concurrencySizingBytes: enforced?.pools.concurrencySizingBytes ?? live.concurrencySizingBytes,
       vramBytes: enforced?.pools.vramBytes ?? live.vramBytes,
       budgetKind: enforced?.pools.kind ?? live.kind,
-      committedOtherBytes: opts.standalone
-        ? 0
-        : this.committedOtherBytesFor(snapshot, provider, modelId),
+      committedOtherBytes: opts.standalone ? 0 : committedOtherBytes,
+      // A standalone imminent placement treats other Gezel engines as
+      // evictable: if one is busy, /infer queues until it drains. Its current
+      // process footprint is therefore not an intrinsic device-capacity
+      // denial. With no competing reservation, live pressure represents
+      // external applications / real system load and must match launch.
+      ...(opts.liveSystemPressure && !(opts.standalone && committedOtherBytes > 0)
+        ? { freeSystemRamBytes: availableSystemRamBytes() }
+        : {}),
     };
   }
 
@@ -12392,13 +12413,22 @@ export class ChatManager {
     opts: {
       allowUninstalled?: boolean;
       /**
-       * Price the model as the only resident engine. Inventory/catalog rows
-       * answer "can this model run on this device?", so their estimate must
-       * not change merely because another model happens to be warm. Actual
-       * launch admission keeps the default live-reservation behavior and may
-       * evict an idle model (or report that a busy one is blocking the swap).
+       * Price the model as the eventual only resident engine. Inventory rows
+       * use this for stable device fitness. Remote admission also uses it
+       * because another Gezel engine can be evicted once idle; paired with
+       * `liveSystemPressure`, non-Gezel system load still constrains the plan.
+       * Actual launch admission keeps default live-reservation behavior and
+       * may evict an idle model (or report that a busy one is blocking the
+       * swap).
        */
       standalone?: boolean;
+      /**
+       * Apply the same reclaimable-aware live RAM clamp as a real provider
+       * launch. Remote admission uses this immediately before inference;
+       * inventory and settings previews deliberately leave it off so a warm
+       * model does not make every catalog row fluctuate with system pressure.
+       */
+      liveSystemPressure?: boolean;
     } = {},
   ): Promise<{
     contextWindow?: number;
@@ -12454,6 +12484,14 @@ export class ChatManager {
       }
       return residentContextWindow;
     };
+    // Reusing an already-running target does not allocate its weights again,
+    // so current free RAM (which that same process depressed) is not a launch
+    // input. Keep the policy checks below — including resident-below-minimum
+    // and changed overrides — while skipping only the self-referential clamp.
+    const capacityOpts =
+      residentContextWindow !== undefined && opts.liveSystemPressure
+        ? { ...opts, liveSystemPressure: false }
+        : opts;
 
     const config = await this.store.readConfig();
     // The floor this host is held to — 64K, or 32K where memory forces the
@@ -12477,7 +12515,7 @@ export class ChatManager {
         planCtxTokensForMemory,
         plannedLocalEngineSlots,
       } = await import('../providers/native/capacity-broker.js');
-      const capacity = await this.previewCapacityInputs('mlx', modelId, opts);
+      const capacity = await this.previewCapacityInputs('mlx', modelId, capacityOpts);
       const {
         budgetBytes,
         fastBudgetBytes: fastBudget,
@@ -12535,6 +12573,9 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         if (!admission.minimumSatisfied) {
@@ -12759,7 +12800,7 @@ export class ChatManager {
       planCtxTokensForMemory,
       plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
-    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, opts);
+    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, capacityOpts);
     const { budgetBytes: admissionBudgetBytes, fastBudgetBytes, committedOtherBytes } = capacity;
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
     const kvCacheType = resolveLlamaCppKvCacheType({
@@ -13046,6 +13087,9 @@ export class ChatManager {
           weightsResidentBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         return probe.minimumSatisfied && probe.slots >= slotCount;
@@ -13097,6 +13141,9 @@ export class ChatManager {
           }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
@@ -13149,6 +13196,9 @@ export class ChatManager {
                 windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
+              ...(capacity.freeSystemRamBytes !== undefined
+                ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+                : {}),
               vramBytes: capacity.vramBytes,
             });
             ladderKvLinearization = {
@@ -13190,6 +13240,9 @@ export class ChatManager {
             committedOtherBytes,
             budgetKind: capacity.budgetKind,
             vramBytes: capacity.vramBytes,
+            ...(capacity.freeSystemRamBytes !== undefined
+              ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+              : {}),
             isMoE: (summary.expertCount ?? 0) > 1,
             // A user-chosen lane count is not growth's to spend.
             allowSlotTrade: configuredSlots === undefined,
