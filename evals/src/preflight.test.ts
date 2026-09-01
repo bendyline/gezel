@@ -219,6 +219,10 @@ describe('preflight admission cache policy', () => {
     const base = {
       modelId: 'qwen3.8-27b-q4',
       engine: 'llama-cpp' as const,
+      // Keep this cache-key unit test independent of native engine startup.
+      // Auto-discovery probes a real llama-server with `--version`, which can
+      // exceed Vitest's timeout when the full suite is running in parallel.
+      llamaBin: '/tmp/gezel-preflight-reasoning-arm-test',
       minGenTokensPerSec: 3,
     };
     const previousPreserve = process.env.GEZEL_LLAMA_REASONING_PRESERVE;
