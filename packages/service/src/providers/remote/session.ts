@@ -18,6 +18,7 @@ import {
 } from '../llama-cpp/tool-grammar.js';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
+import { CapacityDeniedError, EngineBusyError } from '../native/capacity-broker.js';
 import {
   PROJECT_MACRO_FAILURE_CAP,
   deriveProjectMacroClosing,
@@ -25,6 +26,10 @@ import {
 import type { ProviderQueue } from '../queue.js';
 import { runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
+import {
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '../terminal-tool-policy.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -38,6 +43,7 @@ import type {
 } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import {
+  isEngineBusyResponse,
   isTenantConcurrencyResponse,
   remoteBackpressureDelayMs,
   waitForRemoteCapacity,
@@ -309,7 +315,16 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         // Execute the model's tool calls LOCALLY on A, then continue the loop.
         // The adaptive cap uses the broker-admitted numCtx, exactly like the
         // in-process llama.cpp/MLX/Ollama sessions.
+        let terminalActionClosing: string | null = null;
         for (const call of toolCalls) {
+          if (terminalActionClosing) {
+            priorMessages.push({
+              role: 'tool',
+              content: TERMINAL_ACTION_SKIPPED_OUTPUT,
+              toolCallId: call.id,
+            });
+            continue;
+          }
           let args: Record<string, unknown> = {};
           try {
             args = call.arguments ? JSON.parse(call.arguments) : {};
@@ -346,6 +361,9 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           }
           const trackableOutput =
             outputIsError && !/^\s*ERROR:/i.test(output) ? `ERROR: ${output}` : output;
+          if (!outputIsError) {
+            terminalActionClosing ??= terminalToolClosingText(undefined, call.name, args, output);
+          }
           const tracked = failureTracker.recordResult(call.name, trackableOutput);
           const repeated = repeatTracker.recordCall(call.name, args, tracked.output);
           priorMessages.push({ role: 'tool', content: repeated.output, toolCallId: call.id });
@@ -376,6 +394,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
                 : {}),
             });
           }
+        }
+        if (terminalActionClosing) {
+          priorMessages.push({ role: 'assistant', content: terminalActionClosing });
+          this.transcript = [...priorMessages];
+          return terminalActionClosing;
         }
         if (projectMacroResult) {
           const closing = deriveProjectMacroClosing(projectMacroResult);
@@ -561,14 +584,17 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       if (res.ok && res.body) break;
 
       const detail = await res.text().catch(() => '');
-      if (isTenantConcurrencyResponse(res.status, detail)) {
+      if (
+        isTenantConcurrencyResponse(res.status, detail) ||
+        isEngineBusyResponse(res.status, detail)
+      ) {
         if (!queueWaitPublished) {
           queueWaitPublished = true;
           // This is remote queue pressure, not a failed turn. Keep the same
           // UI state as a local ProviderQueue wait and retry until capacity
           // opens or the user cancels.
           opts?.queue?.onQueueWait?.({ aheadOf: 1 });
-          log.info(`[remote] ${this.deps.model} waiting for broker tenant capacity`);
+          log.info(`[remote] ${this.deps.model} waiting for broker capacity or a busy engine`);
         }
         const waitStartedAt = Date.now();
         await waitForRemoteCapacity(
@@ -578,13 +604,32 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         queueWaitMs += Date.now() - waitStartedAt;
         continue;
       }
+      try {
+        const payload = JSON.parse(detail) as {
+          error?: string;
+          message?: string;
+          requestId?: string;
+        };
+        if (payload.error === 'capacity_denied') {
+          const error = new CapacityDeniedError(
+            payload.message ??
+              'This machine does not currently have enough memory to start the model.',
+          );
+          if (payload.requestId) Object.assign(error, { incidentId: payload.requestId });
+          throw error;
+        }
+      } catch (err) {
+        if (err instanceof CapacityDeniedError) throw err;
+        // Mixed-version brokers may return plain text; keep the diagnostic
+        // fallback below for failures without a structured availability code.
+      }
       throw new Error(`[remote] /v1/remote/infer returned HTTP ${res.status} ${detail}`.trim());
     }
 
     let text = '';
     let reasoning = '';
     let toolCalls: ExternalToolCall[] = [];
-    let errFrame: { code: string; message: string } | null = null;
+    let errFrame: { code: string; message: string; requestId?: string } | null = null;
 
     await readSseFrames(res.body as ReadableStream<Uint8Array>, (raw) => {
       const parsed = RemoteInferFrameSchema.safeParse(raw);
@@ -690,7 +735,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           });
           break;
         case 'error':
-          errFrame = { code: frame.code, message: frame.message };
+          errFrame = {
+            code: frame.code,
+            message: frame.message,
+            ...(frame.requestId ? { requestId: frame.requestId } : {}),
+          };
           break;
         default:
           break; // done
@@ -698,9 +747,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     });
 
     if (errFrame) {
-      throw new Error(
-        `[remote] ${(errFrame as { code: string }).code}: ${(errFrame as { message: string }).message}`,
-      );
+      const remoteError = errFrame as { code: string; message: string; requestId?: string };
+      const error =
+        remoteError.code === 'capacity_denied'
+          ? new CapacityDeniedError(remoteError.message)
+          : remoteError.code === 'engine_busy'
+            ? new EngineBusyError(remoteError.message)
+            : new Error(`[remote] ${remoteError.code}: ${remoteError.message}`);
+      if (remoteError.requestId) Object.assign(error, { incidentId: remoteError.requestId });
+      throw error;
     }
     return { text, toolCalls, reasoning, queueWaitMs };
   }

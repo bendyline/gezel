@@ -8,6 +8,8 @@ import { displayName } from '@bendyline/gezel';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { GezelIcon } from './GezelIcon.js';
 import type { LiveSlot } from './chat-live-slot.js';
+import { SessionTreeGuides } from './chat-session-tree-guides.js';
+import type { SessionTreeBranch } from './session-thread-nesting.js';
 
 export function renderDivider(args: {
   row:
@@ -26,6 +28,10 @@ export function renderDivider(args: {
    * doesn't think their reply landed somewhere else.
    */
   continuing: boolean;
+  /** Visual nesting level for a session opened by another visible session. */
+  depth?: number;
+  /** Tree connector state for this session within its visible sibling set. */
+  treeBranch?: SessionTreeBranch;
   key: string;
   /**
    * Threaded in from the caller because `renderDivider` is invoked as a
@@ -43,6 +49,8 @@ export function renderDivider(args: {
     activeSessionId,
     onFocusSession,
     continuing,
+    depth = 0,
+    treeBranch,
     key,
     roleBasedNameOnlyMode,
   } = args;
@@ -61,10 +69,21 @@ export function renderDivider(args: {
       : (row.slot.sessionCreatedAt ?? new Date(row.slot.startedAt).toISOString());
   const taskRef = row.kind === 'message' ? row.msg.taskRef : row.slot.taskRef;
   const source = row.kind === 'message' ? row.msg.sessionSource : row.slot.sessionSource;
-  const handoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
-  const handoffName = handoff
+  const parentSession = row.kind === 'message' ? row.msg.parentSession : row.slot.parentSession;
+  const handoffFrom = row.kind === 'message' ? row.msg.handoffFrom : row.slot.handoffFrom;
+  const parent =
+    parentSession ?? (handoffFrom ? { ...handoffFrom, kind: 'task-handoff' as const } : undefined);
+  const parentName = parent
     ? (() => {
-        const hg = gezels.get(handoff.gezelId);
+        const hg = gezels.get(parent.gezelId);
+        return hg
+          ? displayName({ name: hg.name, roleBasedName: hg.roleBasedName }, roleBasedNameOnlyMode)
+          : undefined;
+      })()
+    : undefined;
+  const handoffFromName = handoffFrom
+    ? (() => {
+        const hg = gezels.get(handoffFrom.gezelId);
         return hg
           ? displayName({ name: hg.name, roleBasedName: hg.roleBasedName }, roleBasedNameOnlyMode)
           : undefined;
@@ -101,6 +120,10 @@ export function renderDivider(args: {
       type="button"
       className={`timeline-session-divider${isActive ? ' timeline-session-divider-active' : ''}${
         continuing ? ' timeline-session-divider-continuing' : ''
+      }${
+        depth > 0
+          ? ` timeline-session-divider-child timeline-session-depth-${Math.min(depth, 4)}`
+          : ''
       }`}
       onClick={() => onFocusSession?.(sessionId, gezelId, projectId)}
       title={
@@ -109,6 +132,7 @@ export function renderDivider(args: {
           : 'Focus this thread — composer will post here'
       }
     >
+      {depth > 0 && treeBranch && <SessionTreeGuides branch={treeBranch} phase="divider" />}
       <GezelIcon
         svg={gezel?.icon ?? null}
         poppetje={gezel?.poppetje}
@@ -129,6 +153,16 @@ export function renderDivider(args: {
             {project && <> · in {project.name}</>}
             {' · '}started {formatRelativeTime(createdAt)}
           </>
+        ) : parent ? (
+          <>
+            {parent.kind === 'consultation'
+              ? `consultation with ${gezelName}`
+              : parent.kind === 'task-handoff'
+                ? `task hand-off to ${gezelName}`
+                : `delegated to ${gezelName}`}
+            {project && <> · in {project.name}</>}
+            {' · '}started {formatRelativeTime(createdAt)}
+          </>
         ) : (
           <>
             new thread with {gezelName}
@@ -138,21 +172,23 @@ export function renderDivider(args: {
         )}
         {taskRef && <> · task {taskRef}</>}
       </span>
-      {handoff && handoffName && (
-        <span className="timeline-divider-handoff">
-          <svg
-            className="timeline-divider-handoff-icon"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
-            <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
-          </svg>
-          handoff from {handoffName}
-        </span>
-      )}
+      {parent &&
+        (parent.kind === 'task-handoff' ? (handoffFromName ?? parentName) : parentName) && (
+          <span className="timeline-divider-handoff">
+            <svg
+              className="timeline-divider-handoff-icon"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
+              <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
+            </svg>
+            {parent.kind === 'task-handoff' ? 'from' : 'by'}{' '}
+            {parent.kind === 'task-handoff' ? (handoffFromName ?? parentName) : parentName}
+          </span>
+        )}
     </button>
   );
 }

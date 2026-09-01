@@ -50,6 +50,132 @@ describe('Store session CRUD', () => {
     expect(got?.messages).toHaveLength(1);
   });
 
+  it('projects explicit parent-session lineage into summaries and timeline rows', async () => {
+    await store.createGezel({ name: 'Boz', role: 'Researcher' });
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-parent',
+        messages: [{ role: 'user', content: 'research the brief', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-child',
+        gezelId: 'boz',
+        createdAt: '2026-04-14T10:01:00Z',
+        lastActivityAt: '2026-04-14T10:01:00Z',
+        parentSession: {
+          sessionId: 'sess-parent',
+          gezelId: 'ada',
+          kind: 'delegation',
+        },
+        messages: [{ role: 'user', content: 'delegated research', at: '2026-04-14T10:01:00Z' }],
+      }),
+    );
+
+    const summaries = await store.listSessions({ projectId: 'default' });
+    expect(summaries.find((session) => session.id === 'sess-child')?.parentSession).toEqual({
+      sessionId: 'sess-parent',
+      gezelId: 'ada',
+      kind: 'delegation',
+    });
+
+    const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-child')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-parent',
+      gezelId: 'ada',
+      kind: 'delegation',
+    });
+  });
+
+  it('recovers a legacy craftbook entry parent from its persisted start card', async () => {
+    await store.createGezel({ name: 'Boz', role: 'Researcher' });
+    await store.createGezel({ name: 'Cai', role: 'Planner' });
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-meester',
+        messages: [
+          {
+            role: 'user',
+            content: 'Create a PowerPoint about the American Revolution.',
+            at: '2026-04-14T10:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: 'The presentation task is underway.',
+            at: '2026-04-14T10:00:05Z',
+            toolCalls: [
+              {
+                name: 'invoke_craftbook',
+                durationMs: 42,
+                success: true,
+                card: {
+                  kind: 'craftbook-start',
+                  craftbookId: 'powerpoint-deck',
+                  craftbookName: 'PowerPoint from Content',
+                  taskRef: 'default/10',
+                  projectId: 'default',
+                  status: 'active',
+                  activeStepId: 'research',
+                  steps: [
+                    { id: 'research', name: 'Acquire and verify sources', status: 'active' },
+                    { id: 'outline', name: 'Lock the slide outline', status: 'pending' },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-research',
+        gezelId: 'boz',
+        taskRef: 'default/10',
+        stepId: 'research',
+        createdAt: '2026-04-14T10:00:01Z',
+        lastActivityAt: '2026-04-14T10:01:00Z',
+        messages: [{ role: 'user', content: 'Acquire the sources.', at: '2026-04-14T10:00:01Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-outline',
+        gezelId: 'cai',
+        taskRef: 'default/10',
+        stepId: 'outline',
+        createdAt: '2026-04-14T10:02:00Z',
+        lastActivityAt: '2026-04-14T10:02:00Z',
+        messages: [{ role: 'user', content: 'Lock the outline.', at: '2026-04-14T10:02:00Z' }],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-research')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-meester',
+      gezelId: 'ada',
+      kind: 'task-entry',
+    });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-outline')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-meester',
+      gezelId: 'ada',
+      kind: 'task-handoff',
+    });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-outline')?.handoffFrom,
+    ).toEqual({
+      sessionId: 'sess-research',
+      gezelId: 'boz',
+    });
+  });
+
   it('getSession returns null for a missing id', async () => {
     expect(await store.getSession('ada', 'missing')).toBeNull();
   });
@@ -204,6 +330,11 @@ describe('Store session CRUD', () => {
     expect(scoped.messages.find((m) => m.gezelId === 'boz')?.handoffFrom).toEqual({
       gezelId: 'ada',
       sessionId: 'sess-ada',
+    });
+    expect(scoped.messages.find((m) => m.gezelId === 'boz')?.parentSession).toEqual({
+      gezelId: 'ada',
+      sessionId: 'sess-ada',
+      kind: 'task-handoff',
     });
   });
 

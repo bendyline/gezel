@@ -161,6 +161,26 @@
   margin-top: 0.4rem;
 }
 
+.app-update-release-link {
+  width: fit-content;
+  padding: 0.4rem 0.75rem;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-update-release-link:hover {
+  filter: brightness(1.06);
+}
+
+.app-update-release-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .app-fallback-banner details {
   margin-top: 0.15rem;
   font-size: 0.78rem;
@@ -2986,9 +3006,12 @@ button.machine-memory-unload-button {
   pointer-events: auto;
 }
 .project-actions-trigger:hover,
-.project-actions-trigger[data-state="open"] {
-  color: var(--fg, inherit);
-  background: rgba(127, 127, 127, 0.14);
+.project-actions-trigger[data-state="open"],
+.project-actions-trigger:focus-visible {
+  color: var(--text);
+  background: var(--key-bg-hover);
+  border-color: var(--key-border);
+  box-shadow: var(--key-shadow);
 }
 /* Keep the status signal's column intact, but let the project name flow below
    the hidden action trigger. Once revealed, an opaque patch covers the last
@@ -3012,6 +3035,14 @@ button.machine-memory-unload-button {
   background: var(--project-action-overlay-bg);
   box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg);
 }
+.app-sidebar-proj-row > .project-actions-trigger:hover,
+.app-sidebar-proj-row > .project-actions-trigger[data-state="open"],
+.app-sidebar-proj-row > .project-actions-trigger:focus-visible {
+  color: var(--text);
+  background: var(--key-bg-hover);
+  border-color: var(--key-border);
+  box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg), var(--key-shadow);
+}
 
 /* Projects-view rail: the name also owns the full resting width, with its
    action menu painted over the trailing text only while visible. */
@@ -3019,6 +3050,7 @@ button.machine-memory-unload-button {
   position: relative;
   display: flex;
   align-items: center;
+  --project-action-overlay-bg: var(--bg);
 }
 .project-rail-name {
   display: flex;
@@ -3071,8 +3103,8 @@ button.machine-memory-unload-button {
 .project-rail-row:hover > .project-actions-trigger,
 .project-rail-row > .project-actions-trigger[data-state="open"],
 .project-rail-row > .project-actions-trigger:focus-visible {
-  background: var(--bg);
-  box-shadow: -0.4rem 0 0 var(--bg);
+  background: var(--project-action-overlay-bg);
+  box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg);
 }
 .project-rail-name.active + .project-actions-trigger {
   --project-action-overlay-bg: color-mix(in srgb, var(--bg) 85%, var(--accent));
@@ -3115,6 +3147,14 @@ button.machine-memory-unload-button {
 .project-rail-name.active + .project-actions-trigger:focus-visible {
   background: var(--project-action-overlay-bg);
   box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg);
+}
+.project-rail-row > .project-actions-trigger:hover,
+.project-rail-row > .project-actions-trigger[data-state="open"],
+.project-rail-row > .project-actions-trigger:focus-visible {
+  color: var(--text);
+  background: var(--key-bg-hover);
+  border-color: var(--key-border);
+  box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg), var(--key-shadow);
 }
 
 .app-nav-menu-item.danger {

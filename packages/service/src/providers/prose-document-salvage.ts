@@ -71,14 +71,26 @@ function looksTruncated(text: string): boolean {
  *
  * Mirrors the intent gate `shouldPromoteCompletedCodeBlock` applies to
  * the fenced case: promote only on an explicit signal, never on shape
- * alone. The escape hatch is the model naming the deliverable itself,
- * which is the same announcement in different words.
+ * alone. The escape hatch is an explicit write announcement naming the
+ * deliverable. Merely mentioning the filename is not enough: task-step
+ * completion receipts naturally name the file they just handed off, and
+ * promoting one of those receipts would overwrite the validated document.
  */
 function looksLikeDocument(text: string, deliverableFile: string): boolean {
   const startsAsDocument = /^(?:#{1,6}\s+\S|\|.+\|)/.test(text);
   if (startsAsDocument) return true;
   const basename = deliverableFile.split('/').at(-1);
-  return !!basename && text.includes(basename);
+  if (!basename) return false;
+
+  // Keep the filename escape hatch deliberately narrow and local to the
+  // opening announcement. A later bullet such as "Validated sources.md"
+  // describes an existing file; it does not make the surrounding reply the
+  // replacement body for that file.
+  const opening = text.split(/\n\s*\n/, 1)[0] ?? '';
+  return (
+    opening.includes(basename) &&
+    /\b(?:writing|saving|creating|drafting|updating|replacing)\b/i.test(opening)
+  );
 }
 
 /**

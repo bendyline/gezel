@@ -1480,6 +1480,7 @@ export class TaskManager {
       ...(draftsDiffpack ? { diffpackId: String(num) } : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
+      ...(input.launchSessionId ? { launchSessionId: input.launchSessionId } : {}),
       artifactDir,
       ...(extras?.origin ? { origin: extras.origin } : {}),
       ...(cron ? { cron } : {}),

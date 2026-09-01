@@ -7,6 +7,7 @@
 export type UpdateState =
   | { kind: 'checking' }
   | { kind: 'up-to-date'; version: string }
+  | { kind: 'available'; version: string }
   | {
       kind: 'downloading';
       version: string;
@@ -22,6 +23,49 @@ export type UpdateState =
       version?: string;
       message: string;
     };
+
+export interface AppUpdateDeliveryPolicy {
+  /** Whether electron-updater may be constructed on this platform. */
+  initializeElectronUpdater: boolean;
+  /** Whether electron-updater may download a package after discovering it. */
+  autoDownload: boolean;
+  /** Whether a downloaded package may be installed during ordinary app quit. */
+  autoInstallOnAppQuit: boolean;
+  installation: 'manual' | 'electron-updater' | 'verified-package';
+}
+
+/**
+ * Whole-app update authority by platform.
+ *
+ * Linux packages are not yet signed through APT/RPM's distribution trust
+ * paths. Keep Linux discovery-only: no electron-updater instance means its
+ * elevating DEB/RPM installers cannot be reached accidentally. Unknown
+ * platforms inherit the same fail-closed manual posture.
+ */
+export function appUpdateDeliveryPolicy(platform: string): AppUpdateDeliveryPolicy {
+  if (platform === 'darwin') {
+    return {
+      initializeElectronUpdater: true,
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      installation: 'verified-package',
+    };
+  }
+  if (platform === 'win32') {
+    return {
+      initializeElectronUpdater: true,
+      autoDownload: true,
+      autoInstallOnAppQuit: true,
+      installation: 'electron-updater',
+    };
+  }
+  return {
+    initializeElectronUpdater: false,
+    autoDownload: false,
+    autoInstallOnAppQuit: false,
+    installation: 'manual',
+  };
+}
 
 export interface UpdaterDownloadProgress {
   percent?: number;

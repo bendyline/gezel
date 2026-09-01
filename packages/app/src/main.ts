@@ -53,7 +53,6 @@ import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
-  isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
@@ -68,6 +67,7 @@ import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
+import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
@@ -79,9 +79,11 @@ import {
   type PublishedAppRelease,
   appReleaseFeedConfiguration,
   discoverLatestAppRelease,
+  isNewerAppVersion,
 } from './updater/app-release.js';
 import {
   type UpdateState,
+  appUpdateDeliveryPolicy,
   downloadingUpdateState,
   shouldPublishDownloadState,
   updateErrorStage,
@@ -608,41 +610,14 @@ async function createWindow(): Promise<void> {
   });
 
   // Electron otherwise approves renderer permission requests by default.
-  // Preserve its existing behavior for unrelated APIs, but bind microphone
-  // capture to this exact top-level daemon UI and reject camera/subframe
-  // requests. The main-frame clause keeps model-authored preview documents
-  // from borrowing the app's same-origin microphone permission.
+  // Deny by default and allow only the two capabilities the application UI
+  // uses: audio-only narration and sanitized clipboard writes. Both are bound
+  // to this exact WebContents, the current daemon origin, and its main frame;
+  // model-authored same-origin preview subframes therefore cannot borrow them.
   const rendererSession = contextMenuWebContents.session;
-  rendererSession.setPermissionCheckHandler(
-    (webContents, permission, requestingOrigin, details) => {
-      if (permission !== 'media') return true;
-      if (webContents !== contextMenuWebContents) return false;
-      return isAllowedMicrophoneCapture(
-        permission,
-        details.requestingUrl ?? requestingOrigin,
-        connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
-        details.isMainFrame,
-        details.mediaType ? [details.mediaType] : undefined,
-      );
-    },
+  installRendererPermissionPolicy(rendererSession, contextMenuWebContents, () =>
+    connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
   );
-  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (permission !== 'media') {
-      callback(true);
-      return;
-    }
-    const media = details as Electron.MediaAccessPermissionRequest;
-    callback(
-      webContents === contextMenuWebContents &&
-        isAllowedMicrophoneCapture(
-          permission,
-          media.requestingUrl,
-          connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
-          media.isMainFrame,
-          media.mediaTypes,
-        ),
-    );
-  });
 
   // Only ever hand a vetted scheme to the OS. `openExternal` will launch
   // handlers for file://, smb://, custom app schemes, javascript:, etc. —
@@ -1084,9 +1059,16 @@ ipcMain.on('gezel:current-connection', (event) => {
 // while an update was already staged.
 ipcMain.handle('gezel:update:state', () => updateState);
 ipcMain.handle('gezel:update:install', async () => {
-  if (process.platform !== 'darwin') {
-    // Windows and Linux keep electron-updater's own installer handoff, which
-    // already elevates via elevate.exe / pkexec.
+  const delivery = appUpdateDeliveryPolicy(process.platform);
+  if (delivery.installation === 'manual') {
+    return {
+      ok: false as const,
+      error:
+        'Linux updates are notification-only. Open the GitHub release, verify its provenance, and install the package manually.',
+    };
+  }
+  if (delivery.installation === 'electron-updater') {
+    // Windows keeps electron-updater's signed NSIS installer handoff.
     if (!autoUpdaterRef || updateState?.kind !== 'ready') {
       return { ok: false as const, error: 'No downloaded update is ready to install.' };
     }
@@ -2472,9 +2454,9 @@ async function initTray(): Promise<void> {
 }
 
 /**
- * Wire the auto-updater (packaged builds only). Beyond the silent
- * download, surface update-available / update-downloaded as OS
- * notifications so the tray is a real locus for updates.
+ * Check for app updates (packaged builds only). Windows downloads its signed
+ * installer, macOS stages and verifies its signed PKG, and Linux reports the
+ * release without downloading or installing it.
  */
 async function setupAutoUpdater(): Promise<void> {
   if (!app.isPackaged) return;
@@ -2489,8 +2471,7 @@ async function setupAutoUpdater(): Promise<void> {
     logUpdaterDenied(permission);
     return;
   }
-  const updater = ensureAutoUpdater();
-  if (updater) await checkAppReleaseForUpdates(updater);
+  await checkAppReleaseForUpdates();
 }
 
 function triggerUpdateCheck(): void {
@@ -2506,20 +2487,17 @@ async function triggerAuthorizedUpdateCheck(): Promise<void> {
     return;
   }
   // Policy/config may have been unavailable at startup. A later explicit
-  // check can recover by wiring the updater only after authorization succeeds.
-  const updater = ensureAutoUpdater();
-  if (!updater) return;
-  await checkAppReleaseForUpdates(updater);
+  // check can recover after authorization succeeds.
+  await checkAppReleaseForUpdates();
 }
 
 /**
  * GitHub's repository-wide "latest" release may be a `native-v*` engine
- * release. Resolve the newest exact `v<semver>` application release first,
- * then give electron-updater a generic feed rooted at that immutable tag.
+ * release. Resolve the newest exact `v<semver>` application release first.
+ * Linux stops there and reports it for manual installation; Windows/macOS
+ * give electron-updater a generic feed rooted at that immutable tag.
  */
-async function checkAppReleaseForUpdates(
-  updater: import('electron-updater').AppUpdater,
-): Promise<void> {
+async function checkAppReleaseForUpdates(): Promise<void> {
   appUpdateRelease = null;
   setUpdateState({ kind: 'checking' });
   try {
@@ -2532,6 +2510,24 @@ async function checkAppReleaseForUpdates(
       return;
     }
     appUpdateRelease = release;
+    const delivery = appUpdateDeliveryPolicy(process.platform);
+    if (!delivery.initializeElectronUpdater) {
+      if (!isNewerAppVersion(release.version, app.getVersion())) {
+        setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
+        tray?.setTooltip('Gezel');
+        return;
+      }
+      setUpdateState({ kind: 'available', version: release.version });
+      tray?.setTooltip('Gezel — update available; install manually');
+      notify({
+        title: 'Gezel update available',
+        body: `Version ${release.version} is available. Linux updates are installed manually.`,
+        view: 'home',
+      });
+      return;
+    }
+    const updater = ensureAutoUpdater();
+    if (!updater) return;
     updater.setFeedURL(appReleaseFeedConfiguration(release));
     console.info(`[updater] checking application release ${release.tagName}`);
     await updater.checkForUpdates();
@@ -2547,6 +2543,10 @@ async function checkAppReleaseForUpdates(
 
 function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   if (autoUpdaterRef) return autoUpdaterRef;
+  const delivery = appUpdateDeliveryPolicy(process.platform);
+  // Defense in depth: Linux and unsupported platforms never construct
+  // electron-updater, keeping its elevating DEB/RPM installers unreachable.
+  if (!delivery.initializeElectronUpdater) return null;
   try {
     const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
     autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error } as never;
@@ -2557,22 +2557,21 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
       setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
       tray?.setTooltip('Gezel');
     });
-    if (process.platform === 'darwin') {
+    autoUpdater.autoDownload = delivery.autoDownload;
+    autoUpdater.autoInstallOnAppQuit = delivery.autoInstallOnAppQuit;
+    if (delivery.installation === 'verified-package') {
       // Take the download away from MacUpdater. Its ZIP path cannot deliver a
       // complete macOS update for a machine-service install and cannot elevate
       // — see src/updater/mac-pkg.ts for the full reasoning. We keep
       // electron-updater purely as the version-check, then stage and verify
       // the signed PKG ourselves.
-      autoUpdater.autoDownload = false;
       autoUpdater.on('update-available', (info) => {
         void handleMacUpdateAvailable(info.version);
       });
-    } else {
-      // Make the Windows NSIS/AppImage contract explicit rather than relying
+    } else if (delivery.installation === 'electron-updater') {
+      // Make the Windows NSIS contract explicit rather than relying
       // on electron-updater's defaults: download in the background, then use
       // its silent install hook after a complete process quit.
-      autoUpdater.autoDownload = true;
-      autoUpdater.autoInstallOnAppQuit = true;
       autoUpdater.on('update-available', (info) => {
         setUpdateState(downloadingUpdateState(info.version));
         notify({ title: 'Gezel update available', body: `Downloading version ${info.version}…` });

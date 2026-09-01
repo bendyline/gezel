@@ -4,6 +4,7 @@ import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
+import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -416,7 +417,16 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
       // Execute tools; feed the outputs back as the next turn's input.
       const outputs: unknown[] = [];
       const toolImages: Array<{ base64: string; mimeType: string }> = [];
+      let terminalActionClosing: string | null = null;
       for (const call of pendingCalls) {
+        if (terminalActionClosing) {
+          outputs.push({
+            type: 'function_call_output',
+            call_id: call.call_id,
+            output: TERMINAL_ACTION_SKIPPED_OUTPUT,
+          } satisfies ResponsesInputItem);
+          continue;
+        }
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(call.arguments);
@@ -424,22 +434,43 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
           /* leave empty */
         }
         let output: string;
+        let outputIsError = false;
         if (this.deps.bridges.hasTool(call.name)) {
           try {
             const rich = await this.deps.bridges.callToolRich(call.name, args);
             output = rich.text;
+            outputIsError = rich.isError;
             toolImages.push(...rich.images);
           } catch (err) {
             output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+            outputIsError = true;
           }
         } else {
           output = `ERROR: tool ${call.name} is not available`;
+          outputIsError = true;
+        }
+        if (!outputIsError) {
+          terminalActionClosing ??= terminalToolClosingText(undefined, call.name, args, output);
         }
         outputs.push({
           type: 'function_call_output',
           call_id: call.call_id,
           output,
         } satisfies ResponsesInputItem);
+      }
+      if (terminalActionClosing) {
+        if (lastUsage) {
+          this.emitUsage(
+            buildTurnUsage({
+              model: this.deps.model,
+              inputTokens: lastUsage.input_tokens,
+              outputTokens: lastUsage.output_tokens,
+              durationMs: Date.now() - start,
+              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
+            }),
+          );
+        }
+        return terminalActionClosing;
       }
       // If any tool returned an image block, surface it to the model as a
       // follow-up user-message input_image so vision-capable runs can

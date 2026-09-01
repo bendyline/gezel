@@ -240,7 +240,21 @@ export async function citationsResolve(
     };
   }
 
-  const cites = [...new Set(extractCitations(content, re).map(cleanCitation).filter(Boolean))];
+  const cites = [
+    ...new Set(
+      extractCitations(content, re)
+        .map(cleanCitation)
+        // A directory token is task context, not source evidence. The
+        // default extractor accepts backticked slash paths, so exclusion
+        // lists such as `powerpoint/task-7/` used to become fabricated
+        // citations. Exact files remain citations; trailing-slash directory
+        // handles are ignored.
+        .filter(
+          (citation) =>
+            citation && (/^[a-z][\w+.-]*:\/\//i.test(citation) || !/[\\/]$/.test(citation)),
+        ),
+    ),
+  ];
   const min = opts.minCitations ?? 1;
   const citedPathExists = createCitedPathChecker(ws);
   const corpus = opts.corpus ? new Set(opts.corpus.map((c) => c.toLowerCase())) : null;

@@ -72,6 +72,83 @@ describe('ChatTimelineView — the composer thread sits at the bottom', () => {
     expect(renderedSessionOrder().at(-1)).toBe('s1');
   });
 
+  it('keeps a delegated child directly below its active parent thread', async () => {
+    renderTimeline('s1', [
+      message({ sessionId: 's1', content: 'research the launch', at: minutesAgo(6) }),
+      message({
+        sessionId: 's2',
+        gezelId: 'g2',
+        content: 'delegated research',
+        at: minutesAgo(1),
+        parentSession: { sessionId: 's1', gezelId: 'g1', kind: 'delegation' },
+      }),
+    ]);
+
+    await waitFor(() => expect(renderedSessionOrder().length).toBe(2));
+    expect(renderedSessionOrder()).toEqual(['s1', 's2']);
+    const child = document
+      .querySelector<HTMLElement>('[data-session-id="s2"]')
+      ?.closest<HTMLElement>('.timeline-thread');
+    expect(child?.classList.contains('timeline-session-subthread')).toBe(true);
+    expect(child?.classList.contains('timeline-session-depth-1')).toBe(true);
+  });
+
+  it('renders peer task steps as siblings under the task-launching thread', async () => {
+    renderTimeline('s1', [
+      message({ sessionId: 's1', content: 'make the deck', at: minutesAgo(6) }),
+      message({
+        sessionId: 's2',
+        gezelId: 'g2',
+        content: 'researching',
+        at: minutesAgo(4),
+        parentSession: { sessionId: 's1', gezelId: 'g1', kind: 'task-entry' },
+      }),
+      message({
+        sessionId: 's3',
+        gezelId: 'g3',
+        content: 'writing',
+        at: minutesAgo(2),
+        parentSession: { sessionId: 's1', gezelId: 'g1', kind: 'task-handoff' },
+        handoffFrom: { sessionId: 's2', gezelId: 'g2' },
+      }),
+    ]);
+
+    await waitFor(() => expect(renderedSessionOrder().length).toBe(3));
+    expect(renderedSessionOrder()).toEqual(['s1', 's2', 's3']);
+    const rootThread = document
+      .querySelector<HTMLElement>('[data-session-id="s1"]')
+      ?.closest<HTMLElement>('.timeline-thread');
+    expect(rootThread?.classList.contains('timeline-session-parent')).toBe(true);
+    expect(rootThread?.classList.contains('timeline-thread-railed')).toBe(true);
+
+    const childDividers = [...document.querySelectorAll('.timeline-session-divider-child')];
+    expect(childDividers).toHaveLength(2);
+    expect(childDividers[0]?.querySelector('.timeline-tree-elbow')).not.toBeNull();
+    expect(childDividers[0]?.querySelector('.timeline-tree-parent-line-continues')).not.toBeNull();
+    expect(childDividers[1]?.querySelector('.timeline-tree-parent-line-continues')).toBeNull();
+
+    for (const sessionId of ['s2', 's3']) {
+      const thread = document
+        .querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`)
+        ?.closest<HTMLElement>('.timeline-thread');
+      expect(thread?.classList.contains('timeline-session-depth-1')).toBe(true);
+      expect(thread?.classList.contains('timeline-session-depth-2')).toBe(false);
+      expect(thread?.classList.contains('timeline-thread-railed')).toBe(false);
+    }
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-session-id="s2"]')
+        ?.closest<HTMLElement>('.timeline-thread')
+        ?.querySelector('.timeline-tree-guide-thread.timeline-tree-guide-up-1'),
+    ).not.toBeNull();
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-session-id="s3"]')
+        ?.closest<HTMLElement>('.timeline-thread')
+        ?.querySelector('.timeline-tree-guide-thread.timeline-tree-guide-up-1'),
+    ).toBeNull();
+  });
+
   it('leaves chronological order alone when the active thread went cold', async () => {
     const stale = new Date(NOW - 48 * 60 * 60 * 1000).toISOString();
     renderTimeline('s1', [

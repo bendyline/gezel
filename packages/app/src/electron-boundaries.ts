@@ -191,6 +191,49 @@ export function isAllowedMicrophoneCapture(
   }
 }
 
+export interface RendererPermissionContext {
+  /** Whether Electron associated the request with the one trusted application WebContents. */
+  isTrustedWebContents: boolean;
+  permission: string;
+  requestingUrl: string;
+  allowedOrigin: string | null;
+  isMainFrame: boolean;
+  mediaTypes?: readonly string[];
+}
+
+/**
+ * The complete renderer permission allowlist.
+ *
+ * Gezel needs audio-only media access for narration and sanitized clipboard
+ * writes for its explicit Copy buttons. Every other browser permission is
+ * denied, including unknown permission names introduced by future Electron
+ * releases. Preview documents are model-authored same-origin subframes, so an
+ * exact WebContents match alone is insufficient: every allowed request must
+ * also come from the trusted daemon origin's main frame.
+ */
+export function isAllowedRendererPermission(context: RendererPermissionContext): boolean {
+  if (!context.isTrustedWebContents || !context.allowedOrigin || !context.isMainFrame) {
+    return false;
+  }
+
+  if (context.permission === 'media') {
+    return isAllowedMicrophoneCapture(
+      context.permission,
+      context.requestingUrl,
+      context.allowedOrigin,
+      context.isMainFrame,
+      context.mediaTypes,
+    );
+  }
+
+  if (context.permission !== 'clipboard-sanitized-write') return false;
+  try {
+    return new URL(context.requestingUrl).origin === new URL(context.allowedOrigin).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Compare already-realpathed directories without accidentally authorizing descendants. */
 export function isExactApprovedPath(
   target: string,

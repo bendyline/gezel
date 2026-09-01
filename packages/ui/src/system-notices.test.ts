@@ -128,6 +128,18 @@ describe('updateNotice', () => {
     expect(notice?.body).not.toMatch(/automatically after you quit/i);
   });
 
+  it('directs Linux users to a manual provenance-verified install', () => {
+    const notice = updateNotice({ kind: 'available', version: '1.2.3' }, 'linux');
+    expect(notice?.id).toBe('update-available');
+    expect(notice?.railLabel).toBe('Update available — install manually');
+    expect(notice?.body).toMatch(/notification-only/i);
+    expect(notice?.body).toMatch(/SLSA build provenance/i);
+    expect(notice?.link).toEqual({
+      href: 'https://github.com/bendyline/gezel/releases/tag/v1.2.3',
+      label: 'Open release and verification steps',
+    });
+  });
+
   // The reported bug: a failed *check* — what an offline launch and a repo
   // with no published release both look like — was shown as "Gezel could not
   // install an update", front and center on Home.

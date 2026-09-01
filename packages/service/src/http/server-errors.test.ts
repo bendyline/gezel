@@ -82,6 +82,53 @@ describe('opaqueServerErrors', () => {
     expect(await response.json()).toEqual({ error: 'capacity_denied' });
   });
 
+  it.each(['capacity_denied', 'engine_busy'] as const)(
+    'preserves the structured remote availability error %s',
+    async (error) => {
+      const app = new Hono();
+      app.use('*', opaqueServerErrors({ error: () => {} }));
+      app.post('/v1/remote/infer', (c) =>
+        c.json(
+          {
+            error,
+            message: 'A safe, actionable availability message.',
+            requestId: `request-${error}`,
+          },
+          503,
+        ),
+      );
+
+      const response = await app.request('/v1/remote/infer', { method: 'POST' });
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get('x-request-id')).toBe(`request-${error}`);
+      expect(await response.json()).toEqual({
+        error,
+        message: 'A safe, actionable availability message.',
+        requestId: `request-${error}`,
+      });
+    },
+  );
+
+  it('still sanitizes a structured availability-shaped response outside the remote boundary', async () => {
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: () => {} }));
+    app.get('/other', (c) =>
+      c.json(
+        {
+          error: 'capacity_denied',
+          message: 'C:\\Users\\alice\\secret.txt',
+          requestId: 'untrusted-request',
+        },
+        503,
+      ),
+    );
+
+    const response = await app.request('/other');
+
+    await expect(response.json()).resolves.toMatchObject({ error: 'internal_error' });
+  });
+
   it.each(['speech_to_text_not_ready', 'speech_to_text_failed'])(
     'preserves the fixed narration error code %s',
     async (error) => {

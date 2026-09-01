@@ -14,9 +14,10 @@ import { ChatManager } from './manager.js';
 // which would make an admission assertion depend on whatever else is running
 // on the test host. Pin it high and leave every real estimator in place — the
 // budget half is what these tests are about.
+const availableSystemRamBytesMock = vi.hoisted(() => vi.fn(() => 512 * 1024 ** 3));
 vi.mock('../providers/native/capacity-broker.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../providers/native/capacity-broker.js')>();
-  return { ...actual, availableSystemRamBytes: () => 512 * 1024 ** 3 };
+  return { ...actual, availableSystemRamBytes: availableSystemRamBytesMock };
 });
 
 const noopMemory = {
@@ -79,6 +80,8 @@ function routerWithReservation(opts: { otherModel?: boolean } = {}) {
 }
 
 beforeEach(async () => {
+  availableSystemRamBytesMock.mockReset();
+  availableSystemRamBytesMock.mockReturnValue(512 * GIB);
   home = await mkdtemp(join(tmpdir(), 'gezel-preview-capacity-'));
   modelDir = await mkdtemp(join(tmpdir(), 'gezel-preview-model-'));
   // Uniform full attention, qwen3.6-27b-shaped: 256 KiB/token of f16 KV.
@@ -183,6 +186,38 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
     await expect(
       manager.previewContextWindowForModel('mlx', 'local-mlx', { standalone: true }),
     ).resolves.toBeGreaterThanOrEqual(65_536);
+  });
+
+  it('uses live RAM only for imminent admission previews', async () => {
+    useRouter(routerWithReservation());
+    availableSystemRamBytesMock.mockReturnValue(4 * GIB);
+
+    // Inventory/config previews remain stable under transient system load.
+    await expect(
+      manager.previewContextWindowForModel('mlx', 'local-mlx'),
+    ).resolves.toBeGreaterThanOrEqual(65_536);
+    expect(availableSystemRamBytesMock).not.toHaveBeenCalled();
+
+    // Remote /admit asks the imminent-placement question and mirrors launch.
+    await expect(
+      manager.previewContextWindowForModel('mlx', 'local-mlx', {
+        liveSystemPressure: true,
+      }),
+    ).rejects.toThrow(/Not enough memory/);
+    expect(availableSystemRamBytesMock).toHaveBeenCalledOnce();
+  });
+
+  it('treats a competing resident engine as queueable during remote admission', async () => {
+    useRouter(routerWithReservation({ otherModel: true }));
+    availableSystemRamBytesMock.mockReturnValue(4 * GIB);
+
+    await expect(
+      manager.previewContextWindowForModel('mlx', 'local-mlx', {
+        standalone: true,
+        liveSystemPressure: true,
+      }),
+    ).resolves.toBeGreaterThanOrEqual(65_536);
+    expect(availableSystemRamBytesMock).not.toHaveBeenCalled();
   });
 });
 

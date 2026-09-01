@@ -74,6 +74,8 @@ import {
   SHARED_PROJECT_FALLBACK_ID,
   SHARED_PROJECT_ID,
   SHARED_PROJECT_MARKER,
+  type SessionLink,
+  type SessionParent,
   type Task,
   type TaskNote,
   TaskNoteSchema,
@@ -5550,6 +5552,8 @@ export class Store {
           ...(session.turnStartedAt ? { turnStartedAt: session.turnStartedAt } : {}),
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
+          ...(session.parentSession ? { parentSession: session.parentSession } : {}),
+          ...(session.handoffFrom ? { handoffFrom: session.handoffFrom } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
           ...(lastMessagePreview ? { lastMessagePreview } : {}),
           involvedGezelIds: [...involvedGezelIds],
@@ -5575,9 +5579,10 @@ export class Store {
    * before the cursor — sorted ascending by `at`. `hasMore` is true when
    * older messages remain that weren't returned.
    *
-   * `handoffFrom` is set on rows whose parent session was created from a
-   * `startHandoffSession` call: the previous session in the same project
-   * sharing the same `taskRef` but with a different `gezelId`.
+   * Task workflow sessions all use the task-launching session as their
+   * visual parent. `handoffFrom` separately identifies the immediately
+   * preceding workflow step so the UI can say who passed the work along
+   * without turning peer steps into an ever-deeper thread chain.
    *
    * `taskRef` narrows the scope to one task's sessions — what the Task
    * detail's Chat tab uses so its history matches the task in its header
@@ -5631,12 +5636,69 @@ export class Store {
       }
     }
 
-    // Resolve handoff lineage per session: for each session with a taskRef,
-    // find the most recent prior session in the same project that shares
-    // the same taskRef but has a different gezelId.
-    const handoffOf = new Map<string, { gezelId: string; sessionId: string }>();
+    // Older task entry sessions predate `task.launchSessionId`, but their
+    // launcher often still carries the durable `craftbook-start` tool card.
+    // Index those receipts by task ref before resolving each child. Prefer
+    // the original invocation over a later idempotent "reused" receipt, then
+    // the earliest card when malformed history contains more than one start.
+    const legacyTaskLaunchers = new Map<
+      string,
+      { session: ChatSession; at: string; reused: boolean }
+    >();
+    for (const candidate of sessions) {
+      for (const message of candidate.messages) {
+        for (const call of message.toolCalls ?? []) {
+          if (call.card?.kind !== 'craftbook-start') continue;
+          const taskRef = call.card.taskRef;
+          const next = {
+            session: candidate,
+            at: message.at,
+            reused: call.card.reused === true,
+          };
+          const current = legacyTaskLaunchers.get(taskRef);
+          if (
+            !current ||
+            (current.reused && !next.reused) ||
+            (current.reused === next.reused && next.at < current.at)
+          ) {
+            legacyTaskLaunchers.set(taskRef, next);
+          }
+        }
+      }
+    }
+
+    // Resolve containment and handoff lineage separately. Task workflow
+    // sessions are siblings beneath the launch session; their immediate
+    // predecessor is retained in `handoffOf` only for attribution. Older
+    // records used the predecessor as parent, so walk those chains back to
+    // the root (or use a persisted craftbook-start receipt) at read time.
+    const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+    const parentOf = new Map<string, SessionParent>();
+    const handoffOf = new Map<string, SessionLink>();
+    const isTaskParent = (parent: SessionParent | undefined): parent is SessionParent =>
+      parent?.kind === 'task-entry' || parent?.kind === 'task-handoff';
+    const taskRoot = (session: ChatSession, initial: SessionParent): SessionParent => {
+      let root = initial;
+      const seen = new Set<string>([session.id]);
+      while (!seen.has(root.sessionId)) {
+        seen.add(root.sessionId);
+        const linked = sessionsById.get(root.sessionId);
+        if (!linked || linked.taskRef !== session.taskRef || !isTaskParent(linked.parentSession)) {
+          break;
+        }
+        root = linked.parentSession;
+      }
+      return root;
+    };
     for (const s of sessions) {
-      if (!s.taskRef) continue;
+      if (s.parentSession && !isTaskParent(s.parentSession)) {
+        parentOf.set(s.id, s.parentSession);
+        continue;
+      }
+      if (!s.taskRef) {
+        if (s.parentSession) parentOf.set(s.id, s.parentSession);
+        continue;
+      }
       let best: ChatSession | null = null;
       for (const other of sessions) {
         if (other.id === s.id) continue;
@@ -5646,7 +5708,53 @@ export class Store {
         if (other.createdAt >= s.createdAt) continue;
         if (!best || other.createdAt > best.createdAt) best = other;
       }
-      if (best) handoffOf.set(s.id, { gezelId: best.gezelId, sessionId: best.id });
+
+      const immediate =
+        s.handoffFrom ??
+        (s.parentSession?.kind === 'task-handoff'
+          ? { gezelId: s.parentSession.gezelId, sessionId: s.parentSession.sessionId }
+          : best
+            ? { gezelId: best.gezelId, sessionId: best.id }
+            : undefined);
+      if (immediate) handoffOf.set(s.id, immediate);
+
+      const launcher = legacyTaskLaunchers.get(s.taskRef)?.session;
+      if (launcher && launcher.id !== s.id) {
+        parentOf.set(s.id, {
+          gezelId: launcher.gezelId,
+          sessionId: launcher.id,
+          kind: immediate ? 'task-handoff' : 'task-entry',
+        });
+        continue;
+      }
+      if (s.parentSession) {
+        const root = taskRoot(s, s.parentSession);
+        parentOf.set(s.id, {
+          gezelId: root.gezelId,
+          sessionId: root.sessionId,
+          kind: immediate ? 'task-handoff' : 'task-entry',
+        });
+        continue;
+      }
+      if (best) {
+        const inherited = isTaskParent(best.parentSession)
+          ? taskRoot(best, best.parentSession)
+          : undefined;
+        parentOf.set(
+          s.id,
+          inherited
+            ? {
+                gezelId: inherited.gezelId,
+                sessionId: inherited.sessionId,
+                kind: 'task-handoff',
+              }
+            : {
+                gezelId: best.gezelId,
+                sessionId: best.id,
+                kind: 'task-handoff',
+              },
+        );
+      }
     }
 
     // Gather one file inventory per in-scope project so we can backfill
@@ -5698,7 +5806,8 @@ export class Store {
     // Flatten into rows tagged with parent session metadata.
     const rows: TimelineMessage[] = [];
     for (const s of sessions) {
-      const handoff = handoffOf.get(s.id);
+      const parentSession = parentOf.get(s.id);
+      const handoffFrom = handoffOf.get(s.id);
       // Sessions written before `ChatMessage.origin` existed carry no marker
       // on their dispatch seed, so a task thread would still open with the
       // machinery's words labelled "You". `startHandoffSession` always
@@ -5752,7 +5861,8 @@ export class Store {
           ...(s.lastTurnErrorDetail ? { sessionLastTurnErrorDetail: s.lastTurnErrorDetail } : {}),
           ...(s.taskRef ? { taskRef: s.taskRef } : {}),
           ...(s.stepId ? { stepId: s.stepId } : {}),
-          ...(handoff ? { handoffFrom: handoff } : {}),
+          ...(parentSession ? { parentSession } : {}),
+          ...(handoffFrom ? { handoffFrom } : {}),
           role: m.role,
           content: m.content,
           at: m.at,

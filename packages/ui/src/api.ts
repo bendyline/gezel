@@ -13,6 +13,8 @@ import { GezelClient } from '@bendyline/gezel-client';
 export type UpdateState =
   | { kind: 'checking' }
   | { kind: 'up-to-date'; version: string }
+  /** A Linux release discovered for manual, provenance-verified installation. */
+  | { kind: 'available'; version: string }
   | {
       kind: 'downloading';
       version: string;
@@ -178,8 +180,8 @@ declare global {
       /**
        * App update status from the Electron shell. On macOS `install` opens a
        * downloaded, signature- and notarization-verified PKG so Installer.app
-       * can authenticate the user — Squirrel's in-place ZIP swap cannot
-       * elevate, and cannot refresh the machine service's own files.
+       * can authenticate the user. Windows hands off its signed NSIS package.
+       * Linux is notification-only and never calls `install`.
        */
       update?: {
         state(): Promise<UpdateState | null>;

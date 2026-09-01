@@ -387,7 +387,7 @@ FunctionEnd
   ; below would tell the supervisor to adopt a tree it cannot even read.
   SetRegView 64
   DeleteRegValue SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}"
-  SetRegView 32
+  SetRegView lastused
 
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /setowner "*S-1-5-32-544" /L /Q'
   Pop $0
@@ -426,7 +426,7 @@ FunctionEnd
   ${EndIf}
   SetRegView 64
   WriteRegStr SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}" "$2"
-  SetRegView 32
+  SetRegView lastused
   DetailPrint "Published the shared service tree; per-user daemons will reuse it."
 
   GezelTreeUnpublished:
@@ -465,10 +465,14 @@ FunctionEnd
 ; a CRT, so a redist hiccup must not fail the whole install — it warns and
 ; continues, and only local-model support is affected.
 !macro InstallVCRedist
-  ; The runtimes key lives in the native 64-bit view; the installer is 32-bit.
+  ; The runtimes key lives in the native 64-bit view. electron-builder's
+  ; onInit already selects the 64-bit view on x64, so this bracket is
+  ; defensive; the restore must be `lastused`, never a hardcoded view — the
+  ; uninstaller's registry cleanup runs after our hooks and relies on the
+  ; baseline view they leave behind.
   SetRegView 64
   ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
-  SetRegView 32
+  SetRegView lastused
   ${If} $0 == 1
     DetailPrint "Microsoft Visual C++ runtime already present."
   ${Else}
@@ -882,12 +886,15 @@ FunctionEnd
 
   ; Registered AND running. Clear any breadcrumb a prior failed install left
   ; behind so the app stops reporting a fallback that no longer applies.
-  ; 64-bit view explicitly: the installer is 32-bit, so an unqualified HKLM
-  ; write lands in Wow6432Node where the 64-bit Electron app would never find
-  ; it. Same reason InstallVCRedist brackets its read.
+  ; 64-bit view explicitly, so the 64-bit Electron app finds the key even if
+  ; a caller changed the view. Restores are `lastused`, never a hardcoded
+  ; view: electron-builder's un.onInit sets the 64-bit baseline and its own
+  ; uninstall-key cleanup runs AFTER customUnInstall — restoring 32 here left
+  ; that cleanup deleting nonexistent Wow6432Node keys, orphaning the
+  ; Add/Remove Programs entry on every full uninstall.
   SetRegView 64
   WriteRegDWORD SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "MachineServiceInstalled" 1
-  SetRegView 32
+  SetRegView lastused
   Goto DoneNssm
 
   RemoveUnsafeGezelService:
@@ -917,7 +924,7 @@ FunctionEnd
   ; uninstall key, so the flag alone is enough to describe the state.
   SetRegView 64
   WriteRegDWORD SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "MachineServiceInstalled" 0
-  SetRegView 32
+  SetRegView lastused
   DoneNssm:
 !macroend
 
@@ -968,7 +975,7 @@ FunctionEnd
   ; control; the ACL is not load-bearing once no build claims that sha.
   SetRegView 64
   DeleteRegKey SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}"
-  SetRegView 32
+  SetRegView lastused
   ; Preserve shared models, engine state, and any legacy data for recovery.
   DetailPrint "GezelService removed. Shared model and legacy data at ${GEZEL_DATA_DIR} preserved."
 !macroend

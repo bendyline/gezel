@@ -24,6 +24,8 @@ import {
   type Question,
   type ScriptMeta,
   type SessionDebugSnapshot,
+  type SessionLink,
+  type SessionParent,
   type SessionTelemetry,
   type Task,
   type TaskCraftbookStep,
@@ -3429,6 +3431,10 @@ export class ChatManager {
     projectId?: string;
     taskRef?: string;
     stepId?: string;
+    /** Durable parent session for delegated/consulted/task-spawned work. */
+    parentSession?: SessionParent;
+    /** Immediate workflow step that handed work to this task session. */
+    handoffFrom?: SessionLink;
     /** Resolve provider/model defaults from `config.nightShift.modelOverride`. */
     nightShift?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
@@ -3525,6 +3531,8 @@ export class ChatManager {
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
+      ...(args.handoffFrom ? { handoffFrom: args.handoffFrom } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
@@ -3587,6 +3595,7 @@ export class ChatManager {
     gezelId: string;
     projectId?: string;
     expectedDeliverable?: ExpectedDeliverable;
+    parentSession?: SessionParent;
   }): Promise<ChatSession> {
     const projectId = args.projectId ?? DEFAULT_PROJECT_ID;
     const existing = await this.store.listSessions({
@@ -3606,6 +3615,7 @@ export class ChatManager {
       gezelId: args.gezelId,
       projectId,
       ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
     });
   }
 
@@ -3619,6 +3629,7 @@ export class ChatManager {
     projectId: string;
     taskRef: string;
     stepId?: string;
+    parentSession?: SessionParent;
   }): Promise<ChatSession> {
     const existing = await this.store.listSessions({
       gezelId: args.gezelId,
@@ -3643,6 +3654,7 @@ export class ChatManager {
       projectId: args.projectId,
       taskRef: args.taskRef,
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(task?.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
         : {}),
@@ -3907,6 +3919,66 @@ export class ChatManager {
         );
       }
     }
+    const parsedTaskRef = parseTaskRef(args.taskRef);
+    const taskRecord = parsedTaskRef
+      ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
+      : null;
+    const candidates =
+      args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
+    const previous = candidates.find(
+      (candidate) =>
+        !candidate.archived &&
+        candidate.taskRef === args.taskRef &&
+        !(
+          args.resumeExisting &&
+          candidate.gezelId === args.gezelId &&
+          candidate.stepId === dispatchStepId
+        ) &&
+        (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
+    );
+    const handoffFrom: SessionLink | undefined = previous
+      ? { sessionId: previous.id, gezelId: previous.gezelId }
+      : undefined;
+
+    // Workflow steps are peers beneath the session that launched the task.
+    // Keep the immediate step-to-step edge separately in `handoffFrom` so
+    // the divider can still say "from planner" without nesting copywriter
+    // beneath planner. Older task records may not have launchSessionId; in
+    // that case inherit and flatten the prior step's task parent when one is
+    // available, falling back to the prior session only as a last resort.
+    let parentSession: SessionParent | undefined;
+    const launcher = taskRecord?.launchSessionId
+      ? await this.store.findSessionById(taskRecord.launchSessionId).catch(() => null)
+      : null;
+    if (launcher) {
+      parentSession = {
+        sessionId: launcher.id,
+        gezelId: launcher.gezelId,
+        kind: args.kind === 'entry' ? 'task-entry' : 'task-handoff',
+      };
+    } else if (previous) {
+      let inherited =
+        previous.parentSession?.kind === 'task-entry' ||
+        previous.parentSession?.kind === 'task-handoff'
+          ? previous.parentSession
+          : undefined;
+      const seen = new Set<string>([previous.id]);
+      while (inherited && !seen.has(inherited.sessionId)) {
+        seen.add(inherited.sessionId);
+        const linked = candidates.find((candidate) => candidate.id === inherited!.sessionId);
+        const next = linked?.parentSession;
+        if (next?.kind !== 'task-entry' && next?.kind !== 'task-handoff') break;
+        inherited = next;
+      }
+      parentSession = inherited
+        ? { ...inherited, kind: 'task-handoff' }
+        : {
+            sessionId: previous.id,
+            gezelId: previous.gezelId,
+            kind: 'task-handoff',
+          };
+    }
+
     let resumedExisting = false;
     let session: ChatSession | null = null;
     if (args.resumeExisting) {
@@ -3923,6 +3995,27 @@ export class ChatManager {
       if (prior) {
         session = await this.store.getSession(args.gezelId, prior.id);
         resumedExisting = session !== null;
+        if (session) {
+          let lineageChanged = false;
+          if (
+            parentSession &&
+            (session.parentSession?.sessionId !== parentSession.sessionId ||
+              session.parentSession.gezelId !== parentSession.gezelId ||
+              session.parentSession.kind !== parentSession.kind)
+          ) {
+            session.parentSession = parentSession;
+            lineageChanged = true;
+          }
+          if (
+            handoffFrom &&
+            (session.handoffFrom?.sessionId !== handoffFrom.sessionId ||
+              session.handoffFrom.gezelId !== handoffFrom.gezelId)
+          ) {
+            session.handoffFrom = handoffFrom;
+            lineageChanged = true;
+          }
+          if (lineageChanged) await this.store.writeSession(session);
+        }
       }
     }
     session ??= await this.createSession({
@@ -3931,6 +4024,8 @@ export class ChatManager {
       taskRef: args.taskRef,
       stepId: dispatchStepId,
       roleBasedNameOnlyMode,
+      ...(parentSession ? { parentSession } : {}),
+      ...(handoffFrom ? { handoffFrom } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
@@ -3979,12 +4074,8 @@ export class ChatManager {
     // context and the prior gezels' notes, so they don't need it re-stated.
     let entryPreface = '';
     if (args.kind === 'entry') {
-      const parsed = parseTaskRef(args.taskRef);
-      const task = parsed
-        ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
-        : null;
-      if (task) {
-        const cb = task.craftbook;
+      if (taskRecord) {
+        const cb = taskRecord.craftbook;
         const stepArc = cb.steps
           .map((s, i) => {
             const here = s.id === dispatchStepId ? ' ← your step' : '';
@@ -3993,7 +4084,7 @@ export class ChatManager {
           })
           .join('\n');
         const cbDesc = cb.description?.trim() ? ` ${cb.description.trim()}` : '';
-        entryPreface = `Task ${task.ref} ("${task.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
+        entryPreface = `Task ${taskRecord.ref} ("${taskRecord.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
       }
     }
     // Seed wording: deliberately does NOT name `read_task_notes` as the
@@ -4118,11 +4209,11 @@ export class ChatManager {
     toGezelId: string;
     deduplicated?: boolean;
   }> {
+    const fromRec = args.fromSessionId
+      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
+      : null;
     let projectId = args.projectId;
-    if (!projectId && args.fromSessionId) {
-      const fromRec = await this.getSessionRecord(args.fromSessionId);
-      projectId = fromRec?.projectId;
-    }
+    if (!projectId) projectId = fromRec?.projectId;
     projectId = projectId ?? DEFAULT_PROJECT_ID;
 
     const target = await this.resolveGezel(args.toGezelIdOrName, projectId);
@@ -4220,16 +4311,21 @@ export class ChatManager {
     if (args.stepId && !args.taskRef) {
       throw new Error('messageGezel stepId requires taskRef');
     }
+    const delegationParent: SessionParent | undefined = fromRec
+      ? { sessionId: fromRec.id, gezelId: fromRec.gezelId, kind: 'delegation' }
+      : undefined;
     const session = args.taskRef
       ? await this.ensureOrCreateTaskSession({
           gezelId: target.id,
           projectId,
           taskRef: args.taskRef,
           ...(args.stepId ? { stepId: args.stepId } : {}),
+          ...(delegationParent ? { parentSession: delegationParent } : {}),
         })
       : await this.ensureOrCreateSession({
           gezelId: target.id,
           projectId,
+          ...(delegationParent ? { parentSession: delegationParent } : {}),
         });
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
@@ -4241,9 +4337,7 @@ export class ChatManager {
     // leaked into a boring-mode session teaches the model a name the
     // user's client never shows.
     const targetBoring = session.roleBasedNameOnlyMode ?? configBoring;
-    const senderSession = args.fromSessionId
-      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
-      : null;
+    const senderSession = fromRec;
     const senderBoring = senderSession?.roleBasedNameOnlyMode ?? configBoring;
     const targetDisplay = (boring: boolean) =>
       displayName({ name: target.name, roleBasedName: target.roleBasedName }, boring);
@@ -4597,6 +4691,15 @@ export class ChatManager {
       projectId,
       ...(taskRef ? { taskRef } : {}),
       ...(taskRef && stepId ? { stepId } : {}),
+      ...(fromRec
+        ? {
+            parentSession: {
+              sessionId: fromRec.id,
+              gezelId: fromRec.gezelId,
+              kind: 'consultation' as const,
+            },
+          }
+        : {}),
       // Consultations inherit the asker's pinned name-rendering mode —
       // the reply flows back into the asker's session, so both sides
       // must speak the same identifier for names not to leak.
@@ -6650,6 +6753,8 @@ export class ChatManager {
           sessionId,
           gezelId: ffRecord.gezelId,
           projectId: ffRecord.projectId,
+          ...(ffRecord.parentSession ? { parentSession: ffRecord.parentSession } : {}),
+          ...(ffRecord.handoffFrom ? { handoffFrom: ffRecord.handoffFrom } : {}),
         }
       : undefined;
     const coldStartPending = preflightScope && !this.states.get(sessionId)?.session;
@@ -6787,6 +6892,8 @@ export class ChatManager {
       sessionId,
       gezelId: state.record.gezelId,
       projectId: state.record.projectId,
+      ...(state.record.parentSession ? { parentSession: state.record.parentSession } : {}),
+      ...(state.record.handoffFrom ? { handoffFrom: state.record.handoffFrom } : {}),
     };
     // Reset the tool-call accumulator for this turn. The `onToolCall`
     // bridge handler (built in buildSessionOpts) pushes here; we drain
@@ -8034,6 +8141,17 @@ export class ChatManager {
           log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
           break;
         }
+        // Completing a task step transfers ownership to the successor session.
+        // Provider loops stop at the tool result, but keep this manager-level
+        // boundary too: CLI/SDK providers can own their internal tool loop, and
+        // no post-turn detector or automatic continuation should re-prompt the
+        // predecessor after a successful handoff.
+        if (drained.some((call) => call.name === 'advance_task_step' && call.success)) {
+          log.info(
+            `session ${sessionId}: advance_task_step succeeded — ending predecessor turn and yielding to the active step`,
+          );
+          break;
+        }
         if (
           continuations >= maxContinuations &&
           looksStalled(finalContent) &&
@@ -8953,6 +9071,8 @@ export class ChatManager {
       sessionId,
       gezelId: record.gezelId,
       projectId: record.projectId,
+      ...(record.parentSession ? { parentSession: record.parentSession } : {}),
+      ...(record.handoffFrom ? { handoffFrom: record.handoffFrom } : {}),
     };
 
     // Reset the per-turn tool-call accumulator. The bridge's onToolCall
@@ -11777,7 +11897,11 @@ export class ChatManager {
     router: import('../providers/native/engine-router.js').EngineRouter,
     name: LocalProviderName,
     modelId: string,
-    opts: { sessionId: string; priorEngineKey?: string | undefined },
+    opts: {
+      sessionId: string;
+      priorEngineKey?: string | undefined;
+      engineDrainWaitMs?: number;
+    },
   ): Promise<{ engineKey: string; provider: LLMProvider }> {
     // Pre-populate the bytes cache so the router's sync resolver
     // hits on the first ensure.
@@ -11793,7 +11917,11 @@ export class ChatManager {
     return router.bindForSession(
       name,
       modelId,
-      { sessionId: opts.sessionId, sessionsPerKey },
+      {
+        sessionId: opts.sessionId,
+        sessionsPerKey,
+        ...(opts.engineDrainWaitMs !== undefined ? { drainWaitMs: opts.engineDrainWaitMs } : {}),
+      },
       opts.priorEngineKey,
     );
   }
@@ -11818,7 +11946,11 @@ export class ChatManager {
    *      evicts an idle resident model under memory pressure. This is
    *      what lets `/v1` swap local models per request.
    */
-  async getProviderForModel(name: ProviderName, modelId?: string): Promise<LLMProvider> {
+  async getProviderForModel(
+    name: ProviderName,
+    modelId?: string,
+    opts: { engineDrainWaitMs?: number } = {},
+  ): Promise<LLMProvider> {
     if (name === 'remote') return this.getRemoteProvider(modelId);
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
@@ -11883,6 +12015,9 @@ export class ChatManager {
       // Synthetic id — one-shot requests have no session record; the
       // bind still load-balances across resident replicas.
       sessionId: `v1:${randomUUID()}`,
+      ...(opts.engineDrainWaitMs !== undefined
+        ? { engineDrainWaitMs: opts.engineDrainWaitMs }
+        : {}),
     });
     return provider;
   }
@@ -12199,17 +12334,16 @@ export class ChatManager {
    * chat needs the live memory clamp so the user daemon can size its prompt,
    * but it must not load the model or evict somebody else's resident engine.
    *
-   * `standalone` is for callers writing the answer somewhere durable rather
-   * than spending it on one turn. Live pricing charges the model for whatever
-   * else happens to be resident, so a preview taken while another engine is
-   * warm collapses to the local context floor — fine for a decision
-   * made and discarded in the same second, wrong for a config file read back
-   * days later. See {@link previewLocalEnginePlan}'s `standalone` note.
+   * `standalone` prices the target as the eventual sole resident: inventory
+   * callers use it for stable device fitness, while remote admission combines
+   * it with `liveSystemPressure` because a competing Gezel engine is
+   * evictable/queueable but memory held by other applications is not. See
+   * {@link previewLocalEnginePlan}'s `standalone` note.
    */
   async previewContextWindowForModel(
     name: LocalProviderName,
     modelId: string,
-    opts: { standalone?: boolean } = {},
+    opts: { standalone?: boolean; liveSystemPressure?: boolean } = {},
   ): Promise<number | undefined> {
     return (await this.previewLocalEnginePlan(name, modelId, opts)).contextWindow;
   }
@@ -12251,21 +12385,19 @@ export class ChatManager {
    * which never passed live RAM, priced the same question correctly. A 4.7 GB
    * model was denied the same way. Adding an engine must not re-open that.
    *
-   * Deliberately carries no `freeSystemRamBytes`. A preview answers a policy
-   * question ("what window would this model get?"), where live free RAM is
-   * both the wrong input and a self-referential one — our own resident engine
-   * is what depressed it, so consulting it makes one running model deny every
-   * row in the list, itself included (see
-   * {@link CtxMemoryClampInput.freeSystemRamBytes}). Real placement belongs to
-   * the launch path: `buildLlamaCppProvider` passes `availableSystemRamBytes()`
-   * and is the only caller that should. Confining grown KV to fast memory is
-   * not lost with it — `planAdaptiveContextGrowth` applies that clamp itself
-   * from `budgetKind` + `vramBytes`.
+   * Policy previews deliberately carry no `freeSystemRamBytes`: live free RAM
+   * is self-referential there — a warm engine can depress it and make every
+   * inventory row, itself included, fluctuate. Imminent placement callers may
+   * opt into `liveSystemPressure`; that is the broker `/admit` path and must
+   * use the same reclaimable-aware clamp as provider construction. Confining
+   * grown KV to fast memory is not lost for policy previews —
+   * `planAdaptiveContextGrowth` applies that clamp itself from `budgetKind` +
+   * `vramBytes`.
    */
   private async previewCapacityInputs(
     provider: LocalProviderName,
     modelId: string,
-    opts: { standalone?: boolean },
+    opts: { standalone?: boolean; liveSystemPressure?: boolean },
   ): Promise<{
     /** Admission budget for the whole resident set. */
     budgetBytes: number;
@@ -12278,6 +12410,8 @@ export class ChatManager {
     budgetKind: CapacityCommitted['pools']['kind'];
     /** Reservations held by models OTHER than this one. */
     committedOtherBytes: number;
+    /** Reclaimable-aware RAM available for an imminent placement. */
+    freeSystemRamBytes?: number;
   }> {
     const { computeCapacityBudget } = await import('../providers/native/capacity-broker.js');
     const router = this.engineRouter ?? this.engineRouterCache;
@@ -12286,6 +12420,7 @@ export class ChatManager {
     // rather than per-field, so a snapshot never contributes half a picture.
     const enforced = snapshot?.enforced ? snapshot : undefined;
     const live = computeCapacityBudget();
+    const committedOtherBytes = this.committedOtherBytesFor(snapshot, provider, modelId);
     return {
       budgetBytes: enforced?.budgetBytes ?? live.budgetBytes,
       fastBudgetBytes:
@@ -12295,9 +12430,15 @@ export class ChatManager {
       concurrencySizingBytes: enforced?.pools.concurrencySizingBytes ?? live.concurrencySizingBytes,
       vramBytes: enforced?.pools.vramBytes ?? live.vramBytes,
       budgetKind: enforced?.pools.kind ?? live.kind,
-      committedOtherBytes: opts.standalone
-        ? 0
-        : this.committedOtherBytesFor(snapshot, provider, modelId),
+      committedOtherBytes: opts.standalone ? 0 : committedOtherBytes,
+      // A standalone imminent placement treats other Gezel engines as
+      // evictable: if one is busy, /infer queues until it drains. Its current
+      // process footprint is therefore not an intrinsic device-capacity
+      // denial. With no competing reservation, live pressure represents
+      // external applications / real system load and must match launch.
+      ...(opts.liveSystemPressure && !(opts.standalone && committedOtherBytes > 0)
+        ? { freeSystemRamBytes: availableSystemRamBytes() }
+        : {}),
     };
   }
 
@@ -12328,13 +12469,22 @@ export class ChatManager {
     opts: {
       allowUninstalled?: boolean;
       /**
-       * Price the model as the only resident engine. Inventory/catalog rows
-       * answer "can this model run on this device?", so their estimate must
-       * not change merely because another model happens to be warm. Actual
-       * launch admission keeps the default live-reservation behavior and may
-       * evict an idle model (or report that a busy one is blocking the swap).
+       * Price the model as the eventual only resident engine. Inventory rows
+       * use this for stable device fitness. Remote admission also uses it
+       * because another Gezel engine can be evicted once idle; paired with
+       * `liveSystemPressure`, non-Gezel system load still constrains the plan.
+       * Actual launch admission keeps default live-reservation behavior and
+       * may evict an idle model (or report that a busy one is blocking the
+       * swap).
        */
       standalone?: boolean;
+      /**
+       * Apply the same reclaimable-aware live RAM clamp as a real provider
+       * launch. Remote admission uses this immediately before inference;
+       * inventory and settings previews deliberately leave it off so a warm
+       * model does not make every catalog row fluctuate with system pressure.
+       */
+      liveSystemPressure?: boolean;
     } = {},
   ): Promise<{
     contextWindow?: number;
@@ -12390,6 +12540,14 @@ export class ChatManager {
       }
       return residentContextWindow;
     };
+    // Reusing an already-running target does not allocate its weights again,
+    // so current free RAM (which that same process depressed) is not a launch
+    // input. Keep the policy checks below — including resident-below-minimum
+    // and changed overrides — while skipping only the self-referential clamp.
+    const capacityOpts =
+      residentContextWindow !== undefined && opts.liveSystemPressure
+        ? { ...opts, liveSystemPressure: false }
+        : opts;
 
     const config = await this.store.readConfig();
     // The floor this host is held to — 64K, or 32K where memory forces the
@@ -12413,7 +12571,7 @@ export class ChatManager {
         planCtxTokensForMemory,
         plannedLocalEngineSlots,
       } = await import('../providers/native/capacity-broker.js');
-      const capacity = await this.previewCapacityInputs('mlx', modelId, opts);
+      const capacity = await this.previewCapacityInputs('mlx', modelId, capacityOpts);
       const {
         budgetBytes,
         fastBudgetBytes: fastBudget,
@@ -12471,6 +12629,9 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         if (!admission.minimumSatisfied) {
@@ -12695,7 +12856,7 @@ export class ChatManager {
       planCtxTokensForMemory,
       plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
-    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, opts);
+    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, capacityOpts);
     const { budgetBytes: admissionBudgetBytes, fastBudgetBytes, committedOtherBytes } = capacity;
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
     const kvCacheType = resolveLlamaCppKvCacheType({
@@ -12982,6 +13143,9 @@ export class ChatManager {
           weightsResidentBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         return probe.minimumSatisfied && probe.slots >= slotCount;
@@ -13033,6 +13197,9 @@ export class ChatManager {
           }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
+          ...(capacity.freeSystemRamBytes !== undefined
+            ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+            : {}),
           vramBytes: capacity.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
@@ -13085,6 +13252,9 @@ export class ChatManager {
                 windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
+              ...(capacity.freeSystemRamBytes !== undefined
+                ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+                : {}),
               vramBytes: capacity.vramBytes,
             });
             ladderKvLinearization = {
@@ -13126,6 +13296,9 @@ export class ChatManager {
             committedOtherBytes,
             budgetKind: capacity.budgetKind,
             vramBytes: capacity.vramBytes,
+            ...(capacity.freeSystemRamBytes !== undefined
+              ? { freeSystemRamBytes: capacity.freeSystemRamBytes }
+              : {}),
             isMoE: (summary.expertCount ?? 0) > 1,
             // A user-chosen lane count is not growth's to spend.
             allowSlotTrade: configuredSlots === undefined,

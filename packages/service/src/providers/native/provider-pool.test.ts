@@ -674,6 +674,26 @@ describe('ProviderPool', () => {
     expect(pool.snapshot().entries[0]!.draining).toBe(false);
   });
 
+  it('can defer a busy model swap immediately for an upstream queue', async () => {
+    const made: BusyFakeProvider[] = [];
+    const sleep = vi.fn(async () => {});
+    const broker = new CapacityBroker({ budgetBytes: 10 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      sleep,
+    });
+    await pool.ensure('mlx', 'resident', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    await expect(
+      pool.ensure('mlx', 'waiting', 0, 10 * GB, { drainWaitMs: 0 }),
+    ).rejects.toMatchObject({ code: 'engine-busy' });
+    expect(sleep).not.toHaveBeenCalled();
+    expect(pool.has(makeEngineKey('mlx', 'resident', 0))).toBe(true);
+    expect(pool.has(makeEngineKey('mlx', 'waiting', 0))).toBe(false);
+  });
+
   it('ensure on a draining key waits for the eviction, then rebuilds fresh', async () => {
     const made: BusyFakeProvider[] = [];
     let releaseDrain!: () => void;

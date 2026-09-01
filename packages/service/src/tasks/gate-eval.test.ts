@@ -979,10 +979,11 @@ describe('evaluateGate — hardened kinds', () => {
     expect(optionalStillRejectsFabrication.failures.join('\n')).toContain('invented/source.md');
   });
 
-  it('citationsResolve forgives task-supplied metadata paths via deps.knownCitationPaths', async () => {
+  it('citationsResolve ignores directory context and forgives task-supplied metadata paths', async () => {
     // The powerpoint-deck wild catch: the research packet records its
     // invocation inputs (`tasks/8`, the future deck path) as the procedure
-    // requires, and those tokens must not read as fabricated citations.
+    // requires. The directory token is ignored as context, while the future
+    // file path is forgiven; neither must read as a fabricated citation.
     const packet =
       'Working folder `tasks/8/`; deck lands at `powerpoint/task-8/deck.pptx`. Research skipped.';
     const forgiven = await evaluateGate(
@@ -992,7 +993,7 @@ describe('evaluateGate — hardened kinds', () => {
     );
     expect(forgiven.pass).toBe(true);
     expect(forgiven.checks[0]!.evidence).toMatchObject({
-      forgiven: ['tasks/8/', 'powerpoint/task-8/deck.pptx'],
+      forgiven: ['powerpoint/task-8/deck.pptx'],
     });
 
     // A path outside the supplied set is still fabrication.

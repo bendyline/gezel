@@ -9,6 +9,7 @@ import {
   ProviderNameSchema,
   ReferencedFileSchema,
 } from './gezel.js';
+import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
 /**
@@ -226,6 +227,10 @@ export const ChatSessionSchema = z.object({
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */
   stepId: z.string().optional(),
+  /** Session that contains this child in the visible thread hierarchy. */
+  parentSession: SessionParentSchema.optional(),
+  /** Immediate task-step session that handed work to this session. */
+  handoffFrom: SessionLinkSchema.optional(),
   /**
    * The most recent successful `generate_image` run in this session,
    * persisted so a follow-up message can continue where the last image
@@ -445,6 +450,8 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   turnStartedAt: true,
   taskRef: true,
   stepId: true,
+  parentSession: true,
+  handoffFrom: true,
 }).extend({
   /**
    * `at` of the most recent HUMAN message in the transcript — a
@@ -588,11 +595,10 @@ export type InterruptSessionRequest = z.infer<typeof InterruptSessionRequestSche
  * session's identity + metadata. The UI groups consecutive messages by
  * `sessionId` to draw session-boundary headers.
  *
- * `handoffFrom` is set when this message belongs to a session that was
- * spawned via `startHandoffSession` — the (gezelId, sessionId) of the
- * session that initiated the handoff. The Store resolves it by matching
- * the most recent prior session in the same project that shares this
- * session's `taskRef` but has a different `gezelId`.
+ * `parentSession` is the visible containment edge. Task workflow sessions
+ * share their task-launching session as that parent; `handoffFrom` separately
+ * names the immediately preceding step. Older task sessions are normalized to
+ * the same shape at read time without rewriting their files.
  */
 export const TimelineMessageSchema = z.object({
   sessionId: z.string(),
@@ -635,7 +641,8 @@ export const TimelineMessageSchema = z.object({
   sessionLastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
-  handoffFrom: z.object({ gezelId: z.string(), sessionId: z.string() }).optional(),
+  parentSession: SessionParentSchema.optional(),
+  handoffFrom: SessionLinkSchema.optional(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   at: z.string(),

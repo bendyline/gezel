@@ -2490,6 +2490,96 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(requestCount).toBe(1);
   });
 
+  it('ends a task-step turn after advance succeeds and skips later calls in the batch', async () => {
+    let requestCount = 0;
+    let staleWriteRan = false;
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_advance',
+                    type: 'function',
+                    function: {
+                      name: 'advance_task_step',
+                      arguments: '{"ref":"default/10","stepId":"research"}',
+                    },
+                  },
+                  {
+                    index: 1,
+                    id: 'call_stale_write',
+                    type: 'function',
+                    function: {
+                      name: 'write_artifact',
+                      arguments: '{"path":"tasks/10/sources.md","content":"handoff receipt"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [{ index: 0, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 20, completion_tokens: 8 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'qwen' });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        {
+          name: 'advance_task_step',
+          description: 'Advance a task step.',
+          parameters: { type: 'object' },
+        },
+        {
+          name: 'write_artifact',
+          description: 'Write an artifact.',
+          parameters: { type: 'object' },
+        },
+      ],
+      hasTool: (name: string) => name === 'advance_task_step' || name === 'write_artifact',
+      callTool: async (name: string) => {
+        if (name === 'advance_task_step') {
+          return 'Completed step "research" on default/10. Active step is now "outline".';
+        }
+        staleWriteRan = true;
+        return 'Wrote tasks/10/sources.md';
+      },
+    };
+
+    const reply = await session.sendAndWait('Finish research and hand off.');
+
+    expect(reply).toBe('Completed step "research" on default/10. Active step is now "outline".');
+    expect(requestCount).toBe(1);
+    expect(staleWriteRan).toBe(false);
+  });
+
   it('narrows existing source edit turns to patch tools after reading the file', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;

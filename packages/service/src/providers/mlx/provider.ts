@@ -109,7 +109,10 @@ import {
   type EngineStatsEvent,
   StreamingSessionBase,
 } from '../streaming-session.js';
-import { terminalToolClosingText } from '../terminal-tool-policy.js';
+import {
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
@@ -3490,6 +3493,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // decision below.
         let immediateWriteTruncated = false;
         for (const call of toolCalls) {
+          if (terminalActionClosing) {
+            this.messages.push({
+              role: 'tool',
+              content: TERMINAL_ACTION_SKIPPED_OUTPUT,
+              tool_call_id: call.id,
+            });
+            continue;
+          }
           let args: Record<string, unknown> = {};
           try {
             args = call.function.arguments.length > 0 ? JSON.parse(call.function.arguments) : {};

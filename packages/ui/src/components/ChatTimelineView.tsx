@@ -67,11 +67,13 @@ import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
+import { SessionTreeGuides } from './chat-session-tree-guides.js';
 import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
+import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
@@ -1606,6 +1608,16 @@ export function ChatTimelineView({
           ...(lastForSession?.sessionModel ? { sessionModel: lastForSession.sessionModel } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           ...(lastForSession?.stepId ? { stepId: lastForSession.stepId } : {}),
+          ...(lastForSession?.parentSession
+            ? { parentSession: lastForSession.parentSession }
+            : env.parentSession
+              ? { parentSession: env.parentSession }
+              : {}),
+          ...(lastForSession?.handoffFrom
+            ? { handoffFrom: lastForSession.handoffFrom }
+            : env.handoffFrom
+              ? { handoffFrom: env.handoffFrom }
+              : {}),
           role: event.message.role,
           content: event.message.content,
           at: event.message.at,
@@ -1691,6 +1703,16 @@ export function ChatTimelineView({
                 ? { sessionSource: env.sessionSource }
                 : {}),
             ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+            ...(lastForSession?.parentSession
+              ? { parentSession: lastForSession.parentSession }
+              : env.parentSession
+                ? { parentSession: env.parentSession }
+                : {}),
+            ...(lastForSession?.handoffFrom
+              ? { handoffFrom: lastForSession.handoffFrom }
+              : env.handoffFrom
+                ? { handoffFrom: env.handoffFrom }
+                : {}),
           });
           liveStore.markStructureChanged();
         }
@@ -2268,6 +2290,16 @@ export function ChatTimelineView({
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+          ...(lastForSession?.parentSession
+            ? { parentSession: lastForSession.parentSession }
+            : env.parentSession
+              ? { parentSession: env.parentSession }
+              : {}),
+          ...(lastForSession?.handoffFrom
+            ? { handoffFrom: lastForSession.handoffFrom }
+            : env.handoffFrom
+              ? { handoffFrom: env.handoffFrom }
+              : {}),
           ...(lastForSession?.sessionSource
             ? { sessionSource: lastForSession.sessionSource }
             : env.sessionSource
@@ -2369,10 +2401,16 @@ export function ChatTimelineView({
   // thing above the draft is what the next message answers. See
   // `active-thread-pin.ts` for why the move is deliberately narrow.
   // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick deliberately re-runs the Date.now()-dependent lane checks.
-  const threadItems = useMemo(
-    () => pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+  const nestedThreadItems = useMemo(
+    () =>
+      nestChildSessionThreads(
+        pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+      ),
     [rows, activeSessionId, terminalOrderTick],
   );
+  const threadItems = nestedThreadItems.items;
+  const sessionDepthById = nestedThreadItems.depthBySession;
+  const sessionBranchById = nestedThreadItems.branchBySession;
 
   /**
    * Queue receipts for held tasks, minus any task that is already
@@ -3164,7 +3202,7 @@ export function ChatTimelineView({
               {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
             </button>
           )}
-          {!isUserCancelledTurnError(errorMessage) && (
+          {!isUserCancelledTurnError(errorMessage) && !isExpectedAvailabilityError(errorDetail) && (
             <ReportErrorLink
               className="timeline-session-error-link"
               report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
@@ -3705,6 +3743,8 @@ export function ChatTimelineView({
     // group boundaries — a thread never straddles two sessions (merged
     // fan-out threads carry the kept root's session for this purpose).
     const sid = item.sessionId;
+    const sessionDepth = sessionDepthById.get(sid) ?? 0;
+    const sessionBranch = sessionBranchById.get(sid);
     const anchorRow = item.root ?? item.replies[0];
     if (!anchorRow) continue;
     if (sid !== prevSessionId) {
@@ -3726,6 +3766,8 @@ export function ChatTimelineView({
           activeSessionId,
           onFocusSession,
           continuing: isContinuing,
+          depth: sessionDepth,
+          ...(sessionBranch ? { treeBranch: sessionBranch } : {}),
           key: `divider:${sid}:${item.at}`,
           roleBasedNameOnlyMode,
         }),
@@ -3816,19 +3858,29 @@ export function ChatTimelineView({
         </div>,
       );
     }
-    // Full-height rail threads: the connector line only draws when the
-    // left gutter is clear top-to-bottom — user roots are right-aligned
-    // and rootless threads have no root at all. Handoff roots render as
-    // left-aligned stretch bubbles whose translucent fill would let the
-    // line show through, so they keep the replies-only border rail.
-    const railed = item.replies.length > 0 && (!item.root || !item.root.msg.from);
+    // Top-level conversations keep the ordinary trigger→reply rail when
+    // their left gutter is clear. A session with visible child sessions
+    // always owns a full-height local trunk, even without replies, so the
+    // child elbows have a stable line to attach to. Nested leaf sessions
+    // suppress their turn rail in CSS: the tree edge already communicates
+    // containment, and drawing both was the source of the doubled line.
+    const railed =
+      sessionBranch?.hasChildren === true ||
+      (sessionDepth === 0 && item.replies.length > 0 && (!item.root || !item.root.msg.from));
     els.push(
       <div
         key={`thread:${sid}:${item.at}`}
-        className={`timeline-thread${item.root ? '' : ' timeline-thread-rootless'}${
-          railed ? ' timeline-thread-railed' : ''
-        }`}
+        className={`timeline-thread${
+          sessionDepth > 0
+            ? ` timeline-session-subthread timeline-session-depth-${Math.min(sessionDepth, 4)}`
+            : ''
+        }${
+          sessionBranch?.hasChildren ? ' timeline-session-parent' : ''
+        }${item.root ? '' : ' timeline-thread-rootless'}${railed ? ' timeline-thread-railed' : ''}`}
       >
+        {sessionDepth > 0 && sessionBranch && (
+          <SessionTreeGuides branch={sessionBranch} phase="thread" />
+        )}
         {children}
       </div>,
     );
@@ -3989,6 +4041,10 @@ function isModelUnavailableError(message: string): boolean {
   return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
 }
 
+function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
+  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
+}
+
 /**
  * Retry is contextual, not a reflex attached to every red surface. Prefer the
  * daemon's structured classification; keep a narrow prose fallback for older
@@ -3998,6 +4054,7 @@ function isModelUnavailableError(message: string): boolean {
 export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDetail): boolean {
   if (isUserCancelledTurnError(message) || isModelUnavailableError(message)) return false;
   if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
+  if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
   if (detail?.code === 'native-engine-crash') return true;
   return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
     message,

@@ -90,6 +90,26 @@ describe('ChatSessionSchema', () => {
     expect(session.source).toEqual(source);
     expect(summary.source).toEqual(source);
   });
+
+  it('round-trips visual parent and immediate handoff lineage separately', () => {
+    const parentSession = {
+      sessionId: 'sess-launcher',
+      gezelId: 'meester',
+      kind: 'task-entry' as const,
+    };
+    const handoffFrom = { sessionId: 'sess-research', gezelId: 'researcher' };
+    const session = ChatSessionSchema.parse({ ...validSession, parentSession, handoffFrom });
+    const summary = ChatSessionSummarySchema.parse({
+      ...validSession,
+      parentSession,
+      handoffFrom,
+    });
+
+    expect(session.parentSession).toEqual(parentSession);
+    expect(summary.parentSession).toEqual(parentSession);
+    expect(session.handoffFrom).toEqual(handoffFrom);
+    expect(summary.handoffFrom).toEqual(handoffFrom);
+  });
 });
 
 describe('ChatSessionSummarySchema', () => {
