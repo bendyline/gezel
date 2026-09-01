@@ -39,55 +39,76 @@ test('sidebar selection persists and document icons align with their group heade
     // sidebar rendering is the proxy for "App.tsx finished first render".
     await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 10_000 });
 
-    const documentsToggle = page.getByTestId('sidebar-group-toggle-documents');
-    if ((await documentsToggle.getAttribute('aria-expanded')) !== 'true') {
-      await documentsToggle.click();
-    }
-    const documentsHeaderIcon = page.locator(
-      '[data-testid="sidebar-group-documents"] .app-sidebar-item-icon',
-    );
-    const documentRowIcon = page.locator('.app-sidebar-tree .tree-icon').first();
-    await expect(documentRowIcon).toBeVisible();
-    const [headerBox, rowBox] = await Promise.all([
-      documentsHeaderIcon.boundingBox(),
-      documentRowIcon.boundingBox(),
-    ]);
-    expect(headerBox).not.toBeNull();
-    expect(rowBox).not.toBeNull();
-    if (headerBox && rowBox) {
-      expect(rowBox.x + rowBox.width / 2).toBeCloseTo(headerBox.x + headerBox.width / 2, 0);
-    }
+    await test.step('document icons align with the Documents header', async () => {
+      const documentsToggle = page.getByTestId('sidebar-group-toggle-documents');
+      if ((await documentsToggle.getAttribute('aria-expanded')) !== 'true') {
+        await documentsToggle.click();
+      }
+      await expect(documentsToggle).toHaveAttribute('aria-expanded', 'true');
+
+      const documentsHeaderIcon = page.locator(
+        '[data-testid="sidebar-group-documents"] .app-sidebar-item-icon',
+      );
+      const documentRowIcon = page
+        .getByRole('button', { name: 'alignment-check', exact: true })
+        .locator('.tree-icon');
+      await expect(documentRowIcon).toBeVisible({ timeout: 10_000 });
+
+      // Both lists load asynchronously during startup. Poll the measured
+      // centers so the assertion observes the settled sidebar layout rather
+      // than a single frame while its rows are being inserted.
+      await expect
+        .poll(
+          async () => {
+            const [headerBox, rowBox] = await Promise.all([
+              documentsHeaderIcon.boundingBox(),
+              documentRowIcon.boundingBox(),
+            ]);
+            if (!headerBox || !rowBox) return Number.POSITIVE_INFINITY;
+            const headerCenter = headerBox.x + headerBox.width / 2;
+            const rowCenter = rowBox.x + rowBox.width / 2;
+            return Math.abs(rowCenter - headerCenter);
+          },
+          { timeout: 10_000 },
+        )
+        .toBeLessThan(0.5);
+    });
 
     // Navigate by the canonical event the listing views / chat surfaces
     // dispatch. This drives `selection` → TabContent renders the area.
     // A group header reads as "active" only when its full area screen is
     // open ({ kind: 'area' }), not when an individual item of that kind is
     // selected — so open the Projects area screen here.
-    await page.evaluate(() => {
-      window.dispatchEvent(
-        new CustomEvent('gezel:open-tab', {
-          detail: { kind: 'area', area: 'projects' },
-        }),
-      );
-    });
-
-    // The Projects group reflects the active project-area selection.
-    await expect(page.locator('.app-sidebar-group-header.active')).toBeVisible({ timeout: 5_000 });
-
-    // Selection persists to localStorage (UI-chrome state). Note: the
-    // last view is restored on next boot from this key — we assert the
-    // write here rather than across a restart, since Chromium flushes
-    // localStorage to disk asynchronously and a quick relaunch races it.
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(() => {
-            const raw = window.localStorage.getItem('gezel:nav:selection');
-            return raw ? (JSON.parse(raw) as { kind?: string; id?: string }) : null;
+    await test.step('project-area selection is active and persisted', async () => {
+      await page.evaluate(() => {
+        window.dispatchEvent(
+          new CustomEvent('gezel:open-tab', {
+            detail: { kind: 'area', area: 'projects' },
           }),
+        );
+      });
+
+      // Assert the intended group, not merely that some group is active.
+      await expect(page.locator('[data-group="projects"] > .app-sidebar-group-header')).toHaveClass(
+        /\bactive\b/,
         { timeout: 10_000 },
-      )
-      .toMatchObject({ kind: 'area', area: 'projects' });
+      );
+
+      // Selection persists to localStorage (UI-chrome state). Note: the
+      // last view is restored on next boot from this key — we assert the
+      // write here rather than across a restart, since Chromium flushes
+      // localStorage to disk asynchronously and a quick relaunch races it.
+      await expect
+        .poll(
+          async () =>
+            await page.evaluate(() => {
+              const raw = window.localStorage.getItem('gezel:nav:selection');
+              return raw ? (JSON.parse(raw) as { kind?: string; id?: string }) : null;
+            }),
+          { timeout: 10_000 },
+        )
+        .toMatchObject({ kind: 'area', area: 'projects' });
+    });
   } finally {
     await closeApp(app);
     await rm(gezelHome, { recursive: true, force: true }).catch(() => {});

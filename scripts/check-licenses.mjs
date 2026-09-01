@@ -118,11 +118,33 @@ const REVIEWED_NON_PERMISSIVE = [
   },
 ];
 
+/**
+ * Packages whose published license metadata does not cover code embedded in
+ * their payload. `wasm-media-encoders` labels the npm package MIT while its
+ * MP3 binary statically incorporates LAME; `@audio/encode-mp3` is the wrapper
+ * that caused that binary to be emitted into Gezel's renderer bundle. Keep
+ * both names blocked even though pnpm reports them as MIT.
+ */
+const PROHIBITED_MISLICENSED_PACKAGES = new Map([
+  ['@audio/encode-mp3', 'embeds the wasm-media-encoders LAME MP3 encoder'],
+  ['wasm-media-encoders', 'its MP3 WebAssembly payload statically incorporates LAME'],
+]);
+
 function run() {
   const byLicense = readProductionLicenseInventory();
   const offenders = [];
 
   for (const [license, packages] of Object.entries(byLicense)) {
+    for (const pkg of packages) {
+      const reason = PROHIBITED_MISLICENSED_PACKAGES.get(pkg.name);
+      if (!reason) continue;
+      offenders.push({
+        reason: `${reason}; published license metadata is not sufficient for redistribution`,
+        name: pkg.name,
+        versions: pkg.versions,
+        license,
+      });
+    }
     if (license === 'Unknown') {
       for (const pkg of packages) {
         if (!(pkg.name in KNOWN_UNKNOWN)) {

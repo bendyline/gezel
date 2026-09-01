@@ -207,7 +207,12 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('/bin/launchctl bootout "gui/${uid}/${USER_AGENT_LABEL}"');
     expect(macUninstall).toContain('"${home}/Library/LaunchAgents/${USER_AGENT_LABEL}.plist"');
     expect(macUninstall).toContain('/usr/bin/mktemp "${DETACHED_SCRIPT_PREFIX}XXXXXX"');
+    expect(macUninstall).toContain('/usr/bin/mktemp -d "${DETACHED_LOG_DIR_PREFIX}XXXXXX"');
+    expect(macUninstall).toContain('/bin/chmod 700 "$detached_log_dir"');
+    expect(macUninstall).toContain('child_args+=("--detached-log=${detached_log}")');
     expect(macUninstall).toContain('/usr/bin/nohup /bin/bash "$staged_script"');
+    expect(macUninstall).toContain('>"$detached_log" 2>&1 </dev/null &');
+    expect(macUninstall).not.toContain('DETACHED_LOG="/var/tmp/gezel-uninstall.log"');
     expect(macUninstall).toContain('waiting for Gezel process ${WAIT_FOR_PID} to exit');
     expect(macUninstall).toContain('PACKAGE_ID="com.bendyline.gezel"');
     expect(macUninstall).toContain('/usr/sbin/pkgutil --forget "$PACKAGE_ID"');
@@ -240,7 +245,9 @@ describe('macOS machine-service filesystem security', () => {
       'Remove the matching group only after the user is verified absent',
     );
     expect(macUninstall).toContain('display alert "Gezel uninstall needs attention"');
-    expect(macUninstall).toContain('See /var/tmp/gezel-uninstall.log');
+    expect(macUninstall).toContain('item 1 of argv');
+    expect(macUninstall).toContain('"$DETACHED_LOG"');
+    expect(macUninstall).not.toContain('See /var/tmp/gezel-uninstall.log');
     expect(macUninstall).toContain('giving up after 30');
     expect(macUninstall).toContain('exit 1');
     expect(macUninstall).toContain('done (service exit and account removal verified)');

@@ -29,12 +29,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     contextMenu.items = [...items];
   },
 }));
-vi.mock('./document-narration-mp3.js', () => ({
-  encodeWavAsMp3: vi.fn(async () => new Blob([], { type: 'audio/mpeg' })),
-}));
-
 const { DocumentNarration } = await import('./DocumentNarration.js');
-const { encodeWavAsMp3 } = await import('./document-narration-mp3.js');
 const { api } = await import('../api.js');
 
 let lastAudio: MockAudio | null = null;
@@ -149,7 +144,7 @@ describe('DocumentNarration', () => {
     );
     expect(vi.mocked(api.synthesizeSpeechWithProgress).mock.calls[0]?.[0].text).not.toContain('#');
     expect(await screen.findByText('Document narration')).toBeInTheDocument();
-    const download = screen.getByRole('button', { name: 'Download MP3' });
+    const download = screen.getByRole('button', { name: 'Download WAV' });
     expect(download).toBeInTheDocument();
     expect(download).toHaveTextContent('');
   });
@@ -270,7 +265,7 @@ describe('DocumentNarration', () => {
     expect(lastAudio?.currentTime).toBe(0);
   });
 
-  it('converts and downloads the narration as an MP3', async () => {
+  it('downloads the narration WAV without bundling a browser codec', async () => {
     let downloadedName = '';
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(
       this: HTMLAnchorElement,
@@ -281,9 +276,11 @@ describe('DocumentNarration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Narrate document' }));
     await screen.findByText('Document narration');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Download MP3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download WAV' }));
 
-    await waitFor(() => expect(encodeWavAsMp3).toHaveBeenCalledOnce());
-    expect(downloadedName).toBe('notes-document-narration.mp3');
+    expect(downloadedName).toBe('notes-document-narration.wav');
+    expect(URL.createObjectURL).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'audio/wav' }),
+    );
   });
 });

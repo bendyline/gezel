@@ -52,7 +52,7 @@ function downloadName(fileName: string | undefined, scope: NarrationScope): stri
       .pop()
       ?.replace(/\.[^.]+$/, '') || 'document';
   const safe = basename.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'document';
-  return `${safe}-${scope}-narration.mp3`;
+  return `${safe}-${scope}-narration.wav`;
 }
 
 function triggerDownload(blob: Blob, name: string): void {
@@ -81,7 +81,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   const audioCleanupRef = useRef<(() => void) | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const wavBlobRef = useRef<Blob | null>(null);
-  const mp3BlobRef = useRef<Blob | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const progressivePlayerRef = useRef<ProgressiveNarrationPlayer | null>(null);
   const creationProgressRef = useRef<AudioSynthesizeProgress | null>(null);
@@ -93,8 +92,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   const [status, setStatus] = useState<NarrationStatus>('idle');
   const [scope, setScope] = useState<NarrationScope>('document');
   const [error, setError] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [encodingMp3, setEncodingMp3] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -126,7 +123,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     audioUrlRef.current = null;
     wavBlobRef.current = null;
-    mp3BlobRef.current = null;
   }, []);
 
   const closeNarration = useCallback(() => {
@@ -135,8 +131,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     releaseAudio();
     setStatus('idle');
     setError(null);
-    setDownloadError(null);
-    setEncodingMp3(false);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -204,8 +198,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
       setScope(nextScope);
       setStatus('creating');
       setError(null);
-      setDownloadError(null);
-      setEncodingMp3(false);
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
@@ -406,21 +398,11 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     setCurrentTime(seconds);
   }, []);
 
-  const downloadMp3 = useCallback(async () => {
+  const downloadWav = useCallback(() => {
     const wav = wavBlobRef.current;
-    if (!wav || encodingMp3) return;
-    setEncodingMp3(true);
-    setDownloadError(null);
-    try {
-      const { encodeWavAsMp3 } = await import('./document-narration-mp3.js');
-      mp3BlobRef.current ??= await encodeWavAsMp3(wav);
-      triggerDownload(mp3BlobRef.current, downloadName(fileName, scope));
-    } catch (caught) {
-      setDownloadError(caught instanceof Error ? caught.message : 'Could not prepare the MP3.');
-    } finally {
-      setEncodingMp3(false);
-    }
-  }, [encodingMp3, fileName, scope]);
+    if (!wav) return;
+    triggerDownload(wav, downloadName(fileName, scope));
+  }, [fileName, scope]);
 
   const creationPercent =
     creationProgress?.phase === 'encoding'
@@ -577,11 +559,9 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
                 <button
                   type="button"
                   className="document-narration-download"
-                  aria-label={encodingMp3 ? 'Preparing MP3' : 'Download MP3'}
-                  aria-busy={encodingMp3}
-                  title={encodingMp3 ? 'Preparing MP3…' : 'Download MP3'}
-                  disabled={encodingMp3}
-                  onClick={() => void downloadMp3()}
+                  aria-label="Download WAV"
+                  title="Download WAV"
+                  onClick={downloadWav}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
@@ -596,11 +576,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
                 >
                   ×
                 </button>
-                {downloadError && (
-                  <span className="document-narration-error" role="alert">
-                    {downloadError}
-                  </span>
-                )}
               </>
             )}
             {status === 'error' && (

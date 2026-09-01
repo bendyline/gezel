@@ -77,11 +77,13 @@ export const NATIVE_PAYLOAD = Object.freeze({
  * `native/engines/<id>/`, which is what NOTICE.md and the native license
  * manifest are keyed by.
  *
- * `null` marks a binary we write ourselves — it has no upstream pin, so it is
- * not a third-party SBOM component. Everything in NATIVE_PAYLOAD must appear
- * here; native-payload.test.mjs enforces that, so adding an engine to the
- * payload without classifying it fails the build rather than silently
- * dropping it from the SBOM.
+ * `null` marks a binary we write ourselves, so it has no upstream engine pin.
+ * Third-party source compiled into one of those helpers is inventoried
+ * separately under `native/licenses/manifest.json#helpers` and still reaches
+ * NOTICE plus the SBOM. Everything in NATIVE_PAYLOAD must appear here;
+ * native-payload.test.mjs enforces that, so adding an engine to the payload
+ * without classifying it fails the build rather than silently dropping it from
+ * the SBOM.
  */
 export const ENGINE_FOR_BINARY = Object.freeze({
   'gezel-llama-server': 'llama-cpp',

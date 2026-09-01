@@ -63,6 +63,7 @@ export async function verifyLicenseBundle(rootInput) {
   for (const field of [
     'productionPackages',
     'nativeEngines',
+    'nativeHelpers',
     'fontFamilies',
     'bundledRuntimes',
     'bundledPnpmPackages',
@@ -162,6 +163,7 @@ export async function verifyLicenseBundle(rootInput) {
     files: manifest.files.length,
     packages: manifest.productionPackages,
     nativeEngines: manifest.nativeEngines,
+    nativeHelpers: manifest.nativeHelpers,
     fontFamilies: manifest.fontFamilies,
     bundledRuntimes: manifest.bundledRuntimes,
     bundledPnpmPackages: manifest.bundledPnpmPackages,
@@ -173,10 +175,7 @@ async function main() {
   if (!root) throw new Error('usage: node scripts/verify-packaged-licenses.mjs <licenses-dir>');
   const result = await verifyLicenseBundle(root);
   console.log(
-    `\u2713 verified ${result.files} legal files in ${result.root} ` +
-      `(${result.packages} packages, ${result.nativeEngines} native engines, ` +
-      `${result.fontFamilies} font families, ${result.bundledRuntimes} bundled runtimes, ` +
-      `${result.bundledPnpmPackages} pnpm runtime packages).`,
+    `\u2713 verified ${result.files} legal files in ${result.root} (${result.packages} packages, ${result.nativeEngines} native engines, ${result.nativeHelpers} native helper${result.nativeHelpers === 1 ? '' : 's'} with third-party notices, ${result.fontFamilies} font families, ${result.bundledRuntimes} bundled runtimes, ${result.bundledPnpmPackages} pnpm runtime packages).`,
   );
 }
 

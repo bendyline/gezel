@@ -57,6 +57,15 @@ export function capacityDenialLogLine(key: string, reason: string): string {
  */
 const MEASURED_VRAM_TOLERANCE_BYTES = 1024 ** 3;
 
+/**
+ * A native child can be gone before a discrete-GPU driver publishes the
+ * released allocation as free again. Only pay this bounded wait after this
+ * pool actually evicted one of its own engines; a genuinely foreign tenant
+ * must still fail fast instead of adding latency to every denial.
+ */
+const MEASURED_VRAM_RECLAIM_POLL_MS = 1_000;
+const MEASURED_VRAM_RECLAIM_WAIT_MS = 5_000;
+
 function gb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
@@ -448,7 +457,7 @@ export class ProviderPool {
         panicDecision.reason ?? 'Local models are paused after a recent GPU kernel panic.',
       );
     }
-    await this.makeRoom(residentBytes, opts.drainWaitMs);
+    const evictedOwnEngine = await this.makeRoom(residentBytes, opts.drainWaitMs);
     const key = makeEngineKey(provider, modelId, replicaIdx);
     // Pre-flight: makeRoom evicts what it can, but on a memory-tight
     // machine a model larger than the whole budget can never fit (no
@@ -470,7 +479,7 @@ export class ProviderPool {
         }),
       );
     }
-    const measured = await this.measuredVramDenial(modelId, residentBytes);
+    const measured = await this.measuredVramDenial(modelId, residentBytes, evictedOwnEngine);
     if (measured) {
       log.error(capacityDenialLogLine(key, measured.reason));
       throw new CapacityDeniedError(measured.message);
@@ -684,29 +693,72 @@ export class ProviderPool {
   private async measuredVramDenial(
     modelId: string,
     residentBytes: number,
+    waitForOwnedReclaim: boolean,
   ): Promise<{ reason: string; message: string } | null> {
-    if (!this.vramHeadroom) return null;
+    const vramHeadroom = this.vramHeadroom;
+    if (!vramHeadroom) return null;
     const committed = this.broker.committed();
     if (!committed.enforced || committed.pools.kind !== 'discrete-gpu') return null;
-    const reading = await this.vramHeadroom().catch((err) => {
-      log.debug(`vram headroom probe failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    });
-    const freeBytes = reading?.freeBytes;
-    if (typeof freeBytes !== 'number' || !Number.isFinite(freeBytes)) return null;
     const required = Math.min(residentBytes, committed.pools.fastBytes);
     if (required <= 0) return null;
+
+    const probe = async () =>
+      await vramHeadroom().catch((err) => {
+        log.debug(
+          `vram headroom probe failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      });
+    let reading = await probe();
+    let freeBytes = reading?.freeBytes;
+    if (typeof freeBytes !== 'number' || !Number.isFinite(freeBytes)) return null;
     if (freeBytes + MEASURED_VRAM_TOLERANCE_BYTES >= required) return null;
+
+    if (waitForOwnedReclaim) {
+      const attempts = Math.ceil(MEASURED_VRAM_RECLAIM_WAIT_MS / MEASURED_VRAM_RECLAIM_POLL_MS);
+      log.info(
+        `graphics memory still reports ${gb(freeBytes)} free after an owned engine eviction; ` +
+          `waiting up to ${MEASURED_VRAM_RECLAIM_WAIT_MS / 1_000}s for driver reclamation`,
+      );
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        await this.sleep(MEASURED_VRAM_RECLAIM_POLL_MS);
+        reading = await probe();
+        freeBytes = reading?.freeBytes;
+        // Preserve the guard's fail-open behavior when the device probe stops
+        // producing a usable reading during the reclaim window.
+        if (typeof freeBytes !== 'number' || !Number.isFinite(freeBytes)) return null;
+        if (freeBytes + MEASURED_VRAM_TOLERANCE_BYTES >= required) {
+          log.info(
+            `graphics memory reclaimed after ${attempt * MEASURED_VRAM_RECLAIM_POLL_MS}ms ` +
+              `(${gb(freeBytes)} free)`,
+          );
+          return null;
+        }
+      }
+    }
+
     const total = reading?.totalBytes;
     const reason = measuredVramDenialReason(required, freeBytes);
-    const message = [
+    const capacity = [
       `Not enough graphics memory to load ${modelId} (about ${gb(required)} on the card). `,
       `The graphics card has ${gb(freeBytes)} free`,
       typeof total === 'number' && Number.isFinite(total) ? ` of ${gb(total)}` : '',
-      '. Gezel can only unload its own models, and it has already released what it could, ',
-      'so something else on this machine is holding that memory — another program using the ',
-      'graphics card, or a second copy of gezel. Close it and try again.',
+      '. ',
     ].join('');
+    const message = waitForOwnedReclaim
+      ? [
+          capacity,
+          `Gezel unloaded its previous model and waited ${MEASURED_VRAM_RECLAIM_WAIT_MS / 1_000} seconds, `,
+          'but the graphics driver has not made enough memory available yet. Wait a few seconds ',
+          'and try again. If this keeps happening, another program or a second Gezel engine may ',
+          'also be using the graphics card.',
+        ].join('')
+      : [
+          capacity,
+          'Gezel has no other idle model in this engine left to unload, so another program, a ',
+          'second Gezel engine, or the graphics driver may be holding that memory. Close the other ',
+          'graphics-card workload, or wait a few seconds and try again.',
+        ].join('');
     return { reason, message };
   }
 
@@ -764,13 +816,17 @@ export class ProviderPool {
    * of paying each one serially before the new model can spawn. The
    * busy path stays serial to preserve the bounded-drain semantics.
    */
-  private async makeRoom(needed: number, drainWaitMs?: number): Promise<void> {
+  private async makeRoom(needed: number, drainWaitMs?: number): Promise<boolean> {
+    let evictedOwnEngine = false;
     while (!this.broker.canReserve(needed) && this.entries.size > 0) {
       const idleBatch = this.idleVictimsFor(needed);
       if (idleBatch.length > 0) {
-        await Promise.all(
-          idleBatch.map((k) =>
-            this.evict(k).catch((err) => {
+        const evicted = await Promise.all(
+          idleBatch.map(async (k) => {
+            try {
+              await this.evict(k);
+              return true;
+            } catch (err) {
               // Idle evictions shouldn't throw (no drain wait), but a
               // shutdown() rejection must not abort the sibling evicts
               // or the whole makeRoom — log and let the loop re-check.
@@ -779,9 +835,11 @@ export class ProviderPool {
                   err instanceof Error ? err.message : String(err)
                 }`,
               );
-            }),
-          ),
+              return false;
+            }
+          }),
         );
+        evictedOwnEngine ||= evicted.some(Boolean);
         continue;
       }
       // No idle candidates — evict a single busy/draining victim. This
@@ -796,7 +854,9 @@ export class ProviderPool {
         continue;
       }
       await this.evict(victim, drainWaitMs === undefined ? undefined : { drainWaitMs });
+      evictedOwnEngine = true;
     }
+    return evictedOwnEngine;
   }
 
   /**
