@@ -4152,20 +4152,37 @@ export class ChatManager {
         }
       }
     }
+    const dispatchStep = taskRecord?.craftbook.steps.find((step) => step.id === dispatchStepId);
+    const explicitOutputMedium = dispatchStep?.toolPolicy?.outputMedium;
+    const additionalOutputMedia = dispatchStep?.toolPolicy?.additionalOutputMedia ?? [];
+    const secondaryClause =
+      additionalOutputMedia.length > 0
+        ? ` The procedure also authorizes secondary output in: ${additionalOutputMedia.join(', ')}; those writes do not substitute for the primary result.`
+        : '';
+    const progressClause =
+      explicitOutputMedium === 'workspace'
+        ? ` Persist the primary result to the workspace path named by the procedure.${secondaryClause}`
+        : explicitOutputMedium === 'artifact'
+          ? ` Persist the primary result to the artifacts-drawer path named by the procedure.${secondaryClause}`
+          : explicitOutputMedium === 'task-note'
+            ? ` Persist the primary result with \`write_task_note\`.${secondaryClause}`
+            : explicitOutputMedium === 'none'
+              ? ' This step has no persisted output; inspect or route as instructed without creating a file, artifact, or task note.'
+              : ' Append focused notes with `write_task_note` as you go.';
     const seed =
       args.kind === 'retry'
         ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork} Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause} Call \`advance_task_step\` when the step is done.`
           : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
                     : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session

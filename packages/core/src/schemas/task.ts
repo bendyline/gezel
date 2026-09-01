@@ -12,6 +12,7 @@ import {
   CraftbookSpawnSchema,
   CraftbookStepInputSchema,
   CraftbookStepSchema,
+  CraftbookStepToolPolicySchema,
   CraftbookToolsetNeedSchema,
   ModelTierSchema,
   NewCraftbookStepSchema,
@@ -788,6 +789,8 @@ export const UpdateTaskStepRequestSchema = z.object({
   suggestedRole: z.string().nullable().optional(),
   /** Per-step indexed-context policy. `null` restores inherited behavior. */
   retrieval: RetrievalPolicySchema.nullable().optional(),
+  /** Per-step subtractive tool/output policy. `null` restores inherited behavior. */
+  toolPolicy: CraftbookStepToolPolicySchema.nullable().optional(),
   assignee: TaskAssigneeSchema.nullable().optional(),
   suggestedGezelId: z.string().nullable().optional(),
   /** Step automation hooks (single ref or ordered list). `null` detaches. */

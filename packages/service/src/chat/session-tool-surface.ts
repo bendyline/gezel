@@ -11,6 +11,10 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
+import {
+  builtinToolsetIdsDisabledForStep,
+  outputMediaForStep,
+} from '../craftbook/step-toolsets.js';
 import type { LocalModelTier } from './local-model-tier.js';
 import { promptMandatedTools } from './prompt-tool-contract.js';
 import {
@@ -24,6 +28,7 @@ import {
   constrainAllowlistForImmediateNamedTool,
   constrainAllowlistForProjectRetrievalFirst,
   constrainAllowlistForScenarioFileRepair,
+  expandToolsetGroups,
   isRoleDelegationTool,
   shouldConstrainToImmediateFileWrite,
 } from './role-tool-filter.js';
@@ -69,7 +74,8 @@ export type SessionToolClampKind =
   | 'direct-file-work'
   | 'scenario-file-repair'
   | 'existing-source-edit'
-  | 'gate-repair';
+  | 'gate-repair'
+  | 'step-policy';
 
 export interface ResolveSessionToolSurfaceOptions {
   surface: SessionToolSurface;
@@ -137,6 +143,8 @@ export interface ResolveSessionToolSurfaceOptions {
     | 'gateAttemptHistory'
     | 'suggestedRole'
     | 'prompt'
+    | 'consumes'
+    | 'toolPolicy'
   >;
   /**
    * Deterministic tool invoked by a fixed-function session. Keep it through
@@ -153,6 +161,63 @@ export interface ResolveSessionToolSurfaceOptions {
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
   projectOrchestrationConstrained: boolean;
+}
+
+const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
+
+/** Materialize the primary built-in roster when an unrestricted surface must be subtracted. */
+function allModelFacingBuiltinTools(): Set<string> {
+  const out = new Set<string>();
+  for (const [name, entry] of Object.entries(TOOL_REGISTRY)) {
+    if (entry.modelFacing) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * Apply the active step's authored JSON policy as a hard, subtractive
+ * ceiling. This runs after role/kit grants so a prompt mention, planner
+ * exception, tier floor, or explicit gezel toolset selection cannot revive
+ * a tool the craftbook declared irrelevant for this phase.
+ */
+export function applyActiveStepToolPolicy(
+  allowlist: Set<string> | null,
+  step: ResolveSessionToolSurfaceOptions['activeStep'],
+): Set<string> | null {
+  const disabledGroups = builtinToolsetIdsDisabledForStep(step);
+  const explicitMedium = step?.toolPolicy?.outputMedium;
+  if (disabledGroups.size === 0 && !explicitMedium) return allowlist;
+
+  const next = allowlist ? new Set(allowlist) : allModelFacingBuiltinTools();
+  for (const name of expandToolsetGroups([...disabledGroups])) next.delete(name);
+
+  if (explicitMedium) {
+    const allowedMedia = outputMediaForStep(step);
+    const workspaceWriters = expandToolsetGroups(['workspace-fs-write']);
+    const stripWorkspace = (): void => {
+      for (const name of workspaceWriters) next.delete(name);
+      // `derive_file` is grouped with execution but persists into workspace.
+      next.delete('derive_file');
+    };
+    const stripArtifact = (): void => {
+      next.delete('write_artifact');
+    };
+    const stripTaskNote = (): void => {
+      next.delete('write_task_note');
+    };
+    for (const name of SHARED_DOCUMENT_MUTATION_TOOLS) next.delete(name);
+
+    if (!allowedMedia.has('workspace')) stripWorkspace();
+    if (!allowedMedia.has('artifact')) stripArtifact();
+    if (!allowedMedia.has('task-note')) stripTaskNote();
+  }
+
+  // A subtractive policy may slim the task group, but it must not make the
+  // active workflow impossible to move or impossible to ask for a decision.
+  for (const name of ['advance_task_step', 'set_task_status', 'ask_user_question']) {
+    if (allowlist === null || allowlist.has(name)) next.add(name);
+  }
+  return next;
 }
 
 let platformUnavailableToolNames: ReadonlySet<string> | undefined;
@@ -366,6 +431,10 @@ export async function resolveSessionToolSurface(
     rawAllowlist = new Set([...rawAllowlist].filter((name) => keep.has(name)));
   }
 
+  const allowlistBeforeStepPolicy = rawAllowlist;
+  rawAllowlist = applyActiveStepToolPolicy(rawAllowlist, opts.activeStep);
+  if (rawAllowlist !== allowlistBeforeStepPolicy) opts.onClamp?.('step-policy');
+
   let allowlist = capToolAllowlistForTier({
     allowlist: rawAllowlist,
     tier: opts.tier,
@@ -522,7 +591,7 @@ export async function resolveSessionToolSurface(
     stepGateRepairActive(opts.activeStep, opts.session)
   ) {
     const repairKeep = new Set<string>([
-      ...gateRepairToolsForKind(kit?.kind ?? null),
+      ...gateRepairToolsForKind(kit?.kind ?? null, outputMediaForStep(opts.activeStep)),
       ...STEP_COMPLETION_TOOLS,
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
@@ -566,6 +635,10 @@ export async function resolveSessionToolSurface(
     allowlist = new Set(allowlist);
     allowlist.add(opts.requiredTool);
   }
+
+  // Fixed-function grants and future post-cap floors must remain subordinate
+  // to the authored step ceiling.
+  allowlist = applyActiveStepToolPolicy(allowlist, opts.activeStep);
 
   return { allowlist, projectOrchestrationConstrained };
 }

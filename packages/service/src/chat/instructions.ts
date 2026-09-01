@@ -1226,6 +1226,28 @@ ${artifactsLine}
       if (step.prompt && step.prompt.trim().length > 0) {
         lines.push(`#### Step procedure\n\n${step.prompt.trim()}`);
       }
+      const outputMedium = step.toolPolicy?.outputMedium;
+      if (outputMedium) {
+        const target = step.advanceWhen?.file ? ` \`${step.advanceWhen.file}\`` : '';
+        const additionalMedia = step.toolPolicy?.additionalOutputMedia ?? [];
+        const additionalContract =
+          additionalMedia.length > 0
+            ? ` The procedure also authorizes these secondary write surfaces: ${additionalMedia
+                .map((medium) => `**${medium}**`)
+                .join(', ')}. They do not substitute for the primary result.`
+            : '';
+        const contract =
+          outputMedium === 'workspace'
+            ? `Write the primary result${target} in the **project workspace**.`
+            : outputMedium === 'artifact'
+              ? `Write the primary result${target} in the **artifacts drawer** with \`write_artifact\`.`
+              : outputMedium === 'task-note'
+                ? 'Write the primary result with `write_task_note`.'
+                : 'This step has no persisted output. Do not create a workspace file, artifact, shared document, or task note.';
+        lines.push(
+          `#### Output contract\n\n${contract}${additionalContract} Any write surface not listed here is intentionally unavailable; do not substitute one drawer for another.`,
+        );
+      }
       if (step.consumes && step.consumes.length > 0) {
         const inputLines = step.consumes.map((input) => {
           const tool = input.artifact ? 'read_artifact' : 'read_file';

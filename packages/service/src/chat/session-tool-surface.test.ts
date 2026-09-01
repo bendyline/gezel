@@ -459,10 +459,10 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(lockedStep.allowlist?.has('replace_in_file')).toBe(false);
   });
 
-  it('a writes-off step session keeps the artifact drawer as its write channel', async () => {
-    // Wild-caught (molen dependency-audit night shift): kit narrowing
-    // stripped the drawer tools from a Developer on a writes-off project,
-    // leaving zero write channels while the gate demanded a deliverable.
+  it('a writes-off workspace step does not offer a wrong-drawer fallback', async () => {
+    // A workspace gate cannot be satisfied by writing an artifact. The task
+    // dispatcher diagnoses this as unsatisfiable; the chat surface must not
+    // tempt the model to fabricate progress in the wrong drawer.
     const clamps: string[] = [];
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -490,14 +490,12 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_file')).toBe(false);
     expect(allowlist!.has('replace_in_file')).toBe(false);
-    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(false);
     expect(allowlist!.has('read_artifact')).toBe(true);
     expect(allowlist!.has('list_artifacts')).toBe(true);
     expect(allowlist!.has('write_task_note')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
-    // The repair clamp applies (write_artifact satisfies the starvation
-    // guard) instead of silently skipping and leaving the wide surface.
-    expect(clamps).toContain('gate-repair');
+    expect(clamps).not.toContain('gate-repair');
   });
 
   it('does NOT grant step tools to a session with no active step', async () => {
@@ -509,6 +507,92 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_task_note')).toBe(false);
     expect(allowlist!.has('advance_task_step')).toBe(false);
+  });
+
+  it.each([
+    {
+      medium: 'workspace' as const,
+      step: { advanceWhen: { file: 'report.md' } },
+      kept: 'write_file',
+      removed: ['write_artifact'],
+    },
+    {
+      medium: 'artifact' as const,
+      step: { advanceWhen: { file: 'reports/audit.md', artifact: true } },
+      kept: 'write_artifact',
+      removed: ['write_file', 'replace_in_file', 'derive_file'],
+    },
+    {
+      medium: 'task-note' as const,
+      step: {},
+      kept: 'write_task_note',
+      removed: ['write_file', 'write_artifact', 'derive_file'],
+    },
+  ])('toolPolicy outputMedium=$medium exposes one result writer', async (row) => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/9', stepId: 'work' }),
+      tier: 'large',
+      activeStep: {
+        ...row.step,
+        toolPolicy: { outputMedium: row.medium },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has(row.kept)).toBe(true);
+    for (const name of row.removed) expect(allowlist!.has(name)).toBe(false);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps an explicitly declared secondary workspace output beside a primary artifact', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/9', stepId: 'fix' }),
+      tier: 'large',
+      activeStep: {
+        advanceWhen: { file: 'reports/fix-notes.md', artifact: true },
+        toolPolicy: {
+          outputMedium: 'artifact',
+          additionalOutputMedia: ['workspace'],
+        },
+      },
+    });
+
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(false);
+  });
+
+  it('structured built-in disallows remain a hard ceiling over a gezel override', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      toolsetsGroupOverride: [
+        'workspace-fs-read',
+        'workspace-fs-write',
+        'code-execution',
+        'git',
+        'tasks',
+      ],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'research' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          disallowBuiltinToolsets: ['code-execution', 'git'],
+          outputMedium: 'task-note',
+        },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('run_nodejs_script')).toBe(false);
+    expect(allowlist!.has('run_git')).toBe(false);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
   it('load-bearing floor keeps step tools alive even under the tiny cap', async () => {
@@ -1074,7 +1158,7 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_file')).toBe(false);
-    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(false);
     expect(allowlist!.has('read_file')).toBe(true);
     expect(allowlist!.has('read_files')).toBe(true);
     expect(allowlist!.has('list_dir')).toBe(true);

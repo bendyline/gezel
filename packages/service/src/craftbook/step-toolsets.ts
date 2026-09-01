@@ -1,4 +1,8 @@
-import type { CraftbookToolsetNeed, TaskCraftbookStep } from '@bendyline/gezel';
+import type {
+  CraftbookStepOutputMedium,
+  CraftbookToolsetNeed,
+  TaskCraftbookStep,
+} from '@bendyline/gezel';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -20,14 +24,15 @@ function escapeRegExp(value: string): string {
  * fail open and retain their existing behavior.
  */
 export function toolsetIdsExplicitlyDisabledForStep(
-  step: Pick<TaskCraftbookStep, 'prompt' | 'description'> | undefined,
+  step: Pick<TaskCraftbookStep, 'prompt' | 'description' | 'toolPolicy'> | undefined,
   toolsets: readonly CraftbookToolsetNeed[] | undefined,
 ): ReadonlySet<string> {
-  if (!step || !toolsets?.length) return new Set();
+  if (!step) return new Set();
+  const disabled = new Set(step.toolPolicy?.disallowToolsets ?? []);
+  if (!toolsets?.length) return disabled;
   const instructions = [step.description, step.prompt].filter(Boolean).join('\n');
-  if (!instructions) return new Set();
+  if (!instructions) return disabled;
 
-  const disabled = new Set<string>();
   for (const need of toolsets) {
     const id = need.toolsetId.trim();
     if (!id) continue;
@@ -41,4 +46,42 @@ export function toolsetIdsExplicitlyDisabledForStep(
     if (explicitDenial.test(instructions)) disabled.add(id);
   }
   return disabled;
+}
+
+/** Stable built-in group ids explicitly subtracted by the active JSON step. */
+export function builtinToolsetIdsDisabledForStep(
+  step: Pick<TaskCraftbookStep, 'toolPolicy'> | undefined,
+): ReadonlySet<string> {
+  return new Set(step?.toolPolicy?.disallowBuiltinToolsets ?? []);
+}
+
+/**
+ * Resolve the step's result surface. Explicit JSON wins. Legacy/file-gated
+ * steps get the same unambiguous behavior immediately, before their catalog
+ * entry has been republished with `toolPolicy.outputMedium`.
+ */
+export function outputMediumForStep(
+  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate'> | undefined,
+): CraftbookStepOutputMedium | null {
+  if (!step) return null;
+  if (step.toolPolicy?.outputMedium) return step.toolPolicy.outputMedium;
+  if (step.advanceWhen?.file) return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+  const gate = step.gate;
+  const checks = gate && 'checks' in gate && Array.isArray(gate.checks) ? gate.checks : [];
+  const fileCheck = checks.find(
+    (check): check is (typeof checks)[number] & { file: string; artifact?: boolean } =>
+      'file' in check && typeof check.file === 'string' && check.file.length > 0,
+  );
+  if (fileCheck) return fileCheck.artifact ? 'artifact' : 'workspace';
+  return null;
+}
+
+/** Primary plus explicitly-authorized secondary result surfaces. */
+export function outputMediaForStep(
+  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate'> | undefined,
+): ReadonlySet<CraftbookStepOutputMedium> {
+  const primary = outputMediumForStep(step);
+  if (!primary) return new Set();
+  if (primary === 'none') return new Set(['none']);
+  return new Set([primary, ...(step?.toolPolicy?.additionalOutputMedia ?? [])]);
 }

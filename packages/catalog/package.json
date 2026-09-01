@@ -45,6 +45,7 @@
     "build-index": "node scripts/run-gilde-build-index.mjs",
     "lint-manifests": "tsx src/chat-model-manifest-lint.ts",
     "generate-craftbooks": "tsx scripts/generate-craftbooks.ts",
+    "migrate-step-policies": "tsx scripts/migrate-craftbook-step-policies.ts",
     "pin-revisions": "tsx scripts/pin-revisions.ts",
     "export-gilde-schemas": "tsx scripts/export-gilde-schemas.ts"
   },

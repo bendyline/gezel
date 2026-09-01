@@ -32,6 +32,7 @@ import {
   parseCraftbookTestSpec,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
+import { applyDefaultCraftbookStepPolicies } from '../src/craftbook-step-policy.js';
 import {
   type TacticalBook,
   TacticalBookSchema,
@@ -141,7 +142,7 @@ async function main(): Promise<void> {
   let written = 0;
   for (const release of books) {
     const { book } = compiled.get(release.id)!;
-    const doc = tacticalCraftbookDoc(book, release);
+    const doc = applyDefaultCraftbookStepPolicies(tacticalCraftbookDoc(book, release));
     const runtime = craftbookFromDoc(doc, { now: release.releasedAt });
     if (!runtime.ok) {
       throw new Error(
