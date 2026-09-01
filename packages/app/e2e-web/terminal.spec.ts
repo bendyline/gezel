@@ -132,7 +132,7 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   await expect(toolbar).toBeVisible();
   await expect(page.getByTestId('chat-send')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Bold/ })).toBeHidden();
-  const insert = page.getByRole('button', { name: 'Insert' });
+  const insert = page.getByRole('button', { name: 'Insert', exact: true });
   await expect(insert).toBeVisible();
 
   await insert.click();
