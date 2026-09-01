@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-client",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Gezel typed HTTP + SSE client and runtime discovery.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "http-client", "sdk"],
