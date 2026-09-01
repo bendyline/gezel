@@ -347,7 +347,8 @@ export function BackgroundServiceStatus() {
 export function UpdateStatus() {
   const state = useUpdateState();
   const platform = window.__GEZEL__?.platform;
-  const notice = state?.kind === 'error' ? updateNotice(state, platform) : null;
+  const notice =
+    state?.kind === 'error' || state?.kind === 'available' ? updateNotice(state, platform) : null;
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 

@@ -161,6 +161,26 @@
   margin-top: 0.4rem;
 }
 
+.app-update-release-link {
+  width: fit-content;
+  padding: 0.4rem 0.75rem;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-update-release-link:hover {
+  filter: brightness(1.06);
+}
+
+.app-update-release-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .app-fallback-banner details {
   margin-top: 0.15rem;
   font-size: 0.78rem;

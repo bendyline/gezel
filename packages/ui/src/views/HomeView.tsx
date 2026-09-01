@@ -9,6 +9,7 @@ import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
+import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
@@ -513,13 +514,30 @@ export function HomeView({
  * explained in Settings → About. See system-notices.ts for why.
  *
  * On macOS "Install" opens a verified PKG so Installer.app can authenticate;
- * elsewhere it defers to electron-updater's own elevating handoff.
+ * Windows defers to its signed NSIS handoff. Linux only links to the release.
  */
 function UpdateBanner({ state, platform }: { state: UpdateState | null; platform?: string }) {
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
-  if (!state || state.kind !== 'ready') return null;
+  if (!state || (state.kind !== 'available' && state.kind !== 'ready')) return null;
+
+  if (state.kind === 'available') {
+    return (
+      <output className="app-fallback-banner" data-testid="update-banner">
+        <strong>Gezel {state.version} is available.</strong>
+        <span>
+          Linux updates are installed manually. Open the GitHub release, verify its SLSA build
+          provenance, then install the package for your distribution.
+        </span>
+        <div className="app-fallback-banner-actions">
+          <a className="app-update-release-link" href={releaseUrl(state.version)}>
+            Open release and verification steps
+          </a>
+        </div>
+      </output>
+    );
+  }
 
   return (
     <output className="app-fallback-banner" data-testid="update-banner">

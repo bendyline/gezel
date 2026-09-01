@@ -477,6 +477,31 @@ describe('SettingsView', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
       await waitFor(() => expect(install).toHaveBeenCalledOnce());
     });
+
+    it('offers only the release page for a Linux update', async () => {
+      const install = vi.fn().mockResolvedValue({ ok: true });
+      window.__GEZEL__ = {
+        ...window.__GEZEL__,
+        platform: 'linux',
+        update: {
+          state: vi.fn().mockResolvedValue({ kind: 'available', version: '1.26224.48' }),
+          install,
+          onStateChanged: vi.fn(),
+        },
+      } as never;
+
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+
+      const available = await screen.findByTestId('settings-notice-update-available');
+      expect(available).toHaveTextContent('Linux updates are notification-only');
+      expect(available).toHaveTextContent('verify its SLSA build provenance');
+      expect(screen.queryByRole('button', { name: /install/i })).not.toBeInTheDocument();
+      expect(install).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('link', { name: /open release and verification steps/i }),
+      ).toHaveAttribute('href', 'https://github.com/bendyline/gezel/releases/tag/v1.26224.48');
+    });
   });
 
   it('shows all local engine tabs with Mac-specific labels by default', async () => {

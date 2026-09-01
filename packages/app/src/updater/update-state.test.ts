@@ -1,11 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appUpdateDeliveryPolicy,
   downloadingUpdateState,
   shouldPublishDownloadState,
   updateErrorStage,
 } from './update-state.js';
 
 describe('updater renderer state', () => {
+  it('keeps Linux notification-only and denies every automatic delivery path', () => {
+    expect(appUpdateDeliveryPolicy('linux')).toEqual({
+      initializeElectronUpdater: false,
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      installation: 'manual',
+    });
+  });
+
+  it('preserves the signed Windows and verified macOS delivery paths', () => {
+    expect(appUpdateDeliveryPolicy('win32')).toMatchObject({
+      initializeElectronUpdater: true,
+      autoDownload: true,
+      autoInstallOnAppQuit: true,
+      installation: 'electron-updater',
+    });
+    expect(appUpdateDeliveryPolicy('darwin')).toMatchObject({
+      initializeElectronUpdater: true,
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      installation: 'verified-package',
+    });
+  });
+
+  it('fails closed on an unsupported platform', () => {
+    expect(appUpdateDeliveryPolicy('freebsd')).toEqual(appUpdateDeliveryPolicy('linux'));
+  });
+
   it('rounds and clamps download progress into a compact IPC snapshot', () => {
     expect(
       downloadingUpdateState('1.2.3', {

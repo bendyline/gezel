@@ -116,7 +116,8 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   // App updates. `state` is the pull for a freshly-mounted renderer;
   // `onStateChanged` is the push for transitions while it is open. `install`
   // opens the verified installer on macOS (Installer.app raises the admin
-  // prompt) and defers to electron-updater elsewhere.
+  // prompt) and defers to the signed NSIS updater on Windows. Linux update
+  // states are notification-only and never invoke `install`.
   update: {
     state: () => ipcRenderer.invoke('gezel:update:state'),
     install: () => ipcRenderer.invoke('gezel:update:install'),

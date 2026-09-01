@@ -90,6 +90,86 @@ describe('Store session CRUD', () => {
     });
   });
 
+  it('recovers a legacy craftbook entry parent from its persisted start card', async () => {
+    await store.createGezel({ name: 'Boz', role: 'Researcher' });
+    await store.createGezel({ name: 'Cai', role: 'Planner' });
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-meester',
+        messages: [
+          {
+            role: 'user',
+            content: 'Create a PowerPoint about the American Revolution.',
+            at: '2026-04-14T10:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: 'The presentation task is underway.',
+            at: '2026-04-14T10:00:05Z',
+            toolCalls: [
+              {
+                name: 'invoke_craftbook',
+                durationMs: 42,
+                success: true,
+                card: {
+                  kind: 'craftbook-start',
+                  craftbookId: 'powerpoint-deck',
+                  craftbookName: 'PowerPoint from Content',
+                  taskRef: 'default/10',
+                  projectId: 'default',
+                  status: 'active',
+                  activeStepId: 'research',
+                  steps: [
+                    { id: 'research', name: 'Acquire and verify sources', status: 'active' },
+                    { id: 'outline', name: 'Lock the slide outline', status: 'pending' },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-research',
+        gezelId: 'boz',
+        taskRef: 'default/10',
+        stepId: 'research',
+        createdAt: '2026-04-14T10:00:01Z',
+        lastActivityAt: '2026-04-14T10:01:00Z',
+        messages: [{ role: 'user', content: 'Acquire the sources.', at: '2026-04-14T10:00:01Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-outline',
+        gezelId: 'cai',
+        taskRef: 'default/10',
+        stepId: 'outline',
+        createdAt: '2026-04-14T10:02:00Z',
+        lastActivityAt: '2026-04-14T10:02:00Z',
+        messages: [{ role: 'user', content: 'Lock the outline.', at: '2026-04-14T10:02:00Z' }],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-research')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-meester',
+      gezelId: 'ada',
+      kind: 'task-entry',
+    });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-outline')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-research',
+      gezelId: 'boz',
+      kind: 'task-handoff',
+    });
+  });
+
   it('getSession returns null for a missing id', async () => {
     expect(await store.getSession('ada', 'missing')).toBeNull();
   });

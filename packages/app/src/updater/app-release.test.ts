@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   appReleaseFeedConfiguration,
   discoverLatestAppRelease,
+  isNewerAppVersion,
   latestPublishedAppRelease,
 } from './app-release.js';
 
@@ -77,5 +78,20 @@ describe('app release feed', () => {
       url: 'https://github.com/bendyline/gezel/releases/download/v1.2.3/',
       useMultipleRangeRequest: false,
     });
+  });
+});
+
+describe('app release version comparison', () => {
+  it('detects only a strictly newer release', () => {
+    expect(isNewerAppVersion('1.26224.49', '1.26224.48')).toBe(true);
+    expect(isNewerAppVersion('1.26225.0', '1.26224.99')).toBe(true);
+    expect(isNewerAppVersion('2.0.0', '1.99999.999')).toBe(true);
+    expect(isNewerAppVersion('1.26224.48', '1.26224.48')).toBe(false);
+    expect(isNewerAppVersion('1.26224.47', '1.26224.48')).toBe(false);
+  });
+
+  it('fails closed for non-release versions', () => {
+    expect(() => isNewerAppVersion('1.2.3-beta.1', '1.2.2')).toThrow(/strict x\.y\.z/);
+    expect(() => isNewerAppVersion('1.2.3', 'dev')).toThrow(/strict x\.y\.z/);
   });
 });

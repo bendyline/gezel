@@ -5633,9 +5633,41 @@ export class Store {
       }
     }
 
+    // Older task entry sessions predate `task.launchSessionId`, but their
+    // launcher often still carries the durable `craftbook-start` tool card.
+    // Index those receipts by task ref before resolving each child. Prefer
+    // the original invocation over a later idempotent "reused" receipt, then
+    // the earliest card when malformed history contains more than one start.
+    const legacyTaskLaunchers = new Map<
+      string,
+      { session: ChatSession; at: string; reused: boolean }
+    >();
+    for (const candidate of sessions) {
+      for (const message of candidate.messages) {
+        for (const call of message.toolCalls ?? []) {
+          if (call.card?.kind !== 'craftbook-start') continue;
+          const taskRef = call.card.taskRef;
+          const next = {
+            session: candidate,
+            at: message.at,
+            reused: call.card.reused === true,
+          };
+          const current = legacyTaskLaunchers.get(taskRef);
+          if (
+            !current ||
+            (current.reused && !next.reused) ||
+            (current.reused === next.reused && next.at < current.at)
+          ) {
+            legacyTaskLaunchers.set(taskRef, next);
+          }
+        }
+      }
+    }
+
     // Resolve lineage per session. New records carry their exact parent;
-    // older task sessions retain the previous best-effort handoff inference
-    // so existing history gains the nested presentation without a migration.
+    // older task sessions first follow a prior worker session (a handoff),
+    // then fall back to the launch receipt above for the entry worker. This
+    // recovers pre-lineage craftbook runs without rewriting user files.
     const parentOf = new Map<string, SessionParent>();
     for (const s of sessions) {
       if (s.parentSession) {
@@ -5657,6 +5689,15 @@ export class Store {
           gezelId: best.gezelId,
           sessionId: best.id,
           kind: 'task-handoff',
+        });
+        continue;
+      }
+      const launcher = legacyTaskLaunchers.get(s.taskRef)?.session;
+      if (launcher && launcher.id !== s.id) {
+        parentOf.set(s.id, {
+          gezelId: launcher.gezelId,
+          sessionId: launcher.id,
+          kind: 'task-entry',
         });
       }
     }

@@ -801,6 +801,17 @@ describe('Sidebar', () => {
       expect(ready).toHaveAttribute('data-tone', 'success');
     });
 
+    it('labels a Linux release as manual instead of ready to install', async () => {
+      const update = updateBridge({ kind: 'available', version: '1.26224.48' });
+      setShell({ platform: 'linux', update });
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      const available = await screen.findByTestId('sidebar-notice-update-available');
+      expect(available).toHaveTextContent('Update available — install manually');
+      expect(available.getAttribute('title')).toMatch(/notification-only/i);
+      expect(available).not.toHaveTextContent('quit to install');
+    });
+
     it('opens Settings → About when clicked', () => {
       setShell({ fallbackReason: 'down', fallbackCode: 'system-service-unhealthy' });
       const onOpenArea = vi.fn();

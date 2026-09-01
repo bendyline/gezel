@@ -25,6 +25,7 @@ export type SystemNoticeId =
   | 'service-unavailable'
   | 'update-checking'
   | 'update-up-to-date'
+  | 'update-available'
   | 'update-downloading'
   | 'update-ready'
   | 'update-download-failed'
@@ -204,6 +205,17 @@ export function updateNotice(state: UpdateState | null, platform?: string): Syst
     };
   }
 
+  if (state.kind === 'available') {
+    return {
+      id: 'update-available',
+      railLabel: 'Update available — install manually',
+      title: `Gezel ${state.version} is available.`,
+      body: 'Linux updates are notification-only because the .deb and .rpm packages are not yet signed through a distribution repository. Download the package from GitHub and verify its SLSA build provenance before installing it manually.',
+      link: { href: releaseUrl(state.version), label: 'Open release and verification steps' },
+      tone: 'success',
+    };
+  }
+
   if (state.kind === 'downloading') {
     const percent = state.percent === undefined ? '' : ` · ${state.percent}%`;
     return {
@@ -216,7 +228,7 @@ export function updateNotice(state: UpdateState | null, platform?: string): Syst
   }
 
   if (state.kind === 'ready') {
-    const automatic = platform !== 'darwin';
+    const automatic = platform === 'win32';
     return {
       id: 'update-ready',
       railLabel: automatic ? 'Update ready — quit to install' : 'Update ready to install',

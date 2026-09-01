@@ -55,6 +55,14 @@ function compareVersions(left: string, right: string): number {
   return 0;
 }
 
+/** Compare a discovered strict release version with this packaged app. */
+export function isNewerAppVersion(candidate: string, current: string): boolean {
+  if (!APP_TAG.test(`v${candidate}`) || !APP_TAG.test(`v${current}`)) {
+    throw new Error('Application update comparison requires strict x.y.z versions');
+  }
+  return compareVersions(candidate, current) > 0;
+}
+
 /** Select the greatest published stable app tag from an untrusted API body. */
 export function latestPublishedAppRelease(records: unknown): PublishedAppRelease | null {
   if (!Array.isArray(records)) {

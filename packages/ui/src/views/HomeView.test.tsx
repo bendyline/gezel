@@ -243,7 +243,7 @@ describe('HomeView', () => {
       expect(banner).toHaveTextContent('ask for an administrator password');
     });
 
-    it('tells Windows and Linux users that a complete quit applies the update', async () => {
+    it('tells Windows users that a complete quit applies the signed update', async () => {
       stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
       render(<HomeView platform="win32" />);
 
@@ -252,6 +252,22 @@ describe('HomeView', () => {
       expect(banner).toHaveTextContent('system tray');
       expect(banner).not.toHaveTextContent('administrator password');
       expect(screen.getByRole('button', { name: /install and restart/i })).toBeInTheDocument();
+    });
+
+    it('keeps Linux notification-only and links to the exact release', async () => {
+      const install = vi.fn().mockResolvedValue({ ok: true });
+      stubUpdateBridge({ kind: 'available', version: '1.26212.4' }, install);
+      render(<HomeView platform="linux" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel 1.26212.4 is available.');
+      expect(banner).toHaveTextContent('Linux updates are installed manually');
+      expect(banner).toHaveTextContent('verify its SLSA build provenance');
+      expect(screen.queryByRole('button', { name: /install/i })).not.toBeInTheDocument();
+      expect(install).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('link', { name: /open release and verification steps/i }),
+      ).toHaveAttribute('href', 'https://github.com/bendyline/gezel/releases/tag/v1.26212.4');
     });
 
     it('hands the install to the shell when asked', async () => {
