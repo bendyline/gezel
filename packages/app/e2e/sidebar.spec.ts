@@ -89,9 +89,10 @@ test('sidebar selection persists and document icons align with their group heade
       });
 
       // Assert the intended group, not merely that some group is active.
-      await expect(
-        page.locator('[data-group="projects"] > .app-sidebar-group-header'),
-      ).toHaveClass(/\bactive\b/, { timeout: 10_000 });
+      await expect(page.locator('[data-group="projects"] > .app-sidebar-group-header')).toHaveClass(
+        /\bactive\b/,
+        { timeout: 10_000 },
+      );
 
       // Selection persists to localStorage (UI-chrome state). Note: the
       // last view is restored on next boot from this key — we assert the
