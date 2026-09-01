@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-mcp",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Gezel MCP server — gives agents access to memory, workspace, artifacts, and tools.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "mcp", "model-context-protocol", "tools"],
