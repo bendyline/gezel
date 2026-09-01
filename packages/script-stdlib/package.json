@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-script-stdlib",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Standard gate-script library packed into the app. Plain defineScript sources resolved in place by the script runner (scope: 'standard'); read-only, trusted, versioned with the app.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "scripts", "stdlib"],
