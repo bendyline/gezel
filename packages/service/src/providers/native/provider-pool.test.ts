@@ -1006,15 +1006,86 @@ describe('measured accelerator headroom', () => {
     // check says yes. Only the device reading knows the card is full — this is
     // the second-daemon case, where a per-process broker is structurally blind.
     const broker = discreteBroker();
+    const sleep = vi.fn(async () => {});
     const pool = new ProviderPool({
       broker,
       builders: { mlx: mkBuilder(7 * GB) },
       vramHeadroom: async () => ({ freeBytes: 0.3 * GB, totalBytes: 12 * GB }),
+      sleep,
     });
     expect(broker.canReserve(7 * GB)).toBe(true);
     await expect(pool.ensure('mlx', 'big', 0, 7 * GB)).rejects.toThrow(
       /Not enough graphics memory to load big/,
     );
+    // Nothing owned by this pool was evicted, so a foreign tenant still
+    // produces an immediate denial rather than an unconditional 5s delay.
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('waits for the driver to publish VRAM reclaimed from an evicted model', async () => {
+    const broker = discreteBroker();
+    const made: FakeProvider[] = [];
+    const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {
+      const provider = new FakeProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return {
+        provider,
+        residentBytes: modelId === 'previous' ? 6 * GB : 7 * GB,
+      };
+    };
+    // Initial load sees an empty card. The model switch evicts `previous`, but
+    // two device samples still report its allocation before the third observes
+    // the release — the Windows/WDDM shape from the captured hand-off.
+    const readings = [12 * GB, 3 * GB, 3 * GB, 8 * GB];
+    const vramHeadroom = vi.fn(async () => ({
+      freeBytes: readings.shift() ?? 8 * GB,
+      totalBytes: 12 * GB,
+    }));
+    const sleep = vi.fn(async () => {});
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: builder },
+      vramHeadroom,
+      sleep,
+    });
+
+    await pool.ensure('mlx', 'previous', 0, 6 * GB);
+    await expect(pool.ensure('mlx', 'next', 0, 7 * GB)).resolves.toBeDefined();
+
+    expect(made[0]?.shutdownCalls).toBe(1);
+    expect(pool.has(makeEngineKey('mlx', 'previous', 0))).toBe(false);
+    expect(pool.has(makeEngineKey('mlx', 'next', 0))).toBe(true);
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenNthCalledWith(1, 1_000);
+    expect(vramHeadroom).toHaveBeenCalledTimes(4);
+  });
+
+  it('bounds the owned-model reclaim wait and reports the transient accurately', async () => {
+    const broker = discreteBroker();
+    const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => ({
+      provider: new FakeProvider(`${modelId}:${replicaIdx}`),
+      residentBytes: modelId === 'previous' ? 6 * GB : 7 * GB,
+    });
+    let firstProbe = true;
+    const sleep = vi.fn(async () => {});
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: builder },
+      vramHeadroom: async () => {
+        if (firstProbe) {
+          firstProbe = false;
+          return { freeBytes: 12 * GB, totalBytes: 12 * GB };
+        }
+        return { freeBytes: 3 * GB, totalBytes: 12 * GB };
+      },
+      sleep,
+    });
+
+    await pool.ensure('mlx', 'previous', 0, 6 * GB);
+    await expect(pool.ensure('mlx', 'next', 0, 7 * GB)).rejects.toThrow(
+      /unloaded its previous model and waited 5 seconds/,
+    );
+    expect(sleep).toHaveBeenCalledTimes(5);
   });
 
   it('keeps the denial in the shape the eval harness classifies as infra', () => {
