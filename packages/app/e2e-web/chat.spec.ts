@@ -135,7 +135,7 @@ test.describe('chat surface', () => {
     await expect(composer.getByRole('button', { name: /^Bold/ })).toBeHidden();
     await expect(composer.getByRole('button', { name: 'More actions' })).toBeHidden();
 
-    const insert = composer.getByRole('button', { name: 'Insert' });
+    const insert = composer.getByRole('button', { name: 'Insert', exact: true });
     await insert.click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
