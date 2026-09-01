@@ -6,6 +6,7 @@ import {
   isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
+  isAllowedRendererPermission,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
@@ -72,6 +73,118 @@ describe('Electron boundary policies', () => {
     expect(isAllowedMicrophoneCapture('notifications', `${origin}/`, origin, true, ['audio'])).toBe(
       false,
     );
+  });
+
+  it('allows only the renderer capabilities Gezel uses', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const trustedMainFrame = {
+      isTrustedWebContents: true,
+      requestingUrl: `${origin}/settings`,
+      allowedOrigin: origin,
+      isMainFrame: true,
+    } as const;
+
+    expect(
+      isAllowedRendererPermission({
+        ...trustedMainFrame,
+        permission: 'media',
+        mediaTypes: ['audio'],
+      }),
+    ).toBe(true);
+    expect(
+      isAllowedRendererPermission({
+        ...trustedMainFrame,
+        permission: 'clipboard-sanitized-write',
+      }),
+    ).toBe(true);
+
+    for (const permission of [
+      'clipboard-read',
+      'deprecated-sync-clipboard-read',
+      'geolocation',
+      'notifications',
+      'display-capture',
+      'fullscreen',
+      'hid',
+      'idle-detection',
+      'keyboardLock',
+      'mediaKeySystem',
+      'midi',
+      'midiSysex',
+      'openExternal',
+      'pointerLock',
+      'serial',
+      'speaker-selection',
+      'storage-access',
+      'top-level-storage-access',
+      'usb',
+      'window-management',
+      'fileSystem',
+      'unknown',
+      'future-electron-permission',
+    ]) {
+      expect(isAllowedRendererPermission({ ...trustedMainFrame, permission })).toBe(false);
+    }
+  });
+
+  it('denies allowlisted capabilities to preview subframes and untrusted renderers', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const previewUrl = `${origin}/preview/cap/workspace/default/site/index.html`;
+
+    for (const request of [
+      { permission: 'media', mediaTypes: ['audio'] },
+      { permission: 'clipboard-sanitized-write' },
+    ]) {
+      expect(
+        isAllowedRendererPermission({
+          isTrustedWebContents: true,
+          requestingUrl: previewUrl,
+          allowedOrigin: origin,
+          isMainFrame: false,
+          ...request,
+        }),
+      ).toBe(false);
+      expect(
+        isAllowedRendererPermission({
+          isTrustedWebContents: false,
+          requestingUrl: `${origin}/`,
+          allowedOrigin: origin,
+          isMainFrame: true,
+          ...request,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('denies allowlisted capabilities before connection and from lookalike origins', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const request = {
+      isTrustedWebContents: true,
+      permission: 'clipboard-sanitized-write',
+      isMainFrame: true,
+    } as const;
+
+    expect(
+      isAllowedRendererPermission({
+        ...request,
+        requestingUrl: `${origin}/`,
+        allowedOrigin: null,
+      }),
+    ).toBe(false);
+    expect(
+      isAllowedRendererPermission({
+        ...request,
+        requestingUrl: 'https://127.0.0.1.evil.test:4312/',
+        allowedOrigin: origin,
+      }),
+    ).toBe(false);
+    expect(
+      isAllowedRendererPermission({
+        ...request,
+        requestingUrl: 'not a URL',
+        allowedOrigin: origin,
+      }),
+    ).toBe(false);
   });
 
   it('allows only the daemon origin and the exact splash file', () => {

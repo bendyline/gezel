@@ -53,7 +53,6 @@ import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
-  isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
@@ -68,6 +67,7 @@ import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
+import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
@@ -608,41 +608,14 @@ async function createWindow(): Promise<void> {
   });
 
   // Electron otherwise approves renderer permission requests by default.
-  // Preserve its existing behavior for unrelated APIs, but bind microphone
-  // capture to this exact top-level daemon UI and reject camera/subframe
-  // requests. The main-frame clause keeps model-authored preview documents
-  // from borrowing the app's same-origin microphone permission.
+  // Deny by default and allow only the two capabilities the application UI
+  // uses: audio-only narration and sanitized clipboard writes. Both are bound
+  // to this exact WebContents, the current daemon origin, and its main frame;
+  // model-authored same-origin preview subframes therefore cannot borrow them.
   const rendererSession = contextMenuWebContents.session;
-  rendererSession.setPermissionCheckHandler(
-    (webContents, permission, requestingOrigin, details) => {
-      if (permission !== 'media') return true;
-      if (webContents !== contextMenuWebContents) return false;
-      return isAllowedMicrophoneCapture(
-        permission,
-        details.requestingUrl ?? requestingOrigin,
-        connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
-        details.isMainFrame,
-        details.mediaType ? [details.mediaType] : undefined,
-      );
-    },
+  installRendererPermissionPolicy(rendererSession, contextMenuWebContents, () =>
+    connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
   );
-  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (permission !== 'media') {
-      callback(true);
-      return;
-    }
-    const media = details as Electron.MediaAccessPermissionRequest;
-    callback(
-      webContents === contextMenuWebContents &&
-        isAllowedMicrophoneCapture(
-          permission,
-          media.requestingUrl,
-          connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
-          media.isMainFrame,
-          media.mediaTypes,
-        ),
-    );
-  });
 
   // Only ever hand a vetted scheme to the OS. `openExternal` will launch
   // handlers for file://, smb://, custom app schemes, javascript:, etc. —
