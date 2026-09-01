@@ -90,6 +90,19 @@ describe('ChatSessionSchema', () => {
     expect(session.source).toEqual(source);
     expect(summary.source).toEqual(source);
   });
+
+  it('round-trips explicit parent-session lineage', () => {
+    const parentSession = {
+      sessionId: 'sess-launcher',
+      gezelId: 'meester',
+      kind: 'task-entry' as const,
+    };
+    const session = ChatSessionSchema.parse({ ...validSession, parentSession });
+    const summary = ChatSessionSummarySchema.parse({ ...validSession, parentSession });
+
+    expect(session.parentSession).toEqual(parentSession);
+    expect(summary.parentSession).toEqual(parentSession);
+  });
 });
 
 describe('ChatSessionSummarySchema', () => {

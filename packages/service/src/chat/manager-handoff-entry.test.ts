@@ -176,6 +176,38 @@ describe('single-channel kickoff (D1)', () => {
     const messaged = await history.listEvents({ kinds: ['gezel.messaged'] });
     expect(messaged).toHaveLength(0);
   });
+
+  it('links the entry worker session to the chat session that launched the task', async () => {
+    const meester = await store.createGezel({ name: 'Meester', role: 'Meester' });
+    const launcher = await manager.createSession({
+      gezelId: meester.id,
+      projectId: 'default',
+    });
+    const task = await tasks.create('p1', {
+      title: 'Research the launch brief',
+      description:
+        'Collect and verify the source material before the rest of the launch brief is produced.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ name: 'Research', suggestedRole: 'researcher' }],
+      launchSessionId: launcher.id,
+      createdBy: { kind: 'gezel', gezelId: meester.id },
+    });
+
+    mock.script('Research underway.');
+    await dispatchTaskEntry({ store, taskRunner: runner, history }, task);
+    await runner.tick();
+    await manager.drainBackground();
+
+    const childSummary = (await store.listSessions({ gezelId: 'worker' })).find(
+      (session) => session.taskRef === task.ref,
+    );
+    const child = childSummary ? await store.getSession('worker', childSummary.id) : null;
+    expect(child?.parentSession).toEqual({
+      sessionId: launcher.id,
+      gezelId: meester.id,
+      kind: 'task-entry',
+    });
+  });
 });
 
 describe('handoff seed wording', () => {
@@ -200,6 +232,34 @@ describe('handoff seed wording', () => {
   it('names the sender when the previous step belonged to another gezel', async () => {
     const seed = await seedFor({ fromGezelName: 'Koray', fromGezelId: 'koray' });
     expect(seed).toContain('Koray has handed step `report`');
+  });
+
+  it('links the new worker session to the previous gezel task session', async () => {
+    const koray = await store.createGezel({ name: 'Koray', role: 'Researcher' });
+    const previous = await manager.createSession({
+      gezelId: koray.id,
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'research',
+    });
+    mock.script('Writing the report.');
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'report',
+      fromGezelName: 'Koray',
+      fromGezelId: koray.id,
+    });
+    await manager.drainBackground();
+
+    const child = await store.getSession('worker', sessionId);
+    expect(child?.parentSession).toEqual({
+      sessionId: previous.id,
+      gezelId: koray.id,
+      kind: 'task-handoff',
+    });
   });
 
   it('uses the sender role and pins the worker session in boring mode', async () => {

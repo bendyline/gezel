@@ -59,7 +59,7 @@ import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
-import { terminalToolClosingText } from './terminal-tool-policy.js';
+import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
 import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from './tool-failure-tracker.js';
 import { ToolRepeatTracker } from './tool-repeat-tracker.js';
@@ -1538,6 +1538,10 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
         const fn = call.function;
         const argsKey = stableArgsKey(fn.arguments);
         callLog.push({ name: fn.name, argsKey, argsRaw: fn.arguments });
+        if (terminalActionClosing) {
+          this.messages.push({ role: 'tool', content: TERMINAL_ACTION_SKIPPED_OUTPUT });
+          continue;
+        }
         let output: string;
         // Suppress duplicate ask_user_question per turn. See the
         // matching block in MlxSession for the rationale.

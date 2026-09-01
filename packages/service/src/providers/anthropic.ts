@@ -4,6 +4,7 @@ import { ANTHROPIC_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
+import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -517,7 +518,16 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
       // Invoke each tool, then feed the results back as a single user message
       // with one `tool_result` content block per call.
       const resultBlocks: AnthropicContentBlock[] = [];
+      let terminalActionClosing: string | null = null;
       for (const call of toolUses) {
+        if (terminalActionClosing) {
+          resultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: call.id,
+            content: TERMINAL_ACTION_SKIPPED_OUTPUT,
+          });
+          continue;
+        }
         let text: string;
         let isError = false;
         if (this.deps.bridges.hasTool(call.name)) {
@@ -539,8 +549,27 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
           content: text,
           ...(isError ? { is_error: true } : {}),
         });
+        if (!isError) {
+          terminalActionClosing ??= terminalToolClosingText(undefined, call.name, call.input, text);
+        }
       }
       this.messages.push({ role: 'user', content: resultBlocks });
+      if (terminalActionClosing) {
+        this.messages.push({
+          role: 'assistant',
+          content: [{ type: 'text', text: terminalActionClosing }],
+        });
+        this.emitUsage(
+          buildTurnUsage({
+            model: this.deps.model,
+            inputTokens: totalInputTokens + totalCacheReadTokens + totalCacheCreationTokens,
+            outputTokens: totalOutputTokens,
+            durationMs: Date.now() - start,
+            ...(totalCacheReadTokens > 0 ? { cachedInputTokens: totalCacheReadTokens } : {}),
+          }),
+        );
+        return terminalActionClosing;
+      }
     }
 
     throw new Error('[anthropic] too many tool-call loops; aborting');

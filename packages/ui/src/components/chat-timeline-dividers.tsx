@@ -26,6 +26,8 @@ export function renderDivider(args: {
    * doesn't think their reply landed somewhere else.
    */
   continuing: boolean;
+  /** Visual nesting level for a session opened by another visible session. */
+  depth?: number;
   key: string;
   /**
    * Threaded in from the caller because `renderDivider` is invoked as a
@@ -43,6 +45,7 @@ export function renderDivider(args: {
     activeSessionId,
     onFocusSession,
     continuing,
+    depth = 0,
     key,
     roleBasedNameOnlyMode,
   } = args;
@@ -61,10 +64,14 @@ export function renderDivider(args: {
       : (row.slot.sessionCreatedAt ?? new Date(row.slot.startedAt).toISOString());
   const taskRef = row.kind === 'message' ? row.msg.taskRef : row.slot.taskRef;
   const source = row.kind === 'message' ? row.msg.sessionSource : row.slot.sessionSource;
-  const handoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
-  const handoffName = handoff
+  const parentSession = row.kind === 'message' ? row.msg.parentSession : undefined;
+  const legacyHandoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
+  const parent =
+    parentSession ??
+    (legacyHandoff ? { ...legacyHandoff, kind: 'task-handoff' as const } : undefined);
+  const parentName = parent
     ? (() => {
-        const hg = gezels.get(handoff.gezelId);
+        const hg = gezels.get(parent.gezelId);
         return hg
           ? displayName({ name: hg.name, roleBasedName: hg.roleBasedName }, roleBasedNameOnlyMode)
           : undefined;
@@ -101,6 +108,10 @@ export function renderDivider(args: {
       type="button"
       className={`timeline-session-divider${isActive ? ' timeline-session-divider-active' : ''}${
         continuing ? ' timeline-session-divider-continuing' : ''
+      }${
+        depth > 0
+          ? ` timeline-session-divider-child timeline-session-depth-${Math.min(depth, 4)}`
+          : ''
       }`}
       onClick={() => onFocusSession?.(sessionId, gezelId, projectId)}
       title={
@@ -129,6 +140,16 @@ export function renderDivider(args: {
             {project && <> · in {project.name}</>}
             {' · '}started {formatRelativeTime(createdAt)}
           </>
+        ) : parent ? (
+          <>
+            {parent.kind === 'consultation'
+              ? `consultation with ${gezelName}`
+              : parent.kind === 'task-handoff'
+                ? `task hand-off to ${gezelName}`
+                : `delegated to ${gezelName}`}
+            {project && <> · in {project.name}</>}
+            {' · '}started {formatRelativeTime(createdAt)}
+          </>
         ) : (
           <>
             new thread with {gezelName}
@@ -138,7 +159,7 @@ export function renderDivider(args: {
         )}
         {taskRef && <> · task {taskRef}</>}
       </span>
-      {handoff && handoffName && (
+      {parent && parentName && (
         <span className="timeline-divider-handoff">
           <svg
             className="timeline-divider-handoff-icon"
@@ -150,7 +171,7 @@ export function renderDivider(args: {
             <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
             <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
           </svg>
-          handoff from {handoffName}
+          {parent.kind === 'task-handoff' ? 'from' : 'by'} {parentName}
         </span>
       )}
     </button>

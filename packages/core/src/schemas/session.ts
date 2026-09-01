@@ -9,6 +9,7 @@ import {
   ProviderNameSchema,
   ReferencedFileSchema,
 } from './gezel.js';
+import { SessionParentSchema } from './session-lineage.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
 /**
@@ -226,6 +227,8 @@ export const ChatSessionSchema = z.object({
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */
   stepId: z.string().optional(),
+  /** Session whose work opened this child session. */
+  parentSession: SessionParentSchema.optional(),
   /**
    * The most recent successful `generate_image` run in this session,
    * persisted so a follow-up message can continue where the last image
@@ -445,6 +448,7 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   turnStartedAt: true,
   taskRef: true,
   stepId: true,
+  parentSession: true,
 }).extend({
   /**
    * `at` of the most recent HUMAN message in the transcript — a
@@ -588,11 +592,10 @@ export type InterruptSessionRequest = z.infer<typeof InterruptSessionRequestSche
  * session's identity + metadata. The UI groups consecutive messages by
  * `sessionId` to draw session-boundary headers.
  *
- * `handoffFrom` is set when this message belongs to a session that was
- * spawned via `startHandoffSession` — the (gezelId, sessionId) of the
- * session that initiated the handoff. The Store resolves it by matching
- * the most recent prior session in the same project that shares this
- * session's `taskRef` but has a different `gezelId`.
+ * `parentSession` is copied from the durable session record. Older task
+ * sessions without explicit lineage are backfilled at read time from the
+ * previous session sharing their task ref; `handoffFrom` remains as the
+ * compatibility projection consumed by older clients.
  */
 export const TimelineMessageSchema = z.object({
   sessionId: z.string(),
@@ -635,6 +638,7 @@ export const TimelineMessageSchema = z.object({
   sessionLastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
+  parentSession: SessionParentSchema.optional(),
   handoffFrom: z.object({ gezelId: z.string(), sessionId: z.string() }).optional(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),

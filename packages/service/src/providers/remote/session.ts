@@ -25,6 +25,10 @@ import {
 import type { ProviderQueue } from '../queue.js';
 import { runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
+import {
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '../terminal-tool-policy.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -309,7 +313,16 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         // Execute the model's tool calls LOCALLY on A, then continue the loop.
         // The adaptive cap uses the broker-admitted numCtx, exactly like the
         // in-process llama.cpp/MLX/Ollama sessions.
+        let terminalActionClosing: string | null = null;
         for (const call of toolCalls) {
+          if (terminalActionClosing) {
+            priorMessages.push({
+              role: 'tool',
+              content: TERMINAL_ACTION_SKIPPED_OUTPUT,
+              toolCallId: call.id,
+            });
+            continue;
+          }
           let args: Record<string, unknown> = {};
           try {
             args = call.arguments ? JSON.parse(call.arguments) : {};
@@ -346,6 +359,9 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           }
           const trackableOutput =
             outputIsError && !/^\s*ERROR:/i.test(output) ? `ERROR: ${output}` : output;
+          if (!outputIsError) {
+            terminalActionClosing ??= terminalToolClosingText(undefined, call.name, args, output);
+          }
           const tracked = failureTracker.recordResult(call.name, trackableOutput);
           const repeated = repeatTracker.recordCall(call.name, args, tracked.output);
           priorMessages.push({ role: 'tool', content: repeated.output, toolCallId: call.id });
@@ -376,6 +392,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
                 : {}),
             });
           }
+        }
+        if (terminalActionClosing) {
+          priorMessages.push({ role: 'assistant', content: terminalActionClosing });
+          this.transcript = [...priorMessages];
+          return terminalActionClosing;
         }
         if (projectMacroResult) {
           const closing = deriveProjectMacroClosing(projectMacroResult);

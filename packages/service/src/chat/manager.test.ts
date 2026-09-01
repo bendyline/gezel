@@ -2234,6 +2234,11 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     });
 
     const mayaDisk = await store.getSession('maya', res.sessionId);
+    expect(mayaDisk!.parentSession).toEqual({
+      sessionId: adaSession.id,
+      gezelId: 'ada',
+      kind: 'delegation',
+    });
     expect(mayaDisk!.messages[0]?.role).toBe('user');
     expect(mayaDisk!.messages[0]?.content).toBe('[Message from Ada]: what is the project status?');
     expect(mayaDisk!.messages[0]?.from).toEqual({
@@ -5068,6 +5073,11 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
     // Maya session, and persists with the question + reply.
     const consult = await store.getSession('maya', res.sessionId);
     expect(consult).not.toBeNull();
+    expect(consult!.parentSession).toEqual({
+      sessionId: adaSession.id,
+      gezelId: 'ada',
+      kind: 'consultation',
+    });
     expect(consult!.messages[0]?.content).toBe('[Question from Ada]: is task 47 done?');
     expect(consult!.messages[0]?.from).toEqual({ gezelId: 'ada', gezelName: 'Ada' });
     expect(consult!.messages[1]?.content).toBe('Task 47 is in code review.');

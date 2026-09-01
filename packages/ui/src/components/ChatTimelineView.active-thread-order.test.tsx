@@ -72,6 +72,27 @@ describe('ChatTimelineView — the composer thread sits at the bottom', () => {
     expect(renderedSessionOrder().at(-1)).toBe('s1');
   });
 
+  it('keeps a delegated child directly below its active parent thread', async () => {
+    renderTimeline('s1', [
+      message({ sessionId: 's1', content: 'research the launch', at: minutesAgo(6) }),
+      message({
+        sessionId: 's2',
+        gezelId: 'g2',
+        content: 'delegated research',
+        at: minutesAgo(1),
+        parentSession: { sessionId: 's1', gezelId: 'g1', kind: 'delegation' },
+      }),
+    ]);
+
+    await waitFor(() => expect(renderedSessionOrder().length).toBe(2));
+    expect(renderedSessionOrder()).toEqual(['s1', 's2']);
+    const child = document
+      .querySelector<HTMLElement>('[data-session-id="s2"]')
+      ?.closest<HTMLElement>('.timeline-thread');
+    expect(child?.classList.contains('timeline-session-subthread')).toBe(true);
+    expect(child?.classList.contains('timeline-session-depth-1')).toBe(true);
+  });
+
   it('leaves chronological order alone when the active thread went cold', async () => {
     const stale = new Date(NOW - 48 * 60 * 60 * 1000).toISOString();
     renderTimeline('s1', [

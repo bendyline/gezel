@@ -72,6 +72,7 @@ import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-div
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
+import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
@@ -1606,6 +1607,11 @@ export function ChatTimelineView({
           ...(lastForSession?.sessionModel ? { sessionModel: lastForSession.sessionModel } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           ...(lastForSession?.stepId ? { stepId: lastForSession.stepId } : {}),
+          ...(lastForSession?.parentSession
+            ? { parentSession: lastForSession.parentSession }
+            : env.parentSession
+              ? { parentSession: env.parentSession }
+              : {}),
           role: event.message.role,
           content: event.message.content,
           at: event.message.at,
@@ -2369,10 +2375,15 @@ export function ChatTimelineView({
   // thing above the draft is what the next message answers. See
   // `active-thread-pin.ts` for why the move is deliberately narrow.
   // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick deliberately re-runs the Date.now()-dependent lane checks.
-  const threadItems = useMemo(
-    () => pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+  const nestedThreadItems = useMemo(
+    () =>
+      nestChildSessionThreads(
+        pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+      ),
     [rows, activeSessionId, terminalOrderTick],
   );
+  const threadItems = nestedThreadItems.items;
+  const sessionDepthById = nestedThreadItems.depthBySession;
 
   /**
    * Queue receipts for held tasks, minus any task that is already
@@ -3705,6 +3716,7 @@ export function ChatTimelineView({
     // group boundaries — a thread never straddles two sessions (merged
     // fan-out threads carry the kept root's session for this purpose).
     const sid = item.sessionId;
+    const sessionDepth = sessionDepthById.get(sid) ?? 0;
     const anchorRow = item.root ?? item.replies[0];
     if (!anchorRow) continue;
     if (sid !== prevSessionId) {
@@ -3726,6 +3738,7 @@ export function ChatTimelineView({
           activeSessionId,
           onFocusSession,
           continuing: isContinuing,
+          depth: sessionDepth,
           key: `divider:${sid}:${item.at}`,
           roleBasedNameOnlyMode,
         }),
@@ -3825,9 +3838,11 @@ export function ChatTimelineView({
     els.push(
       <div
         key={`thread:${sid}:${item.at}`}
-        className={`timeline-thread${item.root ? '' : ' timeline-thread-rootless'}${
-          railed ? ' timeline-thread-railed' : ''
-        }`}
+        className={`timeline-thread${
+          sessionDepth > 0
+            ? ` timeline-session-subthread timeline-session-depth-${Math.min(sessionDepth, 4)}`
+            : ''
+        }${item.root ? '' : ' timeline-thread-rootless'}${railed ? ' timeline-thread-railed' : ''}`}
       >
         {children}
       </div>,

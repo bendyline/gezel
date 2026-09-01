@@ -81,6 +81,17 @@ describe('prepareSalvagedProseDocument', () => {
       ).not.toBeNull();
     });
 
+    it('refuses a successful handoff receipt that mentions the deliverable', () => {
+      const receipt = `Research step complete — handed off to the outline gezel.
+
+- Validated deliverable: \`tasks/35/pr-review/observations-11.md\`.
+- The completion gate passed with all required sources present.
+- Active step is now "Lock the outline" and its assignee owns the next phase.
+
+No further edits are required from the research step.`;
+      expect(salvage({ text: receipt })).toBeNull();
+    });
+
     it('refuses narration that carries no document structure', () => {
       const narration =
         'I have reviewed all three records in this batch and found no significant issues. '.repeat(

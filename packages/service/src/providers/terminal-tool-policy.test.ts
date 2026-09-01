@@ -9,6 +9,28 @@ const policy = {
 };
 
 describe('terminalToolClosingText', () => {
+  it('always terminates a successful task-step handoff', () => {
+    expect(
+      terminalToolClosingText(
+        undefined,
+        'advance_task_step',
+        { ref: 'default/10', stepId: 'research' },
+        'Completed step "research" on default/10.\nActive step is now "Lock the slide outline".',
+      ),
+    ).toBe('Completed step "research" on default/10. Active step is now "Lock the slide outline".');
+  });
+
+  it('keeps a rejected task-step handoff in the repair loop', () => {
+    expect(
+      terminalToolClosingText(
+        undefined,
+        'advance_task_step',
+        { ref: 'default/10', stepId: 'research' },
+        'ERROR: [gate_rejected] citations do not resolve',
+      ),
+    ).toBeNull();
+  });
+
   it('uses the action call table talk as one compact line', () => {
     expect(
       terminalToolClosingText(

@@ -3008,6 +3008,62 @@ button.timeline-session-divider-continuing::before {
   stroke-linejoin: round;
 }
 
+/* A session opened by work in another visible session stays directly below
+   that parent and steps inward like a margin note in the same ledger. The
+   warm rule is session lineage (not the turn/reply rail), so both may appear
+   together without claiming the child replied to a particular bubble. Keep
+   these rules after the base divider declarations so its full-width margin
+   and pseudo-element inset cannot flatten the child treatment. */
+.timeline-session-divider-child,
+.timeline-session-subthread {
+  width: calc(100% - var(--timeline-session-inset));
+  margin-left: var(--timeline-session-inset);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  padding-left: 0.55rem;
+}
+
+.timeline-session-depth-1 {
+  --timeline-session-inset: 1.6rem;
+}
+
+.timeline-session-depth-2 {
+  --timeline-session-inset: 3.2rem;
+}
+
+.timeline-session-depth-3 {
+  --timeline-session-inset: 4.8rem;
+}
+
+.timeline-session-depth-4 {
+  --timeline-session-inset: 6.4rem;
+}
+
+.timeline-session-divider-child {
+  margin-top: 0.2rem;
+}
+
+button.timeline-session-divider-child::before {
+  left: 0.55rem;
+}
+
+@media (max-width: 700px) {
+  .timeline-session-depth-1 {
+    --timeline-session-inset: 0.8rem;
+  }
+
+  .timeline-session-depth-2 {
+    --timeline-session-inset: 1.6rem;
+  }
+
+  .timeline-session-depth-3 {
+    --timeline-session-inset: 2.4rem;
+  }
+
+  .timeline-session-depth-4 {
+    --timeline-session-inset: 3.2rem;
+  }
+}
+
 .timeline-msg-faded {
   opacity: 0.55;
   transition: opacity 120ms ease;

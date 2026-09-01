@@ -422,6 +422,8 @@ export const TaskSchema = z.object({
   spawnsCraftbookParams: z.record(z.string(), z.string()).optional(),
   activeStepId: z.string().optional(),
   parentTaskRef: z.string().optional(),
+  /** Chat session whose turn launched this task, when one exists. */
+  launchSessionId: z.string().optional(),
   /**
    * This task's working folder inside the project's ARTIFACTS drawer
    * (e.g. `tasks/12`). Stamped by the service at create time — never by
@@ -582,6 +584,11 @@ export const CreateTaskRequestSchema = z
     spawnsSteps: z.array(NewCraftbookStepSchema).optional(),
     spawnsEntryStepId: z.string().optional(),
     parentTaskRef: z.string().optional(),
+    /**
+     * Chat session launching this task. The MCP runtime stamps its own
+     * session id so the entry worker can be represented as a child thread.
+     */
+    launchSessionId: z.string().optional(),
     cron: z
       .object({
         expression: z.string(),

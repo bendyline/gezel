@@ -1,5 +1,5 @@
 import type OpenAI from 'openai';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { OpenAISession, type OpenAISessionDeps } from './openai.js';
 import { ProviderQueue } from './queue.js';
@@ -130,6 +130,64 @@ describe('OpenAISession — external tools', () => {
     const text = await session.sendAndWait('Hi');
     expect(text).toBe('plain reply');
     expect(session.capturedToolCalls()).toEqual([]);
+  });
+});
+
+describe('OpenAISession — terminal task-step handoff', () => {
+  it('does not request another generation after advance_task_step succeeds', async () => {
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'isEmpty').mockReturnValue(false);
+    vi.spyOn(bridges, 'getOpenAITools').mockReturnValue([
+      {
+        type: 'function',
+        name: 'advance_task_step',
+        description: 'Advance a task step.',
+        parameters: { type: 'object' },
+      },
+    ]);
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const invokedTools: string[] = [];
+    const advance = vi.spyOn(bridges, 'callToolRich').mockImplementation(async (name) => {
+      invokedTools.push(name);
+      return {
+        text: 'Completed step "research" on default/10. Active step is now "outline".',
+        images: [],
+        isError: false,
+      };
+    });
+    let requestCount = 0;
+    const session = new OpenAISession({
+      openai: stubOpenAI(
+        [
+          functionCallItemEvent(
+            'advance-1',
+            'advance_task_step',
+            '{"ref":"default/10","stepId":"research"}',
+          ),
+          functionCallItemEvent(
+            'stale-write-1',
+            'write_artifact',
+            '{"path":"tasks/10/sources.md","content":"handoff receipt"}',
+          ),
+          completedEvent('resp-advance'),
+        ],
+        () => {
+          requestCount += 1;
+        },
+      ),
+      model: 'gpt-test',
+      systemMessage: 'You are a test assistant.',
+      bridges,
+      previousResponseId: null,
+      queue: new ProviderQueue({ concurrency: 1 }),
+    });
+
+    await expect(session.sendAndWait('Finish research.')).resolves.toBe(
+      'Completed step "research" on default/10. Active step is now "outline".',
+    );
+    expect(requestCount).toBe(1);
+    expect(advance).toHaveBeenCalledOnce();
+    expect(invokedTools).toEqual(['advance_task_step']);
   });
 });
 

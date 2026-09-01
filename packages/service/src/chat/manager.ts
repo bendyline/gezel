@@ -24,6 +24,7 @@ import {
   type Question,
   type ScriptMeta,
   type SessionDebugSnapshot,
+  type SessionParent,
   type SessionTelemetry,
   type Task,
   type TaskCraftbookStep,
@@ -3429,6 +3430,8 @@ export class ChatManager {
     projectId?: string;
     taskRef?: string;
     stepId?: string;
+    /** Durable parent session for delegated/consulted/task-spawned work. */
+    parentSession?: SessionParent;
     /** Resolve provider/model defaults from `config.nightShift.modelOverride`. */
     nightShift?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
@@ -3525,6 +3528,7 @@ export class ChatManager {
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
@@ -3587,6 +3591,7 @@ export class ChatManager {
     gezelId: string;
     projectId?: string;
     expectedDeliverable?: ExpectedDeliverable;
+    parentSession?: SessionParent;
   }): Promise<ChatSession> {
     const projectId = args.projectId ?? DEFAULT_PROJECT_ID;
     const existing = await this.store.listSessions({
@@ -3606,6 +3611,7 @@ export class ChatManager {
       gezelId: args.gezelId,
       projectId,
       ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
     });
   }
 
@@ -3619,6 +3625,7 @@ export class ChatManager {
     projectId: string;
     taskRef: string;
     stepId?: string;
+    parentSession?: SessionParent;
   }): Promise<ChatSession> {
     const existing = await this.store.listSessions({
       gezelId: args.gezelId,
@@ -3643,6 +3650,7 @@ export class ChatManager {
       projectId: args.projectId,
       taskRef: args.taskRef,
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(task?.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
         : {}),
@@ -3907,6 +3915,39 @@ export class ChatManager {
         );
       }
     }
+    const parsedTaskRef = parseTaskRef(args.taskRef);
+    const taskRecord = parsedTaskRef
+      ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
+      : null;
+    let parentSession: SessionParent | undefined;
+    if (args.kind === 'entry' && taskRecord?.launchSessionId) {
+      const launcher = await this.store
+        .findSessionById(taskRecord.launchSessionId)
+        .catch(() => null);
+      if (launcher) {
+        parentSession = {
+          sessionId: launcher.id,
+          gezelId: launcher.gezelId,
+          kind: 'task-entry',
+        };
+      }
+    } else if (args.kind !== 'entry') {
+      const candidates = await this.store.listSessions({ projectId: args.projectId });
+      const previous = candidates.find(
+        (candidate) =>
+          !candidate.archived &&
+          candidate.taskRef === args.taskRef &&
+          (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
+      );
+      if (previous) {
+        parentSession = {
+          sessionId: previous.id,
+          gezelId: previous.gezelId,
+          kind: 'task-handoff',
+        };
+      }
+    }
+
     let resumedExisting = false;
     let session: ChatSession | null = null;
     if (args.resumeExisting) {
@@ -3931,6 +3972,7 @@ export class ChatManager {
       taskRef: args.taskRef,
       stepId: dispatchStepId,
       roleBasedNameOnlyMode,
+      ...(parentSession ? { parentSession } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
@@ -3979,12 +4021,8 @@ export class ChatManager {
     // context and the prior gezels' notes, so they don't need it re-stated.
     let entryPreface = '';
     if (args.kind === 'entry') {
-      const parsed = parseTaskRef(args.taskRef);
-      const task = parsed
-        ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
-        : null;
-      if (task) {
-        const cb = task.craftbook;
+      if (taskRecord) {
+        const cb = taskRecord.craftbook;
         const stepArc = cb.steps
           .map((s, i) => {
             const here = s.id === dispatchStepId ? ' ← your step' : '';
@@ -3993,7 +4031,7 @@ export class ChatManager {
           })
           .join('\n');
         const cbDesc = cb.description?.trim() ? ` ${cb.description.trim()}` : '';
-        entryPreface = `Task ${task.ref} ("${task.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
+        entryPreface = `Task ${taskRecord.ref} ("${taskRecord.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
       }
     }
     // Seed wording: deliberately does NOT name `read_task_notes` as the
@@ -4118,11 +4156,11 @@ export class ChatManager {
     toGezelId: string;
     deduplicated?: boolean;
   }> {
+    const fromRec = args.fromSessionId
+      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
+      : null;
     let projectId = args.projectId;
-    if (!projectId && args.fromSessionId) {
-      const fromRec = await this.getSessionRecord(args.fromSessionId);
-      projectId = fromRec?.projectId;
-    }
+    if (!projectId) projectId = fromRec?.projectId;
     projectId = projectId ?? DEFAULT_PROJECT_ID;
 
     const target = await this.resolveGezel(args.toGezelIdOrName, projectId);
@@ -4220,16 +4258,21 @@ export class ChatManager {
     if (args.stepId && !args.taskRef) {
       throw new Error('messageGezel stepId requires taskRef');
     }
+    const delegationParent: SessionParent | undefined = fromRec
+      ? { sessionId: fromRec.id, gezelId: fromRec.gezelId, kind: 'delegation' }
+      : undefined;
     const session = args.taskRef
       ? await this.ensureOrCreateTaskSession({
           gezelId: target.id,
           projectId,
           taskRef: args.taskRef,
           ...(args.stepId ? { stepId: args.stepId } : {}),
+          ...(delegationParent ? { parentSession: delegationParent } : {}),
         })
       : await this.ensureOrCreateSession({
           gezelId: target.id,
           projectId,
+          ...(delegationParent ? { parentSession: delegationParent } : {}),
         });
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
@@ -4241,9 +4284,7 @@ export class ChatManager {
     // leaked into a boring-mode session teaches the model a name the
     // user's client never shows.
     const targetBoring = session.roleBasedNameOnlyMode ?? configBoring;
-    const senderSession = args.fromSessionId
-      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
-      : null;
+    const senderSession = fromRec;
     const senderBoring = senderSession?.roleBasedNameOnlyMode ?? configBoring;
     const targetDisplay = (boring: boolean) =>
       displayName({ name: target.name, roleBasedName: target.roleBasedName }, boring);
@@ -4597,6 +4638,15 @@ export class ChatManager {
       projectId,
       ...(taskRef ? { taskRef } : {}),
       ...(taskRef && stepId ? { stepId } : {}),
+      ...(fromRec
+        ? {
+            parentSession: {
+              sessionId: fromRec.id,
+              gezelId: fromRec.gezelId,
+              kind: 'consultation' as const,
+            },
+          }
+        : {}),
       // Consultations inherit the asker's pinned name-rendering mode —
       // the reply flows back into the asker's session, so both sides
       // must speak the same identifier for names not to leak.
@@ -6650,6 +6700,7 @@ export class ChatManager {
           sessionId,
           gezelId: ffRecord.gezelId,
           projectId: ffRecord.projectId,
+          ...(ffRecord.parentSession ? { parentSession: ffRecord.parentSession } : {}),
         }
       : undefined;
     const coldStartPending = preflightScope && !this.states.get(sessionId)?.session;
@@ -6787,6 +6838,7 @@ export class ChatManager {
       sessionId,
       gezelId: state.record.gezelId,
       projectId: state.record.projectId,
+      ...(state.record.parentSession ? { parentSession: state.record.parentSession } : {}),
     };
     // Reset the tool-call accumulator for this turn. The `onToolCall`
     // bridge handler (built in buildSessionOpts) pushes here; we drain
@@ -8034,6 +8086,17 @@ export class ChatManager {
           log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
           break;
         }
+        // Completing a task step transfers ownership to the successor session.
+        // Provider loops stop at the tool result, but keep this manager-level
+        // boundary too: CLI/SDK providers can own their internal tool loop, and
+        // no post-turn detector or automatic continuation should re-prompt the
+        // predecessor after a successful handoff.
+        if (drained.some((call) => call.name === 'advance_task_step' && call.success)) {
+          log.info(
+            `session ${sessionId}: advance_task_step succeeded — ending predecessor turn and yielding to the active step`,
+          );
+          break;
+        }
         if (
           continuations >= maxContinuations &&
           looksStalled(finalContent) &&
@@ -8953,6 +9016,7 @@ export class ChatManager {
       sessionId,
       gezelId: record.gezelId,
       projectId: record.projectId,
+      ...(record.parentSession ? { parentSession: record.parentSession } : {}),
     };
 
     // Reset the per-turn tool-call accumulator. The bridge's onToolCall

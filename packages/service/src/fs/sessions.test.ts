@@ -50,6 +50,46 @@ describe('Store session CRUD', () => {
     expect(got?.messages).toHaveLength(1);
   });
 
+  it('projects explicit parent-session lineage into summaries and timeline rows', async () => {
+    await store.createGezel({ name: 'Boz', role: 'Researcher' });
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-parent',
+        messages: [{ role: 'user', content: 'research the brief', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-child',
+        gezelId: 'boz',
+        createdAt: '2026-04-14T10:01:00Z',
+        lastActivityAt: '2026-04-14T10:01:00Z',
+        parentSession: {
+          sessionId: 'sess-parent',
+          gezelId: 'ada',
+          kind: 'delegation',
+        },
+        messages: [{ role: 'user', content: 'delegated research', at: '2026-04-14T10:01:00Z' }],
+      }),
+    );
+
+    const summaries = await store.listSessions({ projectId: 'default' });
+    expect(summaries.find((session) => session.id === 'sess-child')?.parentSession).toEqual({
+      sessionId: 'sess-parent',
+      gezelId: 'ada',
+      kind: 'delegation',
+    });
+
+    const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-child')?.parentSession,
+    ).toEqual({
+      sessionId: 'sess-parent',
+      gezelId: 'ada',
+      kind: 'delegation',
+    });
+  });
+
   it('getSession returns null for a missing id', async () => {
     expect(await store.getSession('ada', 'missing')).toBeNull();
   });
@@ -204,6 +244,11 @@ describe('Store session CRUD', () => {
     expect(scoped.messages.find((m) => m.gezelId === 'boz')?.handoffFrom).toEqual({
       gezelId: 'ada',
       sessionId: 'sess-ada',
+    });
+    expect(scoped.messages.find((m) => m.gezelId === 'boz')?.parentSession).toEqual({
+      gezelId: 'ada',
+      sessionId: 'sess-ada',
+      kind: 'task-handoff',
     });
   });
 

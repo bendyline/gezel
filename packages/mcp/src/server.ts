@@ -136,6 +136,7 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
+import { taskStepMutationRejection } from './task-step-authority.js';
 import {
   ActionToolOutputSchema,
   ExecutionToolOutputSchema,
@@ -187,10 +188,12 @@ const sessionRoleBasedNameOnlyMode =
     : process.env.GEZEL_ROLE_BASED_NAME_ONLY_MODE === '0'
       ? false
       : undefined;
-const sessionTaskNamingMode =
-  sessionRoleBasedNameOnlyMode === undefined
+const sessionTaskNamingMode = {
+  ...(sessionRoleBasedNameOnlyMode === undefined
     ? {}
-    : { roleBasedNameOnlyMode: sessionRoleBasedNameOnlyMode };
+    : { roleBasedNameOnlyMode: sessionRoleBasedNameOnlyMode }),
+  ...(sessionId ? { launchSessionId: sessionId } : {}),
+} as const;
 // The task this session is scoped to (`record.taskRef`), if any. Lets
 // the task tools default to / recover toward the current task when the
 // model omits or mangles the ref. Empty for lobby sessions.
@@ -234,6 +237,33 @@ const linkedFetchImpl: typeof fetch = (input, init) => {
   return fetchImpl(input, { ...init, headers });
 };
 const linkedApi = new GezelClient({ baseUrl, token, fetch: linkedFetchImpl });
+
+// A successful advance transfers ownership before another provider generation.
+// This fence also protects SDK/CLI loops and resumed stale sessions.
+let sessionStepCompleted = false;
+
+async function staleStepMutationResult() {
+  if (!sessionTaskRef || !sessionStepId) return null;
+
+  let activeStepId: string | undefined;
+  if (!sessionStepCompleted) {
+    try {
+      const parsed = await parseRef(sessionTaskRef);
+      const task = await api.getTask(parsed.projectId, parsed.num);
+      activeStepId = task.activeStepId;
+    } catch {
+      // Let the mutation's own API request enforce scope after a transient read failure.
+      return null;
+    }
+  }
+  const rejection = taskStepMutationRejection({
+    taskRef: sessionTaskRef,
+    sessionStepId,
+    activeStepId,
+    transitionCompleted: sessionStepCompleted,
+  });
+  return rejection ? errorResult(rejection, { code: 'stale_task_step', retryable: false }) : null;
+}
 
 type ConcreteWorkspaceTarget = Exclude<LinkedWorkspaceTarget, { kind: 'links-root' }>;
 let linkedIdsCache: { ids: string[]; expiresAt: number } | null = null;
@@ -1912,6 +1942,8 @@ server.tool(
     dest: z.string().min(1).describe('Destination path in the workspace, e.g. `assets/logo.png`.'),
   },
   async ({ source, dest }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const result = await api.copyArtifactToWorkspace(projectId, {
         source,
@@ -2414,6 +2446,8 @@ server.tool(
     content: z.string().describe('Full file contents.'),
   },
   async ({ path, content }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     const normalizedContent = normalizeWorkspaceWriteContent(path, content);
     const syntax = validateSourceContent(path, normalizedContent);
     if (syntax && !syntax.ok) {
@@ -2580,6 +2614,8 @@ server.tool(
       ),
   },
   async ({ path, content, create }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       let prior = '';
       try {
@@ -2661,6 +2697,8 @@ server.tool(
     partial: PartialEditArg,
   },
   async ({ path, find, replace, occurrence, partial }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2731,6 +2769,8 @@ server.tool(
     partial: PartialEditArg,
   },
   async ({ path, startLine, endLine, content, partial }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2800,6 +2840,8 @@ server.tool(
     partial: PartialEditArg,
   },
   async ({ path, diff, partial }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2862,6 +2904,8 @@ server.tool(
     partial: PartialEditArg,
   },
   async ({ path, marker, content, where, partial }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2920,6 +2964,8 @@ server.tool(
       .describe('Required when removing a directory. Ignored for files.'),
   },
   async ({ path, recursive }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       await editClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
@@ -2944,6 +2990,8 @@ server.tool(
     path: z.string().describe('Directory path relative to the project root.'),
   },
   async ({ path }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const target = await concreteWorkspaceTarget(path);
       await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
@@ -2969,6 +3017,8 @@ server.tool(
     toPath: z.string().describe('New path, relative to the project root.'),
   },
   async ({ fromPath, toPath }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     try {
       const [fromTarget, toTarget] = await Promise.all([
         concreteWorkspaceTarget(fromPath),
@@ -4373,6 +4423,8 @@ server.tool(
       ),
   },
   async ({ path, content, force }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
     const clean = normalizeArtifactPath(path);
     if (isReservedShadowArtifactPath(clean)) {
       return {
@@ -9590,7 +9642,7 @@ async function explainAdvanceFailure(
 
 server.tool(
   'advance_task_step',
-  'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool.',
+  'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool. A SUCCESSFUL call is terminal for this gezel\'s turn: stop immediately and yield; the successor owns all further work. A rejected gate is not terminal — repair the named issue and retry.',
   {
     ref: z.string(),
     stepId: z.string().describe('Id of the step to complete'),
@@ -9642,6 +9694,7 @@ server.tool(
         },
       );
     }
+    sessionStepCompleted = true;
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
       active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;

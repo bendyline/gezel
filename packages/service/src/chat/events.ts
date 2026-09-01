@@ -2,6 +2,7 @@ import {
   type ChatEvent,
   type ChatEventEnvelope,
   type ChatSessionSource,
+  type SessionParent,
   createLogger,
 } from '@bendyline/gezel';
 
@@ -14,6 +15,7 @@ export interface PublishScope {
   sessionId: string;
   gezelId: string;
   projectId: string;
+  parentSession?: SessionParent;
   sessionSource?: ChatSessionSource;
 }
 
@@ -67,6 +69,7 @@ export class ChatEventBus {
       sessionId: scope.sessionId,
       gezelId: scope.gezelId,
       projectId: scope.projectId,
+      ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
       ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
       event,
     };
@@ -152,6 +155,7 @@ export class ChatEventBus {
           sessionId,
           gezelId: scope.gezelId,
           projectId: scope.projectId,
+          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });
@@ -184,6 +188,7 @@ export class ChatEventBus {
           sessionId,
           gezelId: scope.gezelId,
           projectId: scope.projectId,
+          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });
@@ -214,6 +219,7 @@ export class ChatEventBus {
           sessionId,
           gezelId: scope.gezelId,
           projectId: scope.projectId,
+          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });

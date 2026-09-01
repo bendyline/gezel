@@ -91,11 +91,7 @@ describe('citationsResolve — knownPaths (task-supplied metadata)', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.unresolved).toEqual([]);
-    expect(r.forgiven?.sort()).toEqual([
-      'powerpoint/task-8',
-      'powerpoint/task-8/deck.pptx',
-      'tasks/8/',
-    ]);
+    expect(r.forgiven?.sort()).toEqual(['powerpoint/task-8', 'powerpoint/task-8/deck.pptx']);
   });
 
   it('forgiven paths do not count toward minCitations', async () => {
@@ -128,7 +124,7 @@ describe('citationsResolve — knownPaths (task-supplied metadata)', () => {
     });
     expect(r.ok).toBe(false);
     expect(r.unresolved).toEqual(['data/market-sizes.csv']);
-    expect(r.forgiven).toEqual(['tasks/8/']);
+    expect(r.forgiven).toBeUndefined();
   });
 
   it('marks a truncated unresolved list with an ellipsis', async () => {
@@ -138,5 +134,23 @@ describe('citationsResolve — knownPaths (task-supplied metadata)', () => {
     expect(r.unresolved).toHaveLength(7);
     expect(r.detail).toContain('cites 7 source(s) that do not exist');
     expect(r.detail).toContain(', …');
+  });
+});
+
+describe('citationsResolve — directory context', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+
+  it('does not treat backticked trailing-slash exclusion directories as citations', async () => {
+    const packet = [
+      'Excluded prior output directories: `powerpoint/task-7/` and `powerpoint/task-8/`.',
+      'Primary source: [Gezel documentation](https://example.test/gezel/).',
+    ].join('\n');
+    const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md');
+    expect(r.ok).toBe(true);
+    expect(r.urls).toEqual(['https://example.test/gezel/']);
+    expect(r.unresolved).toEqual([]);
   });
 });

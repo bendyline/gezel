@@ -168,6 +168,46 @@ describe('RemoteSession', () => {
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
+  it('does not request another remote forward-pass after advance_task_step succeeds', async () => {
+    let requestCount = 0;
+    const fetchImpl = (async () => {
+      requestCount += 1;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: 'advance-1',
+              name: 'advance_task_step',
+              arguments: '{"ref":"default/10","stepId":"research"}',
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://broker',
+      token: 'broker-token',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        advance_task_step: async () =>
+          'Completed step "research" on default/10. Active step is now "outline".',
+      }),
+      systemMessage: 'system',
+      model: 'llama-cpp:qwen',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('Finish research.')).resolves.toBe(
+      'Completed step "research" on default/10. Active step is now "outline".',
+    );
+    expect(requestCount).toBe(1);
+  });
+
   it('captures every call when caller tools are advertised, even if no returned name matches', async () => {
     const requests: Array<Record<string, unknown>> = [];
     let bridgeCalls = 0;

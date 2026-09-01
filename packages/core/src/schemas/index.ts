@@ -18,6 +18,7 @@ export * from './project-local.js';
 export * from './script.js';
 export * from './task.js';
 export * from './session.js';
+export * from './session-lineage.js';
 export * from './session-telemetry.js';
 export * from './terminal.js';
 export * from './history.js';

@@ -74,6 +74,7 @@ import {
   SHARED_PROJECT_FALLBACK_ID,
   SHARED_PROJECT_ID,
   SHARED_PROJECT_MARKER,
+  type SessionParent,
   type Task,
   type TaskNote,
   TaskNoteSchema,
@@ -5550,6 +5551,7 @@ export class Store {
           ...(session.turnStartedAt ? { turnStartedAt: session.turnStartedAt } : {}),
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
+          ...(session.parentSession ? { parentSession: session.parentSession } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
           ...(lastMessagePreview ? { lastMessagePreview } : {}),
           involvedGezelIds: [...involvedGezelIds],
@@ -5631,11 +5633,15 @@ export class Store {
       }
     }
 
-    // Resolve handoff lineage per session: for each session with a taskRef,
-    // find the most recent prior session in the same project that shares
-    // the same taskRef but has a different gezelId.
-    const handoffOf = new Map<string, { gezelId: string; sessionId: string }>();
+    // Resolve lineage per session. New records carry their exact parent;
+    // older task sessions retain the previous best-effort handoff inference
+    // so existing history gains the nested presentation without a migration.
+    const parentOf = new Map<string, SessionParent>();
     for (const s of sessions) {
+      if (s.parentSession) {
+        parentOf.set(s.id, s.parentSession);
+        continue;
+      }
       if (!s.taskRef) continue;
       let best: ChatSession | null = null;
       for (const other of sessions) {
@@ -5646,7 +5652,13 @@ export class Store {
         if (other.createdAt >= s.createdAt) continue;
         if (!best || other.createdAt > best.createdAt) best = other;
       }
-      if (best) handoffOf.set(s.id, { gezelId: best.gezelId, sessionId: best.id });
+      if (best) {
+        parentOf.set(s.id, {
+          gezelId: best.gezelId,
+          sessionId: best.id,
+          kind: 'task-handoff',
+        });
+      }
     }
 
     // Gather one file inventory per in-scope project so we can backfill
@@ -5698,7 +5710,7 @@ export class Store {
     // Flatten into rows tagged with parent session metadata.
     const rows: TimelineMessage[] = [];
     for (const s of sessions) {
-      const handoff = handoffOf.get(s.id);
+      const parentSession = parentOf.get(s.id);
       // Sessions written before `ChatMessage.origin` existed carry no marker
       // on their dispatch seed, so a task thread would still open with the
       // machinery's words labelled "You". `startHandoffSession` always
@@ -5752,7 +5764,15 @@ export class Store {
           ...(s.lastTurnErrorDetail ? { sessionLastTurnErrorDetail: s.lastTurnErrorDetail } : {}),
           ...(s.taskRef ? { taskRef: s.taskRef } : {}),
           ...(s.stepId ? { stepId: s.stepId } : {}),
-          ...(handoff ? { handoffFrom: handoff } : {}),
+          ...(parentSession ? { parentSession } : {}),
+          ...(parentSession?.kind === 'task-handoff'
+            ? {
+                handoffFrom: {
+                  gezelId: parentSession.gezelId,
+                  sessionId: parentSession.sessionId,
+                },
+              }
+            : {}),
           role: m.role,
           content: m.content,
           at: m.at,

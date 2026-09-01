@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AskQuestionRequestSchema,
   BoekwachterIssueSchema,
+  ChatEventEnvelopeSchema,
   ChatEventSchema,
   ChatMessageSchema,
   ChatMessageToolCallSchema,
@@ -400,6 +401,21 @@ describe('ChatEventSchema', () => {
     ).toMatchObject({ type: 'task_event', gezelId: 'reviewer' });
   });
 
+  it('carries parent-session lineage on multiplexed live events', () => {
+    const envelope = ChatEventEnvelopeSchema.parse({
+      sessionId: 'child',
+      gezelId: 'researcher',
+      projectId: 'default',
+      parentSession: {
+        sessionId: 'parent',
+        gezelId: 'meester',
+        kind: 'consultation',
+      },
+      event: { type: 'delta', content: 'Working' },
+    });
+    expect(envelope.parentSession?.sessionId).toBe('parent');
+  });
+
   it('accepts an in-app Settings action on a warning', () => {
     expect(
       ChatEventSchema.parse({
@@ -703,6 +719,14 @@ describe('CreateTaskRequestSchema', () => {
       plan: '1. Research\n2. Draft\n3. Review',
     });
     expect(parsed.plan).toBe('1. Research\n2. Draft\n3. Review');
+  });
+
+  it('round-trips the session that launched the task', () => {
+    const parsed = CreateTaskRequestSchema.parse({
+      ...base,
+      launchSessionId: 'session-meester-1',
+    });
+    expect(parsed.launchSessionId).toBe('session-meester-1');
   });
 
   it('dispatchEntry parses on a plain active create', () => {

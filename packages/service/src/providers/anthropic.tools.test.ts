@@ -213,6 +213,38 @@ describe('AnthropicSession — bridge tool results', () => {
       }),
     ]);
   });
+
+  it('does not request another generation after advance_task_step succeeds', async () => {
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    vi.spyOn(bridges, 'callToolRich').mockResolvedValue({
+      text: 'Completed step "research" on default/10. Active step is now "outline".',
+      images: [],
+      isError: false,
+    });
+    let requestCount = 0;
+    const session = new AnthropicSession({
+      anthropic: stubAnthropic(
+        toolUseStream('advance-1', 'advance_task_step', {
+          ref: 'default/10',
+          stepId: 'research',
+        }),
+        () => {
+          requestCount += 1;
+        },
+      ),
+      model: 'claude-test',
+      systemMessage: 'You are a test assistant.',
+      bridges,
+      priorMessages: [],
+      queue: new ProviderQueue({ concurrency: 1 }),
+    });
+
+    await expect(session.sendAndWait('Finish research.')).resolves.toBe(
+      'Completed step "research" on default/10. Active step is now "outline".',
+    );
+    expect(requestCount).toBe(1);
+  });
 });
 
 describe('AnthropicSession — thinking capture', () => {

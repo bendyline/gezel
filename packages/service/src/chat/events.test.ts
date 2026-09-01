@@ -11,7 +11,16 @@ describe('ChatEventBus — mid-stream replay on subscribeProject', () => {
     // arrived during the gap is lost — the bubble re-creates as
     // thinking-dots only.
     const bus = new ChatEventBus();
-    const scope = { sessionId: 's1', gezelId: 'ada', projectId: 'eliza' };
+    const scope = {
+      sessionId: 's1',
+      gezelId: 'ada',
+      projectId: 'eliza',
+      parentSession: {
+        sessionId: 'launcher',
+        gezelId: 'meester',
+        kind: 'consultation' as const,
+      },
+    };
     bus.publish(scope, {
       type: 'user_message',
       message: { role: 'user', content: 'hi', at: 't0' },
@@ -27,6 +36,7 @@ describe('ChatEventBus — mid-stream replay on subscribeProject', () => {
     expect(seen.map((e) => e.event.type)).toEqual(['user_message', 'delta']);
     expect(seen[1]?.event).toMatchObject({ type: 'delta', content: 'Hello there' });
     expect(seen.every((e) => e.sessionId === 's1' && e.projectId === 'eliza')).toBe(true);
+    expect(seen.every((e) => e.parentSession?.sessionId === 'launcher')).toBe(true);
   });
 
   it('does not replay events for other projects', async () => {
