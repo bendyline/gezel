@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-knowledge",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Gezel knowledge catalogs: the .gezk compiler, archive safety, read-only reader, routing, and signatures.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "knowledge", "rag", "sqlite-vec"],
