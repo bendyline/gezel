@@ -2626,6 +2626,8 @@ body.chat-rail-resizing webview {
   --chat-scrollbar-track: color-mix(in srgb, var(--scrollbar-track) 45%, transparent);
   --chat-scrollbar-thumb-color: transparent;
   --chat-scrollbar-track-color: transparent;
+  --timeline-session-step: 1.6rem;
+  --timeline-tree-line: color-mix(in srgb, var(--accent) 42%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -2819,7 +2821,7 @@ body.chat-rail-resizing webview {
   gap: 0.4rem;
   min-width: 0;
   margin-left: 7px;
-  border-left: 2px solid rgba(176, 114, 76, 0.28);
+  border-left: 2px solid var(--timeline-tree-line, rgba(176, 114, 76, 0.28));
   padding-left: calc(var(--thread-indent, 1.05rem) - 7px - 2px);
 }
 
@@ -2837,12 +2839,19 @@ body.chat-rail-resizing webview {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: rgba(176, 114, 76, 0.28);
+  background: var(--timeline-tree-line, rgba(176, 114, 76, 0.28));
   pointer-events: none;
 }
 
 .timeline-thread-railed > .timeline-thread-replies {
   border-left-color: transparent;
+}
+
+/* A session with visible children owns the trunk they branch from. When a
+   session contains several turn groups, bridge the ordinary timeline gap so
+   that trunk reads as one continuous line rather than a stack of fragments. */
+.timeline-session-parent + .timeline-session-parent.timeline-thread-railed::before {
+  top: -0.9rem;
 }
 
 /* Directly under a session divider the rail reaches up through the
@@ -3008,18 +3017,15 @@ button.timeline-session-divider-continuing::before {
   stroke-linejoin: round;
 }
 
-/* A session opened by work in another visible session stays directly below
-   that parent and steps inward like a margin note in the same ledger. The
-   warm rule is session lineage (not the turn/reply rail), so both may appear
-   together without claiming the child replied to a particular bubble. Keep
-   these rules after the base divider declarations so its full-width margin
-   and pseudo-element inset cannot flatten the child treatment. */
+/* Session lineage uses a conventional tree-view grammar. Child sessions step
+   inward, while explicit guide elements keep ancestor trunks continuous and
+   terminate the immediate parent line at the last sibling's elbow. The child
+   no longer paints its own border: that border plus the reply rail caused the
+   unexplained pair of parallel vertical lines in nested task sessions. */
 .timeline-session-divider-child,
 .timeline-session-subthread {
   width: calc(100% - var(--timeline-session-inset));
   margin-left: var(--timeline-session-inset);
-  border-left: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
-  padding-left: 0.55rem;
 }
 
 .timeline-session-depth-1 {
@@ -3040,13 +3046,105 @@ button.timeline-session-divider-continuing::before {
 
 .timeline-session-divider-child {
   margin-top: 0.2rem;
+  padding-left: 0;
 }
 
 button.timeline-session-divider-child::before {
-  left: 0.55rem;
+  display: none;
+}
+
+/* Nested leaf sessions do not need a second, turn-level reply rail: the tree
+   elbow already establishes their relationship. A nested session that owns
+   children keeps the ordinary inset because its local x=7px rail becomes the
+   trunk for the next level down. */
+.timeline-session-subthread:not(.timeline-session-parent) > .timeline-thread-replies {
+  margin-left: 0;
+  border-left: 0;
+  padding-left: 0;
+}
+
+/* Tree guide geometry is relative to the already-indented child node. `up-1`
+   lands on the immediate parent's x=7px rail; deeper classes preserve any
+   ancestor trunks that still have a later sibling below this subtree. */
+.timeline-tree-guide,
+.timeline-tree-parent-line,
+.timeline-tree-elbow {
+  position: absolute;
+  z-index: 0;
+  display: block;
+  pointer-events: none;
+  background: var(--timeline-tree-line);
+}
+
+.timeline-tree-guide-up-1 {
+  left: calc(7px - var(--timeline-session-step));
+}
+
+.timeline-tree-guide-up-2 {
+  left: calc(7px - var(--timeline-session-step) - var(--timeline-session-step));
+}
+
+.timeline-tree-guide-up-3 {
+  left: calc(
+    7px -
+    var(--timeline-session-step) -
+    var(--timeline-session-step) -
+    var(--timeline-session-step)
+  );
+}
+
+.timeline-tree-guide-up-4 {
+  left: calc(
+    7px -
+    var(--timeline-session-step) -
+    var(--timeline-session-step) -
+    var(--timeline-session-step) -
+    var(--timeline-session-step)
+  );
+}
+
+.timeline-tree-guide,
+.timeline-tree-parent-line {
+  width: 2px;
+}
+
+/* A child divider follows a 0.9rem flex gap plus its 0.2rem top margin. */
+.timeline-tree-guide-divider,
+.timeline-tree-parent-line {
+  top: -1.1rem;
+}
+
+.timeline-tree-guide-divider {
+  bottom: 0;
+}
+
+.timeline-tree-parent-line {
+  bottom: 50%;
+}
+
+.timeline-tree-parent-line-continues {
+  bottom: 0;
+}
+
+.timeline-tree-elbow {
+  top: 50%;
+  width: calc(var(--timeline-session-step) + 1px);
+  height: 2px;
+  transform: translateY(-1px);
+  border-radius: 0 999px 999px 0;
+}
+
+/* Divider → thread is the timeline's 0.9rem gap plus 0.1rem divider margin. */
+.timeline-tree-guide-thread {
+  top: -1rem;
+  bottom: 0;
 }
 
 @media (max-width: 700px) {
+  .chat-timeline {
+    --timeline-session-step: 0.8rem;
+  }
+
   .timeline-session-depth-1 {
     --timeline-session-inset: 0.8rem;
   }

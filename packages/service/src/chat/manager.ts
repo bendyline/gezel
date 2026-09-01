@@ -24,6 +24,7 @@ import {
   type Question,
   type ScriptMeta,
   type SessionDebugSnapshot,
+  type SessionLink,
   type SessionParent,
   type SessionTelemetry,
   type Task,
@@ -3432,6 +3433,8 @@ export class ChatManager {
     stepId?: string;
     /** Durable parent session for delegated/consulted/task-spawned work. */
     parentSession?: SessionParent;
+    /** Immediate workflow step that handed work to this task session. */
+    handoffFrom?: SessionLink;
     /** Resolve provider/model defaults from `config.nightShift.modelOverride`. */
     nightShift?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
@@ -3529,6 +3532,7 @@ export class ChatManager {
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
+      ...(args.handoffFrom ? { handoffFrom: args.handoffFrom } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
@@ -3919,33 +3923,60 @@ export class ChatManager {
     const taskRecord = parsedTaskRef
       ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
       : null;
+    const candidates =
+      args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
+    const previous = candidates.find(
+      (candidate) =>
+        !candidate.archived &&
+        candidate.taskRef === args.taskRef &&
+        !(
+          args.resumeExisting &&
+          candidate.gezelId === args.gezelId &&
+          candidate.stepId === dispatchStepId
+        ) &&
+        (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
+    );
+    const handoffFrom: SessionLink | undefined = previous
+      ? { sessionId: previous.id, gezelId: previous.gezelId }
+      : undefined;
+
+    // Workflow steps are peers beneath the session that launched the task.
+    // Keep the immediate step-to-step edge separately in `handoffFrom` so
+    // the divider can still say "from planner" without nesting copywriter
+    // beneath planner. Older task records may not have launchSessionId; in
+    // that case inherit and flatten the prior step's task parent when one is
+    // available, falling back to the prior session only as a last resort.
     let parentSession: SessionParent | undefined;
-    if (args.kind === 'entry' && taskRecord?.launchSessionId) {
-      const launcher = await this.store
-        .findSessionById(taskRecord.launchSessionId)
-        .catch(() => null);
-      if (launcher) {
-        parentSession = {
-          sessionId: launcher.id,
-          gezelId: launcher.gezelId,
-          kind: 'task-entry',
-        };
+    const launcher = taskRecord?.launchSessionId
+      ? await this.store.findSessionById(taskRecord.launchSessionId).catch(() => null)
+      : null;
+    if (launcher) {
+      parentSession = {
+        sessionId: launcher.id,
+        gezelId: launcher.gezelId,
+        kind: args.kind === 'entry' ? 'task-entry' : 'task-handoff',
+      };
+    } else if (previous) {
+      let inherited =
+        previous.parentSession?.kind === 'task-entry' ||
+        previous.parentSession?.kind === 'task-handoff'
+          ? previous.parentSession
+          : undefined;
+      const seen = new Set<string>([previous.id]);
+      while (inherited && !seen.has(inherited.sessionId)) {
+        seen.add(inherited.sessionId);
+        const linked = candidates.find((candidate) => candidate.id === inherited!.sessionId);
+        const next = linked?.parentSession;
+        if (next?.kind !== 'task-entry' && next?.kind !== 'task-handoff') break;
+        inherited = next;
       }
-    } else if (args.kind !== 'entry') {
-      const candidates = await this.store.listSessions({ projectId: args.projectId });
-      const previous = candidates.find(
-        (candidate) =>
-          !candidate.archived &&
-          candidate.taskRef === args.taskRef &&
-          (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
-      );
-      if (previous) {
-        parentSession = {
-          sessionId: previous.id,
-          gezelId: previous.gezelId,
-          kind: 'task-handoff',
-        };
-      }
+      parentSession = inherited
+        ? { ...inherited, kind: 'task-handoff' }
+        : {
+            sessionId: previous.id,
+            gezelId: previous.gezelId,
+            kind: 'task-handoff',
+          };
     }
 
     let resumedExisting = false;
@@ -3964,6 +3995,27 @@ export class ChatManager {
       if (prior) {
         session = await this.store.getSession(args.gezelId, prior.id);
         resumedExisting = session !== null;
+        if (session) {
+          let lineageChanged = false;
+          if (
+            parentSession &&
+            (session.parentSession?.sessionId !== parentSession.sessionId ||
+              session.parentSession.gezelId !== parentSession.gezelId ||
+              session.parentSession.kind !== parentSession.kind)
+          ) {
+            session.parentSession = parentSession;
+            lineageChanged = true;
+          }
+          if (
+            handoffFrom &&
+            (session.handoffFrom?.sessionId !== handoffFrom.sessionId ||
+              session.handoffFrom.gezelId !== handoffFrom.gezelId)
+          ) {
+            session.handoffFrom = handoffFrom;
+            lineageChanged = true;
+          }
+          if (lineageChanged) await this.store.writeSession(session);
+        }
       }
     }
     session ??= await this.createSession({
@@ -3973,6 +4025,7 @@ export class ChatManager {
       stepId: dispatchStepId,
       roleBasedNameOnlyMode,
       ...(parentSession ? { parentSession } : {}),
+      ...(handoffFrom ? { handoffFrom } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
@@ -6701,6 +6754,7 @@ export class ChatManager {
           gezelId: ffRecord.gezelId,
           projectId: ffRecord.projectId,
           ...(ffRecord.parentSession ? { parentSession: ffRecord.parentSession } : {}),
+          ...(ffRecord.handoffFrom ? { handoffFrom: ffRecord.handoffFrom } : {}),
         }
       : undefined;
     const coldStartPending = preflightScope && !this.states.get(sessionId)?.session;
@@ -6839,6 +6893,7 @@ export class ChatManager {
       gezelId: state.record.gezelId,
       projectId: state.record.projectId,
       ...(state.record.parentSession ? { parentSession: state.record.parentSession } : {}),
+      ...(state.record.handoffFrom ? { handoffFrom: state.record.handoffFrom } : {}),
     };
     // Reset the tool-call accumulator for this turn. The `onToolCall`
     // bridge handler (built in buildSessionOpts) pushes here; we drain
@@ -9017,6 +9072,7 @@ export class ChatManager {
       gezelId: record.gezelId,
       projectId: record.projectId,
       ...(record.parentSession ? { parentSession: record.parentSession } : {}),
+      ...(record.handoffFrom ? { handoffFrom: record.handoffFrom } : {}),
     };
 
     // Reset the per-turn tool-call accumulator. The bridge's onToolCall

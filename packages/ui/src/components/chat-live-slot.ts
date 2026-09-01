@@ -3,6 +3,8 @@ import type {
   ChatTurnErrorDetail,
   ProviderName,
   SessionGpuTask,
+  SessionLink,
+  SessionParent,
 } from '@bendyline/gezel';
 import type { InlineWarning, ToolActivity } from './chat-bubbles.js';
 
@@ -104,6 +106,10 @@ export interface LiveSlot {
   /** External owner for a live read-only thread. */
   sessionSource?: ChatSessionSource;
   taskRef?: string;
+  /** Visual containment parent for delegated or task-spawned work. */
+  parentSession?: SessionParent;
+  /** Immediate prior task step, kept separate from visual containment. */
+  handoffFrom?: SessionLink;
   /**
    * Set when the turn ended in error (context overflow, provider crash,
    * timeout). The slot isn't deleted in that case — we keep it around

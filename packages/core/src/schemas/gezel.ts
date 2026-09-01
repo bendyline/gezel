@@ -8,7 +8,7 @@ import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
-import { SessionParentSchema } from './session-lineage.js';
+import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -1533,6 +1533,8 @@ export const ChatEventEnvelopeSchema = z.object({
   projectId: z.string(),
   /** Present when this live session was opened by another session. */
   parentSession: SessionParentSchema.optional(),
+  /** Immediate task-step session that handed work to this live session. */
+  handoffFrom: SessionLinkSchema.optional(),
   /** Present for externally-owned read-only threads, including live turns. */
   sessionSource: ChatSessionSourceSchema.optional(),
   event: ChatEventSchema,

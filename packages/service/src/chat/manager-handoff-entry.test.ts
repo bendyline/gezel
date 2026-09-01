@@ -234,13 +234,23 @@ describe('handoff seed wording', () => {
     expect(seed).toContain('Koray has handed step `report`');
   });
 
-  it('links the new worker session to the previous gezel task session', async () => {
+  it('keeps peer task steps under the task root while recording the immediate handoff', async () => {
+    const meester = await store.createGezel({ name: 'Meester', role: 'Meester' });
     const koray = await store.createGezel({ name: 'Koray', role: 'Researcher' });
+    const launcher = await manager.createSession({
+      gezelId: meester.id,
+      projectId: 'default',
+    });
     const previous = await manager.createSession({
       gezelId: koray.id,
       projectId: 'p1',
       taskRef: 'p1/1',
       stepId: 'research',
+      parentSession: {
+        sessionId: launcher.id,
+        gezelId: meester.id,
+        kind: 'task-entry',
+      },
     });
     mock.script('Writing the report.');
 
@@ -256,9 +266,13 @@ describe('handoff seed wording', () => {
 
     const child = await store.getSession('worker', sessionId);
     expect(child?.parentSession).toEqual({
+      sessionId: launcher.id,
+      gezelId: meester.id,
+      kind: 'task-handoff',
+    });
+    expect(child?.handoffFrom).toEqual({
       sessionId: previous.id,
       gezelId: koray.id,
-      kind: 'task-handoff',
     });
   });
 
@@ -361,6 +375,8 @@ describe('handoff seed wording', () => {
     expect(full?.messages.some((message) => message.content.includes('service restarted'))).toBe(
       true,
     );
+    expect(full?.parentSession).toBeUndefined();
+    expect(full?.handoffFrom).toBeUndefined();
   });
 
   /**

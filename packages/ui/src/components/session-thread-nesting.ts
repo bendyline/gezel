@@ -4,9 +4,19 @@ interface MessageWithParent extends ThreadMessageLike {
   parentSession?: { sessionId: string };
 }
 
+export interface SessionTreeBranch {
+  /** This session owns at least one visible child session. */
+  hasChildren: boolean;
+  /** Its parent guide must continue below this node to a later sibling. */
+  hasFollowingSibling: boolean;
+  /** More-distant ancestor columns that continue through this subtree. */
+  ancestorContinuationLevels: number[];
+}
+
 export interface NestedSessionThreads<M extends MessageWithParent, S, T, TS> {
   items: Array<TimelineThreadItem<M, S, T, TS>>;
   depthBySession: Map<string, number>;
+  branchBySession: Map<string, SessionTreeBranch>;
 }
 
 function parentIdFor<M extends MessageWithParent, S>(
@@ -61,6 +71,14 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS>(
     siblings.sort((a, b) => (firstIndex.get(a) ?? 0) - (firstIndex.get(b) ?? 0));
   }
 
+  const hasFollowingSibling = new Map<string, boolean>();
+  for (const siblings of childrenByParent.values()) {
+    for (let index = 0; index < siblings.length; index++) {
+      const sessionId = siblings[index];
+      if (sessionId) hasFollowingSibling.set(sessionId, index < siblings.length - 1);
+    }
+  }
+
   const depthBySession = new Map<string, number>();
   const resolveDepth = (sessionId: string, trail = new Set<string>()): number => {
     const cached = depthBySession.get(sessionId);
@@ -78,6 +96,27 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS>(
     return depth;
   };
   for (const sessionId of presentSessions) resolveDepth(sessionId);
+
+  const branchBySession = new Map<string, SessionTreeBranch>();
+  for (const sessionId of presentSessions) {
+    const ancestorContinuationLevels: number[] = [];
+    if ((depthBySession.get(sessionId) ?? 0) > 0) {
+      let ancestor = parentBySession.get(sessionId);
+      let levelsUp = 2;
+      while (ancestor && parentBySession.has(ancestor)) {
+        if (hasFollowingSibling.get(ancestor) === true) {
+          ancestorContinuationLevels.push(levelsUp);
+        }
+        ancestor = parentBySession.get(ancestor);
+        levelsUp += 1;
+      }
+    }
+    branchBySession.set(sessionId, {
+      hasChildren: (childrenByParent.get(sessionId)?.length ?? 0) > 0,
+      hasFollowingSibling: hasFollowingSibling.get(sessionId) === true,
+      ancestorContinuationLevels,
+    });
+  }
 
   const nestedSessions = new Set<string>();
   for (const [childId, parentId] of parentBySession) {
@@ -128,5 +167,5 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS>(
     if (!emitted.has(sessionId)) emitSession(sessionId);
   }
 
-  return { items: output, depthBySession };
+  return { items: output, depthBySession, branchBySession };
 }

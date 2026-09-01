@@ -20,6 +20,10 @@ describe('ChatEventBus — mid-stream replay on subscribeProject', () => {
         gezelId: 'meester',
         kind: 'consultation' as const,
       },
+      handoffFrom: {
+        sessionId: 'research',
+        gezelId: 'researcher',
+      },
     };
     bus.publish(scope, {
       type: 'user_message',
@@ -37,6 +41,7 @@ describe('ChatEventBus — mid-stream replay on subscribeProject', () => {
     expect(seen[1]?.event).toMatchObject({ type: 'delta', content: 'Hello there' });
     expect(seen.every((e) => e.sessionId === 's1' && e.projectId === 'eliza')).toBe(true);
     expect(seen.every((e) => e.parentSession?.sessionId === 'launcher')).toBe(true);
+    expect(seen.every((e) => e.handoffFrom?.sessionId === 'research')).toBe(true);
   });
 
   it('does not replay events for other projects', async () => {

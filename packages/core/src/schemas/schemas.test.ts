@@ -411,9 +411,14 @@ describe('ChatEventSchema', () => {
         gezelId: 'meester',
         kind: 'consultation',
       },
+      handoffFrom: {
+        sessionId: 'previous-step',
+        gezelId: 'planner',
+      },
       event: { type: 'delta', content: 'Working' },
     });
     expect(envelope.parentSession?.sessionId).toBe('parent');
+    expect(envelope.handoffFrom?.sessionId).toBe('previous-step');
   });
 
   it('accepts an in-app Settings action on a warning', () => {

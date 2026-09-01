@@ -2,6 +2,7 @@ import {
   type ChatEvent,
   type ChatEventEnvelope,
   type ChatSessionSource,
+  type SessionLink,
   type SessionParent,
   createLogger,
 } from '@bendyline/gezel';
@@ -16,6 +17,7 @@ export interface PublishScope {
   gezelId: string;
   projectId: string;
   parentSession?: SessionParent;
+  handoffFrom?: SessionLink;
   sessionSource?: ChatSessionSource;
 }
 
@@ -70,6 +72,7 @@ export class ChatEventBus {
       gezelId: scope.gezelId,
       projectId: scope.projectId,
       ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
+      ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
       ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
       event,
     };
@@ -156,6 +159,7 @@ export class ChatEventBus {
           gezelId: scope.gezelId,
           projectId: scope.projectId,
           ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
+          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });
@@ -189,6 +193,7 @@ export class ChatEventBus {
           gezelId: scope.gezelId,
           projectId: scope.projectId,
           ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
+          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });
@@ -220,6 +225,7 @@ export class ChatEventBus {
           gezelId: scope.gezelId,
           projectId: scope.projectId,
           ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
+          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
           ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
           event,
         });

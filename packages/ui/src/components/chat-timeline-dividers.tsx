@@ -8,6 +8,8 @@ import { displayName } from '@bendyline/gezel';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { GezelIcon } from './GezelIcon.js';
 import type { LiveSlot } from './chat-live-slot.js';
+import { SessionTreeGuides } from './chat-session-tree-guides.js';
+import type { SessionTreeBranch } from './session-thread-nesting.js';
 
 export function renderDivider(args: {
   row:
@@ -28,6 +30,8 @@ export function renderDivider(args: {
   continuing: boolean;
   /** Visual nesting level for a session opened by another visible session. */
   depth?: number;
+  /** Tree connector state for this session within its visible sibling set. */
+  treeBranch?: SessionTreeBranch;
   key: string;
   /**
    * Threaded in from the caller because `renderDivider` is invoked as a
@@ -46,6 +50,7 @@ export function renderDivider(args: {
     onFocusSession,
     continuing,
     depth = 0,
+    treeBranch,
     key,
     roleBasedNameOnlyMode,
   } = args;
@@ -64,14 +69,21 @@ export function renderDivider(args: {
       : (row.slot.sessionCreatedAt ?? new Date(row.slot.startedAt).toISOString());
   const taskRef = row.kind === 'message' ? row.msg.taskRef : row.slot.taskRef;
   const source = row.kind === 'message' ? row.msg.sessionSource : row.slot.sessionSource;
-  const parentSession = row.kind === 'message' ? row.msg.parentSession : undefined;
-  const legacyHandoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
+  const parentSession = row.kind === 'message' ? row.msg.parentSession : row.slot.parentSession;
+  const handoffFrom = row.kind === 'message' ? row.msg.handoffFrom : row.slot.handoffFrom;
   const parent =
-    parentSession ??
-    (legacyHandoff ? { ...legacyHandoff, kind: 'task-handoff' as const } : undefined);
+    parentSession ?? (handoffFrom ? { ...handoffFrom, kind: 'task-handoff' as const } : undefined);
   const parentName = parent
     ? (() => {
         const hg = gezels.get(parent.gezelId);
+        return hg
+          ? displayName({ name: hg.name, roleBasedName: hg.roleBasedName }, roleBasedNameOnlyMode)
+          : undefined;
+      })()
+    : undefined;
+  const handoffFromName = handoffFrom
+    ? (() => {
+        const hg = gezels.get(handoffFrom.gezelId);
         return hg
           ? displayName({ name: hg.name, roleBasedName: hg.roleBasedName }, roleBasedNameOnlyMode)
           : undefined;
@@ -120,6 +132,7 @@ export function renderDivider(args: {
           : 'Focus this thread — composer will post here'
       }
     >
+      {depth > 0 && treeBranch && <SessionTreeGuides branch={treeBranch} phase="divider" />}
       <GezelIcon
         svg={gezel?.icon ?? null}
         poppetje={gezel?.poppetje}
@@ -159,21 +172,23 @@ export function renderDivider(args: {
         )}
         {taskRef && <> · task {taskRef}</>}
       </span>
-      {parent && parentName && (
-        <span className="timeline-divider-handoff">
-          <svg
-            className="timeline-divider-handoff-icon"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
-            <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
-          </svg>
-          {parent.kind === 'task-handoff' ? 'from' : 'by'} {parentName}
-        </span>
-      )}
+      {parent &&
+        (parent.kind === 'task-handoff' ? (handoffFromName ?? parentName) : parentName) && (
+          <span className="timeline-divider-handoff">
+            <svg
+              className="timeline-divider-handoff-icon"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
+              <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
+            </svg>
+            {parent.kind === 'task-handoff' ? 'from' : 'by'}{' '}
+            {parent.kind === 'task-handoff' ? (handoffFromName ?? parentName) : parentName}
+          </span>
+        )}
     </button>
   );
 }

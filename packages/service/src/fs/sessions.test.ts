@@ -164,9 +164,15 @@ describe('Store session CRUD', () => {
     expect(
       timeline.messages.find((message) => message.sessionId === 'sess-outline')?.parentSession,
     ).toEqual({
+      sessionId: 'sess-meester',
+      gezelId: 'ada',
+      kind: 'task-handoff',
+    });
+    expect(
+      timeline.messages.find((message) => message.sessionId === 'sess-outline')?.handoffFrom,
+    ).toEqual({
       sessionId: 'sess-research',
       gezelId: 'boz',
-      kind: 'task-handoff',
     });
   });
 

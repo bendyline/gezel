@@ -8,9 +8,13 @@ import { z } from 'zod';
  * consultation may not carry a task at all. Keeping the relationship on the
  * child lets persisted and live timelines reconstruct the same tree.
  */
-export const SessionParentSchema = z.object({
+export const SessionLinkSchema = z.object({
   sessionId: z.string(),
   gezelId: z.string(),
+});
+export type SessionLink = z.infer<typeof SessionLinkSchema>;
+
+export const SessionParentSchema = SessionLinkSchema.extend({
   kind: z.enum(['delegation', 'consultation', 'task-entry', 'task-handoff']),
 });
 export type SessionParent = z.infer<typeof SessionParentSchema>;

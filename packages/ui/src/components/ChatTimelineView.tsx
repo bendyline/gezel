@@ -67,6 +67,7 @@ import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
+import { SessionTreeGuides } from './chat-session-tree-guides.js';
 import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
@@ -1612,6 +1613,11 @@ export function ChatTimelineView({
             : env.parentSession
               ? { parentSession: env.parentSession }
               : {}),
+          ...(lastForSession?.handoffFrom
+            ? { handoffFrom: lastForSession.handoffFrom }
+            : env.handoffFrom
+              ? { handoffFrom: env.handoffFrom }
+              : {}),
           role: event.message.role,
           content: event.message.content,
           at: event.message.at,
@@ -1697,6 +1703,16 @@ export function ChatTimelineView({
                 ? { sessionSource: env.sessionSource }
                 : {}),
             ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+            ...(lastForSession?.parentSession
+              ? { parentSession: lastForSession.parentSession }
+              : env.parentSession
+                ? { parentSession: env.parentSession }
+                : {}),
+            ...(lastForSession?.handoffFrom
+              ? { handoffFrom: lastForSession.handoffFrom }
+              : env.handoffFrom
+                ? { handoffFrom: env.handoffFrom }
+                : {}),
           });
           liveStore.markStructureChanged();
         }
@@ -2274,6 +2290,16 @@ export function ChatTimelineView({
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+          ...(lastForSession?.parentSession
+            ? { parentSession: lastForSession.parentSession }
+            : env.parentSession
+              ? { parentSession: env.parentSession }
+              : {}),
+          ...(lastForSession?.handoffFrom
+            ? { handoffFrom: lastForSession.handoffFrom }
+            : env.handoffFrom
+              ? { handoffFrom: env.handoffFrom }
+              : {}),
           ...(lastForSession?.sessionSource
             ? { sessionSource: lastForSession.sessionSource }
             : env.sessionSource
@@ -2384,6 +2410,7 @@ export function ChatTimelineView({
   );
   const threadItems = nestedThreadItems.items;
   const sessionDepthById = nestedThreadItems.depthBySession;
+  const sessionBranchById = nestedThreadItems.branchBySession;
 
   /**
    * Queue receipts for held tasks, minus any task that is already
@@ -3717,6 +3744,7 @@ export function ChatTimelineView({
     // fan-out threads carry the kept root's session for this purpose).
     const sid = item.sessionId;
     const sessionDepth = sessionDepthById.get(sid) ?? 0;
+    const sessionBranch = sessionBranchById.get(sid);
     const anchorRow = item.root ?? item.replies[0];
     if (!anchorRow) continue;
     if (sid !== prevSessionId) {
@@ -3739,6 +3767,7 @@ export function ChatTimelineView({
           onFocusSession,
           continuing: isContinuing,
           depth: sessionDepth,
+          ...(sessionBranch ? { treeBranch: sessionBranch } : {}),
           key: `divider:${sid}:${item.at}`,
           roleBasedNameOnlyMode,
         }),
@@ -3829,12 +3858,15 @@ export function ChatTimelineView({
         </div>,
       );
     }
-    // Full-height rail threads: the connector line only draws when the
-    // left gutter is clear top-to-bottom — user roots are right-aligned
-    // and rootless threads have no root at all. Handoff roots render as
-    // left-aligned stretch bubbles whose translucent fill would let the
-    // line show through, so they keep the replies-only border rail.
-    const railed = item.replies.length > 0 && (!item.root || !item.root.msg.from);
+    // Top-level conversations keep the ordinary trigger→reply rail when
+    // their left gutter is clear. A session with visible child sessions
+    // always owns a full-height local trunk, even without replies, so the
+    // child elbows have a stable line to attach to. Nested leaf sessions
+    // suppress their turn rail in CSS: the tree edge already communicates
+    // containment, and drawing both was the source of the doubled line.
+    const railed =
+      sessionBranch?.hasChildren === true ||
+      (sessionDepth === 0 && item.replies.length > 0 && (!item.root || !item.root.msg.from));
     els.push(
       <div
         key={`thread:${sid}:${item.at}`}
@@ -3842,8 +3874,13 @@ export function ChatTimelineView({
           sessionDepth > 0
             ? ` timeline-session-subthread timeline-session-depth-${Math.min(sessionDepth, 4)}`
             : ''
+        }${
+          sessionBranch?.hasChildren ? ' timeline-session-parent' : ''
         }${item.root ? '' : ' timeline-thread-rootless'}${railed ? ' timeline-thread-railed' : ''}`}
       >
+        {sessionDepth > 0 && sessionBranch && (
+          <SessionTreeGuides branch={sessionBranch} phase="thread" />
+        )}
         {children}
       </div>,
     );

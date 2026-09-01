@@ -24,6 +24,16 @@ describe('ProjectActionsMenu', () => {
     } as never);
   });
 
+  it('renders the project overflow icon as horizontal dots', () => {
+    render(<ProjectActionsMenu project={PROJECT} />);
+
+    const dots = screen
+      .getByRole('button', { name: 'Actions for Alpha' })
+      .querySelectorAll('circle');
+    expect(Array.from(dots, (dot) => dot.getAttribute('cx'))).toEqual(['5', '12', '19']);
+    expect(Array.from(dots, (dot) => dot.getAttribute('cy'))).toEqual(['12', '12', '12']);
+  });
+
   it('offers no error-clearing action when the project has no failed turn', () => {
     render(<ProjectActionsMenu project={PROJECT} />);
     expect(screen.queryByRole('menuitem', { name: 'Clear error indicator' })).toBeNull();

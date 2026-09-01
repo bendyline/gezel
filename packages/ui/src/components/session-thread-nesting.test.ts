@@ -47,6 +47,11 @@ describe('nestChildSessionThreads', () => {
     expect(sessionOrder(nested.items)).toEqual(['parent', 'child']);
     expect(nested.depthBySession.get('parent')).toBe(0);
     expect(nested.depthBySession.get('child')).toBe(1);
+    expect(nested.branchBySession.get('parent')).toMatchObject({ hasChildren: true });
+    expect(nested.branchBySession.get('child')).toMatchObject({
+      hasFollowingSibling: false,
+      ancestorContinuationLevels: [],
+    });
   });
 
   it('supports nested delegations and preserves sibling order', () => {
@@ -65,6 +70,12 @@ describe('nestChildSessionThreads', () => {
       'second-child',
     ]);
     expect(nested.depthBySession.get('grandchild')).toBe(2);
+    expect(nested.branchBySession.get('first-child')).toMatchObject({
+      hasChildren: true,
+      hasFollowingSibling: true,
+    });
+    expect(nested.branchBySession.get('grandchild')?.ancestorContinuationLevels).toEqual([2]);
+    expect(nested.branchBySession.get('second-child')?.hasFollowingSibling).toBe(false);
   });
 
   it('leaves a child at top level when its parent is outside the loaded timeline', () => {
