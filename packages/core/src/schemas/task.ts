@@ -121,6 +121,15 @@ export type TaskNightShift = z.infer<typeof TaskNightShiftSchema>;
  * harness reads to confirm a model actually looped and recovered rather
  * than one-shotting.
  */
+/**
+ * How many times boot rehydration may resume one active step before the
+ * task pauses for a human. Each resume re-prefills the whole step context,
+ * so an unbounded ladder spends a full model turn on every app start and
+ * shows nothing for it. Reset by any activation — see
+ * `restartResumeCount`.
+ */
+export const MAX_RESTART_RESUMES = 3;
+
 export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
   createdAt: z.string(),
   completedAt: z.string().optional(),
@@ -185,6 +194,27 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
    */
   redriveCount: z.number().int().nonnegative().optional(),
   lastRedriveAt: z.string().optional(),
+  /**
+   * Restart-resume bookkeeping. `restartResumeCount` = how many times this
+   * step has been re-dispatched by boot rehydration after the process died
+   * with it still active; `lastRestartResumeAt` = when it last was.
+   *
+   * Deliberately NOT charged to `redriveCount`, which counts re-pokes of a
+   * SILENT assignee: a step killed by a restart was working, and spending
+   * the anti-stall budget on the app quitting would shorten the ladder for
+   * the stalls it exists to catch. The two also end differently — a stall
+   * escalates to the keurmeester ladder, a restart loop just needs to stop
+   * re-running.
+   *
+   * Reset by `bumpStepActivation`, so any advance or loop-back grants a
+   * fresh budget: the count only ever means "resumed this many times
+   * WITHOUT finishing this step". Bounded because each resume re-prefills
+   * the whole step context — measured at 48k tokens and ~10 minutes on a
+   * 27B — so a step that cannot survive a restart quietly burns an engine
+   * on every boot forever.
+   */
+  restartResumeCount: z.number().int().nonnegative().optional(),
+  lastRestartResumeAt: z.string().optional(),
   /**
    * Rolling reject trail (capped at 8 entries, oldest dropped). One entry
    * per real completion-gate rejection PLUS one per damped byte-identical

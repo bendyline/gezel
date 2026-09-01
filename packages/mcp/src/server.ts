@@ -76,6 +76,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { advanceHandoffNote } from './advance-note.js';
+import {
+  ASSIGNEE_ARG_DESCRIPTION,
+  type AssigneeArg,
+  assigneeArg,
+  normalizeAssigneeArg,
+} from './assignee-arg.js';
 import { commandResultIsError } from './command-result.js';
 import {
   RootTurnInvocationCache,
@@ -5235,7 +5241,7 @@ async function launchCraftbookTask(args: {
   title?: string;
   description?: string;
   version?: string;
-  assignee?: z.infer<ReturnType<typeof assigneeArg>>;
+  assignee?: AssigneeArg;
   params?: Record<string, string>;
   /** Durable continuation dedupe key for the explicit invoke_craftbook tool. */
   craftbookInvocationKey?: string;
@@ -5289,6 +5295,7 @@ async function launchCraftbookTask(args: {
     params: args.params,
     jobDescription: args.description,
   });
+  const resolvedAssignee = await resolveAssigneeArg(args.assignee);
   const task = await api.createTask(args.project, {
     ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
@@ -5296,7 +5303,7 @@ async function launchCraftbookTask(args: {
     craftbookId: args.craftbookId,
     ...(args.version ? { craftbookVersion: args.version } : {}),
     ...(Object.keys(effectiveParams).length > 0 ? { craftbookParams: effectiveParams } : {}),
-    ...(args.assignee ? { assignee: assigneeFromArg(args.assignee) } : {}),
+    ...(resolvedAssignee ? { assignee: resolvedAssignee } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
     dispatchEntry: true,
@@ -6339,7 +6346,7 @@ server.tool(
       projectId === 'default'
         ? ' If this work belongs to a project you spun up (not Default), pass `project: "<projectId>"` in BOTH calls — without it the gezel lands in `Default` and gets the wrong workspace + memory scope.'
         : '';
-    const nextHint = `\n\nNEXT: \`message_gezel({ gezel: "${res.gezelId}", message: "<one-line brief>"${projectArgFragment} })\` to start them, or \`update_task({ ref, assignee: { kind: "gezel", gezelId: "${res.gezelId}" } })\` to formally assign.${projectArgGuidance} Do NOT call \`ensure_gezel\` again with a similar \`jobTitle\` — it is idempotent and will keep returning the same gezel.`;
+    const nextHint = `\n\nNEXT: \`message_gezel({ gezel: "${res.gezelId}", message: "<one-line brief>"${projectArgFragment} })\` to start them, or \`update_task({ ref, assignee: "${res.gezelId}" })\` to formally assign.${projectArgGuidance} Do NOT call \`ensure_gezel\` again with a similar \`jobTitle\` — it is idempotent and will keep returning the same gezel.`;
     return {
       content: [
         {
@@ -8609,25 +8616,21 @@ server.tool(
 // monotonic per-project number, one or more phases, an assignee, and a
 // status. Use these tools to create, inspect, assign, and advance tasks.
 
-function assigneeArg() {
-  return coerceJsonObject(
-    z
-      .object({
-        kind: z.enum(['gezel', 'user']),
-        gezelId: z.string().optional(),
-      })
-      .describe(
-        'Task assignee. Must be a real JSON object: `{kind:"gezel", gezelId:"..."}` or `{kind:"user"}` — NOT a stringified one.',
-      ),
-  );
-}
-
-function assigneeFromArg(a: { kind: 'gezel' | 'user'; gezelId?: string }) {
-  if (a.kind === 'gezel') {
-    if (!a.gezelId) throw new Error('assignee.kind="gezel" requires gezelId');
-    return { kind: 'gezel' as const, gezelId: a.gezelId };
-  }
-  return { kind: 'user' as const };
+/**
+ * Resolve the model-facing `assignee` argument to the wire struct, or
+ * `undefined` when the caller named no one in particular — see
+ * `assignee-arg.ts` for why a kind without an id is a default and not an
+ * error. A gezel reference goes through {@link resolveGezelId}, so a name
+ * the model typed lands as the canonical id instead of being persisted
+ * verbatim into `assignee.gezelId`.
+ */
+async function resolveAssigneeArg(
+  raw: AssigneeArg | undefined,
+): Promise<{ kind: 'gezel'; gezelId: string } | { kind: 'user' } | undefined> {
+  const normalized = normalizeAssigneeArg(raw);
+  if (!normalized) return undefined;
+  if (normalized.kind === 'user') return { kind: 'user' as const };
+  return { kind: 'gezel' as const, gezelId: await resolveGezelId(normalized.ref) };
 }
 
 function formatTaskLine(t: {
@@ -8824,9 +8827,7 @@ server.tool(
     assignee: assigneeArg()
       .optional()
       .describe(
-        'Who owns the task. OMIT this when the craftbook or steps name a role per step — the owner then ' +
-          "mirrors whoever the entry step's role resolves to, which is the gezel actually doing the work. " +
-          'Naming someone here just pins an owner the per-step roles override anyway.',
+        `${ASSIGNEE_ARG_DESCRIPTION} Naming someone here just pins an owner the per-step roles override anyway.`,
       ),
     craftbookId: z
       .string()
@@ -8891,12 +8892,13 @@ server.tool(
   }) => {
     try {
       const projectId = await resolveProjectId(project);
+      const resolvedAssignee = await resolveAssigneeArg(assignee);
       const created = await api.createTask(projectId, {
         ...sessionTaskNamingMode,
         title,
         description,
         ...(plan ? { plan } : {}),
-        ...(assignee ? { assignee: assigneeFromArg(assignee) } : {}),
+        ...(resolvedAssignee ? { assignee: resolvedAssignee } : {}),
         ...(craftbookId ? { craftbookId } : {}),
         ...(craftbookVersion ? { craftbookVersion } : {}),
         ...(steps && steps.length > 0 ? { steps: steps.map(blueprintToStep) } : {}),
@@ -9041,7 +9043,7 @@ server.tool(
     if (title !== undefined) body.title = title;
     if (description !== undefined) body.description = description;
     if (plan !== undefined) body.plan = plan;
-    const nextAssignee = assignee !== undefined ? assigneeFromArg(assignee) : undefined;
+    const nextAssignee = await resolveAssigneeArg(assignee);
     if (nextAssignee !== undefined) body.assignee = nextAssignee;
     if (cron !== undefined) {
       body.cron =
@@ -9447,19 +9449,24 @@ server.tool(
 
 server.tool(
   'assign_task',
-  'Assign a task to a gezel or to the user.',
+  'Assign a task to a specific gezel, or to the user. This one needs a name — there is no "any gezel" ' +
+    "form, because a task created without an assignee already mirrors whichever gezel the entry step's " +
+    'role resolves to.',
   {
     ref: z.string(),
     assignee: assigneeArg(),
   },
   async ({ ref, assignee }) => {
     const parsed = await parseRef(ref);
-    const updated = await api.setTaskAssignee(
-      parsed.projectId,
-      parsed.num,
-      assigneeFromArg(assignee),
-    );
-    const summary = `${ref} assigned to ${assignee.kind === 'user' ? 'the user' : assignee.gezelId}`;
+    const resolved = await resolveAssigneeArg(assignee);
+    if (!resolved) {
+      return errorResult(
+        `assign_task needs a specific assignee — name one gezel (id, display name, or role name) or "user". ${await availableGezelsHint()}`,
+        { code: 'invalid_assignee', retryable: true },
+      );
+    }
+    const updated = await api.setTaskAssignee(parsed.projectId, parsed.num, resolved);
+    const summary = `${ref} assigned to ${resolved.kind === 'user' ? 'the user' : resolved.gezelId}`;
     return okResult(
       TaskToolOutputSchema,
       {
@@ -9780,31 +9787,57 @@ async function resolveProjectId(input: string): Promise<string> {
 }
 
 /**
- * Resolve a gezel id-or-name to a canonical id. Tries the input as an id
- * first (cheap if it's already an id), then falls back to a case-
- * insensitive lookup against the gezel roster by display name. Same
- * shape as `resolveProjectId` — kept terse here because tools that take
- * a gezel arg never need partial / fuzzy matching.
+ * Resolve a gezel id-or-name to a canonical id: the roster is consulted
+ * first (exact id, then a case-insensitive id / display name /
+ * role-based name), and `getGezel` is the fallback for gezels the roster
+ * does not list, such as the encoded project-local ids. Same shape as
+ * `resolveProjectId` — kept terse here because tools that take a gezel
+ * arg never need partial / fuzzy matching.
+ *
+ * The roster has to come first because `getGezel` echoes the id it was
+ * asked for, and on a case-insensitive filesystem `getGezel("Ada")`
+ * happily reads `gezels/ada/`. Returning "Ada" there would persist a
+ * reference that no `===` against the real id matches — the drift
+ * `ChatManager.resolveGezelIdRef` exists to undo.
  */
 async function resolveGezelId(input: string): Promise<string> {
+  const all = (await api.listGezels()).gezels;
+  const exact = all.find((g) => g.id === input);
+  if (exact) return exact.id;
+  const lc = input.trim().toLowerCase();
+  const match = all.find(
+    (g) =>
+      g.id.toLowerCase() === lc ||
+      g.name.toLowerCase() === lc ||
+      g.roleBasedName?.toLowerCase() === lc,
+  );
+  if (match) return match.id;
   try {
     const g = await api.getGezel(input);
     return g.id;
   } catch {
-    /* fall through to name lookup */
+    /* not a listed gezel and not directly readable */
   }
-  const all = (await api.listGezels()).gezels;
-  const lc = input.trim().toLowerCase();
-  const match = all.find(
-    (g) => g.name.toLowerCase() === lc || g.roleBasedName?.toLowerCase() === lc,
+  throw new Error(
+    `gezel "${input}" not found. ${gezelRosterHint(all)} Use the id (the slug), the friendly name, or the role-based name.`,
   );
-  if (match) return match.id;
-  const available = all
+}
+
+function gezelRosterHint(
+  gezels: ReadonlyArray<{ id: string; name: string; roleBasedName?: string }>,
+): string {
+  const available = gezels
     .map((g) => `"${g.id}" (${g.name}${g.roleBasedName ? `, role: ${g.roleBasedName}` : ''})`)
     .join(', ');
-  throw new Error(
-    `gezel "${input}" not found. Available: ${available || '(none)'}. Use the id (the slug), the friendly name, or the role-based name.`,
-  );
+  return `Available: ${available || '(none)'}.`;
+}
+
+async function availableGezelsHint(): Promise<string> {
+  try {
+    return gezelRosterHint((await api.listGezels()).gezels);
+  } catch {
+    return 'Call `list_gezels` for the roster.';
+  }
 }
 
 // Tolerant ref resolution: accepts the canonical `projectId/num` but

@@ -111,12 +111,13 @@ export function ChatNarrateButton({
       const session = new ProgressiveSpeechToText({
         stream,
         ...(format.mimeType ? { mimeType: format.mimeType } : {}),
-        transcribe: async (blob, mimeType, signal) => {
+        transcribe: async (blob, mimeType, signal, prompt) => {
           const upload = await microphoneTakeAsWav(blob);
           const response = await api.transcribeAudio({
             audio: { data: await blobToBase64(upload), mimeType: upload.type || mimeType },
             projectId,
             signal,
+            ...(prompt ? { prompt } : {}),
           });
           const text = normalizeSpeechTranscript(response.text);
           if (!text) return '';

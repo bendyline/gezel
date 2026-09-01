@@ -363,6 +363,20 @@
   display: block;
 }
 
+/* The pane-level stand-in shown while a project's detail is in flight
+   (`ProjectPanePlaceholder`). The strip holds the tab row's place with a
+   real, hidden trigger rather than a guessed height — the same rule above
+   sizes both, so nothing moves when the labels arrive. `visibility` and
+   not `display`, for exactly that reason. */
+.project-pane-placeholder-tabs .gz-tabs-trigger {
+  visibility: hidden;
+}
+
+.project-pane-placeholder-body {
+  flex: 1;
+  min-height: 0;
+}
+
 .gz-tabs-trigger:focus-visible {
   outline: 2px solid var(--accent, #b0724c);
   /* Tab lists scroll horizontally, so an outward focus ring is clipped at

@@ -12,6 +12,14 @@ import { LicenseMetaShape, RecoMetaShape } from './catalog.js';
 
 // ── transcribe (STT) ──────────────────────────────────────────────
 
+/**
+ * Bound recognition context before it crosses a service or paired-device
+ * boundary. Whisper uses this as an initial transcript prompt, not as audio
+ * to retranscribe; a short recent tail is enough to preserve vocabulary,
+ * punctuation, and sequence continuity without crowding its context window.
+ */
+export const AUDIO_TRANSCRIBE_PROMPT_MAX_CHARS = 2_000;
+
 export const AudioTranscribeRequestSchema = z.object({
   /**
    * Source audio. Either an inline base64 blob OR a project-relative
@@ -35,6 +43,8 @@ export const AudioTranscribeRequestSchema = z.object({
   model: z.string().optional(),
   /** BCP-47 language hint. Whisper auto-detects when omitted. */
   language: z.string().optional(),
+  /** Recent transcript used to contextually decode this audio window. */
+  prompt: z.string().trim().min(1).max(AUDIO_TRANSCRIBE_PROMPT_MAX_CHARS).optional(),
   /** Project the audio belongs to. Defaults to 'default'. */
   projectId: z.string().optional(),
 });

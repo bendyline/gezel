@@ -29,6 +29,7 @@ import {
   createAwakeTimeout,
   createLogger,
   leaksUntaggedReasoning,
+  turnCancelledMessage,
 } from '@bendyline/gezel';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
@@ -2893,6 +2894,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
   }
 
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
+  }
+
   /** Total context window (tokens) llama-server booted with. */
   get numCtx(): number {
     return this.deps.numCtx;
@@ -3441,7 +3451,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
             if (opts?.queue?.signal?.aborted) {
-              throw new Error('[llama-cpp] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (engineDeadlineSignal.aborted) throw turnTimeoutError();
           }
@@ -4640,7 +4650,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           }
           if ((err as Error).name === 'AbortError') {
             if (abortKind === 'external' || externalSignal?.aborted) {
-              throw new Error('[llama-cpp] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (
               constrainedToolSignalAborted &&
@@ -5270,7 +5280,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           let recoveredFromIdleStall = false;
           if ((err as Error).name === 'AbortError') {
             if (abortKind === 'external' || externalSignal?.aborted) {
-              throw new Error('[llama-cpp] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (constrainedToolSignalAborted) {
               finishReason ??= `${constrainedToolSignalMode ?? 'constrained'}-no-tool-signal`;

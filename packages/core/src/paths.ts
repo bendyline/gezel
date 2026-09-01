@@ -679,6 +679,16 @@ export function globalHistoryFile(root: string): string {
 }
 
 /**
+ * Gezel-to-gezel messages that were accepted but not yet dispatched — a
+ * handoff parks while the sender is mid-turn, and that park is a closure in
+ * one process's memory. Written when the park happens, dropped when the
+ * dispatch fires, replayed at boot.
+ */
+export function pendingHandoffsFile(root: string): string {
+  return join(root, 'pending-handoffs.json');
+}
+
+/**
  * Home-scoped index directory for cross-project derived caches (session
  * transcripts, history mirror, documents library). Always local: it's a
  * rebuildable sqlite cache, never user data, so it stays out of

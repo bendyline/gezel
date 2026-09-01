@@ -126,6 +126,10 @@ describe('ChatNarrateButton', () => {
       'first thought',
       'second thought',
     ]);
+    expect(api.transcribeAudio).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ prompt: 'first thought' }),
+    );
     expect(stopTrack).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith(null);
   });

@@ -41,6 +41,7 @@ import { QueuedTaskBubble } from './QueuedTaskBubble.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
+import { pinActiveThreadLast } from './active-thread-pin.js';
 import {
   GhostQueuedBubble,
   type InlineWarning,
@@ -54,6 +55,7 @@ import {
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
   countSegmentTools,
+  erroredSlotsWithPersistedTwin,
   liveStatusLabel,
   queueNoticeIsFresh,
   segmentsHaveText,
@@ -65,6 +67,7 @@ import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
+import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
@@ -80,7 +83,6 @@ const PAGE_SIZE = 100;
 // as a drift pill in the bubble header — the model is available on hover
 // via the author-name tooltip instead. Cloud providers still show drift.
 const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set(['ollama', 'llama-cpp', 'mlx', 'ds4']);
-const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 /**
  * Gap past which a reply inside a thread is "late": it keeps its
  * author header and gains a relative timestamp instead of merging into
@@ -1406,10 +1408,17 @@ export function ChatTimelineView({
       // The server returned the most-recent slice. Keep older pages already
       // loaded while merging in the new durable rows.
       setMessages((prev) => mergeTimelineMessages(prev, res.messages));
+      // One of those durable rows may be the persisted twin of a failed
+      // turn we are still showing as a live shell. Retire the shell now
+      // that the record has landed — same move `acknowledgeFailedTurn`
+      // makes, minus the click.
+      const retired = erroredSlotsWithPersistedTwin(liveRef.current, res.messages);
+      for (const sessionId of retired) liveRef.current.delete(sessionId);
+      if (retired.length > 0) liveStore.markStructureChanged();
     } catch {
       /* non-fatal — the SSE complete event already updated the live state */
     }
-  }, [loadTimeline]);
+  }, [loadTimeline, liveStore.markStructureChanged]);
 
   // SSE remains the low-latency path, but a dropped `done` envelope must
   // not leave a permanent thinking/stalled bubble. Reconcile the local
@@ -1726,16 +1735,29 @@ export function ChatTimelineView({
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'reasoning_delta') {
         // Live think-phase tokens (ds4's `reasoning_content` channel).
-        // Accumulate into a dimmed "thinking" block rendered above the
-        // reply; it collapses into the committed message's reasoning
-        // expander once the turn ends and this slot is replaced. Counts as
-        // real activity — resets the silence timer and clears the
-        // wire-pulse dots, so a streaming think never reads as a stall.
-        // `thinkingProgress` (the prefill bar) is definitively done once
-        // reasoning tokens flow; drop it. `thinkingLabel` stays — the
-        // status line still honestly reads "thinking…".
+        // Appended as a segment so the think phase sits in wire order
+        // between the tool rows it reasoned about, rather than in one
+        // box above them: on a long turn the trace has to stay near the
+        // caret the user is actually watching. It collapses into the
+        // committed message's reasoning expander once the turn ends and
+        // this slot is replaced. Counts as real activity — resets the
+        // silence timer and clears the wire-pulse dots, so a streaming
+        // think never reads as a stall. `thinkingProgress` (the prefill
+        // bar) is definitively done once reasoning tokens flow; drop it.
+        // `thinkingLabel` stays — the status line still honestly reads
+        // "thinking…".
+        //
+        // Unlike text deltas there is no idle-gap break: a think phase
+        // is one continuous act of deliberation, and splitting it on a
+        // slow-token pause would scatter it into boxes that each carry
+        // their own "Thinking" label.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
-        slot.liveReasoning = (slot.liveReasoning ?? '') + event.content;
+        const reasoningTail = slot.segments[slot.segments.length - 1];
+        if (reasoningTail?.kind === 'reasoning') {
+          reasoningTail.content += event.content;
+        } else {
+          slot.segments.push({ kind: 'reasoning', content: event.content });
+        }
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         delete slot.queueAhead;
@@ -1970,15 +1992,15 @@ export function ChatTimelineView({
         // start of the silent stretch, not from the user's send.
         const existing = liveRef.current.get(sessionId);
         if (existing) {
+          // Clearing segments also drops the live think-phase blocks:
+          // the just-committed message carries this iteration's
+          // reasoning on its `reasoning` field (collapsed expander), so
+          // keeping them would double-render the trace until the next
+          // delta.
           existing.segments = [];
           existing.lastActivityAt = Date.now();
           existing.hasProgress = true;
           existing.wirePulseCount = 0;
-          // Drop the live think-phase block: the just-committed message
-          // carries this iteration's reasoning on its `reasoning` field
-          // (collapsed expander). Leaving it set would double-render the
-          // trace — live block + expander — until the next delta.
-          delete existing.liveReasoning;
           delete existing.liveToolArgs;
           delete existing.queueAhead;
           delete existing.error;
@@ -2343,7 +2365,14 @@ export function ChatTimelineView({
   // (@-mention fan-out persists the same prompt into several sessions)
   // don't render their own root; their sessions' replies merge into the
   // kept root's thread. See `timeline-threads.ts`.
-  const threadItems = useMemo(() => buildTimelineThreads(rows), [rows]);
+  // The thread the composer points at settles at the bottom, so the last
+  // thing above the draft is what the next message answers. See
+  // `active-thread-pin.ts` for why the move is deliberately narrow.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick deliberately re-runs the Date.now()-dependent lane checks.
+  const threadItems = useMemo(
+    () => pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+    [rows, activeSessionId, terminalOrderTick],
+  );
 
   /**
    * Queue receipts for held tasks, minus any task that is already
@@ -3292,7 +3321,7 @@ export function ChatTimelineView({
   ): React.ReactNode => {
     const gezel = gezels.get(m.gezelId);
     const isActive = m.sessionId === activeSessionId;
-    const isRecent = withinHours(m.sessionLastActivityAt, RECENT_THRESHOLD_MS);
+    const isRecent = withinHours(m.sessionLastActivityAt, FRESH_THREAD_MAX_AGE_MS);
     const fade = !isActive && !isRecent;
     // Only surface the project context when (a) we're on a
     // cross-project surface (Meester / global timeline) AND (b) the
@@ -3500,7 +3529,6 @@ export function ChatTimelineView({
           ? { thinkingProgress: slot.thinkingProgress }
           : {})}
         {...(slot.thinkingDetail ? { thinkingDetail: slot.thinkingDetail } : {})}
-        {...(slot.liveReasoning ? { liveReasoning: slot.liveReasoning } : {})}
         {...(slot.liveToolArgs ? { liveToolArgs: slot.liveToolArgs } : {})}
         {...(slot.gpuSwapTask ? { gpuSwapTask: slot.gpuSwapTask } : {})}
         {...(slot.gpuSwapDetail ? { gpuSwapDetail: slot.gpuSwapDetail } : {})}

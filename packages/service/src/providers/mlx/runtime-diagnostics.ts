@@ -83,7 +83,19 @@ export function formatTps(rate: number): string {
 
 export function buildPreFirstByteAbortMessage(
   lastPrefill: { progress: number; detail: string; at: number } | null,
+  busyElsewhere?: { detail: string; secondsAgo: number } | null,
 ): string {
+  // Checked first, and only when THIS request saw no prefill of its own:
+  // an engine that was demonstrably prefilling someone else's turn is
+  // neither loading nor unhealthy, and saying so sends the reader to
+  // Settings → On-device to restart a perfectly good engine. Wild-caught
+  // on a restart that resumed four sessions at once — one turn waited
+  // 10m36s behind a neighbour's 124s prefill and was told the model might
+  // be sick.
+  if (!lastPrefill && busyElsewhere) {
+    const what = busyElsewhere.detail ? ` (${busyElsewhere.detail})` : '';
+    return `[Mac AI] no first byte — the engine was busy with another session's turn${what} ${busyElsewhere.secondsAgo}s ago and never got to this one. It is not stuck or unhealthy: retry, and if several gezels are working at once expect them to take turns on one engine.`;
+  }
   if (lastPrefill && lastPrefill.progress > 0) {
     const pct = Math.round(lastPrefill.progress * 100);
     const detail = lastPrefill.detail ? ` (${lastPrefill.detail})` : '';

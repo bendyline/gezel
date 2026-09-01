@@ -33,6 +33,7 @@ import {
   createAwakeTimeout,
   createLogger,
   leaksUntaggedReasoning,
+  turnCancelledMessage,
 } from '@bendyline/gezel';
 import type { ToolsMlxTemplateFixConfig } from '../../model-profile/behaviors/tools-mlx-template-fix.js';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
@@ -405,6 +406,17 @@ export class MlxProvider implements LLMProvider {
     // streaming its reply picks up a neighbour's prefill bar — at the
     // neighbour's token total — because one engine has one stdout.
     deliver: (phase) => {
+      // Engine-wide record of who the engine was last seen working FOR.
+      // A session that never gets a first byte cannot tell "the engine is
+      // sick" from "the engine is busy with someone else" from inside its
+      // own request — this is the only place both are visible.
+      if (phase.cacheId && phase.phase === 'prefill') {
+        this.lastTaggedPrefill = {
+          cacheId: phase.cacheId,
+          detail: phase.detail ?? '',
+          at: Date.now(),
+        };
+      }
       for (const s of this.activeSessions) {
         if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
         s.publishEnginePhase(phase);
@@ -559,6 +571,23 @@ export class MlxProvider implements LLMProvider {
   currentBaseUrl(): string | null {
     if (this.externalBaseUrl) return this.externalBaseUrl;
     return this.supervisor?.currentBaseUrl() ?? null;
+  }
+
+  private lastTaggedPrefill: { cacheId: string; detail: string; at: number } | null = null;
+
+  /**
+   * The most recent prefill this engine ran for a DIFFERENT session, if it
+   * happened after `sinceMs`. Proof that the engine was alive and working —
+   * just not on the caller's turn.
+   */
+  prefillForOtherSessionSince(
+    ownCacheId: string | null,
+    sinceMs: number,
+  ): { detail: string; at: number } | null {
+    const last = this.lastTaggedPrefill;
+    if (!last || last.at < sinceMs) return null;
+    if (ownCacheId !== null && last.cacheId === ownCacheId) return null;
+    return { detail: last.detail, at: last.at };
   }
 
   /** True only while this sidecar is serving or queuing a physical request. */
@@ -1146,6 +1175,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnReasoning(): string | undefined {
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
+  }
+
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
   }
 
   getLastTurnAttemptedToolCalls(): Array<{ body: string; reason?: string }> | undefined {
@@ -1768,7 +1806,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
             if (externalSignal?.aborted) {
-              throw new Error('[Mac AI] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (engineDeadlineSignal.aborted) throw turnTimeoutError();
           }
@@ -1926,6 +1964,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         };
         this.currentTurnIdleReset = resetIdleFromPhaseEvent;
         this.lastPrefillEvent = null;
+        // Anchored at request dispatch: only work the engine did while THIS
+        // turn was already waiting can explain why it never got a first byte.
+        const requestDispatchedAt = Date.now();
+        const busyElsewhere = (): { detail: string; secondsAgo: number } | null => {
+          const other = this.deps.provider.prefillForOtherSessionSince(
+            this.currentCacheId ?? null,
+            requestDispatchedAt,
+          );
+          if (!other) return null;
+          return {
+            detail: other.detail,
+            secondsAgo: Math.max(0, Math.round((Date.now() - other.at) / 1000)),
+          };
+        };
         const cleanupTurn = () => {
           clearInterval(deadlineTicker);
           clearTimeout(idleTimer);
@@ -1956,14 +2008,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           if ((err as Error).name === 'AbortError') {
             if (externalSignal?.aborted) {
-              throw new Error('[Mac AI] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (abortReason === 'idle') {
               // Idle-fired during the fetch itself (no response body yet).
               // If we observed prefill chunks, attribute the stall to the
               // last seen progress point — much more useful than "no
               // first byte" when the model was clearly working.
-              throw new Error(buildPreFirstByteAbortMessage(this.lastPrefillEvent));
+              throw new Error(
+                buildPreFirstByteAbortMessage(this.lastPrefillEvent, busyElsewhere()),
+              );
             }
             throw turnTimeoutError();
           }
@@ -2273,7 +2327,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           let recoveredFromRamble = false;
           if ((err as Error).name === 'AbortError') {
             if (externalSignal?.aborted) {
-              throw new Error('[Mac AI] turn cancelled by caller');
+              throw new Error(turnCancelledMessage());
             }
             if (rambleAborted) {
               const hasSalvageableMarkup = /<tool_call>|<function=/i.test(turnContent);
@@ -2371,7 +2425,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // informative when the bubble would otherwise look
               // empty.
               if (idleAbortKind === 'pre-first-byte') {
-                throw new Error(buildPreFirstByteAbortMessage(this.lastPrefillEvent));
+                throw new Error(
+                  buildPreFirstByteAbortMessage(this.lastPrefillEvent, busyElsewhere()),
+                );
               }
               const sinceFirst =
                 firstSseEventAt !== null ? Math.round((Date.now() - firstSseEventAt) / 1000) : null;

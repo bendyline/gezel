@@ -32,6 +32,7 @@ import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
 import {
   type CSSProperties,
+  Fragment,
   type MouseEvent,
   type RefObject,
   useCallback,
@@ -58,6 +59,7 @@ import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
+import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { shouldDisplayIntent } from './intent-display.js';
@@ -866,7 +868,11 @@ export function MessageBubble({
         />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
-        <ReasoningExpando reasoning={reasoning} durationMs={reasoningDurationMs} />
+        <ReasoningExpando
+          reasoning={reasoning}
+          durationMs={reasoningDurationMs}
+          {...(toolCalls ? { toolCalls } : {})}
+        />
       )}
       {!isUser && attemptedToolCalls && attemptedToolCalls.length > 0 && (
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
@@ -1327,7 +1333,8 @@ function stripFromPrefix(content: string, fromName: string): string {
 export type StreamingSegment =
   | { kind: 'text'; content: string }
   | { kind: 'tool'; tool: ToolActivity }
-  | { kind: 'intent'; label: string };
+  | { kind: 'intent'; label: string }
+  | { kind: 'reasoning'; content: string };
 
 /**
  * Horizontal-rule divider with a centered small-caps label, rendered
@@ -1459,13 +1466,6 @@ export interface StreamingBubbleProps {
    * model doesn't grow the bubble unbounded.
    */
   wirePulseCount?: number;
-  /**
-   * Live private-reasoning text streaming on the model's think channel
-   * (ds4). Rendered as a distinct dimmed "thinking" block above the
-   * reply. Absent once the turn commits — the persisted message carries
-   * the same trace on `reasoning`, shown behind the collapsed expander.
-   */
-  liveReasoning?: string;
   /**
    * Live tool-argument stream — the model is generating a structured
    * tool call (typically a long `write_file`) whose tokens never arrive
@@ -1870,7 +1870,6 @@ export function StreamingBubble({
   onProbeOllama,
   onReEngage,
   wirePulseCount,
-  liveReasoning,
   liveToolArgs,
   thinkingLabel,
   thinkingProgress,
@@ -1981,12 +1980,17 @@ export function StreamingBubble({
     | { kind: 'text'; content: string }
     | { kind: 'tools'; tools: ToolActivity[] }
     | { kind: 'intent'; label: string }
+    | { kind: 'reasoning'; content: string }
   > = [];
   for (const s of segments) {
     const tail = renderedSegments[renderedSegments.length - 1];
     if (s.kind === 'tool') {
       if (tail?.kind === 'tools') tail.tools.push(s.tool);
       else renderedSegments.push({ kind: 'tools', tools: [s.tool] });
+    } else if (s.kind === 'reasoning') {
+      if (s.content.trim().length > 0) {
+        renderedSegments.push({ kind: 'reasoning', content: s.content });
+      }
     } else if (s.kind === 'intent') {
       if (shouldDisplayIntent(s.label)) {
         renderedSegments.push({ kind: 'intent', label: s.label });
@@ -2008,12 +2012,15 @@ export function StreamingBubble({
       }
     }
   }
-  const elapsed = useElapsedSeconds(startedAt);
+  // Derived before the elapsed hooks so a failed turn's clock freezes at
+  // the moment it died instead of counting on past its own death.
+  const failed = Boolean(error);
+  const elapsed = useElapsedSeconds(startedAt, { stopped: failed });
   // Seconds since the last delta / tool event. Falls back to total
   // elapsed when the parent didn't supply a lastActivityAt — keeps
   // the old "show after 30s" behavior for any caller that hasn't
   // been updated.
-  const silentFor = useElapsedSeconds(lastActivityAt ?? startedAt);
+  const silentFor = useElapsedSeconds(lastActivityAt ?? startedAt, { stopped: failed });
   // Has the turn produced ANY signal yet (a delta, a tool event)? Before
   // the first token, `silentFor` counts from turn start — so a legitimately
   // slow COLD start (a 284B DeepSeek model streaming experts from disk takes
@@ -2050,7 +2057,6 @@ export function StreamingBubble({
       setProbeBusy(false);
     }
   }, [onProbeOllama]);
-  const failed = Boolean(error);
   // Re-derived on every tick of `useElapsedSeconds` above, which is what
   // lets the queued state expire on its own a few seconds after the daemon
   // stops re-asserting it (i.e. the turn got its slot).
@@ -2066,7 +2072,13 @@ export function StreamingBubble({
     !awaiting &&
     !liveToolArgs &&
     (renderedSegments.length === 0 ||
-      renderedSegments[renderedSegments.length - 1]?.kind === 'tools');
+      renderedSegments[renderedSegments.length - 1]?.kind === 'tools' ||
+      // A streaming think phase is still "working with nothing visible
+      // to show for it yet" — the same state the dots were built for.
+      // Before reasoning joined the segment list this branch was the
+      // `length === 0` one, so keeping it preserves the dots that were
+      // already there under a growing trace.
+      renderedSegments[renderedSegments.length - 1]?.kind === 'reasoning');
   const inlineWirePulse =
     !failed && !queued && !awaiting && wirePulseCount !== undefined && wirePulseCount > 0 ? (
       <span
@@ -2194,13 +2206,6 @@ export function StreamingBubble({
           </output>
         ) : (
           <>
-            {!failed && liveReasoning && liveReasoning.trim().length > 0 && (
-              // Live think-phase stream (ds4). A dimmed block above the
-              // reply that grows token-by-token while the model reasons,
-              // then vanishes on commit — the persisted message re-renders
-              // the same trace behind the collapsed "Thinking" expander.
-              <LiveReasoning text={liveReasoning} />
-            )}
             {renderedSegments.map((seg, i) => {
               // Stable-ish key using kind + first tool-name (or
               // text-prefix). Index-only would re-mount nodes when
@@ -2211,7 +2216,9 @@ export function StreamingBubble({
                   ? `tools-${i}-${seg.tools[0]?.name ?? ''}`
                   : seg.kind === 'intent'
                     ? `intent-${i}-${seg.label}`
-                    : `text-${i}-${seg.content.length}`;
+                    : seg.kind === 'reasoning'
+                      ? `reasoning-${i}`
+                      : `text-${i}-${seg.content.length}`;
               // Wrap each segment so CSS can space subsequent
               // segments apart from the previous one — gives
               // visible paragraph breaks when a long thinking
@@ -2226,6 +2233,13 @@ export function StreamingBubble({
                     />
                   ) : seg.kind === 'intent' ? (
                     <IntentDivider label={seg.label} />
+                  ) : seg.kind === 'reasoning' ? (
+                    // Only the trailing block is still growing, so only
+                    // it auto-scrolls to its tail. Pinning an earlier,
+                    // finished trace to its last line would hide the
+                    // reasoning that led into the tool row below it —
+                    // which is the whole point of showing it in place.
+                    <LiveReasoning text={seg.content} live={i === renderedSegments.length - 1} />
                   ) : (
                     // Same display-only tool-call markup scrub the
                     // persisted MessageBubble runs (see
@@ -3013,325 +3027,6 @@ function ToolActivityList({
   );
 }
 
-/**
- * Inline playback rows for audio artifacts a tool returned
- * (synthesize_speech narrations). Renders one AudioPlayer per audio,
- * stacked. Each player loads its blob via the authenticated API
- * client — same auth fence as ToolImageRow.
- */
-function ToolAudioRow({
-  projectId,
-  audios,
-}: {
-  projectId: string;
-  audios: ToolCallAudio[];
-}) {
-  return (
-    <ul className="thinking-tool-audios">
-      {audios.map((a, i) => (
-        <li key={`${a.path}-${i}`} className="thinking-tool-audio-cell">
-          <AudioPlayer
-            projectId={projectId}
-            path={a.path}
-            {...(a.durationSeconds !== undefined ? { durationSeconds: a.durationSeconds } : {})}
-            {...(a.voice ? { voice: a.voice } : {})}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
- * Thumbnails for image artifacts a tool returned (Playwright screenshots
- * etc.). Each thumbnail loads its blob via the authenticated API client
- * (an `<img src="/api/...">` URL would fail because it can't carry a
- * bearer token) and opens a full-screen ImagePreview on click. Lives
- * inside the `<li>` so its margin-left aligns with the tool row's text.
- */
-function ToolImageRow({ projectId, images }: { projectId: string; images: ToolCallImage[] }) {
-  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
-  // Streaming turns re-render this row whenever new text/tool events land.
-  // Keep the callback stable so ToolImagePreviewLoader does not treat an
-  // unrelated parent update as a new load, revoke the live blob URL, and
-  // leave the dialog's image pointing at that revoked URL while it refetches.
-  const closePreview = useCallback(() => setPreviewIdx(null), []);
-  return (
-    <>
-      <ul className="thinking-tool-images">
-        {images.map((img, i) => (
-          <li key={`${img.path}-${i}`} className="thinking-tool-image-cell">
-            <button
-              type="button"
-              className="thinking-tool-image"
-              onClick={() => setPreviewIdx(i)}
-              title={img.path}
-              aria-label={`Open screenshot ${i + 1}`}
-            >
-              <ToolImageThumbnail projectId={projectId} path={img.path} />
-            </button>
-            <ImageActionsMenu projectId={projectId} path={img.path} />
-          </li>
-        ))}
-      </ul>
-      {previewIdx !== null && images[previewIdx] && (
-        <ToolImagePreviewLoader
-          projectId={projectId}
-          image={images[previewIdx]}
-          onClose={closePreview}
-        />
-      )}
-    </>
-  );
-}
-
-/**
- * Inline `<video>` player(s) under a tool row — the video sibling of
- * {@link ToolImageRow}. Used by `generate_video`: the mp4 is an artifact
- * (never base64 in the transcript), streamed from the artifact-blob
- * endpoint. Same auth fence as images — the blob is fetched with the
- * bearer token and handed to the element as an object URL.
- */
-function ToolVideoRow({ projectId, videos }: { projectId: string; videos: ToolCallVideo[] }) {
-  return (
-    <ul className="thinking-tool-videos">
-      {videos.map((vid, i) => (
-        <li key={`${vid.path}-${i}`} className="thinking-tool-video-cell">
-          <ToolVideoPlayer projectId={projectId} video={vid} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function ToolVideoPlayer({ projectId, video }: { projectId: string; video: ToolCallVideo }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [posterSrc, setPosterSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let revoked = false;
-    const urls: string[] = [];
-    void (async () => {
-      try {
-        const blob = await api.fetchProjectArtifactBlob(projectId, video.path);
-        if (revoked) return;
-        const url = URL.createObjectURL(blob);
-        urls.push(url);
-        setSrc(url);
-      } catch (err) {
-        console.warn('[tool-video] load failed', { path: video.path, err });
-        if (!revoked) setFailed(true);
-      }
-      if (video.posterPath) {
-        try {
-          const poster = await api.fetchProjectArtifactBlob(projectId, video.posterPath);
-          if (revoked) return;
-          const purl = URL.createObjectURL(poster);
-          urls.push(purl);
-          setPosterSrc(purl);
-        } catch {
-          /* poster is optional */
-        }
-      }
-    })();
-    return () => {
-      revoked = true;
-      for (const u of urls) URL.revokeObjectURL(u);
-    };
-  }, [projectId, video.path, video.posterPath]);
-  if (failed) {
-    return <span className="thinking-tool-video-error">Couldn't load video ({video.path})</span>;
-  }
-  if (!src) return <span className="thinking-tool-video-loading" aria-hidden />;
-  return (
-    <video
-      className="thinking-tool-video"
-      src={src}
-      {...(posterSrc ? { poster: posterSrc } : {})}
-      controls
-      preload="metadata"
-      playsInline
-    />
-  );
-}
-
-/**
- * Trigger downloading an artifact image via a synthetic `<a download>`
- * click. The artifact tree is bearer-token-gated, so we can't just put
- * the URL on the link directly — fetch the blob through the
- * authenticated client first and serve it via a one-shot
- * `URL.createObjectURL` reference. The object URL is revoked on a
- * short delay so the browser has time to start the download before
- * the source goes away (revoking synchronously cancels the download
- * on Chromium-based engines).
- */
-async function downloadProjectArtifact(projectId: string, path: string): Promise<void> {
-  const blob = await api.fetchProjectArtifactBlob(projectId, path);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  // Pull the trailing filename out of the path so the user gets
-  // `image-2026-…-42.png` rather than `generated_image-2026-…-42.png`
-  // or some browser-default name.
-  a.download = path.split(/[/\\]/).pop() ?? 'image';
-  a.rel = 'noopener';
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-/**
- * Three-dot menu pinned to the corner of an image thumbnail. Hidden
- * until hover or until the menu opens — same pattern as the cancel
- * button on a streaming bubble. Today the menu offers Download and
- * Copy path; future entries (regenerate, send to gezel, etc.) plug
- * in here without touching the thumbnail layout.
- */
-function ImageActionsMenu({ projectId, path }: { projectId: string; path: string }) {
-  const [open, setOpen] = useState(false);
-  const handleDownload = async () => {
-    try {
-      await downloadProjectArtifact(projectId, path);
-    } catch (err) {
-      console.warn('[tool-image] download failed', { path, err });
-    }
-  };
-  const handleCopyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(`artifacts/${path.replace(/^artifacts\//, '')}`);
-    } catch (err) {
-      console.warn('[tool-image] copy path failed', { path, err });
-    }
-  };
-  return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          className={`thinking-tool-image-menu-btn${open ? ' open' : ''}`}
-          aria-label="Image actions"
-          title="More"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            role="img"
-            aria-label="Image actions"
-          >
-            <title>Image actions</title>
-            <circle cx="3" cy="8" r="1.4" />
-            <circle cx="8" cy="8" r="1.4" />
-            <circle cx="13" cy="8" r="1.4" />
-          </svg>
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align="end">
-          <DropdownMenu.Item
-            className="app-nav-menu-item"
-            onSelect={() => {
-              void handleDownload();
-            }}
-          >
-            <span>Download</span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            className="app-nav-menu-item"
-            onSelect={() => {
-              void handleCopyPath();
-            }}
-          >
-            <span>Copy artifact path</span>
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  );
-}
-
-/**
- * Per-thumbnail image loader. Fetches the artifact blob via the
- * authenticated client, renders an `<img>` against a `blob:` URL.
- * Revokes the URL on unmount so we don't leak per-render.
- */
-function ToolImageThumbnail({ projectId, path }: { projectId: string; path: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let revoked = false;
-    let url: string | null = null;
-    void (async () => {
-      try {
-        const blob = await api.fetchProjectArtifactBlob(projectId, path);
-        if (revoked) return;
-        url = URL.createObjectURL(blob);
-        setSrc(url);
-      } catch (err) {
-        console.warn('[tool-image] thumbnail load failed', { path, err });
-      }
-    })();
-    return () => {
-      revoked = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [projectId, path]);
-  if (!src) return <span className="thinking-tool-image-loading" aria-hidden />;
-  return <img src={src} alt="" />;
-}
-
-/**
- * Loads the full-resolution blob for the preview overlay. Separate from
- * the thumbnail loader so the modal opens instantly with whatever's in
- * the cache (the same path is fetched again — browser cache short-
- * circuits the second request) and the user can re-click the X without
- * re-downloading.
- */
-function ToolImagePreviewLoader({
-  projectId,
-  image,
-  onClose,
-}: {
-  projectId: string;
-  image: ToolCallImage;
-  onClose: () => void;
-}) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let revoked = false;
-    let url: string | null = null;
-    void (async () => {
-      try {
-        const blob = await api.fetchProjectArtifactBlob(projectId, image.path);
-        if (revoked) return;
-        url = URL.createObjectURL(blob);
-        setSrc(url);
-      } catch (err) {
-        console.warn('[tool-image] preview load failed', { path: image.path, err });
-        // If load failed, close the preview rather than show a blank overlay.
-        onClose();
-      }
-    })();
-    return () => {
-      revoked = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [projectId, image.path, onClose]);
-  if (!src) return null;
-  return (
-    <ImagePreview
-      src={src}
-      alt="Tool screenshot"
-      caption={image.path}
-      onClose={onClose}
-      downloadFilename={image.path.split(/[/\\]/).pop() ?? 'image'}
-    />
-  );
-}
-
 /** Most failures a reader needs to see at once. Beyond this the expando
  *  is the right surface — the notice is a headline, not a log. */
 const VISIBLE_TOOL_FAILURES = 2;
@@ -3468,12 +3163,57 @@ export function countReasoningWords(reasoning: string): number {
   return trimmed ? trimmed.split(/\s+/u).length : 0;
 }
 
+/**
+ * Splits a persisted reasoning trace at the offsets its tool calls
+ * recorded, so the expander can mark where the model stopped
+ * deliberating and acted.
+ *
+ * Offsets index the RAW trace, but the expander renders `trim()`ed
+ * text — so every mark shifts left by however much leading whitespace
+ * the provider left on the trace. Clamped and sorted because a
+ * continuation is a fresh iteration with its own trace: an offset
+ * captured against a longer earlier string would otherwise slice
+ * backwards.
+ */
+export function spliceReasoningMarks(
+  reasoning: string,
+  tools: ReadonlyArray<ChatMessageToolCall> = [],
+): Array<{ text: string; mark?: ChatMessageToolCall }> {
+  const trimmed = reasoning.trim();
+  const lead = reasoning.length - reasoning.trimStart().length;
+  const marks = tools
+    .filter((t) => t.afterReasoningChars !== undefined)
+    .map((t) => ({
+      tool: t,
+      at: Math.min(Math.max((t.afterReasoningChars as number) - lead, 0), trimmed.length),
+    }))
+    .sort((a, b) => a.at - b.at);
+  if (marks.length === 0) return [{ text: trimmed }];
+  const out: Array<{ text: string; mark?: ChatMessageToolCall }> = [];
+  let cursor = 0;
+  for (const m of marks) {
+    out.push({ text: trimmed.slice(cursor, m.at), mark: m.tool });
+    cursor = m.at;
+  }
+  out.push({ text: trimmed.slice(cursor) });
+  return out;
+}
+
+/** Compact label for an inline reasoning mark — verb plus target. */
+function reasoningMarkLabel(tool: ChatMessageToolCall): string {
+  const summary = tool.argsSummary?.trim();
+  if (!summary) return tool.name;
+  return `${tool.name} · ${summary.length > 60 ? `${summary.slice(0, 59)}…` : summary}`;
+}
+
 function ReasoningExpando({
   reasoning,
   durationMs,
+  toolCalls,
 }: {
   reasoning: string;
   durationMs?: number;
+  toolCalls?: ChatMessageToolCall[];
 }) {
   const trimmed = reasoning.trim();
   if (!trimmed) return null;
@@ -3482,6 +3222,11 @@ function ReasoningExpando({
     durationMs !== undefined && Number.isFinite(durationMs) && durationMs > 0
       ? formatDurationShort(Math.round(durationMs))
       : null;
+  // Marks are inline children of the same `<pre>` rather than separate
+  // blocks between several `<pre>`s: the trace's whitespace and wrapping
+  // context has to survive the splice, and the plain-text rendering is
+  // deliberate (see above).
+  const parts = spliceReasoningMarks(reasoning, toolCalls);
   return (
     <details className="msg-reasoning">
       <summary>
@@ -3491,7 +3236,26 @@ function ReasoningExpando({
           {duration ? ` · ${duration}` : ''}
         </span>
       </summary>
-      <pre className="msg-reasoning-body">{trimmed}</pre>
+      <pre className="msg-reasoning-body">
+        {parts.map((part, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: slices are positional by construction
+          <Fragment key={i}>
+            {part.text}
+            {part.mark ? (
+              <span
+                className={`msg-reasoning-mark${part.mark.success ? '' : ' failed'}`}
+                title={
+                  part.mark.success
+                    ? `${part.mark.name} ran here`
+                    : `${part.mark.name} failed here: ${part.mark.errorMessage ?? 'unknown error'}`
+                }
+              >
+                {reasoningMarkLabel(part.mark)}
+              </span>
+            ) : null}
+          </Fragment>
+        ))}
+      </pre>
     </details>
   );
 }
@@ -3499,20 +3263,25 @@ function ReasoningExpando({
 /**
  * Live counterpart to {@link ReasoningExpando}: renders the think phase
  * as it streams (ds4's `reasoning_content` channel), always-open and
- * dimmed, above the reply. Auto-scrolls to the tail so the newest
- * reasoning stays in view inside the capped-height body. Replaced by the
+ * dimmed, in wire order among the turn's other segments. Replaced by the
  * collapsed expander once the turn commits and the slot is torn down.
  * Plain-text on purpose — same reasoning-as-raw-trace rationale as the
  * expander (a mid-stream trace has unbalanced markdown we don't want a
  * render pass to swallow).
+ *
+ * `live` marks the trailing block — the one still receiving tokens. Only
+ * it auto-scrolls to the tail so the newest reasoning stays in view
+ * inside the capped-height body; an earlier block belongs to a finished
+ * tool-loop iteration and stays where the reader left it.
  */
-function LiveReasoning({ text }: { text: string }) {
+function LiveReasoning({ text, live = true }: { text: string; live?: boolean }) {
   const bodyRef = useRef<HTMLPreElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to autoscroll as reasoning text streams in
   useEffect(() => {
+    if (!live) return;
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [text]);
+  }, [text, live]);
   return (
     <div className="msg-stream-reasoning" aria-label="Thinking" aria-live="polite">
       <span className="msg-stream-reasoning-label">Thinking</span>
@@ -3681,13 +3450,21 @@ function AttemptedToolCallsExpando({
  * not streaming). Uses a single shared interval so adding the counter to
  * a bubble doesn't spin up multiple timers.
  */
-export function useElapsedSeconds(startedAt: number | null): number | null {
+export function useElapsedSeconds(
+  startedAt: number | null,
+  opts?: { stopped?: boolean },
+): number | null {
   const [now, setNow] = useState(() => Date.now());
+  const stopped = opts?.stopped === true;
   useEffect(() => {
-    if (startedAt === null) return;
+    // A turn that has already failed is not still running. Left ticking,
+    // the bubble reads "11:15" and climbing on a turn that died minutes
+    // ago — the reader's first question becomes "is it still going?"
+    // rather than "what went wrong?".
+    if (startedAt === null || stopped) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [startedAt]);
+  }, [startedAt, stopped]);
   if (startedAt === null) return null;
   return Math.max(0, Math.floor((now - startedAt) / 1000));
 }

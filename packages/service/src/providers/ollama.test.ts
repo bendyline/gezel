@@ -1,3 +1,4 @@
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OllamaProvider,
@@ -233,7 +234,7 @@ describe('OllamaProvider chat turn', () => {
     // Let the fetch start + stream reader attach before aborting.
     await new Promise<void>((r) => setTimeout(r, 10));
     ctrl.abort();
-    await expect(pending).rejects.toThrow(/turn cancelled by caller/);
+    await expect(pending).rejects.toThrow(turnCancelledMessage());
   });
 });
 

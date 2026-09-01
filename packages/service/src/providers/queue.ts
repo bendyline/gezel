@@ -63,6 +63,8 @@
  * and user-facing background turns are unaffected.
  */
 
+import { turnCancelledMessage } from '@bendyline/gezel';
+
 export type Lane = 'interactive' | 'background';
 
 export interface EnqueueRequest {
@@ -279,9 +281,15 @@ export function backgroundLaneCap(engineWidth: number): number {
   return Math.max(1, engineWidth - 1);
 }
 
+/**
+ * A turn stopped before it ever reached the engine — it was still waiting
+ * its place in line. Same event to the person who stopped it as one killed
+ * mid-stream, so it carries the same sentence; the class name is what tells
+ * the two apart in a log.
+ */
 export class AbortedWhileQueuedError extends Error {
   constructor() {
-    super('request aborted while queued');
+    super(turnCancelledMessage());
     this.name = 'AbortedWhileQueuedError';
   }
 }

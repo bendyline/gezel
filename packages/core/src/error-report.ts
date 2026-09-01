@@ -1,6 +1,7 @@
 import { ISSUES_NEW_URL } from './github-urls.js';
 import { redactSensitive } from './redact.js';
 import type { ChatTurnErrorDetail, SystemDiagnostics } from './schemas/index.js';
+import { isTurnCancelledMessage } from './turn-cancel.js';
 
 /**
  * Composes the text behind "Report error on GitHub…".
@@ -48,9 +49,13 @@ const SURFACE_LABEL: Record<ErrorReportSurface, string> = {
 const PROMPT_HEADING = '### What I was doing';
 const STACK_MAX = 2000;
 
-/** Provider wording for a turn stopped through the user's cancel action. */
+/**
+ * A turn the user (or the app on their behalf) stopped is not a defect, so
+ * the bubble hides "Report error on GitHub…" for it. The wording it matches
+ * lives in `turn-cancel.ts` beside the code that writes it.
+ */
 export function isUserCancelledTurnError(message: string | null | undefined): boolean {
-  return Boolean(message && /\bturn cancel(?:l)?ed by caller\b/i.test(message));
+  return isTurnCancelledMessage(message);
 }
 
 function gb(bytes: number | null | undefined): string | null {

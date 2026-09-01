@@ -1,3 +1,4 @@
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { CopilotProvider } from './copilot.js';
 
@@ -84,7 +85,7 @@ describe('Copilot cancellation', () => {
     expect(sdk.aborted()).toBe(0);
 
     ctrl.abort();
-    await expect(pending).rejects.toThrow(/aborted/i);
+    await expect(pending).rejects.toThrow(turnCancelledMessage());
     expect(sdk.aborted()).toBe(1);
 
     await provider.shutdown();
@@ -99,7 +100,7 @@ describe('Copilot cancellation', () => {
 
     await expect(
       session.sendAndWait('hello', { queue: { lane: 'interactive', signal: ctrl.signal } }),
-    ).rejects.toThrow(/aborted/i);
+    ).rejects.toThrow(turnCancelledMessage());
 
     await provider.shutdown();
   });

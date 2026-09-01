@@ -1,6 +1,11 @@
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { createLogger, resolveSandboxCopilot, toolActivityLabel } from '@bendyline/gezel';
+import {
+  createLogger,
+  resolveSandboxCopilot,
+  toolActivityLabel,
+  turnCancelledMessage,
+} from '@bendyline/gezel';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { QuotaBucket } from '../chat/usage.js';
 import { resolveCopilotCliPath } from './copilot-cli.js';
@@ -41,7 +46,7 @@ const IDLE_SILENCE_MS = 30_000;
  */
 class CopilotTurnAbortedError extends Error {
   constructor() {
-    super('Copilot turn aborted by cancel.');
+    super(turnCancelledMessage());
     this.name = 'CopilotTurnAbortedError';
   }
 }
@@ -679,6 +684,15 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnReasoning(): string | undefined {
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
+  }
+
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
   }
 
   /**

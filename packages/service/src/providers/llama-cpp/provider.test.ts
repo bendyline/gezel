@@ -1,3 +1,4 @@
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lookupBehavior } from '../../model-profile/registry.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
@@ -758,7 +759,7 @@ describe('LlamaCppProvider physical request gate', () => {
     });
 
     ctrl.abort();
-    await expect(first).rejects.toThrow('turn cancelled by caller');
+    await expect(first).rejects.toThrow(turnCancelledMessage());
     await expect(second).resolves.toBe('recovered');
     expect(fetchCalls).toBe(2);
   });
@@ -8136,7 +8137,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     // Give the fetch stub a tick to attach its abort listener.
     await new Promise((r) => setTimeout(r, 10));
     ctrl.abort();
-    await expect(promise).rejects.toThrow(/cancelled by caller/);
+    await expect(promise).rejects.toThrow(turnCancelledMessage());
   });
 });
 

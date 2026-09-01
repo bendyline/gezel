@@ -12,6 +12,7 @@ import {
   type GateScriptRef,
   type GezelConfig,
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
+  MAX_RESTART_RESUMES,
   type NewCraftbookStep,
   type NormalizedStepGate,
   type ScriptRef,
@@ -2153,6 +2154,12 @@ export class TaskManager {
         ...(existing?.lastGateReject ? { lastGateReject: existing.lastGateReject } : {}),
         ...(existing?.redriveCount !== undefined ? { redriveCount: existing.redriveCount } : {}),
         ...(existing?.lastRedriveAt ? { lastRedriveAt: existing.lastRedriveAt } : {}),
+        ...(existing?.restartResumeCount !== undefined
+          ? { restartResumeCount: existing.restartResumeCount }
+          : {}),
+        ...(existing?.lastRestartResumeAt
+          ? { lastRestartResumeAt: existing.lastRestartResumeAt }
+          : {}),
       };
     });
     const craftbook: TaskCraftbook = {
@@ -2445,6 +2452,74 @@ export class TaskManager {
       craftbook: { ...task.craftbook, steps, updatedAt: at },
       updatedAt: at,
     });
+  }
+
+  /**
+   * Count one boot rehydration of an active step, and stop the loop when
+   * the step has burned its budget without ever finishing.
+   *
+   * Resuming a step the process died on is right the first few times — the
+   * work was interrupted, not failed. But every resume re-prefills the
+   * whole step context (48k tokens / ~10 minutes on a 27B in the case this
+   * was written for), so a step that never survives a restart pays that on
+   * every boot forever and nothing on the path remembers the last three
+   * attempts died the same way. Past the budget the task pauses with a note
+   * saying exactly that, which also stops the boot from re-running it.
+   *
+   * Returns `exhausted: true` when the caller should NOT resume.
+   */
+  async noteRestartResume(
+    projectId: string,
+    num: number,
+    stepId: string,
+  ): Promise<{ count: number; exhausted: boolean }> {
+    const task = await this.store.readTask(projectId, num).catch(() => null);
+    if (!task || task.activeStepId !== stepId) return { count: 0, exhausted: false };
+    const step = task.craftbook.steps.find((s) => s.id === stepId);
+    if (!step) return { count: 0, exhausted: false };
+    const count = (step.restartResumeCount ?? 0) + 1;
+    const at = nowIso();
+    await this.store.writeTask({
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        steps: task.craftbook.steps.map((s) =>
+          s.id === stepId ? { ...s, restartResumeCount: count, lastRestartResumeAt: at } : s,
+        ),
+        updatedAt: at,
+      },
+      updatedAt: at,
+    });
+    if (count <= MAX_RESTART_RESUMES) return { count, exhausted: false };
+
+    const assignee = stepOwnerGezelId(task, step) ?? 'the assignee';
+    await this.appendNote(projectId, num, {
+      text: `# Step keeps being interrupted — paused for help
+
+Step "${step.name}" (\`${step.id}\`) has been resumed ${count - 1}× after the app or service restarted, and has never finished. Each resume re-reads the whole step context before any new work happens, so this now costs a full model turn on every start with nothing to show for it.
+
+Pausing so it stops re-running unattended. Check what ${assignee} has already written for this step — the work may be nearly done — then set the task active again, split the step smaller, or hand it to a model that can finish it inside one sitting.`,
+      author: { kind: 'user' },
+      stepId,
+    }).catch(() => {});
+    await this.setStatus(projectId, num, 'paused').catch(() => {});
+    await this.emitNeedsHelp({
+      projectId,
+      task,
+      stepId,
+      reason: 'step_stalled',
+      detail: `Step "${step.name}" was resumed ${count - 1}x after restarts without finishing.`,
+    }).catch(() => {});
+    await this.history
+      ?.log({
+        kind: 'task.step.stalled',
+        projectId,
+        gezelId: assignee,
+        summary: `Paused ${task.ref}: step "${step.name}" never survived a restart (${count - 1} resumes)`,
+        details: { ref: task.ref, stepId, restartResumes: count - 1 },
+      })
+      .catch(() => {});
+    return { count, exhausted: true };
   }
 
   async recordStepRedrive(projectId: string, num: number, stepId: string): Promise<number> {

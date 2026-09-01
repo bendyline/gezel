@@ -33,12 +33,24 @@ export function nextTerminalBottomGraceExpiry(
   return next;
 }
 
+/**
+ * Is this row in the bottom-most lane — live terminal output, or a
+ * terminal command still inside its grace period?
+ *
+ * Exported because the active-thread pin has to stop above this lane:
+ * hoisting a running command's output away from the command that
+ * started it is the exact split {@link TERMINAL_BOTTOM_GRACE_MS} exists
+ * to prevent.
+ */
+export function isTerminalBottomLane(row: { kind: string; at: string }, nowMs: number): boolean {
+  if (row.kind === 'terminal-streaming') return true;
+  if (row.kind !== 'terminal') return false;
+  const expiresAt = terminalBottomGraceExpiresAt(row.at);
+  return expiresAt !== undefined && nowMs <= expiresAt;
+}
+
 function timelineRowPriority(row: TimelineOrderRow, nowMs: number): number {
-  if (row.kind === 'terminal-streaming') return 2;
-  if (row.kind === 'terminal') {
-    const expiresAt = terminalBottomGraceExpiresAt(row.at);
-    if (expiresAt !== undefined && nowMs <= expiresAt) return 2;
-  }
+  if (isTerminalBottomLane(row, nowMs)) return 2;
   if (row.kind === 'streaming') return 1;
   return 0;
 }

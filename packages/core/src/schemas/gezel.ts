@@ -575,6 +575,27 @@ export const ChatMessageToolCallSchema = z.object({
   removedLines: z.number().int().nonnegative().optional(),
   /** Rich inline card payload for tools with special renderings — see ToolCallCardSchema. */
   card: ToolCallCardSchema.optional(),
+  /**
+   * Offset into the turn's `ChatMessage.reasoning` string marking where
+   * this call fired — the same trick `intents[].afterChars` plays on
+   * `content`. Lets the collapsed Thinking expander splice a small
+   * marker into the trace at the spot the model stopped deliberating
+   * and acted, so an expanded trace reads in causal order instead of as
+   * one undifferentiated block above an unrelated tool list.
+   *
+   * Sourced from the PROVIDER's running reasoning length
+   * (`LLMSession.getCurrentTurnReasoningLength`), never from a
+   * manager-side count of `reasoning_delta` events: the persisted trace
+   * is whatever `getLastTurnReasoning()` returns, which several local
+   * providers build by extracting `<think>` blocks per tool-loop
+   * iteration rather than from the delta stream. An offset into a
+   * different string would drift silently.
+   *
+   * Absent for providers that don't implement the getter, and on every
+   * message written before this field existed — the expander then
+   * renders the plain trace it always did.
+   */
+  afterReasoningChars: z.number().int().min(0).optional(),
 });
 export type ChatMessageToolCall = z.infer<typeof ChatMessageToolCallSchema>;
 

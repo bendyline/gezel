@@ -1,3 +1,4 @@
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { LlamaCppProvider } from './llama-cpp/provider.js';
 import { MlxProvider } from './mlx/provider.js';
@@ -153,7 +154,7 @@ describe('MlxProvider engine request lock', () => {
     });
 
     ctrl.abort();
-    await expect(first).rejects.toThrow('turn cancelled by caller');
+    await expect(first).rejects.toThrow(turnCancelledMessage());
     await expect(second).resolves.toBe('recovered');
     expect(fetchCalls).toBe(2);
     expect(provider.isEngineBusy()).toBe(false);

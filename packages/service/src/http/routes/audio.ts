@@ -174,6 +174,7 @@ export function audioRoutes(ctx: ServiceContext): Hono {
         audio: { data: bytes, mimeType: mime },
         ...(req.model ? { model: req.model } : {}),
         ...(req.language ? { language: req.language } : {}),
+        ...(req.prompt ? { prompt: req.prompt } : {}),
       });
       return c.json({
         text: out.text,

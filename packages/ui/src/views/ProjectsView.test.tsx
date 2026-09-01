@@ -698,12 +698,23 @@ describe('ProjectsView', () => {
     });
   });
 
-  it('insets the detail-only loading state from the project pane edge', () => {
+  // Switching projects re-resolves `forceProjectId`, and the pane has no
+  // project for that round-trip. It must hold the hydrated shape rather than
+  // spend the window on a sentence that appears and leaves.
+  it('keeps the pane shape while a detail-only project loads, with no loading copy', () => {
     vi.mocked(api.getProject).mockReturnValue(new Promise(() => {}) as never);
 
-    render(<ProjectsView forceProjectId="pj-alpha" />);
+    const { container } = render(<ProjectsView forceProjectId="pj-alpha" />);
 
-    expect(screen.getByText('Loading project…')).toHaveClass('project-loading');
+    expect(screen.queryByText('Loading project…')).not.toBeInTheDocument();
+    // The tab strip holds its place with a real (hidden) trigger, so the
+    // row's height comes from the same rule the labelled row uses.
+    const strip = container.querySelector('.project-pane-placeholder-tabs');
+    expect(strip).toBeTruthy();
+    expect(strip?.querySelector('.gz-tabs-trigger')).toBeTruthy();
+    expect(container.querySelector('.project-pane-placeholder-body')).toBeTruthy();
+    // The wait is still announced, just not drawn.
+    expect(screen.getByText(/Loading this project/)).toHaveClass('sr-only');
   });
 
   it('does not apply the collapsed project-list grid to a detail-only project tab', async () => {

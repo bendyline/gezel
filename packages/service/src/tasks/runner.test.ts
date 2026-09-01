@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TaskCraftbook, TaskCraftbookStep } from '@bendyline/gezel';
+import { MAX_RESTART_RESUMES, type TaskCraftbook, type TaskCraftbookStep } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { ProviderQueue } from '../providers/queue.js';
@@ -949,6 +949,102 @@ describe('TaskRunner — startup rehydration', () => {
 
     expect(runner.snapshot().pendingCount).toBe(3);
     expect(runner.snapshot().pendingByGezel).toEqual({ bea: 2, cid: 1 });
+  });
+
+  it('stops resuming a step that has never survived a restart, and holds it', async () => {
+    // Wild-caught: one review step was resumed four times across ~50
+    // minutes of restarts. Each resume re-read 48k tokens before doing any
+    // new work and died again, and nothing on the path remembered the last
+    // three attempts. The budget makes the loop end in a paused task with a
+    // note instead of a fresh engine burn on every boot.
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 't',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: bea.id },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'review',
+          name: 'review',
+          assignee: { kind: 'gezel', gezelId: bea.id },
+          createdAt: now,
+        },
+      ]),
+      activeStepId: 'review',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const tasks = new TaskManager(store);
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      noteRestartResume: (projectId, num, stepId) =>
+        tasks.noteRestartResume(projectId, num, stepId),
+    });
+
+    for (let boot = 1; boot <= MAX_RESTART_RESUMES; boot++) {
+      const res = await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+      expect(res.taskRefs).toEqual(['p1/1']);
+      expect(res.heldTaskRefs).toEqual([]);
+    }
+
+    const spent = await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+    expect(spent.taskRefs).toEqual([]);
+    expect(spent.heldTaskRefs).toEqual(['p1/1']);
+    expect((await store.readTask('p1', 1))!.status).toBe('paused');
+  });
+
+  it('does not charge the restart budget for an in-process rehydration', async () => {
+    // The night-shift and per-project callers re-read a RUNNING process's
+    // queue. Counting those would pause a healthy task for being looked at.
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 't',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: bea.id },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'review',
+          name: 'review',
+          assignee: { kind: 'gezel', gezelId: bea.id },
+          createdAt: now,
+        },
+      ]),
+      activeStepId: 'review',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const tasks = new TaskManager(store);
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      noteRestartResume: (projectId, num, stepId) =>
+        tasks.noteRestartResume(projectId, num, stepId),
+    });
+
+    for (let pass = 0; pass < MAX_RESTART_RESUMES + 3; pass++) {
+      const res = await runner.rehydrateFromStore({ projectId: 'p1' });
+      expect(res.taskRefs).toEqual(['p1/1']);
+    }
+    const step = (await store.readTask('p1', 1))!.craftbook.steps[0]!;
+    expect(step.restartResumeCount).toBeUndefined();
+    expect((await store.readTask('p1', 1))!.status).toBe('active');
   });
 
   it('requeues active tasks even when a stale non-archived session exists', async () => {

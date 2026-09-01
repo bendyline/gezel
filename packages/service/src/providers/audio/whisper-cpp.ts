@@ -167,6 +167,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
     form.set('response_format', 'json');
     if (input.language) form.set('language', input.language);
     if (input.model) form.set('model', input.model);
+    if (input.prompt) form.set('prompt', input.prompt);
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);

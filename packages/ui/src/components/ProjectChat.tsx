@@ -7,10 +7,12 @@ import { ChatComposer } from './ChatComposer.js';
 import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
 import { FolderTreeSwitcher } from './FolderTreeSwitcher.js';
+import { ProjectChatPlaceholder } from './ProjectChatPlaceholder.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer } from './TerminalComposer.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
+import { isFreshThreadAt } from './chat-thread-freshness.js';
 import {
   projectRecipientKey,
   projectThreadKey,
@@ -21,15 +23,10 @@ import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
 /**
- * How recent an ordinary thread has to be for opening the project to resume
- * it. Past this the conversation is not one the user is still having, so the
- * default reverts to the voorman on a blank thread; the older thread stays
- * one click away in the switcher.
- */
-const RESUMABLE_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Is this thread one the user is still in the middle of?
+ * Is this thread one the user is still in the middle of? Past the shared
+ * freshness window the conversation is not one the user is still having,
+ * so the default reverts to the voorman on a blank thread; the older thread
+ * stays one click away in the switcher.
  *
  * Freshness is measured from the last HUMAN turn, not `lastActivityAt`: a
  * meester nudge or a gezel's own follow-up bumps the session hours after the
@@ -37,9 +34,7 @@ const RESUMABLE_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
  * started reaction thread) is not a conversation to resume at all.
  */
 function isResumableThread(thread: LastThread | null | undefined, now: number): boolean {
-  if (!thread?.lastHumanActivityAt) return false;
-  const at = Date.parse(thread.lastHumanActivityAt);
-  return Number.isFinite(at) && now - at < RESUMABLE_THREAD_MAX_AGE_MS;
+  return isFreshThreadAt(thread?.lastHumanActivityAt, now);
 }
 
 interface LastThread {
@@ -66,6 +61,12 @@ export function ProjectChat({
   compact?: boolean;
 }) {
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  // Has the roster ever come back? Distinguishes "this project has nobody"
+  // from "we haven't asked yet" — without it the empty state renders on the
+  // first frame of every project switch. Monotonic on purpose: the refetch
+  // below also fires on roster/voorman changes, and blanking the pane for
+  // those would trade one flash for another.
+  const [gezelsLoaded, setGezelsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string>('');
 
   // Refetch the global gezel list whenever the project — or its
@@ -80,8 +81,11 @@ export function ProjectChat({
   useEffect(() => {
     api
       .listGezels()
-      .then((r) => setGezels(r.gezels))
-      .catch(() => {});
+      .then((r) => {
+        setGezels(r.gezels);
+        setGezelsLoaded(true);
+      })
+      .catch(() => setGezelsLoaded(true));
   }, [project.id, project.voormanGezelId, (project.gezelIds ?? []).join(',')]);
 
   // Reset the composer selection when the project changes. Without this,
@@ -188,9 +192,16 @@ export function ProjectChat({
 
   const selected = gezels.find((g) => g.id === selectedId);
 
+  // Everything before the body can mount — the roster fetch, the last-thread
+  // probe that picks the default recipient — is a stand-in, not an answer.
+  // The empty state is the one claim we can only make once the roster is in.
+  if (!gezelsLoaded || (gezels.length > 0 && !selected)) {
+    return <ProjectChatPlaceholder />;
+  }
+
   if (gezels.length === 0) {
     return (
-      <p className="muted">
+      <p className="muted project-chat-empty">
         No gezellen available to chat with yet. Create one from the Gezellen tab.
       </p>
     );

@@ -283,6 +283,15 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
   }
 
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
+  }
+
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
   }

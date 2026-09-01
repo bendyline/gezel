@@ -1,4 +1,9 @@
-import { createLogger, isOllamaReasoningModel, leaksUntaggedReasoning } from '@bendyline/gezel';
+import {
+  createLogger,
+  isOllamaReasoningModel,
+  leaksUntaggedReasoning,
+  turnCancelledMessage,
+} from '@bendyline/gezel';
 
 /**
  * Per-turn output cap (token count) Ollama applies via
@@ -525,6 +530,15 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
   }
 
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
+  }
+
   get model(): string {
     return this.deps.model;
   }
@@ -877,7 +891,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       };
 
       const abortErrorMessage = async (): Promise<string> => {
-        if (abortKind === 'external') return '[ollama] turn cancelled by caller';
+        if (abortKind === 'external') return turnCancelledMessage();
         if (abortKind === 'ramble') {
           return buildRambleAbortMessage({
             providerLabel: '[ollama]',

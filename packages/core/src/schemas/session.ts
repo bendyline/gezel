@@ -209,6 +209,19 @@ export const ChatSessionSchema = z.object({
    * have the UI offering to report a problem that is already fixed.
    */
   lastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
+  /**
+   * Set when a turn starts, cleared when it settles — so a value found on
+   * disk at boot means the process died mid-turn and never came back to
+   * finish it. Both writes ride the session writes the turn already makes,
+   * which is what lets this survive a SIGKILL: a marker written only at
+   * shutdown would record the graceful quit and miss every crash.
+   *
+   * `ChatManager.resumeInterruptedTurns` reads it at boot and re-drives the
+   * turn. Task-scoped sessions are skipped there — `TaskRunner` rehydrates
+   * those from the task record, and two writers on one session is worse
+   * than a dropped turn.
+   */
+  turnStartedAt: z.string().optional(),
   /** Optional task this session is scoped to, in `projectId/num` form. */
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */
@@ -375,6 +388,41 @@ export const ChatSessionSchema = z.object({
 });
 export type ChatSession = z.infer<typeof ChatSessionSchema>;
 
+/**
+ * A gezel-to-gezel message accepted but not yet handed to the recipient.
+ *
+ * `messageGezel` parks a delivery while the SENDER is still mid-turn, so the
+ * two don't interleave — and that park is a callback in one process's
+ * memory. Everything downstream of dispatch is already durable (the seed
+ * lands as a persisted user message on the recipient's session, which boot
+ * recovery can finish), but a message still parked when the process stops
+ * leaves no trace anywhere. This record is that trace: enough to re-issue
+ * the exact same call after a restart.
+ */
+export const PendingGezelMessageSchema = z.object({
+  id: z.string(),
+  /** When the message was accepted — not when it was parked. */
+  at: z.string(),
+  fromGezelId: z.string(),
+  fromSessionId: z.string().optional(),
+  toGezelIdOrName: z.string(),
+  projectId: z.string().optional(),
+  text: z.string(),
+  suppressReply: z.boolean().optional(),
+  taskRef: z.string().optional(),
+  stepId: z.string().optional(),
+  lane: z.enum(['interactive', 'background']).optional(),
+  ambient: z.boolean().optional(),
+  expectedDeliverable: ExpectedDeliverableSchema.optional(),
+});
+export type PendingGezelMessage = z.infer<typeof PendingGezelMessageSchema>;
+
+export const PendingHandoffQueueSchema = z.object({
+  version: z.literal(1),
+  messages: z.array(PendingGezelMessageSchema),
+});
+export type PendingHandoffQueue = z.infer<typeof PendingHandoffQueueSchema>;
+
 export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   id: true,
   gezelId: true,
@@ -391,6 +439,10 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   // loading the full record. Set on abort, cleared on the next successful
   // turn.
   lastTurnError: true,
+  // Surfaced for the same reason: boot recovery finds the turns that died
+  // with the previous process from the summary list, without a second pass
+  // over every session file.
+  turnStartedAt: true,
   taskRef: true,
   stepId: true,
 }).extend({

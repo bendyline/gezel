@@ -5,8 +5,10 @@
  * first chunk, WebM/MP4 metadata may be missing. Progressive STT needs every
  * upload to stand alone, so this recorder stops and immediately replaces the
  * MediaRecorder at each boundary while keeping the same microphone stream.
- * Transcriptions are queued in capture order and delivered as final text
- * fragments that a composer can append without revising earlier dictation.
+ * Transcriptions are queued in capture order and receive a bounded tail of
+ * earlier recognized text as Whisper's initial prompt. They are still
+ * delivered as new final fragments that a composer can append without
+ * revising or duplicating earlier dictation.
  */
 
 import {
@@ -26,7 +28,12 @@ export interface ProgressiveSpeechToTextOptions {
   /** Silence after any speech that finishes the narration session. */
   longPauseMs?: number;
   activityMonitor?: SpeechActivityMonitor | null;
-  transcribe: (blob: Blob, mimeType: string, signal: AbortSignal) => Promise<string>;
+  transcribe: (
+    blob: Blob,
+    mimeType: string,
+    signal: AbortSignal,
+    prompt: string,
+  ) => Promise<string>;
   onTranscript: (text: string) => void;
   onError: (error: Error) => void;
   onLongPause?: (hadTranscript: boolean) => void;
@@ -39,6 +46,7 @@ const DEFAULT_SEGMENT_MS = 2_500;
 const DEFAULT_SPEECH_PAUSE_MS = 350;
 const DEFAULT_MIN_SEGMENT_MS = 650;
 const DEFAULT_LONG_PAUSE_MS = 10_000;
+const MAX_RECOGNITION_PROMPT_CHARS = 1_000;
 
 export class ProgressiveSpeechToText {
   private readonly stream: MediaStream;
@@ -67,6 +75,7 @@ export class ProgressiveSpeechToText {
   private currentlySpeaking = false;
   private lastSpeechAt: number | null = null;
   private confirmedSilenceMs = 0;
+  private recognitionPrompt = '';
   private hasTranscript = false;
   private longPauseNotified = false;
   private disposed = false;
@@ -236,13 +245,19 @@ export class ProgressiveSpeechToText {
       if (this.disposed) return;
       try {
         const text = normalizeSpeechTranscript(
-          await this.transcribe(blob, mimeType, this.abortController.signal),
+          await this.transcribe(
+            blob,
+            mimeType,
+            this.abortController.signal,
+            this.recognitionPrompt,
+          ),
         );
         if (this.disposed) return;
         if (text) {
           this.confirmedSilenceMs = 0;
           this.hasTranscript = true;
           this.longPauseNotified = false;
+          this.recognitionPrompt = extendRecognitionPrompt(this.recognitionPrompt, text);
           this.onTranscript(text);
           return;
         }
@@ -288,4 +303,14 @@ export class ProgressiveSpeechToText {
 export function normalizeSpeechTranscript(value: string): string {
   const text = value.trim();
   return /^\[\s*BLANK_AUDIO\s*\]$/i.test(text) ? '' : text;
+}
+
+/** Keep a word-aligned recent transcript tail for the next Whisper window. */
+export function extendRecognitionPrompt(previous: string, transcript: string): string {
+  const combined = `${previous.trim()} ${transcript.trim()}`.trim();
+  if (combined.length <= MAX_RECOGNITION_PROMPT_CHARS) return combined;
+
+  const tail = combined.slice(-MAX_RECOGNITION_PROMPT_CHARS);
+  const firstWhitespace = tail.search(/\s/);
+  return (firstWhitespace >= 0 ? tail.slice(firstWhitespace + 1) : tail).trim();
 }

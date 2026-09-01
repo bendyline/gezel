@@ -165,6 +165,38 @@ describe('McpBridge', () => {
     expect(bridge.hasTool('definitely_not_a_tool')).toBe(false);
   });
 
+  // A router model read assignee kind="gezel" as "have a gezel do it" and
+  // left gezelId out; the old arg shape aborted the whole call on
+  // `assignee.kind="gezel" requires gezelId`, which cost a Meester turn its
+  // craftbook route. A kind without an id means "no one in particular" —
+  // exactly what an unassigned task already does.
+  it('creates a task when assignee names a kind but no gezel', async () => {
+    const out = await bridge.callTool('create_task', {
+      project: 'default',
+      title: 'Kind without an id',
+      description:
+        'Reproduces the router turn that sent assignee {kind:"gezel"} with no gezelId at all.',
+      assignee: { kind: 'gezel' },
+      steps: [{ name: 'Do the thing' }],
+    });
+    expect(out).not.toContain('requires gezelId');
+    expect(out).toMatch(/default\/\d+/);
+  });
+
+  it('resolves a display name in the assignee argument to the gezel id', async () => {
+    const out = await bridge.callTool('create_task', {
+      project: 'default',
+      title: 'Named assignee',
+      description: 'The model reaches for the friendly name it sees in chat, not the slug.',
+      assignee: 'Ada',
+      steps: [{ name: 'Do the thing' }],
+    });
+    const ref = out.match(/default\/\d+/)?.[0];
+    expect(ref).toBeDefined();
+    const task = await svc.context.tasks.get('default', Number(ref?.split('/')[1]));
+    expect(task?.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
+  });
+
   it('reads the whole task-note feed by default from a step-scoped session', async () => {
     const task = await svc.context.tasks.create('default', {
       title: 'Cross-step notes',

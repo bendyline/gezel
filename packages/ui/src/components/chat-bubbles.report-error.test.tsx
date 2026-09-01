@@ -1,3 +1,4 @@
+import { turnCancelledMessage } from '@bendyline/gezel';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,11 +76,26 @@ describe('the failed-turn banner', () => {
         authorIcon={null}
         segments={[]}
         startedAt={null}
-        error="[Mac AI] turn cancelled by caller"
+        error={turnCancelledMessage('user-stop')}
       />,
     );
 
     expect(screen.getByText(/Turn stopped before finishing/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
+  });
+
+  it('offers no report link on a session written with the old cancel wording', () => {
+    // Sessions persisted before the copy change keep the provider string.
+    render(
+      <StreamingBubble
+        authorLabel="Ada"
+        authorIcon={null}
+        segments={[]}
+        startedAt={null}
+        error="[Mac AI] turn cancelled by caller"
+      />,
+    );
+
     expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
   });
 });
