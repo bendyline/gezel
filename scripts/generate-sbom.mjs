@@ -6,10 +6,11 @@
  *
  *   - pnpm's production license graph — the npm dependency tree;
  *   - the pin-bound inventory of pnpm's own vendored `dist/node_modules`;
- *   - NOTICE.md's native-engine and bundled-runtime tables, read through
- *     check-notice.mjs so the pins are the ones it has already reconciled
- *     against `native/engines/<id>/VERSION` and the native license manifest;
- *   - native-payload.mjs, for which platform each engine actually ships on.
+ *   - NOTICE.md's native-engine, native-helper-source, and bundled-runtime
+ *     rows, read through check-notice.mjs so the pins and legal texts are the
+ *     ones it has already reconciled against `native/engines/<id>/VERSION`,
+ *     helper-local notices, and the native license manifest;
+ *   - native-payload.mjs, for which platform each native component ships on.
  *
  * Until July 2026 this emitted the npm tree alone, so roughly a gigabyte of
  * payload — llama.cpp, whisper.cpp, stable-diffusion.cpp, ds4, uv, the pinned
@@ -79,6 +80,30 @@ for (const engine of notice.native.components) {
       { name: 'gezel:upstream-commit', value: engine.commit },
     ],
     ...(engine.source ? { externalReferences: [{ type: 'vcs', url: engine.source }] } : {}),
+  });
+}
+
+// Third-party source compiled into first-party helpers. These components do
+// not have their own redistributed binary: their ABI declarations/constants
+// are incorporated into the helper executable on the scoped platforms.
+for (const component of notice.native.helperComponents) {
+  components.push({
+    type: 'library',
+    'bom-ref': `gezel:native-helper-source/${component.id}@${component.version}`,
+    name: component.id,
+    version: component.version,
+    scope: 'required',
+    description:
+      `${component.name} — third-party source compiled into ` +
+      `${component.binary} (${component.helperId} helper)`,
+    licenses: [licenseEntry(component.license)],
+    properties: [
+      { name: 'gezel:component-kind', value: 'native-helper-derived-source' },
+      { name: 'gezel:platforms', value: component.platforms.join(',') },
+      { name: 'gezel:native-helper', value: component.helperId },
+      { name: 'gezel:native-binary', value: component.binary },
+    ],
+    externalReferences: [{ type: 'vcs', url: component.source }],
   });
 }
 

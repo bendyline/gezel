@@ -702,9 +702,6 @@ importers:
 
   packages/ui:
     dependencies:
-      '@audio/encode-mp3':
-        specifier: 1.2.2
-        version: 1.2.2
       '@bendyline/gezel':
         specifier: workspace:*
         version: link:../core
@@ -915,10 +912,6 @@ packages:
   '@atproto/xrpc@0.8.10':
     resolution: {integrity: sha512-++FNpTVF61fF8+3Kk1RYtdTO7xyUTdIc/Cmfk2CMn29Qw9tZD8bmW+M5db1Z0okYWFWK8Wqu7bc9VmF8tUB8Jg==}
     engines: {node: '>=22'}
-
-  '@audio/encode-mp3@1.2.2':
-    resolution: {integrity: sha512-24tI04E6g3Z8vZy8mgWDrRGntyiPHIRoLM5D/5iFvKDdqut7Si6OGeL7odhSXXf5tyCOjJ/zZKLmFrmeJp8uzA==}
-    engines: {node: '>=18'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -7906,10 +7899,6 @@ packages:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
 
-  wasm-media-encoders@0.7.0:
-    resolution: {integrity: sha512-Sp4wUasgxOK/IFfNhpon6LQQgYGwtpxyV4isjGIe1rvhnJL3w2KYr4f+CdqDNtGPDcgCDRY+uBanVfSx6Si0WQ==}
-    engines: {node: '>= 10'}
-
   web-namespaces@2.0.1:
     resolution: {integrity: sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ==}
 
@@ -8205,10 +8194,6 @@ snapshots:
     dependencies:
       '@atproto/lexicon': 0.7.11
       zod: 3.25.76
-
-  '@audio/encode-mp3@1.2.2':
-    dependencies:
-      wasm-media-encoders: 0.7.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -15585,10 +15570,6 @@ snapshots:
   w3c-xmlserializer@5.0.0:
     dependencies:
       xml-name-validator: 5.0.0
-
-  wasm-media-encoders@0.7.0:
-    dependencies:
-      '@swc/helpers': 0.5.23
 
   web-namespaces@2.0.1: {}
 

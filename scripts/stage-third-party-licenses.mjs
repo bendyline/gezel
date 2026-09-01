@@ -490,17 +490,14 @@ async function main() {
   await writeBundleManifest({
     productionPackages,
     nativeEngines: notice.native.engines,
+    nativeHelpers: notice.native.helpers,
     fontFamilies: notice.fonts.families,
     bundledRuntimes: runtimeSummary.runtimes,
     bundledPnpmPackages: runtimeSummary.pnpmPackages,
     cudaPayloads,
   });
   console.log(
-    `\u2713 staged legal bundle at ${relative(repoRoot, destination)} ` +
-      `(${productionPackages} production packages, ${notice.native.engines} native engines, ` +
-      `${notice.fonts.families} font families, ${runtimeSummary.runtimes} bundled runtimes, ` +
-      `${runtimeSummary.pnpmPackages} pnpm runtime packages, ` +
-      `${cudaPayloads} CUDA payloads).`,
+    `\u2713 staged legal bundle at ${relative(repoRoot, destination)} (${productionPackages} production packages, ${notice.native.engines} native engines, ${notice.native.helpers} native helper${notice.native.helpers === 1 ? '' : 's'} with third-party notices, ${notice.fonts.families} font families, ${runtimeSummary.runtimes} bundled runtimes, ${runtimeSummary.pnpmPackages} pnpm runtime packages, ${cudaPayloads} CUDA payloads).`,
   );
 }
 

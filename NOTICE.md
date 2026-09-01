@@ -197,8 +197,10 @@ Component read-slices vendored so far:
 
 Gezel builds (or downloads) several native, non-npm tools and stages the
 release artifacts under `packages/app/native-bin/` for each platform. Upstream
-pins live in `native/engines/<name>/VERSION`; distributable license copies and
-their pin-bound manifest live in [`native/licenses/`](native/licenses/).
+engine pins live in `native/engines/<name>/VERSION`; first-party helpers with
+compiled third-party source live under `native/helpers/`. Distributable license
+copies and their engine- and helper-aware manifest live in
+[`native/licenses/`](native/licenses/).
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
@@ -209,6 +211,7 @@ their pin-bound manifest live in [`native/licenses/`](native/licenses/).
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
 | **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
+| **AMD Display Library (ADL) SDK headers** (ABI definitions compiled into Windows `gezel-device-health.exe`; no AMD binary redistributed) | `18.0` | MIT | [GPUOpen-LibrariesAndSDKs/display-library](https://github.com/GPUOpen-LibrariesAndSDKs/display-library) |
 
 The `ggml` compute library is vendored as a submodule of both
 llama.cpp and whisper.cpp and is compiled into the shared libraries
@@ -221,6 +224,13 @@ application runtimes** above rather than here: like Node.js and pnpm it is a
 precompiled binary we redistribute exactly as its upstream published it,
 signed and notarized by the DuckDB Foundation under their own identity, so it
 is not an artifact of the `native/` build pipeline.
+
+The Windows device-health helper contains a minimal set of ABI structures,
+constants, callback types, and function signatures derived from AMD's
+MIT-licensed ADL SDK headers. It dynamically loads the AMD display driver's
+`atiadlxx.dll` from Windows System32 at runtime; Gezel does not redistribute
+that AMD binary. The ADL code is excluded from Linux builds, which read AMD and
+Intel telemetry from DRM/hwmon sysfs instead.
 
 The **ds4** engine (antirez's DeepSeek-V4 inference engine) is MIT-licensed:
 its `LICENSE` carries the dual copyright *"The ds4.c authors"* and *"The ggml
@@ -512,6 +522,10 @@ components live in the pnpm lockfile:
   a new engine is added under `native/engines/`. `pnpm check:notice` compares
   the visible versions above to every `VERSION` file and requires the matching
   entry in `native/licenses/manifest.json` to name the same pinned commit.
+- Native helpers: add a `native/licenses/manifest.json` helper entry whenever a
+  first-party helper gains `THIRD_PARTY_NOTICES.md`. The notice gate reconciles
+  that helper-local disclosure, the central license text, its `NOTICE.md` row,
+  and the exact installer platforms carrying the affected code.
 - Vendored connector components: update the "Vendored connector components
   (Prismatic)" table when a new component slice is added under
   `packages/connectors-spectral/vendor/`. The authoritative list — with

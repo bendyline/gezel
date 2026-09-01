@@ -20,7 +20,8 @@ MACHINE_SHARED_DIR="/Users/Shared/Gezel"
 APP_DIR="/Applications/Gezel.app"
 DAEMON_USER="_gezeld"
 DETACHED_SCRIPT_PREFIX="/private/tmp/gezel-uninstall."
-DETACHED_LOG="/var/tmp/gezel-uninstall.log"
+DETACHED_LOG_DIR_PREFIX="/var/tmp/gezel-uninstall."
+DETACHED_LOG=""
 SERVICE_EXIT_TIMEOUT_SECONDS=30
 
 usage() {
@@ -57,7 +58,7 @@ Compatibility:
   --purge-data is an alias for --remove-machine-data.
 
 Internal app handoff options:
-  --detach --wait-for-pid=PID
+  --detach --wait-for-pid=PID --detached-log=PATH
 EOF
 }
 
@@ -88,6 +89,9 @@ while [ "$#" -gt 0 ]; do
     --user-uid=*)
       TARGET_USER_UID="${1#*=}"
       ;;
+    --detached-log=*)
+      DETACHED_LOG="${1#*=}"
+      ;;
     -h|--help)
       usage
       exit 0
@@ -110,6 +114,20 @@ if [ -n "$WAIT_FOR_PID" ] && ! [[ "$WAIT_FOR_PID" =~ ^[0-9]+$ ]] ||
    [ -n "$WAIT_FOR_PID" ] && [ "$WAIT_FOR_PID" -le 1 ]; then
   echo "--wait-for-pid must name a process id greater than 1" >&2
   exit 64
+fi
+
+if [ -n "$DETACHED_LOG" ]; then
+  case "$0" in
+    "${DETACHED_SCRIPT_PREFIX}"*) ;;
+    *)
+      echo "--detached-log is reserved for the staged uninstaller" >&2
+      exit 64
+      ;;
+  esac
+  if ! [[ "$DETACHED_LOG" =~ ^/var/tmp/gezel-uninstall\.[[:alnum:]]+/uninstall\.log$ ]]; then
+    echo "--detached-log does not name a staged uninstall log" >&2
+    exit 64
+  fi
 fi
 
 if [ "$REMOVE_CURRENT_USER_DATA" -eq 1 ]; then
@@ -136,15 +154,23 @@ if [ "$DETACH" -eq 1 ]; then
   /usr/sbin/chown root:wheel "$staged_script"
   /bin/chmod 700 "$staged_script"
 
+  # Keep the predictable filename inside a root-only, atomically allocated
+  # directory. A local account cannot pre-create or swap this redirect target.
+  detached_log_dir=$(/usr/bin/mktemp -d "${DETACHED_LOG_DIR_PREFIX}XXXXXX")
+  /usr/sbin/chown root:wheel "$detached_log_dir"
+  /bin/chmod 700 "$detached_log_dir"
+  detached_log="${detached_log_dir}/uninstall.log"
+
   child_args=()
   [ -n "$WAIT_FOR_PID" ] && child_args+=("--wait-for-pid=${WAIT_FOR_PID}")
   [ -n "$TARGET_USER_UID" ] && child_args+=("--user-uid=${TARGET_USER_UID}")
+  child_args+=("--detached-log=${detached_log}")
   [ "$REMOVE_MACHINE_DATA" -eq 1 ] && child_args+=("--remove-machine-data")
   [ "$REMOVE_SHARED_DATA" -eq 1 ] && child_args+=("--remove-shared-data")
   [ "$REMOVE_CURRENT_USER_DATA" -eq 1 ] && child_args+=("--remove-current-user-data")
 
   /usr/bin/nohup /bin/bash "$staged_script" "${child_args[@]}" \
-    >"$DETACHED_LOG" 2>&1 </dev/null &
+    >"$detached_log" 2>&1 </dev/null &
   echo "[gezel uninstall] staged; Gezel may now quit"
   exit 0
 fi
@@ -305,8 +331,10 @@ print_identity_remediation() {
 [gezel uninstall] If the user is Gezel's dedicated account, remove it first. Remove the matching group only after the user is verified absent:
 [gezel uninstall]   sudo /usr/bin/dscl . -delete /Users/${DAEMON_USER}
 [gezel uninstall]   sudo /usr/bin/dscl . -delete /Groups/${DAEMON_USER}
-[gezel uninstall] A detached uninstall's complete log is at ${DETACHED_LOG}.
 EOF
+  if [ -n "$DETACHED_LOG" ]; then
+    echo "[gezel uninstall] A detached uninstall's complete log is at ${DETACHED_LOG}." >&2
+  fi
 }
 
 notify_detached_identity_failure() {
@@ -322,8 +350,11 @@ notify_detached_identity_failure() {
   # back over IPC. Surface it in the initiating user's GUI as well as the
   # root-owned log. The alert times out so cleanup never waits indefinitely.
   /bin/launchctl asuser "$TARGET_USER_UID" /usr/bin/sudo -H -u "$notification_username" \
-    /usr/bin/osascript -e \
-    'display alert "Gezel uninstall needs attention" message "Gezel was removed, but macOS retained part of the _gezeld service account. Its matching group was not removed while the user remained. See /var/tmp/gezel-uninstall.log for the exact error and safe manual steps." as critical buttons {"OK"} default button "OK" giving up after 30' \
+    /usr/bin/osascript \
+    -e 'on run argv' \
+    -e 'display alert "Gezel uninstall needs attention" message ("Gezel was removed, but macOS retained part of the _gezeld service account. Its matching group was not removed while the user remained. The complete log is at " & item 1 of argv & ". Administrator permission may be required to read it.") as critical buttons {"OK"} default button "OK" giving up after 30' \
+    -e 'end run' \
+    "$DETACHED_LOG" \
     >/dev/null 2>&1 || true
 }
 

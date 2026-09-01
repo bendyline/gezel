@@ -12,7 +12,7 @@
  * succeeds, the tarball still publishes, and the failure only shows up as a
  * blank page for a user who installed from npm.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,33 @@ import { loadPublishedPackages } from './_packages';
 
 const service = loadPublishedPackages().find((p) => p.dir === 'service')!;
 const workerNames = Object.keys(SERVICE_WORKER_ENTRIES) as ServiceWorkerEntry[];
+
+function rendererPayloadContainsLame(root: string): boolean {
+  const lameSignature = /bug in LAME encoding library|lame\.sf\.net|ILAME %s version/;
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = resolve(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(path);
+        continue;
+      }
+      if (entry.name.endsWith('.wasm')) {
+        if (lameSignature.test(readFileSync(path).toString('latin1'))) return true;
+        continue;
+      }
+      if (!entry.name.endsWith('.js')) continue;
+      const source = readFileSync(path, 'utf8');
+      if (lameSignature.test(source)) return true;
+      for (const match of source.matchAll(/base64,([A-Za-z0-9+/=]{1024,})/g)) {
+        const decoded = Buffer.from(match[1]!, 'base64').toString('latin1');
+        if (lameSignature.test(decoded)) return true;
+      }
+    }
+  }
+  return false;
+}
 
 describe('service bundled assets', () => {
   it('stages the web UI into dist/ui', () => {
@@ -66,6 +93,14 @@ describe('service bundled assets', () => {
   it('does not ship the browser ffmpeg runtime', () => {
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.js'))).toBe(false);
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.wasm'))).toBe(false);
+  });
+
+  it('does not ship the LAME MP3 encoder hidden in a renderer payload', () => {
+    // @audio/encode-mp3 -> wasm-media-encoders self-declared as MIT even
+    // though the emitted base64 WASM statically contained LAME 3.100. Decode
+    // embedded data URIs as well as checking ordinary JS/WASM assets so npm
+    // metadata cannot hide the same payload from the ship gate again.
+    expect(rendererPayloadContainsLame(resolve(service.dist, 'ui'))).toBe(false);
   });
 
   it('stages the MLX sidecar python tree, including its hard imports', () => {

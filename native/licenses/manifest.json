@@ -30,5 +30,21 @@
       "commit": "f049fff95a089aa9969deb009cdd4892b3e74916",
       "files": ["LICENSE-ggml-MIT.txt"]
     }
+  },
+  "helpers": {
+    "device-health": {
+      "binary": "gezel-device-health",
+      "components": [
+        {
+          "id": "amd-adl-sdk-headers",
+          "name": "AMD Display Library (ADL) SDK headers",
+          "version": "18.0",
+          "license": "MIT",
+          "source": "https://github.com/GPUOpen-LibrariesAndSDKs/display-library",
+          "platforms": ["win32-x64"],
+          "files": ["LICENSE-amd-adl-MIT.txt"]
+        }
+      ]
+    }
   }
 }

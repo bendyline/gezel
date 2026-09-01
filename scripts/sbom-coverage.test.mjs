@@ -20,7 +20,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { verifyNoticeInventory } from './check-notice.mjs';
-import { ENGINE_FOR_BINARY, allPlatformKeys } from './native-payload.mjs';
+import { ENGINE_FOR_BINARY, NATIVE_PAYLOAD, allPlatformKeys } from './native-payload.mjs';
 import {
   isRemovedPnpmRuntimePackage,
   loadPnpmRuntimeInventory,
@@ -36,7 +36,12 @@ const root = join(here, '..');
 
 test('the generator sources every non-npm component kind', async () => {
   const generator = await readFile(join(here, 'generate-sbom.mjs'), 'utf8');
-  for (const kind of ['native-engine', 'bundled-runtime', 'native-redistributable']) {
+  for (const kind of [
+    'native-engine',
+    'native-helper-derived-source',
+    'bundled-runtime',
+    'native-redistributable',
+  ]) {
     assert.match(
       generator,
       new RegExp(`'gezel:component-kind', value: '${kind}'`),
@@ -141,7 +146,7 @@ test('the packaged legal bundle rejects a stale or incomplete pnpm graph', async
   );
 });
 
-test('every native engine and bundled runtime reaches the SBOM with a pin', async () => {
+test('every native engine, helper component, and bundled runtime reaches the SBOM', async () => {
   const notice = await verifyNoticeInventory();
 
   const engineIds = new Set(Object.values(ENGINE_FOR_BINARY).filter(Boolean));
@@ -157,6 +162,22 @@ test('every native engine and bundled runtime reaches the SBOM with a pin', asyn
     assert.ok(engine.license, `${engine.id} has no license`);
     assert.ok(engine.commit, `${engine.id} has no upstream commit`);
     assert.match(engine.source ?? '', /^https:\/\//, `${engine.id} has no source URL`);
+  }
+
+  assert.equal(notice.native.helpers, 1);
+  assert.equal(notice.native.helperComponents.length, 1);
+  const adl = notice.native.helperComponents[0];
+  assert.equal(adl.id, 'amd-adl-sdk-headers');
+  assert.equal(adl.helperId, 'device-health');
+  assert.equal(adl.binary, 'gezel-device-health');
+  assert.equal(adl.license, 'MIT');
+  assert.deepEqual(adl.platforms, ['win32-x64']);
+  assert.match(adl.source, /^https:\/\/github\.com\/GPUOpen-LibrariesAndSDKs\/display-library$/);
+  for (const platform of adl.platforms) {
+    assert.ok(
+      NATIVE_PAYLOAD[platform]?.includes(adl.binary),
+      `${adl.id} claims ${platform}, which does not ship ${adl.binary}`,
+    );
   }
 
   assert.equal(notice.runtimes.components.length, notice.runtimes.count);

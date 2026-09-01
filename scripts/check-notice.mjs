@@ -6,6 +6,7 @@
  * introducing a second generated source of truth. It fails on:
  *   - a native VERSION pin that is stale in NOTICE.md;
  *   - a native license manifest that is not bound to the same tag/commit;
+ *   - a first-party native helper whose third-party notice is not inventoried;
  *   - missing or orphaned native license texts;
  *   - a built UI font missing from the font manifest/NOTICE (or vice versa);
  *   - a font license absent from the service npm payload or stale on disk.
@@ -15,6 +16,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ENGINE_FOR_BINARY, NATIVE_PAYLOAD } from './native-payload.mjs';
 import {
   loadPnpmRuntimeInventory,
   pnpmReleaseTargets,
@@ -123,13 +125,26 @@ function formatSet(values) {
   return sorted(values).join(', ') || '(none)';
 }
 
+function normalizedText(value) {
+  return value.replaceAll('\r\n', '\n').trim();
+}
+
 async function checkNativeInventory(notice) {
   const enginesRoot = join(repoRoot, 'native', 'engines');
+  const helpersRoot = join(repoRoot, 'native', 'helpers');
   const licensesRoot = join(repoRoot, 'native', 'licenses');
   const licenseManifestPath = join(licensesRoot, 'manifest.json');
   const manifest = JSON.parse(await readFile(licenseManifestPath, 'utf8'));
-  if (manifest.schemaVersion !== 1 || !manifest.engines || typeof manifest.engines !== 'object') {
-    throw new Error('native/licenses/manifest.json must have schemaVersion 1 and an engines map');
+  if (
+    manifest.schemaVersion !== 1 ||
+    !manifest.engines ||
+    typeof manifest.engines !== 'object' ||
+    !manifest.helpers ||
+    typeof manifest.helpers !== 'object'
+  ) {
+    throw new Error(
+      'native/licenses/manifest.json must have schemaVersion 1 plus engines and helpers maps',
+    );
   }
 
   const engineIds = [];
@@ -144,6 +159,25 @@ async function checkNativeInventory(notice) {
         'native license engines differ from VERSION inventory',
         `  VERSION: ${formatSet(engineIds)}`,
         `  licenses: ${formatSet(Object.keys(manifest.engines))}`,
+      ].join('\n'),
+    );
+  }
+
+  const helperIds = [];
+  for (const entry of await readdir(helpersRoot, { withFileTypes: true })) {
+    if (
+      entry.isDirectory() &&
+      existsSync(join(helpersRoot, entry.name, 'THIRD_PARTY_NOTICES.md'))
+    ) {
+      helperIds.push(entry.name);
+    }
+  }
+  if (!sameMembers(helperIds, Object.keys(manifest.helpers))) {
+    throw new Error(
+      [
+        'native license helpers differ from THIRD_PARTY_NOTICES inventory',
+        `  notices: ${formatSet(helperIds)}`,
+        `  licenses: ${formatSet(Object.keys(manifest.helpers))}`,
       ].join('\n'),
     );
   }
@@ -210,6 +244,103 @@ async function checkNativeInventory(notice) {
     });
   }
 
+  const helperComponents = [];
+  const helperComponentIds = new Set();
+  for (const helperId of helperIds) {
+    const legal = manifest.helpers[helperId];
+    if (
+      !legal ||
+      typeof legal.binary !== 'string' ||
+      !Array.isArray(legal.components) ||
+      legal.components.length === 0
+    ) {
+      throw new Error(`native license manifest has no components for helper ${helperId}`);
+    }
+    if (!(legal.binary in ENGINE_FOR_BINARY) || ENGINE_FOR_BINARY[legal.binary] !== null) {
+      throw new Error(
+        `native helper ${helperId} references ${legal.binary}, which is not a first-party staged binary`,
+      );
+    }
+
+    const helperNoticePath = join(helpersRoot, helperId, 'THIRD_PARTY_NOTICES.md');
+    const helperNotice = normalizedText(await readFile(helperNoticePath, 'utf8'));
+    for (const component of legal.components) {
+      if (
+        !component ||
+        typeof component.id !== 'string' ||
+        typeof component.name !== 'string' ||
+        typeof component.version !== 'string' ||
+        typeof component.license !== 'string' ||
+        typeof component.source !== 'string' ||
+        !component.source.startsWith('https://')
+      ) {
+        throw new Error(`native helper ${helperId} has invalid third-party component metadata`);
+      }
+      if (helperComponentIds.has(component.id)) {
+        throw new Error(`duplicate native helper component id: ${component.id}`);
+      }
+      helperComponentIds.add(component.id);
+      if (
+        !Array.isArray(component.platforms) ||
+        component.platforms.length === 0 ||
+        new Set(component.platforms).size !== component.platforms.length
+      ) {
+        throw new Error(`native helper component ${component.id} has invalid platform scope`);
+      }
+      for (const platform of component.platforms) {
+        if (!NATIVE_PAYLOAD[platform]?.includes(legal.binary)) {
+          throw new Error(
+            `native helper component ${component.id} claims ${platform}, which does not ship ${legal.binary}`,
+          );
+        }
+      }
+      if (!Array.isArray(component.files) || component.files.length === 0) {
+        throw new Error(`native helper component ${component.id} has no license files`);
+      }
+      for (const file of component.files) {
+        if (typeof file !== 'string' || file.includes('/') || file.includes('\\')) {
+          throw new Error(`invalid native license filename for ${component.id}: ${String(file)}`);
+        }
+        const licensePath = join(licensesRoot, file);
+        if (!existsSync(licensePath)) {
+          throw new Error(`missing native license text: native/licenses/${file}`);
+        }
+        const licenseText = normalizedText(await readFile(licensePath, 'utf8'));
+        if (!helperNotice.includes(licenseText)) {
+          throw new Error(
+            `${relative(repoRoot, helperNoticePath)} does not contain native/licenses/${file}`,
+          );
+        }
+        referencedLicenseFiles.add(file);
+      }
+
+      const row = nativeRows.find((cells) =>
+        plainMarkdown(cells[0] ?? '').includes(component.name),
+      );
+      if (!row) throw new Error(`NOTICE.md has no native row for ${component.name}`);
+      const expectedVersion = `\`${component.version}\``;
+      if ((row[1] ?? '') !== expectedVersion) {
+        throw new Error(
+          `NOTICE.md native version is stale for ${component.name}: ` +
+            `expected "${expectedVersion}", found "${row[1] ?? ''}"`,
+        );
+      }
+      if (plainMarkdown(row[2] ?? '') !== component.license) {
+        throw new Error(`NOTICE.md native license is stale for ${component.name}`);
+      }
+      const noticeSource = (row[3] ?? '').match(/\]\((https?:[^)]+)\)/)?.[1] ?? null;
+      if (noticeSource !== component.source) {
+        throw new Error(`NOTICE.md native source is stale for ${component.name}`);
+      }
+
+      helperComponents.push({
+        ...component,
+        helperId,
+        binary: legal.binary,
+      });
+    }
+  }
+
   const presentLicenseFiles = (await readdir(licensesRoot)).filter((name) =>
     name.startsWith('LICENSE-'),
   );
@@ -224,8 +355,10 @@ async function checkNativeInventory(notice) {
   }
   return {
     engines: engineIds.length,
+    helpers: helperIds.length,
     licenseFiles: referencedLicenseFiles.size,
     components,
+    helperComponents,
   };
 }
 
@@ -476,12 +609,7 @@ export async function verifyNoticeInventory() {
 async function main() {
   const result = await verifyNoticeInventory();
   console.log(
-    `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ` +
-      `${result.native.licenseFiles} native license texts, ` +
-      `${result.fonts.families} font families, ${result.fonts.files} built font files, ` +
-      `${result.fonts.licenseFiles} service font-license files, and ` +
-      `${result.runtimes.count} bundled application runtimes with ` +
-      `${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
+    `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ${result.native.helpers} native helper${result.native.helpers === 1 ? '' : 's'} with third-party notices, ${result.native.licenseFiles} native license texts, ${result.fonts.families} font families, ${result.fonts.files} built font files, ${result.fonts.licenseFiles} service font-license files, and ${result.runtimes.count} bundled application runtimes with ${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
   );
 }
 

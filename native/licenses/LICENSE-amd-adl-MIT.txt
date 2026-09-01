@@ -1,12 +1,3 @@
-# Third-party notices
-
-The Windows AMD adapter uses ABI structure and constant definitions derived
-from AMD's open-source AMD Display Library SDK headers.
-
-The installer-facing copy of these terms is maintained at
-`native/licenses/LICENSE-amd-adl-MIT.txt`; the native notice gate requires this
-helper-local disclosure to contain the same text.
-
 Copyright (c) 2016-2022 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

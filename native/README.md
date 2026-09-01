@@ -190,6 +190,13 @@ name plus environment variable to `packages/core/src/native/discover.ts`.
 Helpers do not use an upstream `VERSION` file, but otherwise share platform
 archives, signing, fetch, and Electron packaging with the engines.
 
+If a helper compiles or vendors third-party source, add
+`native/helpers/<name>/THIRD_PARTY_NOTICES.md`, copy the applicable terms into
+`native/licenses/`, and register the component, helper binary, and exact
+platform scope under `manifest.json#helpers`. `pnpm check:notice` discovers
+helper notice files independently and fails if any helper, license text,
+NOTICE row, or staged platform falls outside that inventory.
+
 ## Local development
 
 Running the full cross-platform matrix locally is painful. For
