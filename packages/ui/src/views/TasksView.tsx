@@ -30,6 +30,10 @@ const TASK_KIND_OPTIONS: Array<{ value: TaskKindFilter; label: string }> = [
 
 function taskKind(task: Task): TaskKindFilter {
   if (task.nightShift?.enabled) return 'night-shift';
+  // Standing background jobs the service installs (workspace indexing) are
+  // scheduled work, not the user's backlog — the default One-time view must
+  // never lead a fresh install with a system job (2026-09-02 UX review).
+  if (task.origin?.kind === 'system-job') return 'scheduled';
   if (task.cron) return 'scheduled';
   return 'one-time';
 }
@@ -87,6 +91,7 @@ function groupTasks(tasks: Task[]): TaskGroup[] {
 
 function taskBadge(task: Task): string | null {
   if (task.nightShift?.enabled) return 'night-shift';
+  if (task.origin?.kind === 'system-job') return 'system';
   if (task.spawnsCraftbook && task.craftbook.steps.length === 0) return 'template';
   if (task.spawnsCraftbook && task.fanout?.materializedAt) return 'coordinator';
   if (task.cron) return 'cron';

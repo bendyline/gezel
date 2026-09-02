@@ -71,9 +71,11 @@ describe('SecurityComplianceSettings', () => {
     for (const r of radios.filter((x) => x !== customKey)) {
       expect(r).toHaveAttribute('aria-checked', 'false');
     }
-    expect(
-      screen.getByText(/Custom posture — individual capabilities below differ/),
-    ).toBeInTheDocument();
+    // The description panel leads with the latched mode's name in bold
+    // (described-tray pattern), so the label and the copy are separate nodes.
+    const description = screen.getByText(/individual capabilities below differ/);
+    expect(description).toBeInTheDocument();
+    expect(description.closest('p')?.querySelector('strong')?.textContent).toBe('Custom');
   });
 
   it('flipping a capability off-preset persists a Custom-classified policy', async () => {

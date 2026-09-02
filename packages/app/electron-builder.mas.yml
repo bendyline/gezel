@@ -14,6 +14,64 @@
 # checked just because a store lane now exists.
 extends: ./electron-builder.yml
 
+# The service tree, shipped UNPACKED. The base config ships it as
+# service-bundle.tar.gz and the app unpacks it into ~/.gezel/service/ on first
+# launch — which exists for a Windows reason (Defender synchronously scans each
+# of ~100k extracted files, making one archive the difference between a
+# thirty-minute install and a few seconds) that does not apply here, and which
+# guideline 2.4.5 reads as installing code outside the bundle.
+#
+# `pnpm deploy` already leaves the complete tree at dist/service-bundle/ on its
+# way to producing the tarball, so this ships that and the supervisor imports
+# it in place. Child arrays replace parent arrays, so both lists restate what
+# the base shipped plus this one addition.
+files:
+  - dist/main.js
+  - dist/preload.cjs
+  - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
+  - dist/service-bundle/**/*
+  - dist/service-bundle.tar.gz
+  - dist/service-bundle.meta.json
+  - dist/pnpm-bundle/**/*
+  - dist/node-bundle/**/*
+  - dist/duckdb-bundle/**/*
+  - dist/ui/**/*
+  - '!dist/ui/**/*.map'
+  - '!dist/*.map'
+  - native-bin/**/*
+  - assets/icon.png
+  - assets/icon.ico
+  - assets/trayTemplate.png
+  - assets/trayTemplate@2x.png
+  - assets/trayWorking*Template*.png
+  - assets/splash.html
+  - assets/gezel-mark.png
+  - assets/gezel-mark-transparent.png
+  - '!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}'
+  - '!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}'
+  - '!**/node_modules/*.d.ts'
+  - '!**/node_modules/.bin'
+  - '!**/node_modules/@napi-rs/canvas/**'
+  - '!**/node_modules/@napi-rs/canvas-*/**'
+
+# Unpacked for the same reason the base unpacks dist/ui: the service reads its
+# own files with plain Node fs, which cannot see inside an asar.
+asarUnpack:
+  - dist/main.js
+  - dist/preload.cjs
+  - package.json
+  - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
+  - dist/service-bundle/**/*
+  - dist/service-bundle.tar.gz
+  - dist/service-bundle.meta.json
+  - dist/pnpm-bundle/**/*
+  - dist/node-bundle/**/*
+  - dist/duckdb-bundle/**/*
+  - dist/ui/**/*
+  - native-bin/**/*
+
 mac:
   target:
     - target: mas
@@ -39,6 +97,12 @@ mac:
       to: licenses
     - from: dist/model-pack
       to: model-pack
+    # The channel marker. This is what makes "is this a store build?" a fact
+    # about the artifact rather than about the environment it launches in —
+    # see packages/app/src/store-build.ts for why an env var must never be
+    # able to answer that question.
+    - from: dist/store-build
+      to: .
 
 # Deep-assigned OVER the `mac` block above by app-builder-lib's macPackager, so
 # only the differences belong here.

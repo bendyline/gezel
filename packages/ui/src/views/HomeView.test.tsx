@@ -375,7 +375,7 @@ describe('HomeView', () => {
 
     render(<HomeView />);
 
-    const link = await screen.findByRole('button', { name: /Manage Chat AI Models/ });
+    const link = await screen.findByRole('button', { name: /Manage AI models in Settings/ });
     expect(link).toBeInTheDocument();
     // The intro copy is the embedded Handboek article, not hardcoded prose.
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
@@ -417,7 +417,7 @@ describe('HomeView', () => {
     expect(heading.compareDocumentPosition(intro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('first run offers "Boring mode" — one toggle over names + avatars', async () => {
+  it('first run offers "Show gezel names and poppetjes" below the security posture', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'copilot',
       hasGithubToken: false,
@@ -428,10 +428,20 @@ describe('HomeView', () => {
 
     render(<HomeView />);
 
-    const checkbox = await screen.findByRole('checkbox', { name: /Boring mode/ });
-    expect(checkbox).not.toBeChecked();
+    // Positive framing, on by default — the old "Boring mode" in-joke led the
+    // section and sat above the security posture (2026-09-02 UX review).
+    const checkbox = await screen.findByRole('checkbox', {
+      name: /Show gezel names and poppetjes/,
+    });
+    expect(checkbox).toBeChecked();
 
-    // Checking it disables names (role-based only) AND avatars in one write.
+    // The consequential choice (security posture) comes first on the page.
+    const security = screen.getByRole('radiogroup', { name: 'Security posture' });
+    expect(
+      security.compareDocumentPosition(checkbox) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Unchecking flips to role-based names AND letter avatars in one write.
     fireEvent.click(checkbox);
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({

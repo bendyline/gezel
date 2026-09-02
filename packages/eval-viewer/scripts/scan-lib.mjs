@@ -208,6 +208,7 @@ function summarize(trialDir, runsRoot) {
     composite: pm?.composite ?? null,
     band: pm?.band ?? null,
     hasPostmortem: pm !== null,
+    hasRecording: existsSync(join(trialDir, 'recording', 'transcript.json')),
     host: host
       ? {
           cpuModel: host.cpuModel ?? null,

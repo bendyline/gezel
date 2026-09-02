@@ -30,6 +30,8 @@ export interface Trial {
   composite: number | null;
   band: Band | null;
   hasPostmortem: boolean;
+  /** True when `recording/transcript.json` exists — the Movie tab's gate. */
+  hasRecording?: boolean;
   host: {
     cpuModel: string | null;
     totalRamGb: number | null;

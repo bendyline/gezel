@@ -27,6 +27,11 @@ on:
         description: 'Required native-binaries tag to bundle (e.g. native-v1.2.3).'
         required: true
         type: string
+      installSmoke:
+        description: 'Self-sign the package, install it, and launch it once. Slower; unproven on hosted runners.'
+        required: false
+        default: false
+        type: boolean
 
 env:
   NODE_VERSION: '24'
@@ -246,6 +251,14 @@ jobs:
         # models it does not contain — do NOT set GEZEL_MODEL_PACK_SKIP here.
         run: node scripts/stage-model-pack.mjs
 
+      - name: Write the store-build marker
+        # Tells the packaged app which channel it is, so it takes the store
+        # ladder (adopt a direct install's daemon, never manage it) and the
+        # store distribution profile (no runtime code downloads). A build
+        # missing this would behave like a direct download and try to download
+        # code the Store forbids.
+        run: node scripts/write-store-build-marker.mjs microsoft-store
+
       - name: Package MSIX
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --win --config electron-builder.appx.yml --publish never
 
@@ -315,6 +328,11 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
+          # Uploaded BEFORE the optional install smoke, deliberately: a smoke
+          # failure then still leaves the package downloadable for diagnosis,
+          # and the job failing is what stops it being submitted — nothing here
+          # publishes on its own.
+          #
           # Kept as .appx, the extension electron-builder produces. MSIX and
           # APPX are the same container format and Partner Center accepts
           # either; renaming would imply a conversion that did not happen.
@@ -322,6 +340,98 @@ jobs:
           path: packages/app/dist/installers/*.appx
           if-no-files-found: error
           retention-days: 14
+
+      - name: Install and launch the package once
+        # Opt-in, because it is the one step here whose failure mode may be the
+        # runner rather than the package: an MSIX must be signed by a
+        # certificate the machine trusts before Windows will install it, and
+        # launching a packaged app on a headless hosted runner is unproven.
+        # When it does run it catches what nothing else can — that the package
+        # actually installs and the app inside it reaches ready, which a
+        # manifest inspection cannot tell you.
+        #
+        # The self-signed certificate exists only on this runner and never
+        # touches the artifact: the .appx uploaded below is the unsigned one
+        # the Store expects. Signing happens on a COPY.
+        if: ${{ inputs.installSmoke }}
+        shell: pwsh
+        env:
+          GEZEL_PACKAGED_SMOKE: '1'
+          GEZEL_EXPECTED_VERSION: ${{ needs.store-preflight.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+            Select-Object -First 1
+
+          # The certificate subject must equal the manifest publisher exactly,
+          # or Windows refuses the package without saying which field differed.
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          try {
+            $entry = $zip.Entries | Where-Object { $_.FullName -eq 'AppxManifest.xml' }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $manifest = [xml]$reader.ReadToEnd()
+            $reader.Dispose()
+          } finally {
+            $zip.Dispose()
+          }
+          $publisher = $manifest.Package.Identity.Publisher
+          Write-Host "[smoke] manifest publisher: $publisher"
+
+          $signed = Join-Path $env:RUNNER_TEMP 'gezel-selfsigned.appx'
+          Copy-Item $pkg.FullName $signed -Force
+
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher `
+            -KeyUsage DigitalSignature -FriendlyName 'Gezel MSIX smoke' `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $pfxPassword = ConvertTo-SecureString -String ([guid]::NewGuid().ToString()) -Force -AsPlainText
+          $pfx = Join-Path $env:RUNNER_TEMP 'gezel-smoke.pfx'
+          Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath $pfx -Password $pfxPassword | Out-Null
+          # Windows will only install a package whose signer it trusts, so the
+          # throwaway certificate has to go into the machine's trusted root for
+          # the duration of this job.
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation 'Cert:\LocalMachine\Root' -Password $pfxPassword | Out-Null
+
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter 'signtool.exe' |
+            Where-Object { $_.FullName -like '*x64*' } | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found on this runner' }
+          & $signtool.FullName sign /fd SHA256 /a /f $pfx /p ([System.Net.NetworkCredential]::new('', $pfxPassword).Password) $signed
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+
+          Add-AppxPackage -Path $signed
+          $installed = Get-AppxPackage | Where-Object { $_.Name -eq $manifest.Package.Identity.Name }
+          if (-not $installed) { throw 'the package did not install' }
+          Write-Host "[smoke] installed $($installed.PackageFullName)"
+
+          # The same sentinel the NSIS smoke uses: the app boots its service,
+          # confirms its own version, and exits 0 without opening a window.
+          $smokeHome = Join-Path $env:RUNNER_TEMP 'gezel-msix-smoke'
+          $arguments = "--gezel-packaged-smoke --gezel-expected-version=${{ needs.store-preflight.outputs.version }} --gezel-home=$smokeHome"
+          $proc = Start-Process -FilePath 'powershell' -PassThru -Wait -NoNewWindow -ArgumentList @(
+            '-NoProfile', '-Command',
+            "Invoke-CommandInDesktopPackage -PackageFamilyName '$($installed.PackageFamilyName)' -AppId 'Gezel' -Command 'gezel.exe' -Args '$arguments'"
+          )
+          if ($proc.ExitCode -ne 0) {
+            throw "launching the packaged app failed with exit code $($proc.ExitCode)"
+          }
+          Write-Host '[smoke] packaged app launched'
+
+      - name: Remove the smoke install
+        if: ${{ always() && inputs.installSmoke }}
+        shell: pwsh
+        run: |
+          # Best-effort teardown so a failed smoke cannot leave a trusted
+          # throwaway certificate or an installed package behind on a reused
+          # runner image.
+          Get-AppxPackage | Where-Object { $_.Publisher -like '*Bendyline*' -or $_.Name -like '*Gezel*' } |
+            ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue }
+          Get-ChildItem 'Cert:\LocalMachine\Root' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FriendlyName -eq 'Gezel MSIX smoke' } |
+            ForEach-Object { Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue }
+          Get-ChildItem 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FriendlyName -eq 'Gezel MSIX smoke' } |
+            ForEach-Object { Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue }
 
       - name: Check store tile art
         shell: pwsh

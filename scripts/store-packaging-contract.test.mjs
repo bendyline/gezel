@@ -44,6 +44,11 @@ function withoutComments(text) {
 
 const read = (rel) => withoutComments(readRaw(rel));
 
+const STORE_BUILD_RESOURCE = /from: dist\/store-build/;
+const MARKER_SCRIPT_MSIX = /write-store-build-marker\.mjs microsoft-store/;
+const MARKER_SCRIPT_MAS = /write-store-build-marker\.mjs mac-app-store/;
+const UNPACKED_SERVICE_TREE = /dist\/service-bundle\/\*\*\/\*/;
+
 const MAS_CONFIG = 'packages/app/electron-builder.mas.yml';
 const APPX_CONFIG = 'packages/app/electron-builder.appx.yml';
 
@@ -236,8 +241,84 @@ test('only the store lanes ship weights', () => {
   assert.doesNotMatch(base, /stage-model-pack/);
 });
 
+test('both store configs stage the channel marker', () => {
+  // Without it a packaged store build reads as a direct download: it would
+  // take the managing supervisor ladder and try to download code the stores
+  // forbid. The marker is what makes the channel a property of the artifact.
+  for (const config of [MAS_CONFIG, APPX_CONFIG]) {
+    assert.match(read(config), STORE_BUILD_RESOURCE, `${config} must stage the marker`);
+  }
+});
+
+test('each store workflow writes its own channel marker before packaging', () => {
+  const msix = read('.github/workflows/release-msix.yml');
+  assert.match(msix, MARKER_SCRIPT_MSIX);
+  // Order matters: the marker has to exist before electron-builder collects
+  // extraResources, or it silently ships without one.
+  assert.ok(
+    msix.indexOf('write-store-build-marker') < msix.indexOf('electron-builder --win'),
+    'the marker must be written before packaging',
+  );
+});
+
+test('the MAS config ships the service tree unpacked', () => {
+  // A store build may not extract code at runtime, so the tree it imports has
+  // to be in the bundle already. The base config ships only the tarball —
+  // correct there, where unpacking one archive instead of ~100k files is what
+  // keeps Windows installs from taking half an hour.
+  const mas = read(MAS_CONFIG);
+  assert.match(mas, UNPACKED_SERVICE_TREE, 'the MAS lane must ship dist/service-bundle unpacked');
+  // Unpacked from the asar too: the service reads its own files with plain
+  // Node fs, which cannot see inside an archive.
+  const asarSection = mas.slice(mas.indexOf('asarUnpack:'));
+  assert.match(asarSection, UNPACKED_SERVICE_TREE);
+  // And the base config must NOT — otherwise every direct-download installer
+  // grows by the size of a second copy of the service.
+  assert.doesNotMatch(read('packages/app/electron-builder.yml'), UNPACKED_SERVICE_TREE);
+});
+
+test('the MAS workflow re-signs the payload and never notarizes', () => {
+  const mas = read('.github/workflows/release-mas.yml');
+  assert.match(mas, /mas-resign-payload.mjs/, 'the payload must be re-signed for the sandbox');
+  assert.match(mas, MARKER_SCRIPT_MAS);
+  assert.match(mas, /stage-model-pack.mjs/);
+  assert.match(mas, /verify-mas-entitlements.mjs/);
+  // A MAS package is not notarized or stapled — the store reviews and
+  // re-signs on ingest, so these checks would fail here by design.
+  assert.doesNotMatch(mas, /notarytool/);
+  assert.doesNotMatch(mas, /stapler/);
+  assert.doesNotMatch(mas, /spctl/);
+  // Re-signing sits in a narrow window, and both edges have bitten:
+  //
+  //   after build:packaged — tsup's onSuccess re-runs fetch-node and
+  //     fetch-duckdb, which re-stage those bundles from their vendor downloads
+  //     and rewrite sha256.txt. Signing earlier is silently undone, and the
+  //     package ships vendor-signed binaries whose children cannot launch
+  //     under the sandbox.
+  //
+  //   before electron-builder — packing seals the tree, and these paths are
+  //     signIgnore'd so electron-builder will not sign them itself.
+  assert.ok(
+    mas.indexOf('pnpm build:packaged') < mas.indexOf('node scripts/mas-resign-payload.mjs'),
+    'the payload must be re-signed AFTER build:packaged, which rebuilds two of those trees',
+  );
+  assert.ok(
+    mas.indexOf('node scripts/mas-resign-payload.mjs') < mas.indexOf('exec electron-builder'),
+    'the payload must be re-signed before electron-builder seals the tree',
+  );
+  // And provenance must be proven BEFORE signatures are replaced, or the
+  // manifest check would be asserting our own bytes back to us.
+  assert.ok(
+    mas.indexOf('--root packages/app/native-bin') < mas.indexOf('mas-resign-payload'),
+    'the native payload must be verified before it is re-signed',
+  );
+});
+
 test('the store workflows are dispatch-only and never auto-publish a release', () => {
-  for (const workflow of ['.github/workflows/release-msix.yml']) {
+  for (const workflow of [
+    '.github/workflows/release-msix.yml',
+    '.github/workflows/release-mas.yml',
+  ]) {
     const text = read(workflow);
     assert.match(text, /^on:\s*$/m);
     assert.match(text, /^ {2}workflow_dispatch:$/m);

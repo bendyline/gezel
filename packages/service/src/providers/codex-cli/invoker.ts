@@ -614,6 +614,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
               name,
               argKeys,
               args,
+              startedAtMs: startedAt,
               durationMs: Math.max(0, Date.now() - startedAt),
               success: !isToolItemError(event.raw),
             };

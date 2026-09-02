@@ -1785,24 +1785,39 @@ button.danger {
   gap: 0.5rem;
   margin-top: 0.6rem;
 }
+/* Banner buttons sit on the light Home surface, so they take the app
+   tokens. The primary is the accent-filled key treatment (same recipe as
+   the other filled primaries): the needs-download CTA is the page's one
+   required action and must out-shout everything else on the screen — the
+   old translucent-cream fill was authored for a dark surface and rendered
+   as the palest control on the page (2026-09-02 UX review). */
 .first-run-banner-btn {
-  padding: 0.35rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid rgba(243, 237, 224, 0.3);
-  background: transparent;
-  color: inherit;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 .first-run-banner-btn:hover {
-  border-color: rgba(243, 237, 224, 0.6);
-  background: rgba(243, 237, 224, 0.06);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
 .first-run-banner-btn-primary {
-  border-color: rgba(243, 237, 224, 0.6);
-  background: rgba(243, 237, 224, 0.1);
+  padding: 0.55rem 1.1rem;
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--accent-selection-ink));
+  background: var(--accent);
+  color: var(--accent-selection-ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(60, 30, 10, 0.2);
+}
+.first-run-banner-btn-primary:hover {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--accent-selection-ink));
+  background: color-mix(in srgb, var(--accent) 88%, var(--titlebar-ink));
 }
 .first-run-banner-btn:disabled {
   opacity: 0.5;

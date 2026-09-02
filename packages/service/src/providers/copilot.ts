@@ -494,6 +494,7 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
           name: pending.name,
           argKeys: Object.keys(pending.args),
           args: pending.args,
+          startedAtMs: pending.startedAt,
           durationMs: Date.now() - pending.startedAt,
           success: d.success !== false,
           ...(errorMessage ? { errorMessage } : {}),

@@ -1,0 +1,416 @@
+# Mac App Store build.
+#
+# Separate from release-electron.yml for the same reason release-msix.yml is —
+# that file's contract test counts its steps to prove every shipped platform is
+# exercised, and adding a store lane there would either trip the counts or
+# force them to be loosened.
+#
+# Produces a draft artifact on the workflow run. Nothing is published or
+# delivered: the .pkg is downloaded and hand-uploaded through Transporter after
+# review.
+#
+# Two things differ sharply from the Developer ID macOS job, and both look like
+# omissions when read side by side:
+#
+#   NO NOTARIZATION. Mac App Store packages are not notarized or stapled — the
+#   store performs its own review and re-signs on ingest. The spctl / stapler /
+#   notarytool steps in the other job are deliberately absent, not forgotten,
+#   and the notarization secrets are deliberately not required here.
+#
+#   SIGNATURES ARE REPLACED, NOT PRESERVED. The other job keeps each vendor's
+#   own Developer ID signature on node, DuckDB and the native engines, because
+#   replacing them would substitute our attestation for theirs. Under the App
+#   Sandbox that is impossible: every Mach-O must carry OUR Apple Distribution
+#   identity and the child inherit entitlements or it will not launch. So this
+#   job re-signs the payload in a step of its own — between build:packaged and
+#   electron-builder, for reasons the step explains — and the config's
+#   signIgnore then protects that work instead of protecting the vendors'.
+#
+# v1 SCOPE: llama.cpp Metal is the on-device chat engine. MLX needs a frozen,
+# bundled Python environment because no runtime downloads are permitted, which
+# is a later milestone — until then the store distribution profile makes MLX
+# report itself unavailable rather than trying to install anything.
+name: Release MAS (Mac App Store)
+
+on:
+  workflow_dispatch:
+    inputs:
+      nativeTag:
+        description: 'Required native-binaries tag to bundle (e.g. native-v1.2.3).'
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-mas-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  store-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reject local workspace links
+        run: node scripts/check-no-local-links.mjs
+
+      - name: Require Mac App Store signing credentials
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+          APPLE_MAS_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_MAS_CERTIFICATE_P12_BASE64 }}
+          APPLE_MAS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_CERTIFICATE_PASSWORD }}
+          APPLE_MAS_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_MAS_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$NATIVE_TAG" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::nativeTag is required and must name a versioned native release (native-vX.Y.Z)"
+            exit 1
+          fi
+          # Deliberately NOT the notarization secrets — a MAS package is never
+          # notarized, so requiring APPLE_ID here would gate the lane on a
+          # credential it has no use for.
+          for name in APPLE_MAS_CERTIFICATE_P12_BASE64 APPLE_MAS_CERTIFICATE_PASSWORD APPLE_MAS_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required Mac App Store secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Verify native release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          set -euo pipefail
+          version="${NATIVE_TAG#native-v}"
+          release="$(gh api "repos/${GH_REPO}/releases/tags/${NATIVE_TAG}")"
+          if [ "$(jq -r '.draft' <<<"$release")" != 'false' ]; then
+            echo "::error::Native release ${NATIVE_TAG} is still a draft"
+            exit 1
+          fi
+
+          expected=()
+          while read -r key; do
+            [[ -n "$key" ]] || continue
+            case "$key" in
+              darwin-*) expected+=("gezel-native-${version}-${key}.tar.gz") ;;
+            esac
+          done < <(node scripts/check-native-payload.mjs --list-keys)
+          expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
+          missing=0
+          for name in "${expected[@]}"; do
+            if ! jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release" >/dev/null; then
+              echo "::error::Native release ${NATIVE_TAG} is missing ${name}"
+              missing=1
+            fi
+          done
+          if (( missing )); then exit 1; fi
+
+          node scripts/verify-native-file-manifest.mjs \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
+          pinned_release="$(
+            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\([^']*\)';/\1/p" \
+              packages/service/src/engines/native-manifest.ts
+          )"
+          if [[ "$pinned_release" != "$version" ]]; then
+            echo "::error::nativeTag ${NATIVE_TAG} does not match source-pinned native-v${pinned_release}"
+            echo "::error::Run scripts/pin-native-release.mjs ${NATIVE_TAG} before building a store package."
+            exit 1
+          fi
+
+      - name: Determine package version
+        id: version
+        run: |
+          version="$(node scripts/stamp-version.mjs --inc "$GITHUB_RUN_NUMBER" --print)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Store package version: $version" >> "$GITHUB_STEP_SUMMARY"
+
+  quality-lite:
+    needs: store-preflight
+    runs-on: ubuntu-latest
+    # Narrower than the primary release's full gate on purpose: main and
+    # release-electron already run the complete suite, and a store package is
+    # hand-reviewed before it goes anywhere. What must run here is everything
+    # that could make the STORE configs wrong.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
+
+      - name: Stamp package version
+        run: node scripts/stamp-version.mjs --version "${{ needs.store-preflight.outputs.version }}"
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Packaging contract tests
+        run: pnpm --filter @bendyline/gezel-app test
+
+  build-mas:
+    needs: [quality-lite, store-preflight]
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
+
+      - name: Stamp package version
+        run: node scripts/stamp-version.mjs --version "${{ needs.store-preflight.outputs.version }}"
+
+      - name: Stage native engine binaries (macOS)
+        shell: bash
+        env:
+          GEZEL_GITHUB_TOKEN: ${{ github.token }}
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          set -euo pipefail
+          version="${NATIVE_TAG#native-v}"
+          node scripts/fetch-native-binaries.mjs --version "$version"
+          ls -la packages/app/native-bin/
+
+      - name: Verify staged native payload before re-signing
+        # Runs BEFORE the re-signing pass on purpose. The manifest attests to
+        # the bytes the native release published, and re-signing changes them.
+        # Proving provenance first and replacing signatures second is the only
+        # order in which both statements stay true.
+        shell: bash
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          version="${NATIVE_TAG#native-v}"
+          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/verify-native-file-manifest.mjs \
+            --root packages/app/native-bin \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
+
+      - name: Import Apple Distribution signing certificate
+        env:
+          APPLE_MAS_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_MAS_CERTIFICATE_P12_BASE64 }}
+          APPLE_MAS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_CERTIFICATE_PASSWORD }}
+          # Optional second .p12 holding the installer identity, when the first
+          # does not already export both.
+          APPLE_MAS_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_MAS_INSTALLER_CERTIFICATE_P12_BASE64 }}
+          APPLE_MAS_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_INSTALLER_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH=$RUNNER_TEMP/mas-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_MAS_CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/mas.p12
+          security import $RUNNER_TEMP/mas.p12 \
+            -P "$APPLE_MAS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          if [ -n "${APPLE_MAS_INSTALLER_CERTIFICATE_P12_BASE64:-}" ]; then
+            echo "$APPLE_MAS_INSTALLER_CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/mas-installer.p12
+            security import $RUNNER_TEMP/mas-installer.p12 \
+              -P "$APPLE_MAS_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          fi
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+      - name: Verify both Mac App Store identities are present
+        # "Apple Distribution" signs the .app; "3rd Party Mac Developer
+        # Installer" signs the .pkg. A missing installer identity does not
+        # warn — electron-builder emits an unsigned package and App Store
+        # Connect rejects it much later with a message that names neither.
+        run: |
+          set -euo pipefail
+          identities=$(security find-identity -v "$RUNNER_TEMP/mas-signing.keychain-db")
+          for kind in 'Apple Distribution' '3rd Party Mac Developer Installer'; do
+            if ! grep -q "$kind" <<<"$identities"; then
+              echo "::error::No \"$kind\" identity in the signing keychain. Export it from"
+              echo "::error::Apple Developer as .p12 and add it to the repository secrets —"
+              echo "::error::combined into APPLE_MAS_CERTIFICATE_P12_BASE64 or separately as"
+              echo "::error::APPLE_MAS_INSTALLER_CERTIFICATE_P12_BASE64."
+              exit 1
+            fi
+          done
+          echo "both Mac App Store identities present"
+
+      - name: Install the provisioning profile
+        env:
+          APPLE_MAS_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_MAS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages/app/build-store
+          echo "$APPLE_MAS_PROVISIONING_PROFILE_BASE64" | base64 --decode \
+            > packages/app/build-store/Gezel_MAS.provisionprofile
+          # The profile carries the App Group entitlement the rendezvous depends
+          # on. A profile without it produces an app that installs, runs, and
+          # silently never finds a direct-download daemon — a failure with no
+          # error attached to it.
+          if ! security cms -D -i packages/app/build-store/Gezel_MAS.provisionprofile \
+            | grep -q 'com.bendyline.gezel'; then
+            echo "::error::The provisioning profile does not cover the Gezel app group."
+            echo "::error::Regenerate it in Apple Developer with the App Groups capability."
+            exit 1
+          fi
+
+      - name: Stage the model pack
+        # Store-lane only: the direct-download installers ship no weights. This
+        # channel does, because the store CDN serves them — which is what makes
+        # a complete offline first boot affordable here and nowhere else.
+        run: node scripts/stage-model-pack.mjs
+
+      - name: Write the store-build marker
+        # Without it the packaged app reads as a direct download: it would take
+        # the managing supervisor ladder and try to download code the store
+        # forbids.
+        run: node scripts/write-store-build-marker.mjs mac-app-store
+
+      - name: Build + produce service bundle
+        # After the certificate import, like the Developer ID job: the native
+        # modules inside the service tree must carry our identity before the
+        # tree is packed. This lane ships that tree UNPACKED (see the mas
+        # config), so the same signing pass covers exactly what the app imports.
+        env:
+          GEZEL_MACOS_SIGN_BUNDLE: '1'
+          GEZEL_MACOS_SIGN_IDENTITY_KIND: apple-distribution
+          GEZEL_MACOS_SIGN_ENTITLEMENTS: packages/app/entitlements.mas.inherit.plist
+        run: pnpm build:packaged
+
+      - name: Verify release version propagation
+        shell: bash
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.store-preflight.outputs.version }}" \
+            --service-meta packages/app/dist/service-bundle.meta.json
+
+      - name: Re-sign the bundled payload with our Apple Distribution identity
+        # MUST run after build:packaged and before electron-builder — see the
+        # timing note in scripts/mas-resign-payload.mjs. tsup's onSuccess hook
+        # re-runs fetch-node / fetch-duckdb, which re-stage those bundles from
+        # their vendor downloads and rewrite sha256.txt; signing earlier is
+        # silently undone and ships vendor-signed binaries the sandbox will not
+        # launch. The script refuses to run in the wrong order rather than
+        # relying on this comment.
+        #
+        # The service tree is signed separately, during build:packaged itself.
+        env:
+          GEZEL_MACOS_SIGN_BUNDLE: '1'
+          GEZEL_MACOS_SIGN_IDENTITY_KIND: apple-distribution
+          GEZEL_MACOS_SIGN_ENTITLEMENTS: packages/app/entitlements.mas.inherit.plist
+        run: node scripts/mas-resign-payload.mjs
+
+      - name: Package the Mac App Store build
+        run: |
+          ulimit -n 524288
+          pnpm --filter @bendyline/gezel-app exec electron-builder \
+            --mac --arm64 --config electron-builder.mas.yml --publish never
+
+      - name: Verify the signed app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find packages/app/dist -maxdepth 4 -name 'Gezel.app' -type d | head -1)"
+          if [ -z "$app" ]; then
+            echo "::error::no packaged Gezel.app found"
+            exit 1
+          fi
+          echo "verifying $app"
+          codesign --verify --strict --deep --verbose=2 "$app"
+          node scripts/verify-mas-entitlements.mjs "$app"
+          node scripts/verify-macos-version-floor.mjs "$app"
+          node scripts/verify-macos-ats.mjs "$app"
+
+          unpacked="$app/Contents/Resources/app.asar.unpacked"
+          # The in-place contract. A store build may not extract code at
+          # runtime, so its service tree has to ship unpacked — and a build
+          # missing it fails at first launch, long after review.
+          if [ ! -f "$unpacked/dist/service-bundle/dist/index.js" ]; then
+            echo "::error::the app ships no unpacked service tree; a store build cannot boot without it"
+            exit 1
+          fi
+          # The channel marker. Without it the app behaves like a direct
+          # download and tries to download code the store forbids.
+          if [ ! -f "$app/Contents/Resources/store-build.json" ]; then
+            echo "::error::the app ships no store-build marker"
+            exit 1
+          fi
+          # The LaunchDaemon payload belongs to the other lane; shipping it
+          # here would mean the wrong extraResources list was used.
+          if [ -f "$app/Contents/Resources/com.bendyline.gezeld.plist" ]; then
+            echo "::error::a store build must not carry the LaunchDaemon payload"
+            exit 1
+          fi
+
+      - name: Verify the installer package
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="$(find packages/app/dist/installers -name '*.pkg' | head -1)"
+          if [ -z "$pkg" ]; then
+            echo "::error::no .pkg produced"
+            exit 1
+          fi
+          # Signed by "3rd Party Mac Developer Installer". Deliberately NOT
+          # checked with spctl or stapler: a MAS package is not notarized, so
+          # those checks would fail here by design.
+          pkgutil --check-signature "$pkg"
+          echo "packaged: $pkg"
+
+      - name: Tear down keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/mas-signing.keychain-db" || true
+          rm -f packages/app/build-store/Gezel_MAS.provisionprofile || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mas-store-artifacts
+          path: packages/app/dist/installers/*.pkg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload instructions
+        shell: bash
+        run: |
+          {
+            echo '## Mac App Store package ready'
+            echo
+            echo 'Download the `mas-store-artifacts` artifact and deliver the `.pkg` with'
+            echo 'Transporter (or `xcrun altool`). Nothing was published automatically.'
+            echo
+            echo 'There is no CI smoke test for this build, and that is expected rather'
+            echo 'than missing: an App Store-provisioned app cannot launch on a runner,'
+            echo 'because the provisioning profile names no machine here. To exercise it'
+            echo 'on a real Mac, build the development variant:'
+            echo
+            echo '```sh'
+            echo 'pnpm --filter @bendyline/gezel-app exec electron-builder \'
+            echo '  --mac mas-dev --arm64 --config electron-builder.mas.yml --publish never'
+            echo '```'
+            echo
+            echo 'That needs a development provisioning profile listing your Mac at'
+            echo '`packages/app/build-store/Gezel_MASDev.provisionprofile`.'
+            echo
+            echo 'Before the FIRST submission: register the bundle ID and App Group in'
+            echo 'App Store Connect, and confirm the profile carries the App Groups'
+            echo 'capability — the rendezvous with a direct-download install depends on it.'
+          } >> "$GITHUB_STEP_SUMMARY"

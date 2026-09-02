@@ -479,6 +479,13 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       paths: ['src/alpha.txt', 'src/beta.txt'],
       success: true,
     });
+    // Start-of-call timestamp lands on the persisted record and sits at or
+    // before the assistant message's own commit time — the replay-timeline
+    // contract (intra-turn ordering with absolute time).
+    const callAt = assistantMsg?.toolCalls?.[0]?.at;
+    expect(callAt).toBeDefined();
+    expect(Date.parse(callAt!)).not.toBeNaN();
+    expect(Date.parse(callAt!)).toBeLessThanOrEqual(Date.parse(assistantMsg!.at));
   }, 30_000);
 
   it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {

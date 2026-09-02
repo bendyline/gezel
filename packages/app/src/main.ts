@@ -69,6 +69,7 @@ import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
+import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
@@ -237,6 +238,17 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', linuxDesktopId);
 }
 
+// Which distribution channel this artifact was built for. Resolved once, at
+// the top, because two things downstream depend on it before anything else
+// runs: the home directory this launch uses (a store build must not share
+// `~/.gezel` with a direct install) and the profile stamped into the
+// environment every child inherits.
+const storeBuild = detectStoreBuild({ resourcesPath: process.resourcesPath });
+stampDistributionProfile(storeBuild);
+if (storeBuild.channel) {
+  console.log(`[gezel] store build: ${storeBuild.channel} (via ${storeBuild.source})`);
+}
+
 // We were handed the daemon entrypoint but booted as an application, which
 // means whoever spawned us forgot `ELECTRON_RUN_AS_NODE=1` (see
 // `daemonSpawnEnv` in @bendyline/gezel-client). Electron silently ignores a
@@ -374,6 +386,32 @@ interface ResolvedLaunch {
  *      don't pollute the real packaged-app data under `~/.gezel`.
  *   4. Packaged default — `~/.gezel`.
  */
+/**
+ * Stamp the distribution profile for every child that inherits this
+ * environment — the service (spawned or embedded) and, through it, the MCP
+ * subprocess.
+ *
+ * Fail-closed in both directions, which is the whole point of doing it here
+ * rather than trusting whatever arrived:
+ *
+ *   - A store build OVERWRITES any inherited value, so nothing in the
+ *     environment can talk it out of its restrictions.
+ *   - A non-store build DELETES an inherited 'store', so a stray variable
+ *     cannot silently disable engine downloads or Playwright in a direct
+ *     install that is perfectly entitled to them.
+ *
+ * Same shape as the packaged-mode `GEZEL_NODE_PATH` handling in the
+ * supervisor, and for the same reason: an inherited value is evidence about
+ * the parent, never authority over this process.
+ */
+function stampDistributionProfile(store: StoreBuildInfo): void {
+  if (store.channel) {
+    process.env.GEZEL_DISTRIBUTION_PROFILE = 'store';
+    return;
+  }
+  delete process.env.GEZEL_DISTRIBUTION_PROFILE;
+}
+
 function resolveLaunch(): ResolvedLaunch {
   const cliHomeArg = process.argv.find((a) => a.startsWith('--gezel-home='));
   if (cliHomeArg) {
@@ -385,6 +423,20 @@ function resolveLaunch(): ResolvedLaunch {
   }
   if (!app.isPackaged) {
     return { home: join(homedir(), '.gezel-dev'), forceEmbeddedFromCli: false };
+  }
+  // A store build keeps its own home, because it may be running beside a
+  // direct-download install that owns `~/.gezel`. Two processes writing one
+  // home is the single-writer violation every other path in the supervisor
+  // exists to avoid, and a store build cannot coordinate with the other
+  // install to prevent it — they are separate products with separate update
+  // schedules. Sharing happens by adopting the other DAEMON (see
+  // store-rendezvous.ts), never by sharing its files.
+  //
+  // On macOS this is belt-and-braces: the sandbox already rewrites `$HOME` to
+  // the container, so `~/.gezel` is private there whatever we do. On Windows,
+  // where a full-trust MSIX sees the real profile, it is load-bearing.
+  if (storeBuild.channel) {
+    return { home: join(app.getPath('userData'), 'gezel-home'), forceEmbeddedFromCli: false };
   }
   return { home: join(homedir(), '.gezel'), forceEmbeddedFromCli: false };
 }
@@ -1059,7 +1111,9 @@ ipcMain.on('gezel:current-connection', (event) => {
 // while an update was already staged.
 ipcMain.handle('gezel:update:state', () => updateState);
 ipcMain.handle('gezel:update:install', async () => {
-  const delivery = appUpdateDeliveryPolicy(process.platform);
+  const delivery = appUpdateDeliveryPolicy(process.platform, {
+    store: storeBuild.channel !== null,
+  });
   if (delivery.installation === 'manual') {
     return {
       ok: false as const,
@@ -2510,7 +2564,9 @@ async function checkAppReleaseForUpdates(): Promise<void> {
       return;
     }
     appUpdateRelease = release;
-    const delivery = appUpdateDeliveryPolicy(process.platform);
+    const delivery = appUpdateDeliveryPolicy(process.platform, {
+      store: storeBuild.channel !== null,
+    });
     if (!delivery.initializeElectronUpdater) {
       if (!isNewerAppVersion(release.version, app.getVersion())) {
         setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
@@ -2543,7 +2599,9 @@ async function checkAppReleaseForUpdates(): Promise<void> {
 
 function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   if (autoUpdaterRef) return autoUpdaterRef;
-  const delivery = appUpdateDeliveryPolicy(process.platform);
+  const delivery = appUpdateDeliveryPolicy(process.platform, {
+    store: storeBuild.channel !== null,
+  });
   // Defense in depth: Linux and unsupported platforms never construct
   // electron-updater, keeping its elevating DEB/RPM installers unreachable.
   if (!delivery.initializeElectronUpdater) return null;
@@ -3070,6 +3128,7 @@ app.whenReady().then(async () => {
         launch.forceEmbeddedFromCli ||
         process.env.GEZEL_EMBEDDED === '1' ||
         (!app.isPackaged && process.env.GEZEL_SPAWN !== '1'),
+      ...(storeBuild.channel ? { storeProfile: true } : {}),
       uiDir: resolveBundledUi(),
       logger: {
         info: (m) => {

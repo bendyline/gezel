@@ -23,6 +23,7 @@ export type SystemNoticeId =
   | 'legacy-machine-data'
   | 'service-version-mismatch'
   | 'service-unavailable'
+  | 'store-service-separate'
   | 'update-checking'
   | 'update-up-to-date'
   | 'update-available'
@@ -142,6 +143,31 @@ export function serviceNotice(input: {
       body: `Everything still works and none of your gezellen, projects, or chats are affected — but the app and the service are on different versions, so newer features may misbehave until they match. The service is installed for the whole machine, so only the installer can replace it. ${reinstallHint(platform)}`,
       technical: reason,
       reportable: true,
+    };
+  }
+
+  // Both store codes describe the SAME outcome — this app is running its own
+  // service instead of sharing the installed one — so they share copy shaped
+  // around that, not around the failure. The distinction the user can act on
+  // is only in `technical`.
+  //
+  // Deliberately NOT the "Background work is off" notice below. That one warns
+  // that scheduled work stops and nothing resumes on its own, which is true of
+  // an embedded fallback in a direct install. Here the app's own service is a
+  // complete, working service; the only thing lost is sharing one daemon (and
+  // its already-loaded models) with the other installation.
+  if (code === 'store-service-unhealthy' || code === 'store-service-incompatible') {
+    return {
+      id: 'store-service-separate',
+      railLabel: 'Running its own service',
+      title: 'Gezel is running its own background service.',
+      body:
+        code === 'store-service-incompatible'
+          ? 'Another copy of Gezel is installed on this computer, but it is a different version than this app can share a service with. This app started its own instead, so everything works normally — the two simply keep separate services, and a model loaded in one is not reused by the other. Updating both copies to current versions lets them share again.'
+          : 'Another copy of Gezel is installed on this computer, but its background service was not responding, so this app started its own. Everything works normally; the two simply keep separate services for now. They will try to share again the next time you open Gezel.',
+      technical: reason,
+      // Nothing is broken and nothing to report — this is the design working.
+      reportable: false,
     };
   }
 

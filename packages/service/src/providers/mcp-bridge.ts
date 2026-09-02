@@ -1334,6 +1334,7 @@ export class McpBridge {
             name: toolName,
             argKeys: Object.keys(callArgs),
             args: redactedArgs,
+            startedAtMs: start,
             durationMs: Date.now() - start,
             success: !isError,
             ...(redactedError ? { errorMessage: redactedError } : {}),

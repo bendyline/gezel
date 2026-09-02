@@ -38,6 +38,12 @@ extraResources:
     to: licenses
   - from: dist/model-pack
     to: model-pack
+  # The channel marker. This is what makes "is this a store build?" a fact
+  # about the artifact rather than about the environment it launches in — see
+  # packages/app/src/store-build.ts for why an env var must never be able to
+  # answer that question.
+  - from: dist/store-build
+    to: .
 
 appx:
   # Identity comes from Partner Center and MUST match the reserved app

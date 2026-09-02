@@ -86,6 +86,32 @@ describe('serviceNotice', () => {
     expect(notice?.body).not.toMatch(/Background work is off/);
   });
 
+  // A store build running its own service is the design working, not a
+  // failure. The "Background work is off" copy would be wrong about both:
+  // nothing is off, and its advice (reinstall) does not apply to an app the
+  // store manages.
+  it('explains a store build running its own service without alarming', () => {
+    for (const code of ['store-service-unhealthy', 'store-service-incompatible'] as const) {
+      const notice = serviceNotice({ reason: 'generation 2 vs 1', code, platform: 'darwin' });
+      expect(notice?.id).toBe('store-service-separate');
+      expect(notice?.railLabel).toBe('Running its own service');
+      expect(notice?.reportable).toBe(false);
+      expect(notice?.body).not.toMatch(/Background work is off/);
+      expect(notice?.body).not.toMatch(/[Rr]einstall/);
+      expect(notice?.technical).toBe('generation 2 vs 1');
+    }
+  });
+
+  it('tells an incompatible store build what would fix it', () => {
+    const notice = serviceNotice({
+      reason: 'generation mismatch',
+      code: 'store-service-incompatible',
+      platform: 'win32',
+    });
+    expect(notice?.body).toMatch(/different version/i);
+    expect(notice?.body).toMatch(/[Uu]pdating both/);
+  });
+
   it('names the right installer per platform', () => {
     const base = { reason: 'down', code: 'system-service-unhealthy' };
     expect(serviceNotice({ ...base, platform: 'win32' })?.body).toMatch(

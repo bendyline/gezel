@@ -213,3 +213,102 @@ describe('resolveMode — machine-service decision table', () => {
     expect(mode).toMatchObject({ kind: 'local-adopt', pid: 4242 });
   });
 });
+
+describe('resolveMode — the store ladder', () => {
+  const rendezvous = {
+    baseUrl: 'https://127.0.0.1:6228',
+    token: 'store-tok',
+    cert: 'CERT',
+    source: 'app-group-mirror' as const,
+  };
+
+  it('adopts a direct install rather than starting a second service', async () => {
+    const mode = await resolveMode(
+      opts({ storeProfile: true, findRendezvous: () => Promise.resolve(rendezvous) }),
+    );
+    expect(mode).toMatchObject({ kind: 'store-connect', token: 'store-tok', cert: 'CERT' });
+  });
+
+  it('runs its own service, silently, when no direct install is present', async () => {
+    // The ordinary case on a machine with only the store build. Nothing is
+    // degraded, so there is no notice — and no spawn branch either.
+    const mode = await resolveMode(
+      opts({ storeProfile: true, findRendezvous: () => Promise.resolve(null) }),
+    );
+    expect(mode).toEqual({ kind: 'embedded' });
+  });
+
+  it('never reaches local-adopt, which would SIGTERM the other product', async () => {
+    // The regression this guards is the whole reason the store ladder is a
+    // divert rather than a branch: local-adopt stops a version-mismatched
+    // daemon and respawns it. Against a direct-download install that is one
+    // product killing another's service — and under the macOS sandbox the
+    // signal would not even be permitted.
+    ctx.localRuntime = {
+      pid: 4242,
+      port: 6228,
+      baseUrl: 'http://127.0.0.1:6228',
+      token: 't',
+      cert: null,
+    };
+    const mode = await resolveMode(
+      opts({ storeProfile: true, findRendezvous: () => Promise.resolve(null) }),
+    );
+    expect(mode.kind).toBe('embedded');
+  });
+
+  it('never reaches the machine-service branch, which waits on a service it does not own', async () => {
+    ctx.scm = { status: 'running' };
+    ctx.runtime = runtime('legacy-full');
+    const mode = await resolveMode(
+      opts({ storeProfile: true, findRendezvous: () => Promise.resolve(null) }),
+    );
+    expect(mode.kind).toBe('embedded');
+  });
+
+  it('never reaches a spawn branch', async () => {
+    const mode = await resolveMode(
+      opts({
+        storeProfile: true,
+        packaged: true,
+        devSpawn: true,
+        findRendezvous: () => Promise.resolve(null),
+      }),
+    );
+    expect(mode.kind).toBe('embedded');
+  });
+
+  it('still honors an explicitly configured remote, which the user named by hand', async () => {
+    await writeFile(
+      join(home, 'config.json'),
+      JSON.stringify({ service: { url: 'https://remote.example:6228', token: 'remote-tok' } }),
+    );
+    const mode = await resolveMode(
+      opts({ storeProfile: true, findRendezvous: () => Promise.resolve(rendezvous) }),
+    );
+    expect(mode.kind).toBe('remote');
+  });
+
+  it('still honors forced embedded', async () => {
+    const mode = await resolveMode(
+      opts({
+        storeProfile: true,
+        forceEmbedded: true,
+        findRendezvous: () => Promise.resolve(rendezvous),
+      }),
+    );
+    expect(mode.kind).toBe('embedded');
+  });
+
+  it('leaves the direct-download ladder untouched when the profile is off', async () => {
+    ctx.localRuntime = {
+      pid: 4242,
+      port: 6228,
+      baseUrl: 'http://127.0.0.1:6228',
+      token: 't',
+      cert: null,
+    };
+    const mode = await resolveMode(opts({ findRendezvous: () => Promise.resolve(rendezvous) }));
+    expect(mode.kind).toBe('local-adopt');
+  });
+});

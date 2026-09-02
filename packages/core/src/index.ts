@@ -1,4 +1,5 @@
 export * from './schemas/index.js';
+export * from './recording/index.js';
 export * from './filemap/index.js';
 export * from './code-intel/compose.js';
 export * from './scripts/source-split.js';

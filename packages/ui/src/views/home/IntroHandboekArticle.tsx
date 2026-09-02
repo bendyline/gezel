@@ -34,8 +34,23 @@ function openHandboek(articleId: string) {
  * captioned video — instead of prose hardcoded into the Home view. The
  * article is the single source of that copy; this is just a small frame
  * around the same engine HandboekView uses.
+ *
+ * Two variants:
+ *   - `toggle` (default): one page with a Read/Watch key tray — the
+ *     workshop greeting's tour tab.
+ *   - `stacked`: the video player on top and the readable article
+ *     beneath, both always visible — the first-run tutorial column. No
+ *     tray (there is nothing to toggle) and no autoplay: an
+ *     always-visible player must not start narrating on page load; the
+ *     toggle variant may autoplay because reaching it took an explicit
+ *     "Watch" click.
  */
-export function IntroHandboekArticle() {
+export function IntroHandboekArticle({
+  variant = 'toggle',
+}: {
+  variant?: 'toggle' | 'stacked';
+} = {}) {
+  const stacked = variant === 'stacked';
   const [article, setArticle] = useState<HandboekArticle | null>(null);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<ViewMode>('doc');
@@ -154,32 +169,51 @@ export function IntroHandboekArticle() {
         >
           Open in Handboek →
         </button>
-        <div className="gz-tray handboek-mode-tray" role="radiogroup" aria-label="View as">
-          <button
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={mode === 'doc'}
-            className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
-            onClick={() => setMode('doc')}
-          >
-            Read
-          </button>
-          <button
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={mode === 'video'}
-            className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
-            onClick={() => setMode('video')}
-          >
-            Watch
-          </button>
-        </div>
+        {!stacked && (
+          <div className="gz-tray handboek-mode-tray" role="radiogroup" aria-label="View as">
+            <button
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={mode === 'doc'}
+              className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
+              onClick={() => setMode('doc')}
+            >
+              Read
+            </button>
+            <button
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={mode === 'video'}
+              className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
+              onClick={() => setMode('video')}
+            >
+              Watch
+            </button>
+          </div>
+        )}
       </div>
-      <div className="home-intro-page">
-        <MediaContext.Provider value={mediaProvider}>
-          {mode === 'doc' ? (
+      <MediaContext.Provider value={mediaProvider}>
+        {(stacked || mode === 'video') && (
+          <div className="home-intro-page home-intro-page-player">
+            <div className="home-intro-player">
+              <DocPlayer
+                doc={playerDoc ?? doc}
+                theme={gezelChatTheme}
+                displayMode="video"
+                audioMode="synthetic"
+                captionsEnabled
+                captionStyle="social"
+                autoPlay={!stacked}
+                showControls
+                showScrubber
+              />
+            </div>
+          </div>
+        )}
+        {(stacked || mode === 'doc') && (
+          <div className="home-intro-page">
             <div className="home-intro-doc" onClickCapture={onDocClickCapture}>
               {/* No synthesized cover, same call HandboekView makes.
                   LinearDocView's default turns `doc.startBlock` into a
@@ -200,23 +234,9 @@ export function IntroHandboekArticle() {
                 showCover={false}
               />
             </div>
-          ) : (
-            <div className="home-intro-player">
-              <DocPlayer
-                doc={playerDoc ?? doc}
-                theme={gezelChatTheme}
-                displayMode="video"
-                audioMode="synthetic"
-                captionsEnabled
-                captionStyle="social"
-                autoPlay
-                showControls
-                showScrubber
-              />
-            </div>
-          )}
-        </MediaContext.Provider>
-      </div>
+          </div>
+        )}
+      </MediaContext.Provider>
     </div>
   );
 }

@@ -44,6 +44,41 @@ describe('indexing job task', () => {
     });
   });
 
+  it('homes a fresh install in the shared library project, never Default', async () => {
+    // A brand-new Default project's task list must not lead with a system
+    // job (2026-09-02 UX review) — the boekwachter's control surface lives
+    // with the library the boekwachter tends.
+    const shared = await store.ensureSharedProject();
+    await ensureIndexingJobTask(store, tasks);
+    const inShared = await store.listProjectTasks(shared.id);
+    expect(inShared.filter((t) => t.title === INDEXING_JOB_TITLE)).toHaveLength(1);
+    const inDefault = await store.listProjectTasks('default');
+    expect(inDefault.filter((t) => t.title === INDEXING_JOB_TITLE)).toHaveLength(0);
+
+    // Pause + notes follow the shared home.
+    const control = new IndexingJobControl(store, tasks);
+    const job = inShared.find((t) => t.title === INDEXING_JOB_TITLE)!;
+    await tasks.setStatus(shared.id, job.num, 'paused');
+    control.invalidate();
+    expect(await control.isPaused()).toBe(true);
+    await tasks.setStatus(shared.id, job.num, 'active');
+    control.invalidate();
+    await control.note('sweep done');
+    expect(await tasks.listNotes(shared.id, job.num)).toHaveLength(1);
+  });
+
+  it('honors an existing Default-project install in place instead of duplicating it', async () => {
+    // Pre-shared installs carried the job in `default`; a migration would
+    // renumber a task the user may have paused or annotated, so it stays.
+    await ensureIndexingJobTask(store, tasks);
+    const shared = await store.ensureSharedProject();
+    await ensureIndexingJobTask(store, tasks);
+    const inDefault = await store.listProjectTasks('default');
+    expect(inDefault.filter((t) => t.title === INDEXING_JOB_TITLE)).toHaveLength(1);
+    const inShared = await store.listProjectTasks(shared.id);
+    expect(inShared.filter((t) => t.title === INDEXING_JOB_TITLE)).toHaveLength(0);
+  });
+
   it('pausing the task pauses the loops via IndexingJobControl', async () => {
     await ensureIndexingJobTask(store, tasks);
     const control = new IndexingJobControl(store, tasks);

@@ -2,6 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // Wipe the UX-tour screenshot folder once per run (not per worker — a
+  // failure-triggered worker restart must not delete captured shots).
+  globalSetup: './e2e/helpers/clean-ux-tour-shots.ts',
   timeout: 30000,
   // Parallel workers can't share Electron launches reliably on
   // Windows — multiple processes attaching to the inspector at once

@@ -178,7 +178,20 @@ Rules:
   `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
   are aliased into the recipe pending markup migration. When touching one of
   those surfaces, move it to the `gz-*` classes and delete its alias.
-- **Keys with a description line** follow the `.gz-key--stacked` shape:
+- **A tray whose latched choice explains itself gets the described-tray
+  connection.** When a paragraph under the tray describes the *currently
+  latched* option (the security posture, AI engagement, tempo), a bare muted
+  `<p>` floats between the tray and whatever follows, attached to neither —
+  "A posture for trusted work" never visibly belonged to the Lockdown key.
+  Add `gz-tray--described` to the tray and `gz-tray-description` to the
+  paragraph: the panel takes the tray's own recessed surface, a short slot
+  in the panel's material (panel fill, panel-border side walls) rises
+  through the tray's bottom edge to meet the latched key, and the
+  copy leads with the latched option's name —
+  `<strong>{label}</strong> — description`. The description is a readout of
+  the tray, so it sits directly beneath with the recipe's 0.5rem gap; don't
+  wedge other content between them. The Security & Compliance posture
+  switch (first run + Settings) is the reference implementation.
   label on top, a smaller muted hint beneath, left-aligned, wrapping
   allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
   recipe styles both, so a new surface never needs its own pair (the

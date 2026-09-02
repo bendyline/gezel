@@ -48,6 +48,14 @@ import {
   isSelfOrchestratingProvider,
   probeProviderAuth,
 } from './providers.ts';
+import { captureRecordingState, writeRecordingManifest } from './recording/capture.ts';
+import { distillRunDir } from './recording/distill-io.ts';
+import {
+  type ChatEventRecorderHandle,
+  type ChatEventRecorderStats,
+  startChatEventRecorder,
+} from './recording/recorder.ts';
+import { captureRecordingScreenshots } from './recording/screenshots.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
   HARNESS_INTERVENTION_SETTLE_MS,
@@ -834,6 +842,17 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   log(`[trial] daemon spawned pid=${spawned.pid} port=${spawned.baseUrl}`);
 
   const client = spawned.client;
+  // Run recording ("exhaust") — always-on, best-effort. Started the moment
+  // the daemon is reachable so the meester-ensure and setup turns are on
+  // tape too; a recorder fault degrades the recording, never the trial.
+  let recorder: ChatEventRecorderHandle | null = null;
+  let recordingStats: ChatEventRecorderStats | null = null;
+  try {
+    recorder = startChatEventRecorder({ client, runDir, log });
+    log('[recording] chat-event tap started');
+  } catch (err) {
+    log(`[recording] tap failed to start: ${err instanceof Error ? err.message : String(err)}`);
+  }
   let success = false;
   let reason = 'trial did not produce a terminal result';
   let failureMode: FailureMode | undefined = 'crash';
@@ -1042,12 +1061,66 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         `[perf] collector teardown failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    if (recorder) {
+      try {
+        recordingStats = await recorder.stop();
+        log(
+          `[recording] tap stopped: ${recordingStats.lines} line(s), ` +
+            `${recordingStats.coalescedDeltas} coalesced delta(s), ${recordingStats.gaps.length} gap(s)`,
+        );
+      } catch (err) {
+        log(`[recording] tap stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     try {
       await captureFinalState({ client, trialHome, runDir, log, trialFailed: !success });
     } catch (err) {
       log(
         `[trial] capture-final-state failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+    let recordingCapture: Record<string, string> | undefined;
+    try {
+      recordingCapture = { ...(await captureRecordingState({ client, trialHome, runDir, log })) };
+    } catch (err) {
+      log(`[recording] capture failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const screenshotStatus = await captureRecordingScreenshots({ runDir, log });
+      recordingCapture = { ...(recordingCapture ?? {}), screenshots: screenshotStatus };
+    } catch (err) {
+      log(`[recording] screenshots failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      await distillRunDir(runDir, {
+        trial: {
+          trialId,
+          scenarioId: scenario.id,
+          modelId: opts.modelId,
+          startedAt: startedAt.toISOString(),
+          durationMs: Date.now() - startMonotonic,
+          success,
+          reason,
+        },
+        log,
+      });
+    } catch (err) {
+      log(`[recording] distillation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      await writeRecordingManifest({
+        runDir,
+        trialId,
+        scenarioId: scenario.id,
+        modelId: opts.modelId,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+        ...(recordingStats ? { chatEvents: recordingStats } : {}),
+        ...(recordingCapture ? { capture: recordingCapture } : {}),
+        log,
+      });
+    } catch (err) {
+      log(`[recording] manifest write failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     await shutdownTrialDaemon(spawned);
     log('[trial] daemon shut down');

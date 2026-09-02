@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "trial": {
+    "trialId": "code-review-mock-2026-09-01",
+    "scenarioId": "craftbook-code-review",
+    "modelId": "qwen3.5-27b",
+    "startedAt": "2026-09-01T10:00:00.000Z",
+    "durationMs": 600000,
+    "success": true,
+    "reason": "all gates passed"
+  },
+  "actors": [
+    { "id": "user", "name": "You", "kind": "user" },
+    { "id": "ada", "name": "Ada", "role": "Meester", "kind": "gezel", "meester": true },
+    { "id": "rex", "name": "Rex", "role": "Reviewer", "kind": "gezel" }
+  ],
+  "scenes": [
+    {
+      "kind": "user-prompt",
+      "at": "2026-09-01T10:00:00.000Z",
+      "actorId": "user",
+      "excerpt": "Run a code review on the payment service."
+    },
+    {
+      "kind": "reasoning",
+      "at": "2026-09-01T10:00:08.000Z",
+      "actorId": "ada",
+      "durationMs": 6000,
+      "excerpt": "The payment module carries the risk. Rex should take the deep pass while I keep the overview."
+    },
+    {
+      "kind": "tool-call",
+      "at": "2026-09-01T10:00:20.000Z",
+      "actorId": "ada",
+      "name": "read_file",
+      "success": true,
+      "durationMs": 300,
+      "count": 4,
+      "path": "src/payment.js"
+    },
+    {
+      "kind": "delegation",
+      "at": "2026-09-01T10:00:45.000Z",
+      "actorId": "ada",
+      "sessionId": "sess-ada",
+      "toActorId": "rex",
+      "toSessionId": "sess-rex",
+      "delegationKind": "delegation",
+      "excerpt": "Please review src/ against our conventions. Findings as a report plus findings.json."
+    },
+    {
+      "kind": "step-transition",
+      "at": "2026-09-01T10:01:00.000Z",
+      "actorId": "rex",
+      "taskRef": "default/1",
+      "stepId": "review",
+      "stepName": "Deep review",
+      "phase": "activated"
+    },
+    {
+      "kind": "tool-call",
+      "at": "2026-09-01T10:02:30.000Z",
+      "actorId": "rex",
+      "name": "write_artifact",
+      "success": true,
+      "durationMs": 800,
+      "path": "reviews/report.md",
+      "argsSummary": "file: reviews/report.md"
+    },
+    {
+      "kind": "gate-verdict",
+      "at": "2026-09-01T10:06:10.000Z",
+      "actorId": "rex",
+      "taskRef": "default/1",
+      "stepId": "review",
+      "verdict": "fail",
+      "attempt": 1,
+      "excerpt": "findings.json missing a severity column"
+    },
+    {
+      "kind": "tool-call",
+      "at": "2026-09-01T10:07:00.000Z",
+      "actorId": "rex",
+      "name": "replace_in_file",
+      "success": true,
+      "durationMs": 400,
+      "path": "review-output/findings.json",
+      "diffStats": { "addedLines": 12, "removedLines": 3 }
+    },
+    {
+      "kind": "artifact-produced",
+      "at": "2026-09-01T10:08:30.000Z",
+      "actorId": "rex",
+      "store": "artifact",
+      "path": "reviews/report.md",
+      "bytes": 18432,
+      "screenshotRef": "screenshots/00-report.png"
+    },
+    {
+      "kind": "step-transition",
+      "at": "2026-09-01T10:09:00.000Z",
+      "actorId": "rex",
+      "taskRef": "default/1",
+      "stepId": "review",
+      "stepName": "Deep review",
+      "phase": "completed"
+    },
+    {
+      "kind": "reply",
+      "at": "2026-09-01T10:09:45.000Z",
+      "actorId": "ada",
+      "excerpt": "Review complete: 4 findings, one high severity. Full report in reviews/report.md."
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "screenshots/00-report.png",
+      "caption": "The finished review report",
+      "width": 900,
+      "height": 720
+    }
+  ],
+  "budget": { "droppedScenes": 0, "truncatedExcerpts": 0 }
+}

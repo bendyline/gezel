@@ -35,14 +35,33 @@ export interface AppUpdateDeliveryPolicy {
 }
 
 /**
- * Whole-app update authority by platform.
+ * Whole-app update authority by platform and channel.
  *
  * Linux packages are not yet signed through APT/RPM's distribution trust
  * paths. Keep Linux discovery-only: no electron-updater instance means its
  * elevating DEB/RPM installers cannot be reached accidentally. Unknown
  * platforms inherit the same fail-closed manual posture.
+ *
+ * A store build gets that same manual posture on EVERY platform. The store
+ * owns delivery there, and self-updating would be both wrong and forbidden:
+ * a store build replacing its own signed bytes is precisely what App Review
+ * guideline 2.4.5 and MSIX package integrity exist to prevent. Returning the
+ * manual shape means `ensureAutoUpdater()` never even imports
+ * electron-updater, so there is no instance to reach by accident — the same
+ * containment Linux relies on.
  */
-export function appUpdateDeliveryPolicy(platform: string): AppUpdateDeliveryPolicy {
+export function appUpdateDeliveryPolicy(
+  platform: string,
+  channel?: { store?: boolean },
+): AppUpdateDeliveryPolicy {
+  if (channel?.store) {
+    return {
+      initializeElectronUpdater: false,
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      installation: 'manual',
+    };
+  }
   if (platform === 'darwin') {
     return {
       initializeElectronUpdater: true,

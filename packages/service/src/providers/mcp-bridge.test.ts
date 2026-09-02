@@ -1259,6 +1259,31 @@ describe('McpBridge', () => {
     });
   });
 
+  describe('tool-call event timing', () => {
+    it('stamps startedAtMs at call start, consistent with durationMs', async () => {
+      const captured: Array<{ name: string; startedAtMs?: number; durationMs: number }> = [];
+      const prior = bridge.onToolCall;
+      bridge.onToolCall = (info) => {
+        captured.push({
+          name: info.name,
+          startedAtMs: info.startedAtMs,
+          durationMs: info.durationMs,
+        });
+      };
+      const before = Date.now();
+      try {
+        await bridge.callTool('write_file', { path: 'timing/probe.txt', content: 'tick\n' });
+      } finally {
+        bridge.onToolCall = prior;
+      }
+      const after = Date.now();
+      const event = captured.find((c) => c.name === 'write_file');
+      expect(event).toBeDefined();
+      expect(event?.startedAtMs).toBeGreaterThanOrEqual(before);
+      expect((event?.startedAtMs ?? 0) + (event?.durationMs ?? 0)).toBeLessThanOrEqual(after);
+    });
+  });
+
   // Layer 4: surgical-edit tools (replace_in_file / apply_patch /
   // insert_at_marker). Each round-trips through the real MCP subprocess
   // and the real service, exercising path safety, atomic write, diff

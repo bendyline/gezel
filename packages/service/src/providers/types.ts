@@ -498,6 +498,13 @@ export interface ToolCallEvent {
    * paths for the References panel.
    */
   args?: Record<string, unknown>;
+  /**
+   * Wall-clock start of the tool invocation (epoch ms). Optional so
+   * third-party producers keep working; ChatManager falls back to
+   * `now - durationMs`, which is exact for any producer that computes
+   * durationMs at fire time.
+   */
+  startedAtMs?: number;
   durationMs: number;
   success: boolean;
   errorMessage?: string;

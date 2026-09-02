@@ -2,6 +2,7 @@ export * from './assignee.js';
 export * from './craftbook.js';
 export * from './craftbook-doc.js';
 export * from './craftbook-test.js';
+export * from './run-recording.js';
 export * from './claude.js';
 export * from './codex.js';
 export * from './codex-setup.js';

@@ -70,3 +70,27 @@ describe('updater renderer state', () => {
     expect(updateErrorStage({ kind: 'ready', version: '1.2.3' })).toBe('install');
   });
 });
+
+describe('appUpdateDeliveryPolicy — store builds', () => {
+  it('never constructs electron-updater on any platform', () => {
+    // The store owns delivery, and a store build replacing its own signed
+    // bytes is what App Review 2.4.5 and MSIX package integrity exist to
+    // prevent. `initializeElectronUpdater: false` means the module is never
+    // even imported, so there is no instance to reach by accident.
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      expect(appUpdateDeliveryPolicy(platform, { store: true })).toEqual({
+        initializeElectronUpdater: false,
+        autoDownload: false,
+        autoInstallOnAppQuit: false,
+        installation: 'manual',
+      });
+    }
+  });
+
+  it('leaves the direct-download channel untouched', () => {
+    expect(appUpdateDeliveryPolicy('win32', { store: false })).toEqual(
+      appUpdateDeliveryPolicy('win32'),
+    );
+    expect(appUpdateDeliveryPolicy('darwin', {})).toEqual(appUpdateDeliveryPolicy('darwin'));
+  });
+});

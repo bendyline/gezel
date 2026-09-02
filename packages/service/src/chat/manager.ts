@@ -513,7 +513,7 @@ function resolveTurnMessageOrigin(
   opts:
     | {
         messageOrigin?: TurnMessageOrigin;
-        from?: { gezelId: string; gezelName: string };
+        from?: NonNullable<ChatMessage['from']>;
         lane?: Lane;
         ambient?: boolean;
         nudge?: boolean;
@@ -906,7 +906,7 @@ interface PendingSendEntry {
   id: string;
   userText: string;
   enqueuedAt: number;
-  from: { gezelId: string; gezelName: string } | undefined;
+  from: NonNullable<ChatMessage['from']> | undefined;
   coalescable: boolean;
   lane: Lane | undefined;
   /** Ambient housekeeping turn — see `EnqueueRequest.ambient`. */
@@ -3621,7 +3621,19 @@ export class ChatManager {
     const active = existing.find((s) => !s.archived && !s.taskRef);
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) return full;
+      if (full) {
+        // Retro-stamp lineage on an already-existing session — without this,
+        // parentSession is only ever set on the CREATE path, and since most
+        // delegations land in a session that already exists, the field was
+        // empirically null across whole eval runs. First-parent-wins: the
+        // containment parent must stay stable or the session tree reshuffles;
+        // later senders are per-message edges (ChatMessage.from), not parents.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          await this.store.writeSession(full);
+        }
+        return full;
+      }
     }
     return this.createSession({
       gezelId: args.gezelId,
@@ -3655,7 +3667,14 @@ export class ChatManager {
     );
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) return full;
+      if (full) {
+        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          await this.store.writeSession(full);
+        }
+        return full;
+      }
     }
     const parsedTaskRef = parseTaskRef(args.taskRef);
     const task = parsedTaskRef
@@ -4452,6 +4471,7 @@ export class ChatManager {
           fromGezelId: args.fromGezelId,
           toGezelId: target.id,
           targetSessionId: session.id,
+          ...(resolvedFromSessionId ? { fromSessionId: resolvedFromSessionId } : {}),
           preview: args.text.slice(0, 80),
         },
       });
@@ -4503,7 +4523,14 @@ export class ChatManager {
       if (parkedHandoffId) void this.clearPendingHandoff(parkedHandoffId);
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
       const targetSend = this.sendWithBusyRetry(session.id, seed, {
-        from: { gezelId: args.fromGezelId, gezelName: fromName },
+        // sessionId/kind are the durable per-edge delegation record — see
+        // SessionParentSchema's lineage contract in core.
+        from: {
+          gezelId: args.fromGezelId,
+          gezelName: fromName,
+          ...(resolvedFromSessionId ? { sessionId: resolvedFromSessionId } : {}),
+          kind: 'delegation',
+        },
         ...(args.lane ? { lane: args.lane } : {}),
         ...(args.ambient ? { ambient: true } : {}),
       })
@@ -4824,7 +4851,12 @@ export class ChatManager {
       const seed = `[Question from ${fromName}]: ${args.text}${deliverableAnnotation}`;
       try {
         await this.sendWithBusyRetry(session.id, seed, {
-          from: { gezelId: args.fromGezelId, gezelName: fromName },
+          from: {
+            gezelId: args.fromGezelId,
+            gezelName: fromName,
+            sessionId: args.fromSessionId,
+            kind: 'consultation',
+          },
         });
       } catch (err) {
         return {
@@ -5321,6 +5353,9 @@ export class ChatManager {
           targetSessionId: args.fromSessionId,
           fromGezelId: args.toGezelId,
           fromName: args.toName,
+          // The recipient session that produced this reply — the reverse
+          // edge of the delegation, recorded per-message like the outbound.
+          fromSessionId: args.targetSessionId,
           fromSessionScope: {
             sessionId: args.fromSessionId,
             gezelId: args.fromGezelId,
@@ -5352,6 +5387,8 @@ export class ChatManager {
     targetSessionId: string;
     fromGezelId: string;
     fromName: string;
+    /** Session the reply was produced in — the reverse delegation edge. */
+    fromSessionId?: string;
     fromSessionScope?: PublishScope;
     seed: string;
   }): Promise<void> {
@@ -5360,7 +5397,11 @@ export class ChatManager {
     while (Date.now() < deadlineMs) {
       try {
         await this.sendWithBusyRetry(args.targetSessionId, args.seed, {
-          from: { gezelId: args.fromGezelId, gezelName: args.fromName },
+          from: {
+            gezelId: args.fromGezelId,
+            gezelName: args.fromName,
+            ...(args.fromSessionId ? { sessionId: args.fromSessionId, kind: 'delegation' } : {}),
+          },
         });
         return;
       } catch (err) {
@@ -5595,7 +5636,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       coalescable?: boolean;
       lane?: Lane;
       ambient?: boolean;
@@ -6418,7 +6459,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       /**
        * When true, merge this send into the tail of the session's
        * pending queue IF the tail is also coalescable and shares
@@ -6578,7 +6619,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
@@ -6709,7 +6750,7 @@ export class ChatManager {
     // user_message event fires inside runSend right after.
     this.publishQueueRemoved(sessionId, next.id, 'started');
     const runOpts: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
@@ -6759,7 +6800,7 @@ export class ChatManager {
     userText: string,
     inflightTurn: InflightTurn,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
@@ -9069,7 +9110,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       hidden?: boolean;
       messageOrigin?: TurnMessageOrigin;
     },
@@ -16143,8 +16184,15 @@ export class ChatManager {
       // the extractor is tool-name-keyed and shape-guarded, so foreign
       // structuredContent yields no card rather than a malformed one.
       const card = extractToolCard(info);
+      // Start-of-call timestamp. The fallback is exact for any producer
+      // that computes durationMs at fire time (all current ones do), so
+      // even a producer that never stamps startedAtMs yields a correct
+      // `at` — which is why this line, not the producer stamps, carries
+      // the replay-timeline guarantee.
+      const at = new Date(info.startedAtMs ?? Date.now() - info.durationMs).toISOString();
       const call: ChatMessageToolCall = {
         name: info.name,
+        at,
         durationMs: info.durationMs,
         success: info.success,
         ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
@@ -16173,6 +16221,7 @@ export class ChatManager {
         {
           type: 'tool',
           name: info.name,
+          at,
           durationMs: info.durationMs,
           success: info.success,
           ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),

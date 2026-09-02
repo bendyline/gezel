@@ -2246,10 +2246,15 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(mayaDisk!.messages[0]?.from).toEqual({
       gezelId: 'ada',
       gezelName: 'Ada',
+      sessionId: adaSession.id,
+      kind: 'delegation',
     });
     expect(mayaDisk!.messages[1]?.role).toBe('assistant');
     expect(mayaDisk!.messages[1]?.content).toBe('I checked — all good.');
   });
+
+  // Delegation-lineage coverage (retro-stamp + per-message edges) lives in
+  // manager-lineage.test.ts — extracted to keep this module under its ceiling.
 
   it('resolves relay names per side: a boring-pinned sender never sees friendly names', async () => {
     await store.createGezel({ name: 'Maya', role: 'Voorman' });
@@ -5103,7 +5108,12 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
       kind: 'consultation',
     });
     expect(consult!.messages[0]?.content).toBe('[Question from Ada]: is task 47 done?');
-    expect(consult!.messages[0]?.from).toEqual({ gezelId: 'ada', gezelName: 'Ada' });
+    expect(consult!.messages[0]?.from).toEqual({
+      gezelId: 'ada',
+      gezelName: 'Ada',
+      sessionId: adaSession.id,
+      kind: 'consultation',
+    });
     expect(consult!.messages[1]?.content).toBe('Task 47 is in code review.');
   });
 

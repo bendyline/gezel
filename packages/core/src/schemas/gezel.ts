@@ -535,6 +535,14 @@ export type ToolCallCard = z.infer<typeof ToolCallCardSchema>;
 
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
+  /**
+   * ISO timestamp of the call's START. Optional: absent on every message
+   * persisted before this field existed, so readers must not assume it.
+   * End time derives as `at + durationMs`. This is what gives replay
+   * (run recordings, the eval movie pipeline) intra-turn ordering with
+   * absolute time — array order alone cannot place calls on a timeline.
+   */
+  at: z.string().optional(),
   durationMs: z.number(),
   success: z.boolean(),
   errorMessage: z.string().optional(),
@@ -678,6 +686,17 @@ export const ChatMessageSchema = z.object({
     .object({
       gezelId: z.string(),
       gezelName: z.string(),
+      /**
+       * The SENDER's session id — the durable per-edge record of which
+       * thread this message came from. `session.parentSession` only says
+       * which session first opened the thread (stable containment);
+       * this field is the ground truth for every individual delegation
+       * edge, including later senders into an existing session. Optional:
+       * absent on messages persisted before the field existed.
+       */
+      sessionId: z.string().optional(),
+      /** How the sender reached this session; mirrors SessionParent.kind. */
+      kind: z.enum(['delegation', 'consultation', 'task-entry', 'task-handoff']).optional(),
     })
     .optional(),
   /**
@@ -993,6 +1012,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool'),
     name: z.string(),
+    /** ISO start-of-call timestamp; see ChatMessageToolCallSchema.at. */
+    at: z.string().optional(),
     durationMs: z.number(),
     success: z.boolean(),
     errorMessage: z.string().optional(),

@@ -1784,3 +1784,107 @@ describe('graceful child shutdown', () => {
     );
   });
 });
+
+/**
+ * Store-connect orchestration.
+ *
+ * The invariant under test is the one the whole store ladder exists for: a
+ * store build may adopt the daemon a direct-download install is running, but
+ * must never manage it. It did not spawn that process, cannot signal it under
+ * the macOS sandbox, and the other install's lifecycle is not its to schedule.
+ */
+describe('store-connect', () => {
+  const storeMode = {
+    kind: 'store-connect' as const,
+    baseUrl: 'https://127.0.0.1:6228',
+    token: 'store-tok',
+    cert: null,
+    source: 'app-group-mirror' as const,
+  };
+
+  const healthy = (over: Record<string, unknown> = {}) => ({
+    ok: true,
+    version: '1.26240.3',
+    apiCompat: { floor: 1, current: 1 },
+    ...over,
+  });
+
+  it('adopts a compatible daemon without spawning or stopping anything', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy());
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+
+    expect(svc.mode).toBe('store-connect');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:6228');
+    // The three things a store build must never do to another install.
+    expect(startService).not.toHaveBeenCalled();
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    expect(stopDaemonProcessByPid).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
+  it('adopts across a version difference, which is the normal case', async () => {
+    // The channels ship on different schedules. Judging on version equality
+    // would send every store user to a private daemon on the first patch
+    // either side released.
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy({ version: '1.99999.1' }));
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+    expect(svc.mode).toBe('store-connect');
+    await svc.shutdown();
+  });
+
+  it('starts its own service when the installed one does not answer', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.reject(new Error('connection refused'));
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(startService).toHaveBeenCalled();
+    // Rendezvous files outlive the daemon that wrote them; they belong to the
+    // other install and must be left exactly as found.
+    expect(stopDaemonProcessByPid).not.toHaveBeenCalled();
+    expect(svc.fallbackReason?.code).toBe('store-service-unhealthy');
+    await svc.shutdown();
+  });
+
+  it('starts its own service when the installed one speaks another generation', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy({ apiCompat: { floor: 7, current: 9 } }));
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.fallbackReason?.code).toBe('store-service-incompatible');
+    // The reason has to name something the user can act on, not an opcode.
+    expect(svc.fallbackReason?.message).toMatch(/generation/i);
+    await svc.shutdown();
+  });
+
+  it('declines a daemon that predates the handshake', async () => {
+    // Absence is a verdict, not silence: no apiCompat means older than any
+    // generation this build knows how to negotiate with.
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.26100.1' });
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.fallbackReason?.code).toBe('store-service-incompatible');
+    await svc.shutdown();
+  });
+
+  it('declines the machine-engine broker, which serves no product API', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy({ serviceRole: 'machine-engine' }));
+
+    const svc = await connectOrStart(baseOpts({ storeProfile: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.fallbackReason?.code).toBe('store-service-incompatible');
+    await svc.shutdown();
+  });
+});
