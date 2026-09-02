@@ -17,6 +17,7 @@ const ignoredDirectories = new Set([
 // directory, not from the copy, so checking them only ever reports the sync.
 const ignoredRepoDirectories = new Set([
   '.gezel/craftbooks',
+  'artifacts',
   'evals/runs',
   'reports',
   'runs',

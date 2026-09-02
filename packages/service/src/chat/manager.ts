@@ -17,7 +17,6 @@ import {
   type HookSpec,
   type InstalledToolset,
   KeyedLock,
-  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ModelTier,
   NEW_THREAD_TITLE,
   type ProjectFileEntry,
@@ -130,11 +129,7 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import {
-  extractDirectFileWorkTargetPath,
-  extractExplicitFileEditTools,
-  extractSingleFileSourceRepairTargetPath,
-} from '../providers/direct-file-work-prompt.js';
+import { extractDirectFileWorkTargetPath } from '../providers/direct-file-work-prompt.js';
 import { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 import {
   buildLlamaCppProvider,
@@ -279,6 +274,12 @@ import {
   isExpectedImageDeliverablePath,
 } from './deliverable-paths.js';
 import type { ChatEventBus, PublishScope } from './events.js';
+import {
+  deriveRepairClampNudge,
+  formatExpectedDeliverableAnnotation,
+  isExpectedDataDeliverablePath,
+  normalizeExpectedDeliverablePath,
+} from './expected-deliverable.js';
 import {
   cleanGenerativePrompt,
   expandVideoPrompt,
@@ -1099,6 +1100,11 @@ export {
 export { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 export { buildLlamaCppProvider } from '../providers/llama-cpp/build-provider.js';
 export { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+export {
+  buildDeriveRepairClampNudge,
+  deriveRepairClampEnabled,
+  deriveRepairClampNudge,
+} from './expected-deliverable.js';
 
 function isMachineEngineChatProvider(name: string): name is LocalProviderName {
   return name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
@@ -17297,82 +17303,6 @@ export function describeDelegateFailureForAsker(
 }
 
 /**
- * Render a brief deliverable-shape annotation for inline injection
- * into a seed message. The asker's `expectedDeliverable` hint becomes
- * a short bracketed line that the recipient model sees alongside the
- * actual message text. Returns the empty string when no hint is set
- * (the default chat-reply path), so callers can append unconditionally.
- *
- * Lives next to the seed-message-construction sites in `messageGezel`
- * and `askGezelAndWait`. The system-prompt consultation-mode addendum
- * is the durable channel (it persists across follow-up turns on a
- * consultation session); this annotation is the per-message
- * reinforcement, sitting in the recency-anchor band where local-model
- * attention is highest.
- */
-function formatExpectedDeliverableAnnotation(
-  deliverable: ExpectedDeliverable | undefined,
-  fileEditsDisabled = false,
-  requestText?: string,
-): string {
-  if (!deliverable || deliverable.kind !== 'file') return '';
-  // On a non-writable project the recipient has no write tools, so don't
-  // tell it to call `write_file`/`generate_image` — that's the instruction
-  // that leads to a stripped-tool call and a hallucinated save. Flag the
-  // block instead; the recipient's system prompt carries the fuller note.
-  if (fileEditsDisabled) {
-    return `\n\n[Note: this recipient's built-in workspace file tools are read-only, so it cannot write this deliverable. Do not call \`write_file\` or claim the file was saved — reply that this session is blocked until "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" is enabled in Project → Settings. Provider-native sessions such as Codex may have separate access.]`;
-  }
-  const path = deliverable.filePath?.trim();
-  const pathClause = path
-    ? `at \`${path}\``
-    : 'at a workspace-relative path (default: `<topic>-analysis.md`)';
-  if (path && isExpectedImageDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`write_file({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
-  }
-  if (path && isExpectedBinaryDocumentDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT OR MEDIA FILE at \`${path}\`. Preserve that exact format — a markdown outline, HTML page, or similarly named text file is not the deliverable. Use the installed DocBlocks production tools/craftbook: author the source as Markdown, call \`convert_document\` for the requested target, visually inspect with \`preview_document\` when layout or frames matter, then persist with \`save_artifact\`. Do NOT hand-build HTML/OOXML or call \`write_file\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
-  }
-  const explicitEditTools = extractExplicitFileEditTools(requestText);
-  if (explicitEditTools.length > 0) {
-    const formattedTools = explicitEditTools.map((tool) => `\`${tool}\``).join(' and ');
-    const appendOnly =
-      explicitEditTools.length === 1 &&
-      explicitEditTools[0] === 'append_to_file' &&
-      isExplicitAppendOnlyRequest(requestText);
-    const editInstruction = appendOnly
-      ? 'This is an append-only update of an existing file. Follow the request exactly: your first file mutation must use `append_to_file`; do not call `write_file`, replace the existing contents, or turn the requested append into a whole-file rewrite.'
-      : `The request explicitly names the existing-file edit surface ${formattedTools}. Follow its stated tool order and fallback rules exactly; do not replace that surgical surface with generic \`write_file\`-first creation guidance.`;
-    return `\n\n[Deliverable expected as a FILE ${pathClause}. ${editInstruction} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-  }
-  if (path && isExpectedDataDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a DERIVED DATA FILE at \`${path}\`. Do not hand-type the rows — compute them: write a small Node script that reads the input files with fs.readFileSync and writes \`${path}\` with fs.writeFileSync, then execute it. Prefer the \`derive_file\` tool ({ script, outputPath: "${path}" }); otherwise write_file the script to scripts/derive.mjs and run it with \`run_nodejs_script\`. Reply in chat with the path + row count — do NOT paste the data into chat.]`;
-  }
-  const repairTarget = extractSingleFileSourceRepairTargetPath(requestText);
-  const focusedExistingRepair =
-    path !== undefined &&
-    repairTarget !== null &&
-    normalizeExpectedDeliverablePath(path) === normalizeExpectedDeliverablePath(repairTarget);
-  if (focusedExistingRepair) {
-    return `\n\n[Deliverable expected as a FILE at \`${path}\`. This is a focused repair of an existing source file, not a fresh-file create. Read \`${path}\` if its current contents are not already in context, then make the smallest concrete edit with \`replace_in_file\` or \`replace_lines\`. Preserve already-working behavior; use \`write_file\` only if a targeted edit is explicitly rejected or the file is missing. Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-  }
-  const singleFileHtmlClause =
-    path && /(?:^|\/)index\.html$/i.test(path)
-      ? ' This is a single-file HTML deliverable: put CSS in `<style>` and JavaScript in one inline `<script>` inside that same HTML file. Do NOT create or rely on `script.js`, `styles.css`, external assets, a build step, or a second source file unless the asker explicitly named one.'
-      : '';
-  return `\n\n[Deliverable expected as a FILE ${pathClause}. Your first assistant action should be the tool call \`write_file({ path, content })\`; draft inside the tool argument, not in chat.${singleFileHtmlClause} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-}
-
-function normalizeExpectedDeliverablePath(path: string): string {
-  return path
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^workspace\//i, '')
-    .replace(/^\.\//, '')
-    .toLowerCase();
-}
-
-/**
  * Retain a compact, non-secret proof that a successful tool call was aimed at
  * source acquisition. Full arguments already live on the session turn; the
  * history event only needs enough to distinguish an external lookup from a
@@ -17400,19 +17330,6 @@ function researchTargetForToolCall(
     return path ? `script:${path.slice(0, 240)}` : 'scripted-browser-run';
   }
   return undefined;
-}
-
-function isExplicitAppendOnlyRequest(requestText: string | undefined): boolean {
-  const text = (requestText ?? '').trim();
-  return (
-    /\bappend[-\s]?only\b/i.test(text) ||
-    /\b(?:first|next)\s+(?:assistant\s+)?(?:action|tool\s+call|mutation)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?append_to_file`?\b/i.test(
-      text,
-    ) ||
-    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?write_file`?\b/i.test(
-      text,
-    )
-  );
 }
 
 function fixedFunctionImagePath(path: string | null | undefined): string | null {
@@ -17465,57 +17382,6 @@ function extractExplicitGenerateImageCall(text: string): { prompt?: string; save
     ...(prompt ? { prompt } : {}),
     ...(saveAs ? { saveAs } : {}),
   };
-}
-
-/**
- * Derived-data handoffs (csv/tsv/json/ndjson) get the transform-by-
- * execution steer instead of the generic "hand-write it with write_file"
- * instruction — hand-typed derived rows lose data (the DS4 v15 lesson).
- * Keyed on the deliverable's extension, never brief keywords, so a
- * markdown report that merely READS a CSV is untouched.
- */
-function isExpectedDataDeliverablePath(path: string): boolean {
-  return /\.(?:csv|tsv|json|ndjson)$/i.test(path.trim());
-}
-
-/**
- * Enable flag for the GATED derive-repair clamp (L2). Default OFF so the
- * shipped behavior is unchanged and the intervention is cleanly A/B-able;
- * mirrors the kill-switch idiom in step-tool-kit.ts (`GEZEL_DISABLE_*`),
- * inverted to an enable so absence means "off".
- */
-export function deriveRepairClampEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.GEZEL_DERIVE_REPAIR_CLAMP === '1';
-}
-
-/**
- * Strong repair directive for a derived-data deliverable a weak model
- * keeps hand-typing (or re-emitting whole) instead of computing. Leads
- * with the failing verdict so the model fixes the ONE bad field, then
- * points at the compute channel (`derive_file` / `run_nodejs_script`) as
- * the only durable way to produce a data file without dropping rows.
- */
-export function buildDeriveRepairClampNudge(filePath: string, failingVerdict: string): string {
-  return `${failingVerdict}\n\nYou re-emitted the whole file and it STILL fails the same check. Stop hand-typing rows — a hand-typed data file loses or corrupts fields every time. COMPUTE the output instead: call \`derive_file({ script, outputPath: "${filePath}" })\` with a Node script that reads the input files with \`fs.readFileSync\`, applies the fix, and writes \`${filePath}\` with \`fs.writeFileSync\` (or write that script to \`scripts/derive.mjs\` and run it with \`run_nodejs_script\`). Fix the ONE failing field named above — do not regenerate everything, and do not paste the data into chat.`;
-}
-
-/**
- * The derive-repair clamp nudge for a data deliverable stuck at a repair
- * plateau, or null when the intervention shouldn't fire. Fires only when
- * the enable flag is set AND the plateau's output path is a derived-data
- * file (csv/tsv/json/ndjson) — the class where hand-typing loses data.
- * The caller supplies the plateau signal (this is invoked only at a
- * gate-reject re-prompt site); this function owns the flag + path gate so
- * the fires / does-not-fire decision is a single pure, testable unit.
- */
-export function deriveRepairClampNudge(
-  opts: { filePath?: string; failingVerdict: string },
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
-  if (!deriveRepairClampEnabled(env)) return null;
-  const path = opts.filePath?.trim();
-  if (!path || !isExpectedDataDeliverablePath(path)) return null;
-  return buildDeriveRepairClampNudge(path, opts.failingVerdict);
 }
 
 export interface AskGezelArgs {

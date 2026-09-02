@@ -333,7 +333,9 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   // reference context — folding a fixed cost in there would inflate the
   // slope. The fixed part belongs to the linearization below.
   const scalingLayers = fullAttentionLayerCount(cacheLayerCount, input.fullAttentionInterval);
-  return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement * loops);
+  return Math.round(
+    scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement * loops,
+  );
 }
 
 /**

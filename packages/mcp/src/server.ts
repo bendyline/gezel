@@ -82,6 +82,7 @@ import {
   assigneeArg,
   normalizeAssigneeArg,
 } from './assignee-arg.js';
+import { extractPageElementsFromYaml, scorePageElementMatch } from './browser-page-elements.js';
 import { commandResultIsError } from './command-result.js';
 import {
   RootTurnInvocationCache,
@@ -4177,97 +4178,6 @@ server.tool(
     };
   },
 );
-
-// Roles whose `[ref=eN]` is worth surfacing to a model trying to
-// pick the next click/type target. Excludes purely structural roles
-// (generic, banner, navigation) — those exist to group children and
-// aren't actionable on their own. Mirrors the list in
-// `service/src/providers/mcp-wrappers/playwright-yaml.ts`; kept
-// inline here so this package doesn't depend on service.
-const PAGE_ELEMENT_INTERACTIVE_ROLES = [
-  'button',
-  'link',
-  'textbox',
-  'searchbox',
-  'combobox',
-  'checkbox',
-  'radio',
-  'switch',
-  'slider',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'tab',
-  'option',
-  'spinbutton',
-];
-
-const PAGE_ELEMENT_REF_RE = new RegExp(
-  String.raw`^\s*- (` +
-    PAGE_ELEMENT_INTERACTIVE_ROLES.join('|') +
-    String.raw`)\s+"([^"]+)"\s+\[ref=(e\d+)\]`,
-);
-
-interface PageElementMatch {
-  role: string;
-  name: string;
-  ref: string;
-}
-
-/**
- * Walk an aria-tree YAML body and collect every interactive element
- * (`- ROLE "NAME" [ref=eN]`). Dedupes on (ref, role, name) so the
- * same logical control showing up twice in the tree (mirrored in
- * desktop + mobile nav, etc.) doesn't pad the list.
- */
-function extractPageElementsFromYaml(yaml: string): PageElementMatch[] {
-  const out: PageElementMatch[] = [];
-  const seen = new Set<string>();
-  for (const line of yaml.split('\n')) {
-    const m = line.match(PAGE_ELEMENT_REF_RE);
-    if (!m) continue;
-    const role = m[1];
-    const name = m[2];
-    const ref = m[3];
-    if (!role || !name || !ref) continue;
-    const key = `${ref}:${role}:${name}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ role, name, ref });
-  }
-  return out;
-}
-
-/**
- * Score how well an element matches a free-text description. Higher
- * is better. The shape:
- *
- *   - Exact role match (when caller passed `role`)        +10
- *   - Full description appears as a substring of name     +5
- *   - Each whitespace-separated word in description that
- *     appears in name OR role                             +1 each
- *   - Description is a substring of role                  +1
- *
- * Returns 0 when no signal — caller filters those out before
- * sorting. Case-insensitive throughout.
- */
-function scorePageElementMatch(
-  el: PageElementMatch,
-  description: string,
-  role: string | undefined,
-): number {
-  const desc = description.toLowerCase().trim();
-  const elRole = el.role.toLowerCase();
-  const elName = el.name.toLowerCase();
-  let score = 0;
-  if (role && elRole === role.toLowerCase()) score += 10;
-  if (desc.length > 0 && elName.includes(desc)) score += 5;
-  if (desc.length > 0 && elRole.includes(desc)) score += 1;
-  for (const word of desc.split(/\s+/).filter(Boolean)) {
-    if (elName.includes(word) || elRole.includes(word)) score += 1;
-  }
-  return score;
-}
 
 /**
  * Find the most recent auto-saved browser snapshot. Returns its

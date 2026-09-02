@@ -129,6 +129,7 @@ import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
+import { formatPreviewComplaint, formatPreviewLog } from './projects/project-preview-log.js';
 
 const loadProjectChatModule = () => import('../components/ProjectChat.js');
 const loadProjectConnectionsModule = () => import('../components/ProjectConnectionsTab.js');
@@ -4223,59 +4224,6 @@ function HtmlPreviewLogPanel({
       )}
     </div>
   );
-}
-
-function formatPreviewLog(entry: HtmlPreviewLogEntry): string {
-  if (entry.kind === 'console.error') {
-    return (entry.detail.args ?? []).join(' ');
-  }
-  return entry.detail.message ?? '(unknown error)';
-}
-
-/**
- * Build a chat message seeded from a preview-pane JavaScript error.
- * Includes the file the user was previewing, the kind of event
- * (runtime error / rejection / console.error), the message, the
- * filename+line+col if reported, and the stack trace when available.
- * The format is prose so the gezel reads it as a user report rather
- * than a structured log.
- */
-function formatPreviewComplaint(
-  entry: HtmlPreviewLogEntry,
-  file: { path: string; source: FileTab },
-): string {
-  const lines: string[] = [];
-  lines.push(
-    `I was previewing \`${file.source}/${file.path}\` and the browser surfaced a JavaScript error.`,
-  );
-  lines.push('');
-  lines.push(`- **Kind:** ${entry.kind}`);
-  const message = formatPreviewLog(entry);
-  if (message) lines.push(`- **Message:** ${message}`);
-  if (entry.detail.filename) {
-    const loc = entry.detail.filename;
-    const withPos = [
-      loc,
-      entry.detail.lineno ? String(entry.detail.lineno) : null,
-      entry.detail.colno ? String(entry.detail.colno) : null,
-    ]
-      .filter(Boolean)
-      .join(':');
-    lines.push(`- **Location:** ${withPos}`);
-  }
-  if (entry.url) lines.push(`- **Preview URL:** ${entry.url}`);
-  if (entry.detail.stack) {
-    lines.push('');
-    lines.push('Stack trace:');
-    lines.push('```');
-    lines.push(entry.detail.stack);
-    lines.push('```');
-  }
-  lines.push('');
-  lines.push(
-    "Can you take a look and figure out what's going wrong? Feel free to edit the file directly.",
-  );
-  return lines.join('\n');
 }
 
 /**
