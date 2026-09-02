@@ -91,6 +91,22 @@ export interface EvalContext {
      * scenario key while routing successive failures to different files.
      */
     repairFilePath?: string;
+    /**
+     * The file the scenario is currently asking to be fixed does not exist,
+     * or exists empty. Set it whenever the driver KNOWS that; leaving it
+     * undefined means "not evaluated" and preserves the older inference.
+     *
+     * Every retry-loop path asks "is there an artifact to be stubborn
+     * about?", and neither raw signal answers it on a multi-deliverable
+     * scenario: `score` counts checks (craftbook preconditions clear before
+     * anything is written) and `bytes` is the PRIMARY deliverable's size,
+     * which is a different file from the failing one. craftbook-route-multi
+     * routed to the right recipe, reached 9/11, and was killed at 14m as
+     * "Artifact produced but never reached success" — while the artifact it
+     * was being accused of stubbornly rewriting, out/press-release.md, was
+     * 0 bytes. The 2005 bytes belonged to a sibling.
+     */
+    deliverableMissing?: boolean;
     runtimePassed?: number;
     runtimeFailed?: number;
     /**
@@ -543,6 +559,22 @@ export interface TrialFinalSniff {
   failReason?: string;
   /** Workspace-relative file selected by the scenario for the next repair. */
   repairFilePath?: string;
+  /**
+   * The file the scenario is currently asking to be fixed does not exist,
+   * or exists empty. Set it whenever the driver KNOWS that; leaving it
+   * undefined means "not evaluated" and preserves the older inference.
+   *
+   * Every retry-loop path asks "is there an artifact to be stubborn
+   * about?", and neither raw signal answers it on a multi-deliverable
+   * scenario: `score` counts checks (craftbook preconditions clear before
+   * anything is written) and `bytes` is the PRIMARY deliverable's size,
+   * which is a different file from the failing one. craftbook-route-multi
+   * routed to the right recipe, reached 9/11, and was killed at 14m as
+   * "Artifact produced but never reached success" — while the artifact it
+   * was being accused of stubbornly rewriting, out/press-release.md, was
+   * 0 bytes. The 2005 bytes belonged to a sibling.
+   */
+  deliverableMissing?: boolean;
   runtimePassed?: number;
   runtimeFailed?: number;
   /** Scenario-declared completed milestones; see `recordSniff`. */

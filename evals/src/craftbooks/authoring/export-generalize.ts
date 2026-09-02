@@ -3,12 +3,12 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
   sendWorkerKickoff,
@@ -378,15 +378,14 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(
-        q1Report,
-        q1Clean,
-        q2Report,
-        q2Clean,
-        book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
-      ) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(
+      q1Report,
+      q1Clean,
+      q2Report,
+      q2Clean,
+      book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
+    ),
+    deliverableMissing: noDeliverableWritten(q1Report, q1Clean, q2Report, q2Clean),
     repairPath: 'craftbook: supplier intake recipe',
     repairDirective: [
       'CRAFTBOOK_GENERALIZE_REPAIR: this eval grades the craftbook catalog, the task graph, and',

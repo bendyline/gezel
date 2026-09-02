@@ -5,12 +5,12 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   progressBytes,
   sendWorkerKickoff,
   taskReferencesCraftbook,
@@ -314,14 +314,13 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(
-        northSummary,
-        southSummary,
-        book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
-        paramNames.join(','),
-      ) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(
+      northSummary,
+      southSummary,
+      book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
+      paramNames.join(','),
+    ),
+    deliverableMissing: noDeliverableWritten(northSummary, southSummary),
     repairPath: 'craftbook: regional sales rollup',
     repairDirective: [
       'CRAFTBOOK_PARAMS_REPAIR: this eval grades the craftbook catalog and the task graph, not a',

@@ -5,7 +5,6 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   authoredCraftbookSummaries,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
@@ -236,9 +235,14 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(release, await workspace.read(FACTS_PATH)) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    // `bytes` is what the MODEL produced. It used to add the seeded facts
+    // sheet, so the very first poll reported ~1000 bytes with nothing
+    // written, the runner read that as an artifact to be stubborn about,
+    // and the retry loop killed the trial at 13-14 minutes in three
+    // consecutive rounds — each time telling the model its 0-byte
+    // out/press-release.md "EXISTS" and not to recreate it.
+    bytes: progressBytes(release),
+    deliverableMissing: release === null || release.length === 0,
     repairPath: RELEASE_PATH,
     repairDirective: [
       'CRAFTBOOK_ROUTE_AND_RUN_REPAIR: this eval grades BOTH the route and the release.',

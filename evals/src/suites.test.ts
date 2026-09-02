@@ -101,7 +101,27 @@ const CEILINGED_SUITE_IDS = [
   'complex-work-smoke',
 ] as const;
 
-/** Per-scenario and whole-suite worst-case ceilings for new suites. */
+/**
+ * Per-scenario and whole-suite AUTHORED budgets for new suites.
+ *
+ * Deliberately not the worst case, which is larger by two independent
+ * multipliers the runner applies at trial time:
+ *
+ *   - `throughputScaledMaxDurationMs` scales the authored ceiling by
+ *     measured decode rate, up to 8x, so capability is not a property of
+ *     the hardware. Small for the 27b/31b class (large-pr-review scaled
+ *     1.03x on qwen3.8-27b-q4), large for a genuinely slow model.
+ *   - `hardCeilingCapMs` then allows extensions to 2x whenever hard
+ *     progress moved recently. This rarely fires on `core`, where trials
+ *     pass early or stall outright, and reliably fires on a hard suite,
+ *     where a model grinds without converging and looks like progress
+ *     every ten minutes. Wild-caught on the 2026-08-30 sweep:
+ *     `craftbook-author-params` is authored at 35m and PASSED at 62m.
+ *
+ * So these bound what a suite is DESIGNED to cost, which is what belongs
+ * in a membership test. Whoever plans a sweep budgets from the note on
+ * `SCORECARD_SUITES` in bin/scorecard.ts, not from these.
+ */
 const MAX_SUITE_SCENARIO_MS = 45 * 60_000;
 const MAX_SUITE_TOTAL_MS = 6.5 * 60 * 60_000;
 

@@ -348,7 +348,27 @@ export interface AuthoringPollArgs {
   totalChecks: number;
   /** Ordered failure list; the first entry drives the repair nudge. */
   failures: string[];
-  /** Monotonic-ish progress proxy for the runner's fingerprint. */
+  /**
+   * Size of the CONTENT the scenario has produced so far — nothing else.
+   *
+   * These expressions used to append `500 * craftbookToolCalls`, which made
+   * the number monotonic but meant an authoring scenario reported hundreds
+   * of "bytes" having written nothing. The runner reads this field as
+   * evidence that a deliverable EXISTS and arms its retry-loop paths on it,
+   * so the synthetic term manufactured artifacts. It bought nothing either:
+   * the hard-progress fingerprint counts tool calls itself, from service
+   * telemetry (\`daemonActivity.toolCalls\`).
+   *
+   * The term was introduced so a slow model iterating on \`craftbook_write\`
+   * validation — each full-document attempt is ~90s of generation on a 27B —
+   * would not read as a stall, after a v6-matrix trial where the book landed
+   * seconds after the kill fired. It could never have worked:
+   * \`retryLoopSniffKey\` deliberately excludes \`bytes\`, so the term moved the
+   * fingerprint and never the retry-loop plateau, and both authoring trials
+   * in the 2026-08-31 sweep were guillotined anyway. That case is now held
+   * by the artifact predicate instead, which stands every retry-loop path
+   * down while there is no content to be stubborn about.
+   */
   bytes: number;
   /**
    * Count of scenario-declared units of work actually completed. Unlike
@@ -358,6 +378,16 @@ export interface AuthoringPollArgs {
   milestones?: number;
   /** Virtual surface named in the feedback message (not a real file). */
   repairPath: string;
+  /**
+   * The scenario's real workspace deliverable does not exist, or is empty.
+   *
+   * Pass it whenever the scenario knows. Every retry-loop path asks whether
+   * there is an artifact to be stubborn about, and infers it from `bytes`
+   * when nothing better is available — which is wrong here in both
+   * directions, since an authoring scenario's `bytes` is a progress proxy
+   * over several surfaces rather than the size of one file.
+   */
+  deliverableMissing?: boolean;
   repairDirective: string;
   successReason: string;
 }
@@ -378,12 +408,21 @@ export async function finishAuthoringPoll(
     key: args.scenarioId,
     score,
     bytes: args.bytes,
+    ...(args.deliverableMissing === undefined
+      ? {}
+      : { deliverableMissing: args.deliverableMissing }),
     ...(args.milestones !== undefined ? { milestones: args.milestones } : {}),
     ...(args.failures[0] !== undefined ? { failReason: args.failures[0] } : {}),
   });
+  // `bytes` belongs in the line even though the craftbook variant is what
+  // score-trial's parser was written against: with no `bytes=` token the
+  // parser records ZERO, which is indistinguishable from a real zero in
+  // facts.json. Triaging the 2026-08-30 sweep, every authoring trial read
+  // "bytes=0" while its sniff had reported hundreds — the one number that
+  // says whether the model produced anything.
   ctx.logChanged(
     `authoring:${args.scenarioId}`,
-    `[scenario] ${args.scenarioId} checks=${score}/${args.totalChecks} failures=${args.failures.join(' | ') || 'none'}`,
+    `[scenario] ${args.scenarioId} bytes=${args.bytes} checks=${score}/${args.totalChecks} failures=${args.failures.join(' | ') || 'none'}`,
   );
   if (args.failures.length === 0) {
     return { done: true, success: true, reason: args.successReason };
@@ -407,58 +446,23 @@ export async function finishAuthoringPoll(
   return { done: false };
 }
 
+/**
+ * Has NONE of the scenario's real deliverables been written?
+ *
+ * Pass the deliverable texts only — not the authored craftbook, not the
+ * task graph, and never a seeded fixture. This answers the one question
+ * every retry-loop path asks ("is there an artifact to be stubborn
+ * about?"), which the runner otherwise has to infer from `bytes` — and
+ * `bytes` here is a progress proxy across several surfaces, so the
+ * inference is wrong in both directions. craftbook-author-params reported
+ * 33 bytes of authored STEP IDS while both of its summaries were 0 bytes,
+ * and was killed on the stall path as an artifact that never closed.
+ */
+export function noDeliverableWritten(...texts: Array<string | null | undefined>): boolean {
+  return texts.every((text) => !text || text.length === 0);
+}
+
 /** Sum of text lengths — a cheap monotonic-ish progress proxy. */
 export function progressBytes(...parts: Array<string | null | undefined>): number {
   return parts.reduce((acc, part) => acc + (part?.length ?? 0), 0);
-}
-
-/**
- * Count craftbook-surface tool calls across the project's sessions —
- * folded into the progress proxy so ACTIVE AUTHORING moves the sniff.
- * Without this, a slow model iterating on `craftbook_write` validation
- * (each full-document attempt is ~90s of generation on a 27B) looks
- * identical to a stall and the retry-loop watchdog guillotines it
- * mid-recovery — wild-caught on the v6 matrix, where the book landed
- * seconds after the kill fired.
- */
-export async function countCraftbookToolCalls(
-  ctx: EvalContext,
-  projectId: string,
-): Promise<number> {
-  const maybeClient = ctx.client as unknown as {
-    listChatSessions?: (filter?: { projectId?: string }) => Promise<{
-      sessions: Array<{ id: string; messages?: Array<{ toolCalls?: Array<{ name?: string }> }> }>;
-    }>;
-    getChatSession?: (
-      sessionId: string,
-    ) => Promise<{ messages?: Array<{ toolCalls?: Array<{ name?: string }> }> }>;
-  };
-  if (
-    typeof maybeClient.listChatSessions !== 'function' ||
-    typeof maybeClient.getChatSession !== 'function'
-  ) {
-    return 0;
-  }
-  try {
-    const { sessions } = await maybeClient.listChatSessions({ projectId });
-    let count = 0;
-    for (const listed of sessions ?? []) {
-      const session = listed.messages ? listed : await maybeClient.getChatSession(listed.id);
-      for (const message of session.messages ?? []) {
-        for (const call of message.toolCalls ?? []) {
-          const name = call.name ?? '';
-          if (
-            name.startsWith('craftbook_') ||
-            name === 'invoke_craftbook' ||
-            name === 'suggest_craftbook'
-          ) {
-            count++;
-          }
-        }
-      }
-    }
-    return count;
-  } catch {
-    return 0;
-  }
 }

@@ -4,13 +4,13 @@ import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
   checkGateScriptSubstance,
-  countCraftbookToolCalls,
   craftbookGateScriptRefs,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   parseJsonValue,
   progressBytes,
   sendWorkerKickoff,
@@ -159,9 +159,10 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(reportText, scriptSource, book ? book.craftbook.id : null) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(reportText, scriptSource, book ? book.craftbook.id : null),
+    // `scriptSource` is the gate script embedded in the authored book, not
+    // the workspace deliverable this scenario waits on.
+    deliverableMissing: noDeliverableWritten(reportText),
     repairPath: 'craftbook: inventory report gate script',
     repairDirective: [
       'CRAFTBOOK_GATE_SCRIPT_REPAIR: fix the FIRST failure above with craftbook/task tools.',

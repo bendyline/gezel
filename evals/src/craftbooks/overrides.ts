@@ -355,6 +355,14 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Run across local model tiers.'],
   },
   'code-review': {
+    // Its sidecar sets `taskNotes.requireCraftbookTask`, so the grader looks
+    // for a task sourced from the book — but without this the setup sends a
+    // freehand kickoff to a Reviewer whose prompt prescribes `write_artifact`
+    // and `write_file` directly. Those pull opposite ways, and the model does
+    // what the prompt says: the first frontier run wrote a 5.5 KB report and
+    // created zero tasks. Every sibling that grades the task graph
+    // (bug-fix-tdd, refactor-module, codemod-sweep) dispatches the real task.
+    runAsCraftbookTask: true,
     // Bounded for the `developer` suite.
     timeoutMs: 30 * 60_000,
     progressTimeoutMs: 12 * 60_000,
