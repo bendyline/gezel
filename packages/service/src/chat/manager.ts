@@ -1256,7 +1256,12 @@ export class ChatManager {
    */
   private readonly inflightFileHandoffs = new Map<
     string,
-    { sessionId: string; toGezelName: string; toGezelId: string }
+    {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    }
   >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
@@ -4225,6 +4230,7 @@ export class ChatManager {
     sessionId: string;
     toGezelName: string;
     toGezelId: string;
+    deliveryState: 'parked' | 'dispatched';
     deduplicated?: boolean;
   }> {
     const fromRec = args.fromSessionId
@@ -4364,10 +4370,20 @@ export class ChatManager {
         ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, boring)
         : 'another gezel';
     const fromName = fromDisplay(targetBoring);
-    const result = {
+    // Start conservatively. `dispatchTargetSend` flips this same object when
+    // the recipient actually enters the provider queue. The object is also
+    // held by `inflightFileHandoffs`, so a duplicate arriving after dispatch
+    // observes the current state rather than stale "parked" metadata.
+    const result: {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    } = {
       sessionId: session.id,
       toGezelName: targetDisplay(senderBoring),
       toGezelId: target.id,
+      deliveryState: 'parked',
     };
     // Re-check after the async session/config reads so simultaneous calls
     // converge on whichever one registered first.
@@ -4477,6 +4493,7 @@ export class ChatManager {
     const dispatchTargetSend = () => {
       if (dispatched) return; // once-guard: park-flush AND watchdog can both call this
       dispatched = true;
+      result.deliveryState = 'dispatched';
       if (parkedHandoffId) void this.clearPendingHandoff(parkedHandoffId);
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
       const targetSend = this.sendWithBusyRetry(session.id, seed, {
@@ -4579,7 +4596,7 @@ export class ChatManager {
           (t as { unref?: () => void }).unref?.();
         } else {
           log.warn(
-            `[chat] ${htag}: WATCHDOG giving up after ${checks} checks — sender still mid-turn`,
+            `[chat] ${htag}: WATCHDOG observation window ended after ${checks} checks — sender still mid-turn; durable handoff remains parked until sender idle or restart`,
           );
         }
       };

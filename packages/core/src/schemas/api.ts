@@ -3349,6 +3349,12 @@ export const MessageGezelResponseSchema = z.object({
   sessionId: z.string(),
   toGezelId: z.string(),
   toGezelName: z.string(),
+  /**
+   * `parked` means the sender still owns its provider turn, so the recipient
+   * has not entered the provider queue yet. `dispatched` means the recipient
+   * send has been handed to that queue; completion remains asynchronous.
+   */
+  deliveryState: z.enum(['parked', 'dispatched']),
   /** True when an identical file handoff was already pending and was joined. */
   deduplicated: z.boolean().optional(),
 });

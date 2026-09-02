@@ -1846,12 +1846,13 @@ describe('ChatManager — parked handoff durability', () => {
     });
 
     // Parks: the sender is mid-turn, so delivery waits for it to idle.
-    await manager.messageGezel({
+    const accepted = await manager.messageGezel({
       fromGezelId: 'ada',
       fromSessionId: sender.id,
       toGezelIdOrName: 'bo',
       text: 'please review the draft',
     });
+    expect(accepted.deliveryState).toBe('parked');
     const parked = await store.readPendingHandoffs();
     expect(parked).toHaveLength(1);
     expect(parked[0]).toMatchObject({ fromGezelId: 'ada', toGezelIdOrName: 'bo' });
@@ -2227,6 +2228,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     expect(res.toGezelId).toBe('maya');
     expect(res.toGezelName).toBe('Maya');
+    expect(res.deliveryState).toBe('dispatched');
 
     await waitForCondition(async () => {
       const disk = await store.getSession('maya', res.sessionId);
@@ -2547,6 +2549,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(duplicate).toMatchObject({
       sessionId: first.sessionId,
       toGezelId: first.toGezelId,
+      deliveryState: 'parked',
       deduplicated: true,
     });
     expect(internals.afterSessionIdle.get(adaSession.id)).toHaveLength(1);

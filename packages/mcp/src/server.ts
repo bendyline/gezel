@@ -6477,7 +6477,7 @@ server.tool(
 
 server.tool(
   'message_gezel',
-  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in your next turn. Use this for fan-out and ambient updates; for explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
+  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in a later turn. After a successful call, END YOUR TURN immediately — remaining alive can keep the recipient parked and occupies a provider slot. Use this for fan-out and ambient updates; emit every fan-out call in the same tool-call batch before ending. For explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
   {
     gezel: z.string().optional().describe('Target gezel id or display name'),
     // `gezelId` is the spelling models reach for; without it the slip
@@ -6550,9 +6550,13 @@ server.tool(
     // during workspace-local typechecks; the wire field is optional so this
     // remains compatible with both response revisions.
     const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean }).deduplicated;
+    const deliveryState = messageGezelDeliveryState(res);
+    const releaseInstruction = asyncHandoffReleaseInstruction(res.toGezelName, deliveryState);
     const responseText = responseWasDeduplicated
-      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of queueing another message.`
-      : `Pinged ${res.toGezelName}.${deliverableText} Their reply will land in your next turn.`;
+      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of creating another message. ${releaseInstruction}`
+      : deliveryState === 'parked'
+        ? `Accepted the message for ${res.toGezelName}.${deliverableText} ${releaseInstruction}`
+        : `Dispatched the message to ${res.toGezelName}.${deliverableText} ${releaseInstruction}`;
     return {
       content: [
         {
@@ -6563,6 +6567,25 @@ server.tool(
     };
   },
 );
+
+function messageGezelDeliveryState(response: {
+  deliveryState?: unknown;
+}): 'parked' | 'dispatched' {
+  // Fail safe for a mixed workspace build: an older client declaration may
+  // omit the new field, and telling the caller to release its turn is safer
+  // than claiming the recipient has already entered the provider queue.
+  return response.deliveryState === 'dispatched' ? 'dispatched' : 'parked';
+}
+
+function asyncHandoffReleaseInstruction(
+  recipientName: string,
+  deliveryState: 'parked' | 'dispatched',
+): string {
+  if (deliveryState === 'parked') {
+    return `The handoff is durably parked and has NOT entered ${recipientName}'s provider queue because your current turn still holds its slot. END YOUR TURN NOW — do not call more tools or wait — so this turn releases the slot and ${recipientName}'s turn can dispatch. Their reply will arrive asynchronously in a later turn.`;
+  }
+  return `${recipientName}'s turn has entered the provider queue. END YOUR TURN NOW — do not call more tools or wait — so your turn releases its provider slot. Their reply will arrive asynchronously in a later turn.`;
+}
 
 function normalizeFileHandoffMessage(
   message: string,
@@ -6978,7 +7001,7 @@ const DELEGATION_ROLE_SPECS: ReadonlyArray<{
 for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
   server.tool(
     `delegate_${slug}`,
-    `Hand a task to a project's ${label} (${hint}) — ASYNC. Auto-creates a ${label} if none exists; their reply lands in your next turn. The target IS this tool, so you never pick a name. For work in a project you created from Default, pass \`project\` so files land in that project. For a quick synchronous question instead, use \`consult_${slug}\`.`,
+    `Hand a task to a project's ${label} (${hint}) — ASYNC. Auto-creates a ${label} if none exists; their reply lands in a later turn. After a successful call, END YOUR TURN immediately so the recipient can dispatch and your provider slot is released. The target IS this tool, so you never pick a name. For work in a project you created from Default, pass \`project\` so files land in that project. For a quick synchronous question instead, use \`consult_${slug}\`.`,
     {
       task: z
         .string()
@@ -7030,13 +7053,15 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean })
           .deduplicated;
+        const deliveryState = messageGezelDeliveryState(res);
+        const releaseInstruction = asyncHandoffReleaseInstruction(res.toGezelName, deliveryState);
         return {
           content: [
             {
               type: 'text' as const,
               text: responseWasDeduplicated
-                ? `An identical file handoff is already pending with ${res.toGezelName} (${label}); joined it instead of queueing another message.`
-                : `Handed off to ${res.toGezelName} (${label}) in project "${resolvedProject}". Their reply will arrive in your next turn. [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
+                ? `An identical file handoff is already pending with ${res.toGezelName} (${label}); joined it instead of creating another message. ${releaseInstruction}`
+                : `${deliveryState === 'parked' ? 'Accepted the handoff for' : 'Dispatched the handoff to'} ${res.toGezelName} (${label}) in project "${resolvedProject}". ${releaseInstruction} [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
             },
           ],
         };

@@ -1,38 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { isSuccessfulAsyncFileHandoff } from './provider.js';
+import { isSuccessfulAsyncHandoff } from './provider.js';
 
-describe('isSuccessfulAsyncFileHandoff', () => {
-  const file = { expectedDeliverable: { kind: 'file', filePath: 'artifacts/deck.pptx' } };
-
+describe('isSuccessfulAsyncHandoff', () => {
   it('terminates after a successful role-typed delegate file handoff', () => {
-    expect(isSuccessfulAsyncFileHandoff('delegate_builder', file, 'Hieu is on it.')).toBe(true);
+    expect(isSuccessfulAsyncHandoff('delegate_builder', 'Hieu is on it.')).toBe(true);
   });
 
-  it('keeps message_gezel file handoffs terminal', () => {
-    expect(isSuccessfulAsyncFileHandoff('message_gezel', file, 'Queued for Hieu.')).toBe(true);
+  it('terminates after an ordinary non-file message so the parked recipient can dispatch', () => {
+    expect(isSuccessfulAsyncHandoff('message_gezel', 'Accepted for Anita.')).toBe(true);
   });
 
-  it('does not terminate for consultations, non-file work, or failed calls', () => {
-    expect(isSuccessfulAsyncFileHandoff('consult_builder', file, 'Answer follows.')).toBe(false);
-    expect(
-      isSuccessfulAsyncFileHandoff(
-        'delegate_builder',
-        { expectedDeliverable: { kind: 'message' } },
-        'Hieu is on it.',
-      ),
-    ).toBe(false);
-    expect(isSuccessfulAsyncFileHandoff('delegate_builder', file, 'ERROR: no recipient')).toBe(
-      false,
-    );
+  it('does not terminate for consultations or failed calls', () => {
+    expect(isSuccessfulAsyncHandoff('ask_gezel', 'Anita answered inline.')).toBe(false);
+    expect(isSuccessfulAsyncHandoff('consult_builder', 'Answer follows.')).toBe(false);
+    expect(isSuccessfulAsyncHandoff('delegate_builder', 'ERROR: no recipient')).toBe(false);
   });
 
-  it('accepts the stringified deliverable shape emitted by smaller models', () => {
-    expect(
-      isSuccessfulAsyncFileHandoff(
-        'delegate_builder',
-        { expectedDeliverable: JSON.stringify(file.expectedDeliverable) },
-        'Hieu is on it.',
-      ),
-    ).toBe(true);
+  it('does not mistake similarly named non-handoff tools for async delegation', () => {
+    expect(isSuccessfulAsyncHandoff('consult_developer', 'Answer follows.')).toBe(false);
+    expect(isSuccessfulAsyncHandoff('message_user', 'Sent.')).toBe(false);
   });
 });

@@ -47,6 +47,18 @@ describe('MLX sidecar memory policy', () => {
     expect(run).toMatch(/_reclaim_mlx_buffer_cache\("batch-pressure"\)/);
   });
 
+  it('keeps a fourth request queued when max concurrency is three', () => {
+    const admit = sliceBlock(SERVER_SRC, 'def _admit_count(');
+    expect(admit).toMatch(/capped = min\(pending, self\._max\)/);
+    expect(admit).toMatch(/return capped {2}# can't read usage/);
+    expect(admit).toMatch(/return 1 if active >= threshold else capped/);
+    expect(admit).not.toMatch(/return 1 if active >= threshold else pending/);
+
+    const run = sliceBlock(SERVER_SRC, 'async def _run(');
+    expect(run).toMatch(/admit_n = self\._admit_count\(len\(self\._pending\)\)/);
+    expect(run).toMatch(/self\._pending = self\._pending\[admit_n:\]/);
+  });
+
   it('reclaims and logs at batched stream and warm boundaries', () => {
     const stream = sliceBlock(SERVER_SRC, 'async def _batched_stream_iter(');
     const warm = sliceBlock(SERVER_SRC, 'async def _await_batched_completion(');
