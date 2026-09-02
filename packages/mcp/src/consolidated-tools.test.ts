@@ -920,6 +920,48 @@ describe('consolidated MCP tools', () => {
     expect(text).not.toContain('not the display name');
   });
 
+  it.each([
+    {
+      deliveryState: 'parked' as const,
+      expected: ["has NOT entered Maya's provider queue", 'END YOUR TURN NOW', 'releases the slot'],
+    },
+    {
+      deliveryState: 'dispatched' as const,
+      expected: [
+        "Maya's turn has entered the provider queue",
+        'END YOUR TURN NOW',
+        'releases its provider slot',
+      ],
+    },
+  ])(
+    'distinguishes a $deliveryState async message and tells the caller to release its slot',
+    async ({ deliveryState, expected }) => {
+      handler = (url) => {
+        if (url.pathname === '/api/gezels/maya/message') {
+          return {
+            accepted: true,
+            sessionId: 'maya-session',
+            toGezelId: 'maya',
+            toGezelName: 'Maya',
+            deliveryState,
+          };
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      };
+
+      const result = await client.callTool({
+        name: 'message_gezel',
+        arguments: { gezel: 'maya', message: 'Please report status.' },
+      });
+      const text = (result.content as Array<{ type: string; text?: string }>)
+        .map((item) => item.text ?? '')
+        .join('\n');
+
+      expect(result.isError).not.toBe(true);
+      for (const fragment of expected) expect(text).toContain(fragment);
+    },
+  );
+
   // A tool that calls the API without its own catch used to hand the model
   // the bare HTTP status line: the SDK stringifies an uncaught throw to
   // `error.message` and nothing else, so the daemon's `hint` — the only

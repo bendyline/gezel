@@ -113,6 +113,7 @@ import {
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
+import { engineApiKey } from '../providers/native/engine-api-key.js';
 import {
   resolveCatalogIdFromModelId,
   resolveCatalogLlamaCppEngineConfig,
@@ -1255,7 +1256,12 @@ export class ChatManager {
    */
   private readonly inflightFileHandoffs = new Map<
     string,
-    { sessionId: string; toGezelName: string; toGezelId: string }
+    {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    }
   >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
@@ -4224,6 +4230,7 @@ export class ChatManager {
     sessionId: string;
     toGezelName: string;
     toGezelId: string;
+    deliveryState: 'parked' | 'dispatched';
     deduplicated?: boolean;
   }> {
     const fromRec = args.fromSessionId
@@ -4363,10 +4370,20 @@ export class ChatManager {
         ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, boring)
         : 'another gezel';
     const fromName = fromDisplay(targetBoring);
-    const result = {
+    // Start conservatively. `dispatchTargetSend` flips this same object when
+    // the recipient actually enters the provider queue. The object is also
+    // held by `inflightFileHandoffs`, so a duplicate arriving after dispatch
+    // observes the current state rather than stale "parked" metadata.
+    const result: {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    } = {
       sessionId: session.id,
       toGezelName: targetDisplay(senderBoring),
       toGezelId: target.id,
+      deliveryState: 'parked',
     };
     // Re-check after the async session/config reads so simultaneous calls
     // converge on whichever one registered first.
@@ -4476,6 +4493,7 @@ export class ChatManager {
     const dispatchTargetSend = () => {
       if (dispatched) return; // once-guard: park-flush AND watchdog can both call this
       dispatched = true;
+      result.deliveryState = 'dispatched';
       if (parkedHandoffId) void this.clearPendingHandoff(parkedHandoffId);
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
       const targetSend = this.sendWithBusyRetry(session.id, seed, {
@@ -4578,7 +4596,7 @@ export class ChatManager {
           (t as { unref?: () => void }).unref?.();
         } else {
           log.warn(
-            `[chat] ${htag}: WATCHDOG giving up after ${checks} checks — sender still mid-turn`,
+            `[chat] ${htag}: WATCHDOG observation window ended after ${checks} checks — sender still mid-turn; durable handoff remains parked until sender idle or restart`,
           );
         }
       };
@@ -11711,6 +11729,18 @@ export class ChatManager {
       const llamaSlotSavePath = llamaProvider.getSlotSavePath();
       const adapter = new LlamaCppCacheAdapter({
         resolveBaseUrl: async () => llamaProvider.currentBaseUrl(),
+        // `/slots` is an AUTHENTICATED endpoint — only `/health` answers
+        // without the key (see engine-api-key.ts). The provider authenticates
+        // because `build-provider` wraps its fetch in `withEngineApiKey`, but
+        // the adapter is constructed here with a bare `fetch`, so without this
+        // it sent no Authorization header and every call 401'd: the `/slots`
+        // usage poll AND both `?action=save|restore` calls, i.e. the whole
+        // disk KV persistence layer, silently dead. It failed quietly because
+        // each call site degrades on error by design (no cache entry, `disk
+        // save: MISSED`) — the only symptom was cold prefills and a 5-second
+        // drip of `unauthorized: Invalid API Key` in the engine log, ~300 per
+        // trial. Resolved per call, not captured: the key is generated lazily.
+        resolveAuthToken: () => engineApiKey(),
         // The ENGINE slot count (`--parallel N`), not `queue.concurrency`:
         // the queue reserves a background lane above the engine slots, so
         // on a single-slot launch it reads 2 and the adapter would bind
@@ -12915,6 +12945,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -12947,6 +12978,7 @@ export class ChatManager {
           slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
           sharedKvLayers: summary.sharedKvLayers,
+          loopCount: summary.loopCount,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -12986,6 +13018,7 @@ export class ChatManager {
         slidingWindow: summary.slidingWindow,
         slidingWindowPattern: summary.slidingWindowPattern,
         sharedKvLayers: summary.sharedKvLayers,
+        loopCount: summary.loopCount,
         keyLength: summary.keyLength,
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
@@ -13098,6 +13131,7 @@ export class ChatManager {
               slidingWindow: summary.slidingWindow,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13137,6 +13171,7 @@ export class ChatManager {
               headCountKvPerLayer: summary.headCountKvPerLayer,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13260,6 +13295,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,

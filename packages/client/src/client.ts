@@ -3285,7 +3285,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`artifact fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`artifact fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 
@@ -3299,7 +3299,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`workspace fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`workspace fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 
@@ -7305,7 +7305,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`document fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`document fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 

@@ -1000,6 +1000,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         hardProgressTimeoutMs,
         softProgressTimeoutMs,
         inflightDeferMs: inflightDeferMsForEngine(engine),
+        writeCounterTrustworthy: isLocalEngine(engine),
         daemonLogPath: join(runDir, 'daemon.log'),
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(evalHints ? { evalHints } : {}),
@@ -1042,7 +1043,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       );
     }
     try {
-      await captureFinalState({ client, trialHome, runDir, log });
+      await captureFinalState({ client, trialHome, runDir, log, trialFailed: !success });
     } catch (err) {
       log(
         `[trial] capture-final-state failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1681,6 +1682,17 @@ export async function pollUntilDone(
      */
     softProgressTimeoutMs: number;
     /**
+     * True when `daemonActivity.writeCalls` is meaningful for this trial.
+     * Local engines route file mutations through gezel-mcp so the counter
+     * is real; CLI-wrapper providers use their own built-in editors and
+     * the counter is structurally 0 (see the FILE_MUTATION_TOOLS bare-name
+     * set). Reporting "blind" on a LOCAL engine buries the finding — a
+     * qwen3.8-27b-q4 trial of craftbook-author-gate-script made 25 tool
+     * calls and zero file mutations, and the message told triage to
+     * discount the zero that WAS the result.
+     */
+    writeCounterTrustworthy?: boolean;
+    /**
      * How long a single in-flight turn may defer the SOFT watchdog. Engine-
      * scaled (MLX gets a larger cap for slow Apple-Silicon prefill — see
      * {@link inflightDeferMsForEngine}). Default {@link WATCHDOG_INFLIGHT_DEFER_MS}.
@@ -1756,7 +1768,12 @@ export async function pollUntilDone(
     milestones?: number;
   }): void => {
     latestSniff = state;
-    if (state.score > 0) {
+    // Sticky, so a transient re-read of 0 does not disarm a guard that a
+    // real artifact already armed. It must therefore be populated by the
+    // SAME predicate the guard reads — recording a bare score>0 here made
+    // the sticky set assert an artifact the sniff never evidenced, and no
+    // later poll could take that assertion back.
+    if (sniffEvidencesArtifact(state)) {
       scoredSniffKeys.add(state.key);
     }
   };
@@ -1945,7 +1962,7 @@ export async function pollUntilDone(
   let sniffPlateauStartingWriteCalls = 0;
   // Workspace file total when the current sniff plateau began — the FAST
   // path uses its growth to tell producing from re-emitting.
-  let sniffPlateauStartingFileCount = 0;
+  let sniffPlateauStartingPathSignature = '';
   let sniffPlateauStartingTurnStarts = 0;
 
   // One-shot re-engage nudge. When the soft window has used ~80% of its
@@ -2236,7 +2253,19 @@ export async function pollUntilDone(
       // the builder kept waiting. Direct-dispatch to the downstream
       // gezel bypasses that relay failure. Falls back to meester when
       // no qualifying downstream session exists.
-      const sniff: { key: string; score: number; bytes: number } | null = latestSniff;
+      // Annotate with every field the consumers below actually read.
+      // The narrower { key, score, bytes } shape that used to sit here was
+      // already a lie — buildReEngageNudge reads failReason — and it hid
+      // deliverableMissing, the field that keeps the nudge from telling a
+      // model its missing deliverable exists.
+      const sniff: {
+        key: string;
+        score: number;
+        bytes: number;
+        failReason?: string;
+        repairFilePath?: string;
+        deliverableMissing?: boolean;
+      } | null = latestSniff;
       const hadAnyProgress = lastHardChangeAt > startedAt + 5000;
       if (
         !deferSoftForInflight &&
@@ -2384,7 +2413,7 @@ export async function pollUntilDone(
       // "no artifact yet" case is the hard-progress watchdog).
       const currentToolCalls = fp.daemonActivity?.toolCalls ?? 0;
       const currentWriteCalls = fp.daemonActivity?.writeCalls ?? 0;
-      const currentFileCount = totalWorkspaceFileCount(fp.workspace);
+      const currentPathSignature = workspacePathSignature(fp.workspace);
       const currentTurnStarts = fp.daemonActivity?.turnStarts ?? 0;
       // Watchdog key tracks success-relevant movement only. Byte churn
       // with the same sniff score is exactly the stubborn-rewrite loop
@@ -2398,14 +2427,13 @@ export async function pollUntilDone(
         sniffPlateauStartingToolCalls = currentToolCalls;
         sniffPlateauStartingWriteCalls = currentWriteCalls;
         sniffPlateauStartingTurnStarts = currentTurnStarts;
-        sniffPlateauStartingFileCount = currentFileCount;
+        sniffPlateauStartingPathSignature = currentPathSignature;
         retryLoopGrantedNudgeStages.clear();
       } else if (currentSniffKey !== 'none') {
         const plateauMs = Date.now() - sniffPlateauStartedAt;
         const toolCallsInPlateau = currentToolCalls - sniffPlateauStartingToolCalls;
         const writeCallsInPlateau = currentWriteCalls - sniffPlateauStartingWriteCalls;
         const turnStartsInPlateau = currentTurnStarts - sniffPlateauStartingTurnStarts;
-        const filesAddedInPlateau = currentFileCount - sniffPlateauStartingFileCount;
 
         // Pre-trigger direct-dispatch nudge. When the plateau is 80% of
         // the way to firing the fast-path retry-loop, pick the most-
@@ -2518,7 +2546,8 @@ export async function pollUntilDone(
           artifactHasScored,
           plateauMs,
           writeCallsInPlateau,
-          filesAddedInPlateau,
+          startingPathSignature: sniffPlateauStartingPathSignature,
+          currentPathSignature,
           windowMs: RETRY_LOOP_FAST_WINDOW_MS,
           writeThreshold: RETRY_LOOP_FAST_WRITE_THRESHOLD,
         });
@@ -2624,7 +2653,9 @@ export async function pollUntilDone(
                 : `artifact scored but stalled ${plateauMin}m despite ${toolCallsInPlateau} tool calls${
                     writeCounterHasEverMoved
                       ? ` (${writeCallsInPlateau} re-writes)`
-                      : ' (write counter blind for this provider — re-write count unknown)'
+                      : args.writeCounterTrustworthy
+                        ? ' (and wrote no files at all)'
+                        : ' (write counter blind for this provider — re-write count unknown)'
                   }`;
           const nudgeNote = retryLoopNudgeDelivered
             ? ' (retry-loop nudge was sent and ignored)'
@@ -2700,6 +2731,15 @@ export async function captureFinalState(args: {
   trialHome: string;
   runDir: string;
   log: (line: string) => void;
+  /**
+   * Scopes the incomplete-transcript warning. Capture runs the instant
+   * `successCheck` returns done, which is normally mid-turn on a PASS as
+   * much as a FAIL — so warning unconditionally fired on 100% of trials and
+   * became noise that would hide the case it exists for. The warning's only
+   * job is to stop a triager concluding "the model did nothing" from an
+   * empty transcript, and nobody triages a pass.
+   */
+  trialFailed?: boolean;
 }): Promise<void> {
   const { client, trialHome, runDir, log } = args;
 
@@ -2745,7 +2785,7 @@ export async function captureFinalState(args: {
     // they wrote remain on disk. Say so, or the transcript reads as "the
     // model did nothing".
     const gaps = incompleteTranscripts(persistedBySession, telemetry.sessions);
-    if (gaps.length > 0) {
+    if (gaps.length > 0 && args.trialFailed !== false) {
       const detail = gaps
         .map((g) => `${g.gezelId ?? g.id}: ${g.persisted} persisted vs ${g.recorded} recorded`)
         .join('; ');
@@ -3435,12 +3475,23 @@ export function buildReEngageNudge(args: {
     bytes: number;
     failReason?: string;
     repairFilePath?: string;
+    deliverableMissing?: boolean;
   } | null;
   downstream: boolean;
 }): { text: string; filePath: string | null } {
   const { sniff, downstream } = args;
   const filePath = recoveryFilePathForSniff(sniff);
-  const artifactExists = (sniff?.bytes ?? 0) > 0;
+  // `bytes` is the PRIMARY deliverable's size on a multi-deliverable
+  // scenario, so it can be large while the file this nudge NAMES does not
+  // exist. Getting this wrong is not a cosmetic mislabel: the branch below
+  // tells the model its file "EXISTS" and to "NOT recreate the file from
+  // scratch" — forbidding the one action the gate requires, and then the
+  // trial is failed for not taking it. craftbook-route-multi was told
+  // exactly that about a 0-byte out/press-release.md, ten minutes before
+  // it was failed for never writing out/press-release.md. Same class as
+  // the McKinley Park incident in ADR 0001: an instruction the roster
+  // cannot satisfy, delivered with full confidence.
+  const artifactExists = sniff?.deliverableMissing === true ? false : (sniff?.bytes ?? 0) > 0;
   const failure = sniff?.failReason?.replace(/\s+/g, ' ').trim().slice(0, 700);
 
   if (artifactExists) {
@@ -3586,6 +3637,37 @@ export function totalWorkspaceFileCount(
 }
 
 /**
+ * Stable signature of WHICH files exist across every project workspace.
+ *
+ * The FAST path needs "did the team produce anything new during this
+ * plateau", and a COUNT answers that badly. It can fall as well as rise —
+ * a deleted or renamed file, or a single transient `listProjectWorkspace`
+ * failure, which the fingerprint deliberately swallows per project rather
+ * than poisoning the whole poll. A negative delta then reads as "no
+ * growth" and the guard waves the kill through.
+ *
+ * Wild-caught on the qwen3.8-27b-q4 sweep of `craftbook-refactor-module`:
+ * `tasks/eval/baseline.md` was created at 16:28:00, inside a plateau
+ * running 16:24:43 to 16:33:04, and the FAST path fired anyway.
+ *
+ * A path-set signature has none of those failure modes. A stubborn
+ * rewriter re-emits the same paths, so its signature is stable and the
+ * path still fires; anything that adds, removes or renames a file changes
+ * it and suppresses. A listing failure also changes it, which fails SAFE —
+ * declining to kill on incomplete information is the right default for a
+ * terminator whose false positives book as model failures.
+ */
+export function workspacePathSignature(
+  workspace: Record<string, { pathsHash?: string; fileCount?: number }> | undefined,
+): string {
+  if (!workspace) return '';
+  return Object.keys(workspace)
+    .sort()
+    .map((id) => `${id}:${workspace[id]?.pathsHash ?? workspace[id]?.fileCount ?? '?'}`)
+    .join('|');
+}
+
+/**
  * FAST path — the stubborn rewriter: a scored artifact re-emitted without
  * improving.
  *
@@ -3610,16 +3692,20 @@ export function retryLoopFastPathTripped(input: {
   artifactHasScored: boolean;
   plateauMs: number;
   writeCallsInPlateau: number;
-  filesAddedInPlateau: number;
+  /** Workspace path signature when this plateau began. */
+  startingPathSignature: string;
+  /** Workspace path signature now. */
+  currentPathSignature: string;
   windowMs: number;
   writeThreshold: number;
 }): boolean {
   if (!input.artifactHasScored) return false;
   if (input.plateauMs < input.windowMs) return false;
   if (input.writeCallsInPlateau < input.writeThreshold) return false;
-  // New files appeared while the sniff held: that is a queue being worked,
-  // not one artifact being re-emitted.
-  return input.filesAddedInPlateau <= 0;
+  // The file SET moved while the sniff held: a queue being worked, not one
+  // artifact re-emitted. Only a stable path set is the stubborn-rewriter
+  // shape this path exists to catch.
+  return input.currentPathSignature === input.startingPathSignature;
 }
 
 export function retryLoopChatterTripped(args: {
@@ -3669,28 +3755,59 @@ export function retryLoopSniffKey(
 export function sniffArtifactHasScored(
   sniff:
     | (Pick<TrialFinalSniff, 'key' | 'score' | 'repairFilePath'> &
-        Partial<Pick<TrialFinalSniff, 'bytes'>>)
+        Partial<Pick<TrialFinalSniff, 'bytes' | 'deliverableMissing'>>)
     | null
     | undefined,
   scoredSniffKeys: ReadonlySet<string>,
 ): boolean {
   if (!sniff) return false;
-  // Some multi-deliverable gates report score=0 even after a substantial
-  // near-miss exists (for example a deck source/preview at the wrong binary
-  // path). Bytes are observable proof that the team has produced an artifact;
-  // exempting that state from every plateau guard lets active chatter run to
-  // the multi-hour ceiling.
-  if (sniff.score > 0 || scoredSniffKeys.has(sniff.key)) return true;
-  // ...but bytes alone only prove *something* was written, and on a
-  // multi-deliverable scenario that something is routinely a DIFFERENT
-  // file. The old code assumed "a true 'not written yet' sniff remains
-  // 0/0"; with four deliverables it reads 0/2728 because sources.md and
-  // outline.md exist while deck.md never has. That armed the 8-minute
-  // stubborn-rewriter path against an artifact nobody had written yet and
-  // failed six of fifteen powerpoint-deck trials whose models were still
-  // actively calling tools. With no repair target identified there is no
-  // scored artifact to be stubborn about, so bytes do not count.
-  return (sniff.bytes ?? 0) > 0 && !!sniff.repairFilePath;
+  // A driver that just looked and found nothing outranks the sticky set:
+  // that set exists so a transient 0-read cannot disarm a guard a real
+  // artifact armed, and this is not an inference from a re-read — it is
+  // the scenario reporting what it found. An emptied or never-written
+  // deliverable is not something a model can be stubbornly rewriting,
+  // whatever an earlier poll believed.
+  if (sniff.deliverableMissing) return false;
+  return sniffEvidencesArtifact(sniff) || scoredSniffKeys.has(sniff.key);
+}
+
+/**
+ * Does this sniff prove a deliverable EXISTS to be stubborn about?
+ *
+ * Every retry-loop path gates on this, so a false positive kills a trial
+ * that is still doing legitimate first-draft work, and reports it as
+ * "Artifact produced but never reached success" — a sentence that sends
+ * triage looking for a bad artifact that was never written.
+ *
+ * Two independent kinds of evidence, and NEITHER of the raw signals is
+ * sufficient on its own:
+ *
+ *   - A named repair target. The scenario has identified a specific file
+ *     it wants fixed, which is as direct as this gets.
+ *   - Bytes AND a non-zero score together. Bytes alone are not enough: on
+ *     a multi-deliverable scenario the written thing is routinely a
+ *     DIFFERENT file, which read as 0/2728 on powerpoint-deck (sources.md
+ *     and outline.md existed, deck.md never did) and failed six of
+ *     fifteen trials whose models were still actively calling tools.
+ *
+ * And score alone is not enough either, which is what this replaced. On a
+ * craftbook scenario `score` counts deterministic checks, and the early
+ * ones are PRECONDITIONS — seeded inputs read, task created from the
+ * right recipe — that clear long before any deliverable exists.
+ * craftbook-refactor-module sat at checks=7/30 with bytes=0 and no repair
+ * target and was killed by the 8-minute stubborn-rewriter path 28 minutes
+ * inside its own ceiling, while it was still reading its seeded inputs.
+ * Its three "re-writes" were the first drafts of files nothing had
+ * written before.
+ */
+function sniffEvidencesArtifact(
+  sniff: Pick<TrialFinalSniff, 'score' | 'repairFilePath'> &
+    Partial<Pick<TrialFinalSniff, 'bytes' | 'deliverableMissing'>>,
+): boolean {
+  // A driver that looked and found nothing outranks both inferences below.
+  if (sniff.deliverableMissing) return false;
+  if (sniff.repairFilePath) return true;
+  return sniff.score > 0 && (sniff.bytes ?? 0) > 0;
 }
 
 function retryLoopFailReasonKey(reason: string | undefined): string {

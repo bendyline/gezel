@@ -124,6 +124,29 @@ describe('ChatFeed', () => {
     expect(output).toContain('▎Builder: answer\n\nprompt area');
   });
 
+  it('caps wrapped events to physical terminal lines and keeps the newest tail', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[
+          row('old', 'note', `old output ${'that wraps '.repeat(12)}`),
+          row('focus', 'assistant', 'newest first line\nnewest second line', 'builder'),
+        ]}
+        gezels={gezels}
+        boring
+        focusedSessionId="focus"
+        visible={4}
+      />,
+      { columns: 24 },
+    );
+
+    // The feed itself stays inside four rows; its trailing newline is the
+    // intentional blank separator before the prompt area.
+    expect(output.endsWith('\n')).toBe(true);
+    expect(output.slice(0, -1).split('\n')).toHaveLength(4);
+    expect(output).not.toContain('old output');
+    expect(output).toContain('newest second line');
+  });
+
   it('renders terminal blocks without a speaker prefix and humanizes assistant tool markup', () => {
     const output = renderToString(
       <ChatFeed

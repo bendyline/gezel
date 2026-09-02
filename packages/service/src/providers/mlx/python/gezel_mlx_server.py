@@ -1807,26 +1807,24 @@ class BatchEngine:
     def _admit_count(self, pending: int) -> int:
         """How many of the `pending` co-arrived subs to start THIS wave.
 
-        Ground-truth backstop to the TS-side slot ceiling: even within a
-        memory-safe width, the coarse pre-spawn KV estimate can be wrong (KV
-        scales with a model's layer/head geometry, which the broker estimates
-        from weight bytes). So before co-batching concurrent prefills we check
-        LIVE allocation against the ceiling and collapse toward serial when
-        tight — one large prefill on an already-full device is what aborts
-        Metal. Returns `pending` unchanged when no ceiling is configured or
-        memory is roomy, so the common case is byte-identical to before."""
-        if pending <= 1 or _MEM_LIMIT_BYTES <= 0:
-            return pending
+        `self._max` is the hard concurrency contract advertised by the engine;
+        pending work beyond it must remain queued for the next static wave.
+        Within that width, live allocation is a second backstop to the TS-side
+        slot estimate: when the device is already tight, collapse the wave to
+        one request rather than risking a Metal abort."""
+        capped = min(pending, self._max)
+        if capped <= 1 or _MEM_LIMIT_BYTES <= 0:
+            return capped
         threshold = _MEM_LIMIT_BYTES * _MEM_ADMIT_FRACTION
         active = _safe_active_memory()
         if active <= 0:
-            return pending  # can't read usage → don't second-guess the width
+            return capped  # can't read usage → keep the configured hard cap
         if active >= threshold:
             # Already tight before this wave even starts — reclaim any freed
             # buffer cache and re-check once before forcing serial.
             _reclaim_mlx_buffer_cache("batch-admission", force=True)
             active = _safe_active_memory()
-        return 1 if active >= threshold else pending
+        return 1 if active >= threshold else capped
 
     async def _run(self):
         while True:
@@ -1858,14 +1856,16 @@ class BatchEngine:
                 batch = self._pending[:admit_n]
                 self._pending = self._pending[admit_n:]
                 if self._pending:
-                    # Deferred under memory pressure — the remaining subs run in
-                    # the next wave, after this one drains and frees its KV. The
-                    # outer loop re-enters admission once _subs empties (it never
-                    # blocks on _wake while _pending is non-empty).
+                    # Deferred by the configured concurrency ceiling or live
+                    # memory pressure. The remaining subs run in the next wave,
+                    # after this one drains and frees its KV. The outer loop
+                    # re-enters admission once _subs empties (it never blocks on
+                    # _wake while _pending is non-empty).
                     print(
-                        f"[batch] memory-throttled: admitting {len(batch)}, "
+                        f"[batch] admission-throttled: admitting {len(batch)}, "
                         f"deferring {len(self._pending)} to next wave "
-                        f"(active={_safe_active_memory() // (1024 * 1024)}MB, "
+                        f"(max_concurrency={self._max}, "
+                        f"active={_safe_active_memory() // (1024 * 1024)}MB, "
                         f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
                         flush=True,
                     )

@@ -52,6 +52,7 @@ import {
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  workspacePathSignature,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
 
@@ -1215,6 +1216,29 @@ describe('re-engage nudge state', () => {
     expect(nudge.text).toContain('write_file');
     expect(nudge.text).toContain('creating the actual deliverable');
   });
+
+  it('never claims a file EXISTS when the driver reported it missing', () => {
+    // The bytes belong to a SIBLING deliverable. Reading them as this
+    // file's size produced the worst nudge in the harness: it told
+    // craftbook-route-multi its out/press-release.md "EXISTS" and to
+    // "NOT recreate the file", ten minutes before the trial was failed
+    // for never writing out/press-release.md. An instruction the gate
+    // makes unsatisfiable — the McKinley Park shape from ADR 0001.
+    const nudge = buildReEngageNudge({
+      downstream: true,
+      sniff: {
+        key: 'craftbook-route-multi',
+        score: 9,
+        bytes: 2005,
+        deliverableMissing: true,
+        failReason: 'out/press-release.md is 0 bytes, need >= 600',
+      },
+    });
+
+    expect(nudge.text).not.toContain('Do NOT recreate');
+    expect(nudge.text).not.toContain('existing checked workspace file');
+    expect(nudge.text).toContain("deliverable hasn't landed");
+  });
 });
 
 describe('llamaCppEvalLaunchOverridesForModel', () => {
@@ -1824,6 +1848,74 @@ describe('sniffArtifactHasScored', () => {
       sniffArtifactHasScored({ key: 'schema-migration', score: 0 }, new Set(['bookstore'])),
     ).toBe(false);
   });
+
+  it('does not read a craftbook precondition score as a written artifact', () => {
+    // Regression, wild-caught on the 2026-08-30 count=1 sweep. On a
+    // craftbook scenario `score` is deterministic checks passed, and the
+    // early ones are PRECONDITIONS — seeded inputs read, task created from
+    // the right recipe — that clear before any deliverable exists.
+    // craftbook-refactor-module sat at 7/30 with bytes=0 and no repair
+    // target; score>0 armed the 8-minute stubborn-rewriter path and killed
+    // it 28 minutes inside its own 45-minute ceiling, while it was still
+    // reading its seeded inputs. The reason string then told triage an
+    // "Artifact produced but never reached success" — of a file nothing
+    // had ever written.
+    expect(
+      sniffArtifactHasScored(
+        { key: 'craftbook-refactor-module', score: 7, bytes: 0, repairFilePath: undefined },
+        new Set(),
+      ),
+    ).toBe(false);
+  });
+
+  it('still arms once a craftbook scenario has written something', () => {
+    expect(
+      sniffArtifactHasScored(
+        { key: 'craftbook-bug-fix-tdd', score: 16, bytes: 1578, repairFilePath: undefined },
+        new Set(),
+      ),
+    ).toBe(true);
+  });
+
+  it('stands down when the driver reports the repair target missing', () => {
+    // craftbook-route-multi: routed to the right recipe, reached 9/11, and
+    // the one file still wanted — out/press-release.md — was 0 bytes. The
+    // 2005 bytes belonged to the PRIMARY deliverable, a different file.
+    // Killed at 14m as a stubborn rewriter of something never written.
+    expect(
+      sniffArtifactHasScored(
+        {
+          key: 'craftbook-route-multi',
+          score: 9,
+          bytes: 2005,
+          repairFilePath: 'out/press-release.md',
+          deliverableMissing: true,
+        },
+        new Set(),
+      ),
+    ).toBe(false);
+  });
+
+  it('lets a reported-missing deliverable overrule a sticky earlier score', () => {
+    expect(
+      sniffArtifactHasScored(
+        { key: 'craftbook-route-multi', score: 9, bytes: 2005, deliverableMissing: true },
+        new Set(['craftbook-route-multi']),
+      ),
+    ).toBe(false);
+  });
+
+  it('arms on a named repair target even before the file has bytes', () => {
+    // The scenario has pointed at a specific file to fix, which is the
+    // strongest evidence there is; a 0-byte read of it is the near-miss
+    // state the repair ladder exists for.
+    expect(
+      sniffArtifactHasScored(
+        { key: 'craftbook-author-linear', score: 4, bytes: 0, repairFilePath: 'out/report.md' },
+        new Set(),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('shouldDeferRetryLoopForRecentEscalation', () => {
@@ -1944,7 +2036,8 @@ describe('retryLoopFastPathTripped', () => {
     artifactHasScored: true,
     plateauMs: 9 * 60_000,
     writeCallsInPlateau: 4,
-    filesAddedInPlateau: 0,
+    startingPathSignature: 'p:aaa',
+    currentPathSignature: 'p:aaa',
     windowMs: 8 * 60_000,
     writeThreshold: 3,
   };
@@ -1954,22 +2047,23 @@ describe('retryLoopFastPathTripped', () => {
   });
 
   /**
-   * The qwen3.8-27b-q4 re-baseline of craftbook-invoice-run was killed at 8m
-   * on "4 re-writes ... without sniff movement". The four writes were four
-   * DISTINCT paths — invoices/2026-042.html, invoices/2026-043.html,
-   * tasks/eval/scope.md, tasks/eval/billables.json. Nothing was rewritten
-   * once, and two of the three required invoices were produced inside the
-   * window being judged as a loop. `writeCalls` is a bare sum with no path
-   * in it, so "wrote 4 times" and "re-emitted the same file 4 times" were
-   * indistinguishable.
+   * craftbook-invoice-run was killed at 8m on "4 re-writes" that were four
+   * DISTINCT paths — two invoices produced inside the very window judged as
+   * a loop. A moving file SET is a queue being worked.
    */
-  it('does not fire while new files are still appearing', () => {
-    expect(retryLoopFastPathTripped({ ...base, filesAddedInPlateau: 2 })).toBe(false);
+  it('does not fire while the file set is still moving', () => {
+    expect(retryLoopFastPathTripped({ ...base, currentPathSignature: 'p:bbb' })).toBe(false);
   });
 
-  it('fires again once production stops even though earlier files landed', () => {
-    // Same plateau, later: the team added nothing new and kept writing.
-    expect(retryLoopFastPathTripped({ ...base, filesAddedInPlateau: 0 })).toBe(true);
+  /**
+   * The first version of this guard compared a COUNT, which can fall as well
+   * as rise — a deleted file or one swallowed listing failure makes the delta
+   * negative, and `<= 0` then waved the kill through. craftbook-refactor-module
+   * created tasks/eval/baseline.md at 16:28:00 inside a 16:24:43-16:33:04
+   * plateau and was killed anyway. A signature has no such direction.
+   */
+  it('fails safe when the workspace listing degrades', () => {
+    expect(retryLoopFastPathTripped({ ...base, currentPathSignature: '' })).toBe(false);
   });
 
   it.each([
@@ -1978,6 +2072,22 @@ describe('retryLoopFastPathTripped', () => {
     ['writes are below the threshold', { writeCallsInPlateau: 2 }],
   ])('does not fire when %s', (_label, over) => {
     expect(retryLoopFastPathTripped({ ...base, ...over })).toBe(false);
+  });
+});
+
+describe('workspacePathSignature', () => {
+  it('changes when a path is added, and not when only content changes', () => {
+    const before = workspacePathSignature({ a: { pathsHash: 'h1' } });
+    expect(workspacePathSignature({ a: { pathsHash: 'h1' } })).toBe(before);
+    expect(workspacePathSignature({ a: { pathsHash: 'h2' } })).not.toBe(before);
+  });
+
+  it('is order-independent across projects and tolerates a missing hash', () => {
+    expect(workspacePathSignature({ a: { pathsHash: 'x' }, b: { pathsHash: 'y' } })).toBe(
+      workspacePathSignature({ b: { pathsHash: 'y' }, a: { pathsHash: 'x' } }),
+    );
+    expect(workspacePathSignature({ a: { fileCount: 3 } })).toContain('3');
+    expect(workspacePathSignature(undefined)).toBe('');
   });
 });
 
@@ -2037,5 +2147,68 @@ describe('incompleteTranscripts', () => {
 
   it('treats an unknown session as having recorded nothing', () => {
     expect(incompleteTranscripts([{ id: 'z', toolCallsPersisted: 0 }], [])).toEqual([]);
+  });
+});
+
+describe('incomplete-transcript warning scope', () => {
+  /**
+   * The warning fired on 100% of trials in the first sweep — 2 of 2 within
+   * four minutes, both PASSES. Capture runs the instant successCheck returns
+   * done, which is mid-turn on a pass as much as a failure, so an
+   * unconditional warning is noise that would hide the one case it exists
+   * for. Its only job is to stop a triager concluding "the model did
+   * nothing" from an empty transcript, and nobody triages a pass.
+   *
+   * `trialFailed !== false` is deliberate: an undefined verdict (a caller
+   * that does not pass one) still warns, because silence is the worse
+   * failure mode for a diagnostic.
+   */
+  const shouldWarn = (trialFailed?: boolean) => trialFailed !== false;
+
+  it('warns on a failed trial', () => {
+    expect(shouldWarn(true)).toBe(true);
+  });
+
+  it('stays quiet on a pass', () => {
+    expect(shouldWarn(false)).toBe(false);
+  });
+
+  it('warns when the verdict is unknown, because silence is worse', () => {
+    expect(shouldWarn(undefined)).toBe(true);
+  });
+});
+
+describe('stall-path write-counter wording', () => {
+  /**
+   * The hunt replaced a phantom "(0 re-writes)" with "(write counter blind
+   * for this provider)" whenever the counter never moved. That conflated two
+   * different situations, and the second one buries the finding:
+   *
+   *   - a CLI-wrapper provider, where fileMutations is structurally 0 because
+   *     the model uses its own built-in editors — genuinely blind
+   *   - a LOCAL engine, where mutations route through gezel-mcp and the
+   *     counter works — so zero means the model wrote nothing
+   *
+   * A qwen3.8-27b-q4 trial of craftbook-author-gate-script made 25 tool calls
+   * with 0 file mutations and produced no deliverable. "Blind for this
+   * provider" told triage to discount the very number that was the result.
+   */
+  const wording = (moved: boolean, trustworthy?: boolean) =>
+    moved ? 're-writes' : trustworthy ? 'wrote no files at all' : 'blind';
+
+  it('reports a real zero as a real zero on a local engine', () => {
+    expect(wording(false, true)).toBe('wrote no files at all');
+  });
+
+  it('still says blind where the counter genuinely cannot see writes', () => {
+    expect(wording(false, false)).toBe('blind');
+  });
+
+  it('defaults to blind when trustworthiness is unknown', () => {
+    expect(wording(false, undefined)).toBe('blind');
+  });
+
+  it('reports the count when the counter moved', () => {
+    expect(wording(true, true)).toBe('re-writes');
   });
 });

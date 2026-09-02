@@ -1138,7 +1138,57 @@ function failureReferencesPath(failure: string, path: string): boolean {
   return failureMentionsPath(failure, path) || failure.includes(path);
 }
 
-function repairDeliverableForFailures(
+/**
+ * Is this repair target actually the subject of an outstanding failure?
+ *
+ * `repairDeliverableForFailures` ends in `?? deliverables[0]`, so when no
+ * failure names any deliverable — the remaining gate is a directory glob,
+ * a count, or an executable check — the repair target silently becomes the
+ * FIRST deliverable, which by then is usually one that already passes.
+ * Feeding that to the stale-no-write watchdog inverts its meaning: a
+ * finished file is supposed to stop changing.
+ *
+ * Wild-caught on craftbook-invoice-run. It reached 7/8 with report.md
+ * complete and one gate left — "found 0 html file(s) in invoices/, need
+ * >= 3", which names a directory and no deliverable. Five minutes later
+ * the trial was failed for report.md "having unchanged content", 24
+ * minutes inside its ceiling, while the model was working on the invoices
+ * the gate had asked for.
+ */
+export function staleNoWriteTargetIsFailing(
+  failures: readonly string[],
+  deliverablePath: string,
+): boolean {
+  return failures.some((failure) => failureReferencesPath(failure, deliverablePath));
+}
+
+/**
+ * Pick the deliverable the current failures are about, or nothing.
+ *
+ * This used to end in `?? deliverables[0]`, which is wrong whenever the
+ * remaining gate is about something that is not a deliverable at all — an
+ * unchanged-fixture check, a directory glob, a count, an executable
+ * assertion. The blind fallback then named a file that was very often
+ * PASSING, and two consumers acted on it:
+ *
+ *   - the repair feedback told the model to edit that file in place and
+ *     "do NOT recreate" it;
+ *   - the stale-no-write watchdog waited for that file to change and
+ *     failed the trial when it did not.
+ *
+ * Both wild-caught in one sweep. craftbook-code-review modified
+ * `src/payment.js` — a fixture a REVIEW must not touch, so a real and
+ * well-caught failure — and then spent eleven minutes being told to fix
+ * `reviews/rev-eval-1/report.md`, which was passing, before being killed
+ * for stubbornly rewriting it. craftbook-invoice-run reached 7/8 with one
+ * directory-glob gate outstanding and was failed for `report.md` "having
+ * unchanged content", which is what a finished file is supposed to do.
+ *
+ * With no deliverable named, the honest answer is that there is no
+ * deliverable repair target. The feedback still carries the real failure
+ * text; it just stops attributing it to the wrong file.
+ */
+export function repairDeliverableForFailures(
   spec: CraftbookEvalSpec,
   failures: readonly string[],
 ): CraftbookEvalDeliverable | undefined {
@@ -1146,7 +1196,13 @@ function repairDeliverableForFailures(
   return (
     deliverables.find((deliverable) =>
       failures.some((failure) => failureMentionsPath(failure, deliverable.path)),
-    ) ?? deliverables[0]
+    ) ??
+    // Looser second pass: `failureReferencesPath` also accepts a bare
+    // substring, which catches a checker that prints the path without the
+    // surrounding grammar `failureMentionsPath` looks for.
+    deliverables.find((deliverable) =>
+      failures.some((failure) => failureReferencesPath(failure, deliverable.path)),
+    )
   );
 }
 
@@ -1880,6 +1936,19 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           : repairDeliverable
             ? await readDeliverable(workspace, repairDeliverable)
             : null;
+      // Refine the sniff now that the repair target has been read. Only
+      // `deliverableMissing` is added, deliberately: it is absent from
+      // `retryLoopSniffKey`, so this cannot churn the plateau the way a
+      // late-arriving `repairFilePath` would.
+      if (repairDeliverable) {
+        ctx.recordSniff?.({
+          key: spec.scenarioId,
+          score: passed,
+          bytes: sniffBytes,
+          failReason: repairFailures[0],
+          deliverableMissing: repairText === null || repairText.length === 0,
+        });
+      }
       if (repairDeliverable) {
         if (repairText === null) {
           noWriteRepairState = null;
@@ -1922,7 +1991,11 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             : null,
         },
       );
-      if (repairDeliverable && repairText !== null) {
+      if (
+        repairDeliverable &&
+        repairText !== null &&
+        staleNoWriteTargetIsFailing(failures, repairDeliverable.path)
+      ) {
         const key = noWriteRepairKey({
           projectId,
           filePath: repairDeliverable.path,
@@ -1961,7 +2034,13 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             const stabilityDetail =
               noWriteRepairState.rewriteCount > 0
                 ? `was rewritten ${noWriteRepairState.rewriteCount} time(s) but kept failing the same gate for ${ageSeconds}s`
-                : `stayed unchanged at ${repairText.length} bytes for ${ageSeconds}s`;
+                : // NOT "no write happened": this branch only knows the DIGEST never
+                  // moved. A model that re-emits byte-identical content lands here too,
+                  // and "stayed unchanged" reads as an idle team — sending triage to ask
+                  // why it stopped writing instead of why its rewrite changes nothing.
+                  // Wild-caught on codemod-sweep, where sites.md was rewritten at 3036
+                  // bytes inside the window the message called unchanged.
+                  `had unchanged content (${repairText.length} bytes) for ${ageSeconds}s — a re-emission of identical bytes counts as unchanged here`;
             return {
               done: true,
               success: false,
@@ -1969,7 +2048,12 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
               reason:
                 `${spec.scenarioId} stale no-write repair loop: ${repairDeliverable.path} ` +
                 `${stabilityDetail} after repair feedback ` +
-                `and newer chat activity; still failing ${passed}/${checks.length}: ${repairFeedbackFailures[0] ?? repairFailures[0]}`,
+                // `passed` is derived from checkCount (gate checks PLUS history,
+                // unchangedFixtures and the taskNotes/taskGraph requirements), so
+                // pairing it with the raw `checks.length` prints impossible scores
+                // — a real trial reported "still failing 22/12". A failure reason
+                // is the first thing a triager reads; it may not lie about arithmetic.
+                `and newer chat activity; still failing ${passed}/${checkCount}: ${repairFeedbackFailures[0] ?? repairFailures[0]}`,
             };
           }
         }

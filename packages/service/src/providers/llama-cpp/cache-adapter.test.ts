@@ -229,6 +229,33 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     expect(calls.find((c) => c.url.includes('action='))).toBeUndefined();
   });
 
+  it('authenticates slot save/restore, not just the usage poll', async () => {
+    // `/slots` is authenticated upstream — only `/health` answers without the
+    // key. The usage poll's auth was covered; save/restore was not, and that
+    // is the half that carries disk KV persistence. Shipped unauthenticated
+    // because the production construction site in ChatManager omitted
+    // `resolveAuthToken`: every save/restore 401'd and degraded quietly to
+    // `disk save: MISSED`, so the only symptom was cold prefills.
+    const auths: Array<string | null> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      auths.push((init?.headers as Record<string, string> | undefined)?.Authorization ?? null);
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      resolveAuthToken: () => 'secret-bearer',
+      slotCount: 1,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await a.prepareForSend('alpha');
+    await a.prepareForSend('beta'); // forces a save of alpha, then a restore attempt
+
+    expect(auths.length).toBeGreaterThan(0);
+    expect(auths.every((h) => h === 'Bearer secret-bearer')).toBe(true);
+  });
+
   it('saves the LRU victim slot before recycling on overflow', async () => {
     const { calls, fetchImpl } = makeFetchSpy();
     const a = new LlamaCppCacheAdapter({

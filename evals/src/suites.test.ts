@@ -45,22 +45,22 @@ const DEVELOPER_SCENARIO_IDS = [
   'interface-contract',
   'craftbook-code-review',
   'craftbook-api-contract-review',
-  'craftbook-codemod-sweep',
-  'large-pr-review',
-  'craftbook-bug-fix-tdd',
   'craftbook-deep-security-review',
+  'large-pr-review',
+  'craftbook-codemod-sweep',
+  'craftbook-bug-fix-tdd',
   'craftbook-refactor-module',
 ] as const;
 
 const COMPLEX_WORK_SCENARIO_IDS = [
   'craftbook-find-vs-create',
-  'craftbook-route-multi',
-  'craftbook-invoice-run',
-  'craftbook-author-params',
-  'craftbook-export-generalize',
   'craftbook-author-linear',
-  'craftbook-author-gate-script',
   'craftbook-edit-midtask',
+  'craftbook-invoice-run',
+  'craftbook-route-multi',
+  'craftbook-export-generalize',
+  'craftbook-author-params',
+  'craftbook-author-gate-script',
   'craftbook-author-fanout',
 ] as const;
 
@@ -101,9 +101,42 @@ const CEILINGED_SUITE_IDS = [
   'complex-work-smoke',
 ] as const;
 
-/** Per-scenario and whole-suite worst-case ceilings for new suites. */
-const MAX_SUITE_SCENARIO_MS = 45 * 60_000;
-const MAX_SUITE_TOTAL_MS = 6.5 * 60 * 60_000;
+/**
+ * Per-scenario and whole-suite AUTHORED budgets for the new suites.
+ *
+ * These were 45m and 6.5h, chosen before a single local trial had run, from
+ * frontier p95 durations as the plan prescribed. That turned out to
+ * calibrate the suites for the wrong population. Claude clears these members
+ * in 3-8 minutes; the 27B/31B local class needs 5-15x that, and the
+ * 2026-09-01 count=1 sweep found:
+ *
+ *   - **5 of 6 passes exceeded their authored ceiling** (1.18x-1.77x). Not
+ *     one hard pass landed inside its budget; every one needed
+ *     `hardCeilingCapMs` doubling it.
+ *   - **7 of 14 failures were the clock**, all at exactly 2x the scaled
+ *     ceiling, four still recording hard progress within two minutes of the
+ *     kill and two within twenty seconds.
+ *   - `developer` consequently ranked `gemma4-31b-q4` two members below
+ *     `qwen3.8-27b-q4` on a decomposition showing ONE genuine failure each
+ *     — a ranking produced by wall-clock, which is exactly what
+ *     docs/eval-strategy.md forbids.
+ *
+ * Ceilings are now set per member from the **max observed pass across every
+ * measured model, plus headroom**; members no model has yet completed get a
+ * deliberately generous value and are re-measured. Not from one model's leg:
+ * the wall-clock gap is per-(model, member) and swings both ways — gemma is
+ * 1.8x faster than qwen on route-multi and 4x slower on invoice-run — so
+ * there is no single slowest model to calibrate against.
+ *
+ * The 2x `hardCeilingCapMs` extension is deliberately KEPT. It only fires
+ * for a trial still making hard progress, which is the case worth rescuing;
+ * the defect was never that the rescue existed, it was that base ceilings
+ * were so low the rescue became load-bearing for ordinary passes. So the
+ * real worst case remains 2x these numbers, and whoever plans a sweep
+ * budgets from the note on `SCORECARD_SUITES` in bin/scorecard.ts.
+ */
+const MAX_SUITE_SCENARIO_MS = 120 * 60_000;
+const MAX_SUITE_TOTAL_MS = 11 * 60 * 60_000;
 
 describe('eval suites', () => {
   it('every suite scenario id resolves in the main registry', () => {

@@ -133,11 +133,11 @@ gap: a frontier cloud model should pass most of each, the best local model aroun
 for a scorecard whose top half had saturated, never as a regression.
 
 ```bash
-# Pulse checks first — one member per gate kind, ~1h40m each.
+# Pulse checks first — one member per gate kind. ~2h35m and ~1h55m.
 pnpm eval:all --suite developer-smoke --count 1 --model qwen3.8-27b-q4
 pnpm eval:all --suite complex-work-smoke --count 1 --model qwen3.8-27b-q4
 
-# The full suites. Budget 5h40m each at --count 1.
+# The full suites. Budget 9h15m and 10h50m at --count 1.
 pnpm eval:all --suite developer --count 3 --model qwen3.8-27b-q4
 pnpm eval:all --suite complex-work --count 3 --model qwen3.8-27b-q4
 ```
@@ -153,9 +153,17 @@ that keeps making tool calls without converging looks like progress every ten mi
 and runs to the cap. Wild-caught on the inaugural frontier run, where
 `craftbook-author-gate-script` sailed past its 45-minute ceiling still grinding.
 
-So the honest planning number for these two suites is **up to 11h20m each at
-`--count 1`**, not the 5h40m of authored ceilings. `eval:scorecard --list` sums the
-authored ceilings and is therefore also a 2x understatement in the worst case.
+So the honest planning number is **up to 18h30m and 21h40m at `--count 1`**, not the
+9h15m and 10h50m of authored ceilings. `eval:scorecard --list` sums the authored
+ceilings and is therefore also a 2x understatement in the worst case.
+
+Those authored ceilings were **raised sharply on 2026-09-01** after the first real local
+sweep. They had been set from frontier p95 durations, which calibrated the suites for the
+wrong population: 5 of 6 passes exceeded their ceiling, 7 of 14 failures were the clock
+rather than the model, and `developer` ranked two local models two members apart on a
+decomposition showing one genuine failure each. Ceilings now come from the **max observed
+pass across every measured model, plus headroom** — not from one model's leg, because the
+wall-clock gap is per-(model, member) and swings both ways.
 
 **Probe before committing a model to a full run.** A model far below the floor books
 six hours of zeros. Run the smoke subset at `--count 1` first and skip the full suite

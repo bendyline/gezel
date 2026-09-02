@@ -47,6 +47,8 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   chooseOutsideInSource: outsideInMocks.chooseOutsideInSource,
   createDocumentLinkProvider: () => async () => [],
   createDocumentsContentContainer: () => outsideInMocks.documentContainer,
+  createVersionCompatibleContentContainer: (container: unknown) => container,
+  documentVersionBasename: (path: string) => path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''),
   importOutsideInDocument: outsideInMocks.importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled: (content: string) => content.includes('editable: true'),
   relativePath: () => '../_squisq/squisq-player.js',

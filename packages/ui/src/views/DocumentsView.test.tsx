@@ -411,6 +411,53 @@ describe('DocumentsView', () => {
     });
   });
 
+  it('renames a Markdown companion before moving its visible document', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        ...FAKE_ENTRIES,
+        { path: 'mission_files', name: 'mission_files', isDirectory: true },
+        { path: 'mission_files/hero.png', name: 'hero.png', isDirectory: false },
+      ],
+    } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByTestId('rename-mission.md'));
+    const user = userEvent.setup();
+    const nameInput = await screen.findByRole('textbox', { name: 'Name' });
+    await user.clear(nameInput);
+    await user.type(nameInput, 'brief');
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => expect(api.renameDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.renameDocument).mock.calls.slice(0, 2)).toEqual([
+      ['mission_files', 'brief_files'],
+      ['mission.md', 'brief.md'],
+    ]);
+  });
+
+  it('deletes a Markdown companion with its visible document', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        ...FAKE_ENTRIES,
+        { path: 'mission_files', name: 'mission_files', isDirectory: true },
+        { path: 'mission_files/hero.png', name: 'hero.png', isDirectory: false },
+      ],
+    } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByTestId('delete-mission.md'));
+    await screen.findByTestId('confirm-dialog');
+    fireEvent.click(screen.getByTestId('confirm'));
+
+    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.deleteDocument).mock.calls.slice(0, 2)).toEqual([
+      ['mission.md'],
+      ['mission_files'],
+    ]);
+  });
+
   it('cancelling the delete dialog does NOT call deleteDocument', async () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
     render(<DocumentsView />);

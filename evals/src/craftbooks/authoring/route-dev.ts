@@ -3,7 +3,6 @@ import { findProjectIdByName } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   authoredCraftbookSummaries,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
@@ -182,9 +181,10 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(JSON.stringify(tasks.map((task) => task.ref)), String(authored.length)) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(JSON.stringify(tasks.map((task) => task.ref)), String(authored.length)),
+    // No `deliverableMissing`: this is a SELECTION probe and it ends at task
+    // creation, so there is no workspace file to be missing. Its `bytes` is
+    // task metadata, which is the right progress proxy here.
     repairPath: 'craftbook selection (engineering)',
     repairDirective: [
       'CRAFTBOOK_SELECTION_REPAIR: this brief is covered by an existing recipe in the library.',

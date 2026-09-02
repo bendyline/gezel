@@ -12,6 +12,9 @@ import { NewPathDialog } from '../NewPathDialog.js';
 import {
   chooseOutsideInSource,
   importDroppedFiles,
+  isMarkdownDocumentPath,
+  markdownCompanionDirectory,
+  moveFileWithCompanion,
   resolveOutsideInLayout,
   withOutsideInMetadata,
 } from '../SquisqIntegration/index.js';
@@ -43,7 +46,13 @@ function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
 
 function renameSuffix(entry: FileEntry | null): string | undefined {
   if (!entry || entry.isDirectory) return undefined;
-  return !entry.name.includes('.') || /\.md$/i.test(entry.name) ? '.md' : undefined;
+  if (!entry.name.includes('.')) return '.md';
+  const markdown = entry.name.match(/\.(md|markdown|mdx)$/i);
+  return markdown ? `.${markdown[1]!.toLowerCase()}` : undefined;
+}
+
+function containsPath(entries: readonly FileEntry[], path: string): boolean {
+  return entries.some((entry) => entry.path === path || entry.path.startsWith(`${path}/`));
 }
 
 function autosaveLanesFor(source: FileBrowserSource, path: string): string[] {
@@ -129,9 +138,13 @@ export function useFileMutations(options: {
     if (!entry) return;
     try {
       await flushOpenDrafts(entry);
-      await source.remove(entry.path);
       const layout = entry.isDirectory ? null : resolveOutsideInLayout(entry.path);
-      if (layout) await source.remove(layout.companionDirectory);
+      const companionDirectory =
+        layout?.companionDirectory ??
+        (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
+      const hasCompanion = companionDirectory ? containsPath(entries, companionDirectory) : false;
+      await source.remove(entry.path);
+      if (companionDirectory && hasCompanion) await source.remove(companionDirectory);
       announce('deleted', entry.path);
       if (
         selectedPath &&
@@ -145,7 +158,16 @@ export function useFileMutations(options: {
     } finally {
       setDeleteTarget(null);
     }
-  }, [announce, deleteTarget, flushOpenDrafts, onSelectPath, refresh, selectedPath, source]);
+  }, [
+    announce,
+    deleteTarget,
+    entries,
+    flushOpenDrafts,
+    onSelectPath,
+    refresh,
+    selectedPath,
+    source,
+  ]);
 
   const confirmRename = useCallback(
     async (newName: string) => {
@@ -171,14 +193,32 @@ export function useFileMutations(options: {
         setRenameError(`Keep the .${oldLayout.format} extension when renaming this document.`);
         return;
       }
+      const oldCompanionDirectory =
+        oldLayout?.companionDirectory ??
+        (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
+      const nextCompanionDirectory =
+        nextLayout?.companionDirectory ??
+        (entry.isDirectory ? null : markdownCompanionDirectory(toPath));
       if (
-        oldLayout &&
-        nextLayout &&
+        !entry.isDirectory &&
+        isMarkdownDocumentPath(entry.path) &&
+        !isMarkdownDocumentPath(toPath)
+      ) {
+        setRenameError('Keep the Markdown extension when renaming this document.');
+        return;
+      }
+      if (
+        nextCompanionDirectory &&
         entries.some(
           (candidate) =>
             candidate.path === toPath ||
-            candidate.path === nextLayout.companionDirectory ||
-            candidate.path.startsWith(`${nextLayout.companionDirectory}/`),
+            ((candidate.path === nextCompanionDirectory ||
+              candidate.path.startsWith(`${nextCompanionDirectory}/`)) &&
+              !(
+                oldCompanionDirectory &&
+                (candidate.path === oldCompanionDirectory ||
+                  candidate.path.startsWith(`${oldCompanionDirectory}/`))
+              )),
         )
       ) {
         setRenameError('A document or companion folder with that name already exists.');
@@ -187,7 +227,17 @@ export function useFileMutations(options: {
 
       try {
         await flushOpenDrafts(entry);
-        await renameAt(entry.path, toPath);
+        const hasCompanion = oldCompanionDirectory
+          ? containsPath(entries, oldCompanionDirectory)
+          : false;
+        await moveFileWithCompanion(
+          renameAt,
+          entry.path,
+          toPath,
+          hasCompanion && oldCompanionDirectory && nextCompanionDirectory
+            ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
+            : null,
+        );
         // A rendered document's companion folder carries its editable markdown
         // and media; it has to travel with the rename, and the metadata inside
         // has to be relinked or the next open resolves the old directory.
@@ -196,13 +246,7 @@ export function useFileMutations(options: {
             .filter((candidate) => !candidate.isDirectory)
             .map((candidate) => candidate.path);
           const oldSourcePath = chooseOutsideInSource(oldLayout, filePaths);
-          const hasCompanion = entries.some(
-            (candidate) =>
-              candidate.path === oldLayout.companionDirectory ||
-              candidate.path.startsWith(`${oldLayout.companionDirectory}/`),
-          );
           if (hasCompanion) {
-            await renameAt(oldLayout.companionDirectory, nextLayout.companionDirectory);
             if (oldSourcePath) {
               let sourcePath = `${nextLayout.companionDirectory}${oldSourcePath.slice(oldLayout.companionDirectory.length)}`;
               if (

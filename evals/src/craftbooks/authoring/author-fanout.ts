@@ -4,12 +4,12 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   progressBytes,
   sendWorkerKickoff,
   taskReferencesCraftbook,
@@ -228,20 +228,21 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(
-        ...healthTexts,
-        book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
-        book?.craftbook.spawn ? JSON.stringify(book.craftbook.spawn) : null,
-      ) +
-      1000 * perStoreRuns +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
-    // A finished per-store run is a declared unit of work, not byte churn.
-    // It rides `milestones` (which the plateau key honours) as well as
-    // `bytes` (which it does not): the first hard-suite run completed three
-    // extra runs while the plateau key `…:2:targetnone:fr1tjwffw:rp0:rf0`
-    // never moved, and the stall path killed the trial as "stalled 18m".
+    bytes: progressBytes(
+      ...healthTexts,
+      book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
+      book?.craftbook.spawn ? JSON.stringify(book.craftbook.spawn) : null,
+    ),
+    // A finished per-store run is a declared unit of work, not byte churn,
+    // and it rides `milestones`, which the plateau key honours: the first
+    // hard-suite run completed three extra runs while the plateau key
+    // `…:2:targetnone:fr1tjwffw:rp0:rf0` never moved and the stall path
+    // killed the trial as "stalled 18m". It used to be added into `bytes`
+    // as well, which is now reserved for real content — the runner reads
+    // that field as evidence a deliverable EXISTS, and `healthTexts` above
+    // already grows as the runs write their files.
     milestones: perStoreRuns,
+    deliverableMissing: noDeliverableWritten(...healthTexts),
     repairPath: 'craftbook: store health sweep',
     repairDirective: [
       'CRAFTBOOK_FANOUT_REPAIR: this eval grades the craftbook document and the task graph, not a',
@@ -266,7 +267,7 @@ export const authorFanoutScenario: EvalScenario = {
   evidenceTexts: [AUTHOR_FANOUT_KICKOFF_MESSAGE, AUTHOR_FANOUT_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 120 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   setup,
   successCheck,

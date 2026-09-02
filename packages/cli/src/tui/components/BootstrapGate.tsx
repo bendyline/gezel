@@ -448,21 +448,25 @@ export function BootstrapGate(props: {
       ...(best
         ? [
             {
-              label: `Recommended workshop set — ${bootstrapChatModelLabel(best)} + ${screen.plan.accessories.length} helpers`,
-              hint: `${bestInstalled ? 'chat model already available · ' : ''}${
-                workshopDownloadBytes > 0
-                  ? formatDownloadSize(workshopDownloadBytes)
-                  : 'already available'
-              }${workshopHelperLabels ? ` · includes ${workshopHelperLabels}` : ''}`,
-              value: 'bundle',
-            },
-            {
-              label: `${bestInstalled ? 'Use' : 'Download'} ${bootstrapChatModelLabel(best)} only`,
+              label: `Recommended — ${bestInstalled ? 'Use' : 'Download'} ${bootstrapChatModelLabel(best)}`,
               hint: `recommended for this device · ${
                 bestInstalled ? 'already available' : formatDownloadSize(best.approxSizeBytes)
               }`,
               value: bestInstalled ? `installed:${best.id}` : `chat:${best.id}`,
             },
+            ...(screen.plan.accessories.length > 0
+              ? [
+                  {
+                    label: `Complete workshop set — ${bootstrapChatModelLabel(best)} + ${screen.plan.accessories.length} ${screen.plan.accessories.length === 1 ? 'helper' : 'helpers'}`,
+                    hint: `optional · ${bestInstalled ? 'chat model already available · ' : ''}${
+                      workshopDownloadBytes > 0
+                        ? formatDownloadSize(workshopDownloadBytes)
+                        : 'already available'
+                    }${workshopHelperLabels ? ` · includes ${workshopHelperLabels}` : ''}`,
+                    value: 'bundle',
+                  },
+                ]
+              : []),
           ]
         : []),
       ...screen.plan.installedChatModels

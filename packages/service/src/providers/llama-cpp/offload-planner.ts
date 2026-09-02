@@ -253,6 +253,13 @@ export interface KvReserveInput {
   slidingWindowPattern?: boolean[] | undefined;
   /** Trailing logical layers that share earlier K/V and own no cache tensors. */
   sharedKvLayers?: number | undefined;
+  /**
+   * `<arch>.num_loops` — a looped transformer runs the block stack this many
+   * times over shared weights, each pass keeping its OWN KV cache (llama.cpp
+   * unrolls them into `n_layer`). Multiplies every per-token KV quantity.
+   * Absent / 1 on ordinary models.
+   */
+  loopCount?: number | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -301,6 +308,7 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const loops = kvLoopMultiplier(input.loopCount);
   const perLayerHeads = input.headCountKvPerLayer;
   const pattern = input.slidingWindowPattern;
   if (
@@ -316,7 +324,7 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
       const heads = perLayerHeads?.[layer] ?? headCountKv ?? 0;
       elemsPerToken += heads * (pattern[layer] ? kDimSwa + vDimSwa : kDim + vDim);
     }
-    return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
+    return Math.round(elemsPerToken * ctxTokens * bytesPerElement * loops);
   }
   if (!headCountKv) return undefined;
   // Linear-attention hybrids: only the full-attention layers hold a cache
@@ -325,7 +333,7 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   // reference context — folding a fixed cost in there would inflate the
   // slope. The fixed part belongs to the linearization below.
   const scalingLayers = fullAttentionLayerCount(cacheLayerCount, input.fullAttentionInterval);
-  return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
+  return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement * loops);
 }
 
 /**
@@ -333,6 +341,20 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
  * minus `shared_kv_layers`: the trailing shared layers reuse the last K/V of
  * their attention type and do not allocate their own cache tensors.
  */
+/**
+ * KV multiplier for a looped transformer. Deliberately NOT folded into
+ * {@link cacheOwningLayerCount}: that count also bounds the per-layer loops
+ * that index `slidingWindowPattern` / `headCountKvPerLayer`, which are arrays
+ * of LOGICAL layers — multiplying it there would read off the end. The loops
+ * replay the same logical stack, so the honest place to apply the factor is
+ * the per-token total each estimator returns.
+ */
+function kvLoopMultiplier(loopCount: number | undefined): number {
+  return typeof loopCount === 'number' && Number.isFinite(loopCount) && loopCount > 1
+    ? Math.floor(loopCount)
+    : 1;
+}
+
 function cacheOwningLayerCount(blockCount: number, sharedKvLayers: number | undefined): number {
   const shared =
     typeof sharedKvLayers === 'number' && Number.isFinite(sharedKvLayers)
@@ -389,6 +411,13 @@ export interface WindowedKvInput {
   slidingWindowPattern?: boolean[] | undefined;
   /** Trailing logical layers that share earlier K/V and own no cache tensors. */
   sharedKvLayers?: number | undefined;
+  /**
+   * `<arch>.num_loops` — a looped transformer runs the block stack this many
+   * times over shared weights, each pass keeping its OWN KV cache (llama.cpp
+   * unrolls them into `n_layer`). Multiplies every per-token KV quantity.
+   * Absent / 1 on ordinary models.
+   */
+  loopCount?: number | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -502,11 +531,12 @@ export function estimateLinearHybridKvLinearization(
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const loops = kvLoopMultiplier(input.loopCount);
   const scalingLayers = fullAttentionLayerCount(blockCount, fullAttentionInterval);
   const linearLayers = blockCount - scalingLayers;
   return {
-    bytesPerToken: scalingLayers * headCountKv * (kDim + vDim) * bytesPerElement,
-    fixedBytes: Math.round(linearLayers * linearLayerStateBytes(input)),
+    bytesPerToken: scalingLayers * headCountKv * (kDim + vDim) * bytesPerElement * loops,
+    fixedBytes: Math.round(linearLayers * linearLayerStateBytes(input) * loops),
   };
 }
 
@@ -528,6 +558,7 @@ export function estimateWindowedKvLinearization(
   if (perLayerHeads && perLayerHeads.length !== blockCount) return undefined;
   if (!perLayerHeads && !input.headCountKv) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const loops = kvLoopMultiplier(input.loopCount);
   const cacheLayerCount = cacheOwningLayerCount(blockCount, input.sharedKvLayers);
   let globalElemsPerToken = 0;
   let swaElemsPerToken = 0;
@@ -538,9 +569,9 @@ export function estimateWindowedKvLinearization(
     else globalElemsPerToken += heads * (kDim + vDim);
   }
   return {
-    bytesPerToken: globalElemsPerToken * bytesPerElement,
+    bytesPerToken: globalElemsPerToken * bytesPerElement * loops,
     fixedBytes: Math.round(
-      swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS),
+      swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS) * loops,
     ),
   };
 }

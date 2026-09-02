@@ -108,9 +108,23 @@ export class DocumentsStore {
    * complete listing).
    */
   async listDocumentsRecursiveDetailed(
-    opts: { withStats?: boolean; includeHidden?: boolean } = {},
+    opts: { withStats?: boolean; includeHidden?: boolean; subpath?: string } = {},
   ): Promise<WalkDirResult> {
-    return walkDirDetailed(this.documentsDir(), opts);
+    const root = this.documentsDir();
+    const subpath = (opts.subpath ?? '')
+      .replace(/\\/g, '/')
+      .replace(/^\.?\/+/, '')
+      .replace(/\/+$/, '');
+    const base = subpath === '' ? root : safeJoin(root, subpath);
+    if (base === null) return { entries: [], truncated: false };
+    const walked = await walkDirDetailed(base, opts);
+    if (subpath === '') return walked;
+    return {
+      ...walked,
+      // Keep paths library-root-relative so callers can feed them directly
+      // back to read/write APIs even though the walk began inside a subtree.
+      entries: walked.entries.map((entry) => ({ ...entry, path: `${subpath}/${entry.path}` })),
+    };
   }
 
   async readDocument(filePath: string): Promise<string | null> {

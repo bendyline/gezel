@@ -5,6 +5,8 @@ import {
   craftbookScenarioFromSpec,
   evaluateHistoryExpectations,
   prioritizeRepairFailures,
+  repairDeliverableForFailures,
+  staleNoWriteTargetIsFailing,
 } from './scenario.ts';
 import type { CraftbookEvalSpec } from './types.ts';
 
@@ -1924,11 +1926,16 @@ ${'Detailed supporting analysis.\n'.repeat(22)}`;
 
     try {
       await expect(scenario.successCheck(ctx)).resolves.toEqual({ done: false });
+      // The LAST call is the refinement made once the repair target has
+      // been read: press-release.md exists at 22 bytes and merely misses
+      // its floor, so the retry-loop guard stays armed. A target that read
+      // as absent or empty would report true here and stand the guard down.
       expect(recordSniff).toHaveBeenLastCalledWith({
         key: 'craftbook-sample-book',
         score: 0,
         bytes: content.length,
         failReason: expect.stringContaining('press-release.md'),
+        deliverableMissing: false,
       });
       expect(client.messageGezel).toHaveBeenCalledTimes(1);
 
@@ -2169,5 +2176,89 @@ describe('craftbook runtime history expectations', () => {
         },
       ]),
     ).resolves.toEqual(['history tool.gated matched 1; expected at most 0']);
+  });
+});
+
+describe('staleNoWriteTargetIsFailing', () => {
+  it('does not arm the stale watchdog against an already-passing deliverable', () => {
+    // craftbook-invoice-run at 7/8: report.md complete, and the only
+    // outstanding gate names a DIRECTORY, so no failure mentions any
+    // deliverable and the repair target fell back to deliverables[0].
+    // report.md not changing is the correct state for a finished file.
+    expect(
+      staleNoWriteTargetIsFailing(
+        [
+          'found 0 html file(s) in invoices/, need >= 3 — create the missing html file(s) under invoices/.',
+        ],
+        'report.md',
+      ),
+    ).toBe(false);
+  });
+
+  it('still arms when the failure names the target', () => {
+    // codemod-sweep, the case the watchdog was built for: the failing
+    // gate is about the very file that stopped changing.
+    expect(
+      staleNoWriteTargetIsFailing(
+        ['tasks/eval/sites.md is missing required content: the new name'],
+        'tasks/eval/sites.md',
+      ),
+    ).toBe(true);
+  });
+
+  it('arms on a bare path mention as well as a structured reference', () => {
+    expect(
+      staleNoWriteTargetIsFailing(['out/report.md is 0 bytes, need >= 80'], 'out/report.md'),
+    ).toBe(true);
+  });
+
+  it('is false with no failures at all', () => {
+    expect(staleNoWriteTargetIsFailing([], 'report.md')).toBe(false);
+  });
+});
+
+describe('repairDeliverableForFailures', () => {
+  const spec = {
+    success: {
+      deliverables: [
+        { path: 'reviews/rev-eval-1/report.md' },
+        { path: 'reviews/rev-eval-1/findings.json' },
+      ],
+    },
+  } as unknown as CraftbookEvalSpec;
+
+  it('returns nothing when no failure is about a deliverable', () => {
+    // craftbook-code-review's last outstanding gate. `src/payment.js` is a
+    // FIXTURE a review must not modify — a real failure, well caught — and
+    // it is not a deliverable. The old `?? deliverables[0]` answered
+    // report.md, which was passing, and the model spent eleven minutes
+    // being told to edit it before being killed for rewriting it.
+    expect(
+      repairDeliverableForFailures(spec, [
+        'unchanged fixture src/payment.js differs from its seeded content',
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('returns nothing for a directory-glob gate either', () => {
+    // craftbook-invoice-run at 7/8.
+    expect(
+      repairDeliverableForFailures(spec, ['found 0 html file(s) in invoices/, need >= 3']),
+    ).toBeUndefined();
+  });
+
+  it('still picks the deliverable a failure names', () => {
+    expect(
+      repairDeliverableForFailures(spec, [
+        'reviews/rev-eval-1/findings.json is 0 bytes, need >= 400',
+      ])?.path,
+    ).toBe('reviews/rev-eval-1/findings.json');
+  });
+
+  it('falls back to a bare substring mention', () => {
+    expect(
+      repairDeliverableForFailures(spec, ['could not parse reviews/rev-eval-1/findings.json'])
+        ?.path,
+    ).toBe('reviews/rev-eval-1/findings.json');
   });
 });
