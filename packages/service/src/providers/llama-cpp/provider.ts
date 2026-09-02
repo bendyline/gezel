@@ -133,6 +133,7 @@ import { buildTurnUsage } from '../usage-builder.js';
 import type { LlamaCppLogFile } from './log.js';
 import { type StartupPhase, classifyStartupLine } from './stdout-parser.js';
 import {
+  isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,
   normalizeJsonSchemaForLlamaCpp,
   simplifyJsonSchemaForLlamaCpp,
@@ -517,6 +518,7 @@ function withWireMessages(body: Record<string, unknown>): Record<string, unknown
 }
 
 export {
+  isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,
   normalizeJsonSchemaForLlamaCpp,
   simplifyJsonSchemaForLlamaCpp,
@@ -2174,6 +2176,30 @@ export class LlamaCppProvider implements LLMProvider {
   }
 
   /**
+   * Set once the engine has rejected a forced tool call for this model, so
+   * every later constrained turn — in this session and every sibling on the
+   * same engine — advertises tools without `tool_choice: "required"` rather
+   * than replaying a rejection the payload cannot fix.
+   *
+   * Engine-scoped and monotonic for the same reason as
+   * {@link toolGrammarFloor}: the incompatibility is a property of the model
+   * plus the server build, not of one turn's tools, so re-probing per turn
+   * would burn a request each time a rescue fires — and rescues fire exactly
+   * when the turn is already in trouble.
+   */
+  private forcedToolChoiceUnsupported = false;
+
+  /** Record that this engine rejected `tool_choice: "required"`. */
+  noteForcedToolChoiceUnsupported(): void {
+    this.forcedToolChoiceUnsupported = true;
+  }
+
+  /** Whether a constrained turn may ask the engine to force a tool call. */
+  get supportsForcedToolChoice(): boolean {
+    return !this.forcedToolChoiceUnsupported;
+  }
+
+  /**
    * Batch capability — llama-server serves `--parallel N` concurrent KV
    * slots, so when batched inference is enabled `maxConcurrency` is that
    * slot count; otherwise 1 (we don't opt into co-batching). See
@@ -2753,6 +2779,22 @@ const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
 class LlamaCppSession extends StreamingSessionBase implements LLMSession {
   private readonly messages: ChatMessage[];
+  /**
+   * Ask the engine to force a tool call on this constrained turn, unless it
+   * has already told us it cannot build the eager grammar that requires
+   * (`isLlamaCppForcedToolChoiceError`). Every constrained/rescue path goes
+   * through here rather than assigning `tool_choice` directly, so a model
+   * that rejects the forced shape degrades to an ordinary tool-advertising
+   * turn — the model may still call the tool, it just is not compelled to —
+   * instead of 400ing the very rescue meant to save the turn.
+   */
+  private forceToolChoice(body: Record<string, unknown>): void {
+    if (this.deps.provider.supportsForcedToolChoice) {
+      body.tool_choice = 'required';
+      return;
+    }
+    delete body.tool_choice;
+  }
   private flattenToolMessagesForStrictAlternation = false;
   private compactWriteTranscript = false;
   /**
@@ -3750,7 +3792,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           }
           body.temperature = 0.2;
           body.top_p = 0.8;
-          body.tool_choice = 'required';
+          this.forceToolChoice(body);
           requestTools = writeFileOnlyTools(tools);
           disableThinkingForConstrainedTurn(
             body,
@@ -3839,7 +3881,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           );
           body.temperature = 0.2;
           body.top_p = 0.8;
-          body.tool_choice = 'required';
+          this.forceToolChoice(body);
           disableThinkingForConstrainedTurn(
             body,
             this.deps.disableThinkingRequestShape,
@@ -3871,7 +3913,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           if (useGemmaScenarioRepairToolGrammarFallback) {
             delete body.tool_choice;
           } else {
-            body.tool_choice = 'required';
+            this.forceToolChoice(body);
             disableThinkingForConstrainedTurn(
               body,
               this.deps.disableThinkingRequestShape,
@@ -3893,7 +3935,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               userMsg.content += PREREQUISITE_REPAIR_READ_PROMPT_SUFFIX;
             }
             requestTools = readFileOnlyTools(tools);
-            body.tool_choice = 'required';
+            this.forceToolChoice(body);
             disableThinkingForConstrainedTurn(
               body,
               this.deps.disableThinkingRequestShape,
@@ -3937,7 +3979,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               }
             }
             requestTools = readFileOnlyTools(tools);
-            body.tool_choice = 'required';
+            this.forceToolChoice(body);
             disableThinkingForConstrainedTurn(
               body,
               this.deps.disableThinkingRequestShape,
@@ -4091,7 +4133,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           if (useGemmaExistingSourceEditToolGrammarFallback) {
             delete body.tool_choice;
           } else {
-            body.tool_choice = 'required';
+            this.forceToolChoice(body);
             disableThinkingForConstrainedTurn(
               body,
               this.deps.disableThinkingRequestShape,
@@ -4128,7 +4170,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           if (useGemmaRepairToolGrammarFallback) {
             delete body.tool_choice;
           } else {
-            body.tool_choice = 'required';
+            this.forceToolChoice(body);
             disableThinkingForConstrainedTurn(
               body,
               this.deps.disableThinkingRequestShape,
@@ -4156,7 +4198,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             userMsg.content += buildMissingFileCreateNudge(missingFileCreatePath);
           }
           requestTools = writeFileOnlyTools(tools);
-          body.tool_choice = 'required';
+          this.forceToolChoice(body);
           disableThinkingForConstrainedTurn(
             body,
             this.deps.disableThinkingRequestShape,
@@ -4749,6 +4791,24 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               rememberFloor();
               continue;
             }
+          }
+          // A forced tool call this model cannot build an eager grammar for.
+          // No schema rung fixes it (the ladder above deliberately does not
+          // match this error), so drop the constraint, remember it
+          // engine-wide, and retry the same turn advertising the same tools
+          // — the rescue still gets its narrowed tool surface and its
+          // prompt suffix, it just cannot compel the call.
+          if (
+            body.tool_choice === 'required' &&
+            isLlamaCppForcedToolChoiceError(txt) &&
+            this.deps.provider.supportsForcedToolChoice
+          ) {
+            this.deps.provider.noteForcedToolChoiceUnsupported();
+            delete body.tool_choice;
+            log.warn(
+              '[llama-cpp] engine rejected tool_choice=required for this model; retrying with an unforced tool call and disabling forced tool choice for this engine',
+            );
+            continue;
           }
           if (
             tryParseStrictAlternationTemplateError(txt) &&

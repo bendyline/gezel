@@ -113,6 +113,7 @@ import {
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
+import { engineApiKey } from '../providers/native/engine-api-key.js';
 import {
   resolveCatalogIdFromModelId,
   resolveCatalogLlamaCppEngineConfig,
@@ -11697,6 +11698,18 @@ export class ChatManager {
       const llamaSlotSavePath = llamaProvider.getSlotSavePath();
       const adapter = new LlamaCppCacheAdapter({
         resolveBaseUrl: async () => llamaProvider.currentBaseUrl(),
+        // `/slots` is an AUTHENTICATED endpoint — only `/health` answers
+        // without the key (see engine-api-key.ts). The provider authenticates
+        // because `build-provider` wraps its fetch in `withEngineApiKey`, but
+        // the adapter is constructed here with a bare `fetch`, so without this
+        // it sent no Authorization header and every call 401'd: the `/slots`
+        // usage poll AND both `?action=save|restore` calls, i.e. the whole
+        // disk KV persistence layer, silently dead. It failed quietly because
+        // each call site degrades on error by design (no cache entry, `disk
+        // save: MISSED`) — the only symptom was cold prefills and a 5-second
+        // drip of `unauthorized: Invalid API Key` in the engine log, ~300 per
+        // trial. Resolved per call, not captured: the key is generated lazily.
+        resolveAuthToken: () => engineApiKey(),
         // The ENGINE slot count (`--parallel N`), not `queue.concurrency`:
         // the queue reserves a background lane above the engine slots, so
         // on a single-slot launch it reads 2 and the adapter would bind
@@ -12901,6 +12914,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -12933,6 +12947,7 @@ export class ChatManager {
           slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
           sharedKvLayers: summary.sharedKvLayers,
+          loopCount: summary.loopCount,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -12972,6 +12987,7 @@ export class ChatManager {
         slidingWindow: summary.slidingWindow,
         slidingWindowPattern: summary.slidingWindowPattern,
         sharedKvLayers: summary.sharedKvLayers,
+        loopCount: summary.loopCount,
         keyLength: summary.keyLength,
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
@@ -13084,6 +13100,7 @@ export class ChatManager {
               slidingWindow: summary.slidingWindow,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13123,6 +13140,7 @@ export class ChatManager {
               headCountKvPerLayer: summary.headCountKvPerLayer,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13246,6 +13264,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
