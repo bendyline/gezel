@@ -5,8 +5,8 @@
  * decision policy, and the release gate that inspects the finished bundle.
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -59,6 +59,24 @@ test('the release job verifies the shipped plist, not just the source config', (
     /node scripts\/verify-macos-ats\.mjs "\$app"/,
     'release-electron.yml no longer asserts the ATS policy on the packaged app',
   );
+});
+
+test('the gate still runs when its script path contains spaces', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel ats runner-'));
+  try {
+    const spacedDir = join(dir, 'path with spaces');
+    const script = join(spacedDir, 'verify-macos-ats.mjs');
+    mkdirSync(spacedDir);
+    copyFileSync(join(root, 'scripts/verify-macos-ats.mjs'), script);
+
+    // No app argument deliberately: reaching main() must produce usage + 1.
+    // The old hand-built file:// comparison skipped main and exited 0 here.
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /usage: verify-macos-ats\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Both the fixture writer and the gate itself shell out to `plutil`, which

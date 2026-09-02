@@ -105,8 +105,13 @@ describe('auditPeTree', () => {
   before(async () => {
     dir = await mkdtemp(join(tmpdir(), 'gezel-pe-audit-'));
     await writeFile(join(dir, 'gezel-thing.dll'), peImage());
-    await writeFile(join(dir, 'pty.node'), peImage());
-    await writeFile(join(dir, 'vec0.dll'), peImage());
+    await mkdir(join(dir, 'node_modules', 'node-pty', 'build', 'Release'), { recursive: true });
+    await mkdir(join(dir, 'node_modules', 'sqlite-vec-windows-x64'), { recursive: true });
+    await writeFile(
+      join(dir, 'node_modules', 'node-pty', 'build', 'Release', 'pty.node'),
+      peImage(),
+    );
+    await writeFile(join(dir, 'node_modules', 'sqlite-vec-windows-x64', 'vec0.dll'), peImage());
   });
 
   after(async () => {
@@ -119,7 +124,10 @@ describe('auditPeTree', () => {
     });
     assert.equal(result.binaries, 3);
     assert.deepEqual(result.signed, ['gezel-thing.dll']);
-    assert.deepEqual(result.exempt.map((e) => e.file).sort(), ['pty.node', 'vec0.dll']);
+    assert.deepEqual(result.exempt.map((e) => e.file.replaceAll('\\', '/')).sort(), [
+      'node_modules/node-pty/build/Release/pty.node',
+      'node_modules/sqlite-vec-windows-x64/vec0.dll',
+    ]);
     assert.deepEqual(result.unsigned, []);
   });
 
@@ -142,22 +150,53 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
   // service-bundle.tar.gz for win32-x64. If a bundled package renames one,
   // verify-pe-tree fails the release; this fails first, and says why.
   const bundled = [
-    'rg.exe',
-    'resvgjs.win32-x64-msvc.node',
-    'keyring.win32-x64-msvc.node',
-    'vec0.dll',
-    'pty.node',
-    'conpty.node',
-    'conpty_console_list.node',
-    'winpty.dll',
-    'winpty-agent.exe',
+    ['@vscode/ripgrep-win32-x64/bin/rg.exe', 'Microsoft vscode-ripgrep'],
+    ['@resvg/resvg-js-win32-x64-msvc/resvgjs.win32-x64-msvc.node', '@resvg/resvg-js'],
+    ['@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node', '@napi-rs/keyring'],
+    ['sqlite-vec-windows-x64/vec0.dll', 'sqlite-vec'],
+    ['node-pty/build/Release/pty.node', 'node-pty'],
+    ['node-pty/build/Release/conpty.node', 'node-pty'],
+    ['node-pty/build/Release/conpty_console_list.node', 'node-pty'],
+    ['node-pty/build/Release/winpty.dll', 'node-pty'],
+    ['node-pty/build/Release/winpty-agent.exe', 'node-pty'],
   ];
 
-  for (const name of bundled) {
-    it(`exempts ${name}`, () => {
-      assert.equal(isThirdPartyBinary(`C:\\bundle\\node_modules\\pkg\\${name}`), true);
+  for (const [path, source] of bundled) {
+    it(`exempts ${path} only under its owning package`, () => {
+      const fullPath = `C:\\bundle\\node_modules\\${path.replaceAll('/', '\\')}`;
+      assert.equal(isThirdPartyBinary(fullPath), true);
+      assert.match(thirdPartyMetadata(fullPath).source, new RegExp(source.replace('/', '\\/')));
     });
   }
+
+  it('exempts native vendor files only inside a reviewed native payload root', () => {
+    assert.equal(
+      isThirdPartyBinary('C:\\repo\\native\\build\\win32-x64-cuda\\cublas64_12.dll'),
+      true,
+    );
+    assert.equal(
+      isThirdPartyBinary('C:\\app\\resources\\app.asar.unpacked\\native-bin\\win32-x64\\uv.exe'),
+      true,
+    );
+    assert.equal(isThirdPartyBinary('C:\\unrelated\\uv.exe'), false);
+  });
+
+  it('scopes loose runtimes to their exact packaged subtrees', () => {
+    assert.equal(
+      isThirdPartyBinary('C:\\app\\resources\\app.asar.unpacked\\dist\\node-bundle\\node.exe'),
+      true,
+    );
+    assert.equal(
+      isThirdPartyBinary('C:\\app\\resources\\app.asar.unpacked\\dist\\duckdb-bundle\\duckdb.exe'),
+      true,
+    );
+    assert.equal(
+      isThirdPartyBinary(
+        'C:\\app\\resources\\app.asar.unpacked\\dist\\pnpm-bundle\\node_modules\\@pnpm\\fastlist-win32-x64\\fastlist-win32-x64.exe',
+      ),
+      true,
+    );
+  });
 
   it('still refuses a first-party binary', () => {
     assert.equal(isThirdPartyBinary('C:\\bundle\\gezel-llama-server.exe'), false);
@@ -165,10 +204,11 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
   });
 
   it('does not exempt a lookalike that merely contains an allowlisted name', () => {
-    // Patterns are anchored, so a first-party file cannot borrow the
-    // exemption by embedding a vendor name.
+    // Both the filename and owning subtree are part of the policy.
     assert.equal(isThirdPartyBinary('C:\\bundle\\not-vec0.dll'), false);
     assert.equal(isThirdPartyBinary('C:\\bundle\\pty.node.exe'), false);
+    assert.equal(isThirdPartyBinary('C:\\bundle\\first-party\\pty.node'), false);
+    assert.equal(isThirdPartyBinary('C:\\bundle\\node_modules\\other-package\\vec0.dll'), false);
   });
 
   it('classifies native Node addons as loadable binaries that must be audited', () => {

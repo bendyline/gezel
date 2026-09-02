@@ -212,8 +212,9 @@ jobs:
           if ($nativeCode.Count -eq 0) { throw 'No native executable/loadable binaries staged' }
           $verified = 0
           foreach ($exe in $nativeCode) {
+            $path = $exe.FullName.Replace('\', '/')
             $isThirdParty = $false
-            foreach ($p in $patterns) { if ($exe.Name -imatch $p) { $isThirdParty = $true; break } }
+            foreach ($p in $patterns) { if ($path -imatch $p) { $isThirdParty = $true; break } }
             if ($isThirdParty) {
               Write-Host "[native] third-party, left unsigned by policy: $($exe.Name)"
               continue

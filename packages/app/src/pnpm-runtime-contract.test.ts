@@ -54,10 +54,11 @@ describe('bundled pnpm runtime contract', () => {
 
   it('never signs a pnpm standalone executable and verifies bundled Node as OpenJS', () => {
     expect(signingPolicy).not.toContain("pattern: '^pnpm\\\\.exe$'");
-    expect(signingPolicy).toContain("pattern: '^fastlist-[\\\\w.-]+\\\\.exe$'");
+    expect(signingPolicy).toContain('dist/pnpm-bundle/');
+    expect(signingPolicy).toContain('fastlist-[\\\\w.-]+\\\\.exe$');
 
     const nodeCheck = releaseWorkflow.indexOf("$executable.Name -ieq 'node.exe'");
-    const thirdPartySkip = releaseWorkflow.indexOf('Test-ThirdParty $executable.Name');
+    const thirdPartySkip = releaseWorkflow.indexOf('Test-ThirdParty $executable.FullName');
     expect(nodeCheck).toBeGreaterThanOrEqual(0);
     expect(nodeCheck).toBeLessThan(thirdPartySkip);
     expect(releaseWorkflow).toContain('O=OpenJS Foundation');

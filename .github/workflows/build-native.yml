@@ -1210,8 +1210,8 @@ jobs:
           $targets = Get-ChildItem "${{ steps.outdir.outputs.dir }}" -Recurse -File |
             Where-Object { $_.Extension -in '.exe', '.dll' } |
             Where-Object {
-              $name = $_.Name
-              -not ($patterns | Where-Object { $name -imatch $_ })
+              $path = $_.FullName.Replace('\', '/')
+              -not ($patterns | Where-Object { $path -imatch $_ })
             }
           if (-not $targets) { throw '[sign] no first-party executable/loadable files found' }
           foreach ($target in $targets) {

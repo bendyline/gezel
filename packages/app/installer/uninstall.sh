@@ -110,8 +110,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-if [ -n "$WAIT_FOR_PID" ] && ! [[ "$WAIT_FOR_PID" =~ ^[0-9]+$ ]] ||
-   [ -n "$WAIT_FOR_PID" ] && [ "$WAIT_FOR_PID" -le 1 ]; then
+valid_wait_pid() {
+  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -gt 1 ]
+}
+
+if [ -n "$WAIT_FOR_PID" ] && ! valid_wait_pid "$WAIT_FOR_PID"; then
   echo "--wait-for-pid must name a process id greater than 1" >&2
   exit 64
 fi
@@ -351,10 +354,7 @@ notify_detached_identity_failure() {
   # root-owned log. The alert times out so cleanup never waits indefinitely.
   /bin/launchctl asuser "$TARGET_USER_UID" /usr/bin/sudo -H -u "$notification_username" \
     /usr/bin/osascript \
-    -e 'on run argv' \
-    -e 'display alert "Gezel uninstall needs attention" message ("Gezel was removed, but macOS retained part of the _gezeld service account. Its matching group was not removed while the user remained. The complete log is at " & item 1 of argv & ". Administrator permission may be required to read it.") as critical buttons {"OK"} default button "OK" giving up after 30' \
-    -e 'end run' \
-    "$DETACHED_LOG" \
+    -e 'display alert "Gezel uninstall needs attention" message "Gezel was removed, but macOS retained part of the _gezeld service account. Its matching group was preserved while the user remained. Ask an administrator to inspect and remove the _gezeld user first, then remove its matching group." as critical buttons {"OK"} default button "OK" giving up after 30' \
     >/dev/null 2>&1 || true
 }
 

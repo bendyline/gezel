@@ -7,7 +7,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { githubHeaders } from './fetch-native-binaries.mjs';
+
 const sourceScript = fileURLToPath(new URL('../native/scripts/fetch-upstream.sh', import.meta.url));
+const nativeFetchScript = fileURLToPath(new URL('./fetch-native-binaries.mjs', import.meta.url));
 const pinnedCommit = '1111111111111111111111111111111111111111';
 
 function bashPath() {
@@ -210,6 +213,27 @@ function countCommand(log, command) {
   return log.split(/\r?\n/).filter((line) => new RegExp(`(?:^| )${command}(?: |$)`).test(line))
     .length;
 }
+
+test('native release requests omit Authorization when no GitHub token is available', () => {
+  assert.deepEqual(githubHeaders({ token: null, accept: 'application/octet-stream' }), {
+    Accept: 'application/octet-stream',
+    'User-Agent': 'gezel-fetch-native',
+  });
+  assert.equal(
+    githubHeaders({ token: 'secret', accept: 'application/vnd.github+json' }).Authorization,
+    'token secret',
+  );
+});
+
+test('native --run still requires an actions token and gives accurate guidance', () => {
+  const result = spawnSync(process.execPath, [nativeFetchScript, '--run', '123'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: '', GEZEL_GITHUB_TOKEN: '', GITHUB_TOKEN: '' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--run requires a GitHub token with actions:read/);
+  assert.doesNotMatch(result.stderr, /repository is private|gezel is private/i);
+});
 
 test('fetch-upstream filters file history while retaining ancestry and retrying fetch', async () => {
   const fixture = await runFixture({ failCommand: 'fetch' });
