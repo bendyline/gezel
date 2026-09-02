@@ -4514,7 +4514,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
   // through MockProvider with the Ollama-only context surface
   // (`numCtx` + `estimatePromptChars`) configured. Each test sets a
   // promptChars closure that the test mutates to simulate the
-  // estimate climbing toward the warning / compaction thresholds.
+  // estimate climbing toward the automatic-compaction threshold.
 
   /**
    * Configure the manager to route Ollama: register the mock under
@@ -4556,7 +4556,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     return { home, store, events, manager: mgr, mock: ollamaMock };
   }
 
-  it('publishes context_warning for an accumulated conversation but does NOT compact', async () => {
+  it('publishes context_warning only when accumulated conversation cannot be compacted', async () => {
     let promptChars = 0;
     const { home, manager, events, mock, store } = await setupOllamaManager({
       numCtx: 1000,
@@ -4583,6 +4583,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       await manager.send(session.id, 'hi');
 
       expect(eventTypes).toContain('context_warning');
+      expect(eventTypes).toContain('context_window');
       expect(eventTypes).not.toContain('context_compacted');
       const rec = await manager.getSessionRecord(session.id);
       expect(rec?.compactionCount).toBeUndefined();
@@ -4615,6 +4616,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(reply.content).toBe('reply');
       expect(eventTypes).not.toContain('context_warning');
       expect(eventTypes).not.toContain('context_compacted');
+      expect(eventTypes).toContain('context_window');
     } finally {
       promptChars = 0;
       await manager.drainBackground();
@@ -4712,6 +4714,25 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(synthCount).toBe(1);
       const synth = rec?.messages.find((m) => m.synthetic === 'compaction-summary');
       expect(synth?.content).toContain('compacted bullet');
+      expect(synth?.contextCompaction).toEqual({
+        removedCount: 15,
+        contextWindow: 1000,
+        estimatedTokensBefore: 1129,
+        compactionCount: 1,
+        autoCompactRatio: 0.7,
+      });
+      expect(rec?.contextWindow).toBe(1000);
+      expect(rec?.contextAutoCompactRatio).toBe(0.7);
+      const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+      const compactionRow = timeline.messages.find(
+        (message) => message.synthetic === 'compaction-summary',
+      );
+      expect(compactionRow).toMatchObject({
+        sessionContextWindow: 1000,
+        sessionContextAutoCompactRatio: 0.7,
+        sessionCompactionCount: 1,
+        contextCompaction: synth?.contextCompaction,
+      });
       const rebuilt = mock.calls.filter((call) => call.kind === 'create').at(-1);
       expect(
         rebuilt?.opts?.priorMessages?.filter(

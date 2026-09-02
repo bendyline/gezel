@@ -645,6 +645,23 @@ export const ReferencedFileSchema = z.object({
 export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
 
 /**
+ * User-facing facts about a persisted automatic context compaction.
+ *
+ * This metadata is deliberately display-only: the synthesized message's
+ * `content` is still the only text replayed to the model. Keeping the facts
+ * beside that message lets the chat timeline explain what happened after a
+ * reload without injecting context-pressure narration into the model prompt.
+ */
+export const ContextCompactionSchema = z.object({
+  removedCount: z.number().int().nonnegative(),
+  contextWindow: z.number().int().positive(),
+  estimatedTokensBefore: z.number().int().nonnegative(),
+  compactionCount: z.number().int().positive(),
+  autoCompactRatio: z.number().positive().max(1),
+});
+export type ContextCompaction = z.infer<typeof ContextCompactionSchema>;
+
+/**
  * A single turn in an agent chat. Stored in memory while a chat session is
  * active; dropped when the session ends or the daemon restarts.
  *
@@ -782,6 +799,13 @@ export const ChatMessageSchema = z.object({
       'keurmeester-notice',
     ])
     .optional(),
+  /**
+   * Present on a synthetic `compaction-summary` message. The UI renders this
+   * as an explicit context-maintenance marker (including the effective token
+   * window and number of messages summarized) rather than pretending it was
+   * an ordinary assistant reply.
+   */
+  contextCompaction: ContextCompactionSchema.optional(),
   /**
    * Display flag: the model sees this message as normal history, but the
    * chat transcript UI never renders a bubble for it. Set on
@@ -1146,16 +1170,27 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     reason: z.enum(['started', 'canceled', 'rejected']),
   }),
   /**
-   * Local-provider context policy: emitted when accumulated conversation
-   * exceeds a safety fraction of the session's effective model context.
-   * The UI may suggest starting fresh because this event is never emitted
-   * for a first-turn standing system/tool prefix.
+   * Effective context policy for a local or remote-local session. Emitted on
+   * each turn so the live UI can show the model's token window immediately;
+   * the same values are persisted on the session for reloads.
+   */
+  z.object({
+    type: z.literal('context_window'),
+    numCtx: z.number().int().positive(),
+    model: z.string(),
+    autoCompactRatio: z.number().positive().max(1),
+  }),
+  /**
+   * Local-provider context policy: emitted only when accumulated conversation
+   * could not be compacted automatically. Normal pressure is handled without
+   * a warning; this is the exceptional maintenance-failure path.
    */
   z.object({
     type: z.literal('context_warning'),
     estimatedTokens: z.number(),
     numCtx: z.number(),
     model: z.string(),
+    reason: z.literal('compaction_failed').optional(),
   }),
   /**
    * Local-provider context policy: emitted right after in-flight compaction collapses
@@ -1168,6 +1203,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('context_compacted'),
     removedCount: z.number().int().nonnegative(),
     model: z.string(),
+    /** Optional for wire compatibility with pre-context-visibility daemons. */
+    numCtx: z.number().int().positive().optional(),
+    estimatedTokensBefore: z.number().int().nonnegative().optional(),
+    autoCompactRatio: z.number().positive().max(1).optional(),
+    compactionCount: z.number().int().positive().optional(),
+    mode: z.enum(['between-turn', 'mid-turn']).optional(),
   }),
   /**
    * Emitted when the chat manager detects a self-chat / compaction loop —

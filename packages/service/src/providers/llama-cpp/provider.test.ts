@@ -9760,9 +9760,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
 
     expect(await internal.maybeCompactMidLoop({ force: true })).toBe(false);
     expect(compactionCalls).toBe(0);
-    expect(warnings).not.toContain(
-      'Compacted earlier conversation to free up working window for the current turn.',
-    );
+    expect(warnings).toHaveLength(0);
   });
 
   it("condenses THIS turn's older tool results — the blind spot prior-fold cannot reach", async () => {
@@ -9963,11 +9961,11 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect(text).toBe('recovered reply');
     expect(fetchCount).toBe(2); // first 500, then 200 after compaction
     expect(compactionCalls).toBe(1); // forced once on the 500
-    // The "compacted earlier conversation" warning DOES fire (it's
+    // The exact auto-compaction notice DOES fire (it's
     // user-visible feedback that we did some work), but the
     // "session was cut off" warning must NOT — we successfully
     // recovered, the user got their reply.
-    expect(warnings.some((w) => w.includes('Compacted earlier conversation'))).toBe(true);
+    expect(warnings.some((w) => w.includes('Auto-compacted'))).toBe(true);
     expect(warnings.some((w) => w.includes('cut off mid-string'))).toBe(false);
   });
 

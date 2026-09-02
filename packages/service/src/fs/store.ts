@@ -5856,6 +5856,14 @@ export class Store {
           sessionProviderName: s.providerName,
           ...(s.source ? { sessionSource: s.source } : {}),
           ...(s.model ? { sessionModel: s.model } : {}),
+          ...((s.contextWindow ?? s.numCtx)
+            ? { sessionContextWindow: s.contextWindow ?? s.numCtx }
+            : {}),
+          ...(s.contextAutoCompactRatio !== undefined
+            ? { sessionContextAutoCompactRatio: s.contextAutoCompactRatio }
+            : {}),
+          ...(s.compactionCount !== undefined ? { sessionCompactionCount: s.compactionCount } : {}),
+          ...(s.lastCompactedAt ? { sessionLastCompactedAt: s.lastCompactedAt } : {}),
           ...(s.archived ? { sessionArchived: true } : {}),
           ...(s.lastTurnError ? { sessionLastTurnError: s.lastTurnError } : {}),
           ...(s.lastTurnErrorDetail ? { sessionLastTurnErrorDetail: s.lastTurnErrorDetail } : {}),
@@ -5887,6 +5895,7 @@ export class Store {
             ? { attemptedToolCalls: m.attemptedToolCalls }
             : {}),
           ...(m.synthetic ? { synthetic: m.synthetic } : {}),
+          ...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {}),
         });
       }
     }

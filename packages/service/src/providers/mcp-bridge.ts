@@ -156,10 +156,10 @@ export const MAX_TOOL_EVENT_STRUCTURED_CONTENT_BYTES = 128 * 1024;
  * "Useful slice" floor — when the adaptive budget is at least this
  * many chars, callers get a normal truncation footer ("re-run with
  * a more specific request if you need the rest"). Below this, the
- * floor logic in {@link capToolOutput} switches to a stronger
- * "context window is nearly full, refine your request or save to
- * artifacts" footer because at sub-8K the result is too clipped to
- * be the basis for normal follow-up work.
+ * floor logic in {@link capToolOutput} switches to stronger guidance
+ * to narrow or save the result because at sub-8K it is too clipped to
+ * be the basis for normal follow-up work. It intentionally does not
+ * speculate about overall context pressure: the runtime owns compaction.
  *
  * Used as a *threshold* for footer wording — NOT as an upward clamp.
  * The previous behavior clamped UP to this floor unconditionally,
@@ -277,8 +277,8 @@ export function timeoutForTool(name: string): number {
  *
  * - **Lower** — {@link CAP_TOOL_OUTPUT_HARD_FLOOR} (500 chars). When
  *   the caller's `maxChars` falls below this, we deliver 500 chars
- *   plus a stronger "context window is nearly full" footer that
- *   tells the model to refine its request or save to artifacts.
+ *   plus stronger result-specific guidance that tells the model to
+ *   refine its request or save the output for chunked inspection.
  *   The previous floor (8K) clamped UP unconditionally, which could
  *   push the running transcript past `numCtx` on tight-context
  *   sessions — exactly the cliff a model hits when a chain of tool
@@ -327,15 +327,15 @@ export function capToolOutput(
     }
   }
   const dropped = text.length - clamped;
-  // Footer wording bifurcates on whether the cap was set by a
-  // tight context (sub-MIN budget) vs the normal "useful slice"
-  // case. Tight-context guidance points the model at the artifacts
-  // drawer because the conversation can't absorb more text either
-  // way; normal guidance just nudges toward a more specific request.
+  // Footer wording bifurcates on whether this call received a sub-MIN
+  // budget vs the normal "useful slice" case. Keep the explanation about
+  // this result, not about global context pressure: a model-facing "window
+  // nearly full" warning caused models to abandon otherwise recoverable
+  // work even though the runtime can compact automatically.
   const isContextTight = maxChars < MIN_TOOL_OUTPUT_CHARS;
   const guidance = isContextTight
-    ? 'context window is nearly full — re-ask with a more specific request, or save the output to an artifact and read it in chunks'
-    : 'context window protected — re-run with a more specific request if you need the rest';
+    ? 'only a small slice fit this tool call — re-run with a narrower request, or save the output and inspect it in smaller chunks'
+    : 'tool output limit applied — re-run with a more specific request if you need the rest';
   return `${text.slice(0, clamped)}\n\n…[tool output truncated: ${dropped.toLocaleString('en-US')} additional chars dropped; ${guidance}]`;
 }
 

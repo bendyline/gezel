@@ -456,7 +456,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         content: result.syntheticContent,
       });
       this.emitWarning(
-        'Compacted earlier conversation to free up working window for the current turn.',
+        `Auto-compacted ${currentTurnStartIdx} earlier message${currentTurnStartIdx === 1 ? '' : 's'} in this ${this.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
       );
       log.info(
         `[remote] mid-loop compacted ${currentTurnStartIdx} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,

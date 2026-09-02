@@ -3150,7 +3150,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       `[llama-cpp] mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)${opts?.force ? ' (reactive recovery)' : ''}`,
     );
     this.emitWarning(
-      'Compacted earlier conversation to free up working window for the current turn.',
+      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
     );
     return true;
   }
@@ -6312,7 +6312,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // approximated at 4:1. The bridge applies a small
               // hard floor (CAP_TOOL_OUTPUT_HARD_FLOOR) so even an
               // exhausted-context budget delivers a usable sentinel
-              // with a "context tight, refine" footer.
+              // with a "small result slice, refine" footer.
               const budgetChars = computeToolBudgetChars(
                 this.deps.numCtx,
                 this.estimatePromptChars(),

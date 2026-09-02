@@ -66,22 +66,22 @@ describe('capToolOutput', () => {
     // running transcript past `numCtx` on tight-context sessions
     // (the model called a tool with 200 chars of headroom and got
     // back 8K chars of payload anyway). Now we floor at the much
-    // smaller HARD_FLOOR (500 chars) and switch the footer to a
-    // "context window is nearly full" guidance so the model knows
-    // to refine.
+    // smaller HARD_FLOOR (500 chars) and switch the footer to
+    // result-specific guidance so the model knows to refine without
+    // being told the whole context window is exhausted.
     const text = 'x'.repeat(30_000);
     const capped = capToolOutput(text, 100);
     expect(capped.startsWith('x'.repeat(CAP_TOOL_OUTPUT_HARD_FLOOR))).toBe(true);
     // Should NOT have been forced up to MIN_TOOL_OUTPUT_CHARS.
     expect(capped.indexOf('x'.repeat(MIN_TOOL_OUTPUT_CHARS))).toBe(-1);
-    // Footer says "context tight" because budget was below MIN.
-    expect(capped).toContain('context window is nearly full');
+    expect(capped).toContain('only a small slice fit this tool call');
+    expect(capped).not.toContain('context window is nearly full');
   });
 
-  it('uses the normal "context protected" footer when budget is between MIN and MAX', () => {
+  it('uses the normal tool-output footer when budget is between MIN and MAX', () => {
     const text = 'x'.repeat(30_000);
     const capped = capToolOutput(text, 20_000);
-    expect(capped).toContain('context window protected');
+    expect(capped).toContain('tool output limit applied');
     expect(capped).not.toContain('context window is nearly full');
   });
 
@@ -164,7 +164,7 @@ describe('computeToolBudgetChars', () => {
   it('falls back to the HARD_FLOOR when the transcript already over-fills the budget', () => {
     // The pathological case: prompt already > 75% × numCtx. Budget
     // returns 0; capToolOutput floors to HARD_FLOOR (500 chars) so
-    // the model still sees a small sentinel + a "context tight"
+    // the model still sees a small sentinel + a result-specific
     // footer rather than getting forced to 8K and overflowing the
     // window. The previous floor (MIN_TOOL_OUTPUT_CHARS, 8K) was
     // the bug this catches.
@@ -175,7 +175,8 @@ describe('computeToolBudgetChars', () => {
     // Crucially, NOT 8K — the old behavior would have forced 8K
     // chars through and pushed the transcript past numCtx.
     expect(slice.indexOf('y'.repeat(MIN_TOOL_OUTPUT_CHARS))).toBe(-1);
-    expect(slice).toContain('context window is nearly full');
+    expect(slice).toContain('only a small slice fit this tool call');
+    expect(slice).not.toContain('context window is nearly full');
   });
 });
 

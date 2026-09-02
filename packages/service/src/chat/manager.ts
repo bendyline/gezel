@@ -9666,23 +9666,13 @@ export class ChatManager {
 
   /**
    * Local-provider context-window pressure check. Runs before each turn
-   * (including continuation nudges). Three bands keyed off the
-   * estimated outgoing-prompt tokens vs. `num_ctx`:
-   *
-   *   - `< 75%`  → no-op.
-   *   - Warning band with prior conversation → publish `context_warning`.
-   *     UI surfaces a yellow banner so the user can choose to start fresh.
-   *     A first-turn prompt never gets this warning: its standing system +
-   *     tool prefix cannot be reduced by starting a new session.
-   *   - `≥ 90%`  → run {@link compactInFlight} to collapse the older
-   *     messages into a synthetic compaction-summary bubble, tear
-   *     down the live session so the next acquire rebuilds with the
-   *     compacted history, and publish `context_compacted`. If the
-   *     compaction itself fails, fall back to the warning so the
-   *     user at least sees something — Ollama would silently
-   *     truncate from the front otherwise, which is what the model
-   *     "forgot the user's question" symptom traces back to (see
-   *     ollama.ts header).
+   * (including continuation nudges). It publishes the effective window and
+   * automatic-compaction threshold for user-facing UI, then compacts once the
+   * estimated outgoing prompt crosses that threshold. There is no ordinary
+   * "window nearly full" warning band: the runtime owns this maintenance and
+   * should not ask either the user or model to second-guess it. A warning is
+   * emitted only when compaction was actually needed but could not reduce an
+   * accumulated conversation.
    *
    * Copilot/OpenAI/CLI providers remain no-ops because they manage history
    * outside this process. RemoteGezelProvider is included: its transport is
@@ -9743,26 +9733,24 @@ export class ChatManager {
       record.providerName === 'mlx' || liveSession.model?.startsWith('mlx:')
         ? MLX_CONTEXT_COMPACT_RATIO
         : CONTEXT_COMPACT_RATIO;
-    if (!opts?.force && ratio < CONTEXT_WARN_RATIO) return { rebuilt: false };
-
-    if (!opts?.force && ratio < compactRatio) {
-      log.info(
-        `pressure#${tag} WARN-ONLY tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)} (compact@${compactRatio})`,
-      );
-      if (!hasPriorConversation) {
+    const contextPolicyChanged =
+      record.contextWindow !== numCtx || record.contextAutoCompactRatio !== compactRatio;
+    record.contextWindow = numCtx;
+    record.contextAutoCompactRatio = compactRatio;
+    if (contextPolicyChanged) {
+      await this.store.writeSession(record).catch((err) => {
         log.warn(
-          `pressure#${tag} FIRST-TURN-PREFIX tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)}; suppressing start-fresh warning because no prior conversation is reducible`,
+          `context-policy writeSession failed for ${tag}: ${err instanceof Error ? err.message : err}`,
         );
-        return { rebuilt: false };
-      }
-      this.events.publish(scope, {
-        type: 'context_warning',
-        estimatedTokens,
-        numCtx,
-        model,
       });
-      return { rebuilt: false };
     }
+    this.events.publish(scope, {
+      type: 'context_window',
+      numCtx,
+      model,
+      autoCompactRatio: compactRatio,
+    });
+    if (!opts?.force && ratio < compactRatio) return { rebuilt: false };
     log.info(
       `pressure#${tag} COMPACT-START tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)} ` +
         `msgs=${record.messages.length}`,
@@ -9773,7 +9761,11 @@ export class ChatManager {
     // least gets the yellow banner — Ollama will silently truncate
     // either way, but the user gets a signal.
     const compactT0 = Date.now();
-    const compacted = await this.compactInFlight(record).catch((err) => {
+    const compacted = await this.compactInFlight(record, {
+      contextWindow: numCtx,
+      estimatedTokensBefore: estimatedTokens,
+      autoCompactRatio: compactRatio,
+    }).catch((err) => {
       log.warn(
         `compactInFlight threw for session ${tag}: ${err instanceof Error ? err.message : err}`,
       );
@@ -9791,6 +9783,7 @@ export class ChatManager {
         estimatedTokens,
         numCtx,
         model,
+        reason: 'compaction_failed',
       });
     } else if (!compacted) {
       log.warn(
@@ -9859,6 +9852,11 @@ export class ChatManager {
         type: 'context_compacted',
         removedCount: compacted.removedCount,
         model,
+        numCtx,
+        estimatedTokensBefore: estimatedTokens,
+        autoCompactRatio: compactRatio,
+        compactionCount: compacted.compactionCount,
+        mode: 'between-turn',
       });
     }
     return { rebuilt: true, fresh };
@@ -9878,7 +9876,14 @@ export class ChatManager {
    * or the summarization failed; caller treats both as "no
    * compaction happened" and skips the fresh-session rebuild.
    */
-  private async compactInFlight(record: ChatSession): Promise<{ removedCount: number } | null> {
+  private async compactInFlight(
+    record: ChatSession,
+    context: {
+      contextWindow: number;
+      estimatedTokensBefore: number;
+      autoCompactRatio: number;
+    },
+  ): Promise<{ removedCount: number; compactionCount: number } | null> {
     if (record.messages.length <= COMPACTION_KEEP_TAIL + 2) {
       // Two-pair tail + at least 3 to compact = 9. Below that the
       // synthesis costs more (one-shot LLM call) than it saves.
@@ -9917,16 +9922,25 @@ export class ChatManager {
 
     const trimmed = synthesis.trim();
     if (!trimmed) return null;
+    const compactedAt = nowIso();
+    const compactionCount = (record.compactionCount ?? 0) + 1;
     const synthetic: ChatMessage = {
       role: 'assistant',
       content: `[Earlier in this conversation, summarized to fit the model context:\n\n${trimmed}]`,
-      at: nowIso(),
+      at: compactedAt,
       synthetic: 'compaction-summary',
+      contextCompaction: {
+        removedCount: toCompact.length,
+        contextWindow: context.contextWindow,
+        estimatedTokensBefore: context.estimatedTokensBefore,
+        compactionCount,
+        autoCompactRatio: context.autoCompactRatio,
+      },
     };
 
     record.messages = [synthetic, ...tail];
-    record.compactionCount = (record.compactionCount ?? 0) + 1;
-    record.lastCompactedAt = nowIso();
+    record.compactionCount = compactionCount;
+    record.lastCompactedAt = compactedAt;
     // The cached prompt prefix no longer matches the compacted message
     // list — anything the engine had cached for this session is now
     // useless. Drop it. Next turn rebuilds the cache against the new
@@ -9972,7 +9986,7 @@ export class ChatManager {
       `compacted session ${record.id.slice(0, 8)}: ${toCompact.length} messages → 1 synthesis (${trimmed.length} chars)`,
     );
 
-    return { removedCount: toCompact.length };
+    return { removedCount: toCompact.length, compactionCount };
   }
 
   async history(sessionId: string): Promise<ChatMessage[]> {
@@ -16875,6 +16889,25 @@ export class ChatManager {
         log.info(
           `[chat] deterministic mid-loop compaction for session ${sessionRef.id.slice(0, 8)} (${estimatedTokens}/${numCtx} estimated tokens)`,
         );
+        this.events.publish(
+          {
+            sessionId: sessionRef.id,
+            gezelId: sessionRef.gezelId,
+            projectId: sessionRef.projectId,
+            ...(sessionRef.parentSession ? { parentSession: sessionRef.parentSession } : {}),
+            ...(sessionRef.handoffFrom ? { handoffFrom: sessionRef.handoffFrom } : {}),
+            ...(sessionRef.source ? { sessionSource: sessionRef.source } : {}),
+          },
+          {
+            type: 'context_compacted',
+            removedCount: priorMessages.length,
+            model: sessionRef.model ?? sessionRef.providerName,
+            numCtx,
+            estimatedTokensBefore: estimatedTokens,
+            autoCompactRatio: CONTEXT_COMPACT_RATIO,
+            mode: 'mid-turn',
+          },
+        );
         return {
           syntheticContent: `[Earlier in this conversation, condensed to fit the model context:\n\n${condensed}]`,
         };
@@ -18225,19 +18258,13 @@ const READ_ONLY_PROGRESS_NUDGE =
  * the user — narrating "I'll do X later" stalls the whole project.
  */
 /**
- * Pre-turn pressure thresholds for Ollama context-window management
- * (`checkContextPressure`):
- *   - WARN: publish a `context_warning` event so the UI can surface
- *     a banner; user gets a chance to start fresh on their own.
- *   - COMPACT: kick in-flight summarization automatically — collapse
- *     older messages into a synthesized "[Earlier in this conversation:
- *     …]" assistant bubble so the next turn fits.
+ * Pre-turn automatic-compaction threshold for local context-window
+ * management (`checkContextPressure`). Older messages collapse into a
+ * synthesized "[Earlier in this conversation: …]" assistant bubble before
+ * the next turn is sent. Ordinary pressure is maintenance, not a warning;
+ * `context_warning` is reserved for a compaction attempt that failed.
  *
- * The 75/70 split (warn = 0.75, compact = 0.70) is intentionally
- * order-inverted from the prior 75/80 — compaction fires BEFORE the
- * warn signal, because the warn band's UI yellow banner is irrelevant
- * to headless eval sessions where the model is the only consumer. The
- * matrix #3 petshop run hit `On-device model ran out of
+ * The matrix #3 petshop run hit `On-device model ran out of
  * working memory: 67,924/49,152` at iteration depth: compaction at
  * 0.80 was still too late once cumulative tool outputs from
  * read_artifact + list_artifacts + message_gezel handoffs piled up.
@@ -18245,7 +18272,6 @@ const READ_ONLY_PROGRESS_NUDGE =
  * to absorb 1-2 more tool round-trips while the in-flight compaction
  * one-shot synthesizes older history.
  */
-const CONTEXT_WARN_RATIO = 0.75;
 const CONTEXT_COMPACT_RATIO = 0.7;
 
 /**

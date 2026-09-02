@@ -2,6 +2,7 @@ import type {
   ChatEvent,
   ChatMessageToolCall,
   ChatTurnErrorDetail,
+  ContextCompaction,
   Question,
   ReferencedFile,
   SessionGpuTask,
@@ -21,6 +22,7 @@ import {
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { queueNoticeIsFresh } from './chat-live-slot.js';
+import { formatContextWindow } from './model-context.js';
 
 // Chat-bubble light surface — shared with the Home intro's embedded
 // Handboek page; the scheme and its rationale live in
@@ -425,6 +427,8 @@ export interface MessageBubbleProps {
    * "produced reasoning but no visible reply".
    */
   synthetic?: import('@bendyline/gezel').ChatMessage['synthetic'];
+  /** Facts displayed by the dedicated automatic-compaction timeline marker. */
+  contextCompaction?: ContextCompaction;
   /**
    * Warnings persisted on the message — on a `turn-aborted` record the
    * first entry is the abort reason itself (`[llama-cpp] timed out
@@ -575,6 +579,7 @@ export function MessageBubble({
   suppressHeader,
   timestampLabel,
   synthetic,
+  contextCompaction,
   warnings,
 }: MessageBubbleProps) {
   // When the assistant reply referenced real files, pre-process the
@@ -777,6 +782,46 @@ export function MessageBubble({
         {...(extraClass ? { extraClass } : {})}
         {...(onTaskReference ? { onTaskReference } : {})}
       />
+    );
+  }
+
+  if (synthetic === 'compaction-summary') {
+    const contextLabel = formatContextWindow(contextCompaction?.contextWindow);
+    const triggerPercent = contextCompaction
+      ? Math.round(contextCompaction.autoCompactRatio * 100)
+      : undefined;
+    return (
+      <aside
+        className={`msg msg-context-compaction${extraClass ? ` ${extraClass}` : ''}`}
+        data-msg-id={dataMsgId}
+        data-session-id={dataSessionId}
+        aria-label="Automatic context compaction"
+      >
+        <div className="msg-context-compaction-summary">
+          <span className="msg-context-compaction-mark" aria-hidden="true" />
+          <span className="msg-context-compaction-copy">
+            <strong>Context auto-compacted</strong>
+            <span>
+              {contextCompaction
+                ? `${contextCompaction.removedCount} earlier message${contextCompaction.removedCount === 1 ? '' : 's'} summarized · ${contextLabel}-token window · compaction #${contextCompaction.compactionCount}`
+                : 'Earlier messages were summarized so the conversation could continue.'}
+            </span>
+          </span>
+        </div>
+        <details className="msg-context-compaction-details">
+          <summary>
+            View continuity summary
+            {triggerPercent !== undefined ? ` · triggered around ${triggerPercent}%` : ''}
+          </summary>
+          <div className="msg-context-compaction-body" style={bodyStyle}>
+            <RenderedMarkdown
+              markdown={displayContent}
+              mediaProvider={mediaProvider}
+              fontFamily={fontFamily}
+            />
+          </div>
+        </details>
+      </aside>
     );
   }
 

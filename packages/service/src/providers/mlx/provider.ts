@@ -1273,7 +1273,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       `mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
     );
     this.emitWarning(
-      'Compacted earlier conversation to free up working window for the current turn.',
+      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
     );
   }
 

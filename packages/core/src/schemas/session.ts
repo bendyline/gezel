@@ -333,6 +333,14 @@ export const ChatSessionSchema = z.object({
    */
   numCtx: z.number().int().positive().optional(),
   /**
+   * Effective token window reported by any locally hosted or remote-local
+   * provider. Unlike the legacy Ollama-only `numCtx`, this is populated from
+   * the live session so clients can explain automatic compaction.
+   */
+  contextWindow: z.number().int().positive().optional(),
+  /** Runtime policy used with {@link contextWindow}; persisted for reload UX. */
+  contextAutoCompactRatio: z.number().positive().max(1).optional(),
+  /**
    * Auto-recall snapshot — set once, at the start of the session's first
    * turn, after the memory search runs. Prevents re-recall on restart.
    */
@@ -380,7 +388,7 @@ export const ChatSessionSchema = z.object({
    */
   extractedUpTo: z.number().int().nonnegative().optional(),
   /**
-   * Telemetry for the in-flight compaction path (Ollama only). Bumped
+   * Telemetry for the in-flight compaction path. Bumped
    * every time `ChatManager.compactInFlight` collapses older messages
    * into a synthetic `compaction-summary` bubble to keep the prompt
    * under `num_ctx`. Distinct from `summarizedUpTo` (post-session
@@ -623,6 +631,11 @@ export const TimelineMessageSchema = z.object({
   sessionProviderName: ProviderNameSchema,
   /** Session-pinned model (from `ChatSession.model`). See `sessionProviderName`. */
   sessionModel: z.string().optional(),
+  /** Effective token window and automatic-compaction policy for this session. */
+  sessionContextWindow: z.number().int().positive().optional(),
+  sessionContextAutoCompactRatio: z.number().positive().max(1).optional(),
+  sessionCompactionCount: z.number().int().nonnegative().optional(),
+  sessionLastCompactedAt: z.string().optional(),
   /**
    * Mirrors `ChatSession.lastTurnError` — set when the last turn
    * errored and nothing was persisted as an assistant message. The
@@ -762,6 +775,8 @@ export const TimelineMessageSchema = z.object({
       'keurmeester-notice',
     ])
     .optional(),
+  /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */
+  contextCompaction: ChatMessageSchema.shape.contextCompaction,
 });
 export type TimelineMessage = z.infer<typeof TimelineMessageSchema>;
 
