@@ -128,14 +128,10 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     timeoutMs: 30 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
       notes:
-        'Reworked for the weekly maintenance suite to reconcile OpenAPI and implemented routes with deterministic semantics, drift, auth, pagination, and corrected-snippet gates; not yet rerun locally.',
+        '2026-09-01 count=1: PASSED on both local models (qwen 6.1m, gemma 7.5m). Does not discriminate at this tier.',
     },
-    gaps: [
-      'Run on a local model to establish the difficulty band.',
-      'The recordSchema gate prescribes drift-record field names; a model that emits different keys fails it before the oracle runs. Watch for that in the first local sweep.',
-    ],
   },
   'audio-ad-spot': {
     coverage: {
@@ -254,14 +250,14 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'bug-fix-tdd': {
     runAsCraftbookTask: true,
-    timeoutMs: 40 * 60_000,
+    timeoutMs: 105 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
       notes:
-        'The 2.0.0 tactical sidecar seeds a boundary defect with a green suite, requires red-then-green command receipts through the real task graph, and a mutant oracle proves the regression guard bites.',
+        '2026-09-01 count=1: qwen3.8-27b-q4 PASS 28/28 in 67.2m; gemma4-31b-q4 FAIL at its 2x cap (83.4m) with hard progress 5s before the end. Ceiling raised 40m -> 105m.',
     },
-    gaps: ['Run the task-attributed workflow across local model tiers.'],
+    gaps: ['Re-run gemma4-31b-q4 at the raised ceiling.'],
   },
   // ── Tactical fleet v2 (compiled track — authoring/tactical/) ──
   // Every fleet book runs as a REAL craftbook task: the sidecars assert
@@ -312,14 +308,16 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'refactor-module': {
     runAsCraftbookTask: true,
-    timeoutMs: 45 * 60_000,
+    timeoutMs: 120 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Tactical 2.0.0 sidecar (duplicated logic; behavior-equivalence matrix + duplication-marker oracle, green-before/green-after receipts).',
+        '2026-09-01 count=1: NEITHER local model completed it. Both died at exactly 2x their scaled ceiling (qwen 92.8m, gemma 93.8m), still making hard progress 112s and 87s before the end. Ceiling raised 45m -> 120m; whether it is winnable locally at all is still unknown.',
     },
-    gaps: ['Run across local model tiers.'],
+    gaps: [
+      'One run at the 120m ceiling to establish whether any local model can finish it. If not, it is a frontier-only member and should say so.',
+    ],
   },
   'perf-optimization': {
     runAsCraftbookTask: true,
@@ -367,22 +365,26 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     timeoutMs: 30 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
       notes:
-        'Adapted from the shipped test.json. Joined the developer suite as the single-change-set review probe; needs local-model validation under the precision oracle.',
+        '2026-09-01 count=1: gemma4-31b-q4 PASS 23/23 in 12.6m; qwen3.8-27b-q4 FAIL twice by MODIFYING src/payment.js, a fixture a review must not touch. One of only two members that genuinely discriminate between the two top local models.',
     },
-    gaps: ['Run on a local model to establish the difficulty band.'],
+    gaps: [
+      'The unchanged-fixture failure names the problem but not the remedy — large-pr-review says "restore all seeded source files byte-for-byte" and this does not.',
+    ],
   },
   'codemod-sweep': {
     runAsCraftbookTask: true,
-    timeoutMs: 35 * 60_000,
+    timeoutMs: 90 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
       notes:
-        'Tactical 1.0.0 sidecar (rename sweep with a tricky template-literal site and a legitimate exclusion; zero-residual oracle).',
+        '2026-09-01 count=1: qwen3.8-27b-q4 PASS 32/32 in 54.2m; gemma4-31b-q4 FAIL at its 2x cap (72.9m) with hard progress 15s before the end. Ceiling raised 35m -> 90m on that evidence.',
     },
-    gaps: ['Run across local model tiers.'],
+    gaps: [
+      'Re-run gemma4-31b-q4 at the raised ceiling — its failure was the clock, not the model.',
+    ],
   },
   'ux-update': {
     runAsCraftbookTask: true,
@@ -778,13 +780,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     timeoutMs: 40 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
       notes:
-        'Systemic security fixture with a precision/recall oracle: src/reports.ts seeds three constructs that pattern-match the seeded defects but are correct (exec with no request data, an allow-list-mapped ORDER BY column, a documented-public /health), each declared deliberate in docs/security.md. The oracle fails a shotgun review on precision and an incomplete one on recall; both arms were proven against fabricated deliverables before landing. Joined the developer suite.',
+        '2026-09-01 count=1: PASSED on both local models (qwen 9.3m, gemma 9.8m) with the precision oracle live. Does not discriminate at this tier; the recall+precision design is sound but the fixture is too easy for the 27B/31B class.',
     },
-    gaps: [
-      'Not yet run on a local model under the precision oracle — the frontier ceiling is proven, the difficulty band is not.',
-    ],
+    gaps: ['Consider a harder fixture — more seeded defects, or decoys closer to the real ones.'],
   },
   'dependency-audit': {
     coverage: {
@@ -1330,18 +1330,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'invoice-run': {
     // Bounded for the `complex-work` suite.
-    timeoutMs: 35 * 60_000,
+    timeoutMs: 50 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'implemented',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'validated',
       notes:
-        'Declarative-fanout spawn host, run as a real craftbook task. The framework path is proven end-to-end: the task is created from the book and its entry step dispatches to the worker (daemon.log: "[tasks] entry dispatched: fieldnote-studio-office/1 step scope"), and the fanout trigger + spawnChild dispatch are covered by fanout.integration + manager unit tests. NOT passing on the local small model: gemma4-e4b-q8 (tier small, 8B) reflex-loops read_task_notes on the entry step — 13 tool calls, all read_task_notes, zero read_file/write_file — and exhausts its repair budget before writing notes/billables.json, so no children spawn. The harness classifies this itself (result.json failureClass: "model", failureMode: "model-stuck"). Even the repeat-tracker\'s strongest "do NOT call read_task_notes again" nudge did not break the loop, so it is a small-model capability floor, not a prompt-completeness or framework gap. Per the anti-overtuning doctrine the bar is a medium model; validate the live PASS there rather than overtuning the small-model path.',
+        '2026-09-01 count=1: PASSED on both local models (qwen 9.3m, gemma 36.2m) — a 4x spread on the same member, which is why ceilings come from the max across models and not from one leg. Ceiling raised 35m -> 50m because gemma exceeded the old value.',
     },
-    gaps: [
-      'Live PASS pending a medium-tier local model (no medium weights currently downloaded).',
-      'Optional: trim the dispatch-turn tool surface for small models on multi-file fanout entry steps — 161 tools appears to drown gemma4-e4b into a read_task_notes reflex.',
-    ],
   },
   'knowledge-base-article': {
     coverage: {

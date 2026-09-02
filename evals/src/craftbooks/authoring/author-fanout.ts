@@ -267,7 +267,7 @@ export const authorFanoutScenario: EvalScenario = {
   evidenceTexts: [AUTHOR_FANOUT_KICKOFF_MESSAGE, AUTHOR_FANOUT_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 120 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   setup,
   successCheck,

@@ -411,7 +411,7 @@ export const exportGeneralizeScenario: EvalScenario = {
   evidenceTexts: [EXPORT_GENERALIZE_KICKOFF_MESSAGE, EXPORT_GENERALIZE_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 40 * 60_000,
+  timeoutMs: 80 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   setup,
   successCheck,

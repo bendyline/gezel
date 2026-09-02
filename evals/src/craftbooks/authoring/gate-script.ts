@@ -186,7 +186,7 @@ export const gateScriptScenario: EvalScenario = {
   evidenceTexts: [GATE_SCRIPT_KICKOFF_MESSAGE, GATE_SCRIPT_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 120 * 60_000,
   progressTimeoutMs: 10 * 60_000,
   setup,
   successCheck,

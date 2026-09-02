@@ -269,7 +269,7 @@ export const SUITES: Record<string, EvalSuite> = {
   developer: {
     id: 'developer',
     description:
-      'Engineering scorecard (10 scenarios, <=5h40m at --count 1), deliberately hard: craftbook ' +
+      'Engineering scorecard (10 scenarios, <=9h15m at --count 1), deliberately hard: craftbook ' +
       'routing under near-neighbour ambiguity, defect identification graded on precision as ' +
       'well as recall, and code change proven by execution receipts. Fully hermetic. Not ' +
       'expected to pass 100% — it exists to rank models that saturate core.',
@@ -279,11 +279,11 @@ export const SUITES: Record<string, EvalSuite> = {
       'interface-contract', // 30m — coupled delegation across a shared type module
       'craftbook-code-review', // 30m — one staged change set, precision-graded
       'craftbook-api-contract-review', // 30m — OpenAPI reconciled against implemented routes
-      'craftbook-codemod-sweep', // 35m — 9-file rename with a deliberate CHANGELOG exception
-      'large-pr-review', // 40m — 120-file corpus, planted defect AND planted false-positive trap
-      'craftbook-bug-fix-tdd', // 40m — red-then-green receipts plus a mutant oracle
       'craftbook-deep-security-review', // 40m — seeded source-to-sink vulns, structured findings
-      'craftbook-refactor-module', // 45m — behavior-equivalence matrix + duplication oracle
+      'large-pr-review', // 60m — 120-file corpus, planted defect AND planted false-positive trap
+      'craftbook-codemod-sweep', // 90m — 9-file rename with a deliberate CHANGELOG exception
+      'craftbook-bug-fix-tdd', // 105m — red-then-green receipts plus a mutant oracle
+      'craftbook-refactor-module', // 120m — behavior-equivalence matrix + duplication oracle
     ],
   },
 
@@ -294,12 +294,12 @@ export const SUITES: Record<string, EvalSuite> = {
   'developer-smoke': {
     id: 'developer-smoke',
     description:
-      'Fast engineering pulse check (3 scenarios, <=1h40m): recipe routing, an executed codemod ' +
+      'Fast engineering pulse check (3 scenarios, <=2h35m): recipe routing, an executed codemod ' +
       'oracle, and a precision-graded security review. Not a scorecard — use developer for that.',
     scenarios: [
-      'dev-craftbook-routing',
-      'craftbook-codemod-sweep',
-      'craftbook-deep-security-review',
+      'dev-craftbook-routing', // 25m
+      'craftbook-deep-security-review', // 40m
+      'craftbook-codemod-sweep', // 90m
     ],
   },
 
@@ -333,20 +333,20 @@ export const SUITES: Record<string, EvalSuite> = {
   'complex-work': {
     id: 'complex-work',
     description:
-      'Complex-workflow scorecard (9 scenarios, <=5h40m at --count 1), deliberately hard: ' +
+      'Complex-workflow scorecard (9 scenarios, <=10h50m at --count 1), deliberately hard: ' +
       'selecting and executing multi-phase recipes, and AUTHORING new ones — parameterized, ' +
       'fanned-out, self-gating, and repaired mid-flight. Six of nine members grade the craftbook ' +
       'the model wrote. Fully hermetic. Not expected to pass 100%.',
     scenarios: [
       'craftbook-find-vs-create', // 20m — find the library recipe instead of authoring one
-      'craftbook-route-multi', // 30m — route AND execute: the selection-to-delivery handoff
-      'craftbook-invoice-run', // 35m — declarative fanout execution, non-code
-      'craftbook-author-params', // 35m — a recipe reusable across two inputs, not hardcoded to one
-      'craftbook-export-generalize', // 40m — generalize finished one-off work into a reusable recipe
       'craftbook-author-linear', // 45m — the authoring anchor: three gated steps, run to completion
-      'craftbook-author-gate-script', // 45m — embedded inline gate script with an anti-stub floor
       'craftbook-edit-midtask', // 45m — diagnose an unwinnable gate and repair the live book
-      'craftbook-author-fanout', // 45m — author a spawn block; the hardest document shape
+      'craftbook-invoice-run', // 50m — declarative fanout execution, non-code
+      'craftbook-route-multi', // 80m — route AND execute: the selection-to-delivery handoff
+      'craftbook-export-generalize', // 80m — generalize finished one-off work into a reusable recipe
+      'craftbook-author-params', // 90m — a recipe reusable across two inputs, not hardcoded to one
+      'craftbook-author-gate-script', // 120m — embedded inline gate script with an anti-stub floor
+      'craftbook-author-fanout', // 120m — author a spawn block; the hardest document shape
     ],
   },
 
@@ -367,10 +367,14 @@ export const SUITES: Record<string, EvalSuite> = {
   'complex-work-smoke': {
     id: 'complex-work-smoke',
     description:
-      'Fast complex-workflow pulse check (3 scenarios, <=1h40m): recipe selection, baseline ' +
+      'Fast complex-workflow pulse check (3 scenarios, <=1h55m): recipe selection, baseline ' +
       'craftbook authoring, and declarative-fanout execution — one per kind of work the suite ' +
       'grades. Not a scorecard — use complex-work for that.',
-    scenarios: ['craftbook-find-vs-create', 'craftbook-invoice-run', 'craftbook-author-linear'],
+    scenarios: [
+      'craftbook-find-vs-create', // 20m
+      'craftbook-author-linear', // 45m
+      'craftbook-invoice-run', // 50m
+    ],
   },
 
   // Bundled project-type rails, driven through the Job Hunt exemplar:

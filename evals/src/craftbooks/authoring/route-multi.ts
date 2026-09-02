@@ -277,7 +277,7 @@ export const routeMultiScenario: EvalScenario = {
   ],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 30 * 60_000,
+  timeoutMs: 80 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   setup,
   successCheck,

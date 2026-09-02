@@ -375,7 +375,7 @@ The final report must include "Coverage: 120/120 changed files", a findings tabl
   // Bounded for the `developer` suite. Until that suite landed this
   // scenario carried no ceiling at all and inherited the runner's 8-hour
   // default, so a wedged trial could hold the device for a working day.
-  timeoutMs: 40 * 60_000,
+  timeoutMs: 60 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   skipInitialPrompt: true,
   setup,

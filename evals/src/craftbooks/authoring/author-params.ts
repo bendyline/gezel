@@ -345,7 +345,7 @@ export const authorParamsScenario: EvalScenario = {
   evidenceTexts: [AUTHOR_PARAMS_KICKOFF_MESSAGE, AUTHOR_PARAMS_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 35 * 60_000,
+  timeoutMs: 90 * 60_000,
   progressTimeoutMs: 10 * 60_000,
   setup,
   successCheck,
