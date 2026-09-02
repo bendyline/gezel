@@ -3,6 +3,7 @@ id: whats-new-index
 title: What's new
 order: -999999
 summary: Every gezel release, in plain language — what changed and what it means for you.
+ogHeadline: Every release, in plain language
 ---
 
 # What's new
