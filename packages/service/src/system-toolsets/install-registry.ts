@@ -1,10 +1,22 @@
 import type { SystemToolsetInstallEvent, SystemToolsetInstallSnapshot } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, resolveDistributionProfile } from '@bendyline/gezel';
 import { installSystemToolsetStreaming } from './bootstrap.js';
 import type { PinnedSystemToolset } from './manifest.js';
 import { readSystemTracking, writeSystemTracking } from './tracking.js';
 
 const log = createLogger('system-toolset-install');
+
+/**
+ * This build cannot install the requested toolset — a property of how the
+ * build was distributed, not of the request or the network.
+ *
+ * Typed so the HTTP route answers 403 with the reason rather than the 500 an
+ * anonymous throw would produce: nothing about it is retryable, and the user
+ * needs to read the sentence to know what to do instead.
+ */
+export class SystemToolsetInstallUnavailableError extends Error {
+  readonly code = 'unavailable_in_build';
+}
 
 /**
  * How long a finished install (done OR error) lingers so a client that
@@ -83,6 +95,14 @@ export class SystemToolsetInstallRegistry {
     alreadyRunning: boolean;
   } {
     const toolsetId = entry.toolsetId;
+    // A store build may not fetch executable code. Refused here rather than
+    // inside the installer so no partial tree is ever created, and with the
+    // profile's own copy so the message names the actual constraint instead
+    // of surfacing whatever the download would have failed with.
+    const distribution = resolveDistributionProfile();
+    if (!distribution.allowRuntimeCodeDownloads) {
+      throw new SystemToolsetInstallUnavailableError(distribution.refusalReason('copilot-install'));
+    }
     // `mcp-toolset` entries also need a Store record written after install or
     // ChatManager never spawns them. Nothing on-demand is one today; fail
     // loudly rather than installing something that silently does nothing.

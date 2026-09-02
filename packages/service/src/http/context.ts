@@ -1,4 +1,4 @@
-import type { ProviderName, ServiceRole } from '@bendyline/gezel';
+import type { ProviderName, ResolvedDistributionPolicy, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
 import type { AppServeController } from '../app-serve/controller.js';
@@ -75,6 +75,12 @@ import type { TokenStore } from './token-store.js';
 export interface ServiceContext {
   /** Process responsibility; used to keep the machine route table deny-by-default. */
   serviceRole: ServiceRole;
+  /**
+   * What this build's distribution channel permits. Resolved once at boot and
+   * passed here so routes take it as a dependency instead of each re-reading
+   * the environment and risking a different answer.
+   */
+  distribution: ResolvedDistributionPolicy;
   home: string;
   store: Store;
   chatEvents: ChatEventBus;

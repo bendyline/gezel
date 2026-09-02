@@ -119,8 +119,18 @@ export function createOllamaEmulationController(opts: {
   fetch: () => ServeFetch;
   /** Test seam — bind an ephemeral port instead of 11434. */
   port?: number;
+  /**
+   * Whether this build may bind the listener at all. False in store builds:
+   * an unauthenticated plain-HTTP port that any local process can drive is
+   * the one surface here a store reviewer would rightly ask about, and the
+   * authenticated `/v1` facade already serves every app that can be told a
+   * URL. Distinct from the user's `emulateOllama` setting — this one the
+   * user cannot turn on.
+   */
+  allowListener?: boolean;
 }): OllamaEmulationController {
   const desiredPort = opts.port ?? OLLAMA_EMULATION_PORT;
+  const allowListener = opts.allowListener !== false;
   let server: ServerType | null = null;
   let current: OllamaEmulationStatus = { listening: false };
 
@@ -135,7 +145,7 @@ export function createOllamaEmulationController(opts: {
   return {
     status: () => ({ ...current }),
     async reconfigure(config) {
-      const wanted = config?.emulateOllama === true && config?.enabled !== false;
+      const wanted = allowListener && config?.emulateOllama === true && config?.enabled !== false;
       if (!wanted) {
         await stop();
         return { ...current };

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Child-process entitlements for the Mac App Store build.
+
+  Applied to every non-host Mach-O in the payload: the Electron helpers, the
+  bundled node and DuckDB binaries, and the native engines. Under the sandbox a
+  child does not get its own capability set — it inherits the parent's, whole,
+  and may not widen it. That inheritance is the mechanism the store build's
+  security story rests on: a gezel script running under the bundled node cannot
+  reach a file the app itself was not granted, enforced by the kernel rather
+  than by our own path checks.
+
+  Deliberately three keys. The parent's grants (network, microphone, the
+  user-selected files, the app group) arrive through `inherit` and must NOT be
+  restated here — codesign rejects a child that names capabilities alongside
+  inheritance, and restating them would misrepresent the child as holding them
+  in its own right.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Take the parent's capability set entire. This is the whole contract:
+         no more than the app has, and nothing separately negotiable. -->
+    <key>com.apple.security.inherit</key>
+    <true/>
+
+    <!-- The Electron helper processes are where V8 actually runs, so the JIT
+         exception has to reach them too. Harmless on the non-Electron children
+         (node uses it, the engines do not). -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

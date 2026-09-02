@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CopilotAvailability } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, resolveDistributionProfile } from '@bendyline/gezel';
 import { checkInstallTree } from '../system-toolsets/install-health.js';
 import { SYSTEM_TOOLSETS } from '../system-toolsets/manifest.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
@@ -134,6 +134,9 @@ async function probe(
     managed,
     pinnedVersion: pinned,
     updateAvailable: managed === 'outdated',
+    // Only the managed rung is a download; the two below it are not, so a
+    // store build still resolves Copilot for anyone who brought their own CLI.
+    canInstall: resolveDistributionProfile(env).allowRuntimeCodeDownloads,
     ...(installed ? { installedVersion: installed.version, installDir: installed.path } : {}),
     ...(damagedReason ? { damagedReason } : {}),
   };

@@ -7,6 +7,7 @@ import {
   type NativeEngineResolveEvent,
   createLogger,
   nowIso,
+  resolveDistributionProfile,
   retryTransient,
 } from '@bendyline/gezel';
 import {
@@ -240,6 +241,13 @@ async function* resolveVendoredDuckdb(
     }
   }
 
+  // Same placement rationale as the native-engine gate: after the warm cache,
+  // before the first byte of network.
+  const duckdbDistribution = resolveDistributionProfile();
+  if (!duckdbDistribution.allowEngineBinaryDownloads) {
+    yield* fail(duckdbDistribution.refusalReason('engine-download'));
+  }
+
   await mkdir(cacheDir, { recursive: true });
   const tmpExtractDir = `${cacheDir}.tmp`;
   await rm(tmpExtractDir, { recursive: true, force: true });
@@ -465,6 +473,14 @@ export async function* resolveEngine(
   }
 
   // ── Availability gates ──
+  // Placed after the warm-cache path above on purpose: a store build resolves
+  // an engine it already has exactly like any other build, and refuses only
+  // the download. Refusing in `ensure` instead would have broken resolution
+  // of the binaries such a build ships with.
+  const distribution = resolveDistributionProfile();
+  if (!distribution.allowEngineBinaryDownloads) {
+    yield* fail(distribution.refusalReason('engine-download'));
+  }
   const expectedDigest = (
     opts.expectedSha256sumsDigest ?? (usesSourcePin ? SHA256SUMS_DIGEST : '0'.repeat(64))
   ).toLowerCase();

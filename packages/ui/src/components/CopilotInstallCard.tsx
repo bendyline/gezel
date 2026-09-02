@@ -20,12 +20,16 @@ type State =
  * should be made to accept just by launching the app. So this card is the
  * only place it gets fetched, and only when the user asks.
  *
- * Five states, driven entirely by {@link CopilotAvailability}:
+ * Six states, driven entirely by {@link CopilotAvailability}:
  *
  *   - `source: 'path'` or `'env'` — the user already has a Copilot CLI.
  *     **No install button.** Offering a second copy of the same proprietary
  *     binary to someone who ran `npm i -g @github/copilot` would be both
  *     wasteful and baffling.
+ *   - `canInstall: false` — a store build, which may not download executable
+ *     code. Also no install button, but for a reason the user cannot fix from
+ *     here, so the copy points at the thing that does work: their own CLI,
+ *     which the two rungs above still resolve normally.
  *   - `managed: 'current'` — installed by us and up to date. One line, no
  *     control.
  *   - `managed: 'outdated'` — installed and working, but this build pins a
@@ -185,6 +189,19 @@ function IdleBody({
           </>
         ) : null}
         .
+      </p>
+    );
+  }
+
+  // This build cannot download the SDK at all (store distribution). Every
+  // branch below offers a button that would only fail, so stop here — but say
+  // what does work, because the two rungs above this one still do: someone who
+  // installs the Copilot CLI themselves gets full Copilot support.
+  if (availability.canInstall === false) {
+    return (
+      <p className="muted small" style={{ marginTop: 0 }}>
+        This version of Gezel can't download the GitHub Copilot SDK. Install the Copilot CLI
+        yourself (<code>npm i -g @github/copilot</code>) and Gezel will use it.
       </p>
     );
   }

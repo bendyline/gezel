@@ -1,0 +1,81 @@
+# Mac App Store build. Selected with `--config electron-builder.mas.yml`.
+#
+# Extends the Developer ID config rather than restating it: `extends` is
+# resolved by app-builder-lib's config loader and deep-merges, so files,
+# asarUnpack, afterPack, fileAssociations, extendInfo and the icon all stay in
+# one place. Child arrays REPLACE parent arrays rather than merging, which is
+# why `mac.extraResources` below has to restate the licenses tree it keeps.
+#
+# Kept separate from electron-builder.yml (rather than adding a `mas` block
+# there) because the two builds disagree about things the audited contract
+# tests pin: mac targets are exactly ['pkg','zip'] there, and
+# `com.apple.security.app-sandbox` is forbidden in entitlements.mac.plist.
+# Both remain true of the Developer ID build, and neither should stop being
+# checked just because a store lane now exists.
+extends: ./electron-builder.yml
+
+mac:
+  target:
+    - target: mas
+      arch:
+        - arm64
+  artifactName: ${productName}-${version}-mas-${arch}.${ext}
+  # The Developer ID build ships the LaunchDaemon plist and uninstall.sh here
+  # for its PKG postinstall to install. A store build registers no daemon —
+  # guideline 2.4.5 forbids installing anything outside the bundle, and a MAS
+  # app cannot elevate — so carrying them would ship an installer payload
+  # nothing can ever use. A child array replaces the parent's, so the licenses
+  # tree has to be restated here or it would be dropped.
+  #
+  # The model pack rides along instead. Weights are data, so they raise no
+  # 2.4.5 question, and the macOS uncompressed app ceiling is 200 GB — the
+  # oft-cited 4 GB limit is iOS-only and applies to the bundle there. A later
+  # milestone can move them to Apple-hosted Background Assets (200 GB per app
+  # on Apple's CDN, versioned independently of the build, so an app update
+  # stops re-shipping unchanged weights); in-bundle first is what makes the
+  # very first boot complete with no download at all.
+  extraResources:
+    - from: dist/licenses
+      to: licenses
+    - from: dist/model-pack
+      to: model-pack
+
+# Deep-assigned OVER the `mac` block above by app-builder-lib's macPackager, so
+# only the differences belong here.
+mas:
+  # Mutually exclusive with the sandbox in practice: MAS apps are signed for
+  # distribution, not with hardened runtime, and the store re-signs on ingest.
+  hardenedRuntime: false
+  entitlements: entitlements.mas.plist
+  entitlementsInherit: entitlements.mas.inherit.plist
+  provisioningProfile: build-store/Gezel_MAS.provisionprofile
+  # Same paths as the parent's signIgnore, for the opposite reason — and this
+  # inversion is the single most confusing thing about the MAS lane, so it is
+  # worth being explicit.
+  #
+  # In the Developer ID build these files are skipped to PRESERVE their vendor
+  # signatures (Node Foundation, DuckDB Foundation, our own native release),
+  # because re-signing them would replace an attestation we did not issue and
+  # break source-pinned reuse.
+  #
+  # A store build cannot keep those signatures: every Mach-O it ships must
+  # carry our Apple Distribution identity and the inherit entitlements, or the
+  # sandbox refuses to launch the children. So the MAS workflow re-signs this
+  # tree ITSELF, before `pnpm build:packaged` seals it, and these entries then
+  # stop electron-builder from signing over that work with the wrong
+  # entitlements. The bytes are already final by the time packing starts, which
+  # is also why an afterSign hook could not do this job.
+  signIgnore:
+    - /Contents/Resources/app\.asar\.unpacked/native-bin/
+    - /Contents/Resources/app\.asar\.unpacked/dist/node-bundle/node$
+    - /Contents/Resources/app\.asar\.unpacked/dist/duckdb-bundle/duckdb$
+
+masDev:
+  provisioningProfile: build-store/Gezel_MASDev.provisionprofile
+
+# No update feed. The store owns delivery, `latest-mac.yml` is never consulted,
+# and `appUpdateDeliveryPolicy` returns the manual shape for store builds so
+# electron-updater is never even constructed. Explicit null rather than
+# inherited so nothing generates metadata that could mislead a future reader
+# into thinking this channel self-updates.
+publish: null

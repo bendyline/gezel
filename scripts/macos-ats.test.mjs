@@ -28,7 +28,7 @@ test('the hook narrows a blanket exemption and leaves everything else alone', ()
   assert.match(decideAtsAction('YES').reason, /^unexpected-value:/);
 });
 
-test('the hook is wired into the afterPack chain for darwin', () => {
+test('the hook is wired into the afterPack chain for both macOS lanes', () => {
   const afterPack = readFileSync(join(root, 'packages/app/scripts/after-pack.cjs'), 'utf8');
   assert.match(afterPack, /require\('\.\/harden-mac-ats\.cjs'\)/);
   assert.match(afterPack, /await hardenMacAts\(context\)/);
@@ -36,8 +36,15 @@ test('the hook is wired into the afterPack chain for darwin', () => {
   const hook = readFileSync(join(root, 'packages/app/scripts/harden-mac-ats.cjs'), 'utf8');
   assert.match(
     hook,
-    /electronPlatformName !== 'darwin'/,
-    'the hook must no-op on non-darwin packs',
+    /MACOS_PLATFORMS\.has\(context\.electronPlatformName\)/,
+    'the hook must no-op on non-macOS packs',
+  );
+  // `mas` is a separate electronPlatformName. Gating on `darwin` alone skipped
+  // the one lane whose Info.plist a reviewer reads.
+  assert.match(
+    hook,
+    /MACOS_PLATFORMS = new Set\(\['darwin', 'mas'\]\)/,
+    'both macOS lanes must reach the ATS narrowing',
   );
   // Surgical replacement, not a parse/serialize round-trip: JSON cannot express
   // plist `data` or `date` values, so a round-trip would silently drop them.

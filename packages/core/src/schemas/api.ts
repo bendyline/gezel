@@ -274,6 +274,26 @@ export const HealthResponseSchema = z.object({
    * service registration, so the only correct response is to say so.
    */
   childProcessSpawn: z.enum(['ok', 'denied']).optional(),
+  /**
+   * The HTTP contract generation this daemon speaks (`current`) and the
+   * oldest one it still serves (`floor`). See `GEZEL_API_GENERATION`.
+   *
+   * Answers a question `version` cannot: whether a client built separately
+   * from this daemon can safely use it. The store builds need that, since
+   * they connect to whatever service the user already installed and cannot
+   * replace it — their only alternative is running their own.
+   *
+   * Absence is itself a verdict, not silence: a daemon predating this field
+   * is older than any generation a store build knows, so a client reading
+   * `undefined` must treat it as incompatible rather than assume the best.
+   * Optional in the schema only so older clients keep parsing.
+   */
+  apiCompat: z
+    .object({
+      floor: z.number().int(),
+      current: z.number().int(),
+    })
+    .optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -3940,6 +3960,17 @@ export const CopilotAvailabilitySchema = z.object({
   cliPath: z.string().optional(),
   /** True when a managed install exists but this build pins a different version. */
   updateAvailable: z.boolean(),
+  /**
+   * Whether this build may install the managed SDK at all.
+   *
+   * False in store builds, which cannot download executable code. It is a
+   * separate question from `available`: the `env` and `path` rungs still work
+   * there, so someone who installed the Copilot CLI themselves keeps full
+   * Copilot support — they simply are never offered an install button. Absent
+   * on daemons predating the field, which the UI reads as "installing is
+   * fine", matching how those builds behave.
+   */
+  canInstall: z.boolean().optional(),
 });
 export type CopilotAvailability = z.infer<typeof CopilotAvailabilitySchema>;
 

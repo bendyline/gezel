@@ -24,6 +24,7 @@ import {
   type ExternalFolders,
   KeyedLock,
   type TaskAssignee,
+  resolveDistributionProfile,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -426,6 +427,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
   const serviceRole = await resolveEffectiveServiceRole(opts.role, process.env, home);
+  // Resolved once and passed down, never re-read from env at the enforcement
+  // seams — the same discipline `resolveSecurityPolicy` follows, and what
+  // keeps one subsystem from disagreeing with another about what this build
+  // is allowed to do.
+  const distribution = resolveDistributionProfile(process.env);
+  if (distribution.profile !== 'standard') {
+    log.info(`[service] distribution=${distribution.profile}`);
+  }
   const privateUserHome = process.env.GEZEL_SYSTEM_SCOPE !== '1';
   // Secure the home before the runtime lock or config probe creates/reads any
   // per-user state. Store.ensureLayout repeats this idempotently so direct
@@ -2447,6 +2456,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return ollamaEmulationFetchRef.value;
     },
     ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
+    allowListener: distribution.allowOllamaEmulation,
   });
 
   // Codex needs a stable plain-HTTP origin because the product daemon's port
@@ -2657,6 +2667,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const context: ServiceContext = {
     serviceRole,
+    distribution,
     home,
     store,
     chatEvents,
@@ -3101,8 +3112,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // pre-existing `GEZEL_MOCK_PROVIDER=1` (implies mocked environment where
   // real tarball downloads would only add teardown-time `EBUSY` races on
   // temp dirs).
+  // A store build skips it for a different reason than the two below: not
+  // "this environment doesn't want the download" but "this build may not
+  // download executable code at all". The published phase is still `ready` —
+  // nothing is pending, and the toolsets are simply absent.
   const skipBootstrap =
     serviceRole === 'machine-engine' ||
+    !distribution.allowRuntimeCodeDownloads ||
     process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
     process.env.GEZEL_MOCK_PROVIDER === '1';
   if (skipBootstrap) {

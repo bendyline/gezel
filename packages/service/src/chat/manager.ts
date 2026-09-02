@@ -113,7 +113,6 @@ import {
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
-import { engineApiKey } from '../providers/native/engine-api-key.js';
 import {
   resolveCatalogIdFromModelId,
   resolveCatalogLlamaCppEngineConfig,
@@ -172,6 +171,7 @@ import {
   minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
 } from '../providers/native/capacity-broker.js';
+import { engineApiKey } from '../providers/native/engine-api-key.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -16383,6 +16383,11 @@ export class ChatManager {
         // explicitly or the control arm would still get re-anchored output.
         ...(process.env.GEZEL_DISABLE_EDIT_REANCHOR
           ? { GEZEL_DISABLE_EDIT_REANCHOR: process.env.GEZEL_DISABLE_EDIT_REANCHOR }
+          : {}),
+        // Same reason: unforwarded, the child resolves `standard` and
+        // registers tools this build cannot honor (npm_install).
+        ...(process.env.GEZEL_DISTRIBUTION_PROFILE
+          ? { GEZEL_DISTRIBUTION_PROFILE: process.env.GEZEL_DISTRIBUTION_PROFILE }
           : {}),
       };
       // Diagnostic for the recurring "game tools missing after a model

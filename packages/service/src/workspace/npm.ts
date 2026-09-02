@@ -11,6 +11,7 @@ import {
   NpmPackageNameSchema,
   NpmRegistryVersionSchema,
   formatNpmRegistrySpec,
+  resolveDistributionProfile,
 } from '@bendyline/gezel';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
@@ -212,6 +213,26 @@ export function intentPackages(
 }
 
 /**
+ * Why this install cannot happen at all, or null when it may proceed.
+ *
+ * Two unrelated conditions decline every package — including the shipped
+ * allowlist, which normally installs with no approval question — and both
+ * want the same shape: a reason the model can act on rather than an error it
+ * will retry. The eval harness's hermetic mode is one; a store build, which
+ * may not fetch executable code at all, is the other.
+ */
+function resolveNpmInstallBlock(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.GEZEL_NPM_INSTALL_OFFLINE === '1') {
+    return 'Package installs are disabled in this environment (offline mode). Do not retry npm_install; write dependency-free code using Node built-ins (fs, path, readline, JSON) instead.';
+  }
+  const distribution = resolveDistributionProfile(env);
+  if (!distribution.allowNpmInstalls) {
+    return `${distribution.refusalReason('npm')} Do not retry npm_install; use Node built-ins (fs, path, readline, JSON) instead.`;
+  }
+  return null;
+}
+
+/**
  * Batch entry point. See module header for outcome semantics.
  */
 export async function requestNpmInstalls(
@@ -225,18 +246,14 @@ export async function requestNpmInstalls(
     return { results: [] };
   }
 
-  // Hermetic-mode kill switch: decline every install — including the
-  // shipped allowlist, which normally installs with no approval question.
-  // The eval harness sets this so trials never reach the npm registry;
-  // the reason text steers the model toward built-ins instead of retry.
-  if (process.env.GEZEL_NPM_INSTALL_OFFLINE === '1') {
+  const blocked = resolveNpmInstallBlock();
+  if (blocked) {
     return {
       results: requested.map((req) => ({
         kind: 'declined' as const,
         package: req.package,
         version: req.version,
-        reason:
-          'Package installs are disabled in this environment (offline mode). Do not retry npm_install; write dependency-free code using Node built-ins (fs, path, readline, JSON) instead.',
+        reason: blocked,
       })),
     };
   }

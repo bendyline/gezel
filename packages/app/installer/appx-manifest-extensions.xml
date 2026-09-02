@@ -1,0 +1,31 @@
+<!--
+  Raw XML spliced into the generated AppxManifest's <Extensions> element by
+  electron-builder's `appx.customExtensionsPath`.
+
+  This is the MSIX equivalent of the autostart unit the other platforms write
+  from Settings -> Daemon: a LaunchAgent on macOS, a systemd --user unit on
+  Linux, a Task Scheduler on-logon task from the NSIS build. A packaged app
+  cannot write a Task Scheduler entry for itself, so on this channel the task
+  must be declared in the manifest instead.
+
+  Declared with Enabled="false" deliberately. Autostart is opt-in everywhere
+  else in Gezel, App Review guidance on both stores treats silent launch-at-
+  login as user-hostile, and a startupTask that ships enabled would turn a
+  Settings toggle the user has never seen into a default. The manifest entry
+  only makes the task *available*; the app enables it through
+  StartupTask.RequestEnableAsync when the user turns autostart on, and Windows
+  still gives the user the final say in Task Manager's Startup tab.
+
+  The TaskId is a stable identity — the app looks the task up by this string,
+  and Windows keys the user's own enable/disable decision to it. Do not rename
+  it once a build carrying it has shipped.
+-->
+<desktop:Extension
+  Category="windows.startupTask"
+  Executable="app\gezel.exe"
+  EntryPoint="Windows.FullTrustApplication">
+  <desktop:StartupTask
+    TaskId="GezelStartup"
+    Enabled="false"
+    DisplayName="Gezel" />
+</desktop:Extension>

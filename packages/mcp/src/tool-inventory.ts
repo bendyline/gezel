@@ -19,6 +19,8 @@
  * contract. Registration guards them against colliding with these names.
  */
 
+import { resolveDistributionProfile } from '@bendyline/gezel';
+
 export const ALWAYS_REGISTERED_TOOLS = [
   // Memory
   'search_memory',
@@ -317,6 +319,20 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     modelFacing: true,
   },
 } as const;
+
+/**
+ * Tools this build's distribution channel forbids, withheld from `tools/list`
+ * exactly like the platform-unavailable ones.
+ *
+ * A store build may not fetch executable code, so `npm_install` could only
+ * ever decline. Withholding beats registering-and-refusing: the model pays no
+ * schema cost for it and cannot spend turns reaching for the one capability
+ * the build lacks. Tools that operate on packages already present — `run_npx`,
+ * `list_packages`, `run_package_script` — are untouched.
+ */
+export function distributionWithheldTools(env: NodeJS.ProcessEnv = process.env): readonly string[] {
+  return resolveDistributionProfile(env).allowNpmInstalls ? [] : ['npm_install'];
+}
 
 export type AlwaysRegisteredToolName = (typeof ALWAYS_REGISTERED_TOOLS)[number];
 export type ConditionallyRegisteredToolName = keyof typeof CONDITIONALLY_REGISTERED_TOOLS;

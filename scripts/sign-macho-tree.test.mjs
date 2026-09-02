@@ -5,9 +5,11 @@ import { join, relative } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  codesignArgs,
   findMachOBinaries,
   isDistributionReadyDeveloperIdSignature,
   isMachOMagic,
+  resolveSignMode,
 } from './sign-macho-tree.mjs';
 
 const magic = (value) => {
@@ -105,6 +107,60 @@ describe('isDistributionReadyDeveloperIdSignature', () => {
     for (const details of cases) {
       assert.equal(isDistributionReadyDeveloperIdSignature(details), false);
     }
+  });
+});
+
+describe('resolveSignMode', () => {
+  it('defaults to Developer ID, preserving vendor signatures and hardening', () => {
+    const mode = resolveSignMode({});
+    assert.equal(mode.name, 'developer-id');
+    assert.equal(mode.hardenedRuntime, true);
+    assert.equal(mode.preserveVendorSignatures, true);
+  });
+
+  it('re-signs everything without hardening for the App Store', () => {
+    // Both differences are load-bearing: a sandboxed child carrying a vendor's
+    // team ID cannot inherit the app's capabilities and will not launch.
+    const mode = resolveSignMode({ GEZEL_MACOS_SIGN_IDENTITY_KIND: 'apple-distribution' });
+    assert.equal(mode.hardenedRuntime, false);
+    assert.equal(mode.preserveVendorSignatures, false);
+    assert.match(mode.identityLabel, /Apple Distribution/);
+  });
+
+  it('refuses an unknown mode rather than silently picking one', () => {
+    assert.throws(
+      () => resolveSignMode({ GEZEL_MACOS_SIGN_IDENTITY_KIND: 'mas' }),
+      /unknown GEZEL_MACOS_SIGN_IDENTITY_KIND/,
+    );
+  });
+});
+
+describe('codesignArgs', () => {
+  it('hardens and timestamps for notarized Developer ID builds', () => {
+    const args = codesignArgs('Developer ID Application: X', '/tmp/bin', resolveSignMode({}), null);
+    assert.deepEqual(args, [
+      '--force',
+      '--sign',
+      'Developer ID Application: X',
+      '--options',
+      'runtime',
+      '--timestamp',
+      '/tmp/bin',
+    ]);
+  });
+
+  it('passes child entitlements and omits hardening for the App Store', () => {
+    const mode = resolveSignMode({ GEZEL_MACOS_SIGN_IDENTITY_KIND: 'apple-distribution' });
+    const args = codesignArgs('Apple Distribution: X', '/tmp/bin', mode, '/tmp/inherit.plist');
+    assert.deepEqual(args, [
+      '--force',
+      '--sign',
+      'Apple Distribution: X',
+      '--entitlements',
+      '/tmp/inherit.plist',
+      '/tmp/bin',
+    ]);
+    assert.equal(args.includes('runtime'), false);
   });
 });
 

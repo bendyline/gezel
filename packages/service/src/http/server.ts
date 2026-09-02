@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
+import {
+  GEZEL_API_GENERATION,
+  GEZEL_API_GENERATION_FLOOR,
+  GEZEL_VERSION,
+  createLogger,
+  isSafeEntityId,
+} from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
@@ -513,6 +519,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     return c.json({
       ok: true as const,
       version: GEZEL_VERSION,
+      // Sent unconditionally for the same reason as `ds4ServerBundled` below:
+      // a client must be able to tell this daemon's answer apart from a
+      // daemon too old to have one.
+      apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
       serviceRole: ctx.serviceRole,
       ...(ctx.machineEngine ? { machineEngineConnected: ctx.machineEngine.isConnected() } : {}),
       startedAt: ctx.startedAt,

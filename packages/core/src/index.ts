@@ -60,12 +60,34 @@ export * from './outside-in-paths.js';
 export * from './shadow-paths.js';
 export * from './thread-title.js';
 export * from './catalog-work-in-progress.js';
+export * from './distribution/profile.js';
 
 /**
  * The package version is embedded into health responses and logs so clients
  * can surface it in the UI.
  */
 export const GEZEL_VERSION = '0.0.0';
+
+/**
+ * The HTTP contract generation this build speaks, and the oldest one it still
+ * serves. Reported on `/api/health` as `apiCompat`.
+ *
+ * This is NOT a version. `GEZEL_VERSION` moves on every release and says
+ * nothing about whether two builds can talk; the only comparison anyone made
+ * with it was string equality, which reads every ordinary release as a
+ * mismatch. A store-distributed client cannot restart or replace the daemon
+ * it finds — its whole decision is "can I use this one, or must I run my
+ * own?" — so it needs an answer that stays stable across the releases where
+ * nothing about the contract changed.
+ *
+ * Bump `GEZEL_API_GENERATION` only for a breaking, client-visible change to
+ * the schemas in `schemas/` as served over HTTP. Raise
+ * `GEZEL_API_GENERATION_FLOOR` to the same number only when dropping support
+ * for the older shape — keeping the floor behind the current generation is
+ * what lets one daemon serve clients from several releases.
+ */
+export const GEZEL_API_GENERATION = 1;
+export const GEZEL_API_GENERATION_FLOOR = 1;
 
 /**
  * The date-based line this build sits on, for content compatibility only.

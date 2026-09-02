@@ -160,6 +160,7 @@ import {
   LEGACY_SPELLING_BY_CANONICAL,
   RESERVED_TOOL_NAMES,
   canonicalToolName,
+  distributionWithheldTools,
   resolveToolNameSpelling,
 } from './tool-inventory.js';
 import {
@@ -540,6 +541,7 @@ const excludedToolNames = new Set(
     ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
       ? []
       : unavailableToolsForPlatform(process.platform)),
+    ...distributionWithheldTools(),
   ].map(canonicalToolName),
 );
 // Compatibility handlers remain available to direct MCP clients for one
