@@ -8,6 +8,8 @@ import {
   chooseOutsideInSource,
   createDocumentLinkProvider,
   createDocumentsContentContainer,
+  createVersionCompatibleContentContainer,
+  documentVersionBasename,
   gezelProofingIgnoreStore,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
@@ -194,6 +196,14 @@ function OutsideInEditor({
     () => createDocumentLinkProvider({ client: api, currentDocumentPath: prepared.sourcePath }),
     [prepared.sourcePath],
   );
+  const versionBasename = useMemo(
+    () => documentVersionBasename(prepared.sourcePath),
+    [prepared.sourcePath],
+  );
+  const versionContainer = useMemo(
+    () => createVersionCompatibleContentContainer(container, versionBasename),
+    [container, versionBasename],
+  );
   const saveDocument = useCallback(
     async (source: string) => {
       const linked = withOutsideInMetadata(source, layout);
@@ -264,12 +274,12 @@ function OutsideInEditor({
           height="100%"
           colorScheme={editorTheme}
           fullWidth
-          workspaceContainer={container}
+          workspaceContainer={versionContainer}
           documentLinkProvider={documentLinkProvider}
           proofing={proofing}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
-          versionBasename={basename(prepared.sourcePath)}
+          versionBasename={versionBasename}
           toolbarSlotAfterActions={
             <>
               {prepared.editingEnabled && <TransformToolbarButton context="generic" />}

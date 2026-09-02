@@ -25,6 +25,7 @@ export function documentRoutes(ctx: ServiceContext): Hono {
       const detailed = await ctx.store.listDocumentsRecursiveDetailed({
         ...(withStats ? { withStats: true } : {}),
         ...(includeHidden ? { includeHidden: true } : {}),
+        ...(subpath ? { subpath } : {}),
       });
       return c.json({ files: detailed.entries, truncated: detailed.truncated });
     }

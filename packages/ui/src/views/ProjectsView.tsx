@@ -57,7 +57,11 @@ import {
   chooseOutsideInSource,
   createArtifactsContentContainer,
   createDocumentLinkProvider,
+  createDocumentMediaProvider,
   createProjectContentContainer,
+  createVersionCompatibleContentContainer,
+  deriveContainerScope,
+  documentVersionBasename,
   importOutsideInDocument,
   isOutsideInInternalPath,
   isOutsideInMarkdownEditingEnabled,
@@ -3735,6 +3739,11 @@ function ProjectOutsideInEditor({
       }),
     [file.source, layout.companionDirectory, projectId, sourcePath],
   );
+  const versionBasename = useMemo(() => documentVersionBasename(sourcePath), [sourcePath]);
+  const versionContainer = useMemo(
+    () => createVersionCompatibleContentContainer(container, versionBasename),
+    [container, versionBasename],
+  );
   const documentLinkProvider = useMemo(
     () =>
       file.source === 'artifacts'
@@ -3757,10 +3766,10 @@ function ProjectOutsideInEditor({
         height="100%"
         colorScheme={editorTheme}
         fullWidth
-        workspaceContainer={container}
+        workspaceContainer={versionContainer}
         documentLinkProvider={documentLinkProvider}
         allowVersioning={!isReadOnly}
-        versionBasename={basenameOf(sourcePath)}
+        versionBasename={versionBasename}
         outline
         toolbarSlotAfterActions={
           <>
@@ -3798,7 +3807,7 @@ function ProjectOutsideInEditor({
 /**
  * The text editor for any project file that isn't a rendered document or an
  * HTML page. Markdown artifacts get the full squisq feature set — the Files
- * panel for image uploads (writes land next to the markdown), the
+ * panel for image uploads (writes land in the document's hidden companion), the
  * DocBlocks-style Export menu, version history, a sibling-artifact link
  * picker, and the report-action fence renderers that mount recommendation
  * blocks as live cards. Workspace files (code) and non-markdown artifacts
@@ -3828,8 +3837,11 @@ function ProjectFileEditor({
   toolbarIndexToggle?: ReactNode;
 }) {
   const markdown = isMarkdown(file.path) && file.source === 'artifacts';
-  const root = useMemo(() => parentDir(file.path), [file.path]);
-  const primaryDocumentFilename = useMemo(() => basenameOf(file.path), [file.path]);
+  const { root, parentDirectory, companionName, primaryDocumentFilename } = useMemo(
+    () => deriveContainerScope(file.path),
+    [file.path],
+  );
+  const versionBasename = useMemo(() => documentVersionBasename(file.path), [file.path]);
   const autosave = useSerializedAutosave({
     resourceKey: `file:${file.source}:${file.path}`,
     initialValue: markdown ? normalizeMarkdownBaseline(file.content) : file.content,
@@ -3851,11 +3863,48 @@ function ProjectFileEditor({
             projectId,
             root,
             client: api,
+            referencePrefix: companionName,
+          })
+        : null,
+    [companionName, markdown, projectId, root],
+  );
+  const exportContainer = useMemo(
+    () =>
+      markdown
+        ? createArtifactsContentContainer({
+            projectId,
+            root: parentDirectory,
+            client: api,
             primaryDocumentFilename,
           })
         : null,
-    [markdown, projectId, root, primaryDocumentFilename],
+    [markdown, parentDirectory, primaryDocumentFilename, projectId],
   );
+  const mediaProvider = useMemo(
+    () =>
+      container && exportContainer
+        ? createDocumentMediaProvider(container, companionName, exportContainer)
+        : null,
+    [companionName, container, exportContainer],
+  );
+  const versionContainer = useMemo(
+    () =>
+      container && exportContainer
+        ? createVersionCompatibleContentContainer(
+            container,
+            versionBasename,
+            [
+              {
+                container: exportContainer,
+                basenames: [primaryDocumentFilename, versionBasename],
+              },
+            ],
+            exportContainer,
+          )
+        : null,
+    [container, exportContainer, primaryDocumentFilename, versionBasename],
+  );
+  useEffect(() => () => mediaProvider?.dispose(), [mediaProvider]);
   const documentLinkProvider = useMemo(
     () =>
       markdown
@@ -3887,11 +3936,12 @@ function ProjectFileEditor({
         colorScheme={editorTheme}
         fullWidth
         showPlayTab={markdown}
-        workspaceContainer={container}
+        workspaceContainer={versionContainer}
+        mediaProvider={mediaProvider}
         documentLinkProvider={documentLinkProvider}
         fenceRenderers={fenceRenderers}
         allowVersioning={markdown && !isReadOnly}
-        versionBasename={primaryDocumentFilename}
+        versionBasename={versionBasename}
         outline={markdown}
         toolbarSlotAfterActions={
           markdown ? (
@@ -3904,10 +3954,10 @@ function ProjectFileEditor({
         toolbarSlotRight={
           <>
             {toolbarIndexToggle}
-            {markdown && container && (
+            {markdown && exportContainer && (
               <ExportToolbarControls
                 selectedFile={file.path}
-                mediaContainer={container}
+                mediaContainer={exportContainer}
                 mediaSource={{ kind: 'project-artifacts', projectId }}
               />
             )}

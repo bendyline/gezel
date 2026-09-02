@@ -1,8 +1,18 @@
 export {
+  createDocumentMediaProvider,
   createDocumentsContentContainer,
   deriveContainerScope,
 } from './documents-container.js';
 export type { DocumentsContentContainerOptions } from './documents-container.js';
+
+export {
+  documentVersionBasename,
+  isMarkdownDocumentPath,
+  markdownCompanionDirectory,
+  moveFileWithCompanion,
+} from './document-companion.js';
+
+export { createVersionCompatibleContentContainer } from './version-compatible-container.js';
 
 export {
   createArtifactsContentContainer,

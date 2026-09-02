@@ -17,7 +17,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
-import { Tooltip } from '../primitives/index.js';
+import { ContextMenu, Tooltip } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
@@ -31,6 +31,11 @@ import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectIcon } from './ProjectIcon.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
+import {
+  isMarkdownDocumentPath,
+  markdownCompanionDirectory,
+  moveFileWithCompanion,
+} from './SquisqIntegration/document-companion.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
@@ -93,6 +98,12 @@ function hideEmptyDocumentFolders(entries: FileEntry[]): FileEntry[] {
     (entry) =>
       !entry.isDirectory || filePaths.some((filePath) => filePath.startsWith(`${entry.path}/`)),
   );
+}
+
+function documentsFolderContextLabel(platform?: string): string {
+  const fileManager =
+    platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'file manager';
+  return `Open Documents folder in ${fileManager}`;
 }
 
 interface SidebarProps {
@@ -354,6 +365,14 @@ export function Sidebar({
       })
       .catch(() => {});
   }, []);
+  const revealDocumentsFolder = useCallback(async () => {
+    try {
+      await api.revealDocuments();
+    } catch {
+      // The menu is already closed when the OS launcher answers. Keep this
+      // action safely retryable, matching the other file-manager actions.
+    }
+  }, []);
 
   useEffect(() => {
     refreshProjects();
@@ -598,15 +617,33 @@ export function Sidebar({
           setRenameDocError(`Keep the .${oldLayout.format} extension when renaming this document.`);
           return;
         }
-        const outsideInListing = oldLayout ? await api.listDocuments('', true) : null;
+        const oldCompanionDirectory =
+          oldLayout?.companionDirectory ??
+          (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
+        const nextCompanionDirectory =
+          nextLayout?.companionDirectory ??
+          (entry.isDirectory ? null : markdownCompanionDirectory(toPath));
         if (
-          oldLayout &&
-          nextLayout &&
-          outsideInListing?.files.some(
+          !entry.isDirectory &&
+          isMarkdownDocumentPath(entry.path) &&
+          !isMarkdownDocumentPath(toPath)
+        ) {
+          setRenameDocError('Keep the Markdown extension when renaming this document.');
+          return;
+        }
+        const companionListing = oldCompanionDirectory ? await api.listDocuments('', true) : null;
+        if (
+          nextCompanionDirectory &&
+          companionListing?.files.some(
             (candidate) =>
               candidate.path === toPath ||
-              candidate.path === nextLayout.companionDirectory ||
-              candidate.path.startsWith(`${nextLayout.companionDirectory}/`),
+              ((candidate.path === nextCompanionDirectory ||
+                candidate.path.startsWith(`${nextCompanionDirectory}/`)) &&
+                !(
+                  oldCompanionDirectory &&
+                  (candidate.path === oldCompanionDirectory ||
+                    candidate.path.startsWith(`${oldCompanionDirectory}/`))
+                )),
           )
         ) {
           setRenameDocError('A document or companion folder with that name already exists.');
@@ -622,17 +659,22 @@ export function Sidebar({
             await flushSerializedAutosave(`outside-in:documents:${oldLayout.markdownPath}`);
           }
         }
-        await api.renameDocument(entry.path, toPath);
-        if (oldLayout && nextLayout) {
-          const hasCompanion = outsideInListing?.files.some(
-            (candidate) =>
-              candidate.path === oldLayout.companionDirectory ||
-              candidate.path.startsWith(`${oldLayout.companionDirectory}/`),
-          );
-          if (hasCompanion) {
-            await api.renameDocument(oldLayout.companionDirectory, nextLayout.companionDirectory);
-          }
-        }
+        const hasCompanion = Boolean(
+          oldCompanionDirectory &&
+            companionListing?.files.some(
+              (candidate) =>
+                candidate.path === oldCompanionDirectory ||
+                candidate.path.startsWith(`${oldCompanionDirectory}/`),
+            ),
+        );
+        await moveFileWithCompanion(
+          (fromPath, nextPath) => api.renameDocument(fromPath, nextPath).then(() => undefined),
+          entry.path,
+          toPath,
+          hasCompanion && oldCompanionDirectory && nextCompanionDirectory
+            ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
+            : null,
+        );
         window.dispatchEvent(
           new CustomEvent('gezel:document-renamed', {
             detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
@@ -658,6 +700,9 @@ export function Sidebar({
     try {
       const selectedPath = selection?.kind === 'document' ? selection.path : null;
       const layout = entry.isDirectory ? null : await outsideInLayout(entry.path);
+      const companionDirectory =
+        layout?.companionDirectory ??
+        (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
       if (
         selectedPath &&
         (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
@@ -667,8 +712,15 @@ export function Sidebar({
           await flushSerializedAutosave(`outside-in:documents:${layout.markdownPath}`);
         }
       }
+      const hasCompanion = companionDirectory
+        ? (await api.listDocuments('', true)).files.some(
+            (candidate) =>
+              candidate.path === companionDirectory ||
+              candidate.path.startsWith(`${companionDirectory}/`),
+          )
+        : false;
       await api.deleteDocument(entry.path);
-      if (layout) await api.deleteDocument(layout.companionDirectory);
+      if (companionDirectory && hasCompanion) await api.deleteDocument(companionDirectory);
       window.dispatchEvent(
         new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
       );
@@ -886,6 +938,14 @@ export function Sidebar({
           onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'documents' }))}
           onAdd={openNewDoc}
           addTitle="New document"
+          contextMenu={
+            <ContextMenu.Item
+              className="app-nav-menu-item"
+              onSelect={() => void revealDocumentsFolder()}
+            >
+              {documentsFolderContextLabel(window.__GEZEL__?.platform)}
+            </ContextMenu.Item>
+          }
         >
           {docs.length === 0 ? (
             <li className="app-sidebar-empty">No documents yet.</li>
@@ -1177,6 +1237,8 @@ interface GroupProps {
   onPreload?: () => void;
   onAdd: (e: ReactMouseEvent) => void;
   addTitle: string;
+  /** Optional right-click actions for this group's header. */
+  contextMenu?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -1192,86 +1254,99 @@ function Group({
   onPreload,
   onAdd,
   addTitle,
+  contextMenu,
   children,
 }: GroupProps) {
   const showList = expanded && !collapsed;
-  return (
-    <div className="app-sidebar-group" data-group={id}>
-      <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
-        {!collapsed && (
-          <button
-            type="button"
-            className="app-sidebar-caret-btn"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
-            data-testid={`sidebar-group-toggle-${id}`}
-          >
-            <span className={`app-sidebar-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
-              <svg
-                width={14}
-                height={14}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                focusable="false"
-                aria-hidden="true"
-              >
-                <polyline points="9 6 15 12 9 18" />
-              </svg>
-            </span>
-          </button>
-        )}
+  const header = (
+    <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
+      {!collapsed && (
         <button
           type="button"
-          className="app-sidebar-group-toggle"
-          // Always opens the full area screen ("all projects/documents/gezels"),
-          // matching a click on the text header in expanded mode. In the
-          // collapsed icon-rail the caret is hidden, but the dedicated
-          // collapse toggle / drag grip still expand the rail, so the icon is
-          // free to navigate rather than toggle the inline list.
-          onClick={onOpen}
-          onPointerEnter={onPreload}
-          onFocus={onPreload}
-          onPointerDown={onPreload}
-          title={label}
-          data-testid={`sidebar-group-${id}`}
+          className="app-sidebar-caret-btn"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          data-testid={`sidebar-group-toggle-${id}`}
         >
-          <span className="app-sidebar-item-icon">
-            <AreaIcon area={area} size={18} />
-          </span>
-          <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
-        </button>
-        {!collapsed && (
-          <button
-            type="button"
-            className="app-sidebar-add"
-            onClick={onAdd}
-            title={addTitle}
-            aria-label={addTitle}
-          >
-            {/* An SVG plus, not a "+" glyph: flex centering aligns the text
-                line box, and the font's ascender/descender asymmetry then
-                leaves the character sitting visibly low in the 22px key. */}
+          <span className={`app-sidebar-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
             <svg
-              width={12}
-              height={12}
+              width={14}
+              height={14}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth={2.4}
+              strokeWidth={2.2}
               strokeLinecap="round"
+              strokeLinejoin="round"
               focusable="false"
               aria-hidden="true"
             >
-              <path d="M12 5v14M5 12h14" />
+              <polyline points="9 6 15 12 9 18" />
             </svg>
-          </button>
-        )}
-      </div>
+          </span>
+        </button>
+      )}
+      <button
+        type="button"
+        className="app-sidebar-group-toggle"
+        // Always opens the full area screen ("all projects/documents/gezels"),
+        // matching a click on the text header in expanded mode. In the
+        // collapsed icon-rail the caret is hidden, but the dedicated
+        // collapse toggle / drag grip still expand the rail, so the icon is
+        // free to navigate rather than toggle the inline list.
+        onClick={onOpen}
+        onPointerEnter={onPreload}
+        onFocus={onPreload}
+        onPointerDown={onPreload}
+        title={label}
+        data-testid={`sidebar-group-${id}`}
+      >
+        <span className="app-sidebar-item-icon">
+          <AreaIcon area={area} size={18} />
+        </span>
+        <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
+      </button>
+      {!collapsed && (
+        <button
+          type="button"
+          className="app-sidebar-add"
+          onClick={onAdd}
+          title={addTitle}
+          aria-label={addTitle}
+        >
+          {/* An SVG plus, not a "+" glyph: flex centering aligns the text
+              line box, and the font's ascender/descender asymmetry then
+              leaves the character sitting visibly low in the 22px key. */}
+          <svg
+            width={12}
+            height={12}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.4}
+            strokeLinecap="round"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+  return (
+    <div className="app-sidebar-group" data-group={id}>
+      {contextMenu ? (
+        <ContextMenu.Root>
+          <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content className="app-nav-menu">{contextMenu}</ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu.Root>
+      ) : (
+        header
+      )}
       {showList && <ul className="app-sidebar-list">{children}</ul>}
     </div>
   );

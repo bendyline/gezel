@@ -150,6 +150,25 @@ describe('GET /api/documents — listing', () => {
     const data = (await res.json()) as { files: Array<{ path: string }> };
     expect(data.files.some((f) => f.path.endsWith('inner.md'))).toBe(true);
   });
+
+  it('roots a recursive list at the requested document companion', async () => {
+    await api('PUT', '/api/documents/write', {
+      path: 'first_files/images/first.png',
+      content: 'first',
+    });
+    await api('PUT', '/api/documents/write', {
+      path: 'second_files/images/second.png',
+      content: 'second',
+    });
+
+    const res = await api('GET', '/api/documents?path=first_files&recursive=1');
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { files: Array<{ path: string }> };
+    const paths = data.files.map((file) => file.path);
+
+    expect(paths).toContain('first_files/images/first.png');
+    expect(paths.some((path) => path.startsWith('second_files/'))).toBe(false);
+  });
 });
 
 describe('POST /api/documents/mkdir', () => {

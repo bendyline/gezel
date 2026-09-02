@@ -5280,7 +5280,7 @@ export class Store {
   }
 
   async listDocumentsRecursiveDetailed(
-    opts: { withStats?: boolean; includeHidden?: boolean } = {},
+    opts: { withStats?: boolean; includeHidden?: boolean; subpath?: string } = {},
   ): Promise<WalkDirResult> {
     return this.documents.listDocumentsRecursiveDetailed(opts);
   }

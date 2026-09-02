@@ -9,6 +9,11 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
 const chatComposerMocks = vi.hoisted(() => ({ queueComposerPrefill: vi.fn() }));
+const documentContainerMocks = vi.hoisted(() => ({
+  createArtifacts: vi.fn(() => ({})),
+  createMedia: vi.fn(() => ({ dispose: vi.fn() })),
+  createVersionCompatible: vi.fn((container: unknown) => container),
+}));
 vi.mock('../components/composer-prefill.js', () => ({
   queueComposerPrefill: chatComposerMocks.queueComposerPrefill,
 }));
@@ -97,8 +102,10 @@ vi.mock('../components/DocumentExport/index.js', () => ({
 }));
 vi.mock('../components/SquisqIntegration/index.js', () => ({
   createDocumentsContentContainer: () => ({}),
-  createArtifactsContentContainer: () => ({}),
+  createArtifactsContentContainer: documentContainerMocks.createArtifacts,
   createProjectContentContainer: () => ({}),
+  createDocumentMediaProvider: documentContainerMocks.createMedia,
+  createVersionCompatibleContentContainer: documentContainerMocks.createVersionCompatible,
   createDocumentLinkProvider: () => async () => [],
   chooseOutsideInSource: () => null,
   importOutsideInDocument: vi.fn(),
@@ -111,9 +118,13 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   withOutsideInMetadata: (source: string) => source,
   withOutsideInMarkdownEditing: (source: string) => source,
   deriveContainerScope: (p: string) => ({
-    root: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
+    root: `${p.replace(/\.[^.]+$/, '')}_files`,
+    parentDirectory: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
+    companionName: `${p.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}_files`,
     primaryDocumentFilename: p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p,
   }),
+  documentVersionBasename: (p: string) =>
+    (p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p).replace(/\.[^.]+$/, ''),
 }));
 
 // ProjectsView's many heavy children — mock them out to focused stand-ins.
@@ -200,6 +211,9 @@ const PROJECTS: Project[] = [
 describe('ProjectsView', () => {
   beforeEach(() => {
     chatComposerMocks.queueComposerPrefill.mockClear();
+    documentContainerMocks.createArtifacts.mockClear();
+    documentContainerMocks.createMedia.mockClear();
+    documentContainerMocks.createVersionCompatible.mockClear();
     editorMocks.setActiveView.mockClear();
     editorMocks.setSelection.mockClear();
     editorMocks.revealLineInCenter.mockClear();
@@ -1522,6 +1536,40 @@ describe('ProjectsView', () => {
     // The confirmation gate owns the delete now — nothing reaches the API
     // until it is answered (ConfirmDialog is stubbed out in this spec).
     expect(api.deleteProjectArtifact).not.toHaveBeenCalled();
+  });
+
+  it('isolates a Markdown artifact in its own companion container', async () => {
+    vi.mocked(api.listProjectArtifacts).mockResolvedValue({
+      files: [{ name: 'report.md', path: 'reports/report.md', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.readProjectArtifact).mockResolvedValue({
+      path: 'reports/report.md',
+      content: '# Report',
+    } as never);
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'report.md' }));
+    await screen.findByTestId('editor');
+
+    expect(documentContainerMocks.createArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({ root: 'reports/report_files', referencePrefix: 'report_files' }),
+    );
+    expect(documentContainerMocks.createArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({ root: 'reports', primaryDocumentFilename: 'report.md' }),
+    );
+    expect(documentContainerMocks.createMedia).toHaveBeenCalledWith(
+      expect.anything(),
+      'report_files',
+      expect.anything(),
+    );
+    expect(documentContainerMocks.createVersionCompatible).toHaveBeenCalledWith(
+      expect.anything(),
+      'report',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('shows only the three shared view modes on the artifacts tab', async () => {

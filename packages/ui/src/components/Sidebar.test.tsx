@@ -1,5 +1,6 @@
 import type { GezelSummary, Project, RecentTab } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -50,10 +51,35 @@ const GEZELS: GezelSummary[] = [{ id: 'g1', name: 'Maya', role: 'Researcher' } a
 describe('Sidebar', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: window.__GEZEL__?.token ?? 'test-token',
+      platform: 'linux',
+    };
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+  });
+
+  it.each([
+    ['darwin', 'Open Documents folder in Finder'],
+    ['win32', 'Open Documents folder in File Explorer'],
+    ['linux', 'Open Documents folder in file manager'],
+  ])('opens the Documents folder from its %s context menu', async (platform, label) => {
+    const user = userEvent.setup();
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: window.__GEZEL__?.token ?? 'test-token',
+      platform,
+    };
+    vi.mocked(api.revealDocuments).mockResolvedValue({ ok: true, path: '/tmp/documents' });
+
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByTestId('sidebar-group-documents'));
+    await user.click(await screen.findByRole('menuitem', { name: label }));
+
+    expect(api.revealDocuments).toHaveBeenCalledOnce();
   });
 
   it('renders Home, groups, and area links', async () => {
@@ -591,7 +617,11 @@ describe('Sidebar', () => {
   it('renames a document from the sidebar row menu and broadcasts the new path', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
-      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+      files: [
+        { name: 'notes.md', path: 'notes.md', isDirectory: false },
+        { name: 'notes_files', path: 'notes_files', isDirectory: true },
+        { name: 'hero.png', path: 'notes_files/hero.png', isDirectory: false },
+      ],
     } as never);
     vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
     const renamed = vi.fn();
@@ -606,6 +636,10 @@ describe('Sidebar', () => {
     await waitFor(() => {
       expect(api.renameDocument).toHaveBeenCalledWith('notes.md', 'meeting-notes.md');
     });
+    expect(vi.mocked(api.renameDocument).mock.calls.slice(0, 2)).toEqual([
+      ['notes_files', 'meeting-notes_files'],
+      ['notes.md', 'meeting-notes.md'],
+    ]);
     expect(renamed).toHaveBeenCalledWith(
       expect.objectContaining({
         detail: expect.objectContaining({ fromPath: 'notes.md', toPath: 'meeting-notes.md' }),
@@ -617,7 +651,11 @@ describe('Sidebar', () => {
   it('confirms before deleting a document from the sidebar row menu', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
-      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+      files: [
+        { name: 'notes.md', path: 'notes.md', isDirectory: false },
+        { name: 'notes_files', path: 'notes_files', isDirectory: true },
+        { name: 'hero.png', path: 'notes_files/hero.png', isDirectory: false },
+      ],
     } as never);
     vi.mocked(api.deleteDocument).mockResolvedValue({ ok: true } as never);
     const deleted = vi.fn();
@@ -629,7 +667,11 @@ describe('Sidebar', () => {
     expect(api.deleteDocument).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledWith('notes.md'));
+    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.deleteDocument).mock.calls.slice(0, 2)).toEqual([
+      ['notes.md'],
+      ['notes_files'],
+    ]);
     expect(deleted).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.objectContaining({ path: 'notes.md' }) }),
     );
