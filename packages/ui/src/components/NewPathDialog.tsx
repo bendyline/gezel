@@ -52,9 +52,7 @@ export function NewPathDialog({
     if (open) setValue(stripSuffix(initialValue, suffix));
   }, [open, initialValue, suffix]);
   const filenameError =
-    parentPath !== undefined && /[\\/]/.test(value)
-      ? 'Enter a file name without folders.'
-      : null;
+    parentPath !== undefined && /[\\/]/.test(value) ? 'Enter a file name without folders.' : null;
   const visibleError = error ?? filenameError;
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
