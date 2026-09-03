@@ -22,26 +22,60 @@ vi.mock('../components/FileTree.js', () => ({
     onSelect,
     onRename,
     onDelete,
+    onMove,
+    actionsForEntry,
   }: {
     entries: FileEntry[];
     onSelect: (e: FileEntry) => void;
     onRename: (e: FileEntry) => void;
     onDelete: (e: FileEntry) => void;
+    onMove?: (entry: FileEntry, destination: FileEntry) => void | Promise<void>;
+    actionsForEntry?: (e: FileEntry) => Array<{
+      label: string;
+      onSelect: (entry: FileEntry) => void;
+    }>;
   }) => (
     <ul data-testid="file-tree">
-      {entries.map((e) => (
-        <li key={e.path}>
-          <button type="button" onClick={() => onSelect(e)} data-testid={`select-${e.path}`}>
-            {e.path}
-          </button>
-          <button type="button" onClick={() => onDelete(e)} data-testid={`delete-${e.path}`}>
-            delete
-          </button>
-          <button type="button" onClick={() => onRename(e)} data-testid={`rename-${e.path}`}>
-            rename
-          </button>
-        </li>
-      ))}
+      {entries.map((e) => {
+        const actions = actionsForEntry?.(e) ?? [];
+        return (
+          <li key={e.path}>
+            <button type="button" onClick={() => onSelect(e)} data-testid={`select-${e.path}`}>
+              {e.path}
+            </button>
+            <button type="button" onClick={() => onDelete(e)} data-testid={`delete-${e.path}`}>
+              delete
+            </button>
+            <button type="button" onClick={() => onRename(e)} data-testid={`rename-${e.path}`}>
+              rename
+            </button>
+            {!e.isDirectory &&
+              onMove &&
+              entries
+                .filter((candidate) => candidate.isDirectory)
+                .map((destination) => (
+                  <button
+                    type="button"
+                    key={destination.path}
+                    onClick={() => void onMove(e, destination)}
+                    data-testid={`move-${e.path}-to-${destination.path}`}
+                  >
+                    move to {destination.path}
+                  </button>
+                ))}
+            {actions.map((action) => (
+              <button
+                type="button"
+                key={action.label}
+                onClick={() => action.onSelect(e)}
+                data-testid={`action-${e.path}`}
+              >
+                {action.label}
+              </button>
+            ))}
+          </li>
+        );
+      })}
     </ul>
   ),
 }));
@@ -197,6 +231,24 @@ describe('DocumentsView', () => {
     expect(screen.getByText('mission.md')).toBeInTheDocument();
   });
 
+  it('pins and unpins a document from the left-pane row actions', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+
+    fireEvent.click(await screen.findByTestId('action-mission.md'));
+    expect(
+      JSON.parse(window.localStorage.getItem('gezel:documents:quick-list:v1') ?? '{}'),
+    ).toEqual(expect.objectContaining({ pinnedPaths: ['mission.md'] }));
+
+    expect(await screen.findByTestId('action-mission.md')).toHaveTextContent(
+      'Unpin from Documents list',
+    );
+    fireEvent.click(screen.getByTestId('action-mission.md'));
+    expect(
+      JSON.parse(window.localStorage.getItem('gezel:documents:quick-list:v1') ?? '{}'),
+    ).toEqual(expect.objectContaining({ pinnedPaths: [] }));
+  });
+
   it('hides managed outside-in companion folders from the document tree', async () => {
     vi.mocked(api.listDocuments).mockResolvedValue({
       files: [
@@ -289,7 +341,7 @@ describe('DocumentsView', () => {
     expect(screen.queryByTestId('document-detail')).not.toBeInTheDocument();
   });
 
-  it('the folder view New document button opens the dialog prefilled with the folder path', async () => {
+  it('creates a folder document from its file name without exposing an editable path', async () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
     render(<DocumentsView />);
     await waitFor(() => {
@@ -303,9 +355,34 @@ describe('DocumentsView', () => {
 
     fireEvent.click(screen.getByTestId('fv-new-doc'));
 
-    const pathInput = await screen.findByPlaceholderText('e.g. guidelines/coding');
-    expect(pathInput).toHaveValue('guidelines/');
+    const nameInput = await screen.findByPlaceholderText('e.g. coding');
+    expect(nameInput).toHaveValue('');
+    expect(screen.getByText('Name')).toBeInTheDocument();
     expect(screen.getByText('.md')).toBeInTheDocument();
+
+    fireEvent.change(nameInput, { target: { value: 'brief' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith('guidelines/brief.md', '');
+    });
+  });
+
+  it('does not let a folder document name redirect creation to another folder', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByTestId('select-guidelines'));
+    await screen.findByTestId('folder-view');
+    fireEvent.click(screen.getByTestId('fv-new-doc'));
+
+    const nameInput = await screen.findByPlaceholderText('e.g. coding');
+    fireEvent.change(nameInput, { target: { value: '../outside' } });
+
+    expect(screen.getByText('Enter a file name without folders.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(api.writeDocument).not.toHaveBeenCalled();
   });
 
   it('renders right-aligned Font Awesome creation actions', async () => {
@@ -409,6 +486,59 @@ describe('DocumentsView', () => {
     await waitFor(() => {
       expect(window.localStorage.getItem('gezel:documents:selectedPath')).toBe('brief.md');
     });
+  });
+
+  it('moves a document into a folder and keeps the moved document selected', async () => {
+    vi.mocked(api.listDocuments)
+      .mockResolvedValueOnce({ files: FAKE_ENTRIES } as never)
+      .mockResolvedValue({
+        files: [
+          ...FAKE_ENTRIES.filter((entry) => entry.path !== 'mission.md'),
+          { path: 'guidelines/mission.md', name: 'mission.md', isDirectory: false },
+        ],
+      } as never);
+    window.localStorage.setItem('gezel:documents:selectedPath', 'mission.md');
+    window.localStorage.setItem(
+      'gezel:documents:quick-list:v1',
+      JSON.stringify({ pinnedPaths: ['mission.md'], lastUsedAt: {} }),
+    );
+    render(<DocumentsView />);
+    await screen.findByTestId('document-detail');
+
+    fireEvent.click(screen.getByTestId('move-mission.md-to-guidelines'));
+
+    await waitFor(() => {
+      expect(api.renameDocument).toHaveBeenCalledWith('mission.md', 'guidelines/mission.md');
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem('gezel:documents:selectedPath')).toBe(
+        'guidelines/mission.md',
+      );
+    });
+    expect(screen.getByText('Moved mission.md to guidelines.')).toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem('gezel:documents:quick-list:v1') ?? '{}'),
+    ).toEqual(expect.objectContaining({ pinnedPaths: ['guidelines/mission.md'] }));
+  });
+
+  it('moves a Markdown document companion into the destination folder first', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        ...FAKE_ENTRIES,
+        { path: 'mission_files', name: 'mission_files', isDirectory: true },
+        { path: 'mission_files/hero.png', name: 'hero.png', isDirectory: false },
+      ],
+    } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByTestId('move-mission.md-to-guidelines'));
+
+    await waitFor(() => expect(api.renameDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.renameDocument).mock.calls.slice(0, 2)).toEqual([
+      ['mission_files', 'guidelines/mission_files'],
+      ['mission.md', 'guidelines/mission.md'],
+    ]);
   });
 
   it('renames a Markdown companion before moving its visible document', async () => {

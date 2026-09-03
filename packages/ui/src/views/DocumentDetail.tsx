@@ -16,6 +16,7 @@ import {
   resolveOutsideInLayout,
   useProofingCapability,
 } from '../components/SquisqIntegration/index.js';
+import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
@@ -65,7 +66,13 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const saveDocument = useCallback((source: string) => api.writeDocument(path, source), [path]);
+  const saveDocument = useCallback(
+    async (source: string) => {
+      await api.writeDocument(path, source);
+      recordDocumentUsed(path);
+    },
+    [path],
+  );
   const autosave = useSerializedAutosave({
     resourceKey: `document:${path}`,
     initialValue: content ?? '',

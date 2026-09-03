@@ -20,6 +20,7 @@ import {
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
+import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -231,8 +232,9 @@ function OutsideInEditor({
         await api.writeDocument(runtimePath, PLAYER_BUNDLE);
       }
       await api.writeDocumentBinary(layout.targetPath, rendered.bytes, rendered.mimeType);
+      recordDocumentUsed(path);
     },
-    [container, layout, prepared.sourcePath],
+    [container, layout, path, prepared.sourcePath],
   );
   const initialContent = useMemo(
     () => normalizeMarkdownBaseline(prepared.content),

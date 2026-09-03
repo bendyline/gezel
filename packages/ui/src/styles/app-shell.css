@@ -2311,7 +2311,7 @@ button.machine-memory-unload-button {
   padding: 0.45rem 0.7rem;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 88%, var(--warning));
+  background: color-mix(in srgb, var(--panel) 84%, var(--sage-soft));
   color: var(--text-muted);
   font-size: var(--text-sm);
 }

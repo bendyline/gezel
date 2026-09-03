@@ -14,25 +14,54 @@ vi.mock('./GezelIcon.js', () => ({
 vi.mock('./FileTree.js', () => ({
   FileTree: ({
     entries,
+    onSelect,
     onRename,
     onDelete,
+    actionsForEntry,
+    trailingForEntry,
   }: {
-    entries: Array<{ name: string; path: string; isDirectory: boolean }>;
+    entries: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    onSelect?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onRename?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onDelete?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    actionsForEntry?: (entry: {
+      name: string;
+      path: string;
+      isDirectory: boolean;
+    }) => Array<{
+      label: string;
+      onSelect: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    }>;
+    trailingForEntry?: (entry: {
+      name: string;
+      path: string;
+      isDirectory: boolean;
+    }) => React.ReactNode;
   }) => (
     <div data-testid="file-tree">
       {entries.length} docs
-      {entries.map((entry) => (
-        <span key={entry.path}>
-          <button type="button" onClick={() => onRename?.(entry)}>
-            Rename {entry.name}
-          </button>
-          <button type="button" onClick={() => onDelete?.(entry)}>
-            Delete {entry.name}
-          </button>
-        </span>
-      ))}
+      {entries.map((entry) => {
+        const actions = actionsForEntry?.(entry) ?? [];
+        return (
+          <span key={entry.path} data-testid={`sidebar-document-${entry.path}`}>
+            <button type="button" onClick={() => onSelect?.(entry)}>
+              Select {entry.name}
+            </button>
+            <button type="button" onClick={() => onRename?.(entry)}>
+              Rename {entry.name}
+            </button>
+            <button type="button" onClick={() => onDelete?.(entry)}>
+              Delete {entry.name}
+            </button>
+            {actions.map((action) => (
+              <button key={action.label} type="button" onClick={() => action.onSelect(entry)}>
+                {action.label} {entry.name}
+              </button>
+            ))}
+            {trailingForEntry?.(entry)}
+          </span>
+        );
+      })}
     </div>
   ),
 }));
@@ -117,26 +146,61 @@ describe('Sidebar', () => {
     expect(onPreload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'project', id: 'p1' }));
   });
 
-  it('omits document folders that contain no visible files', async () => {
+  it('shows the five most recent documents alphabetically and omits folders', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
       files: [
-        { name: 'empty', path: 'empty', isDirectory: true },
-        { name: 'nested-empty', path: 'nested-empty', isDirectory: true },
-        { name: 'child', path: 'nested-empty/child', isDirectory: true },
-        { name: 'kept', path: 'kept', isDirectory: true },
-        { name: 'notes.md', path: 'kept/notes.md', isDirectory: false },
+        { name: 'folder', path: 'folder', isDirectory: true, mtimeMs: 10_000 },
+        { name: 'zulu.md', path: 'zulu.md', isDirectory: false, mtimeMs: 100 },
+        { name: 'echo.md', path: 'echo.md', isDirectory: false, mtimeMs: 200 },
+        { name: 'delta.md', path: 'delta.md', isDirectory: false, mtimeMs: 300 },
+        { name: 'charlie.md', path: 'charlie.md', isDirectory: false, mtimeMs: 400 },
+        { name: 'bravo.md', path: 'bravo.md', isDirectory: false, mtimeMs: 500 },
+        { name: 'alpha.md', path: 'alpha.md', isDirectory: false, mtimeMs: 600 },
       ],
     } as never);
 
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('2 docs'));
-    expect(screen.queryByRole('button', { name: 'Rename empty' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rename nested-empty' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rename child' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rename kept' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rename notes.md' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('5 docs'));
+    const paths = Array.from(screen.getByTestId('file-tree').querySelectorAll('[data-testid]')).map(
+      (element) => element.getAttribute('data-testid'),
+    );
+    expect(paths).toEqual([
+      'sidebar-document-alpha.md',
+      'sidebar-document-bravo.md',
+      'sidebar-document-charlie.md',
+      'sidebar-document-delta.md',
+      'sidebar-document-echo.md',
+    ]);
+    expect(screen.queryByRole('button', { name: 'Rename folder' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename zulu.md' })).not.toBeInTheDocument();
+  });
+
+  it('keeps pinned documents in the list beyond the five recent slots', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    window.localStorage.setItem(
+      'gezel:documents:quick-list:v1',
+      JSON.stringify({ pinnedPaths: ['zulu.md'], lastUsedAt: {} }),
+    );
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        { name: 'zulu.md', path: 'zulu.md', isDirectory: false, mtimeMs: 100 },
+        { name: 'echo.md', path: 'echo.md', isDirectory: false, mtimeMs: 200 },
+        { name: 'delta.md', path: 'delta.md', isDirectory: false, mtimeMs: 300 },
+        { name: 'charlie.md', path: 'charlie.md', isDirectory: false, mtimeMs: 400 },
+        { name: 'bravo.md', path: 'bravo.md', isDirectory: false, mtimeMs: 500 },
+        { name: 'alpha.md', path: 'alpha.md', isDirectory: false, mtimeMs: 600 },
+      ],
+    } as never);
+
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('6 docs'));
+    expect(screen.getByLabelText('Pinned')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Unpin from Documents list zulu.md' }),
+    ).toBeInTheDocument();
   });
 
   it('shows a per-row actions menu for each gezel', async () => {

@@ -66,6 +66,7 @@ export interface FileBrowserCustomList {
   detailForEntry?: (entry: FileEntry) => ReactNode;
   emptyMessage: string;
   onSelect?: (entry: FileEntry) => void;
+  actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
 }
 
 export interface FileBrowserPaneProps {
@@ -322,6 +323,7 @@ export function FileBrowserPane({
                 onSelect={customList.onSelect ?? onSelect}
                 trailingForEntry={customList.trailingForEntry}
                 detailForEntry={customList.detailForEntry}
+                actionsForEntry={customList.actionsForEntry ?? actionsForEntry}
                 emptyMessage={customList.emptyMessage}
               />
             ) : treeMode ? (
@@ -339,6 +341,7 @@ export function FileBrowserPane({
                   onSelect={onSelect}
                   onRename={mutations.rename}
                   onDelete={mutations.remove}
+                  onMove={source.kind === 'documents' ? mutations.move : undefined}
                   trailingForEntry={trailingForEntry}
                   actionsForEntry={actionsForEntry}
                 />
@@ -348,16 +351,25 @@ export function FileBrowserPane({
                 entries={flatEntries}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
-                trailingForEntry={(entry) =>
-                  entry.mtimeMs !== undefined ? (
-                    <span
-                      className="file-flat-time"
-                      title={formatAbsoluteTime(new Date(entry.mtimeMs))}
-                    >
-                      {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
-                    </span>
-                  ) : null
-                }
+                trailingForEntry={(entry) => {
+                  const hostTrailing = trailingForEntry?.(entry);
+                  const modified =
+                    entry.mtimeMs !== undefined ? (
+                      <span
+                        className="file-flat-time"
+                        title={formatAbsoluteTime(new Date(entry.mtimeMs))}
+                      >
+                        {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
+                      </span>
+                    ) : null;
+                  return hostTrailing || modified ? (
+                    <>
+                      {hostTrailing}
+                      {modified}
+                    </>
+                  ) : null;
+                }}
+                actionsForEntry={actionsForEntry}
                 emptyMessage={`No ${listLabel} files yet.`}
               />
             )}

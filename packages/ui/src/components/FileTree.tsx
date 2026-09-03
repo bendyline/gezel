@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react';
+import { type DragEvent as ReactDragEvent, type ReactNode, useMemo, useState } from 'react';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
 import { sortTreeNodes } from './file-view-modes.js';
@@ -35,6 +35,8 @@ export interface FileTreeProps {
   onRename?: (entry: FileEntry) => void;
   /** Optional per-row delete action, exposed through ⋯ and right-click menus. */
   onDelete?: (entry: FileEntry) => void;
+  /** Move a file by dropping it onto a folder row. Folders are never draggable. */
+  onMove?: (entry: FileEntry, destination: FileEntry) => void | Promise<void>;
   /** Optional host-defined actions, exposed through both row menus. */
   actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
   /** Optional read-only row status rendered after the label. */
@@ -119,6 +121,7 @@ export function FileTree({
   onIntent,
   onRename,
   onDelete,
+  onMove,
   actionsForEntry,
   trailingForEntry,
   defaultExpandedDepth = 2,
@@ -127,6 +130,8 @@ export function FileTree({
   selectableFolders = false,
   sortMode = 'none',
 }: FileTreeProps) {
+  const [draggedEntry, setDraggedEntry] = useState<FileEntry | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const tree = useMemo(
     () => (sortMode === 'none' ? buildTree(entries) : sortTreeNodes(buildTree(entries), sortMode)),
     [entries, sortMode],
@@ -143,12 +148,29 @@ export function FileTree({
           onIntent={onIntent}
           onRename={onRename}
           onDelete={onDelete}
+          onMove={onMove}
           actionsForEntry={actionsForEntry}
           trailingForEntry={trailingForEntry}
           defaultExpandedDepth={defaultExpandedDepth}
           iconFor={iconFor}
           labelFor={labelFor}
           selectableFolders={selectableFolders}
+          draggedEntry={draggedEntry}
+          dropTargetPath={dropTargetPath}
+          onDragStart={(entry, event) => {
+            setDraggedEntry(entry);
+            setDropTargetPath(null);
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('application/x-gezel-file-path', entry.path);
+            // Chromium requires at least one broadly-supported type before it
+            // will start a native drag. The path never leaves this window.
+            event.dataTransfer.setData('text/plain', entry.path);
+          }}
+          onDragEnd={() => {
+            setDraggedEntry(null);
+            setDropTargetPath(null);
+          }}
+          onDropTargetChange={setDropTargetPath}
         />
       ))}
     </>
@@ -163,12 +185,23 @@ interface TreeItemProps {
   onIntent?: (entry: FileEntry) => void;
   onRename?: (entry: FileEntry) => void;
   onDelete?: (entry: FileEntry) => void;
+  onMove?: (entry: FileEntry, destination: FileEntry) => void | Promise<void>;
   actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
   trailingForEntry?: (entry: FileEntry) => ReactNode;
   defaultExpandedDepth: number;
   iconFor: (entry: FileEntry) => ReactNode;
   labelFor: (entry: FileEntry) => string;
   selectableFolders: boolean;
+  draggedEntry: FileEntry | null;
+  dropTargetPath: string | null;
+  onDragStart: (entry: FileEntry, event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  onDropTargetChange: (path: string | null) => void;
+}
+
+function parentPath(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash < 0 ? '' : path.slice(0, slash);
 }
 
 function TreeItem({
@@ -179,12 +212,18 @@ function TreeItem({
   onIntent,
   onRename,
   onDelete,
+  onMove,
   actionsForEntry,
   trailingForEntry,
   defaultExpandedDepth,
   iconFor,
   labelFor,
   selectableFolders,
+  draggedEntry,
+  dropTargetPath,
+  onDragStart,
+  onDragEnd,
+  onDropTargetChange,
 }: TreeItemProps) {
   const [expanded, setExpanded] = useState(depth < defaultExpandedDepth);
   const entry: FileEntry = {
@@ -198,14 +237,62 @@ function TreeItem({
   const trailing = trailingForEntry?.(entry);
   const hasActions = Boolean(onRename || onDelete || customActions.length > 0);
   const canExpand = node.isDirectory && node.children.length > 0;
+  const draggable = Boolean(onMove && !entry.isDirectory);
+  const canReceiveDrop = Boolean(
+    onMove &&
+      entry.isDirectory &&
+      draggedEntry &&
+      draggedEntry.path !== entry.path &&
+      parentPath(draggedEntry.path) !== entry.path,
+  );
+  const isDragging = draggedEntry?.path === entry.path;
+  const isDropTarget = canReceiveDrop && dropTargetPath === entry.path;
 
   const row = (
     <div
-      className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
+      className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}${
+        draggable ? ' tree-row-draggable' : ''
+      }${isDragging ? ' tree-row-dragging' : ''}${isDropTarget ? ' tree-row-drop-target' : ''}`}
       style={{ paddingLeft: `${depth * 12 + 2}px` }}
+      draggable={draggable}
       onPointerEnter={() => onIntent?.(entry)}
       onFocus={() => onIntent?.(entry)}
       onPointerDown={() => onIntent?.(entry)}
+      onDragStart={(event) => {
+        if (!draggable) return;
+        onDragStart(entry, event);
+      }}
+      onDragEnd={onDragEnd}
+      onDragEnter={(event) => {
+        if (!canReceiveDrop) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'move';
+        onDropTargetChange(entry.path);
+      }}
+      onDragOver={(event) => {
+        if (!canReceiveDrop) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'move';
+        if (dropTargetPath !== entry.path) onDropTargetChange(entry.path);
+      }}
+      onDragLeave={(event) => {
+        if (!isDropTarget) return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        onDropTargetChange(null);
+      }}
+      onDrop={(event) => {
+        if (!canReceiveDrop || !draggedEntry || !onMove) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const moving = draggedEntry;
+        onDropTargetChange(null);
+        setExpanded(true);
+        onDragEnd();
+        void onMove(moving, entry);
+      }}
     >
       {canExpand ? (
         <button
@@ -355,12 +442,18 @@ function TreeItem({
               onIntent={onIntent}
               onRename={onRename}
               onDelete={onDelete}
+              onMove={onMove}
               actionsForEntry={actionsForEntry}
               trailingForEntry={trailingForEntry}
               defaultExpandedDepth={defaultExpandedDepth}
               iconFor={iconFor}
               labelFor={labelFor}
               selectableFolders={selectableFolders}
+              draggedEntry={draggedEntry}
+              dropTargetPath={dropTargetPath}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onDropTargetChange={onDropTargetChange}
             />
           ))}
         </div>

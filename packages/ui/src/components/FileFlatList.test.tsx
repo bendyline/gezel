@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { FileFlatList } from './FileFlatList.js';
@@ -42,5 +42,26 @@ describe('FileFlatList', () => {
 
     rerender(<FileFlatList entries={[]} onSelect={vi.fn()} emptyMessage="Nothing here" />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
+  });
+
+  it('offers host actions from both the row menu and right-click menu', async () => {
+    const user = userEvent.setup();
+    const pin = vi.fn();
+    const actionsForEntry = () => [{ label: 'Pin to Documents list', onSelect: pin }];
+    const { rerender } = render(
+      <FileFlatList entries={ENTRIES} onSelect={vi.fn()} actionsForEntry={actionsForEntry} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for new.md' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Pin to Documents list' }));
+    expect(pin).toHaveBeenCalledWith(ENTRIES[0]);
+
+    pin.mockClear();
+    rerender(
+      <FileFlatList entries={[ENTRIES[1]!]} onSelect={vi.fn()} actionsForEntry={actionsForEntry} />,
+    );
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^root\.md$/ }).closest('.tree-row')!);
+    await user.click(await screen.findByRole('menuitem', { name: 'Pin to Documents list' }));
+    expect(pin).toHaveBeenCalledWith(ENTRIES[1]);
   });
 });

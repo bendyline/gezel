@@ -6,6 +6,7 @@ import type { FileEntry } from '../components/FileTree.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { isOutsideInInternalPath } from '../components/SquisqIntegration/index.js';
 import { documentLabel } from '../components/document-label.js';
+import { useDocumentQuickList } from '../components/document-quick-list.js';
 import {
   FileBrowserPane,
   NonTextFilePreview,
@@ -84,6 +85,7 @@ export function DocumentsView() {
   const [showHidden, setShowHiddenState] = useState<boolean>(
     () => readStored(DOCUMENTS_HIDDEN_STORAGE_KEY) === '1',
   );
+  const documentQuickList = useDocumentQuickList();
   // Selected document for the right pane. Persisted in localStorage so the
   // selection survives switching to another tab and back (TabContent
   // remounts on key change) and across app restarts.
@@ -108,10 +110,14 @@ export function DocumentsView() {
     };
   }, []);
 
-  const setSelectedPath = useCallback((path: string | null) => {
-    setSelectedPathState(path);
-    persistSelectedPath(path);
-  }, []);
+  const setSelectedPath = useCallback(
+    (path: string | null) => {
+      setSelectedPathState(path);
+      persistSelectedPath(path);
+      if (path) documentQuickList.noteUsed(path);
+    },
+    [documentQuickList.noteUsed],
+  );
 
   const setViewMode = useCallback((mode: FileViewMode) => {
     setViewModeState(mode);
@@ -154,6 +160,20 @@ export function DocumentsView() {
     onSelectPath: setSelectedPath,
     refresh,
   });
+  const documentActionsForEntry = useCallback(
+    (entry: FileEntry) => {
+      if (entry.isDirectory) return [];
+      const pinned = documentQuickList.pinnedPaths.has(entry.path);
+      return [
+        {
+          label: pinned ? 'Unpin from Documents list' : 'Pin to Documents list',
+          onSelect: () =>
+            pinned ? documentQuickList.unpin(entry.path) : documentQuickList.pin(entry.path),
+        },
+      ];
+    },
+    [documentQuickList.pin, documentQuickList.pinnedPaths, documentQuickList.unpin],
+  );
 
   // Land on the first document instead of an empty pane. Only when there is
   // no (surviving) stored selection — a user's pick or a deep link wins.
@@ -204,7 +224,7 @@ export function DocumentsView() {
         theme={editorTheme}
         onOpenFile={(e) => setSelectedPath(e.path)}
         onOpenFolder={(e) => setSelectedPath(e.path)}
-        onNewDocument={() => mutations.newFile?.(`${selectedPath}/`)}
+        onNewDocument={() => mutations.newFile?.(selectedPath)}
         onNewFolder={() => mutations.newFolder?.(`${selectedPath}/`)}
       />
     );
@@ -277,6 +297,14 @@ export function DocumentsView() {
         onSelect={(entry) => setSelectedPath(entry.path)}
         selectableFolders
         labelFor={(entry) => documentLabel(entry.name)}
+        trailingForEntry={(entry) =>
+          documentQuickList.pinnedPaths.has(entry.path) ? (
+            <span className="document-pin-marker" title="Pinned" aria-label="Pinned">
+              <i className="fa-solid fa-thumbtack" />
+            </span>
+          ) : null
+        }
+        actionsForEntry={documentActionsForEntry}
         emptyMessage="No documents yet. Create a mission statement, coding guidelines, or any shared reference."
         mutations={mutations}
         viewer={viewer}

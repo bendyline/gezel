@@ -2068,6 +2068,28 @@ button.danger {
   background: rgba(176, 114, 76, 0.15);
 }
 
+/* Documents can be lifted from the tree and set into a folder. Keep the
+   resting cue quiet (the pointer is enough), then make both halves of the
+   move explicit while dragging: the source recedes and the receiving folder
+   gains an inset accent edge without changing the row's geometry. */
+.tree-row-draggable {
+  cursor: grab;
+}
+
+.tree-row-draggable:active {
+  cursor: grabbing;
+}
+
+.tree-row-dragging {
+  opacity: 0.48;
+}
+
+.tree-row.tree-row-drop-target {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px
+    color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
 .tree-toggle {
   background: none;
   border: none;
@@ -2136,6 +2158,16 @@ button.danger {
   align-items: center;
   gap: 0.35rem;
   flex: 0 0 auto;
+}
+
+/* A pin is a quiet persistence cue, not a second action button. The row menu
+   owns the interaction; this mark only explains why an older file remains in
+   the compact Documents list. */
+.document-pin-marker {
+  color: var(--accent);
+  font-size: 0.72rem;
+  line-height: 1;
+  transform: rotate(-18deg);
 }
 
 /* Flat-list rows make their trailing badges select the row too, so the

@@ -38,6 +38,7 @@ import {
 } from './SquisqIntegration/document-companion.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
+import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
@@ -85,19 +86,6 @@ async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
   if (!/\.(?:html?|docx|pdf|pptx|xlsx)$/i.test(path)) return null;
   const { resolveOutsideInLayout } = await import('./SquisqIntegration/outside-in.js');
   return resolveOutsideInLayout(path);
-}
-
-/**
- * The sidebar is a compact document navigator, so a folder only earns a row
- * when it leads to a visible document. The full Documents view still keeps
- * empty folders available for selection and creation.
- */
-function hideEmptyDocumentFolders(entries: FileEntry[]): FileEntry[] {
-  const filePaths = entries.filter((entry) => !entry.isDirectory).map((entry) => entry.path);
-  return entries.filter(
-    (entry) =>
-      !entry.isDirectory || filePaths.some((filePath) => filePath.startsWith(`${entry.path}/`)),
-  );
 }
 
 function documentsFolderContextLabel(platform?: string): string {
@@ -257,6 +245,11 @@ export function Sidebar({
   const [renameDocError, setRenameDocError] = useState<string | null>(null);
   const [deleteDocTarget, setDeleteDocTarget] = useState<FileEntry | null>(null);
   const [deleteDocError, setDeleteDocError] = useState<string | null>(null);
+  const documentQuickList = useDocumentQuickList();
+  const quickDocs = useMemo(
+    () => documentQuickListEntries(docs, documentQuickList.state),
+    [docs, documentQuickList.state],
+  );
   const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
@@ -358,10 +351,10 @@ export function Sidebar({
   }, []);
   const refreshDocs = useCallback(() => {
     api
-      .listDocuments('', true)
+      .listDocuments('', true, { stats: true, hidden: false })
       .then((r) => {
         const visibleEntries = r.files.filter((entry) => !isOutsideInInternalPath(entry.path));
-        setDocs(hideEmptyDocumentFolders(visibleEntries));
+        setDocs(visibleEntries);
       })
       .catch(() => {});
   }, []);
@@ -380,6 +373,12 @@ export function Sidebar({
     refreshMeesterConfig();
     refreshDocs();
   }, [refreshProjects, refreshGezels, refreshMeesterConfig, refreshDocs]);
+
+  // A direct document tab can be restored or opened from outside either
+  // documents pane. Count that as use so it joins the five-item quick list.
+  useEffect(() => {
+    if (selection?.kind === 'document') documentQuickList.noteUsed(selection.path);
+  }, [selection, documentQuickList.noteUsed]);
 
   // Renames / creates / deletes elsewhere flow back in via the same
   // window events the detail views already broadcast.
@@ -746,6 +745,20 @@ export function Sidebar({
     }),
     [onPreload],
   );
+  const documentActionsForEntry = useCallback(
+    (entry: FileEntry) => {
+      if (entry.isDirectory) return [];
+      const pinned = documentQuickList.pinnedPaths.has(entry.path);
+      return [
+        {
+          label: pinned ? 'Unpin from Documents list' : 'Pin to Documents list',
+          onSelect: () =>
+            pinned ? documentQuickList.unpin(entry.path) : documentQuickList.pin(entry.path),
+        },
+      ];
+    },
+    [documentQuickList.pin, documentQuickList.pinnedPaths, documentQuickList.unpin],
+  );
 
   return (
     <aside
@@ -947,16 +960,17 @@ export function Sidebar({
             </ContextMenu.Item>
           }
         >
-          {docs.length === 0 ? (
+          {quickDocs.length === 0 ? (
             <li className="app-sidebar-empty">No documents yet.</li>
           ) : (
             <li className="app-sidebar-tree">
               <FileTree
-                entries={docs}
+                entries={quickDocs}
                 labelFor={(entry) => documentLabel(entry.name)}
                 selectedPath={selection?.kind === 'document' ? selection.path : undefined}
                 onSelect={(entry) => {
                   if (entry.isDirectory) return;
+                  documentQuickList.noteUsed(entry.path);
                   onSelect(toRecentTab({ kind: 'document', path: entry.path }));
                 }}
                 onIntent={(entry) => {
@@ -966,7 +980,15 @@ export function Sidebar({
                 }}
                 onRename={openRenameDocument}
                 onDelete={openDeleteDocument}
-                defaultExpandedDepth={1}
+                actionsForEntry={documentActionsForEntry}
+                trailingForEntry={(entry) =>
+                  documentQuickList.pinnedPaths.has(entry.path) ? (
+                    <span className="document-pin-marker" title="Pinned" aria-label="Pinned">
+                      <i className="fa-solid fa-thumbtack" />
+                    </span>
+                  ) : null
+                }
+                sortMode="alpha"
               />
             </li>
           )}

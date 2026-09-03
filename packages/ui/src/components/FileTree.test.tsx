@@ -90,6 +90,58 @@ describe('FileTree folder expansion', () => {
   });
 });
 
+describe('FileTree document moves', () => {
+  const FOLDER = { path: 'archive', name: 'archive', isDirectory: true };
+
+  it('moves a dragged file when it is dropped on a folder', () => {
+    const onMove = vi.fn();
+    render(<FileTree entries={[FOLDER, NOTE]} onSelect={vi.fn()} onMove={onMove} />);
+
+    const fileRow = screen.getByRole('button', { name: 'notes.md' }).closest('.tree-row');
+    const folderRow = screen.getByRole('button', { name: 'archive' }).closest('.tree-row');
+    expect(fileRow).not.toBeNull();
+    expect(folderRow).not.toBeNull();
+    expect(fileRow).toHaveAttribute('draggable', 'true');
+    expect(folderRow).toHaveAttribute('draggable', 'false');
+
+    const dataTransfer = {
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(fileRow!, { dataTransfer });
+    fireEvent.dragEnter(folderRow!, { dataTransfer });
+    expect(folderRow).toHaveClass('tree-row-drop-target');
+    fireEvent.drop(folderRow!, { dataTransfer });
+
+    expect(dataTransfer.effectAllowed).toBe('move');
+    expect(dataTransfer.dropEffect).toBe('move');
+    expect(dataTransfer.setData).toHaveBeenCalledWith('application/x-gezel-file-path', 'notes.md');
+    expect(onMove).toHaveBeenCalledWith(NOTE, FOLDER);
+    expect(folderRow).not.toHaveClass('tree-row-drop-target');
+  });
+
+  it('does not offer the current parent as a drop target', () => {
+    const nestedNote = { path: 'archive/notes.md', name: 'notes.md', isDirectory: false };
+    const onMove = vi.fn();
+    render(<FileTree entries={[FOLDER, nestedNote]} onSelect={vi.fn()} onMove={onMove} />);
+
+    const fileRow = screen.getByRole('button', { name: 'notes.md' }).closest('.tree-row');
+    const folderRow = screen.getByRole('button', { name: 'archive' }).closest('.tree-row');
+    const dataTransfer = {
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(fileRow!, { dataTransfer });
+    fireEvent.dragEnter(folderRow!, { dataTransfer });
+    fireEvent.drop(folderRow!, { dataTransfer });
+
+    expect(folderRow).not.toHaveClass('tree-row-drop-target');
+    expect(onMove).not.toHaveBeenCalled();
+  });
+});
+
 describe('FileTree file-type icons', () => {
   it.each([
     ['brief.docx', 'fa-file-word'],
