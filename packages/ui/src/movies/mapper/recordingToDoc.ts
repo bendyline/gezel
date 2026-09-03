@@ -72,13 +72,9 @@ export function recordingToDoc(
   const title = coverTitle(recording);
   const subtitle = coverSubtitle(recording);
 
+  // No caption on the cover or outro: those blocks ARE full-screen text,
+  // and a caption underneath just duplicates it. Captions narrate scenes.
   blocks.push(coverBlock(title, subtitle, { startTime: 0, duration: coverDuration }));
-  captions.push({
-    text: subtitle ? `${title} — ${subtitle}` : title,
-    startTime: 0,
-    endTime: coverDuration,
-    audioSegment: 0,
-  });
 
   const ctx = {
     actors,
@@ -113,12 +109,6 @@ export function recordingToDoc(
 
   const outroStart = coverDuration + timeline.totalDuration;
   blocks.push(outroBlock(recording, profile, { startTime: outroStart, duration: outroDuration }));
-  captions.push({
-    text: profile === 'marketing' ? 'Made with Gezel.' : 'Run complete.',
-    startTime: outroStart,
-    endTime: outroStart + outroDuration,
-    audioSegment: 0,
-  });
 
   const media: MovieMediaRef[] = collectScreenshotRefs(recording);
   for (const actor of recording.actors) {

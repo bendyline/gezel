@@ -543,7 +543,9 @@ function artifactLayers(
   blockId: string,
   scene: RunRecordingScene & { kind: 'artifact-produced' },
 ): Layer[] {
-  const caption = `${scene.path}${scene.bytes ? `  ·  ${formatBytes(scene.bytes)}` : ''}`;
+  const caption = `${scene.path}${scene.bytes ? `  ·  ${formatBytes(scene.bytes)}` : ''}${
+    scene.count && scene.count > 1 ? `  ·  ${scene.count} revisions` : ''
+  }`;
   if (scene.screenshotRef) {
     return [
       {

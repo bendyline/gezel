@@ -155,6 +155,8 @@ export const RunRecordingSceneSchema = z.discriminatedUnion('kind', [
       store: z.enum(['workspace', 'artifact']),
       path: z.string().min(1),
       bytes: z.number().int().nonnegative().optional(),
+      /** >1 when a burst of consecutive writes to this path was coalesced. */
+      count: z.number().int().positive().optional(),
       /** Transcript-dir-relative screenshot of the produced file. */
       screenshotRef: z.string().optional(),
     })

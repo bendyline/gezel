@@ -41,9 +41,10 @@ describe('recordingToDoc', () => {
       }
       const last = doc.blocks[doc.blocks.length - 1]!;
       expect(doc.duration).toBeCloseTo(last.startTime + last.duration, 1);
-      // Synthetic clock: no audio segments, captions present for every block.
+      // Synthetic clock: no audio segments; captions narrate every SCENE
+      // block — cover and outro are full-screen text and carry none.
       expect(doc.audio.segments).toHaveLength(0);
-      expect(doc.captions?.phrases.length).toBe(doc.blocks.length);
+      expect(doc.captions?.phrases.length).toBe(doc.blocks.length - 2);
     });
   }
 

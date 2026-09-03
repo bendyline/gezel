@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type ChatSession,
+  type DistillChatEventLine,
   type DistillScreenshotIndexEntry,
   type DistillTaskNotes,
   type HistoryEvent,
@@ -46,15 +47,47 @@ export async function distillRunDir(
     return null;
   }
 
+  // Home-level history carries install events (gezel.created, …); the
+  // movie-critical stream — task.created, task.step.*, workspace.write —
+  // lives in the PER-PROJECT logs the capture snapshots under
+  // project-history/. Read both, deduped by event id.
   const historyEvents: HistoryEvent[] = [];
-  const historyPath = join(runDir, 'history.jsonl');
-  if (existsSync(historyPath)) {
-    for (const line of (await readFile(historyPath, 'utf8')).split('\n')) {
+  const seenEventIds = new Set<string>();
+  const readHistoryFile = async (path: string) => {
+    if (!existsSync(path)) return;
+    for (const line of (await readFile(path, 'utf8')).split('\n')) {
       if (line.trim().length === 0) continue;
       try {
-        historyEvents.push(JSON.parse(line) as HistoryEvent);
+        const event = JSON.parse(line) as HistoryEvent;
+        if (event.id && seenEventIds.has(event.id)) continue;
+        if (event.id) seenEventIds.add(event.id);
+        historyEvents.push(event);
       } catch {
         // A torn tail line on a killed trial is expected; skip it.
+      }
+    }
+  };
+  await readHistoryFile(join(runDir, 'history.jsonl'));
+  const projectHistoryDir = join(runDir, 'project-history');
+  if (existsSync(projectHistoryDir)) {
+    for (const file of (await readdir(projectHistoryDir)).sort()) {
+      if (file.endsWith('.jsonl')) await readHistoryFile(join(projectHistoryDir, file));
+    }
+  }
+
+  // Live-tap tool events, for recovering the tool calls a killed turn
+  // never committed. Pre-filtered to `"type":"tool"` lines so a large
+  // event log stays cheap to load.
+  const chatEventLog: DistillChatEventLine[] = [];
+  const chatEventsPath = join(runDir, 'recording', 'chat-events.jsonl');
+  if (existsSync(chatEventsPath)) {
+    for (const line of (await readFile(chatEventsPath, 'utf8')).split('\n')) {
+      if (!line.includes('"type":"tool"')) continue;
+      try {
+        const parsed = JSON.parse(line) as DistillChatEventLine;
+        if (parsed.event?.type === 'tool') chatEventLog.push(parsed);
+      } catch {
+        // Torn tail line — skip.
       }
     }
   }
@@ -83,6 +116,7 @@ export async function distillRunDir(
   const recording = distillRunRecording({
     sessions,
     ...(historyEvents.length > 0 ? { historyEvents } : {}),
+    ...(chatEventLog.length > 0 ? { chatEventLog } : {}),
     ...(taskNotes ? { taskNotes } : {}),
     ...(actors ? { actors } : {}),
     ...(screenshots && screenshots.length > 0 ? { screenshots } : {}),

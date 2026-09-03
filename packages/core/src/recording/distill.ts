@@ -34,7 +34,14 @@ export interface DistillTaskNotes {
   num: number;
   title?: string;
   craftbookId?: string;
-  notes: Array<{ id?: string; at: string; author?: string; stepId?: string; text: string }>;
+  notes: Array<{
+    id?: string;
+    at: string;
+    /** Persisted TaskNote author: a structured ref, or a bare name/id in older data. */
+    author?: string | { kind?: string; gezelId?: string; name?: string };
+    stepId?: string;
+    text: string;
+  }>;
 }
 
 export interface DistillScreenshotIndexEntry {
@@ -47,9 +54,37 @@ export interface DistillScreenshotIndexEntry {
   height?: number;
 }
 
+/**
+ * A line from the live chat-event tap (`recording/chat-events.jsonl`),
+ * pre-filtered by the caller to the event types the distiller consumes
+ * (today: `tool`). `rx` is the recorder's receive time; the event's own
+ * `at` (when present) is preferred.
+ */
+export interface DistillChatEventLine {
+  rx: string;
+  sessionId: string;
+  event: {
+    type: string;
+    at?: string;
+    name?: string;
+    durationMs?: number;
+    success?: boolean;
+    argsSummary?: string;
+    path?: string;
+  };
+}
+
 export interface DistillInputs {
   sessions: ChatSession[];
   historyEvents?: HistoryEvent[];
+  /**
+   * Live-tap enrichment: recovers work that never reached disk because
+   * assistant turns commit at turn END — a killed/stalled turn takes its
+   * tool calls with it. Only events for sessions whose last turn aborted
+   * are consulted, and only those after the last committed message, so
+   * committed work is never double-counted.
+   */
+  chatEventLog?: DistillChatEventLine[];
   taskNotes?: DistillTaskNotes[];
   /** Roster from capture (`recording/actors.json`); a synthetic user actor is added. */
   actors?: RunRecordingActor[];
@@ -98,7 +133,15 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
   const maxBytes = opts?.maxBytes ?? DEFAULT_MAX_BYTES;
 
   const actors = buildActorRoster(inputs);
-  const knownActorIds = new Set(actors.map((actor) => actor.id));
+  // Task-note `author` is sometimes a display name ("Rex"), not an id —
+  // resolve either spelling onto the roster.
+  const actorIdByKey = new Map<string, string>();
+  for (const actor of actors) {
+    actorIdByKey.set(actor.id.toLowerCase(), actor.id);
+    actorIdByKey.set(actor.name.toLowerCase(), actor.id);
+  }
+  const resolveActorId = (key: string | undefined): string | undefined =>
+    key ? actorIdByKey.get(key.toLowerCase()) : undefined;
   const scenes: RunRecordingScene[] = [];
   let truncatedExcerpts = 0;
   const excerpt = (text: string | undefined): string | undefined => {
@@ -142,6 +185,22 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
             ...(body ? { excerpt: body } : {}),
           });
         } else if (message.origin !== 'system' && !message.nudge) {
+          // The `[Answer to: …]` envelope is the runtime's question-answer
+          // delivery (same prefix prompt-meester-build-prelude keys on) —
+          // a reply beat, never a fresh ask.
+          if (/^\s*\[Answer to:/i.test(message.content)) {
+            const body = excerpt(message.content.replace(/^\s*\[Answer to:[^\]]*\]:?\s*/i, ''));
+            scenes.push({
+              kind: 'question',
+              at: message.at,
+              actorId: USER_ACTOR_ID,
+              sessionId: session.id,
+              ...(session.taskRef ? { taskRef: session.taskRef } : {}),
+              state: 'answered',
+              ...(body ? { excerpt: body } : {}),
+            });
+            continue;
+          }
           const body = excerpt(message.content);
           scenes.push({
             kind: 'user-prompt',
@@ -200,6 +259,85 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
     }
   }
 
+  // Live-tap recovery: a session whose last turn never committed (aborted
+  // synthetic, or a transcript that simply ends on the user's message)
+  // still made tool calls — the tap saw them. Recover them as scenes,
+  // taking only events AFTER the last committed assistant message so
+  // committed turns are never double-counted.
+  if (inputs.chatEventLog && inputs.chatEventLog.length > 0) {
+    for (const session of inputs.sessions) {
+      const aborted =
+        session.messages.some((message) => message.synthetic === 'turn-aborted') ||
+        (session.messages.length > 0 &&
+          session.messages[session.messages.length - 1]!.role !== 'assistant');
+      if (!aborted) continue;
+      let lastCommittedMs = 0;
+      for (const message of session.messages) {
+        if (message.role === 'assistant' && !message.synthetic) {
+          const t = Date.parse(message.at);
+          if (Number.isFinite(t)) lastCommittedMs = Math.max(lastCommittedMs, t);
+        }
+      }
+      const lost: NonNullable<ChatMessage['toolCalls']> = [];
+      for (const line of inputs.chatEventLog) {
+        if (line.sessionId !== session.id || line.event.type !== 'tool') continue;
+        const at = line.event.at ?? line.rx;
+        const t = Date.parse(at);
+        if (!Number.isFinite(t) || t <= lastCommittedMs) continue;
+        lost.push({
+          name: line.event.name ?? 'tool',
+          at,
+          durationMs: line.event.durationMs ?? 0,
+          success: line.event.success !== false,
+          ...(line.event.argsSummary ? { argsSummary: line.event.argsSummary } : {}),
+          ...(line.event.path ? { path: line.event.path } : {}),
+        });
+      }
+      for (const call of coalesceToolCalls(lost)) {
+        const summary = excerpt(call.argsSummary);
+        scenes.push({
+          kind: 'tool-call',
+          at: call.at ?? session.lastActivityAt,
+          actorId: session.gezelId,
+          sessionId: session.id,
+          ...(session.taskRef ? { taskRef: session.taskRef } : {}),
+          name: call.name,
+          success: call.success,
+          ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+          ...(call.count > 1 ? { count: call.count } : {}),
+          ...(call.path ? { path: call.path } : {}),
+          ...(summary ? { argsSummary: summary } : {}),
+        });
+      }
+    }
+  }
+
+  // Pre-scan the history for task identity: which refs were actually
+  // COMMISSIONED (entry.dispatched — filters out ambient night-shift /
+  // boekwachter tasks that are merely created), and the step-id → name
+  // map task.created carries in its details.
+  const dispatchedRefs = new Set<string>();
+  const stepNamesByRef = new Map<string, Map<string, string>>();
+  for (const event of inputs.historyEvents ?? []) {
+    const details = (event.details ?? {}) as Record<string, unknown>;
+    const ref = firstString(details.ref, details.taskRef);
+    if (!ref) continue;
+    if (event.kind === 'task.entry.dispatched') dispatchedRefs.add(ref);
+    if (event.kind === 'task.created' && Array.isArray(details.steps)) {
+      const names = new Map<string, string>();
+      for (const step of details.steps) {
+        if (step && typeof step === 'object') {
+          const id = (step as { id?: unknown }).id;
+          const name = (step as { name?: unknown }).name;
+          if (typeof id === 'string' && typeof name === 'string') names.set(id, name);
+        }
+      }
+      if (names.size > 0) stepNamesByRef.set(ref, names);
+    }
+  }
+  const stepNameFor = (ref: string | undefined, stepId: string | undefined): string | undefined =>
+    ref && stepId ? stepNamesByRef.get(ref)?.get(stepId) : undefined;
+
   for (const event of inputs.historyEvents ?? []) {
     const details = (event.details ?? {}) as Record<string, unknown>;
     const stepId = firstString(details.stepId, details.step);
@@ -215,7 +353,7 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
         | 'completed'
         | 'redriven'
         | 'stalled';
-      const stepName = firstString(details.stepName, details.name);
+      const stepName = firstString(details.stepName, details.name) ?? stepNameFor(taskRef, stepId);
       const summary = excerpt(event.summary);
       scenes.push({
         kind: 'step-transition',
@@ -229,6 +367,37 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
       });
       continue;
     }
+    if (event.kind === 'task.created') {
+      // The commissioned task IS the movie's ask: dispatched tasks get a
+      // user-prompt scene from their title; ambient crew tasks (created
+      // but never entry-dispatched) stay out of the timeline.
+      if (!taskRef || !dispatchedRefs.has(taskRef)) continue;
+      const title = excerpt(firstString(details.title) ?? event.summary);
+      scenes.push({
+        kind: 'user-prompt',
+        at: event.at,
+        actorId: USER_ACTOR_ID,
+        taskRef,
+        ...(title ? { excerpt: title } : {}),
+      });
+      continue;
+    }
+    if (event.kind === 'task.entry.dispatched') {
+      // The first activation beat — "the work lands on someone's bench".
+      const stepName = stepNameFor(taskRef, stepId);
+      const summary = excerpt(event.summary);
+      scenes.push({
+        kind: 'step-transition',
+        at: event.at,
+        ...(event.gezelId ? { actorId: event.gezelId } : {}),
+        ...(taskRef ? { taskRef } : {}),
+        stepId: stepId ?? 'step',
+        ...(stepName ? { stepName } : {}),
+        phase: 'activated',
+        ...(summary ? { excerpt: summary } : {}),
+      });
+      continue;
+    }
     if (event.kind === 'task.step.gated') {
       const summary = excerpt(event.summary);
       scenes.push({
@@ -237,7 +406,7 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
         ...(event.gezelId ? { actorId: event.gezelId } : {}),
         ...(taskRef ? { taskRef } : {}),
         ...(stepId ? { stepId } : {}),
-        verdict: 'fail',
+        verdict: details.decision === 'approve' ? 'pass' : 'fail',
         ...(typeof details.attempt === 'number' && details.attempt > 0
           ? { attempt: details.attempt }
           : {}),
@@ -245,13 +414,29 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
       });
       continue;
     }
+    if (event.kind === 'user.question.answered') {
+      const summary = excerpt(event.summary);
+      scenes.push({
+        kind: 'question',
+        at: event.at,
+        ...(event.gezelId ? { actorId: event.gezelId } : {}),
+        state: 'answered',
+        ...(summary ? { excerpt: summary } : {}),
+      });
+      continue;
+    }
     if (event.kind === 'workspace.write') {
+      // A write with no gezelId is the HARNESS seeding fixtures (or a
+      // user edit) — not the crew producing work. Only gezel writes
+      // become artifact scenes, or a code-review movie opens with
+      // thirteen files "produced" at second zero.
+      if (!event.gezelId) continue;
       const path = firstString(details.path, details.file);
       if (!path) continue;
       scenes.push({
         kind: 'artifact-produced',
         at: event.at,
-        ...(event.gezelId ? { actorId: event.gezelId } : {}),
+        actorId: event.gezelId,
         store: 'workspace',
         path,
         ...(typeof details.bytes === 'number' ? { bytes: details.bytes } : {}),
@@ -262,10 +447,18 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
   for (const task of inputs.taskNotes ?? []) {
     for (const note of task.notes) {
       const body = excerpt(note.text);
+      const author =
+        typeof note.author === 'string'
+          ? resolveActorId(note.author)
+          : note.author?.gezelId
+            ? resolveActorId(note.author.gezelId)
+            : note.author?.kind === 'user'
+              ? USER_ACTOR_ID
+              : resolveActorId(note.author?.name);
       scenes.push({
         kind: 'note',
         at: note.at,
-        ...(note.author && knownActorIds.has(note.author) ? { actorId: note.author } : {}),
+        ...(author ? { actorId: author } : {}),
         taskRef: task.ref,
         ...(note.stepId ? { stepId: note.stepId } : {}),
         ...(body ? { excerpt: body } : {}),
@@ -302,6 +495,30 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
     return a.index - b.index;
   });
   let ordered = indexed.map((entry) => entry.scene);
+
+  // Coalesce artifact WRITE BURSTS: iterative editing logs several
+  // workspace.write events for the same file back to back (surgical
+  // edits double-log, and a build step rewrites its deliverable many
+  // times). One movie beat per burst — first timestamp, last byte size,
+  // any screenshot, `count` carrying the burst length.
+  const coalesced: RunRecordingScene[] = [];
+  for (const scene of ordered) {
+    const prev = coalesced[coalesced.length - 1];
+    if (
+      scene.kind === 'artifact-produced' &&
+      prev?.kind === 'artifact-produced' &&
+      prev.path === scene.path &&
+      prev.actorId === scene.actorId &&
+      prev.store === scene.store
+    ) {
+      prev.count = (prev.count ?? 1) + (scene.count ?? 1);
+      if (scene.bytes !== undefined) prev.bytes = scene.bytes;
+      if (scene.screenshotRef !== undefined) prev.screenshotRef = scene.screenshotRef;
+      continue;
+    }
+    coalesced.push(scene);
+  }
+  ordered = coalesced;
 
   // Budget pass 1: scene ceiling via importance tiers.
   let droppedScenes = 0;

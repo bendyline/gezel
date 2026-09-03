@@ -205,6 +205,184 @@ describe('distillRunRecording', () => {
     expect(parseRunRecording(recording).ok).toBe(true);
   });
 
+  it('synthesizes the ask from a dispatched task, skips ambient tasks and harness seeding', () => {
+    const recording = distillRunRecording({
+      sessions: [session({ id: 's', gezelId: 'rex', messages: [] })],
+      historyEvents: [
+        {
+          id: 'h1',
+          at: T(1),
+          kind: 'task.created',
+          gezelId: 'rex',
+          summary: 'Created task default/1',
+          details: {
+            ref: 'default/1',
+            title: 'Snapshot-driven code review',
+            steps: [{ id: 'scope', name: 'Scope the change set' }],
+          },
+        },
+        {
+          id: 'h2',
+          at: T(2),
+          kind: 'task.entry.dispatched',
+          gezelId: 'rex',
+          summary: 'Entry step "scope" handed to Rex',
+          details: { ref: 'default/1', stepId: 'scope' },
+        },
+        // Ambient crew task: created, never dispatched → no scene.
+        {
+          id: 'h3',
+          at: T(3),
+          kind: 'task.created',
+          summary: 'Created task shared/1 — "Boekwachter: indexing"',
+          details: { ref: 'shared/1', title: 'Boekwachter: indexing' },
+        },
+        // Harness seeding: workspace.write with no gezelId → no scene.
+        {
+          id: 'h4',
+          at: T(4),
+          kind: 'workspace.write',
+          summary: 'Wrote src/seeded.js',
+          details: { path: 'src/seeded.js', bytes: 100 },
+        },
+        // Gate approval carries decision=approve → pass; absent → fail.
+        {
+          id: 'h5',
+          at: T(5),
+          kind: 'task.step.gated',
+          gezelId: 'rex',
+          summary: 'Gate approved',
+          details: { ref: 'default/1', stepId: 'scope', decision: 'approve', attempt: 2 },
+        },
+      ] as HistoryEvent[],
+    });
+    const prompts = recording.scenes.filter((scene) => scene.kind === 'user-prompt');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({
+      taskRef: 'default/1',
+      excerpt: 'Snapshot-driven code review',
+    });
+    const entry = recording.scenes.find((scene) => scene.kind === 'step-transition');
+    expect(entry).toMatchObject({
+      stepId: 'scope',
+      stepName: 'Scope the change set',
+      phase: 'activated',
+    });
+    expect(recording.scenes.some((scene) => scene.kind === 'artifact-produced')).toBe(false);
+    const gate = recording.scenes.find((scene) => scene.kind === 'gate-verdict');
+    expect(gate).toMatchObject({ verdict: 'pass', attempt: 2 });
+  });
+
+  it('recovers tool calls a killed turn never committed, without double-counting', () => {
+    const aborted = session({
+      id: 's-lost',
+      gezelId: 'rex',
+      messages: [
+        { role: 'user', content: 'go', at: T(0) },
+        { role: 'assistant', content: 'first turn done', at: T(10) },
+        { role: 'user', content: 'continue', at: T(11) },
+        { role: 'assistant', content: '', at: T(60), synthetic: 'turn-aborted' },
+      ],
+    });
+    const recording = distillRunRecording({
+      sessions: [aborted],
+      chatEventLog: [
+        // Before the last commit — belongs to the committed turn, ignored.
+        { rx: T(5), sessionId: 's-lost', event: { type: 'tool', at: T(5), name: 'read_file' } },
+        // After the last commit — the lost turn's work, recovered + coalesced.
+        {
+          rx: T(20),
+          sessionId: 's-lost',
+          event: { type: 'tool', at: T(20), name: 'read_file', durationMs: 100, success: true },
+        },
+        {
+          rx: T(21),
+          sessionId: 's-lost',
+          event: { type: 'tool', at: T(21), name: 'read_file', durationMs: 90, success: true },
+        },
+        {
+          rx: T(30),
+          sessionId: 's-lost',
+          event: {
+            type: 'tool',
+            at: T(30),
+            name: 'write_task_note',
+            durationMs: 50,
+            success: true,
+            path: 'notes.md',
+          },
+        },
+        // Different session — ignored.
+        { rx: T(25), sessionId: 'other', event: { type: 'tool', at: T(25), name: 'read_file' } },
+      ],
+    });
+    const tools = recording.scenes.filter((scene) => scene.kind === 'tool-call');
+    expect(tools).toHaveLength(2);
+    expect(tools[0]).toMatchObject({ name: 'read_file', count: 2, at: T(20) });
+    expect(tools[1]).toMatchObject({ name: 'write_task_note', path: 'notes.md' });
+  });
+
+  it('coalesces artifact write bursts into one beat with a revision count', () => {
+    const writes: HistoryEvent[] = [1, 2, 3, 4].map((i) => ({
+      id: `w${i}`,
+      at: T(10 + i),
+      kind: 'workspace.write',
+      gezelId: 'jules',
+      summary: 'Wrote index.html',
+      details: { path: 'index.html', ...(i === 4 ? { bytes: 17146 } : {}) },
+    })) as HistoryEvent[];
+    const recording = distillRunRecording({
+      sessions: [session({ id: 's', gezelId: 'jules', messages: [] })],
+      historyEvents: [
+        ...writes,
+        {
+          id: 'w5',
+          at: T(20),
+          kind: 'workspace.write',
+          gezelId: 'jules',
+          summary: 'Wrote styles.css',
+          details: { path: 'styles.css', bytes: 300 },
+        } as HistoryEvent,
+      ],
+      screenshots: [{ sourcePath: 'index.html', png: '00-index.png' }],
+    });
+    const artifacts = recording.scenes.filter((scene) => scene.kind === 'artifact-produced');
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts[0]).toMatchObject({
+      path: 'index.html',
+      at: T(11),
+      count: 4,
+      bytes: 17146,
+      screenshotRef: 'screenshots/00-index.png',
+    });
+    expect(artifacts[1]).toMatchObject({ path: 'styles.css' });
+    expect(artifacts[1]!.count).toBeUndefined();
+  });
+
+  it('maps [Answer to: …] envelopes to answered-question beats, not fresh asks', () => {
+    const recording = distillRunRecording({
+      sessions: [
+        session({
+          id: 's',
+          gezelId: 'javier',
+          messages: [
+            { role: 'user', content: 'Fix the pricing bug.', at: T(0) },
+            {
+              role: 'user',
+              content: '[Answer to: "Proceed with the failing test?"]: Yes, go ahead.',
+              at: T(30),
+            },
+          ],
+        }),
+      ],
+    });
+    const prompts = recording.scenes.filter((scene) => scene.kind === 'user-prompt');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.excerpt).toBe('Fix the pricing bug.');
+    const answer = recording.scenes.find((scene) => scene.kind === 'question');
+    expect(answer).toMatchObject({ state: 'answered', actorId: 'user', excerpt: 'Yes, go ahead.' });
+  });
+
   it('degrades gracefully with sessions alone (backfill mode)', () => {
     const recording = distillRunRecording({ sessions: fixtureSessions() });
     expect(parseRunRecording(recording).ok).toBe(true);

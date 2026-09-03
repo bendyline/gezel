@@ -65,8 +65,19 @@ export function coverTitle(recording: RunRecording): string {
 
 export function coverSubtitle(recording: RunRecording): string {
   const model = recording.provenance?.modelId ?? recording.trial?.modelId;
+  // Bill the cast by prominence — scene count — not roster order, or the
+  // cover credits whoever sorts first alphabetically while the actual
+  // protagonists go unnamed.
+  const sceneCounts = new Map<string, number>();
+  for (const scene of recording.scenes) {
+    if (scene.actorId) sceneCounts.set(scene.actorId, (sceneCounts.get(scene.actorId) ?? 0) + 1);
+    if (scene.kind === 'delegation') {
+      sceneCounts.set(scene.toActorId, (sceneCounts.get(scene.toActorId) ?? 0) + 1);
+    }
+  }
   const cast = recording.actors
-    .filter((actor) => actor.kind === 'gezel')
+    .filter((actor) => actor.kind === 'gezel' && (sceneCounts.get(actor.id) ?? 0) > 0)
+    .sort((a, b) => (sceneCounts.get(b.id) ?? 0) - (sceneCounts.get(a.id) ?? 0))
     .map((actor) => actor.name);
   const castLine = cast.length > 0 ? `with ${cast.slice(0, 4).join(', ')}` : '';
   return [castLine, model ? `on ${model}` : ''].filter((part) => part.length > 0).join(' · ');
