@@ -24,8 +24,12 @@ export interface Timeline {
  * ground truth stays visible, playback stays watchable.
  *
  * Marketing pacing: the scene list is already selected; dwell comes from
- * the narration line's reading time, then the whole timeline is scaled
- * linearly into the target duration.
+ * the reading time of what is ON SCREEN (the excerpt, which the bubble
+ * typewrites, falling back to the narration line) plus a settle beat, so
+ * a viewer can actually finish reading a bubble before it cuts. The
+ * target duration is a ceiling: a naturally shorter cut is left alone,
+ * and an over-long one is compressed linearly but never below the
+ * per-scene floor.
  */
 export function buildTimeline(
   scenes: RunRecordingScene[],
@@ -59,8 +63,12 @@ export function buildTimeline(
         2.0 + 1.3 * Math.log(1 + coveredSeconds),
       );
     } else {
-      const words = estimateReadingTime(narrationOf(scene));
-      duration = clamp(knobs.minSceneSeconds, knobs.maxSceneSeconds, words.seconds);
+      const onScreen =
+        scene.excerpt && scene.excerpt.length > 0 ? scene.excerpt : narrationOf(scene);
+      const reading = estimateReadingTime(onScreen);
+      // +1.5s settle: the bubble typewrites in over up to 2.5s, and a card
+      // needs a breath after its last word before the cut.
+      duration = clamp(knobs.minSceneSeconds, knobs.maxSceneSeconds, reading.seconds + 1.5);
     }
     timed.push({
       scene,
@@ -71,17 +79,30 @@ export function buildTimeline(
     cursor += duration;
   }
 
-  if (profile === 'marketing' && knobs.targetDurationSeconds > 0 && cursor > 0) {
+  if (
+    profile === 'marketing' &&
+    knobs.targetDurationSeconds > 0 &&
+    cursor > knobs.targetDurationSeconds
+  ) {
     const scale = knobs.targetDurationSeconds / cursor;
     let scaledCursor = 0;
     for (const entry of timed) {
       entry.startTime = scaledCursor;
-      entry.duration = Math.max(1.2, entry.duration * scale);
+      entry.duration = Math.max(knobs.minSceneSeconds, entry.duration * scale);
       scaledCursor += entry.duration;
     }
     cursor = scaledCursor;
   }
   return { timed, totalDuration: cursor };
+}
+
+/**
+ * Eval-harness interventions relayed through the crew (`[scenario check]`
+ * nudges). They are real messages and stay in the debug rendition, but a
+ * marketing cut must not headline the harness poking the model.
+ */
+export function isHarnessNudge(scene: RunRecordingScene): boolean {
+  return /^\s*\[scenario check\]/i.test(scene.excerpt ?? '');
 }
 
 /**
@@ -142,6 +163,7 @@ export function selectMarketingScenes(
   const picked = new Set<number>();
   for (const entry of [...scored].sort((a, b) => b.score - a.score || a.index - b.index)) {
     if (picked.size >= budget) break;
+    if (isHarnessNudge(entry.scene)) continue;
     if (entry.scene.kind === 'reasoning' && reasoningKept >= 2) continue;
     if (entry.scene.kind === 'step-transition' && stepKept >= 3) continue;
     if (entry.scene.kind === 'reasoning') reasoningKept += 1;

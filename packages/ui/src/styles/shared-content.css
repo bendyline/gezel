@@ -1257,6 +1257,16 @@
   min-width: 0;
 }
 
+/* Prompt-draft save state. The chat composer runs with no status bar, so the
+   one place this can live is the quiet end of the toolbar row — see
+   AutosaveStatus. It says nothing at rest, which is most of the time. */
+.chat-editor-wrap .autosave-status {
+  margin-right: 0.35rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* The dedicated Attach file action owns the empty-state affordance. Reveal
    Squisq's Files toggle only after it has a count, when it becomes the compact
    show/hide control for the populated accessory bin. */

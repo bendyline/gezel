@@ -46,6 +46,7 @@ import {
   ArtifactPathExistsError,
   ArtifactPathNotFoundError,
   ConnectorCorpusWriteDeniedError,
+  PromptDraftPathWriteDeniedError,
   ShadowPathWriteDeniedError,
   normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
@@ -1179,6 +1180,16 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json(res);
   });
 
+  // Whether this mutation is a gezel acting through a tool rather than the
+  // person at the keyboard. The reserved-subtree guards that protect the
+  // user's own files — connector corpora, prompt drafts — key off it, and the
+  // UI's own writes carry no gezel or session id.
+  const initiatedByGezel = (
+    c: { req: { query: (k: string) => string | undefined } },
+    body?: { gezelId?: string; sessionId?: string },
+  ): boolean =>
+    Boolean(body?.gezelId || body?.sessionId || c.req.query('gezelId') || c.req.query('sessionId'));
+
   app.put('/:id/artifacts/write', async (c) => {
     const id = c.req.param('id');
     const body = (await c.req.json()) as {
@@ -1190,13 +1201,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!body.path) return c.json({ error: 'missing path' }, 400);
     try {
       await ctx.store.writeProjectArtifact(id, body.path, body.content, {
-        initiatedByGezel: Boolean(body.gezelId || body.sessionId),
+        initiatedByGezel: initiatedByGezel(c, body),
       });
       return c.json({ ok: true, path: body.path });
     } catch (err) {
       if (
         err instanceof ConnectorCorpusWriteDeniedError ||
-        err instanceof ShadowPathWriteDeniedError
+        err instanceof ShadowPathWriteDeniedError ||
+        err instanceof PromptDraftPathWriteDeniedError
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
@@ -1216,10 +1228,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     try {
       const written = await ctx.store.writeProjectArtifactBinary(id, filePath, buf, {
         createOnly: c.req.query('create') === '1',
+        initiatedByGezel: initiatedByGezel(c),
       });
       return c.json({ ok: true, path: written });
     } catch (err) {
-      if (err instanceof ShadowPathWriteDeniedError) {
+      if (
+        err instanceof ShadowPathWriteDeniedError ||
+        err instanceof PromptDraftPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -1233,30 +1249,54 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
-    await ctx.store.deleteProjectArtifact(id, filePath);
+    try {
+      await ctx.store.deleteProjectArtifact(id, filePath, {
+        initiatedByGezel: initiatedByGezel(c),
+      });
+    } catch (err) {
+      if (err instanceof PromptDraftPathWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
+      throw err;
+    }
     return c.json({ ok: true });
   });
 
   app.post('/:id/artifacts/mkdir', async (c) => {
     const id = c.req.param('id');
-    const body = (await c.req.json()) as { path?: string };
+    const body = (await c.req.json()) as { path?: string; gezelId?: string; sessionId?: string };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
     try {
-      const path = await ctx.store.createProjectArtifactFolder(id, body.path);
+      const path = await ctx.store.createProjectArtifactFolder(id, body.path, {
+        initiatedByGezel: initiatedByGezel(c, body),
+      });
       return c.json({ ok: true, path });
     } catch (err) {
+      if (err instanceof PromptDraftPathWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
 
   app.post('/:id/artifacts/rename', async (c) => {
     const id = c.req.param('id');
-    const body = (await c.req.json()) as { fromPath?: string; toPath?: string };
+    const body = (await c.req.json()) as {
+      fromPath?: string;
+      toPath?: string;
+      gezelId?: string;
+      sessionId?: string;
+    };
     if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
     try {
-      const moved = await ctx.store.renameProjectArtifactPath(id, body.fromPath, body.toPath);
+      const moved = await ctx.store.renameProjectArtifactPath(id, body.fromPath, body.toPath, {
+        initiatedByGezel: initiatedByGezel(c, body),
+      });
       return c.json({ ok: true, ...moved });
     } catch (err) {
+      if (err instanceof PromptDraftPathWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
       const status =
         err instanceof ArtifactPathNotFoundError
           ? 404

@@ -332,6 +332,178 @@
   cursor: not-allowed;
 }
 
+/* Count of open drafts on the active thread, appended to the Drafts key.
+   Tabular so the key does not shift width as the count changes. */
+.gezel-chat-session-btn-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* A thread starter that has not been sent yet. Same badge recipe as the
+   transcript's nudge chip: it marks what a row IS, so it is a badge and never
+   a control. Neutral rather than terracotta — an unsent message is a state,
+   not an accent. */
+.session-row-draft-mark {
+  margin-left: 0.35rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Two-line menu rows: the draft's first line over when it was last touched. */
+.prompt-drafts-menu .app-nav-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+
+.prompt-drafts-menu .app-nav-menu-item small {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+/* Context meter — how full the ACTIVE thread's token window is, sat between
+   the thread picker and its actions. A dial, not a choice control: the ring
+   is a sanctioned true circle (see docs/ux.md), the button around it keeps
+   the same small radius as the row's other keys. Absent entirely for cloud
+   providers, which manage history themselves and report no window. */
+.context-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.45rem 0.2rem 0.3rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.context-meter:hover,
+.context-meter[data-state="open"] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.context-meter-ring-wrap {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.context-meter-ring {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.context-meter-ring-bg {
+  stroke: rgba(127, 127, 127, 0.25);
+}
+
+.context-meter-ring-fill {
+  stroke: var(--accent);
+  transition: stroke-dasharray 0.3s ease;
+}
+
+.context-meter-warn .context-meter-ring-fill {
+  stroke: #e67e22;
+}
+
+.context-meter-critical {
+  color: #c0392b;
+  border-color: color-mix(in srgb, #c0392b 45%, var(--border));
+}
+
+.context-meter-critical .context-meter-ring-fill {
+  stroke: #c0392b;
+}
+
+.context-meter-popover {
+  width: 19rem;
+}
+
+.context-meter-popover-header {
+  font-weight: 600;
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+
+.context-meter-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.7rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.context-meter-stats dt {
+  color: var(--text-muted);
+}
+
+.context-meter-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.context-meter-note {
+  margin: 0.6rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.context-meter-action {
+  margin-top: 0.7rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.context-meter-action:hover:not([disabled]) {
+  border-color: var(--accent);
+}
+
+.context-meter-action[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.context-meter-note-warn {
+  color: #8a6310;
+}
+
+[data-theme="dark"] .context-meter-note-warn {
+  color: #f0d488;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .context-meter-note-warn {
+    color: #f0d488;
+  }
+}
+
 .external-conversation-panel {
   flex-shrink: 0;
   border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));

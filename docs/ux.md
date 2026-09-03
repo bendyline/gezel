@@ -823,6 +823,57 @@ actually observed.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
 
+**A standing status number is a ring, not a strip.** A value that is always
+present and rarely acted on — the provider quota, how full a thread's context
+window is — gets a small **ring meter**: a ~15–22px circular fill, an optional
+short label, and the numbers behind a popover on click. It sits inline in the
+row it belongs to, never as its own full-width band. A strip claims a whole
+band of the frame permanently, and the two the app had spent that band
+restating constants: `139K-token context · Automatic compaction around 70%`
+told the reader the model's capacity and the runtime's policy, and never once
+told them how full the thread actually was. If a strip's copy would be the
+same on the first turn and the fiftieth, it is a ring.
+Reference implementations: the header's `.quota-meter`
+([App.tsx](../packages/ui/src/App.tsx)) and
+[ContextMeter](../packages/ui/src/components/ContextMeter.tsx) beside the
+thread picker. Rules: the ring itself is a sanctioned true circle, but the
+button around it keeps the row's small radius (see
+[keys in trays](#controls-keys-in-trays)); the ring is a *dial*, so it never
+takes a latched state; a reading the app has not measured shows an empty ring
+and the capacity as text rather than an invented zero; and an exceptional
+state (a failed compaction, a quota at 95%) recolors the ring and its label
+rather than growing back into a banner. What a ring counts must be said in
+the popover, because a bare percentage invites the reader to assume it is
+global when it is scoped — the context meter names *this thread* in its
+label, its tooltip, and its popover.
+
+**A ring earns its popover by holding the lever, not just the numbers.** The
+popover a ring opens is the natural home for the one action a reader takes
+after looking at it — the context meter's **Compact now**, which runs the
+same collapse the runtime performs automatically at the threshold. Without
+it, a user watching a thread fill up has no move but to send a throwaway
+message and hope the pressure check fires. Two rules: the action's refusals
+are *sentences*, rendered where the button is (the thread is mid-turn; there
+is nothing older to summarize yet) — never a toast, and never a silent
+no-op; and a number the app has not actually measured says so rather than
+showing a zero. The context meter's "in use" figure is the transcript tally
+until a turn measures the real prompt, and it says `at least` instead of `~`
+for exactly as long as that is true.
+
+**An unsent message is a row in the thread picker.** A prompt someone is
+still writing is a thing they own, not composer scratch, so it survives a
+restart and shows up where they would look for it. A draft addressed to a
+thread that does not exist yet is listed **above** the threads under a
+`Drafts` label, carrying a small `draft` badge so the difference is visible
+before it is committed to; drafts that already belong to a thread live behind
+that thread's `Drafts` key rather than crowding the picker. Two rules keep it
+honest. The picker's `+ New` still mints a thread and `+ Draft` mints only a
+message, because "start a conversation" and "start writing" are different
+intentions and collapsing them is what left empty threads behind. And the
+composer's save state is the toolbar's quiet autosave status — a dot while
+dirty, a word while saving — never a chip and never a banner: a person typing
+should not be told that typing is working.
+
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped
 **identity code** (`.device-code`, the first 16 hex characters in groups

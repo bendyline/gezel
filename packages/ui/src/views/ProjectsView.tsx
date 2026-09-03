@@ -57,6 +57,7 @@ import {
   type OutsideInLayout,
   chooseOutsideInSource,
   createArtifactsContentContainer,
+  createDataReferenceContainer,
   createDocumentLinkProvider,
   createDocumentMediaProvider,
   createProjectContentContainer,
@@ -70,6 +71,7 @@ import {
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
+  supportsOutsideInMarkdownEditing,
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
@@ -130,6 +132,7 @@ import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
+import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
 import { formatPreviewComplaint, formatPreviewLog } from './projects/project-preview-log.js';
 
 const loadProjectChatModule = () => import('../components/ProjectChat.js');
@@ -1698,7 +1701,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         layout: { ...layout, markdownPath: sourcePath },
         sourcePath,
         content: linkedContent,
-        editingEnabled: isOutsideInMarkdownEditingEnabled(linkedContent),
+        editingEnabled:
+          supportsOutsideInMarkdownEditing(layout.format) &&
+          isOutsideInMarkdownEditingEnabled(linkedContent),
       };
     },
     [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
@@ -1750,6 +1755,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const allowOutsideInMarkdownEditing = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
+      const layout = resolveOutsideInLayout(entry.path);
+      if (!layout || !supportsOutsideInMarkdownEditing(layout.format)) {
+        setError('CSV data previews are read-only.');
+        return;
+      }
       if (!canWriteProjectFiles(source)) {
         setError('Enable workspace writes before allowing Markdown editing.');
         return;
@@ -1830,6 +1840,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           primaryDocumentFilename: basenameOf(sourcePath),
           source: openFile.source,
         });
+        const dataReferenceContainer = createDataReferenceContainer(container);
         const allEntries = openFile.source === 'workspace' ? workspaceFiles : artifactFiles;
         const runtimePath =
           layout.format === 'html'
@@ -1846,7 +1857,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         const rendered = await renderOutsideInDocument(
           linkedContent,
           layout,
-          container,
+          dataReferenceContainer,
           runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
         );
 
@@ -3360,9 +3371,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           : undefined
                       }
                       actionsForEntry={(entry) => {
+                        const layout = entry.isDirectory
+                          ? null
+                          : resolveOutsideInLayout(entry.path);
                         if (
                           entry.isDirectory ||
-                          !resolveOutsideInLayout(entry.path) ||
+                          !layout ||
+                          !supportsOutsideInMarkdownEditing(layout.format) ||
                           (openFile?.path === entry.path &&
                             openFile.source === fileTab &&
                             openFile.outsideIn?.editingEnabled)
@@ -3689,122 +3704,6 @@ function WorkspaceSourceLineReveal({
     monacoEditor.focus();
   }, [activeView, monacoEditor, request, setActiveView]);
   return null;
-}
-
-/** Editor for a rendered document's editable Markdown companion. */
-function ProjectOutsideInEditor({
-  projectId,
-  file,
-  outsideIn,
-  isReadOnly,
-  editorTheme,
-  onChange,
-  onSave,
-  toolbarIndexToggle,
-}: {
-  projectId: string;
-  file: {
-    path: string;
-    content: string;
-    source: FileTab;
-  };
-  outsideIn: OutsideInOpenFile;
-  isReadOnly: boolean;
-  editorTheme: 'light' | 'dark';
-  onChange: (source: string) => void;
-  onSave: (content?: string) => void | Promise<void>;
-  toolbarIndexToggle?: ReactNode;
-}) {
-  const { layout, sourcePath } = outsideIn;
-  const autosave = useSerializedAutosave({
-    resourceKey: `outside-in:${projectId}:${file.source}:${sourcePath}`,
-    initialValue: normalizeMarkdownBaseline(file.content),
-    save: async (content) => {
-      await onSave(content);
-    },
-  });
-  const handleChange = useCallback(
-    (content: string) => {
-      onChange(content);
-      autosave.update(content);
-    },
-    [autosave.update, onChange],
-  );
-  const container = useMemo(
-    () =>
-      createProjectContentContainer({
-        projectId,
-        root: layout.companionDirectory,
-        client: api,
-        primaryDocumentFilename: basenameOf(sourcePath),
-        source: file.source,
-      }),
-    [file.source, layout.companionDirectory, projectId, sourcePath],
-  );
-  const versionBasename = useMemo(() => documentVersionBasename(sourcePath), [sourcePath]);
-  const versionContainer = useMemo(
-    () => createVersionCompatibleContentContainer(container, versionBasename),
-    [container, versionBasename],
-  );
-  const documentLinkProvider = useMemo(
-    () =>
-      file.source === 'artifacts'
-        ? createDocumentLinkProvider({
-            client: api,
-            currentDocumentPath: sourcePath,
-            source: 'project-artifacts',
-            projectId,
-          })
-        : undefined,
-    [file.source, projectId, sourcePath],
-  );
-  return (
-    <div className="editor-wrap" style={{ height: '100%' }}>
-      <EditorShell
-        initialMarkdown={autosave.desiredValue()}
-        fileName={file.path}
-        readOnly={isReadOnly}
-        onChange={isReadOnly ? undefined : handleChange}
-        height="100%"
-        colorScheme={editorTheme}
-        fullWidth
-        workspaceContainer={versionContainer}
-        documentLinkProvider={documentLinkProvider}
-        calcEngineFactory={isReadOnly ? undefined : ironCalcEngineFactory}
-        allowVersioning={!isReadOnly}
-        versionBasename={versionBasename}
-        outline
-        toolbarSlotAfterActions={
-          <>
-            {!isReadOnly && <TransformToolbarButton context="generic" />}
-            <DocumentNarration fileName={file.path} projectId={projectId} />
-          </>
-        }
-        toolbarSlotRight={
-          <>
-            {toolbarIndexToggle}
-            {!isReadOnly && <AutosaveStatus autosave={autosave} />}
-            {!isReadOnly && (
-              <button
-                type="button"
-                onClick={() => void autosave.flush()}
-                style={{ marginLeft: '0.5rem' }}
-              >
-                Save {layout.format.toUpperCase()}
-              </button>
-            )}
-            {file.source === 'artifacts' && (
-              <ExportToolbarControls
-                selectedFile={file.path}
-                mediaContainer={container}
-                mediaSource={{ kind: 'project-artifacts', projectId }}
-              />
-            )}
-          </>
-        }
-      />
-    </div>
-  );
 }
 
 /**

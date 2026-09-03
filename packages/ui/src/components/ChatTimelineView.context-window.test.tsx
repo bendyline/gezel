@@ -79,8 +79,8 @@ describe('ChatTimelineView context-window visibility', () => {
     expect(within(marker).getByText(/14 earlier messages summarized/)).toHaveTextContent(
       '40K-token window · compaction #2',
     );
-    expect(document.querySelector('.chat-context-banner')).toHaveTextContent(
-      'Context auto-compacted · 14 earlier messages summarized · 40K-token window · compaction #2',
-    );
+    // The window/fill readings moved to the thread picker's context meter;
+    // the timeline keeps only this chronological marker.
+    expect(document.querySelector('.chat-context-banner')).toBeNull();
   });
 });

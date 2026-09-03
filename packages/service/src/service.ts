@@ -152,6 +152,8 @@ import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
+import { PromptDraftManager } from './prompt-drafts/manager.js';
+import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
 import { GpuArbiter, resolveGpuPolicy } from './providers/gpu-arbiter.js';
@@ -1896,6 +1898,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // task against the draft overlay (proposed tree), not the real workspace.
   tasks.setDraftReader(diffpacks.drafts);
   chat.setDraftReader(diffpacks.drafts);
+  // Prompt drafts: the messages the user is writing, kept on disk so they
+  // survive a restart. The chat manager needs it only to stamp a sent draft
+  // and to clean up after a deleted thread.
+  const promptDrafts = new PromptDraftManager({ store, events: chatEvents });
+  chat.setPromptDrafts(promptDrafts);
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
@@ -2704,6 +2711,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     codeReviews,
     reportActions,
     diffpacks,
+    promptDrafts,
     connectors,
     connectorActions,
     duck,
@@ -3248,6 +3256,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       );
     },
   });
+  const promptDraftSweeper = new PromptDraftSweeper({ store, drafts: promptDrafts });
+  if (serviceRole !== 'machine-engine') promptDraftSweeper.start();
   if (serviceRole !== 'machine-engine') digestGenerator.start();
   if (serviceRole !== 'machine-engine') gildeUpdates.startScheduler();
 
@@ -3347,6 +3357,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
+      promptDraftSweeper.stop();
       gildeUpdates.stop();
       await shutdownStep('knowledge workers', async () => knowledge?.stop());
       keurmeesterDigest.stop();

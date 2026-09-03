@@ -42,6 +42,10 @@ export function MeesterConversation({
   // meester's newest thread.
   const remembered = readChatThreadSelection(MEESTER_THREAD_KEY);
   const [sessionId, setSessionId] = useState<string>(remembered?.sessionId ?? '');
+  // The prompt draft the composer has open. Tracked here because both the
+  // composer and the thread picker act on it, and a draft with no thread
+  // yet has nothing else to hang off.
+  const [draftId, setDraftId] = useState<string>('');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [selectedGezelId, setSelectedGezelId] = useState(remembered?.gezelId || meesterGezelId);
@@ -195,6 +199,8 @@ export function MeesterConversation({
               onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
               draftScope="meester"
+              draftId={draftId || undefined}
+              onDraftIdChange={(next) => setDraftId(next ?? '')}
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={activeGezelId}
@@ -203,6 +209,9 @@ export function MeesterConversation({
                   gezelName={activeGezelName}
                   onSessionIdChange={(next) => setSessionId(next ?? '')}
                   refreshKey={sessionRefreshKey}
+                  activeDraftId={draftId || undefined}
+                  onDraftSelect={(next) => setDraftId(next ?? '')}
+                  draftScope="meester"
                 />
               }
             />

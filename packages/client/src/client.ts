@@ -92,6 +92,7 @@ import type {
   CreatePreviewCapabilityRequest,
   CreatePreviewCapabilityResponse,
   CreateProjectRequest,
+  CreatePromptDraftRequest,
   CreateScriptRequest,
   CreateScriptResponse,
   CreateTaskRequest,
@@ -99,6 +100,7 @@ import type {
   CreateTypedProjectResponse,
   DelegateSecurityFindingRequest,
   DelegateSecurityFindingResponse,
+  DeletePromptDraftResponse,
   DescribeFolderRequest,
   DescribeFolderResponse,
   DescribeTableRequest,
@@ -114,6 +116,7 @@ import type {
   DraftScriptResponse,
   DriveIndexEnrichmentRequest,
   DriveIndexEnrichmentResponse,
+  DuplicatePromptDraftRequest,
   EnableSuggestedWorkRequest,
   EnsureGezelRequest,
   EnsureGezelResponse,
@@ -230,6 +233,7 @@ import type {
   ListPeopleResponse,
   ListProjectsForGezelResponse,
   ListProjectsResponse,
+  ListPromptDraftsResponse,
   ListQuestionsResponse,
   ListScriptsResponse,
   ListSessionQueueResponse,
@@ -265,6 +269,7 @@ import type {
   PageCheckResponse,
   PageReadRequest,
   PageReadResponse,
+  PatchPromptDraftRequest,
   PendingImports,
   PiSetupStatusResponse,
   Poppetje,
@@ -278,6 +283,9 @@ import type {
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  PromptDraft,
+  PromptDraftStatus,
+  PromptDraftSummary,
   ProviderName,
   QueryTableRequest,
   QueryTableResponse,
@@ -409,6 +417,7 @@ import type {
   WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
+  WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
 import { KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
@@ -1353,6 +1362,15 @@ export interface ConfigResponse {
       overall?: { enabled?: boolean; percent?: number };
       perDay?: { enabled?: boolean; percent?: number };
     };
+  };
+  /**
+   * Prompt-draft retention. See `GezelConfig.promptDrafts` in core schemas:
+   * how many days a SENT draft (and the files it attached) is kept before the
+   * daily sweep removes it. `0` keeps them forever; unsent drafts are never
+   * swept whatever this says.
+   */
+  promptDrafts?: {
+    keepSentDays?: number;
   };
   /**
    * Tool-filtering policy. See `GezelConfig.toolFilterMode` in core
@@ -4936,7 +4954,14 @@ export class GezelClient {
     sessionId: string,
     body:
       | string
-      | { message: string; mentions?: string[]; passiveCcGezelIds?: string[]; nudge?: boolean },
+      | {
+          message: string;
+          mentions?: string[];
+          passiveCcGezelIds?: string[];
+          nudge?: boolean;
+          /** The prompt draft this message was written in. */
+          draftId?: string;
+        },
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);
@@ -5051,6 +5076,21 @@ export class GezelClient {
 
   deleteChatSession(sessionId: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  /**
+   * Summarize this thread's older messages on demand — the same collapse the
+   * runtime performs automatically under context pressure, reached from the
+   * context meter. Rejects with 409 while a turn is running, and when the
+   * thread is too short to have anything worth summarizing.
+   */
+  compactChatSession(sessionId: string): Promise<{
+    compacted: true;
+    removedCount: number;
+    compactionCount: number;
+    transcriptTokens: number;
+  }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/compact`);
   }
 
   /**
@@ -5212,7 +5252,7 @@ export class GezelClient {
    */
   interruptChatSession(
     sessionId: string,
-    body: { message: string },
+    body: { message: string; draftId?: string },
   ): Promise<{ accepted: true; sessionId: string }> {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, body);
   }
@@ -6151,6 +6191,96 @@ export class GezelClient {
 
   renderImage(req: RenderImageRequest): Promise<RenderImageResponse> {
     return this.request('POST', '/api/render/image', req);
+  }
+
+  // ── Prompt drafts (artifacts/prompts/<draftId>/) ──
+  //
+  // The draft's own uploads are NOT here: they live at
+  // `prompts/<id>/message_files/` and go through the artifact read/raw/list/
+  // delete methods above, which is what lets the editor treat a draft as the
+  // same kind of document folder it already knows.
+
+  listPromptDrafts(
+    projectId: string,
+    filter?: { gezelId?: string; sessionId?: string | null; status?: PromptDraftStatus },
+  ): Promise<ListPromptDraftsResponse> {
+    const params = new URLSearchParams();
+    if (filter?.gezelId) params.set('gezelId', filter.gezelId);
+    // `null` is "not addressed to a thread yet" and is a different question
+    // from an omitted filter, which means "any thread".
+    if (filter?.sessionId === null) params.set('sessionId', 'new');
+    else if (filter?.sessionId) params.set('sessionId', filter.sessionId);
+    if (filter?.status) params.set('status', filter.status);
+    const query = params.toString();
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts${query ? `?${query}` : ''}`,
+    );
+  }
+
+  createPromptDraft(projectId: string, body: CreatePromptDraftRequest): Promise<PromptDraft> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts`,
+      body,
+    );
+  }
+
+  getPromptDraft(projectId: string, draftId: string): Promise<PromptDraft> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+    );
+  }
+
+  /**
+   * Autosave the draft's text. A draft left with no text and no files is
+   * deleted server-side — the response says so, and the caller should forget
+   * the id rather than write to it again.
+   */
+  writePromptDraftContent(
+    projectId: string,
+    draftId: string,
+    content: string,
+  ): Promise<WritePromptDraftContentResponse> {
+    return this.request(
+      'PUT',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}/content`,
+      { content },
+    );
+  }
+
+  /** Re-file a draft onto another thread or gezel. `null` clears a ref. */
+  patchPromptDraft(
+    projectId: string,
+    draftId: string,
+    patch: PatchPromptDraftRequest,
+  ): Promise<PromptDraftSummary> {
+    return this.request(
+      'PATCH',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+      patch,
+    );
+  }
+
+  /** "Use again" — copy a sent draft's text and files into a fresh draft. */
+  duplicatePromptDraft(
+    projectId: string,
+    draftId: string,
+    body: DuplicatePromptDraftRequest = {},
+  ): Promise<PromptDraft> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}/duplicate`,
+      body,
+    );
+  }
+
+  deletePromptDraft(projectId: string, draftId: string): Promise<DeletePromptDraftResponse> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+    );
   }
 
   deleteProjectArtifact(id: string, filePath: string): Promise<{ ok: true }> {

@@ -846,6 +846,13 @@ export const ChatMessageSchema = z.object({
    */
   nudge: z.boolean().optional(),
   /**
+   * The prompt draft (`artifacts/prompts/<draftId>/`) this user message was
+   * sent from. Display-only: the model never sees it, and the draft may since
+   * have been swept, so the UI must treat a dangling id as "no prompt to
+   * open" rather than an error.
+   */
+  draftId: z.string().optional(),
+  /**
    * The machinery — not the human — authored this `role: 'user'` message.
    * Task dispatch seeds, step handoffs, and project-page reaction seeds
    * all arrive as user turns because that is the only role a provider
@@ -1200,6 +1207,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     numCtx: z.number().int().positive(),
     model: z.string(),
     autoCompactRatio: z.number().positive().max(1),
+    /**
+     * Estimated prompt size for the turn about to run, in the same
+     * chars/4 units the compaction check itself uses. Absent on older
+     * daemons, which published the window without the fill.
+     */
+    estimatedTokens: z.number().int().nonnegative().optional(),
   }),
   /**
    * Local-provider context policy: emitted only when accumulated conversation
@@ -1525,6 +1538,26 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('gezel_created'),
     gezelId: z.string(),
     name: z.string(),
+  }),
+  /**
+   * A prompt draft was created, edited, re-filed, sent, or removed. Emitted
+   * on the project stream so a thread picker open in another window folds the
+   * change in. Content-only churn rides this event too (autosave fires it
+   * about once a second per typing user), so consumers must debounce and
+   * should ignore an event for the draft they are themselves editing.
+   *
+   * `gezelId` is the draft's, not the envelope's: a draft that will start a
+   * new thread has no session for the envelope to be scoped by.
+   */
+  z.object({
+    type: z.literal('prompt_draft_changed'),
+    projectId: z.string(),
+    gezelId: z.string(),
+    draftId: z.string(),
+    sessionId: z.string().nullable(),
+    status: z.enum(['draft', 'sent']),
+    deleted: z.boolean().optional(),
+    updatedAt: z.string(),
   }),
   /**
    * Global (project-less) signal that Night Shift mode flipped ON/OFF.

@@ -1,5 +1,15 @@
 import type { RunRecording, RunRecordingActor, RunRecordingScene } from '@bendyline/gezel';
-import type { Block, CaptionPhrase, Doc } from '@bendyline/squisq/schemas';
+import { getThemeFont } from '@bendyline/squisq/doc';
+import {
+  type Block,
+  type CaptionPhrase,
+  DEFAULT_THEME,
+  DEFAULT_THEME_ID,
+  type Doc,
+  VIEWPORT_PRESETS,
+  createTemplateContext,
+  resolveTheme,
+} from '@bendyline/squisq/schemas';
 import {
   type MovieMediaRef,
   collectScreenshotRefs,
@@ -8,8 +18,23 @@ import {
 } from '../media.js';
 import { coverSubtitle, coverTitle, narrationLine } from './narration.js';
 import { RENDITION_KNOBS, type RenditionProfile } from './profiles.js';
-import { coverBlock, outroBlock, sceneToBlock } from './scenes.js';
+import { type MovieFonts, coverBlock, outroBlock, sceneToBlock } from './scenes.js';
 import { buildTimeline, selectMarketingScenes } from './timing.js';
+
+/**
+ * The font stacks the player will resolve for `themeId`, so authored
+ * text layers match the theme instead of falling back to the platform
+ * UI font. Same resolution path squisq's own templates use.
+ */
+function themeFonts(themeId: string): MovieFonts {
+  const theme = resolveTheme(themeId) ?? DEFAULT_THEME;
+  const context = createTemplateContext(theme, 0, 1, VIEWPORT_PRESETS.landscape);
+  return {
+    title: getThemeFont(context, 'title'),
+    body: getThemeFont(context, 'body'),
+    mono: getThemeFont(context, 'mono'),
+  };
+}
 
 export interface RecordingToDocOptions {
   /**
@@ -67,6 +92,8 @@ export function recordingToDoc(
 
   const coverDuration = COVER_SECONDS[profile];
   const outroDuration = OUTRO_SECONDS[profile];
+  const themeId = opts?.themeId ?? DEFAULT_THEME_ID;
+  const fonts = themeFonts(themeId);
   const blocks: Block[] = [];
   const captions: CaptionPhrase[] = [];
   const title = coverTitle(recording);
@@ -74,7 +101,7 @@ export function recordingToDoc(
 
   // No caption on the cover or outro: those blocks ARE full-screen text,
   // and a caption underneath just duplicates it. Captions narrate scenes.
-  blocks.push(coverBlock(title, subtitle, { startTime: 0, duration: coverDuration }));
+  blocks.push(coverBlock(title, subtitle, { startTime: 0, duration: coverDuration }, fonts));
 
   const ctx = {
     actors,
@@ -82,6 +109,7 @@ export function recordingToDoc(
     profile,
     showTimestamps: knobs.showTimestamps,
     runStartedAtMs,
+    fonts,
   };
   for (const [index, entry] of timeline.timed.entries()) {
     const startTime = entry.startTime + coverDuration;
@@ -108,7 +136,9 @@ export function recordingToDoc(
   }
 
   const outroStart = coverDuration + timeline.totalDuration;
-  blocks.push(outroBlock(recording, profile, { startTime: outroStart, duration: outroDuration }));
+  blocks.push(
+    outroBlock(recording, profile, { startTime: outroStart, duration: outroDuration }, fonts),
+  );
 
   const media: MovieMediaRef[] = collectScreenshotRefs(recording);
   for (const actor of recording.actors) {
@@ -127,7 +157,9 @@ export function recordingToDoc(
     blocks,
     audio: { segments: [] },
     captions: { phrases: captions, version: 1 },
-    ...(opts?.themeId ? { themeId: opts.themeId } : {}),
+    // Always explicit: the authored layers were font-stamped for THIS
+    // theme, so the player must resolve the same one.
+    themeId,
     startBlock: {
       title,
       ...(subtitle ? { subtitle } : {}),

@@ -54,6 +54,7 @@ function hashVector(text: string): number[] {
 
 const fakeEmbedder: ProfileEmbedder = {
   profile: FAKE_PROFILE,
+  verification: { status: 'unpinned', checks: [] },
   embed: async (texts) => texts.map(hashVector),
   embedQuery: async (text) => Float32Array.from(hashVector(text)),
   countTokens: (text) => (text.trim() ? text.trim().split(/\s+/).length : 0),

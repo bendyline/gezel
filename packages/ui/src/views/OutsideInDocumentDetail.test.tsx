@@ -26,6 +26,8 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     toolbarSlotAfterActions,
     statusBarSlotRight,
     calcEngineFactory,
+    mediaProvider,
+    initialView,
   }: {
     initialMarkdown: string;
     fileName: string;
@@ -34,12 +36,16 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     toolbarSlotAfterActions?: React.ReactNode;
     statusBarSlotRight?: React.ReactNode;
     calcEngineFactory?: unknown;
+    mediaProvider?: unknown;
+    initialView?: string;
   }) => (
     <div
       data-testid="editor-shell"
       data-file={fileName}
       data-readonly={String(Boolean(readOnly))}
       data-calc-engine={typeof calcEngineFactory === 'function'}
+      data-media-provider={String(Boolean(mediaProvider))}
+      data-initial-view={initialView}
     >
       <span>{initialMarkdown}</span>
       <button type="button" data-testid="edit" onClick={() => onChange?.('# Edited')}>
@@ -52,6 +58,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
 }));
 vi.mock('../components/SquisqIntegration/index.js', () => ({
   chooseOutsideInSource: outsideInMocks.chooseOutsideInSource,
+  createDataReferenceContainer: (container: unknown) => container,
   createDocumentLinkProvider: () => async () => [],
   createDocumentsContentContainer: () => outsideInMocks.documentContainer,
   createVersionCompatibleContentContainer: (container: unknown) => container,
@@ -61,6 +68,7 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   relativePath: () => '../_squisq/squisq-player.js',
   renderOutsideInDocument: outsideInMocks.renderOutsideInDocument,
   runtimePathForTarget: () => '_squisq/squisq-player.js',
+  supportsOutsideInMarkdownEditing: (format: string) => format !== 'csv',
   withOutsideInMarkdownEditing: (content: string) => `${content}\neditable: true`,
   withOutsideInMetadata: (content: string) => content,
   gezelProofingProvider: () => ({ kind: 'proofing-provider' }),
@@ -92,6 +100,21 @@ const LAYOUT = {
   backupDirectory: 'brief_files/.original',
   backupFilename: 'original.docx',
   backupPath: 'brief_files/.original/original.docx',
+} as const;
+
+const CSV_LAYOUT = {
+  targetPath: 'pg_catalog.csv',
+  format: 'csv',
+  parentDirectory: '',
+  stem: 'pg_catalog',
+  companionName: 'pg_catalog_files',
+  companionDirectory: 'pg_catalog_files',
+  markdownFilename: 'pg-catalog.md',
+  markdownPath: 'pg_catalog_files/pg-catalog.md',
+  relativeTargetPath: '../pg_catalog.csv',
+  backupDirectory: 'pg_catalog_files/.original',
+  backupFilename: 'original.csv',
+  backupPath: 'pg_catalog_files/.original/original.csv',
 } as const;
 
 describe('OutsideInDocumentDetail', () => {
@@ -133,9 +156,11 @@ describe('OutsideInDocumentDetail', () => {
   it('edits the Markdown companion and regenerates the visible DOCX on autosave', async () => {
     render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
     const editor = await screen.findByTestId('editor-shell');
-    expect(editor).toHaveAttribute('data-file', 'brief.docx');
+    expect(editor).toHaveAttribute('data-file', LAYOUT.markdownPath);
+    expect(editor).toHaveAttribute('data-initial-view', 'wysiwyg');
     expect(editor).toHaveAttribute('data-readonly', 'false');
     expect(editor).toHaveAttribute('data-calc-engine', 'true');
+    expect(editor).toHaveAttribute('data-media-provider', 'true');
 
     screen.getByTestId('edit').click();
     await vi.advanceTimersByTimeAsync(1100);
@@ -209,5 +234,40 @@ describe('OutsideInDocumentDetail', () => {
       'brief.md',
     );
     expect(api.writeDocumentBinary).not.toHaveBeenCalled();
+  });
+
+  it('opens a large CSV through its retained data sidecar without offering lossy editing', async () => {
+    outsideInMocks.chooseOutsideInSource.mockReturnValue(null);
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ path: 'pg_catalog.csv', name: 'pg_catalog.csv', isDirectory: false }],
+    } as never);
+    outsideInMocks.importOutsideInDocument.mockResolvedValue({
+      markdown:
+        '# pg_catalog {[dataTable src=pg-catalog_files/data/pg_catalog.csv]}\n\n[pg_catalog.csv](pg-catalog_files/data/pg_catalog.csv)\n',
+      container: outsideInMocks.importContainer,
+      warnings: [],
+    });
+    outsideInMocks.importContainer.listFiles.mockResolvedValue([
+      { path: 'pg-catalog.md', mimeType: 'text/markdown' },
+      { path: 'pg-catalog_files/data/pg_catalog.csv', mimeType: 'text/csv' },
+    ]);
+    outsideInMocks.importContainer.readFile.mockResolvedValue(
+      new TextEncoder().encode('id,title\n1,Declaration\n'),
+    );
+
+    render(<OutsideInDocumentDetail path="pg_catalog.csv" layout={CSV_LAYOUT} />);
+
+    const editor = await screen.findByTestId('editor-shell');
+    expect(editor).toHaveAttribute('data-readonly', 'true');
+    expect(editor).toHaveAttribute('data-media-provider', 'true');
+    expect(editor).toHaveAttribute('data-file', CSV_LAYOUT.markdownPath);
+    expect(editor).toHaveAttribute('data-initial-view', 'wysiwyg');
+    expect(screen.getByText('CSV data preview · source preserved.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enable editing' })).not.toBeInTheDocument();
+    expect(outsideInMocks.documentContainer.writeFile).toHaveBeenCalledWith(
+      'pg-catalog_files/data/pg_catalog.csv',
+      new TextEncoder().encode('id,title\n1,Declaration\n'),
+      'text/csv',
+    );
   });
 });

@@ -1,10 +1,12 @@
-import type { ChatSessionSummary } from '@bendyline/gezel';
+import type { ChatSessionSummary, PromptDraftSummary } from '@bendyline/gezel';
 import { parseTaskRef } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
+import { ContextMeter, type ContextMeterStatus } from './ContextMeter.js';
+import { PromptDraftsMenu } from './PromptDraftsMenu.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
 import { MENTION_RE, displayThreadTitle, plainTitle } from './session-labels.js';
 
@@ -49,6 +51,17 @@ interface Props {
    * "Video · ltx-video-0.9.7". When null/undefined the default suffix shows.
    */
   engineLabel?: string | null;
+  /** The prompt draft the composer has open, when the parent tracks one. */
+  activeDraftId?: string | undefined;
+  /** Picking a draft row, or clearing the pick after it is sent or deleted. */
+  onDraftSelect?: (draftId: string | undefined) => void;
+  /**
+   * The composer surface these drafts belong to — the same value the
+   * composer takes as `draftScope`, so a gezel’s own tab and Home’s
+   * meester conversation do not offer each other’s unsent thread starters.
+   */
+  draftScope?: string;
+  craftbookRef?: string;
 }
 
 /**
@@ -57,6 +70,17 @@ interface Props {
  * a polling interval: the event itself is the invalidation signal.
  */
 const LIVE_SESSION_REFRESH_DEBOUNCE_MS = 150;
+
+/**
+ * Draft events fire on every autosave — about once a second while someone is
+ * typing — and unlike a finished turn there is nothing urgent about them. A
+ * slower coalescing window keeps a second window’s typing from turning this
+ * list into a poller.
+ */
+const LIVE_DRAFT_REFRESH_DEBOUNCE_MS = 1000;
+
+/** Radix needs a non-empty value per item; drafts share the session picker. */
+const DRAFT_VALUE_PREFIX = 'draft:';
 
 /**
  * Inline session picker + "+ New" / "Archive" controls, scoped to a
@@ -82,10 +106,28 @@ export function SessionSwitcher({
   stepId,
   autoPickNewest = true,
   engineLabel,
+  activeDraftId,
+  onDraftSelect,
+  draftScope,
+  craftbookRef,
 }: Props) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  // Unsent thread starters. They have no session to belong to, so they are
+  // listed above the threads rather than inside one.
+  const [newThreadDrafts, setNewThreadDrafts] = useState<PromptDraftSummary[]>([]);
+  // Open drafts on the selected thread. More than one is allowed: a person
+  // can keep a long ask and a quick one going in the same conversation.
+  const [threadDrafts, setThreadDrafts] = useState<PromptDraftSummary[]>([]);
   const [busy, setBusy] = useState(false);
+  // Live context-window readings, keyed by session. The summary carries the
+  // persisted values (so a reload shows a meter immediately); these entries
+  // let a running turn move the ring without waiting for a list refresh.
+  const [liveContext, setLiveContext] = useState<Map<string, ContextMeterStatus>>(new Map());
   const autoPickedFor = useRef<string | null>(null);
+  // Read inside the event loop, which is built once per project.
+  const activeDraftIdRef = useRef<string | undefined>(activeDraftId);
+  activeDraftIdRef.current = activeDraftId;
+  const refreshDraftsRef = useRef<() => Promise<void>>(async () => {});
   const refreshedUnknownSession = useRef<string | null>(null);
 
   // The (gezel, project, task) triple the list is scoped to. Stamped onto
@@ -143,6 +185,37 @@ export function SessionSwitcher({
     void refresh();
   }, [refresh, refreshKey]);
 
+  // Drafts that belong to this surface. Filtered client-side on the refs the
+  // list API does not key on, so a task pane never offers the lobby's drafts.
+  const belongsHere = useCallback(
+    (draft: PromptDraftSummary): boolean =>
+      (draft.taskRef ?? undefined) === (taskRef ?? undefined) &&
+      (draft.craftbookRef ?? undefined) === (craftbookRef ?? undefined) &&
+      (draft.scope ?? undefined) === (draftScope ?? undefined),
+    [taskRef, craftbookRef, draftScope],
+  );
+
+  const refreshDrafts = useCallback(async () => {
+    try {
+      const [fresh, onThread] = await Promise.all([
+        api.listPromptDrafts(projectId, { gezelId, sessionId: null, status: 'draft' }),
+        sessionId
+          ? api.listPromptDrafts(projectId, { gezelId, sessionId, status: 'draft' })
+          : Promise.resolve({ drafts: [] }),
+      ]);
+      setNewThreadDrafts(fresh.drafts.filter(belongsHere));
+      setThreadDrafts(onThread.drafts.filter(belongsHere));
+    } catch {
+      // A picker that cannot list drafts still lists threads.
+    }
+  }, [projectId, gezelId, sessionId, belongsHere]);
+
+  refreshDraftsRef.current = refreshDrafts;
+
+  useEffect(() => {
+    void refreshDrafts();
+  }, [refreshDrafts]);
+
   // Auto-pick the most-recent session when we mount (or swap to a new
   // scope) and the caller doesn't already have one. Only once per scope
   // — we don't want to stomp a user's explicit pick after they've acted.
@@ -164,14 +237,38 @@ export function SessionSwitcher({
       }
     }
     if (autoPickedFor.current === key) return;
-    if (sessions.length === 0) return;
+    if (activeDraftId) {
+      // The parent already restored a draft; that IS where the user was.
+      autoPickedFor.current = key;
+      return;
+    }
+    const newestDraft = newThreadDrafts[0];
+    if (sessions.length === 0 && !newestDraft) return;
     // Latch either way: once this scope has had its one chance, a later
     // flip of `autoPickNewest` must not reach in and move a composer the
     // user is already typing into.
     autoPickedFor.current = key;
-    if (!autoPickNewest) return;
-    onSessionIdChange(sessions[0]!.id);
-  }, [sessions, sessionsScope, sessionId, scopeKey, autoPickNewest, onSessionIdChange]);
+    if (autoPickNewest && sessions.length > 0) {
+      onSessionIdChange(sessions[0]!.id);
+      return;
+    }
+    // Nothing worth resuming, but an unsent thread starter is waiting. That
+    // is a better answer to "where was I" than a blank composer.
+    if (newestDraft) {
+      onSessionIdChange(undefined);
+      onDraftSelect?.(newestDraft.id);
+    }
+  }, [
+    sessions,
+    sessionsScope,
+    sessionId,
+    scopeKey,
+    autoPickNewest,
+    onSessionIdChange,
+    activeDraftId,
+    newThreadDrafts,
+    onDraftSelect,
+  ]);
 
   useEffect(() => {
     if (sessionsScope !== scopeKey) return;
@@ -205,12 +302,22 @@ export function SessionSwitcher({
     let refreshTimer: number | null = null;
     let stopped = false;
 
+    let draftTimer: number | null = null;
+
     const scheduleRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
         void refresh();
       }, LIVE_SESSION_REFRESH_DEBOUNCE_MS);
+    };
+
+    const scheduleDraftRefresh = () => {
+      if (draftTimer !== null) window.clearTimeout(draftTimer);
+      draftTimer = window.setTimeout(() => {
+        draftTimer = null;
+        void refreshDraftsRef.current();
+      }, LIVE_DRAFT_REFRESH_DEBOUNCE_MS);
     };
 
     void (async () => {
@@ -224,9 +331,92 @@ export function SessionSwitcher({
             fetch: api.getFetch(),
           })) {
             if (stopped) return;
+            // Draft events name their own gezel in the payload: a lifecycle
+            // publish leaves the envelope's scope empty, so the filter below
+            // would drop every one of them.
+            if (envelope.event.type === 'prompt_draft_changed') {
+              const draftEvent = envelope.event;
+              if (draftEvent.projectId === projectId && draftEvent.gezelId === gezelId) {
+                // Our own autosave is not news. Refetching on it would mean a
+                // list read per second for as long as someone is typing.
+                const ownEdit =
+                  draftEvent.draftId === activeDraftIdRef.current &&
+                  !draftEvent.deleted &&
+                  draftEvent.status === 'draft';
+                if (!ownEdit) scheduleDraftRefresh();
+              }
+              continue;
+            }
             if (envelope.projectId !== projectId || envelope.gezelId !== gezelId) continue;
             const { event } = envelope;
-            if (event.type === 'user_message' || event.type === 'done') scheduleRefresh();
+            // A compaction rewrites the transcript on disk, so the summary's
+            // token tally is stale until the list is re-read.
+            if (
+              event.type === 'user_message' ||
+              event.type === 'done' ||
+              event.type === 'context_compacted'
+            ) {
+              scheduleRefresh();
+            }
+            if (
+              envelope.sessionId &&
+              (event.type === 'context_window' ||
+                event.type === 'context_warning' ||
+                event.type === 'context_compacted')
+            ) {
+              const id = envelope.sessionId;
+              setLiveContext((prev) => {
+                const next = new Map(prev);
+                const prior = next.get(id);
+                if (event.type === 'context_window') {
+                  next.set(id, {
+                    ...prior,
+                    numCtx: event.numCtx,
+                    model: event.model,
+                    autoCompactRatio: event.autoCompactRatio,
+                    // Older daemons publish the window without a fill; keep
+                    // the last reading rather than blanking the ring.
+                    ...(event.estimatedTokens !== undefined
+                      ? { estimatedTokens: event.estimatedTokens }
+                      : {}),
+                  });
+                } else if (event.type === 'context_warning') {
+                  next.set(id, {
+                    ...prior,
+                    numCtx: event.numCtx,
+                    model: event.model,
+                    estimatedTokens: event.estimatedTokens,
+                    compactionFailed: true,
+                  });
+                } else {
+                  // A compaction that ran is the resolution of a warning.
+                  // Every field but `model` is optional on this event (older
+                  // daemons omit them), so only what arrived may overwrite.
+                  // The measured reading described the prompt that was just
+                  // rewritten — drop it and let the refreshed summary's
+                  // transcript tally carry the meter until the next turn
+                  // measures for real. The automatic path republishes a fresh
+                  // measurement right after this, which wins.
+                  const numCtx = event.numCtx ?? prior?.numCtx;
+                  if (numCtx !== undefined) {
+                    const { estimatedTokens: _stale, ...rest } = prior ?? {};
+                    next.set(id, {
+                      ...rest,
+                      numCtx,
+                      model: event.model,
+                      ...(event.autoCompactRatio !== undefined
+                        ? { autoCompactRatio: event.autoCompactRatio }
+                        : {}),
+                      ...(event.compactionCount !== undefined
+                        ? { compactionCount: event.compactionCount }
+                        : {}),
+                      compactionFailed: false,
+                    });
+                  }
+                }
+                return next;
+              });
+            }
             backoffMs = 250;
           }
         } catch (err) {
@@ -246,6 +436,7 @@ export function SessionSwitcher({
       stopped = true;
       ctrl.abort();
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      if (draftTimer !== null) window.clearTimeout(draftTimer);
     };
   }, [gezelId, projectId, refresh]);
 
@@ -267,20 +458,49 @@ export function SessionSwitcher({
     }
   }, [gezelId, projectId, taskRef, stepId, refresh, onSessionIdChange, onNewSessionCreated]);
 
+  const createDraft = useCallback(async () => {
+    setBusy(true);
+    try {
+      const created = await api.createPromptDraft(projectId, {
+        gezelId,
+        sessionId: null,
+        ...(taskRef ? { taskRef } : {}),
+        ...(craftbookRef ? { craftbookRef } : {}),
+        ...(draftScope ? { scope: draftScope } : {}),
+      });
+      setNewThreadDrafts((prev) => [created, ...prev.filter((d) => d.id !== created.id)]);
+      // No session is created here: the thread comes into being when the
+      // message is sent, so abandoning this leaves no empty thread behind.
+      onSessionIdChange(undefined);
+      onDraftSelect?.(created.id);
+    } finally {
+      setBusy(false);
+    }
+  }, [projectId, gezelId, taskRef, craftbookRef, draftScope, onSessionIdChange, onDraftSelect]);
+
   const archiveCurrent = useCallback(async () => {
     if (!sessionId) return;
     setBusy(true);
     try {
       await api.archiveChatSession(sessionId);
       const remaining = await refresh();
+      onDraftSelect?.(undefined);
       onSessionIdChange(remaining[0]?.id);
     } finally {
       setBusy(false);
     }
-  }, [sessionId, refresh, onSessionIdChange]);
+  }, [sessionId, refresh, onSessionIdChange, onDraftSelect]);
 
   const hasSessions = sessions.length > 0;
-  const activeValue = sessionId && hasSessions ? sessionId : '__NONE__';
+  const hasDrafts = newThreadDrafts.length > 0;
+  // A draft only owns the trigger while no thread is chosen: once a thread is
+  // active the picker is showing the conversation, not the message.
+  const activeValue =
+    activeDraftId && !sessionId
+      ? `${DRAFT_VALUE_PREFIX}${activeDraftId}`
+      : sessionId && hasSessions
+        ? sessionId
+        : '__NONE__';
   const emptyLabel = gezelName
     ? `No threads with ${gezelName} yet — a message starts one`
     : 'No threads yet';
@@ -288,26 +508,80 @@ export function SessionSwitcher({
   // newest thread lands; with it off it is the deliberate resting state, and
   // the trigger has to say so rather than read as a control the user forgot.
   const unselectedLabel = autoPickNewest ? 'Pick a thread' : 'New thread';
+  const emptyMenuLabel = hasDrafts ? 'No threads yet' : emptyLabel;
+
+  // Context meter for the thread the composer posts into. The persisted
+  // summary is the reload seed; live events win field by field so a running
+  // turn moves the ring before the debounced list refresh lands.
+  const activeSummary = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
+  const persistedContext: ContextMeterStatus | undefined = activeSummary?.contextWindow
+    ? {
+        numCtx: activeSummary.contextWindow,
+        model: activeSummary.model,
+        ...(activeSummary.contextEstimatedTokens !== undefined
+          ? { estimatedTokens: activeSummary.contextEstimatedTokens }
+          : {}),
+        ...(activeSummary.contextAutoCompactRatio !== undefined
+          ? { autoCompactRatio: activeSummary.contextAutoCompactRatio }
+          : {}),
+        ...(activeSummary.compactionCount !== undefined
+          ? { compactionCount: activeSummary.compactionCount }
+          : {}),
+        ...(activeSummary.transcriptTokens !== undefined
+          ? { transcriptTokens: activeSummary.transcriptTokens }
+          : {}),
+      }
+    : undefined;
+  const live = sessionId ? liveContext.get(sessionId) : undefined;
+  const contextStatus = live ? { ...persistedContext, ...live } : persistedContext;
 
   return (
     <div className="gezel-chat-session-header">
       <Select.Root
         value={activeValue}
         onValueChange={(v) => {
-          if (v && v !== '__NONE__') onSessionIdChange(v);
+          if (!v || v === '__NONE__') return;
+          if (v.startsWith(DRAFT_VALUE_PREFIX)) {
+            // Clear the thread first: the composer must not see a draft
+            // arrive while it still believes it is addressing a conversation.
+            onSessionIdChange(undefined);
+            onDraftSelect?.(v.slice(DRAFT_VALUE_PREFIX.length));
+            return;
+          }
+          onDraftSelect?.(undefined);
+          onSessionIdChange(v);
         }}
-        disabled={!hasSessions || busy}
+        disabled={(!hasSessions && !hasDrafts) || busy}
       >
         <Select.Trigger className="gezel-chat-session-select">
           <Select.Value placeholder={hasSessions ? unselectedLabel : emptyLabel} />
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu">
+          {hasDrafts && (
+            <Select.Group>
+              <Select.Label>Drafts</Select.Label>
+              {newThreadDrafts.map((d) => (
+                <Select.Item
+                  key={d.id}
+                  value={`${DRAFT_VALUE_PREFIX}${d.id}`}
+                  textValue={draftRowTextValue(d)}
+                >
+                  {renderDraftRow(d)}
+                </Select.Item>
+              ))}
+            </Select.Group>
+          )}
+          {hasDrafts && hasSessions && <Select.Separator />}
           {hasSessions ? (
             sessions.map((s) => (
               <Select.Item key={s.id} value={s.id} textValue={rowTextValue(s, engineLabel)}>
                 {renderRow(s, engineLabel)}
               </Select.Item>
             ))
+          ) : hasDrafts ? (
+            <Select.Item value="__NONE__" disabled>
+              {emptyMenuLabel}
+            </Select.Item>
           ) : (
             <Select.Item value="__NONE__" disabled>
               {emptyLabel}
@@ -315,6 +589,7 @@ export function SessionSwitcher({
           )}
         </Select.Content>
       </Select.Root>
+      <ContextMeter status={contextStatus} sessionId={sessionId} />
       <button
         type="button"
         className="gezel-chat-session-btn"
@@ -324,6 +599,27 @@ export function SessionSwitcher({
       >
         + New
       </button>
+      <button
+        type="button"
+        className="gezel-chat-session-btn"
+        onClick={() => void createDraft()}
+        disabled={busy}
+        title="Start a message you can come back to — no thread until you send it"
+      >
+        + Draft
+      </button>
+      <PromptDraftsMenu
+        projectId={projectId}
+        gezelId={gezelId}
+        sessionId={sessionId}
+        activeDraftId={activeDraftId}
+        drafts={threadDrafts}
+        onDraftSelect={onDraftSelect}
+        onChanged={() => void refreshDrafts()}
+        {...(taskRef ? { taskRef } : {})}
+        {...(craftbookRef ? { craftbookRef } : {})}
+        {...(draftScope ? { draftScope } : {})}
+      />
       <button
         type="button"
         className="gezel-chat-session-btn"
@@ -387,4 +683,25 @@ function renderRow(s: ChatSessionSummary, engineLabel?: string | null): ReactNod
 
 function rowTextValue(s: ChatSessionSummary, engineLabel?: string | null): string {
   return `${plainTitle(displayThreadTitle(s.title))} · ${formatRelativeTime(s.lastActivityAt)} · ${engineSuffix(s, engineLabel)}`;
+}
+
+/**
+ * A draft that has no thread yet. It reads like a thread row on purpose —
+ * from the user's side it is the same thing, one step earlier — with a badge
+ * so the difference is visible before they commit to it.
+ */
+function renderDraftRow(d: PromptDraftSummary): ReactNode {
+  return (
+    <span className="session-row">
+      <span className="session-row-title">{d.title || 'Untitled draft'}</span>
+      <span className="session-row-draft-mark">draft</span>
+      <span className="session-row-meta" title={formatAbsoluteTime(d.updatedAt)}>
+        {` · ${formatRelativeTime(d.updatedAt)}`}
+      </span>
+    </span>
+  );
+}
+
+function draftRowTextValue(d: PromptDraftSummary): string {
+  return `${d.title || 'Untitled draft'} · draft · ${formatRelativeTime(d.updatedAt)}`;
 }

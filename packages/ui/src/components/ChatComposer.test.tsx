@@ -30,6 +30,9 @@ vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
+vi.mock('./PromptDraftMediaProvider.js', () => ({
+  createPromptDraftMediaProvider: () => ({ dispose: vi.fn() }),
+}));
 vi.mock('./ChatNarrateButton.js', async () => {
   const { useState } = await import('react');
   return {
@@ -338,6 +341,7 @@ describe('ChatComposer lossless draft submission', () => {
     expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
       message: source.trim(),
       mentions: ['ada'],
+      draftId: '2026-09-03-0001',
     });
   });
 
@@ -536,6 +540,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
       expect(api.getChatSessionInflight).toHaveBeenCalledTimes(2);
     });
@@ -658,6 +663,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         nudge: true,
+        draftId: '2026-09-03-0001',
       });
     });
     // The draft cleared: the editor remounted empty and the mid-turn
@@ -681,6 +687,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         nudge: true,
+        draftId: '2026-09-03-0001',
       });
     });
   });
@@ -697,6 +704,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
     await waitFor(() => {
       expect(api.interruptChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
     });
     expect(api.sendToChatSession).not.toHaveBeenCalled();
@@ -826,6 +834,7 @@ describe('ChatComposer recipient picker', () => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         mentions: ['ada'],
+        draftId: '2026-09-03-0001',
       });
     });
   });
@@ -882,6 +891,7 @@ describe('ChatComposer ordinary-session fallback', () => {
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('ordinary-session', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
     });
     expect(api.createChatSession).not.toHaveBeenCalled();

@@ -826,6 +826,23 @@ export function SettingsView() {
     }
   }, []);
 
+  /**
+   * How long a SENT prompt draft is kept. The sweep also removes the files
+   * that draft attached, which a message in the transcript may still be
+   * showing — so the copy says that plainly rather than presenting this as
+   * free disk hygiene.
+   */
+  const savePromptDraftRetention = useCallback(async (keepSentDays: number) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ promptDrafts: { keepSentDays } });
+      setConfig(res);
+      setStatus('draft retention saved');
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
+
   const saveNightShift = useCallback(
     async (patch: {
       enabled?: boolean;
@@ -1685,6 +1702,35 @@ export function SettingsView() {
                 </label>
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   (Grammar checking is currently only available for English)
+                </p>
+              </section>
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Prompt drafts</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  A message you start writing is saved to the project as you type, so you can leave
+                  it and come back days later. Unsent drafts are kept until you delete them. A draft
+                  you have already sent is kept for a while so you can reopen or reuse it.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>Keep sent drafts for</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={3650}
+                    value={config?.promptDrafts?.keepSentDays ?? 90}
+                    onChange={(e) => {
+                      const days = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(days) && days >= 0) {
+                        void savePromptDraftRetention(days);
+                      }
+                    }}
+                    style={{ width: '5rem' }}
+                  />
+                  <span>days (0 keeps them forever)</span>
+                </label>
+                <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                  Clearing out an old sent draft also removes the files it attached, so an image in
+                  a message that old will stop showing in the transcript.
                 </p>
               </section>
               <section style={{ marginTop: '2rem' }}>

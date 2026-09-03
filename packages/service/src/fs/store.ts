@@ -4407,25 +4407,34 @@ export class Store {
     id: string,
     filePath: string,
     data: Buffer,
-    options?: { createOnly?: boolean },
+    options?: { createOnly?: boolean; initiatedByGezel?: boolean },
   ): Promise<string> {
     return this.artifacts.writeProjectArtifactBinary(id, filePath, data, options);
   }
 
-  async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
-    await this.artifacts.deleteProjectArtifact(id, filePath);
+  async deleteProjectArtifact(
+    id: string,
+    filePath: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<void> {
+    await this.artifacts.deleteProjectArtifact(id, filePath, opts);
   }
 
-  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
-    return this.artifacts.createProjectArtifactFolder(id, folderPath);
+  async createProjectArtifactFolder(
+    id: string,
+    folderPath: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<string> {
+    return this.artifacts.createProjectArtifactFolder(id, folderPath, opts);
   }
 
   async renameProjectArtifactPath(
     id: string,
     fromPath: string,
     toPath: string,
+    opts?: { initiatedByGezel?: boolean },
   ): Promise<{ fromPath: string; toPath: string }> {
-    return this.artifacts.renameProjectArtifactPath(id, fromPath, toPath);
+    return this.artifacts.renameProjectArtifactPath(id, fromPath, toPath, opts);
   }
 
   // ---------- session images (pasted / uploaded in a chat) ----------
@@ -4510,7 +4519,13 @@ export class Store {
     await this.touchProject(projectId);
   }
 
-  // ---------- project attachments (project-scoped files pasted in chat) ----------
+  // ---------- project attachments (legacy; project-scoped chat uploads) ----------
+  //
+  // DEPRECATED for new uploads. The composer now writes into the draft that
+  // owns them — `artifacts/prompts/<draftId>/message_files/` — so a file and
+  // the message it belongs to live and die together. Everything here stays:
+  // every chat written before that still references `attachments/<file>`, and
+  // those must keep resolving.
   //
   // Unlike session-scoped images (legacy; see above), attachments live
   // once per project under `artifacts/attachments/<filename>`. A user
@@ -5511,9 +5526,22 @@ export class Store {
         // on ChatSessionSummarySchema.
         let lastHumanActivityAt: string | undefined;
         const involvedGezelIds = new Set<string>([session.gezelId]);
+        // Running tally of what the transcript costs, mirroring the
+        // providers' `estimatePromptChars` accounting so the two numbers are
+        // in the same units. The standing prefix (system prompt + tool
+        // schemas) is not on disk, so this is a floor — see
+        // `ChatSessionSummary.transcriptTokens`.
+        let transcriptChars = 0;
         for (let i = session.messages.length - 1; i >= 0; i--) {
           const m = session.messages[i];
           if (!m) continue;
+          transcriptChars += m.content.length;
+          for (const call of m.toolCalls ?? []) {
+            transcriptChars +=
+              call.name.length +
+              (call.argsFull ?? call.argsSummary ?? '').length +
+              (call.resultText ?? '').length;
+          }
           if (m.from) involvedGezelIds.add(m.from.gezelId);
           if (!lastHumanActivityAt && m.role === 'user' && !m.from) {
             lastHumanActivityAt = m.at;
@@ -5556,6 +5584,15 @@ export class Store {
           ...(session.handoffFrom ? { handoffFrom: session.handoffFrom } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
           ...(lastMessagePreview ? { lastMessagePreview } : {}),
+          ...(session.contextWindow ? { contextWindow: session.contextWindow } : {}),
+          ...(session.contextAutoCompactRatio
+            ? { contextAutoCompactRatio: session.contextAutoCompactRatio }
+            : {}),
+          ...(session.contextEstimatedTokens !== undefined
+            ? { contextEstimatedTokens: session.contextEstimatedTokens }
+            : {}),
+          ...(session.compactionCount ? { compactionCount: session.compactionCount } : {}),
+          transcriptTokens: Math.ceil(transcriptChars / 4),
           involvedGezelIds: [...involvedGezelIds],
         });
       }
@@ -5876,6 +5913,7 @@ export class Store {
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
+          ...(m.draftId ? { draftId: m.draftId } : {}),
           ...(m.origin === 'system' || (legacySeedAt !== undefined && m.at === legacySeedAt)
             ? { origin: 'system' as const }
             : {}),

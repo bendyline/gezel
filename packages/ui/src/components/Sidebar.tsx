@@ -7,6 +7,7 @@ import type {
 } from '@bendyline/gezel';
 import { SHARED_PROJECT_ID, displayName, isOutsideInInternalPath } from '@bendyline/gezel';
 import {
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -92,6 +93,10 @@ function documentsFolderContextLabel(platform?: string): string {
   const fileManager =
     platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'file manager';
   return `Open Documents folder in ${fileManager}`;
+}
+
+function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files');
 }
 
 interface SidebarProps {
@@ -245,6 +250,8 @@ export function Sidebar({
   const [renameDocError, setRenameDocError] = useState<string | null>(null);
   const [deleteDocTarget, setDeleteDocTarget] = useState<FileEntry | null>(null);
   const [deleteDocError, setDeleteDocError] = useState<string | null>(null);
+  const [documentDropActive, setDocumentDropActive] = useState(false);
+  const [documentDropStatus, setDocumentDropStatus] = useState('');
   const documentQuickList = useDocumentQuickList();
   const quickDocs = useMemo(
     () => documentQuickListEntries(docs, documentQuickList.state),
@@ -366,6 +373,99 @@ export function Sidebar({
       // action safely retryable, matching the other file-manager actions.
     }
   }, []);
+
+  const handleDocumentDrop = useCallback(
+    async (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDocumentDropActive(false);
+
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length === 0) return;
+      setDocumentDropStatus(
+        `Adding ${files.length === 1 ? files[0]?.name : `${files.length} files`}…`,
+      );
+
+      try {
+        // Read a fresh, unfiltered listing for collision detection. Managed
+        // outside-in companion folders stay hidden in the rail, but still
+        // reserve their names when an OS drop chooses a destination.
+        const current = await api.listDocuments('', true, { stats: true, hidden: false });
+        // Keep the document conversion stack out of the always-mounted
+        // sidebar bundle; it is only needed once a user actually drops files.
+        const { importDroppedFiles } = await import('./SquisqIntegration/document-import.js');
+        const result = await importDroppedFiles({
+          target: {
+            writeText: async (path, content) => {
+              await api.writeDocument(path, content);
+            },
+            writeBinary: async (path, data, mimeType) => {
+              await api.writeDocumentBinary(path, data, mimeType);
+            },
+          },
+          files,
+          destination: '',
+          existingPaths: current.files.map((entry) => entry.path),
+        });
+
+        if (result.importedPaths.length > 0) {
+          const lastPath = result.importedPaths.at(-1)!;
+          documentQuickList.noteUsed(lastPath);
+          window.dispatchEvent(
+            new CustomEvent('gezel:document-created', {
+              detail: { path: lastPath, paths: result.importedPaths },
+            }),
+          );
+        }
+
+        const added = result.importedPaths.length;
+        if (result.rejected.length > 0) {
+          const first = result.rejected[0]!;
+          setDocumentDropStatus(
+            `${added > 0 ? `Added ${added}; ` : ''}couldn't add ${first.name}: ${first.reason}${result.rejected.length > 1 ? ` (+${result.rejected.length - 1} more)` : ''}`,
+          );
+        } else {
+          setDocumentDropStatus(`Added ${added} ${added === 1 ? 'file' : 'files'}.`);
+        }
+      } catch (error) {
+        setDocumentDropStatus(
+          `Couldn't add files: ${(error as Error).message || 'Unknown error.'}`,
+        );
+      }
+    },
+    [documentQuickList.noteUsed],
+  );
+
+  const documentDropTarget = useMemo<GroupDropTarget>(
+    () => ({
+      active: documentDropActive,
+      hint: 'Drop to add to Documents',
+      status: documentDropStatus,
+      onDragEnter: (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        setDocumentDropActive(true);
+      },
+      onDragOver: (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        setDocumentDropActive(true);
+      },
+      onDragLeave: (event) => {
+        if (!isFileDrag(event)) return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        setDocumentDropActive(false);
+      },
+      onDrop: (event) => void handleDocumentDrop(event),
+    }),
+    [documentDropActive, documentDropStatus, handleDocumentDrop],
+  );
 
   useEffect(() => {
     refreshProjects();
@@ -951,6 +1051,7 @@ export function Sidebar({
           onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'documents' }))}
           onAdd={openNewDoc}
           addTitle="New document"
+          dropTarget={documentDropTarget}
           contextMenu={
             <ContextMenu.Item
               className="app-nav-menu-item"
@@ -1261,7 +1362,19 @@ interface GroupProps {
   addTitle: string;
   /** Optional right-click actions for this group's header. */
   contextMenu?: React.ReactNode;
+  /** Optional OS file-drop target spanning this group. */
+  dropTarget?: GroupDropTarget;
   children: React.ReactNode;
+}
+
+interface GroupDropTarget {
+  active: boolean;
+  hint: string;
+  status: string;
+  onDragEnter: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDrop: (event: ReactDragEvent<HTMLDivElement>) => void;
 }
 
 function Group({
@@ -1277,6 +1390,7 @@ function Group({
   onAdd,
   addTitle,
   contextMenu,
+  dropTarget,
   children,
 }: GroupProps) {
   const showList = expanded && !collapsed;
@@ -1358,7 +1472,14 @@ function Group({
     </div>
   );
   return (
-    <div className="app-sidebar-group" data-group={id}>
+    <div
+      className={`app-sidebar-group${dropTarget?.active ? ' app-sidebar-group-drop-active' : ''}`}
+      data-group={id}
+      onDragEnter={dropTarget?.onDragEnter}
+      onDragOver={dropTarget?.onDragOver}
+      onDragLeave={dropTarget?.onDragLeave}
+      onDrop={dropTarget?.onDrop}
+    >
       {contextMenu ? (
         <ContextMenu.Root>
           <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
@@ -1370,6 +1491,20 @@ function Group({
         header
       )}
       {showList && <ul className="app-sidebar-list">{children}</ul>}
+      {dropTarget?.active && (
+        <div className="app-sidebar-document-drop-overlay" aria-hidden="true">
+          <i className="fa-solid fa-file-arrow-down" />
+          <span>{dropTarget.hint}</span>
+        </div>
+      )}
+      {dropTarget?.status && (
+        <output
+          className={`app-sidebar-document-drop-status${collapsed ? ' sr-only' : ''}`}
+          aria-live="polite"
+        >
+          {dropTarget.status}
+        </output>
+      )}
     </div>
   );
 }

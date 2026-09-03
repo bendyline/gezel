@@ -107,6 +107,7 @@ vi.mock('../components/DocumentExport/index.js', () => ({
   ExportToolbarControls: () => null,
 }));
 vi.mock('../components/SquisqIntegration/index.js', () => ({
+  createDataReferenceContainer: (container: unknown) => container,
   createDocumentsContentContainer: () => ({}),
   createArtifactsContentContainer: documentContainerMocks.createArtifacts,
   createProjectContentContainer: () => ({}),

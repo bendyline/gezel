@@ -1,4 +1,5 @@
 import type { ChatEventEnvelope } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -389,5 +390,245 @@ describe('SessionSwitcher', () => {
       expect(onSessionIdChange).toHaveBeenCalledWith('s-new');
       expect(onNewSessionCreated).toHaveBeenCalledWith('s-new');
     });
+  });
+
+  it('meters the active thread against its own context window', async () => {
+    mockSessions([
+      {
+        id: 's1',
+        gezelId: 'g1',
+        title: 'Deck for the offsite',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'llama-cpp',
+        model: 'large-local',
+        archived: false,
+        contextWindow: 40_960,
+        contextAutoCompactRatio: 0.7,
+        contextEstimatedTokens: 10_240,
+      },
+    ]);
+    render(
+      <SessionSwitcher gezelId="g1" projectId="p1" sessionId="s1" onSessionIdChange={vi.fn()} />,
+    );
+
+    const meter = await screen.findByRole('button', { name: /Thread context/ });
+    expect(meter).toHaveTextContent('25%');
+    expect(meter).toHaveAccessibleName(
+      'Thread context: This thread fills about 25% of its 40K-token context',
+    );
+
+    // A running turn republishes the window; the ring must follow it without
+    // waiting for the debounced session-list refresh.
+    stream.push({
+      sessionId: 's1',
+      gezelId: 'g1',
+      projectId: 'p1',
+      event: {
+        type: 'context_window',
+        numCtx: 40_960,
+        model: 'large-local',
+        autoCompactRatio: 0.7,
+        estimatedTokens: 30_720,
+      },
+    } as never);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Thread context/ })).toHaveTextContent('75%');
+    });
+  });
+
+  it('falls back to the transcript tally before any turn has been measured', async () => {
+    mockSessions([
+      {
+        id: 's1',
+        gezelId: 'g1',
+        title: 'Legacy thread',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'llama-cpp',
+        model: 'large-local',
+        archived: false,
+        contextWindow: 40_960,
+        contextAutoCompactRatio: 0.7,
+        // No `contextEstimatedTokens`: this thread last ran before the
+        // daemon started recording the measurement.
+        transcriptTokens: 4_096,
+      },
+    ]);
+    render(
+      <SessionSwitcher gezelId="g1" projectId="p1" sessionId="s1" onSessionIdChange={vi.fn()} />,
+    );
+
+    const meter = await screen.findByRole('button', { name: /Thread context/ });
+    expect(meter).toHaveTextContent('10%');
+    expect(meter).toHaveAccessibleName(/at least 10%/);
+  });
+
+  it('compacts the active thread on demand', async () => {
+    mockSessions([
+      {
+        id: 's1',
+        gezelId: 'g1',
+        title: 'Long thread',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'llama-cpp',
+        model: 'large-local',
+        archived: false,
+        contextWindow: 40_960,
+        contextAutoCompactRatio: 0.7,
+        contextEstimatedTokens: 30_000,
+      },
+    ]);
+    render(
+      <SessionSwitcher gezelId="g1" projectId="p1" sessionId="s1" onSessionIdChange={vi.fn()} />,
+    );
+
+    await screen.findByRole('button', { name: /Thread context/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
+
+    await waitFor(() => {
+      expect(api.compactChatSession).toHaveBeenCalledWith('s1');
+    });
+  });
+
+  it('surfaces the daemon reason when a manual compaction is refused', async () => {
+    mockSessions([
+      {
+        id: 's1',
+        gezelId: 'g1',
+        title: 'Short thread',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'llama-cpp',
+        archived: false,
+        contextWindow: 40_960,
+        transcriptTokens: 200,
+      },
+    ]);
+    vi.mocked(api.compactChatSession).mockRejectedValue(
+      new GezelApiError('Gezel API error 409 on POST /api/sessions/s1/compact', 409, {
+        error: 'This thread is too short to compact; there is nothing older to summarize yet.',
+        code: 'too-short',
+      }),
+    );
+    render(
+      <SessionSwitcher gezelId="g1" projectId="p1" sessionId="s1" onSessionIdChange={vi.fn()} />,
+    );
+
+    await screen.findByRole('button', { name: /Thread context/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
+
+    expect(await screen.findByText(/too short to compact/)).toBeInTheDocument();
+  });
+
+  it('shows no meter for a provider that reports no context window', async () => {
+    mockSessions([
+      {
+        id: 's1',
+        gezelId: 'g1',
+        title: 'Cloud thread',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'copilot',
+        archived: false,
+      },
+    ]);
+    render(
+      <SessionSwitcher gezelId="g1" projectId="p1" sessionId="s1" onSessionIdChange={vi.fn()} />,
+    );
+
+    await screen.findByText(/Cloud thread/);
+    expect(screen.queryByRole('button', { name: /Thread context/ })).toBeNull();
+  });
+});
+
+/**
+ * Unsent thread starters. A draft with no thread is still somewhere the user
+ * left off, so it has to be visible in the same place they look for threads.
+ */
+describe('SessionSwitcher prompt drafts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stream.reset();
+  });
+
+  function mockDrafts(byScope: { fresh?: unknown[]; onThread?: unknown[] }) {
+    vi.mocked(api.listPromptDrafts).mockImplementation(async (_projectId, filter) => {
+      if (filter?.sessionId === null) return { drafts: byScope.fresh ?? [] } as never;
+      return { drafts: byScope.onThread ?? [] } as never;
+    });
+  }
+
+  const draft = (over: Record<string, unknown> = {}) => ({
+    id: '2026-09-03-0001',
+    projectId: 'p1',
+    gezelId: 'g1',
+    sessionId: null,
+    createdAt: '2026-09-03T12:00:00.000Z',
+    updatedAt: '2026-09-03T12:00:00.000Z',
+    status: 'draft',
+    title: 'The PRD',
+    hasFiles: false,
+    fileCount: 0,
+    ...over,
+  });
+
+  it('lists an unsent thread starter above the threads, marked as a draft', async () => {
+    mockSessions([]);
+    mockDrafts({ fresh: [draft()] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    const option = await screen.findByRole('option', { name: /The PRD/ });
+    expect(option).toHaveValue('draft:2026-09-03-0001');
+    // The row says what it is before the user commits to it.
+    expect(option.textContent).toContain('draft');
+  });
+
+  it('clears the thread before handing the draft over, never both at once', async () => {
+    const onSessionIdChange = vi.fn();
+    const onDraftSelect = vi.fn();
+    mockSessions([]);
+    mockDrafts({ fresh: [draft()] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+    await screen.findByRole('option', { name: /The PRD/ });
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'draft:2026-09-03-0001' },
+    });
+
+    expect(onSessionIdChange).toHaveBeenCalledWith(undefined);
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0001');
+    // Order matters: the composer must not see a draft arrive while it still
+    // believes it is addressing a thread.
+    expect(onSessionIdChange.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      onDraftSelect.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('leaves the drafts group out entirely when there are none', async () => {
+    mockSessions([]);
+    mockDrafts({});
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(api.listPromptDrafts).toHaveBeenCalled());
+    expect(screen.queryByRole('option', { name: /draft/ })).not.toBeInTheDocument();
   });
 });

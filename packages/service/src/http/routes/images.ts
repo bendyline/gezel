@@ -25,6 +25,8 @@ export function imagesRoutes(ctx: ServiceContext): Hono {
 
   // Project-scoped attachments — images and files pasted/uploaded via the
   // chat composer land here. Each
+  // DEPRECATED for new uploads — see `Store.writeProjectAttachment`. Kept
+  // because existing transcripts reference these files. Each
   // project gets one flat folder at `artifacts/attachments/` so any
   // session can reference the same file, and the Artifacts tab shows
   // them alongside other project files. Markdown refs use the

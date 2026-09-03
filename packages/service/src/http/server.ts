@@ -88,6 +88,7 @@ import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
+import { promptDraftRoutes } from './routes/prompt-drafts.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
@@ -640,6 +641,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
   app.route('/api/projects', diffpackRoutes(ctx));
+  app.route('/api/projects', promptDraftRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
   // Legacy alias: the same local-git routes under the old /github segment,

@@ -142,6 +142,7 @@ import {
   ProjectTabVisibilitySchema,
   ProjectTypeProvenanceSchema,
 } from './project.js';
+import { PromptDraftConfigSchema } from './prompt-draft.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
@@ -2139,6 +2140,8 @@ export const GezelConfigSchema = z.object({
       enabled: z.boolean().optional(),
     })
     .optional(),
+  /** Retention for chat prompt drafts under `artifacts/prompts/`. */
+  promptDrafts: PromptDraftConfigSchema.optional(),
   /**
    * Opt-in live gilde content updates. Default OFF. When enabled, the
    * daemon checks registry.npmjs.org roughly daily for newer

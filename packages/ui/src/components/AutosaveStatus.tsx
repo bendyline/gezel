@@ -8,7 +8,9 @@ export interface AutosaveStatusProps {
  * Save state for a Squisq-backed editor. Belongs in the shell's bottom
  * status bar (`statusBarSlotRight`), not its toolbar — it is ambient state
  * about the whole surface, so it takes the bar's quiet type rather than a
- * chip of its own.
+ * chip of its own. The chat composer is the one exception: it runs with no
+ * status bar at all (`showStatusBar={false}`), so its prompt-draft state
+ * sits at the quiet end of the toolbar row instead.
  *
  * A document being typed into is the normal case, so `dirty` is a bare dot
  * with no words. Only the transient saving/saved pair and the actionable

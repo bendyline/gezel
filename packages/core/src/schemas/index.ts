@@ -15,6 +15,7 @@ export * from './gezel.js';
 export * from './growth.js';
 export * from './hook.js';
 export * from './project.js';
+export * from './prompt-draft.js';
 export * from './project-local.js';
 export * from './script.js';
 export * from './task.js';

@@ -85,7 +85,6 @@ import {
 } from './chat-timeline-helpers.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
-import { formatContextWindow } from './model-context.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
@@ -586,26 +585,6 @@ export function ChatTimelineView({
   const queuedRef = useRef<
     Map<string, Array<{ id: string; preview: string; enqueuedAt: string; nudge?: boolean }>>
   >(new Map());
-  /**
-   * Per-session live context-window status. Persisted timeline metadata is
-   * the reload fallback; these entries let SSE update the strip immediately.
-   */
-  const contextStatusRef = useRef<
-    Map<
-      string,
-      {
-        kind: 'ready' | 'warning' | 'compacted';
-        estimatedTokens?: number;
-        numCtx?: number;
-        model: string;
-        removedCount?: number;
-        autoCompactRatio?: number;
-        compactionCount?: number;
-        mode?: 'between-turn' | 'mid-turn';
-        at: number;
-      }
-    >
-  >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const responseRunwayRef = useRef<HTMLDivElement | null>(null);
   const scrollbarIdleTimerRef = useRef<number | null>(null);
@@ -722,7 +701,6 @@ export function ChatTimelineView({
     terminalLiveRef.current.clear();
     terminalLiveStore.markStructureChanged();
     queuedRef.current.clear();
-    contextStatusRef.current.clear();
     // Reset the stick-to-bottom state too. Otherwise, if the user
     // was scrolled up reading older history in the previous scope,
     // `pinnedToBottom === false` would carry that forward — and the
@@ -2149,46 +2127,11 @@ export function ChatTimelineView({
         }
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
-      } else if (event.type === 'context_window') {
-        const existing = contextStatusRef.current.get(sessionId);
-        contextStatusRef.current.set(sessionId, {
-          ...(existing ?? { kind: 'ready' as const, at: Date.now() }),
-          numCtx: event.numCtx,
-          model: event.model,
-          autoCompactRatio: event.autoCompactRatio,
-        });
-        liveStore.markStructureChanged();
-      } else if (event.type === 'context_warning') {
-        // Don't downgrade an existing 'compacted' status to a 'warning'
-        // — once the system has had to compact, that's the user-facing
-        // signal that matters; a subsequent warning event below the
-        // compact threshold doesn't add information.
-        const existing = contextStatusRef.current.get(sessionId);
-        if (existing?.kind !== 'compacted') {
-          contextStatusRef.current.set(sessionId, {
-            kind: 'warning',
-            estimatedTokens: event.estimatedTokens,
-            numCtx: event.numCtx,
-            model: event.model,
-            autoCompactRatio: existing?.autoCompactRatio,
-            at: Date.now(),
-          });
-          liveStore.markStructureChanged();
-        }
       } else if (event.type === 'context_compacted') {
-        contextStatusRef.current.set(sessionId, {
-          kind: 'compacted',
-          model: event.model,
-          removedCount: event.removedCount,
-          numCtx: event.numCtx,
-          estimatedTokens: event.estimatedTokensBefore,
-          autoCompactRatio: event.autoCompactRatio,
-          compactionCount: event.compactionCount,
-          mode: event.mode,
-          at: Date.now(),
-        });
-        // Refetch the timeline — older messages were dropped from disk
-        // by the compaction, so the rendered list needs to match.
+        // The window/fill readings these events carry drive the context meter
+        // beside the thread picker (SessionSwitcher); the timeline's own
+        // stake is the transcript. Refetch it — older messages were dropped
+        // from disk by the compaction, so the rendered list needs to match.
         // Older daemons emitted no mode and only had the between-turn path.
         if (event.mode !== 'mid-turn') void refreshLatest();
         liveStore.markStructureChanged();
@@ -3920,107 +3863,8 @@ export function ChatTimelineView({
     );
   }
 
-  // Surface the active session's context policy above the scroll area. Live
-  // SSE state wins, while session metadata on timeline rows makes the strip
-  // survive navigation and daemon restarts.
-  let persistedContextRow: TimelineMessage | undefined;
-  let persistedCompactionRow: TimelineMessage | undefined;
-  if (activeSessionId) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const candidate = messages[i];
-      if (!candidate || candidate.sessionId !== activeSessionId) continue;
-      persistedContextRow ??= candidate;
-      if (!persistedCompactionRow && candidate.contextCompaction) {
-        persistedCompactionRow = candidate;
-      }
-      if (persistedContextRow && persistedCompactionRow) break;
-    }
-  }
-  const persistedContextStatus =
-    persistedContextRow?.sessionContextWindow !== undefined
-      ? {
-          kind:
-            (persistedContextRow.sessionCompactionCount ?? 0) > 0
-              ? ('compacted' as const)
-              : ('ready' as const),
-          numCtx: persistedContextRow.sessionContextWindow,
-          model: persistedContextRow.sessionModel ?? persistedContextRow.sessionProviderName,
-          autoCompactRatio: persistedContextRow.sessionContextAutoCompactRatio,
-          compactionCount: persistedContextRow.sessionCompactionCount,
-          removedCount: persistedCompactionRow?.contextCompaction?.removedCount,
-          estimatedTokens: persistedCompactionRow?.contextCompaction?.estimatedTokensBefore,
-          mode: persistedCompactionRow ? ('between-turn' as const) : undefined,
-          at: persistedContextRow.sessionLastCompactedAt
-            ? Date.parse(persistedContextRow.sessionLastCompactedAt)
-            : 0,
-        }
-      : undefined;
-  const liveContextStatus = activeSessionId
-    ? contextStatusRef.current.get(activeSessionId)
-    : undefined;
-  const activeContextStatus = liveContextStatus
-    ? {
-        ...persistedContextStatus,
-        ...liveContextStatus,
-        compactionCount:
-          liveContextStatus.compactionCount ?? persistedContextStatus?.compactionCount,
-      }
-    : persistedContextStatus;
-  const activeContextPercent =
-    activeContextStatus?.kind === 'warning' &&
-    typeof activeContextStatus.estimatedTokens === 'number' &&
-    typeof activeContextStatus.numCtx === 'number' &&
-    activeContextStatus.numCtx > 0
-      ? Math.round((100 * activeContextStatus.estimatedTokens) / activeContextStatus.numCtx)
-      : null;
   return (
     <div className="chat-timeline-viewport">
-      {activeContextStatus && (
-        <output className={`chat-context-banner chat-context-banner-${activeContextStatus.kind}`}>
-          <span className="chat-context-banner-mark" aria-hidden="true" />
-          {activeContextStatus.kind === 'ready' ? (
-            <>
-              <span className="chat-context-banner-body">
-                <strong>{formatContextWindow(activeContextStatus.numCtx)}-token context</strong>
-                {activeContextStatus.autoCompactRatio !== undefined
-                  ? ` · Automatic compaction around ${Math.round(activeContextStatus.autoCompactRatio * 100)}%`
-                  : ' · Automatic compaction is on'}
-                {(activeContextStatus.compactionCount ?? 0) > 0
-                  ? ` · ${activeContextStatus.compactionCount} completed`
-                  : ''}
-              </span>
-            </>
-          ) : activeContextStatus.kind === 'warning' ? (
-            <>
-              <span className="chat-context-banner-body">
-                <strong>Automatic compaction could not reduce this thread.</strong>{' '}
-                {activeContextPercent === null
-                  ? ''
-                  : `The estimated prompt is about ${activeContextPercent}% of the `}
-                {formatContextWindow(activeContextStatus.numCtx)}-token context window. The runtime
-                will still use its deterministic fit safeguards for this turn.
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="chat-context-banner-body">
-                <strong>Context auto-compacted</strong>
-                {activeContextStatus.removedCount !== undefined
-                  ? ` · ${activeContextStatus.removedCount} earlier message${activeContextStatus.removedCount === 1 ? '' : 's'} summarized`
-                  : ''}
-                {activeContextStatus.numCtx !== undefined
-                  ? ` · ${formatContextWindow(activeContextStatus.numCtx)}-token window`
-                  : ''}
-                {activeContextStatus.compactionCount !== undefined
-                  ? ` · compaction #${activeContextStatus.compactionCount}`
-                  : activeContextStatus.mode === 'mid-turn'
-                    ? ' · current turn continued'
-                    : ''}
-              </span>
-            </>
-          )}
-        </output>
-      )}
       {stickyPayload &&
         (stickyPayload.assistantInfo.kind === 'live' ? (
           <FrameCoalescedLiveStickyHeader

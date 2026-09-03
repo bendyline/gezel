@@ -35,6 +35,7 @@ import type { DuckRunner } from '../observations/duck.js';
 import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
 import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
+import type { PromptDraftManager } from '../prompt-drafts/manager.js';
 import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
 import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
 import type { GpuArbiter } from '../providers/gpu-arbiter.js';
@@ -140,6 +141,8 @@ export interface ServiceContext {
   reportActions: ReportActionManager;
   /** Proposed change sets a gezel drafted for the user to review and apply. */
   diffpacks: DiffpackManager;
+  /** Chat prompt drafts the user is writing (artifacts/prompts/). */
+  promptDrafts: PromptDraftManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   /**

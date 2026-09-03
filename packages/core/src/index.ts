@@ -58,6 +58,7 @@ export * from './net-retry.js';
 export * from './suspend-clock.js';
 export * from './gezel-version.js';
 export * from './outside-in-paths.js';
+export * from './prompt-drafts.js';
 export * from './shadow-paths.js';
 export * from './thread-title.js';
 export * from './catalog-work-in-progress.js';

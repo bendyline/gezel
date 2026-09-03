@@ -267,6 +267,11 @@ export interface WorkspaceFileSource {
 }
 import { extractReferencedTasks } from '../references/task-references.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
+import {
+  CONTEXT_COMPACT_RATIO,
+  type CompactSessionNowResult,
+  ContextCompactor,
+} from './context-compaction.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
 import {
@@ -925,6 +930,8 @@ interface PendingSendEntry {
    * user message carries `ChatMessage.nudge` for the transcript chip.
    */
   nudge: boolean;
+  /** The prompt draft this send was written in, if any. */
+  draftId: string | undefined;
   waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
 }
 
@@ -1461,6 +1468,7 @@ export class ChatManager {
   private readonly activeMemoryExtractions = new Map<string, { rerunRequested: boolean }>();
   private readonly store: Store;
   private readonly events: ChatEventBus;
+  private readonly contextCompactor: ContextCompactor;
   private readonly externalConversations: ExternalConversationRecorder;
   private readonly memory: MemoryManager;
   private readonly historyManager?: import('../history/manager.js').HistoryManager;
@@ -1551,6 +1559,18 @@ export class ChatManager {
         this.seededProviders.set(name, provider);
       }
     }
+    this.contextCompactor = new ContextCompactor({
+      store: this.store,
+      events: this.events,
+      getSessionRecord: (sessionId) => this.getSessionRecord(sessionId),
+      getLiveSession: (sessionId) => this.states.get(sessionId)?.session,
+      isSessionTurnPending: (sessionId) => this.isSessionTurnPending(sessionId),
+      resetSession: (sessionId) => this.reset(sessionId),
+      oneShotCompletion: (prompt, timeoutMs, completionOpts) =>
+        this.oneShotCompletion(prompt, timeoutMs, completionOpts),
+      invalidateSessionCache: (sessionId) => this.cacheController?.invalidate(sessionId),
+      ...(this.historyManager ? { history: this.historyManager } : {}),
+    });
     // Seed the engagement-mode cache from disk without blocking the
     // constructor. Tests and the real service can flip it synchronously
     // via setEngagementMode after reading fresh config.
@@ -2052,6 +2072,17 @@ export class ChatManager {
     this.draftReader = reader;
   }
   private draftReader?: import('../diffpack/draft-store.js').DraftOverlayReader;
+
+  /**
+   * Prompt drafts. Optional so every test that builds a bare ChatManager
+   * keeps working; the two things it drives — stamping a sent draft with its
+   * message time, and cleaning up after a deleted thread — are both
+   * best-effort bookkeeping, never part of a turn's success.
+   */
+  setPromptDrafts(manager: import('../prompt-drafts/manager.js').PromptDraftManager): void {
+    this.promptDrafts = manager;
+  }
+  private promptDrafts?: import('../prompt-drafts/manager.js').PromptDraftManager;
 
   /**
    * Fail-fast per-task budget (Theme F, F3.1). Accumulates each task's
@@ -3037,7 +3068,11 @@ export class ChatManager {
    * merged turn after it. On an idle session with an empty queue this
    * degrades to a plain `send()`.
    */
-  async interruptWithMessage(sessionId: string, userText: string): Promise<ChatMessage> {
+  async interruptWithMessage(
+    sessionId: string,
+    userText: string,
+    opts?: { draftId?: string },
+  ): Promise<ChatMessage> {
     if (this.shuttingDown) {
       throw new Error('service shutting down');
     }
@@ -3046,7 +3081,7 @@ export class ChatManager {
     }
     const queueDepth = this.pendingSends.get(sessionId)?.length ?? 0;
     if (!this.inflight.has(sessionId) && queueDepth === 0) {
-      return this.send(sessionId, userText);
+      return this.send(sessionId, userText, opts?.draftId ? { draftId: opts.draftId } : {});
     }
     return new Promise<ChatMessage>((resolve, reject) => {
       const q = this.pendingSends.get(sessionId) ?? [];
@@ -3062,6 +3097,7 @@ export class ChatManager {
         continuationMaxTokens: undefined,
         hidden: false,
         nudge: false,
+        draftId: opts?.draftId,
         waiters: [{ resolve, reject }],
       };
       q.unshift(entry);
@@ -5670,6 +5706,13 @@ export class ChatManager {
     primarySessionId: string;
     text: string;
     mentionGezelIds: string[];
+    /**
+     * The prompt draft the user wrote this in. Stamped on the PRIMARY
+     * message only: the fan-out copies are deliveries of that one draft, not
+     * drafts of their own, and pointing several messages at one draft would
+     * make "open the prompt this came from" ambiguous.
+     */
+    draftId?: string;
   }): Promise<{ mentionSessionIds: string[] }> {
     const { primarySessionId, text } = args;
     const primary = await this.getSessionRecord(primarySessionId);
@@ -5707,7 +5750,7 @@ export class ChatManager {
     if (primaryShouldReply) {
       // Fire primary first and await — UI should see the primary turn
       // start before any fan-out shows up.
-      await this.send(primarySessionId, text);
+      await this.send(primarySessionId, text, args.draftId ? { draftId: args.draftId } : {});
     }
     // Note: the silent-primary branch (notifyUserMessage) runs AFTER
     // the fan-out loop below. When the user explicitly addresses
@@ -5776,7 +5819,11 @@ export class ChatManager {
       // — but in practice this keeps the voorman bubble behind the
       // addressed gezel's turn start for the common case.
       await Promise.resolve();
-      await this.notifyUserMessage(primarySessionId, text);
+      await this.notifyUserMessage(
+        primarySessionId,
+        text,
+        args.draftId ? { draftId: args.draftId } : {},
+      );
     }
 
     if (this.historyManager && historyTargets.length > 0) {
@@ -5815,7 +5862,11 @@ export class ChatManager {
    * session bus so any composer streaming indicator clears. On error,
    * the session bus gets `error` + `done` so the composer doesn't hang.
    */
-  async notifyUserMessage(sessionId: string, userText: string): Promise<ChatMessage> {
+  async notifyUserMessage(
+    sessionId: string,
+    userText: string,
+    opts?: { draftId?: string },
+  ): Promise<ChatMessage> {
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('notifyUserMessage error:', message);
@@ -5839,6 +5890,7 @@ export class ChatManager {
       role: 'user',
       content: userText,
       at: nowIso(),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
     };
     record!.messages.push(userMessage);
     // Deliberately DON'T update `record.title` from `userText` here.
@@ -6436,6 +6488,15 @@ export class ChatManager {
     this.rejectQueuedForSession(sessionId, 'session deleted');
     // Drop the cached prompt state — the session no longer exists.
     this.cacheController?.invalidate(sessionId);
+    // Sent drafts describe a conversation that no longer exists, so they go
+    // too; unsent ones are detached instead — the user still has words they
+    // never sent, and losing those to a thread cleanup would be the exact
+    // failure this whole feature exists to prevent.
+    if (this.promptDrafts) {
+      await this.promptDrafts.onSessionDeleted(record.projectId, sessionId).catch((err) => {
+        log.warn(`prompt draft cleanup failed for session ${sessionId}: ${String(err)}`);
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -6507,6 +6568,12 @@ export class ChatManager {
        * the message never queued, so it renders as a normal send.
        */
       nudge?: boolean;
+      /**
+       * The prompt draft this user turn was written in. Display-only, and
+       * carried through the queue so a message typed mid-turn still points at
+       * its draft when it finally runs.
+       */
+      draftId?: string;
       /** Strong provenance used by per-turn behavior hooks. */
       messageOrigin?: TurnMessageOrigin;
     },
@@ -6576,6 +6643,7 @@ export class ChatManager {
           continuationMaxTokens: opts?.continuationMaxTokens,
           hidden: opts?.hidden === true,
           nudge: opts?.nudge === true,
+          draftId: opts?.draftId,
           waiters: [{ resolve, reject }],
         };
         q.push(entry);
@@ -6625,6 +6693,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
@@ -6756,6 +6825,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     } = {};
     if (next.from) runOpts.from = next.from;
@@ -6764,6 +6834,9 @@ export class ChatManager {
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
     if (next.hidden) runOpts.hidden = true;
     if (next.nudge) runOpts.nudge = true;
+    // Merged nudges keep the FIRST entry's draft: the run is that draft's
+    // turn, and the later nudges are text appended to it.
+    if (next.draftId) runOpts.draftId = next.draftId;
     runOpts.messageOrigin = next.messageOrigin;
     void this.runSendAndDrain(sessionId, next.userText, runOpts)
       .then((msg) => {
@@ -6806,6 +6879,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
@@ -7011,6 +7085,7 @@ export class ChatManager {
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
       ...(opts?.nudge ? { nudge: true } : {}),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
       // A dispatch seed or handoff is a user turn only because that is the
       // role providers accept; mark it so the transcript never attributes
       // the machinery's words to the person.
@@ -7044,6 +7119,13 @@ export class ChatManager {
         'failed to persist user message before send:',
         err instanceof Error ? err.message : err,
       );
+    }
+    if (userMessage.draftId && this.promptDrafts) {
+      void this.promptDrafts
+        .noteSentMessageAt(state.record.projectId, userMessage.draftId, userMessage.at)
+        .catch((err) => {
+          log.warn(`failed to stamp prompt draft ${userMessage.draftId}: ${String(err)}`);
+        });
     }
     // Publish the user message so the project + global timelines render
     // it immediately. The session-scoped composer ignores it — it doesn't
@@ -9112,6 +9194,7 @@ export class ChatManager {
     opts?: {
       from?: NonNullable<ChatMessage['from']>;
       hidden?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
@@ -9172,6 +9255,7 @@ export class ChatManager {
       at: nowIso(),
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
       ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     record.messages.push(userMessage);
@@ -9802,6 +9886,9 @@ export class ChatManager {
       record.contextWindow !== numCtx || record.contextAutoCompactRatio !== compactRatio;
     record.contextWindow = numCtx;
     record.contextAutoCompactRatio = compactRatio;
+    // The fill rides along on the turn's own session write; it changes every
+    // turn and is not worth a write of its own.
+    record.contextEstimatedTokens = estimatedTokens;
     if (contextPolicyChanged) {
       await this.store.writeSession(record).catch((err) => {
         log.warn(
@@ -9814,6 +9901,7 @@ export class ChatManager {
       numCtx,
       model,
       autoCompactRatio: compactRatio,
+      estimatedTokens,
     });
     if (!opts?.force && ratio < compactRatio) return { rebuilt: false };
     log.info(
@@ -9826,16 +9914,18 @@ export class ChatManager {
     // least gets the yellow banner — Ollama will silently truncate
     // either way, but the user gets a signal.
     const compactT0 = Date.now();
-    const compacted = await this.compactInFlight(record, {
-      contextWindow: numCtx,
-      estimatedTokensBefore: estimatedTokens,
-      autoCompactRatio: compactRatio,
-    }).catch((err) => {
-      log.warn(
-        `compactInFlight threw for session ${tag}: ${err instanceof Error ? err.message : err}`,
-      );
-      return null;
-    });
+    const compacted = await this.contextCompactor
+      .compactInFlight(record, {
+        contextWindow: numCtx,
+        estimatedTokensBefore: estimatedTokens,
+        autoCompactRatio: compactRatio,
+      })
+      .catch((err) => {
+        log.warn(
+          `compactInFlight threw for session ${tag}: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      });
     log.info(
       `pressure#${tag} COMPACT-END afterMs=${Date.now() - compactT0} ` +
         `removed=${compacted?.removedCount ?? 0} ${compacted ? 'ok' : 'nope'}`,
@@ -9924,134 +10014,37 @@ export class ChatManager {
         mode: 'between-turn',
       });
     }
+    // Republish the window with the reduced fill. Without this the client's
+    // meter sits at the pre-compaction reading until the next turn measures
+    // again — i.e. the one moment the number visibly matters is the one
+    // moment it would be wrong.
+    const reducedEstimator = fresh.estimatePromptChars;
+    if (reducedEstimator) {
+      const reducedTokens = Math.ceil((reducedEstimator.call(fresh) + pendingPrompt.length) / 4);
+      record.contextEstimatedTokens = reducedTokens;
+      this.events.publish(scope, {
+        type: 'context_window',
+        numCtx,
+        model,
+        autoCompactRatio: compactRatio,
+        estimatedTokens: reducedTokens,
+      });
+    }
     return { rebuilt: true, fresh };
   }
 
   /**
-   * Collapse the older portion of a session's messages into a single
-   * synthetic `compaction-summary` assistant bubble. The newest
-   * {@link COMPACTION_KEEP_TAIL} messages stay verbatim — they're the
-   * conversational "now" the model needs in full fidelity. Everything
-   * before that is fed to a one-shot summarization on the same
-   * provider; the resulting synthesis replaces those messages
-   * in-place. Persisted via `writeSession`. Fully audit-trailed via
-   * a `chat.compacted` history event.
+   * Compact a session on demand, outside any turn. Same collapse the
+   * automatic pressure path runs, reached from the context meter's
+   * "Compact now" so a user who can see the thread filling up doesn't have
+   * to wait for the threshold — or send a throwaway message to trigger it.
    *
-   * Returns `null` when there's nothing to compact (too few messages)
-   * or the summarization failed; caller treats both as "no
-   * compaction happened" and skips the fresh-session rebuild.
+   * Refuses while a turn is pending: compaction rewrites `record.messages`
+   * out from under a live session, which is safe only because the caller
+   * then tears that session down.
    */
-  private async compactInFlight(
-    record: ChatSession,
-    context: {
-      contextWindow: number;
-      estimatedTokensBefore: number;
-      autoCompactRatio: number;
-    },
-  ): Promise<{ removedCount: number; compactionCount: number } | null> {
-    if (record.messages.length <= COMPACTION_KEEP_TAIL + 2) {
-      // Two-pair tail + at least 3 to compact = 9. Below that the
-      // synthesis costs more (one-shot LLM call) than it saves.
-      return null;
-    }
-    const splitAt = record.messages.length - COMPACTION_KEEP_TAIL;
-    const toCompact = record.messages.slice(0, splitAt);
-    const tail = record.messages.slice(splitAt);
-    const transcript = renderTranscript(toCompact);
-    if (!transcript.trim()) return null;
-
-    // Attribute the job in the queue UI to the Klerk when one is
-    // configured (compaction is a writerly summary task — the Klerk's
-    // job description) and otherwise to the active session's gezel.
-    // Provider + model stay pinned to the session's so the compacted
-    // summary tokens are compatible with subsequent turns; we don't
-    // pass `useKlerk: true` because that would inject the Klerk's
-    // about.md as the system prompt, which dilutes the very specific
-    // COMPACTION_PROMPT instructions.
-    const compactionConfig = await this.store.readConfig().catch(() => null);
-    const compactionGezelId = compactionConfig?.klerkGezelId ?? record.gezelId;
-    let synthesis: string;
-    try {
-      synthesis = await this.oneShotCompletion(`${COMPACTION_PROMPT}${transcript}`, 60_000, {
-        providerName: record.providerName,
-        ...(record.model ? { model: record.model } : {}),
-        ...(compactionGezelId ? { gezelId: compactionGezelId } : {}),
-        jobLabel: `compaction · ${record.id.slice(0, 8)}`,
-      });
-    } catch (err) {
-      log.warn(
-        `[chat] in-flight compaction failed for session ${record.id.slice(0, 8)}: ${err instanceof Error ? err.message : err}`,
-      );
-      return null;
-    }
-
-    const trimmed = synthesis.trim();
-    if (!trimmed) return null;
-    const compactedAt = nowIso();
-    const compactionCount = (record.compactionCount ?? 0) + 1;
-    const synthetic: ChatMessage = {
-      role: 'assistant',
-      content: `[Earlier in this conversation, summarized to fit the model context:\n\n${trimmed}]`,
-      at: compactedAt,
-      synthetic: 'compaction-summary',
-      contextCompaction: {
-        removedCount: toCompact.length,
-        contextWindow: context.contextWindow,
-        estimatedTokensBefore: context.estimatedTokensBefore,
-        compactionCount,
-        autoCompactRatio: context.autoCompactRatio,
-      },
-    };
-
-    record.messages = [synthetic, ...tail];
-    record.compactionCount = compactionCount;
-    record.lastCompactedAt = compactedAt;
-    // The cached prompt prefix no longer matches the compacted message
-    // list — anything the engine had cached for this session is now
-    // useless. Drop it. Next turn rebuilds the cache against the new
-    // shorter prefix.
-    this.cacheController?.invalidate(record.id);
-    // Reset summarization watermark — `summarizedUpTo` was indexed
-    // into the now-shrunken array. Leave `summarizedAt` as a
-    // tombstone; the next post-session summarizer pass will see
-    // the new shape and proceed normally.
-    if (typeof record.summarizedUpTo === 'number') {
-      record.summarizedUpTo = Math.min(record.summarizedUpTo, record.messages.length);
-    }
-    // Same clamp for the memory-extraction cadence cursor. Without
-    // this, `shouldRunMemoryExtraction` would compute
-    // `messages.length - extractedUpTo` as negative (or a very small
-    // positive), and extraction would stay permanently deferred on
-    // local providers after the first compaction.
-    if (typeof record.extractedUpTo === 'number') {
-      record.extractedUpTo = Math.min(record.extractedUpTo, record.messages.length);
-    }
-    await this.store.writeSession(record);
-
-    void this.historyManager
-      ?.log({
-        kind: 'chat.compacted',
-        projectId: record.projectId,
-        gezelId: record.gezelId,
-        summary: `Compacted ${toCompact.length} message${toCompact.length === 1 ? '' : 's'} → ${trimmed.length} char synthesis (compaction #${record.compactionCount})`,
-        details: {
-          sessionId: record.id,
-          removedCount: toCompact.length,
-          synthesisLength: trimmed.length,
-          compactionCount: record.compactionCount,
-        },
-      })
-      .catch((err) => {
-        log.warn(
-          `history.log for chat.compacted failed: ${err instanceof Error ? err.message : err}`,
-        );
-      });
-
-    log.info(
-      `compacted session ${record.id.slice(0, 8)}: ${toCompact.length} messages → 1 synthesis (${trimmed.length} chars)`,
-    );
-
-    return { removedCount: toCompact.length, compactionCount };
+  async compactSessionNow(sessionId: string): Promise<CompactSessionNowResult> {
+    return this.contextCompactor.compactSessionNow(sessionId);
   }
 
   async history(sessionId: string): Promise<ChatMessage[]> {
@@ -18228,8 +18221,6 @@ const READ_ONLY_PROGRESS_NUDGE =
  * to absorb 1-2 more tool round-trips while the in-flight compaction
  * one-shot synthesizes older history.
  */
-const CONTEXT_COMPACT_RATIO = 0.7;
-
 /**
  * MLX-specific compaction trigger. Phase 0 set this to 0.55 to cap
  * per-turn re-prefill cost (mlx_vlm.server cleared its KV cache after
@@ -18287,14 +18278,6 @@ function memoryExtractionDisabledByEnv(): boolean {
   const raw = process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
   return raw === '1' || raw?.toLowerCase() === 'true';
 }
-
-/**
- * Number of trailing messages to preserve verbatim when compacting.
- * Six covers the last ~3 user/assistant pairs — the conversational
- * "now" the model needs in full fidelity to continue. Older messages
- * get folded into the synthetic compaction-summary message.
- */
-const COMPACTION_KEEP_TAIL = 6;
 
 // Deterministic last-resort context fit. LLM-summary compaction
 // (`compactInFlight`) is preferred but can't always run: it needs enough older
@@ -18365,46 +18348,6 @@ export function fitMessagesToBudget(
  * the turn with a visible bubble so the user can redirect.
  */
 const MAX_COMPACTIONS_PER_SEND = 2;
-
-/**
- * Prompt for in-flight compaction. Distinct from {@link
- * import('../memory/summarizer.js').summarizeSessionForMemory}'s
- * `SUMMARY_PROMPT` — that one distills to durable cross-session
- * memory (file paths to remember, decisions to carry forward); this
- * one preserves actionable in-conversation detail because the gezel
- * will read this synthesis on its very next turn and continue from
- * it.
- */
-const COMPACTION_PROMPT = `You are summarizing the earlier portion of an in-progress conversation between a user and an AI agent. Your output will REPLACE that earlier portion in the agent's context window — the agent must be able to continue correctly using ONLY your summary plus the most recent few turns.
-
-CRITICAL: this conversation is being compacted because the agent ran out of context. Your single most important job is to prevent the agent from re-attempting things that already happened. The agent will read your output and decide what to do next; if the summary doesn't make it crystal clear which directions are exhausted, the agent will loop and re-trigger compaction.
-
-Use these section headings, in this order, omitting any section that has nothing to put in it:
-
-## Decisions made
-- Concrete decisions and the reasoning behind them.
-
-## User intent and constraints
-- What the user is trying to accomplish, and any specific constraints / requirements / preferences they've stated.
-
-## Approaches already tried (do NOT repeat without new information)
-- Each thing the agent attempted, with the outcome. Be explicit about *what was tried* and *why it didn't finish the job* — was the result wrong, did a tool fail, did the user redirect, was the answer rejected? If an approach was already tried and abandoned, list it here so the agent doesn't re-launch it.
-
-## Open work
-- Outstanding tasks the agent committed to but hasn't completed, with enough detail to resume.
-- Open questions awaiting the user.
-
-## Key references
-- Names of files, artifacts, tools, gezels, and tasks that were touched. One bullet each.
-
-## Errors and recoveries
-- Errors encountered, what triggered them, how they were handled.
-
-Drop conversational filler, pleasantries, and verbatim tool outputs (just note "read X, found Y"). Be concrete and specific — vague summaries cause loops. No preamble; start with the first heading.
-
-Earlier conversation:
-
-`;
 
 const VOORMAN_IDLE_NUDGE =
   'Before you finish, make one quick project check: is there concrete work already in flight that this turn should move? ' +

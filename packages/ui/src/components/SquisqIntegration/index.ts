@@ -13,6 +13,7 @@ export {
 } from './document-companion.js';
 
 export { createVersionCompatibleContentContainer } from './version-compatible-container.js';
+export { createDataReferenceContainer } from './data-reference-container.js';
 
 export {
   createArtifactsContentContainer,
@@ -28,6 +29,7 @@ export {
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
+  supportsOutsideInMarkdownEditing,
   withOutsideInMetadata,
   withOutsideInMarkdownEditing,
 } from './outside-in.js';

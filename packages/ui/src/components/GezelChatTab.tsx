@@ -329,6 +329,10 @@ function GezelChatBody({
   const [sessionId, setSessionId] = useState<string>(
     () => focusSessionId ?? readChatThreadSelection(threadKey)?.sessionId ?? '',
   );
+  // The prompt draft the composer has open. Tracked here because both the
+  // composer and the thread picker act on it, and a draft with no thread
+  // yet has nothing else to hang off.
+  const [draftId, setDraftId] = useState<string>('');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
   const [activeSource, setActiveSource] = useState<ChatSessionSource | null>(null);
@@ -449,6 +453,8 @@ function GezelChatBody({
               onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
               draftScope="gezel"
+              draftId={draftId || undefined}
+              onDraftIdChange={(next) => setDraftId(next ?? '')}
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={gezel.id}
@@ -459,6 +465,9 @@ function GezelChatBody({
                   onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
                   refreshKey={sessionRefreshKey}
                   engineLabel={engineLabel}
+                  activeDraftId={draftId || undefined}
+                  onDraftSelect={(next) => setDraftId(next ?? '')}
+                  draftScope="gezel"
                 />
               }
             />

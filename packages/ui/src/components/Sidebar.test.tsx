@@ -177,6 +177,58 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('button', { name: 'Rename zulu.md' })).not.toBeInTheDocument();
   });
 
+  it('imports OS-dropped Markdown and Office files into the shared Documents root', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false, mtimeMs: 100 }],
+    } as never);
+    vi.mocked(api.writeDocument).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.writeDocumentBinary).mockResolvedValue({ ok: true } as never);
+    const created = vi.fn();
+    window.addEventListener('gezel:document-created', created);
+
+    const { container } = render(
+      <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+    await waitFor(() => expect(api.listDocuments).toHaveBeenCalled());
+
+    const markdown = new File(['# Dropped'], 'notes.md', { type: 'text/markdown' });
+    Object.defineProperty(markdown, 'text', { value: vi.fn(async () => '# Dropped') });
+    const docx = new File(['docx bytes'], 'brief.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    const xlsx = new File(['xlsx bytes'], 'budget.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const dataTransfer = {
+      types: ['Files'],
+      files: [markdown, docx, xlsx],
+      dropEffect: 'none',
+    };
+    const target = container.querySelector('[data-group="documents"]');
+    expect(target).not.toBeNull();
+
+    fireEvent.dragEnter(target!, { dataTransfer });
+    expect(screen.getByText('Drop to add to Documents')).toBeInTheDocument();
+    fireEvent.drop(target!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith('notes 2.md', '# Dropped');
+      expect(api.writeDocumentBinary).toHaveBeenCalledWith('brief.docx', docx, docx.type);
+      expect(api.writeDocumentBinary).toHaveBeenCalledWith('budget.xlsx', xlsx, xlsx.type);
+    });
+    expect(await screen.findByText('Added 3 files.')).toBeInTheDocument();
+    expect(created).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: {
+          path: 'budget.xlsx',
+          paths: ['notes 2.md', 'brief.docx', 'budget.xlsx'],
+        },
+      }),
+    );
+
+    window.removeEventListener('gezel:document-created', created);
+  });
+
   it('keeps pinned documents in the list beyond the five recent slots', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     window.localStorage.setItem(

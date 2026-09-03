@@ -341,6 +341,12 @@ export const ChatSessionSchema = z.object({
   /** Runtime policy used with {@link contextWindow}; persisted for reload UX. */
   contextAutoCompactRatio: z.number().positive().max(1).optional(),
   /**
+   * Estimated prompt size at the start of the most recent turn, in the same
+   * chars/4 units the compaction check uses. Persisted so a reloaded client
+   * can show how full the thread is before the next turn republishes it.
+   */
+  contextEstimatedTokens: z.number().int().nonnegative().optional(),
+  /**
    * Auto-recall snapshot — set once, at the start of the session's first
    * turn, after the memory search runs. Prevents re-recall on restart.
    */
@@ -460,6 +466,13 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   stepId: true,
   parentSession: true,
   handoffFrom: true,
+  // The thread's context policy and last measured fill. Surfaced on the
+  // summary so the thread picker's context meter has something to show
+  // before (and after) the session's own event stream reports a turn.
+  contextWindow: true,
+  contextAutoCompactRatio: true,
+  contextEstimatedTokens: true,
+  compactionCount: true,
 }).extend({
   /**
    * `at` of the most recent HUMAN message in the transcript — a
@@ -485,6 +498,18 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
    * Optional for compatibility with older daemons and cached responses.
    */
   involvedGezelIds: z.array(z.string()).optional(),
+  /**
+   * Size of the persisted transcript in the same chars/4 units the
+   * compaction check uses, computed at list time. This is a running tally
+   * — no turn has to run for it to exist — so it is what a thread's context
+   * meter shows until {@link ChatSession.contextEstimatedTokens} lands.
+   *
+   * It is deliberately the SMALLER of the two: the measured figure also
+   * carries the standing prefix (system prompt, about.md, tool schemas),
+   * which lives in the live provider session and cannot be reconstructed
+   * from disk. Present it as a floor, never as the exact prompt size.
+   */
+  transcriptTokens: z.number().int().nonnegative().optional(),
 });
 export type ChatSessionSummary = z.infer<typeof ChatSessionSummarySchema>;
 
@@ -542,6 +567,14 @@ export const SendToSessionRequestSchema = z.object({
    * session the flag is a no-op — the message sends as a normal turn.
    */
   nudge: z.boolean().optional(),
+  /**
+   * The prompt draft (`artifacts/prompts/<draftId>/`) this message was
+   * written in. The route rewrites the draft's document-relative
+   * `message_files/` refs into project-relative `artifacts/…` refs before the
+   * message is persisted, stamps the id on the stored user message, and marks
+   * the draft sent. Must belong to this session's project.
+   */
+  draftId: z.string().optional(),
 });
 export type SendToSessionRequest = z.infer<typeof SendToSessionRequestSchema>;
 
@@ -594,6 +627,12 @@ export type UpdateQueuedMessageResponse = z.infer<typeof UpdateQueuedMessageResp
  */
 export const InterruptSessionRequestSchema = z.object({
   message: z.string().min(1),
+  /**
+   * The prompt draft this message came from. Same contract as the send
+   * route: `message_files/` refs are rewritten into the message that gets
+   * persisted, and the draft is marked sent.
+   */
+  draftId: z.string().optional(),
 });
 export type InterruptSessionRequest = z.infer<typeof InterruptSessionRequestSchema>;
 
@@ -670,6 +709,11 @@ export const TimelineMessageSchema = z.object({
    * the mid-turn queue as a nudge. The bubble renders a small chip.
    */
   nudge: z.boolean().optional(),
+  /**
+   * Mirrors `ChatMessage.draftId` — the prompt draft this message was sent
+   * from, when it is still on disk.
+   */
+  draftId: z.string().optional(),
   /**
    * Mirrors `ChatMessage.origin` — the machinery authored this user turn
    * (task dispatch seed, step handoff, reaction seed), so the bubble is

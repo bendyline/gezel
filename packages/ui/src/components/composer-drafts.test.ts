@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  clearComposerDraft,
   composerDraftKey,
-  moveComposerDraft,
-  readComposerDraft,
+  forgetDraft,
+  moveActiveDraftId,
+  promptDraftSlotKey,
+  readActiveDraftId,
+  readDraftText,
   resetComposerDrafts,
-  writeComposerDraft,
+  writeActiveDraftId,
+  writeDraftText,
 } from './composer-drafts.js';
 
 afterEach(() => resetComposerDrafts());
@@ -29,40 +32,71 @@ describe('composerDraftKey', () => {
   });
 });
 
-describe('draft storage', () => {
-  it('round-trips a draft and reports an empty string for an unknown key', () => {
-    writeComposerDraft('a', 'abcdef');
-    expect(readComposerDraft('a')).toBe('abcdef');
-    expect(readComposerDraft('b')).toBe('');
+describe('promptDraftSlotKey', () => {
+  it('gives each thread its own slot, and one to the thread that does not exist yet', () => {
+    const base = { projectId: 'default', gezelId: 'tomas' };
+    const onThread = promptDraftSlotKey({ ...base, sessionId: 's1' });
+    const otherThread = promptDraftSlotKey({ ...base, sessionId: 's2' });
+    const newThread = promptDraftSlotKey({ ...base, sessionId: null });
+    expect(new Set([onThread, otherThread, newThread]).size).toBe(3);
+    expect(newThread.endsWith('|new')).toBe(true);
+  });
+});
+
+describe('the slot index', () => {
+  it('remembers which draft a slot had open', () => {
+    writeActiveDraftId('slot', '2026-09-03-0001');
+    expect(readActiveDraftId('slot')).toBe('2026-09-03-0001');
+    expect(readActiveDraftId('other')).toBeUndefined();
   });
 
-  it('drops an all-whitespace draft rather than storing it', () => {
-    writeComposerDraft('a', 'abcdef');
-    writeComposerDraft('a', '  \n ');
-    expect(readComposerDraft('a')).toBe('');
+  it('forgets a slot when handed nothing', () => {
+    writeActiveDraftId('slot', '2026-09-03-0001');
+    writeActiveDraftId('slot', undefined);
+    expect(readActiveDraftId('slot')).toBeUndefined();
   });
 
-  it('clears on demand', () => {
-    writeComposerDraft('a', 'abcdef');
-    clearComposerDraft('a');
-    expect(readComposerDraft('a')).toBe('');
+  it('re-points a slot without picking up what the destination held', () => {
+    writeActiveDraftId('old', '2026-09-03-0001');
+    writeActiveDraftId('new', '2026-09-03-0002');
+    moveActiveDraftId('old', 'new', '2026-09-03-0001');
+    expect(readActiveDraftId('old')).toBeUndefined();
+    expect(readActiveDraftId('new')).toBe('2026-09-03-0001');
   });
 
-  it('moves a live draft to a new address without picking up what was there', () => {
-    writeComposerDraft('old', 'in progress');
-    writeComposerDraft('new', 'stale');
-    moveComposerDraft('old', 'new', 'in progress');
-    expect(readComposerDraft('old')).toBe('');
-    expect(readComposerDraft('new')).toBe('in progress');
+  it('evicts the least recently used slot past the cap', () => {
+    for (let i = 0; i < 64; i += 1) writeActiveDraftId(`k${i}`, `2026-09-03-${i}`);
+    writeActiveDraftId('k0', '2026-09-03-0000');
+    writeActiveDraftId('overflow', '2026-09-03-9999');
+    expect(readActiveDraftId('k1')).toBeUndefined();
+    expect(readActiveDraftId('k0')).toBe('2026-09-03-0000');
+    expect(readActiveDraftId('overflow')).toBe('2026-09-03-9999');
+  });
+});
+
+describe('the text cache', () => {
+  it('round-trips the last known text for a draft', () => {
+    writeDraftText('2026-09-03-0001', 'half a thought');
+    expect(readDraftText('2026-09-03-0001')).toBe('half a thought');
+    expect(readDraftText('2026-09-03-0002')).toBeUndefined();
   });
 
-  it('evicts the least-recently-written draft past the cap', () => {
-    for (let i = 0; i < 64; i += 1) writeComposerDraft(`k${i}`, `draft ${i}`);
-    // Touching k0 makes k1 the oldest.
-    writeComposerDraft('k0', 'draft 0 again');
-    writeComposerDraft('overflow', 'newest');
-    expect(readComposerDraft('k1')).toBe('');
-    expect(readComposerDraft('k0')).toBe('draft 0 again');
-    expect(readComposerDraft('overflow')).toBe('newest');
+  it('keeps an empty draft distinguishable from one it has never seen', () => {
+    // Disk is the source of truth now, so an empty string is a real answer:
+    // it means "loaded, and empty", not "unknown".
+    writeDraftText('2026-09-03-0001', '');
+    expect(readDraftText('2026-09-03-0001')).toBe('');
+  });
+
+  it('drops a draft and every slot pointing at it', () => {
+    writeDraftText('2026-09-03-0001', 'text');
+    writeActiveDraftId('slot-a', '2026-09-03-0001');
+    writeActiveDraftId('slot-b', '2026-09-03-0001');
+    writeActiveDraftId('slot-c', '2026-09-03-0002');
+    forgetDraft('2026-09-03-0001');
+    expect(readDraftText('2026-09-03-0001')).toBeUndefined();
+    expect(readActiveDraftId('slot-a')).toBeUndefined();
+    expect(readActiveDraftId('slot-b')).toBeUndefined();
+    expect(readActiveDraftId('slot-c')).toBe('2026-09-03-0002');
   });
 });

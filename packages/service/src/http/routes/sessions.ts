@@ -8,6 +8,7 @@ import {
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
+  rewritePromptDraftFileRefs,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
@@ -194,6 +195,22 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     if (!isEngagementAllowed(cfg)) {
       return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
     }
+    // A message written in a prompt draft carries its refs in the draft's own
+    // document-relative form. The transcript needs them project-relative, so
+    // the rewrite happens once, here, before any dispatch path sees the text —
+    // the fan-out copies and the passive CC ghosts must show the same images
+    // the sender saw.
+    let text = body.message;
+    if (body.draftId) {
+      const draft = await ctx.promptDrafts.get(target.projectId, body.draftId);
+      if (!draft) {
+        return c.json(
+          { error: 'prompt draft not found in this project', code: 'prompt_draft_not_found' },
+          404,
+        );
+      }
+      text = rewritePromptDraftFileRefs(body.message, body.draftId);
+    }
     // Accept immediately; the live reply streams over /events/chat.
     // Mentioned gezels (if any) get the same verbatim user text in their
     // own session via the fan-out helper — no `from` metadata, so their
@@ -206,8 +223,9 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
         ctx.chat
           .sendWithMentions({
             primarySessionId: id,
-            text: body.message,
+            text,
             mentionGezelIds: body.mentions,
+            ...(body.draftId ? { draftId: body.draftId } : {}),
           })
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -216,10 +234,15 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       );
     } else {
       ctx.chat.trackBackground(
-        ctx.chat.send(id, body.message, body.nudge ? { nudge: true } : undefined).catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`[sessions] send failed for ${id}: ${message}`);
-        }),
+        ctx.chat
+          .send(id, text, {
+            ...(body.nudge ? { nudge: true } : {}),
+            ...(body.draftId ? { draftId: body.draftId } : {}),
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            log.warn(`[sessions] send failed for ${id}: ${message}`);
+          }),
       );
     }
     // Passive CC fan-out — drops a transcript-only ghost on each
@@ -243,7 +266,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
                 projectId: primary.projectId,
               });
               if (ccSession.id === id) continue;
-              await ctx.chat.notifyUserMessage(ccSession.id, body.message);
+              await ctx.chat.notifyUserMessage(ccSession.id, text);
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
               log.warn(`[sessions] passive CC to ${ccId} failed: ${message}`);
@@ -251,6 +274,22 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
           }
         })(),
       );
+    }
+    // Mark it sent only after dispatch has been accepted. The draft keeps its
+    // ORIGINAL text — the rewritten form belongs to the transcript, while the
+    // draft stays an editable document whose Files panel still resolves.
+    // Best-effort: the message is already on its way, and failing the request
+    // now would tell the user their message did not send when it did.
+    if (body.draftId) {
+      try {
+        await ctx.promptDrafts.markSent(target.projectId, body.draftId, {
+          sessionId: id,
+          content: body.message,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`[sessions] marking draft ${body.draftId} sent failed: ${message}`);
+      }
     }
     return c.json({ accepted: true, sessionId: id }, 202);
   });
@@ -281,6 +320,30 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     if (source) return c.json(externalReadOnlyError(source), 409);
     await ctx.chat.reset(id);
     return c.json({ ok: true });
+  });
+
+  app.post('/:id/compact', async (c) => {
+    const id = c.req.param('id');
+    const source = await externalReadOnlySource(ctx, id);
+    if (source) return c.json(externalReadOnlyError(source), 409);
+    const cfg = await ctx.store.readConfig();
+    // Compaction is an LLM one-shot on the session's own provider, so it is
+    // AI work and answers to the engagement switch like any other turn.
+    if (!isEngagementAllowed(cfg)) {
+      return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
+    }
+    const result = await ctx.chat.compactSessionNow(id);
+    if (result.reason === 'not-found') return c.json({ error: 'not found' }, 404);
+    if (!result.compacted) {
+      const message =
+        result.reason === 'busy'
+          ? 'This thread is mid-turn — wait for it to finish, then compact.'
+          : result.reason === 'too-short'
+            ? 'This thread is too short to compact; there is nothing older to summarize yet.'
+            : 'Compaction could not summarize this thread. The runtime will still fit the prompt on the next turn.';
+      return c.json({ error: message, code: result.reason }, 409);
+    }
+    return c.json(result);
   });
 
   app.get('/:id/inflight', async (c) => {
@@ -315,11 +378,34 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     if (!isEngagementAllowed(cfg)) {
       return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
     }
+    // Same draft contract as /send: rewrite the refs, stamp the message,
+    // mark the draft sent. An interrupt is still a message the user wrote.
+    let interruptText = body.message;
+    if (body.draftId) {
+      const record = await ctx.chat.getSessionRecord(id).catch(() => null);
+      const draft = record
+        ? await ctx.promptDrafts.get(record.projectId, body.draftId).catch(() => null)
+        : null;
+      if (!draft) {
+        return c.json(
+          { error: 'prompt draft not found in this project', code: 'prompt_draft_not_found' },
+          404,
+        );
+      }
+      interruptText = rewritePromptDraftFileRefs(body.message, body.draftId);
+      await ctx.promptDrafts
+        .markSent(record!.projectId, body.draftId, { sessionId: id, content: body.message })
+        .catch((err) => {
+          log.warn(`[sessions] marking draft sent failed: ${String(err)}`);
+        });
+    }
     ctx.chat.trackBackground(
-      ctx.chat.interruptWithMessage(id, body.message).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`[sessions] interrupt failed for ${id}: ${message}`);
-      }),
+      ctx.chat
+        .interruptWithMessage(id, interruptText, body.draftId ? { draftId: body.draftId } : {})
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`[sessions] interrupt failed for ${id}: ${message}`);
+        }),
     );
     return c.json({ accepted: true, sessionId: id }, 202);
   });

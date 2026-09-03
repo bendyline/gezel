@@ -1,21 +1,22 @@
 /**
- * In-memory drafts for the chat composer, keyed by chat surface.
+ * The composer's in-memory index over the prompt drafts on disk.
  *
- * Every chat surface (Home's meester conversation, a gezel tab, a project
- * chat, a task pane) unmounts the moment the user navigates elsewhere — the
- * app keys `TabContent` on the selection and `HomeView` is swapped out
- * wholesale. Before this store existed, the composer's `draftRef` died with
- * the mount, so a half-written message was silently discarded by a trip to
- * Settings and back.
+ * Drafts themselves live in the project's artifact drawer
+ * (`artifacts/prompts/<draftId>/`) and are the source of truth. What stays in
+ * memory is only what makes returning to a conversation feel instant:
+ *
+ * - **which draft each composer surface had open**, so coming back to a
+ *   thread reopens the same one rather than guessing from a list; and
+ * - **the last text we knew for a draft**, so the editor paints immediately
+ *   on mount instead of flashing empty until the GET lands.
+ *
+ * Both are caches. Losing either costs a fetch and nothing else — which is
+ * the whole point of the change: before this, losing them cost the user their
+ * message.
  *
  * Keep this module editor-free for the same reason `composer-prefill.ts` is:
  * surfaces that only want to read or drop a draft must not pull the Squisq
  * editor into their navigation chunk.
- *
- * Drafts are deliberately memory-only, not `localStorage`. The markdown holds
- * `attachments/<file>` refs that resolve against a specific project's artifact
- * drawer, so a draft that outlived the daemon could reference bytes that are
- * no longer there. Session lifetime is the honest lifetime.
  */
 
 export interface ComposerDraftAddress {
@@ -37,15 +38,21 @@ export interface ComposerDraftAddress {
 }
 
 /**
- * Bound on retained drafts. A draft is a few KB of markdown at most, and the
- * cap only ever evicts the least-recently-written surface, so the practical
- * effect is nil — it exists so a long session that visits hundreds of chats
- * cannot accumulate unboundedly.
+ * One composer surface pointed at one thread. Unlike the address, this DOES
+ * include the session: a draft now belongs to the thread it is addressed to,
+ * and picking another thread should bring up that thread's own draft.
+ * `sessionId: null` is the thread that does not exist yet.
  */
-const MAX_DRAFTS = 64;
+export interface PromptDraftSlot extends ComposerDraftAddress {
+  sessionId: string | null;
+}
 
-/** Insertion order is the LRU order — every write re-inserts. */
-const drafts = new Map<string, string>();
+const MAX_ENTRIES = 64;
+
+/** slot key → the draft id that slot had open. */
+const activeDrafts = new Map<string, string>();
+/** draft id → last known markdown. Insertion order is the LRU order. */
+const draftText = new Map<string, string>();
 
 export function composerDraftKey(address: ComposerDraftAddress): string {
   return [
@@ -57,42 +64,63 @@ export function composerDraftKey(address: ComposerDraftAddress): string {
   ].join('|');
 }
 
-export function readComposerDraft(key: string): string {
-  return drafts.get(key) ?? '';
+export function promptDraftSlotKey(slot: PromptDraftSlot): string {
+  return `${composerDraftKey(slot)}|${slot.sessionId ?? 'new'}`;
 }
 
-/** Storing an all-whitespace draft drops the entry — an empty composer is not a draft. */
-export function writeComposerDraft(key: string, source: string): void {
-  if (!source.trim()) {
-    drafts.delete(key);
+export function readActiveDraftId(slotKey: string): string | undefined {
+  return activeDrafts.get(slotKey);
+}
+
+export function writeActiveDraftId(slotKey: string, draftId: string | undefined): void {
+  if (!draftId) {
+    activeDrafts.delete(slotKey);
     return;
   }
-  drafts.delete(key);
-  drafts.set(key, source);
-  while (drafts.size > MAX_DRAFTS) {
-    const oldest = drafts.keys().next();
+  activeDrafts.delete(slotKey);
+  activeDrafts.set(slotKey, draftId);
+  while (activeDrafts.size > MAX_ENTRIES) {
+    const oldest = activeDrafts.keys().next();
     if (oldest.done) break;
-    drafts.delete(oldest.value);
+    activeDrafts.delete(oldest.value);
   }
 }
 
-export function clearComposerDraft(key: string): void {
-  drafts.delete(key);
+export function readDraftText(draftId: string): string | undefined {
+  return draftText.get(draftId);
 }
 
-/**
- * Re-file a live draft under a new address. The composer keeps its text when
- * its own address moves under it — an @-mention pivot in project chat, a
- * recipient swap from the To-line picker — so the stored copy has to follow
- * rather than being swapped out for whatever the new address held.
- */
-export function moveComposerDraft(fromKey: string, toKey: string, source: string): void {
+export function writeDraftText(draftId: string, source: string): void {
+  draftText.delete(draftId);
+  draftText.set(draftId, source);
+  while (draftText.size > MAX_ENTRIES) {
+    const oldest = draftText.keys().next();
+    if (oldest.done) break;
+    draftText.delete(oldest.value);
+  }
+}
+
+/** Drop a draft's text and every slot still pointing at it. */
+export function forgetDraft(draftId: string): void {
+  draftText.delete(draftId);
+  for (const [slotKey, id] of activeDrafts) {
+    if (id === draftId) activeDrafts.delete(slotKey);
+  }
+}
+
+/** Re-point a slot's draft — used when an address moves under a live composer. */
+export function moveActiveDraftId(
+  fromKey: string,
+  toKey: string,
+  draftId: string | undefined,
+): void {
   if (fromKey === toKey) return;
-  drafts.delete(fromKey);
-  writeComposerDraft(toKey, source);
+  activeDrafts.delete(fromKey);
+  writeActiveDraftId(toKey, draftId);
 }
 
 /** Test seam. */
 export function resetComposerDrafts(): void {
-  drafts.clear();
+  activeDrafts.clear();
+  draftText.clear();
 }

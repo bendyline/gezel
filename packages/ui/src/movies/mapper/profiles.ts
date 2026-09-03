@@ -12,7 +12,11 @@
 export type RenditionProfile = 'debug' | 'marketing';
 
 export interface RenditionKnobs {
-  /** Target duration in seconds (marketing only; debug derives its own). */
+  /**
+   * Duration CEILING in seconds (marketing only; debug derives its own).
+   * Natural pacing runs shorter untouched; only an over-long cut is
+   * compressed, and never below `minSceneSeconds` per scene.
+   */
   targetDurationSeconds: number;
   /** Per-scene dwell bounds in seconds. */
   minSceneSeconds: number;
@@ -29,20 +33,20 @@ export interface RenditionKnobs {
 export const RENDITION_KNOBS: Record<RenditionProfile, RenditionKnobs> = {
   debug: {
     targetDurationSeconds: 0,
-    minSceneSeconds: 2.5,
-    maxSceneSeconds: 12,
+    minSceneSeconds: 3.5,
+    maxSceneSeconds: 14,
     gapBeatThresholdSeconds: 60,
     gapBeatSeconds: 2,
     maxBlocks: 120,
     showTimestamps: true,
   },
   marketing: {
-    targetDurationSeconds: 115,
-    minSceneSeconds: 2,
-    maxSceneSeconds: 9,
+    targetDurationSeconds: 150,
+    minSceneSeconds: 4.5,
+    maxSceneSeconds: 14,
     gapBeatThresholdSeconds: Number.POSITIVE_INFINITY,
     gapBeatSeconds: 0,
-    maxBlocks: 28,
+    maxBlocks: 20,
     showTimestamps: false,
   },
 };

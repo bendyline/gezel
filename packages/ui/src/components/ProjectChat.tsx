@@ -246,6 +246,10 @@ function ProjectChatBody({
   // it for the (selectedGezel, project) pair; the timeline highlights it
   // as the active session; the composer posts into it.
   const [sessionId, setSessionId] = useState<string>('');
+  // The prompt draft the composer has open. Tracked here because both the
+  // composer and the thread picker act on it, and a draft with no thread
+  // yet has nothing else to hang off.
+  const [draftId, setDraftId] = useState<string>('');
   // The task the pill row (or the rail) last focused. It scopes BOTH the
   // SessionSwitcher's thread list and the composer's next send: without it
   // the switcher lists only non-task threads, decides the focused task
@@ -695,6 +699,8 @@ function ProjectChatBody({
                       : undefined
                   }
                   addressLineTrailing={composeModeTabs}
+                  draftId={draftId || undefined}
+                  onDraftIdChange={(next) => setDraftId(next ?? '')}
                   belowAddressLine={
                     <SessionSwitcher
                       gezelId={selectedGezel.id}
@@ -706,6 +712,8 @@ function ProjectChatBody({
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
                       onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
+                      activeDraftId={draftId || undefined}
+                      onDraftSelect={(next) => setDraftId(next ?? '')}
                       // A task scope is always an explicit navigation, so it
                       // keeps the ordinary newest-thread pick.
                       autoPickNewest={!startFreshThread || Boolean(activeTask)}

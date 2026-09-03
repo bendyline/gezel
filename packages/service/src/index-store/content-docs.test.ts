@@ -32,11 +32,22 @@ async function makeDocx(md: string): Promise<Uint8Array> {
   return new Uint8Array(ab);
 }
 
-// Successful document conversion requires a denyNet child, which currently
-// has an enforceable OS boundary only through macOS Seatbelt. Windows/Linux
-// fail closed before starting the parser; that policy is covered by the
-// sandbox-network tests.
-describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + search + read', () => {
+/** Build a real .pdf via squisq's exporter so we exercise the import path. */
+async function makePdf(md: string): Promise<Uint8Array> {
+  const { parseMarkdown } = (await import('@bendyline/squisq/markdown')) as unknown as {
+    parseMarkdown: (s: string) => unknown;
+  };
+  const fmt = (await import('@bendyline/squisq-formats')) as unknown as {
+    markdownDocToPdf: (doc: unknown) => Promise<ArrayBuffer>;
+  };
+  const ab = await fmt.markdownDocToPdf(parseMarkdown(md));
+  return new Uint8Array(ab);
+}
+
+// The converter is a fixed, shipped worker. Platforms with an enforceable OS
+// network boundary use it; Windows retains the remaining sandbox layers plus
+// the JS network neutralizer through the trusted-provenance lane.
+describe('doc-intel: docx conversion + search + read', () => {
   it('converts a .docx, indexes it, and answers search_docs / read_doc_as_markdown', async () => {
     await mkdir(join(dir, 'docs'), { recursive: true });
     const docx = await makeDocx(
@@ -81,5 +92,28 @@ describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + sear
     const read = await ci.readDocAsMarkdown('c', 'note.docx');
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('lazy conversion works');
+  }, 15_000);
+});
+
+describe('doc-intel: pdf conversion + search + read', () => {
+  it('converts a .pdf and keeps its markdown companion readable', async () => {
+    const pdf = await makePdf('# Field report\n\nThe lighthouse inspection is complete.\n');
+    await writeFile(join(dir, 'report.pdf'), pdf);
+
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(stats).not.toBeNull();
+    expect(stats!.docsConverted).toBe(1);
+
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => artifacts,
+      } as unknown as Store,
+      home,
+    );
+    const read = await ci.readDocAsMarkdown('c', 'report.pdf');
+    expect(read.found).toBe(true);
+    expect(read.markdown).toContain('lighthouse inspection');
+    expect(read.markdownPath).toBe('artifacts/shadow/report.pdf_files/report.md');
   }, 15_000);
 });

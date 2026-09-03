@@ -33,6 +33,13 @@ export const MOVIE_PALETTE = {
   chip: '#31405c',
 } as const;
 
+/** CSS font stacks resolved from the squisq theme the doc plays under. */
+export interface MovieFonts {
+  title: string;
+  body: string;
+  mono: string;
+}
+
 export interface SceneBlockContext {
   actors: Map<string, RunRecordingActor>;
   /** Recording-dir-relative media files the consumer can actually serve. */
@@ -40,6 +47,61 @@ export interface SceneBlockContext {
   profile: RenditionProfile;
   showTimestamps: boolean;
   runStartedAtMs: number;
+  fonts: MovieFonts;
+}
+
+/** Design basis the percent coordinates are laid out against. */
+const BASIS = { width: 1920, height: 1080 } as const;
+const LINE_HEIGHT = 1.35;
+
+/**
+ * How tall a text box must be for `body` at `fontSize` wrapped into
+ * `widthPct` of the frame — the same average-glyph-width estimate
+ * squisq's own templates size their captions with. Bubbles are sized
+ * from this so long excerpts never run past their background.
+ */
+function fitText(
+  body: string,
+  fontSize: number,
+  widthPct: number,
+  maxLines: number,
+): { lines: number; heightPct: number } {
+  const widthPx = (widthPct / 100) * BASIS.width;
+  const charsPerLine = Math.max(8, Math.floor(widthPx / (fontSize * 0.52)));
+  let lines = 0;
+  for (const paragraph of body.split('\n')) {
+    lines += Math.max(1, Math.ceil(paragraph.length / charsPerLine));
+  }
+  lines = Math.min(maxLines, lines);
+  return { lines, heightPct: ((lines * fontSize * LINE_HEIGHT) / BASIS.height) * 100 };
+}
+
+/** "Name · Role" — the crew are craftspeople; their trade is part of the credit. */
+function credit(actor: RunRecordingActor | undefined, fallbackName: string): string {
+  const name = actor?.name ?? fallbackName;
+  return actor?.role ? `${name}  ·  ${actor.role}` : name;
+}
+
+/**
+ * Authored layers carry no font of their own, so the renderer would fall
+ * back to the platform UI font (Segoe on Windows) — off-theme. Stamp the
+ * theme's stacks: title face for display lines, mono for tool chips and
+ * their detail, body for everything else. Layers that already name a
+ * font keep it.
+ */
+function applyThemeFonts(layers: Layer[], fonts: MovieFonts): Layer[] {
+  for (const layer of layers) {
+    if (layer.type !== 'text' || layer.content.style.fontFamily) continue;
+    const id = layer.id;
+    const face =
+      id.endsWith('-tool') || id.endsWith('-detail')
+        ? fonts.mono
+        : id.endsWith('-title') || id.endsWith('-verdict') || id.endsWith('-brand')
+          ? fonts.title
+          : fonts.body;
+    layer.content.style.fontFamily = face;
+  }
+  return layers;
 }
 
 export function sceneToBlock(
@@ -164,7 +226,7 @@ export function sceneToBlock(
     startTime: round2(timing.startTime),
     duration: round2(timing.duration),
     audioSegment: 0,
-    layers,
+    layers: applyThemeFonts(layers, ctx.fonts),
     transition: { type: scene.kind === 'artifact-produced' ? 'zoom' : 'fade', duration: 0.5 },
   };
 }
@@ -173,6 +235,7 @@ export function coverBlock(
   title: string,
   subtitle: string,
   timing: { startTime: number; duration: number },
+  fonts: MovieFonts,
 ): Block {
   const id = 'scene-cover';
   return {
@@ -180,32 +243,35 @@ export function coverBlock(
     startTime: round2(timing.startTime),
     duration: round2(timing.duration),
     audioSegment: 0,
-    layers: [
-      backgroundLayers(id),
-      text(`${id}-title`, title, {
-        x: '50%',
-        y: '44%',
-        width: '84%',
-        anchor: 'center',
-        fontSize: 84,
-        color: MOVIE_PALETTE.text,
-        bold: true,
-        align: 'center',
-      }),
-      ...(subtitle
-        ? [
-            text(`${id}-subtitle`, subtitle, {
-              x: '50%',
-              y: '58%',
-              width: '80%',
-              anchor: 'center',
-              fontSize: 34,
-              color: MOVIE_PALETTE.textMuted,
-              align: 'center',
-            }),
-          ]
-        : []),
-    ],
+    layers: applyThemeFonts(
+      [
+        backgroundLayers(id),
+        text(`${id}-title`, title, {
+          x: '50%',
+          y: '44%',
+          width: '84%',
+          anchor: 'center',
+          fontSize: 84,
+          color: MOVIE_PALETTE.text,
+          bold: true,
+          align: 'center',
+        }),
+        ...(subtitle
+          ? [
+              text(`${id}-subtitle`, subtitle, {
+                x: '50%',
+                y: '58%',
+                width: '80%',
+                anchor: 'center',
+                fontSize: 34,
+                color: MOVIE_PALETTE.textMuted,
+                align: 'center',
+              }),
+            ]
+          : []),
+      ],
+      fonts,
+    ),
     transition: { type: 'fade', duration: 0.7 },
   };
 }
@@ -214,6 +280,7 @@ export function outroBlock(
   recording: RunRecording,
   profile: RenditionProfile,
   timing: { startTime: number; duration: number },
+  fonts: MovieFonts,
 ): Block {
   const id = 'scene-outro';
   const layers: Layer[] = [backgroundLayers(id)];
@@ -271,7 +338,7 @@ export function outroBlock(
     startTime: round2(timing.startTime),
     duration: round2(timing.duration),
     audioSegment: 0,
-    layers,
+    layers: applyThemeFonts(layers, fonts),
     transition: { type: 'fade', duration: 0.7 },
   };
 }
@@ -303,7 +370,7 @@ function bubbleLayers(blockId: string, ctx: SceneBlockContext, opts: BubbleOpts)
   const name = opts.actor?.name ?? opts.fallbackName;
   const layers: Layer[] = [
     ...avatarLayers(blockId, ctx, opts.actor, name, { x: '12%', y: '30%' }),
-    text(`${blockId}-name`, name + (opts.label ? `  ·  ${opts.label}` : ''), {
+    text(`${blockId}-name`, credit(opts.actor, name) + (opts.label ? `  ·  ${opts.label}` : ''), {
       x: '21%',
       y: '22%',
       anchor: 'top-left',
@@ -311,24 +378,16 @@ function bubbleLayers(blockId: string, ctx: SceneBlockContext, opts: BubbleOpts)
       color: MOVIE_PALETTE.textMuted,
       bold: true,
     }),
-    {
-      type: 'shape',
-      id: `${blockId}-bubble`,
-      content: { shape: 'rect', fill: opts.fill, borderRadius: 18 },
-      position: { x: '21%', y: '27%', width: '62%', height: '46%', anchor: 'top-left' },
-      animation: { type: 'fadeIn', duration: 0.4 },
-    },
-    text(`${blockId}-text`, opts.text, {
-      x: '23.5%',
-      y: '31%',
-      width: '57%',
-      height: '38%',
-      anchor: 'top-left',
+    ...sizedBubble(blockId, opts.text, {
+      top: 27,
+      left: 21,
+      width: 62,
+      fill: opts.fill,
       fontSize: 32,
-      color: MOVIE_PALETTE.text,
-      italic: opts.italic,
       maxLines: 7,
-      animation: { type: 'typewriter', duration: Math.min(2.5, 0.4 + opts.text.length / 120) },
+      italic: opts.italic,
+      align: 'left',
+      typewriter: Math.min(2.5, 0.4 + opts.text.length / 120),
     }),
   ];
   return layers;
@@ -352,7 +411,7 @@ function toolLayers(
   ].filter((part): part is string => part !== undefined && part.length > 0);
   return [
     ...avatarLayers(blockId, ctx, actor, name, { x: '12%', y: '30%' }),
-    text(`${blockId}-name`, name, {
+    text(`${blockId}-name`, credit(actor, name), {
       x: '21%',
       y: '22%',
       anchor: 'top-left',
@@ -409,7 +468,7 @@ function delegationLayers(
   return [
     ...avatarLayers(`${blockId}-from`, ctx, from, fromName, { x: '26%', y: '26%' }),
     ...avatarLayers(`${blockId}-to`, ctx, to, toName, { x: '74%', y: '26%' }),
-    text(`${blockId}-from-name`, fromName, {
+    text(`${blockId}-from-name`, credit(from, fromName), {
       x: '26%',
       y: '40%',
       anchor: 'center',
@@ -418,7 +477,7 @@ function delegationLayers(
       bold: true,
       align: 'center',
     }),
-    text(`${blockId}-to-name`, toName, {
+    text(`${blockId}-to-name`, credit(to, toName), {
       x: '74%',
       y: '40%',
       anchor: 'center',
@@ -448,28 +507,78 @@ function delegationLayers(
       align: 'center',
     }),
     ...(scene.excerpt
-      ? [
-          {
-            type: 'shape',
-            id: `${blockId}-bubble`,
-            content: { shape: 'rect', fill: MOVIE_PALETTE.bubble, borderRadius: 18 },
-            position: { x: '50%', y: '64%', width: '66%', height: '32%', anchor: 'center' },
-            animation: { type: 'fadeIn', duration: 0.4, delay: 0.3 },
-          } satisfies Layer,
-          text(`${blockId}-text`, scene.excerpt, {
-            x: '50%',
-            y: '64%',
-            width: '60%',
-            height: '26%',
-            anchor: 'center',
-            fontSize: 32,
-            color: MOVIE_PALETTE.text,
-            align: 'center',
-            maxLines: 5,
-            animation: { type: 'typewriter', duration: 2, delay: 0.4 },
-          }),
-        ]
+      ? sizedBubble(blockId, scene.excerpt, {
+          top: 50,
+          left: 17,
+          width: 66,
+          fill: MOVIE_PALETTE.bubble,
+          fontSize: 32,
+          maxLines: 5,
+          align: 'center',
+          typewriter: 2,
+          delay: 0.4,
+        })
       : []),
+  ];
+}
+
+/**
+ * A speech bubble whose height follows its text: background rect plus
+ * top-left-anchored text with a fixed inset. Percent geometry on the
+ * design basis; `top`/`left`/`width` describe the bubble.
+ */
+function sizedBubble(
+  blockId: string,
+  body: string,
+  opts: {
+    top: number;
+    left: number;
+    width: number;
+    fill: string;
+    fontSize: number;
+    maxLines: number;
+    italic?: boolean;
+    align: 'left' | 'center';
+    typewriter: number;
+    delay?: number;
+  },
+): Layer[] {
+  const insetX = 2.5;
+  const insetY = 2.6;
+  const textWidth = opts.width - insetX * 2;
+  const fit = fitText(body, opts.fontSize, textWidth, opts.maxLines);
+  const bubbleHeight = fit.heightPct + insetY * 2;
+  return [
+    {
+      type: 'shape',
+      id: `${blockId}-bubble`,
+      content: { shape: 'rect', fill: opts.fill, borderRadius: 18 },
+      position: {
+        x: `${opts.left}%`,
+        y: `${opts.top}%`,
+        width: `${opts.width}%`,
+        height: `${round2(bubbleHeight)}%`,
+        anchor: 'top-left',
+      },
+      animation: { type: 'fadeIn', duration: 0.4, ...(opts.delay ? { delay: opts.delay } : {}) },
+    },
+    text(`${blockId}-text`, body, {
+      x: `${opts.left + insetX}%`,
+      y: `${opts.top + insetY}%`,
+      width: `${textWidth}%`,
+      height: `${round2(fit.heightPct)}%`,
+      anchor: 'top-left',
+      fontSize: opts.fontSize,
+      color: MOVIE_PALETTE.text,
+      italic: opts.italic,
+      align: opts.align,
+      maxLines: opts.maxLines,
+      animation: {
+        type: 'typewriter',
+        duration: opts.typewriter,
+        ...(opts.delay ? { delay: opts.delay } : {}),
+      },
+    }),
   ];
 }
 
