@@ -152,15 +152,7 @@ export async function* downloadWithRetry(
     if (attemptResult.kind === 'xet') {
       // HuggingFace serves this file via Xet content-addressed storage; the
       // reconstruction downloader speaks that protocol and drives its own
-      // retry/resume from here.
-      if (opts.maxBytes !== undefined) {
-        return {
-          kind: 'error',
-          error: 'Bounded downloads cannot use the Xet reconstruction path',
-          attemptsMade: budget.attemptsMade,
-          bytesWritten: existingPartialSize(partialPath),
-        };
-      }
+      // retry/resume from here, honoring the same byte cap.
       return yield* downloadXet({
         detection: attemptResult.detection,
         destPath: opts.destPath,
@@ -169,6 +161,7 @@ export async function* downloadWithRetry(
         maxRetries: opts.maxRetries,
         chunkTimeoutMs: opts.chunkTimeoutMs,
         signal: opts.signal,
+        maxBytes: opts.maxBytes,
       });
     }
     if (attemptResult.kind === 'ok') {

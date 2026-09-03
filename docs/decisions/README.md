@@ -18,3 +18,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0009](0009-observation-corpora.md) | Accepted | Observation corpora: tabular connector data, Parquet, and a local query engine |
 | [0010](0010-shared-band-prefix-reuse.md) | Accepted | Shared-band prompt-prefix reuse on MLX (cache keying + the never-lengthen invariant) |
 | [0011](0011-workspace-tables.md) | Accepted | Workspace spreadsheets and data files become queryable tables |
+| [0012](0012-gezk-open-format.md) | Accepted | gezk becomes an open format (0.5) published on Hugging Face |

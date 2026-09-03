@@ -121,6 +121,7 @@ import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { KnowledgeManager } from './knowledge/manager.js';
+import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
@@ -2094,6 +2095,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       : new KnowledgeManager({
           home,
           host: createWorkerCatalogHost(),
+          catalog,
+          history,
+          readConfig: () => store.readConfig(),
+          ...(machineEngine
+            ? { sharedInstaller: createSharedKnowledgeInstaller(machineEngine) }
+            : {}),
           projectPolicy: async (projectId) => {
             const project = await store.getProject(projectId);
             return project?.knowledgeCatalogs ?? null;
@@ -2104,6 +2111,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     search.setKnowledgeSearch({
       search: (query, opts) => knowledge.searchUnified(query, opts),
     });
+    knowledge.startAutoUpdateTimer();
   }
   // Drop the cached name catalog when a project/gezel/document is
   // created/renamed/deleted, so a just-created entity is quick-openable

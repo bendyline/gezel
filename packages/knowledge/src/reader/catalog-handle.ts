@@ -1,9 +1,13 @@
 /**
  * One mounted catalog: the router database plus lazily opened shards, and
- * the two-stage query flow (gezk-format-v1.md §3, §9):
+ * the two-stage query flow (the gezk spec §8 and §9):
  *
  *   embed query (caller) → centroid routing → per shard: bit-hamming KNN
  *   top-K → int8 rerank → fuse.
+ *
+ * Stage 1 runs in memory: a shard's sign-bit rows are loaded once into a
+ * contiguous array (9.6 MB for a full 200k-chunk shard) and scanned with a
+ * popcount, so no vector extension is needed to read a catalog.
  *
  * The handle is synchronous (node:sqlite) and single-threaded by design —
  * the daemon confines every handle to its knowledge worker thread; the CLI
@@ -21,6 +25,7 @@ import {
   rerankK,
 } from '../format/constants.js';
 import { quantizeBinary, rerankScore } from '../format/quantize.js';
+import { type ShardBitIndex, hammingTopK } from './bit-scan.js';
 import { documentFtsTopIds, sanitizeFtsQuery } from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
 
@@ -66,8 +71,12 @@ interface ShardInfo {
   chunkCount: number;
 }
 
+/** Resident sign-bit budget across mounted shards before the oldest is dropped. */
+const BIT_INDEX_BUDGET_BYTES = 256 * 1024 * 1024;
+
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
+  private readonly bitIndexes = new Map<string, ShardBitIndex>();
   readonly meta: Record<string, string>;
   readonly shards: ShardInfo[];
 
@@ -101,6 +110,7 @@ export class CatalogHandle {
   close(): void {
     for (const conn of this.connections.values()) conn.close();
     this.connections.clear();
+    this.bitIndexes.clear();
   }
 
   /** Integrity check for the router connection, used by deep validation. */
@@ -143,6 +153,64 @@ export class CatalogHandle {
       this.connections.set(shard.path, conn);
     }
     return conn.db;
+  }
+
+  /**
+   * A shard's sign-bit rows as one contiguous array, loaded on first use and
+   * kept while the resident budget allows. Chunk ids must be dense from 1 —
+   * the row index IS the id — so a gap is a corrupt shard, not a sparse one.
+   */
+  private shardBits(shard: ShardInfo): ShardBitIndex {
+    const cached = this.bitIndexes.get(shard.path);
+    if (cached) return cached;
+    const db = this.shardDb(shard);
+    const span = db
+      .prepare(
+        'SELECT COUNT(*) AS n, MIN(chunk_id) AS lo, MAX(chunk_id) AS hi FROM chunk_vectors_bit',
+      )
+      .get() as { n: number | bigint; lo: number | bigint | null; hi: number | bigint | null };
+    const rows = Number(span.n);
+    if (rows > 0 && (Number(span.lo) !== 1 || Number(span.hi) !== rows)) {
+      throw new CatalogOpenError(`chunk ids are not dense in ${shard.path}`, 'corrupt');
+    }
+    const bytesPerRow = Math.ceil(this.dimensions() / 8);
+    const bits = new Uint8Array(rows * bytesPerRow);
+    const rowsIter = db
+      .prepare('SELECT chunk_id, v FROM chunk_vectors_bit ORDER BY chunk_id')
+      .iterate() as Iterable<{ chunk_id: number | bigint; v: Uint8Array }>;
+    for (const row of rowsIter) {
+      if (row.v.byteLength !== bytesPerRow) {
+        throw new CatalogOpenError(
+          `bit vector width ${row.v.byteLength} != ${bytesPerRow} in ${shard.path}`,
+          'corrupt',
+        );
+      }
+      bits.set(row.v, (Number(row.chunk_id) - 1) * bytesPerRow);
+    }
+    const index: ShardBitIndex = { bits, bytesPerRow, rows };
+    let resident = bits.byteLength;
+    for (const other of this.bitIndexes.values()) resident += other.bits.byteLength;
+    for (const [key, other] of this.bitIndexes) {
+      if (resident <= BIT_INDEX_BUDGET_BYTES) break;
+      this.bitIndexes.delete(key);
+      resident -= other.bits.byteLength;
+    }
+    this.bitIndexes.set(shard.path, index);
+    return index;
+  }
+
+  /** The embedding dimension from the router's profile echo. */
+  private dimensions(): number {
+    const raw = this.meta.embedding_profile_json;
+    if (raw) {
+      try {
+        const dims = (JSON.parse(raw) as { dimensions?: unknown }).dimensions;
+        if (typeof dims === 'number' && dims > 0) return dims;
+      } catch {
+        /* fall through to the corrupt error */
+      }
+    }
+    throw new CatalogOpenError('router meta lacks a usable embedding profile', 'corrupt');
   }
 
   /** Resolve a manifest/router path without allowing it to escape the catalog. */
@@ -331,18 +399,16 @@ export class CatalogHandle {
    * after global cross-catalog routing has already spent the S budget.
    */
   searchShards(queryVector: Float32Array, shardIds: number[], finalK: number): CatalogChunkHit[] {
-    const queryBits = Buffer.from(quantizeBinary(queryVector));
+    const queryBits = quantizeBinary(queryVector);
     const hits: CatalogChunkHit[] = [];
     for (const shardId of shardIds) {
       const shard = this.shards.find((s) => s.id === shardId);
       if (!shard) continue;
       const db = this.shardDb(shard);
       const k = rerankK(finalK, shard.chunkCount);
-      const candidates = db
-        .prepare(
-          'SELECT chunk_id FROM vec_chunks WHERE embedding MATCH vec_bit(?) AND k = ? ORDER BY distance',
-        )
-        .all(queryBits, BigInt(k)) as Array<{ chunk_id: number | bigint }>;
+      const candidates = hammingTopK(this.shardBits(shard), queryBits, k).map((hit) => ({
+        chunk_id: hit.chunkId,
+      }));
       if (candidates.length === 0) continue;
       const getInt8 = db.prepare('SELECT v FROM chunk_vectors_int8 WHERE chunk_id = ?');
       const reranked = candidates
@@ -418,25 +484,19 @@ export class CatalogHandle {
   }
 
   /**
-   * Embedder-free integrity smoke (§6.3): chunk 1's own bit vector must be
-   * its own nearest neighbor — proves the extension parses this file's vec
-   * blobs. Returns false instead of throwing (callers report a reason).
+   * Embedder-free integrity smoke: chunk 1's own bit vector must be its own
+   * nearest neighbor — proves the shard's vectors load and scan. Returns
+   * false instead of throwing (callers report a reason).
    */
   selfKnnSmoke(shardId: number): boolean {
     const shard = this.shards.find((s) => s.id === shardId);
     if (!shard) return false;
     try {
-      const db = this.shardDb(shard);
-      const first = db.prepare('SELECT embedding FROM vec_chunks WHERE chunk_id = 1').get() as
-        | { embedding: Uint8Array }
-        | undefined;
-      if (!first) return false;
-      const nearest = db
-        .prepare(
-          'SELECT chunk_id FROM vec_chunks WHERE embedding MATCH vec_bit(?) AND k = 1 ORDER BY distance',
-        )
-        .get(Buffer.from(first.embedding)) as { chunk_id: number | bigint } | undefined;
-      return nearest !== undefined && Number(nearest.chunk_id) === 1;
+      const index = this.shardBits(shard);
+      if (index.rows === 0) return false;
+      const first = index.bits.subarray(0, index.bytesPerRow);
+      const nearest = hammingTopK(index, first, 1)[0];
+      return nearest !== undefined && nearest.chunkId === 1 && nearest.distance === 0;
     } catch {
       return false;
     }

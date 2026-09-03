@@ -215,7 +215,12 @@ export function CatalogBrowser({
     return out;
   }, [items, query, filterTags, filter, activeCategory, kind]);
 
-  const isModelCatalog = kind === 'chat-model' || kind === 'image-model' || kind === 'video-model';
+  // Knowledge catalogs are downloads too: same card chrome as the model kinds.
+  const isModelCatalog =
+    kind === 'chat-model' ||
+    kind === 'image-model' ||
+    kind === 'video-model' ||
+    kind === 'knowledge-catalog';
 
   return (
     <div className={`catalog-browser${isModelCatalog ? ' catalog-browser--models' : ''}`}>
@@ -267,6 +272,13 @@ export function CatalogBrowser({
                 <CatalogItemLogo item={item} />
                 <div className="catalog-item-head">
                   <div className="catalog-item-name">{item.manifest.name}</div>
+                  {item.manifest.kind === 'knowledge-catalog' && (
+                    <div className="catalog-item-attribution">
+                      <div>
+                        Published by <strong>{item.manifest.maintainer.name}</strong>
+                      </div>
+                    </div>
+                  )}
                   {attribution && (
                     <div className="catalog-item-attribution">
                       <div>

@@ -31,7 +31,7 @@ export default defineConfig({
     'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
     // Owns every knowledge-catalog SQLite connection: CatalogHandle is
     // synchronous (node:sqlite), so shard scans must run off the daemon
-    // loop (gezk-format-v1.md §9).
+    // loop (docs/gezk-format.md).
     'knowledge/search-worker': 'src/knowledge/search-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing

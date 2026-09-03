@@ -1,38 +1,51 @@
 /**
  * Machine-side knowledge asset broker (docs/service-boundaries.md,
- * `machine-knowledge-assets`): a narrow installer of SIGNED COORDINATES into
+ * `machine-knowledge-assets`): a narrow installer of TRUSTED COORDINATES into
  * the machine-shared asset store. It never receives queries, prompts, chunk
- * requests, project/session/gezel ids, or user paths — the request shape is
- * `TrustedKnowledgeCoordinate`, nothing else, and archive bytes are resolved
- * broker-side (today: the operator-provisioned local registry directory,
- * `GEZEL_KNOWLEDGE_REGISTRY_DIR`; the Phase-6 signed CDN registry plugs into
- * the same seam). ACL publication follows the shared-model pattern and its
- * SCM-1066 failure posture: a permission repair failure degrades the one
- * catalog, never the service.
+ * requests, project/session/gezel ids, user paths, or URLs — the request
+ * shape is `TrustedKnowledgeCoordinate`, nothing else, and archive bytes are
+ * resolved broker-side in a fixed ladder: the operator drop directory
+ * (`GEZEL_KNOWLEDGE_REGISTRY_DIR`), the shipped gilde `knowledge-catalog`
+ * pin (the same trust root the user daemon uses), then the optional signed
+ * publisher registry (`GEZEL_KNOWLEDGE_REGISTRY_URL`). Installs run as
+ * background jobs in a ChatModelInstallRegistry keyed by coordinate, so a
+ * requesting daemon can stream progress, disconnect without abandoning the
+ * download, attach again, or cancel explicitly. ACL publication follows the
+ * shared-model pattern and its SCM-1066 failure posture: a permission repair
+ * failure degrades the one catalog, never the service.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import type { KnowledgeMachineInventory, TrustedKnowledgeCoordinate } from '@bendyline/gezel';
+import type {
+  KnowledgeCatalogRef,
+  KnowledgeInstallEvent,
+  KnowledgeMachineInventory,
+  KnowledgeRegistryIndex,
+  TrustedKnowledgeCoordinate,
+} from '@bendyline/gezel';
 import {
   KnowledgeMachineInventorySchema,
   TrustedKnowledgeCoordinateSchema,
   awakeTimeoutSignal,
   createLogger,
 } from '@bendyline/gezel';
-import type { KnowledgeRegistryIndex } from '@bendyline/gezel';
+import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   extractGezkVerified,
   fetchKnowledgeRegistry,
   findRegistryEntry,
-  readGezkManifest,
+  inspectGezkArchive,
   validateExtractedCatalog,
 } from '@bendyline/gezel-knowledge';
 import { isPathInside, realpathContained } from '../fs/safe-paths.js';
+import { resolveKnowledgeCatalogSource } from '../knowledge/catalog-source.js';
 import { loadKnowledgeTrustAnchors } from '../knowledge/trust-anchors.js';
+import { ChatModelInstallRegistry } from '../models/install-registry.js';
 import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
+import { downloadWithRetry } from '../utils/download-with-retry.js';
 
 const log = createLogger('knowledge-assets');
 
@@ -46,19 +59,45 @@ export const KNOWLEDGE_REGISTRY_DIR_ENV = 'GEZEL_KNOWLEDGE_REGISTRY_DIR';
 export const KNOWLEDGE_REGISTRY_URL_ENV = 'GEZEL_KNOWLEDGE_REGISTRY_URL';
 
 const REGISTRY_CACHE_TTL_MS = 5 * 60 * 1000;
+const REGISTRY_FETCH_BUDGET_MS = 30_000;
 const ARCHIVE_DOWNLOAD_BUDGET_MS = 30 * 60 * 1000;
+/** Finished installs stay attachable long enough for a slow requester to observe the result. */
+const FINISHED_TTL_MS = 60_000;
+
+export type EnsureErrorCode =
+  | 'unavailable'
+  | 'not-found'
+  | 'digest-mismatch'
+  | 'invalid'
+  | 'cancelled';
 
 export type EnsureOutcome =
   | { status: 'ready'; path: string }
+  | { status: 'error'; code: EnsureErrorCode; error: string };
+
+/**
+ * The broker's install stream: the shared install-event vocabulary, with
+ * the outcome code riding on errors so the one-shot `ensure` can map it to
+ * an HTTP status. Absent on the registry's own synthesized cancel error.
+ */
+export type BrokerInstallEvent =
+  | Exclude<KnowledgeInstallEvent, { type: 'error' }>
   | {
-      status: 'error';
-      code: 'unavailable' | 'not-found' | 'digest-mismatch' | 'invalid';
+      type: 'error';
       error: string;
+      code?: EnsureErrorCode;
+      mismatch?: { expected: string; actual: string };
     };
 
 export interface KnowledgeAssetsBroker {
   available(): boolean;
+  /** Install (or find) the coordinate and wait for the result. */
   ensure(coordinate: TrustedKnowledgeCoordinate): Promise<EnsureOutcome>;
+  /** Start the install as a background job, or attach to the running one. */
+  startStream(coordinate: TrustedKnowledgeCoordinate): { key: string; alreadyRunning: boolean };
+  cancel(coordinate: TrustedKnowledgeCoordinate): boolean;
+  /** The job registry `startStream` feeds; subscribe by the key it returns. */
+  readonly installs: ChatModelInstallRegistry<BrokerInstallEvent, TrustedKnowledgeCoordinate>;
   status(coordinate: TrustedKnowledgeCoordinate): Promise<{ installed: boolean }>;
   inventory(): Promise<KnowledgeMachineInventory>;
   reclaim(coordinate: TrustedKnowledgeCoordinate): Promise<{ removed: boolean }>;
@@ -84,13 +123,23 @@ export function sharedKnowledgeVersionDir(
   );
 }
 
+export function coordinateKey(coordinate: TrustedKnowledgeCoordinate): string {
+  return `${coordinate.publisherId}/${coordinate.catalogId}/${coordinate.version}/${coordinate.expectedDigest}`;
+}
+
+type LocatedArchive =
+  | { kind: 'local'; path: string }
+  | { kind: 'remote'; url: string; archiveBytes: number; source: 'catalog' | 'registry' };
+
 export function createKnowledgeAssetsBroker(
   env: NodeJS.ProcessEnv = process.env,
+  opts: {
+    /** The gilde loader: a `knowledge-catalog` pin is the second rung of the ladder. */
+    catalog?: CatalogService;
+  } = {},
 ): KnowledgeAssetsBroker {
   const root = sharedKnowledgeRoot(env);
   const inventoryFile = root ? join(root, 'inventory.json') : null;
-  /** Serialize ensure calls per coordinate so concurrent daemons coalesce. */
-  const inFlight = new Map<string, Promise<EnsureOutcome>>();
 
   const readInventory = async (): Promise<KnowledgeMachineInventory> => {
     if (!inventoryFile) return { version: 1, catalogs: [] };
@@ -131,7 +180,10 @@ export function createKnowledgeAssetsBroker(
       return null;
     }
     try {
-      const { registry, keyId } = await fetchKnowledgeRegistry(url, { anchors });
+      const { registry, keyId } = await fetchKnowledgeRegistry(url, {
+        anchors,
+        signal: awakeTimeoutSignal(REGISTRY_FETCH_BUDGET_MS),
+      });
       log.info(`knowledge registry verified (publisher ${registry.publisher.id}, key ${keyId})`);
       registryCache = { url, fetchedAt: Date.now(), registry };
       return registry;
@@ -144,60 +196,42 @@ export function createKnowledgeAssetsBroker(
   };
 
   /**
-   * Download a registry-located archive into the broker's staging area. The
-   * registry's declared byte size is a hard cap (early abort on oversize);
-   * the caller still verifies the coordinate digest on the result.
+   * The gilde rung: the shipped `knowledge-catalog` entry for this id and
+   * version, accepted only when its publisher and pinned sha256 equal the
+   * coordinate's — a pin that disagrees is not this rung's answer.
    */
-  const downloadArchive = async (
-    url: string,
-    maxBytes: number,
-    destination: string,
-  ): Promise<void> => {
-    const response = await fetch(url, {
-      signal: awakeTimeoutSignal(ARCHIVE_DOWNLOAD_BUDGET_MS),
-      redirect: 'follow',
-    });
-    if (!response.ok || !response.body) {
-      throw new Error(`archive download failed: HTTP ${response.status}`);
+  const locateFromCatalog = async (
+    coordinate: TrustedKnowledgeCoordinate,
+  ): Promise<LocatedArchive | null> => {
+    if (!opts.catalog) return null;
+    const resolved = await resolveKnowledgeCatalogSource(
+      opts.catalog,
+      coordinate.catalogId,
+      coordinate.version,
+    ).catch(() => null);
+    if (!resolved) return null;
+    if (
+      resolved.coordinate.publisherId !== coordinate.publisherId ||
+      resolved.sha256 !== coordinate.expectedDigest
+    ) {
+      return null;
     }
-    await mkdir(dirname(destination), { recursive: true });
-    const out = createWriteStream(destination);
-    let received = 0;
-    try {
-      for await (const chunk of response.body) {
-        const buffer = Buffer.from(chunk);
-        received += buffer.byteLength;
-        if (received > maxBytes) {
-          throw new Error(`archive exceeds its registry-declared size (${maxBytes} bytes)`);
-        }
-        if (!out.write(buffer)) {
-          await new Promise<void>((drained, failed) => {
-            out.once('drain', drained);
-            out.once('error', failed);
-          });
-        }
-      }
-      await new Promise<void>((closed, failed) => {
-        out.end(() => closed());
-        out.once('error', failed);
-      });
-    } catch (err) {
-      out.destroy();
-      await rm(destination, { force: true }).catch(() => {});
-      throw err;
-    }
+    return {
+      kind: 'remote',
+      url: resolved.url,
+      archiveBytes: resolved.archiveBytes,
+      source: 'catalog',
+    };
   };
 
   /**
-   * Broker-side archive resolution — the registry seam. First the operator
-   * drop directory (a file whose sha256 equals the coordinate's expected
-   * digest), then the signed CDN registry when `GEZEL_KNOWLEDGE_REGISTRY_URL`
-   * is configured. Nothing about the requesting daemon reaches either source.
-   * Downloaded archives are ephemeral — deleted after extraction.
+   * Broker-side archive resolution — the ladder. Nothing about the
+   * requesting daemon reaches any rung. Downloaded archives are ephemeral:
+   * deleted after extraction.
    */
-  const resolveArchive = async (
+  const locateArchive = async (
     coordinate: TrustedKnowledgeCoordinate,
-  ): Promise<{ path: string; ephemeral: boolean } | null> => {
+  ): Promise<LocatedArchive | null> => {
     const registryDir = env[KNOWLEDGE_REGISTRY_DIR_ENV]?.trim();
     if (registryDir && isAbsolute(registryDir)) {
       const preferred = join(registryDir, `${coordinate.catalogId}-${coordinate.version}.gezk`);
@@ -209,80 +243,191 @@ export function createKnowledgeAssetsBroker(
       }
       for (const candidate of candidates) {
         if ((await hashFile(candidate)) === coordinate.expectedDigest) {
-          return { path: candidate, ephemeral: false };
+          return { kind: 'local', path: candidate };
         }
       }
     }
 
+    const pinned = await locateFromCatalog(coordinate);
+    if (pinned) return pinned;
+
     const registry = await fetchRegistry();
-    if (registry && root) {
+    if (registry) {
       const entry = findRegistryEntry(registry, {
         publisherId: coordinate.publisherId,
         catalogId: coordinate.catalogId,
         version: coordinate.version,
         contentDigest: coordinate.expectedDigest,
       });
-      if (!entry) return null;
-      const download = join(
-        root,
-        'downloads',
-        `${coordinate.expectedDigest.slice(0, 16)}.gezk.partial`,
-      );
-      await assertKnowledgePathContained(root, download);
-      try {
-        await downloadArchive(entry.url, entry.archiveBytes, download);
-      } catch (err) {
-        log.warn(
-          `registry archive download failed for ${coordinate.catalogId}@${coordinate.version}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return null;
+      if (entry) {
+        return {
+          kind: 'remote',
+          url: entry.url,
+          archiveBytes: entry.archiveBytes,
+          source: 'registry',
+        };
       }
-      if ((await hashFile(download)) !== coordinate.expectedDigest) {
-        await rm(download, { force: true }).catch(() => {});
-        log.warn(
-          `registry archive for ${coordinate.catalogId}@${coordinate.version} failed digest verification`,
-        );
-        return null;
-      }
-      return { path: download, ephemeral: true };
     }
     return null;
   };
 
-  const ensureImpl = async (coordinate: TrustedKnowledgeCoordinate): Promise<EnsureOutcome> => {
-    if (!root)
-      return { status: 'error', code: 'unavailable', error: 'shared asset store not configured' };
+  /**
+   * Download a located archive into the broker's staging area through the
+   * shared downloader (resume, retry, stall detection, Xet), streaming its
+   * progress. The declared byte size is a hard cap; the caller verifies the
+   * coordinate digest on the result. Returns the failure message, or null.
+   * A budget timeout or a cancel leaves the `.partial` in place so the next
+   * request resumes instead of restarting.
+   */
+  async function* downloadArchive(
+    url: string,
+    maxBytes: number,
+    destination: string,
+    signal: AbortSignal,
+  ): AsyncGenerator<BrokerInstallEvent, string | null> {
+    await mkdir(dirname(destination), { recursive: true });
+    const download = downloadWithRetry({
+      url,
+      destPath: destination,
+      approxSizeBytes: maxBytes,
+      maxBytes,
+      signal,
+    });
+    try {
+      while (true) {
+        const step = await download.next();
+        if (step.done) {
+          const result = step.value;
+          if (result.kind === 'ok') {
+            await rm(destination, { force: true });
+            await rename(`${destination}.partial`, destination);
+            return null;
+          }
+          if (result.kind === 'aborted') {
+            return 'archive download ran out of its time budget; it resumes on the next request';
+          }
+          return result.error;
+        }
+        if (step.value.type === 'progress') {
+          yield {
+            type: 'progress',
+            phase: 'download',
+            bytesDone: step.value.bytesWritten,
+            bytesTotal: step.value.totalBytes,
+          };
+        } else {
+          yield {
+            type: 'retrying',
+            attempt: step.value.attempt,
+            maxAttempts: step.value.maxAttempts,
+            delayMs: step.value.delayMs,
+            reason: step.value.reason,
+          };
+        }
+      }
+    } finally {
+      // A cancel closes this generator at a yield; unwind the download too
+      // so its file handle does not outlive the job.
+      await download.return(undefined as never).catch(() => {});
+    }
+  }
+
+  async function* ensureEvents(
+    coordinate: TrustedKnowledgeCoordinate,
+  ): AsyncGenerator<BrokerInstallEvent> {
+    if (!root) {
+      yield { type: 'error', code: 'unavailable', error: 'shared asset store not configured' };
+      return;
+    }
     await mkdir(root, { recursive: true });
     const target = sharedKnowledgeVersionDir(root, coordinate);
     await assertKnowledgePathContained(root, target);
+    const ref: KnowledgeCatalogRef = {
+      publisherId: coordinate.publisherId,
+      catalogId: coordinate.catalogId,
+      version: coordinate.version,
+      contentDigest: coordinate.expectedDigest,
+      storageScope: 'machine-shared',
+    };
     if (await stat(join(target, 'manifest.json')).catch(() => null)) {
-      return { status: 'ready', path: target };
+      yield { type: 'done', ref, rootDir: target, storageScope: 'machine-shared' };
+      return;
     }
-    const resolved = await resolveArchive(coordinate);
-    if (!resolved) {
-      return {
-        status: 'error',
+    const located = await locateArchive(coordinate);
+    if (!located) {
+      yield {
+        type: 'error',
         code: 'not-found',
         error: `no archive for ${coordinate.catalogId}@${coordinate.version} with digest ${coordinate.expectedDigest.slice(0, 16)}… in the machine knowledge registry`,
       };
+      return;
     }
-    const archive = resolved.path;
 
+    // The abort covers a cancel that lands while the download is mid-flight;
+    // the awake budget bounds a download nobody cancelled.
+    const abort = new AbortController();
+    let archive: string | null = null;
+    let ephemeral = false;
     try {
-      const manifest = await readGezkManifest(archive).catch(() => null);
+      if (located.kind === 'local') {
+        archive = located.path;
+      } else {
+        archive = join(root, 'downloads', `${coordinate.expectedDigest.slice(0, 16)}.gezk`);
+        await assertKnowledgePathContained(root, archive);
+        ephemeral = true;
+        const failure = yield* downloadArchive(
+          located.url,
+          located.archiveBytes,
+          archive,
+          AbortSignal.any([abort.signal, awakeTimeoutSignal(ARCHIVE_DOWNLOAD_BUDGET_MS)]),
+        );
+        if (failure) {
+          log.warn(
+            `${located.source} archive download failed for ${coordinate.catalogId}@${coordinate.version}: ${failure}`,
+          );
+          yield { type: 'error', code: 'not-found', error: failure };
+          return;
+        }
+        yield { type: 'verifying' };
+        const actual = await hashFile(archive);
+        if (actual !== coordinate.expectedDigest) {
+          await rm(archive, { force: true }).catch(() => {});
+          ephemeral = false;
+          log.warn(
+            `${located.source} archive for ${coordinate.catalogId}@${coordinate.version} failed digest verification`,
+          );
+          yield {
+            type: 'error',
+            code: 'digest-mismatch',
+            error: `archive sha256 mismatch: expected ${coordinate.expectedDigest}, got ${actual}`,
+            mismatch: { expected: coordinate.expectedDigest, actual },
+          };
+          return;
+        }
+      }
+
+      const inspection = await inspectGezkArchive(archive).catch(() => null);
+      const manifest = inspection?.manifest;
       if (
         !manifest ||
         manifest.publisher.id !== coordinate.publisherId ||
         manifest.id !== coordinate.catalogId ||
         manifest.version !== coordinate.version
       ) {
-        return {
-          status: 'error',
+        yield {
+          type: 'error',
           code: 'invalid',
           error: 'archive manifest identity does not match the trusted coordinate',
         };
+        return;
       }
 
+      yield {
+        type: 'progress',
+        phase: 'extract',
+        bytesDone: 0,
+        bytesTotal: inspection.totalUncompressedBytes,
+      };
       const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
       try {
         await mkdir(dirname(target), { recursive: true });
@@ -291,25 +436,29 @@ export function createKnowledgeAssetsBroker(
         const report = await validateExtractedCatalog(staging, { deep: true });
         if (!report.ok) {
           const failed = report.checks.find((c) => !c.ok);
-          return {
-            status: 'error',
+          yield {
+            type: 'error',
             code: 'invalid',
             error: `catalog failed validation: ${failed?.name}${failed?.detail ? ` (${failed.detail})` : ''}`,
           };
+          return;
         }
         await assertKnowledgePathContained(root, target);
         await rm(target, { recursive: true, force: true });
         await rename(staging, target);
       } catch (err) {
-        await rm(staging, { recursive: true, force: true }).catch(() => {});
-        return {
-          status: 'error',
+        yield {
+          type: 'error',
           code: 'invalid',
           error: err instanceof Error ? err.message : String(err),
         };
+        return;
+      } finally {
+        await rm(staging, { recursive: true, force: true }).catch(() => {});
       }
     } finally {
-      if (resolved.ephemeral) await rm(archive, { force: true }).catch(() => {});
+      abort.abort();
+      if (ephemeral && archive) await rm(archive, { force: true }).catch(() => {});
     }
 
     // ACL publication — per-item, NEVER fatal (the SCM-1066 lesson).
@@ -333,20 +482,55 @@ export function createKnowledgeAssetsBroker(
       bytes,
     });
     await writeInventory(inventory);
-    return { status: 'ready', path: target };
+    yield { type: 'done', ref, rootDir: target, storageScope: 'machine-shared' };
+  }
+
+  const installs = new ChatModelInstallRegistry<BrokerInstallEvent, TrustedKnowledgeCoordinate>({
+    engine: 'knowledge-assets',
+    run: (_key, coordinate) => ensureEvents(coordinate),
+    finishedTtlMs: FINISHED_TTL_MS,
+  });
+
+  const startStream = (coordinate: TrustedKnowledgeCoordinate) => {
+    const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
+    const key = coordinateKey(trusted);
+    const { alreadyRunning } = installs.start(key, trusted);
+    return { key, alreadyRunning };
   };
 
   return {
+    installs,
     available: () => root !== null,
+    startStream,
+    cancel: (coordinate) =>
+      installs.cancel(coordinateKey(TrustedKnowledgeCoordinateSchema.parse(coordinate))),
     ensure: (coordinate) => {
-      const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
-      const key = `${trusted.publisherId}/${trusted.catalogId}/${trusted.version}/${trusted.expectedDigest}`;
-      let promise = inFlight.get(key);
-      if (!promise) {
-        promise = ensureImpl(trusted).finally(() => inFlight.delete(key));
-        inFlight.set(key, promise);
-      }
-      return promise;
+      const { key } = startStream(coordinate);
+      return new Promise<EnsureOutcome>((resolveOutcome) => {
+        let settled = false;
+        let unsubscribe: (() => void) | null = null;
+        const settle = (outcome: EnsureOutcome) => {
+          if (settled) return;
+          settled = true;
+          resolveOutcome(outcome);
+          unsubscribe?.();
+        };
+        unsubscribe = installs.subscribe(key, (event) => {
+          if (event.type === 'done') settle({ status: 'ready', path: event.rootDir });
+          else if (event.type === 'error') {
+            settle({ status: 'error', code: event.code ?? 'cancelled', error: event.error });
+          }
+        });
+        if (!unsubscribe) {
+          settle({
+            status: 'error',
+            code: 'unavailable',
+            error: 'install ended before it could be observed',
+          });
+        } else if (settled) {
+          unsubscribe();
+        }
+      });
     },
     status: async (coordinate) => {
       if (!root) return { installed: false };
@@ -428,8 +612,8 @@ async function treeBytes(dir: string): Promise<number> {
 }
 
 async function assertKnowledgePathContained(root: string, target: string): Promise<void> {
-  if (!isPathInside(target, root) || !(await realpathContained(root, target))) {
-    throw new Error(`refusing a catalog path outside the shared knowledge root: ${target}`);
+  if (!(isPathInside(target, root) && (await realpathContained(root, target)))) {
+    throw new Error(`refusing a shared knowledge path outside the asset root: ${target}`);
   }
 }
 

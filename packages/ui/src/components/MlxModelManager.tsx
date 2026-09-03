@@ -18,6 +18,7 @@ import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
+import { InstallProgressRow } from './InstallProgressRow.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
@@ -913,35 +914,14 @@ function InstallProgress({
   }
   const indeterminate = inst.phase !== 'downloading' || !known;
   return (
-    <div
-      className={`ollama-pull${inst.error ? ' ollama-pull-error' : inst.retrying ? ' ollama-pull-warning' : ''}`}
-    >
-      <div className="ollama-pull-head">
-        <code>{inst.catalogId}</code>
-        <span className="muted small">{phaseLabel}</span>
-        {inst.error ? (
-          <button type="button" className="gz-link-button" onClick={onRetry}>
-            Retry
-          </button>
-        ) : (
-          /* Cancel always available: installs are server-owned background
-             jobs, so this view can cancel remote-origin rows too. */
-          <button type="button" className="gz-link-button" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {indeterminate ? (
-        <div className="ollama-pull-bar ollama-pull-bar-indeterminate">
-          <div className="ollama-pull-bar-fill" />
-        </div>
-      ) : (
-        <div className="ollama-pull-bar">
-          <div className="ollama-pull-bar-fill" style={{ width: `${pct}%` }} />
-          <span className="ollama-pull-bar-label">{pct}%</span>
-        </div>
-      )}
-    </div>
+    <InstallProgressRow
+      title={<code>{inst.catalogId}</code>}
+      status={phaseLabel}
+      percent={indeterminate ? null : pct}
+      tone={inst.error ? 'error' : inst.retrying ? 'warning' : 'normal'}
+      onCancel={onCancel}
+      onRetry={onRetry}
+    />
   );
 }
 

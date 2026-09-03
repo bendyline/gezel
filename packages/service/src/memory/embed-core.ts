@@ -14,7 +14,15 @@
  */
 
 import { createHash } from 'node:crypto';
-import { createLogger } from '@bendyline/gezel';
+import { type KnowledgeEmbeddingProfile, createLogger } from '@bendyline/gezel';
+import {
+  EmbedderUnavailableError,
+  KNOWLEDGE_EMBEDDING_PROFILES,
+  type ProfileEmbedder,
+  createProfileEmbedder,
+  resolveTransformersModelOptions,
+  verifyProfileArtifacts,
+} from '@bendyline/gezel-knowledge';
 import {
   HF_CACHE_DIR_ENV,
   TRANSFORMERS_MODULE,
@@ -59,6 +67,34 @@ const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-en-v1.5';
 
 export function embedModelId(): string {
   return process.env.GEZEL_EMBED_MODEL || DEFAULT_EMBED_MODEL;
+}
+
+/**
+ * The registered knowledge profile the daemon's own model IS, when the
+ * configured model is one of them (the default bge install; `null` for a
+ * custom `GEZEL_EMBED_MODEL`). The pin fixes how the pipeline is loaded —
+ * the exact graph and precision, never a runtime default — and, once its
+ * cached files hash to the pin's digests, lets knowledge catalogs in that
+ * profile reuse the daemon's query vectors instead of loading a second copy.
+ */
+export function daemonEmbedderPin(): KnowledgeEmbeddingProfile | null {
+  const modelId = embedModelId();
+  return KNOWLEDGE_EMBEDDING_PROFILES.find((p) => p.model.repo === modelId) ?? null;
+}
+
+/**
+ * Load options for the daemon's own pipeline. A pinned model names its graph
+ * and precision explicitly (`onnx/model.onnx`, fp32 — what transformers.js
+ * happens to default to on Node, now stated rather than assumed). The
+ * revision stays `main` on purpose: pinning it would change the cache key
+ * and re-download the model on every existing install, while the digest
+ * check in `daemonEmbedderVerified` already proves the bytes are the pin's.
+ */
+function daemonLoadOptions(): Record<string, unknown> {
+  const pin = daemonEmbedderPin();
+  if (!pin) return {};
+  const { dtype, subfolder, model_file_name } = resolveTransformersModelOptions(pin);
+  return { dtype, subfolder, model_file_name };
 }
 
 /**
@@ -186,7 +222,7 @@ export async function loadPipeline(): Promise<Pipeline> {
         const { pipeline } = await import('@huggingface/transformers');
         const modelId = embedModelId();
         if (modelId !== DEFAULT_EMBED_MODEL) log.info(`[embed] using model ${modelId}`);
-        return (await pipeline('feature-extraction', modelId)) as Pipeline;
+        return (await pipeline('feature-extraction', modelId, daemonLoadOptions())) as Pipeline;
       } catch (err) {
         const missing = isMissingModule(err, TRANSFORMERS_MODULE);
         const message = missing
@@ -225,6 +261,113 @@ export async function runEmbed(texts: string[]): Promise<number[][]> {
     const result = await pipe(slice, { pooling: 'mean', normalize: true });
     for (const v of result.tolist()) out.push(v);
   }
+  return out;
+}
+
+let daemonVerification: Promise<boolean> | null = null;
+
+/**
+ * Whether the files behind the daemon's own pipeline hash to its pin's
+ * digests. Call it after the pipeline has embedded once, so the cache is
+ * populated wherever the pipeline lives (the worker's cache dir is this
+ * process's). Checked once per process: the cached files do not change
+ * underneath a running daemon, and hashing the graph is not free.
+ */
+export function daemonEmbedderVerified(): Promise<boolean> {
+  if (!daemonVerification) daemonVerification = verifyDaemonPipeline();
+  return daemonVerification;
+}
+
+/** Test seam: forget the memoized verdict. */
+export function resetDaemonEmbedderVerification(): void {
+  daemonVerification = null;
+}
+
+async function verifyDaemonPipeline(): Promise<boolean> {
+  const pin = daemonEmbedderPin();
+  if (!pin) return false;
+  try {
+    const cacheDir = process.env[HF_CACHE_DIR_ENV] ?? (await defaultTransformersCacheDir());
+    const result = await verifyProfileArtifacts(pin, { cacheDir, revision: 'main' });
+    if (result.status !== 'verified') return false;
+    log.info(`[embed] ${pin.id}: the daemon's model files match the profile pin`);
+    return true;
+  } catch (err) {
+    log.warn(
+      `[embed] ${pin.id}: the daemon's model files do not verify against the profile pin, so knowledge catalogs load their own pinned copy: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+async function defaultTransformersCacheDir(): Promise<string> {
+  const { env } = await import('@huggingface/transformers');
+  return env.cacheDir;
+}
+
+// ── knowledge-catalog profiles ─────────────────────────────────────────────
+//
+// A catalog searches in the vector space its publisher embedded it in. When
+// that is not the daemon's own model (a multilingual public catalog on a
+// default bge install), the query must be embedded by the catalog's profile —
+// same repo, same pinned revision, same graph, same instruction prefix — or
+// the vectors never meet. Profiles load lazily, are cached per id, verify
+// their files against the profile's digests, and are dropped after idling so
+// a second ONNX session does not stay resident forever.
+
+const PROFILE_IDLE_MS = 10 * 60 * 1000;
+
+interface ProfileEntry {
+  promise: Promise<ProfileEmbedder>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+const profileEmbedders = new Map<string, ProfileEntry>();
+
+function armIdleDisposal(id: string, entry: ProfileEntry): void {
+  if (entry.idleTimer) clearTimeout(entry.idleTimer);
+  entry.idleTimer = setTimeout(() => {
+    profileEmbedders.delete(id);
+    void entry.promise.then((embedder) => embedder.dispose()).catch(() => {});
+  }, PROFILE_IDLE_MS);
+  entry.idleTimer.unref();
+}
+
+/** Load (and cache) a catalog profile's embedder; typed load failures like the default pipeline's. */
+export async function loadProfileEmbedder(
+  profile: KnowledgeEmbeddingProfile,
+): Promise<ProfileEmbedder> {
+  let entry = profileEmbedders.get(profile.id);
+  if (!entry) {
+    const cacheDir = process.env[HF_CACHE_DIR_ENV];
+    const promise = createProfileEmbedder(profile, cacheDir ? { cacheDir } : {}).catch((err) => {
+      profileEmbedders.delete(profile.id);
+      if (err instanceof PipelineLoadError) throw err;
+      const missing =
+        err instanceof EmbedderUnavailableError || isMissingModule(err, TRANSFORMERS_MODULE);
+      throw new PipelineLoadError(
+        err instanceof Error ? err.message : String(err),
+        missing,
+        !missing && isRetryablePipelineLoadFailure(err),
+      );
+    });
+    entry = { promise };
+    profileEmbedders.set(profile.id, entry);
+    log.info(`[embed] loading knowledge profile ${profile.id} (${profile.model.repo})`);
+  }
+  armIdleDisposal(profile.id, entry);
+  return entry.promise;
+}
+
+/** Embed SEARCH QUERIES with a catalog's own profile (its query instruction applied). */
+export async function runProfileQueryEmbed(
+  texts: string[],
+  profile: KnowledgeEmbeddingProfile,
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const embedder = await loadProfileEmbedder(profile);
+  const out: number[][] = [];
+  for (const text of texts) out.push(Array.from(await embedder.embedQuery(capText(text))));
   return out;
 }
 

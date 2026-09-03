@@ -6,7 +6,9 @@
  * long enrichment batch also no longer janks the UI.
  *
  * Protocol (structured-clone messages over the worker port):
- *   host → worker:  { id, texts }
+ *   host → worker:  { id, texts, profile? }       — profile: embed as a
+ *                                                     knowledge-catalog QUERY
+ *                                                     with that profile
  *   worker → host:  { id, vectors }                 — success
  *                   { id, error, fatal,             — failure (fatal ⇒ model
  *                     retryable, optionalPeerMissing } unloadable, disable for
@@ -17,7 +19,8 @@
  */
 
 import { parentPort } from 'node:worker_threads';
-import { PipelineLoadError, runEmbed } from './embed-core.js';
+import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
+import { PipelineLoadError, runEmbed, runProfileQueryEmbed } from './embed-core.js';
 
 if (!parentPort) {
   throw new Error('embed-worker must be run as a worker thread');
@@ -27,12 +30,15 @@ const port = parentPort;
 interface EmbedRequest {
   id: number;
   texts: string[];
+  profile?: KnowledgeEmbeddingProfile;
 }
 
 port.on('message', (msg: EmbedRequest) => {
   void (async () => {
     try {
-      const vectors = await runEmbed(msg.texts);
+      const vectors = msg.profile
+        ? await runProfileQueryEmbed(msg.texts, msg.profile)
+        : await runEmbed(msg.texts);
       port.postMessage({ id: msg.id, vectors });
     } catch (err) {
       port.postMessage({

@@ -572,7 +572,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     });
     // Model ensure must win over the exact `/models` discovery handler.
     app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
-    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes());
+    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes({ catalog: ctx.catalog }));
     app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
     app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
     app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));

@@ -72,3 +72,17 @@ describe('KnowledgeInstallRequestSchema', () => {
     ).toBe(false);
   });
 });
+
+describe('KnowledgeInstallRequestSchema catalog source', () => {
+  it('accepts a gilde catalog id with optional version and placement', () => {
+    expect(
+      KnowledgeInstallRequestSchema.safeParse({
+        source: { kind: 'catalog', id: 'wikipedia-physics', placement: 'auto' },
+      }).success,
+    ).toBe(true);
+    expect(
+      KnowledgeInstallRequestSchema.safeParse({ source: { kind: 'catalog', id: 'Not_An_Id' } })
+        .success,
+    ).toBe(false);
+  });
+});

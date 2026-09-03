@@ -2,7 +2,7 @@
  * Knowledge catalog worker — owns every catalog SQLite connection.
  * CatalogHandle is synchronous by design (node:sqlite), so a 10-20 ms shard
  * scan (or a 100 ms cold burst) must run here, never on the daemon loop
- * (gezk-format-v1.md §9). One long-lived worker; scans run sequentially
+ * (docs/gezk-format.md). One long-lived worker; scans run sequentially
  * inside it, which is the format's stated concurrency model.
  *
  * Protocol (structured-clone messages over the worker port):

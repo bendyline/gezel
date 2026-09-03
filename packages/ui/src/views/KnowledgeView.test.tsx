@@ -30,6 +30,8 @@ const CATALOG = {
   name: 'Shop Notes',
   license: 'MIT',
   documents: 2,
+  source: 'file' as const,
+  updateAvailable: false,
 };
 
 const TOPICS = [
@@ -105,7 +107,7 @@ describe('KnowledgeView', () => {
           snippet: 'Tails and pins interlock…',
           documentId: 'dovetails',
           catalogId: 'shop-notes',
-          uri: 'knowledge://shop-notes/dovetails',
+          uri: 'knowledge://gezel-tests/shop-notes/dovetails',
           relevance: 0.8,
           tier: 'strong',
           score: 296,

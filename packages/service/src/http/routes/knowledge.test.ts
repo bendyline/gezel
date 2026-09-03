@@ -10,7 +10,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GezelClient } from '@bendyline/gezel-client';
+import { GezelClient, type KnowledgeInstallEvent } from '@bendyline/gezel-client';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { knowledgeDownloadsDir } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -78,7 +78,7 @@ describe('knowledge routes', () => {
   it('answers the knowledge search route with cited results', async () => {
     const { results } = await client.searchKnowledge({ query: 'dovetail corner joint' });
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0]?.uri).toMatch(/^knowledge:\/\/test-notes\//);
+    expect(results[0]?.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
   });
 
   it('model-facing project search returns knowledge hits alongside project arms', async () => {
@@ -89,7 +89,7 @@ describe('knowledge routes', () => {
     expect(res.results.length).toBeGreaterThan(0);
     expect(res.results.every((r) => r.kind === 'knowledge')).toBe(true);
     expect(res.results[0]?.retrievalSource).toBe('knowledge');
-    expect(res.results[0]?.uri).toContain('knowledge://test-notes/');
+    expect(res.results[0]?.uri).toContain('knowledge://gezel-tests/test-notes/');
   });
 
   it('quarantine leaves project search unaffected', async () => {
@@ -230,7 +230,7 @@ describe('knowledge routes', () => {
     const knowledgeHits = details.hits.filter((h) => h.source === 'knowledge');
     expect(knowledgeHits.length).toBeLessThanOrEqual(2); // balanced ceiling
     for (const hit of knowledgeHits) {
-      expect(hit.uri).toMatch(/^knowledge:\/\/test-notes\//);
+      expect(hit.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
       expect(hit.catalogId).toBe('test-notes');
     }
 
@@ -250,92 +250,34 @@ describe('knowledge routes', () => {
     await client.updateKnowledgeCatalog('test-notes', { enabled: true });
   }, 60_000);
 
-  it('reports newer versions from the signed publisher registry (Phase 6)', async () => {
-    // Unconfigured: honest unavailability, never an error.
-    expect(await client.knowledgeUpdates()).toEqual({
-      available: false,
-      reason: 'no-registry-url',
-    });
-
-    const { generateKnowledgeSigningKeyPair, signRegistryIndex } = await import(
-      '@bendyline/gezel-knowledge'
-    );
-    const keys = generateKnowledgeSigningKeyPair();
+  it('answers the gilde-backed browse, update and job surfaces', async () => {
+    // The pinned gilde content ships no knowledge catalogs yet, so the
+    // browser is empty and nothing is updatable — every surface still answers.
+    expect((await client.listAvailableKnowledgeCatalogs()).catalogs).toEqual([]);
+    const updates = await client.knowledgeUpdates();
+    expect(updates.source).toBe('gilde');
+    expect(updates.updates).toEqual([]);
+    expect((await client.listKnowledgeActiveInstalls()).installs).toEqual([]);
+    expect((await client.listIncompleteKnowledgeDownloads()).incomplete).toEqual([]);
     const installed = (await client.listKnowledgeCatalogs()).catalogs.find(
       (c) => c.ref.catalogId === 'test-notes',
     );
-    expect(installed).toBeDefined();
-    if (!installed) return;
+    expect(installed).toMatchObject({ source: 'url', updateAvailable: false });
 
-    const registry = signRegistryIndex(
-      {
-        kind: 'gezel-knowledge-registry',
-        formatVersion: 1,
-        publisher: { id: installed.ref.publisherId, name: 'Gezel Tests' },
-        generatedAt: new Date().toISOString(),
-        catalogs: [
-          {
-            catalogId: 'test-notes',
-            version: `${installed.ref.version}.99`,
-            name: 'Test Notes (newer)',
-            language: 'en',
-            documents: 3,
-            archiveBytes: 4096,
-            contentDigest: 'c'.repeat(64),
-            url: 'https://example.com/_knowledge/catalogs/test-notes/next/test-notes-next.gezk',
-            license: { name: 'CC BY-SA 4.0', attributionRequired: true },
-          },
-        ],
-      },
-      keys.privateKeyPem,
-    );
-
-    const registryServer: Server = createServer((_req, res) => {
-      const body = JSON.stringify(registry);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(body);
+    // An unknown catalog id fails the SSE install with a terminal error, and
+    // the finished job stays observable through the job surface.
+    const events: KnowledgeInstallEvent[] = [];
+    await client.installKnowledgeCatalogFromCatalog('no-such-catalog', (event) => {
+      events.push(event);
     });
-    await new Promise<void>((resolve) => registryServer.listen(0, '127.0.0.1', resolve));
-    const registryAddress = registryServer.address();
-    const registryPort =
-      typeof registryAddress === 'object' && registryAddress ? registryAddress.port : 0;
-    const registryUrl = `http://127.0.0.1:${registryPort}/index.json`;
-    await svc.context.store.writeConfig({ knowledge: { registryUrl } });
-
-    const anchorsPath = join(dir, 'trust-anchors.json');
-    const priorAnchors = process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
-    try {
-      // Configured URL but no anchor that can verify it: refuse to consult.
-      delete process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
-      expect(await client.knowledgeUpdates()).toEqual({
-        available: false,
-        reason: 'no-trust-anchors',
-      });
-
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(
-        anchorsPath,
-        JSON.stringify([{ keyId: keys.keyId, publicKeyPem: keys.publicKeyPem }]),
-        'utf8',
-      );
-      process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS = anchorsPath;
-
-      const updates = await client.knowledgeUpdates();
-      expect(updates.available).toBe(true);
-      if (!updates.available) return;
-      expect(updates.publisher.id).toBe(installed.ref.publisherId);
-      expect(updates.updates).toHaveLength(1);
-      expect(updates.updates[0]).toMatchObject({
-        catalogId: 'test-notes',
-        installedVersion: installed.ref.version,
-        availableVersion: `${installed.ref.version}.99`,
-        contentDigest: 'c'.repeat(64),
-      });
-    } finally {
-      if (priorAnchors === undefined) delete process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
-      else process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS = priorAnchors;
-      await svc.context.store.writeConfig({ knowledge: {} });
-      registryServer.close();
-    }
+    const last = events.at(-1);
+    expect(last?.type).toBe('error');
+    if (last?.type === 'error') expect(last.error).toContain('no knowledge catalog');
+    const job = await client.getKnowledgeJob('no-such-catalog');
+    expect(job.finished).toBe(true);
+    expect(job.error).toContain('no knowledge catalog');
+    expect(
+      await client.deleteIncompleteKnowledgeDownload('0'.repeat(16)).catch((e) => e),
+    ).toBeInstanceOf(Error);
   }, 30_000);
 });

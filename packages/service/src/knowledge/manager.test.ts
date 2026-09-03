@@ -76,7 +76,7 @@ describe('KnowledgeManager', () => {
     const hit = results[0];
     expect(hit?.kind).toBe('knowledge');
     expect(hit?.catalogId).toBe('test-notes');
-    expect(hit?.uri).toMatch(/^knowledge:\/\/test-notes\//);
+    expect(hit?.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
     expect(hit?.retrievalSource).toBe('knowledge');
   });
 
@@ -162,5 +162,127 @@ describe('KnowledgeManager', () => {
     const results = await manager.searchUnified('dovetail', { vector: null, maxResults: 5 });
     expect(results).toEqual([]);
     expect(await manager.remove('test-notes')).toBe(false);
+  });
+});
+
+describe('KnowledgeManager — per-profile query embedding', () => {
+  let profileDir: string;
+  let profileHome: string;
+  let profileManager: KnowledgeManager;
+  const embedded: string[] = [];
+
+  beforeAll(async () => {
+    profileDir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-profile-'));
+    profileHome = join(profileDir, 'home');
+    const { MULTILINGUAL_E5_SMALL_1 } = await import('@bendyline/gezel-knowledge');
+    const archive = join(profileDir, 'e5-notes-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: archive,
+      workDir: join(profileDir, 'work'),
+      id: 'e5-notes',
+      embeddingProfile: MULTILINGUAL_E5_SMALL_1,
+    });
+    profileManager = new KnowledgeManager({
+      home: profileHome,
+      host: await createInProcessCatalogHost(),
+      embedQueryForProfile: async (text, profile) => {
+        embedded.push(`${profile.id}:${text}`);
+        return testHashVector(text);
+      },
+    });
+    await profileManager.start();
+    await runInstall(profileManager, archive);
+  }, 60_000);
+
+  afterAll(async () => {
+    await profileManager?.stop();
+    await rm(profileDir, { recursive: true, force: true });
+  });
+
+  it('mounts a registered foreign profile in profile mode, not keyword-only', async () => {
+    const status = (await profileManager.list()).find((c) => c.ref.catalogId === 'e5-notes');
+    expect(status?.mounted).toBe(true);
+    expect(status?.semanticSearch).toBe('profile');
+    expect(status?.vectorCompatible).toBe(true);
+  });
+
+  it('embeds the query with the catalog profile and reaches the vector path', async () => {
+    // The hash embedder gives the exact stored vector back for the exact
+    // embed input the compiler built: passage prefix + title header + text.
+    // Read the stored chunk through the host to rebuild that input verbatim.
+    const stored = (
+      await profileManager.host.search({
+        query: 'dovetail',
+        shardBudget: 6,
+        finalK: 24,
+        includeChunkFts: true,
+        catalogKeys: ['gezel-tests/e5-notes'],
+      })
+    ).chunks.find((hit) => hit.documentId === 'dovetails');
+    expect(stored).toBeDefined();
+    if (!stored) return;
+    const path = stored.headingPath.filter((h) => h !== stored.title);
+    const header = path.length > 0 ? `${stored.title}\n${path.join(' > ')}\n` : `${stored.title}\n`;
+    const embedInput = `passage: ${header}${stored.text}`;
+    const results = await profileManager.searchUnified(embedInput, {
+      vector: null,
+      maxResults: 5,
+    });
+    expect(embedded.some((e) => e.startsWith('multilingual-e5-small@1:'))).toBe(true);
+    const dovetails = results.find((r) => r.documentId === 'dovetails');
+    expect(dovetails).toBeDefined();
+    expect(dovetails?.relevance).toBe(1);
+  });
+});
+
+describe('KnowledgeManager with a registered profile id whose pins differ', () => {
+  let pinDir: string;
+  let pinManager: KnowledgeManager;
+  const embedded: string[] = [];
+
+  beforeAll(async () => {
+    pinDir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-pin-'));
+    const { MULTILINGUAL_E5_SMALL_1 } = await import('@bendyline/gezel-knowledge');
+    // Same id, same repo and revision — but produced from the fp16 graph. A
+    // reader that matched on id alone would search it with fp32 vectors.
+    const archive = join(pinDir, 'e5-fp16-notes-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: archive,
+      workDir: join(pinDir, 'work'),
+      id: 'e5-fp16-notes',
+      embeddingProfile: {
+        ...MULTILINGUAL_E5_SMALL_1,
+        model: {
+          ...MULTILINGUAL_E5_SMALL_1.model,
+          onnxFile: 'onnx/model_fp16.onnx',
+          onnxDigest: `sha256:${'f'.repeat(64)}`,
+        },
+      },
+    });
+    pinManager = new KnowledgeManager({
+      home: join(pinDir, 'home'),
+      host: await createInProcessCatalogHost(),
+      embedQueryForProfile: async (text, profile) => {
+        embedded.push(`${profile.id}:${text}`);
+        return testHashVector(text);
+      },
+    });
+    await pinManager.start();
+    await runInstall(pinManager, archive);
+  }, 60_000);
+
+  afterAll(async () => {
+    await pinManager?.stop();
+    await rm(pinDir, { recursive: true, force: true });
+  });
+
+  it('mounts keyword-only and never embeds a query for it', async () => {
+    const status = (await pinManager.list()).find((c) => c.ref.catalogId === 'e5-fp16-notes');
+    expect(status?.mounted).toBe(true);
+    expect(status?.semanticSearch).toBe('keyword-only');
+    expect(status?.vectorCompatible).toBe(false);
+    const results = await pinManager.searchUnified('dovetail', { vector: null, maxResults: 5 });
+    expect(embedded).toEqual([]);
+    expect(results.some((r) => r.documentId === 'dovetails')).toBe(true);
   });
 });

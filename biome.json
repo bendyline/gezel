@@ -8,6 +8,7 @@
   "files": {
     "ignoreUnknown": true,
     "ignore": [
+      "packages/knowledge/conformance/**",
       "**/dist/**",
       "**/dist-embedded/**",
       "**/dist-e2e/**",

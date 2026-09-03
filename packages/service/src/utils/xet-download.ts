@@ -53,6 +53,13 @@ export interface XetDownloadOptions {
   maxRetries?: number;
   chunkTimeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Hard cap on the reconstructed file. Enforced against an oversized
+   * `.partial` before any network call, against the manifest's exact total
+   * before streaming, and per term while streaming — the same three gates as
+   * the classic downloader, so a bounded caller can take the Xet path.
+   */
+  maxBytes?: number;
 }
 
 export async function* downloadXet(
@@ -60,6 +67,14 @@ export async function* downloadXet(
 ): AsyncGenerator<DownloadEvent, DownloadResult, void> {
   const partialPath = `${opts.destPath}.partial`;
   const maxAttempts = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  if (opts.maxBytes !== undefined && existingPartialSize(partialPath) > opts.maxBytes) {
+    return {
+      kind: 'error',
+      error: byteLimitError(opts.maxBytes),
+      attemptsMade: 0,
+      bytesWritten: existingPartialSize(partialPath),
+    };
+  }
   const budget = new DownloadRetryBudget(maxAttempts, existingPartialSize(partialPath));
   let lastFriendly = 'Xet download failed';
 
@@ -106,6 +121,10 @@ export async function* downloadXet(
     attemptsMade,
     bytesWritten: existingPartialSize(partialPath),
   };
+}
+
+function byteLimitError(maxBytes: number): string {
+  return `Download exceeds the ${maxBytes} byte limit`;
 }
 
 function aborted(partialPath: string): DownloadResult {
@@ -200,6 +219,13 @@ async function* runXetAttempt(
   // Exact total from the manifest (drives an accurate progress bar).
   const totalBytes =
     recon.terms.reduce((n, t) => n + t.unpacked_length, 0) - (recon.offset_into_first_range ?? 0);
+  if (opts.maxBytes !== undefined && totalBytes > opts.maxBytes) {
+    return {
+      kind: 'fatal',
+      friendlyError: byteLimitError(opts.maxBytes),
+      bytesWritten: resumeFrom,
+    };
+  }
 
   // 3. Stream terms to `.partial`, resuming past bytes already on disk.
   const stream = createWriteStream(partialPath, { flags: resumeFrom > 0 ? 'a' : 'w' });
@@ -238,10 +264,30 @@ async function* runXetAttempt(
         written = termEnd;
         continue;
       }
+      // A manifest that lies about its total cannot over-deliver past the cap.
+      if (opts.maxBytes !== undefined && termEnd > opts.maxBytes) {
+        await closeStream(stream);
+        return {
+          kind: 'fatal',
+          friendlyError: byteLimitError(opts.maxBytes),
+          bytesWritten: Math.max(written, resumeFrom),
+        };
+      }
 
       let data = await termData(term, recon, segCache, fetchImpl, chunkTimeoutMs, signal);
       if (leadingTrim > 0) data = data.subarray(leadingTrim);
       const toWrite = termStart < resumeFrom ? data.subarray(resumeFrom - termStart) : data;
+      if (
+        opts.maxBytes !== undefined &&
+        Math.max(written, resumeFrom) + toWrite.byteLength > opts.maxBytes
+      ) {
+        await closeStream(stream);
+        return {
+          kind: 'fatal',
+          friendlyError: byteLimitError(opts.maxBytes),
+          bytesWritten: Math.max(written, resumeFrom),
+        };
+      }
       await writeChunk(stream, toWrite);
       if (streamError) throw streamError;
       written = termEnd;

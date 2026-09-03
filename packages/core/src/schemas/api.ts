@@ -2179,9 +2179,16 @@ export const GezelConfigSchema = z.object({
    */
   knowledge: z
     .object({
-      /** Check the signed registry for catalog updates (default off). */
+      /**
+       * Install newer versions of catalog-sourced knowledge automatically
+       * (default off). Newer versions come from the shipped gilde content;
+       * a per-catalog `autoUpdate` in the registry overrides this default.
+       */
       autoUpdate: z.boolean().optional(),
-      /** Override the signed Qualla registry URL (operators/tests). */
+      /**
+       * Signed publisher registry URL, the machine-shared broker's operator
+       * seam. The user daemon resolves updates from gilde and ignores this.
+       */
       registryUrl: z.string().optional(),
     })
     .optional(),

@@ -17,6 +17,7 @@ import {
   GEZEL_CONTENT_COMPAT,
   GezelTemplateVersionManifestSchema,
   ImageModelVersionManifestSchema,
+  KnowledgeCatalogVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
   ToolsetVersionManifestSchema,
   VideoModelVersionManifestSchema,
@@ -105,6 +106,7 @@ const KINDS: CatalogKind[] = [
   'chat-model',
   'image-model',
   'video-model',
+  'knowledge-catalog',
 ];
 
 /**
@@ -121,6 +123,7 @@ const KIND_DIR: Record<CatalogKind, string> = {
   'chat-model': 'chat-models',
   'image-model': 'image-models',
   'video-model': 'video-models',
+  'knowledge-catalog': 'knowledge-catalogs',
 };
 
 function shardPrefix(id: string): string {
@@ -848,7 +851,10 @@ type AnyVersionPayload =
   | (ReturnType<typeof ConnectorTypeVersionManifestSchema.parse> & { __kind: 'connector-type' })
   | (ReturnType<typeof ChatModelVersionManifestSchema.parse> & { __kind: 'chat-model' })
   | (ReturnType<typeof ImageModelVersionManifestSchema.parse> & { __kind: 'image-model' })
-  | (ReturnType<typeof VideoModelVersionManifestSchema.parse> & { __kind: 'video-model' });
+  | (ReturnType<typeof VideoModelVersionManifestSchema.parse> & { __kind: 'video-model' })
+  | (ReturnType<typeof KnowledgeCatalogVersionManifestSchema.parse> & {
+      __kind: 'knowledge-catalog';
+    });
 
 function parseVersionPayload(kind: CatalogKind, raw: unknown): AnyVersionPayload | null {
   try {
@@ -879,6 +885,10 @@ function parseVersionPayload(kind: CatalogKind, raw: unknown): AnyVersionPayload
     if (kind === 'video-model') {
       const p = VideoModelVersionManifestSchema.parse(raw);
       return { ...p, __kind: 'video-model' } as AnyVersionPayload;
+    }
+    if (kind === 'knowledge-catalog') {
+      const p = KnowledgeCatalogVersionManifestSchema.parse(raw);
+      return { ...p, __kind: 'knowledge-catalog' } as AnyVersionPayload;
     }
     const p = ImageModelVersionManifestSchema.parse(raw);
     return { ...p, __kind: 'image-model' } as AnyVersionPayload;
@@ -1166,6 +1176,49 @@ function mergeIdentityAndVersion(
       hardwareTier: identity.hardwareTier,
       minRamGB: identity.minRamGB,
       commercialUse: identity.commercialUse,
+      ...(version.notes !== undefined ? { notes: version.notes } : {}),
+      availableVersions,
+    };
+  }
+  if (
+    kind === 'knowledge-catalog' &&
+    identity.kind === 'knowledge-catalog' &&
+    version.__kind === 'knowledge-catalog'
+  ) {
+    return {
+      schemaVersion: 1,
+      kind: 'knowledge-catalog',
+      id: identity.id,
+      name: identity.name,
+      description: identity.description,
+      tags: identity.tags,
+      maintainer: identity.maintainer,
+      ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
+      ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(identity.licenseClass !== undefined ? { licenseClass: identity.licenseClass } : {}),
+      ...(identity.licenseShortName !== undefined
+        ? { licenseShortName: identity.licenseShortName }
+        : {}),
+      ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
+      ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
+      publisherId: identity.publisherId,
+      language: identity.language,
+      ...(identity.category ? { category: identity.category } : {}),
+      ...(identity.upstream !== undefined ? { upstream: identity.upstream } : {}),
+      version: version.version,
+      releasedAt: version.releasedAt,
+      formatVersion: version.formatVersion,
+      huggingface: version.huggingface,
+      sha256: version.sha256,
+      archiveBytes: version.archiveBytes,
+      uncompressedBytes: version.uncompressedBytes,
+      documents: version.documents,
+      chunks: version.chunks,
+      embeddingProfile: version.embeddingProfile,
+      topics: version.topics,
+      ...(version.sourceSnapshot ? { sourceSnapshot: version.sourceSnapshot } : {}),
+      ...(version.parquet ? { parquet: version.parquet } : {}),
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       availableVersions,
     };

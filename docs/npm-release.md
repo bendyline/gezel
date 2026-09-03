@@ -6,16 +6,18 @@ version line.
 
 ## What ships
 
-Eleven packages, all under the `@bendyline` scope, all public API under semver:
+Thirteen packages, all under the `@bendyline` scope, all public API under semver:
 
 | Package | What it is |
 |---|---|
+| `@bendyline/gezk` | The `.gezk` knowledge-catalog format: schemas, ids, references, quantization, DDL, signing (no gezel dependency) |
 | `@bendyline/gezel` | Core types, Zod schemas, path helpers, gezel-markdown parser |
 | `@bendyline/gezel-client` | Typed HTTP client for the daemon |
 | `@bendyline/gezel-sdk` | The preferred extension surface |
 | `@bendyline/gezel-app-sdk` | Embedding helpers for host applications |
 | `@bendyline/gezel-plugin-sdk` | Legacy extension surface, kept for compatibility |
 | `@bendyline/gezel-catalog` | Catalog loader (content lives in `@bendyline/gilde`) |
+| `@bendyline/gezel-knowledge` | The `.gezk` toolchain: compiler, verified archive reader, retrieval |
 | `@bendyline/gezel-connectors-spectral` | Spawned Prismatic component host |
 | `@bendyline/gezel-script-stdlib` | Standard gate-script library |
 | `@bendyline/gezel-mcp` | The stdio MCP server |
@@ -24,7 +26,7 @@ Eleven packages, all under the `@bendyline` scope, all public API under semver:
 
 Three tiers, and the tier is a property of the manifest, not a list:
 
-- **Published** — the eleven above.
+- **Published** — the thirteen above.
 - **Versioned but not published** — `packages/app` and `packages/vscode`.
   multi-semantic-release versions, tags and changelogs them, but they stay
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
@@ -181,7 +183,7 @@ They catch publishing-shape bugs no per-package suite can see:
 ### `pnpm check:packages`
 
 [`scripts/check-package-consumers.mjs`](../scripts/check-package-consumers.mjs)
-packs all eleven packages, `npm install`s the tarballs into a throwaway
+packs all thirteen packages, `npm install`s the tarballs into a throwaway
 **non-pnpm, non-workspace** project, and then:
 
 1. enforces an 800 MiB logical `node_modules` budget,
@@ -325,7 +327,7 @@ npm token. Three things make that work, and all three are load-bearing:
 ### First publish (one time per package)
 
 Trusted publishing can only be configured on a package that already exists, so
-the eleven are bootstrapped by hand once. Two things about that hand-publish are
+the thirteen are bootstrapped by hand once. Two things about that hand-publish are
 not obvious:
 
 - **It must use `--no-provenance`.** Every manifest sets
@@ -358,7 +360,7 @@ not obvious:
    so every package must already carry the bootstrap version before the first
    `publish` runs.
 2. On npmjs.com, register a trusted publisher per package — npm's bulk
-   trusted-publisher configuration makes eleven manageable:
+   trusted-publisher configuration makes thirteen manageable:
    - repository: `bendyline/gezel`
    - workflow: `.github/workflows/publish-npm.yml`
    - environment: **none** (the release job configures none, so the trusted

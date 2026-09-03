@@ -9,7 +9,7 @@ import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
 import { compileKnowledgeCatalog } from '@bendyline/gezel-knowledge';
 
 export const TEST_EMBED_PROFILE: KnowledgeEmbeddingProfile = {
-  id: 'gezel-test-hash-embed@1',
+  id: 'test-hash-embed@1',
   model: { repo: 'test/hash-embed', revision: 'fixture' },
   tokenizer: { kind: 'whitespace' },
   pooling: 'mean',
@@ -18,7 +18,7 @@ export const TEST_EMBED_PROFILE: KnowledgeEmbeddingProfile = {
   maxTokens: 512,
   queryInstruction: '',
   passageInstruction: '',
-  vectorEncoding: 'bit384+int8',
+  vectorEncoding: 'bit+int8',
   distance: { stage1: 'hamming', stage2: 'cosine' },
   quantization: {
     int8: { method: 'symmetric-linear', scale: 127 },
@@ -46,12 +46,15 @@ export async function buildTestCatalog(opts: {
   outputPath: string;
   workDir: string;
   id?: string;
+  version?: string;
   publisherId?: string;
+  /** Embed with the hash embedder but DECLARE this profile (mode classification tests). */
+  embeddingProfile?: KnowledgeEmbeddingProfile;
 }): Promise<void> {
   await compileKnowledgeCatalog({
     catalog: {
       id: opts.id ?? 'test-notes',
-      version: '1.0.0',
+      version: opts.version ?? '1.0.0',
       name: 'Test Notes',
       description: 'Service test fixture catalog.',
       language: 'en',
@@ -86,14 +89,14 @@ export async function buildTestCatalog(opts: {
       };
     })(),
     outputPath: opts.outputPath,
-    embeddingProfile: TEST_EMBED_PROFILE,
+    embeddingProfile: opts.embeddingProfile ?? TEST_EMBED_PROFILE,
     chunkingProfile: {
-      id: 'gezel-markdown-chunks@2',
+      id: 'markdown-chunks@2',
       unit: 'tokens',
       tokenizer: 'profile',
-      targetTokens: 420,
-      overlapTokens: 64,
-      contextHeader: { maxTokens: 64 },
+      target: 420,
+      overlap: 64,
+      contextHeader: { max: 64 },
     },
     embed: async (texts) => texts.map(testHashVector),
     countTokens: (text) => (text.trim() ? text.trim().split(/\s+/).length : 0),

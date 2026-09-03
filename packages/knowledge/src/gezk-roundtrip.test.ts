@@ -1,14 +1,17 @@
 /**
  * Phase-0 exit tests (knowledge-catalogs plan): deterministic double-build,
- * verified extraction, read-only + immutable open with sqlite-vec, the
+ * verified extraction, read-only + immutable open with plain SQLite, the
  * shipped TOC, brotli body round-trip, two-stage semantic search, doc-FTS
  * known queries, the embedder-free self-KNN smoke, and tamper rejection.
  */
 
 import { createHash } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GEZK_MIME_TYPE } from '@bendyline/gezk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   GezkArchiveError,
@@ -105,8 +108,60 @@ describe('archive + manifest', () => {
   it('reads the manifest without extraction', async () => {
     const manifest = await readGezkManifest(archivePath);
     expect(manifest.id).toBe('fixture-en');
+    expect(manifest.kind).toBe('gezk-catalog');
+    expect(manifest.formatVersion).toBe('0.5');
     expect(manifest.embedding.id).toBe(FIXTURE_EMBEDDING_PROFILE.id);
     expect(manifest.topics.length).toBeGreaterThanOrEqual(1);
+    expect(manifest.license.noticePath).toBe('LICENSES/catalog.txt');
+    expect(manifest.files.map((f) => f.path)).toEqual(
+      expect.arrayContaining(['README.md', 'LICENSES/catalog.txt']),
+    );
+    expect(manifest.toolchain?.name).toBe('@bendyline/gezel-knowledge');
+  });
+
+  it('starts with the stored mimetype entry, identifiable at a fixed offset', async () => {
+    const head = Buffer.from(await readFile(archivePath)).subarray(
+      0,
+      30 + 8 + GEZK_MIME_TYPE.length,
+    );
+    expect(head.subarray(0, 4)).toEqual(Buffer.from('PK\x03\x04', 'latin1'));
+    expect(head.subarray(30, 38).toString('utf8')).toBe('mimetype');
+    expect(head.subarray(38).toString('utf8')).toBe(GEZK_MIME_TYPE);
+  });
+
+  it('refuses a manifest from an earlier format generation with a typed reason', async () => {
+    const legacyPath = join(dir, 'legacy-format.gezk');
+    const manifest = { ...report.manifest, kind: 'gezel-knowledge-catalog', formatVersion: 1 };
+    await writeGezkArchive(legacyPath, [
+      { path: 'manifest.json', content: Buffer.from(`${JSON.stringify(manifest)}\n`) },
+      ...report.manifest.files.map((file) => ({
+        path: file.path,
+        absPath: join(extractedDir, file.path),
+      })),
+    ]);
+    await expect(readGezkManifest(legacyPath)).rejects.toMatchObject({ reason: 'format-version' });
+  });
+
+  it('refuses an archive without the mimetype magic', async () => {
+    const yazl = createRequire(import.meta.url)('yazl') as {
+      ZipFile: new () => {
+        addBuffer(buffer: Buffer, path: string): void;
+        end(): void;
+        outputStream: NodeJS.ReadableStream;
+      };
+    };
+    const scratch = await mkdtemp(join(dir, 'no-magic-'));
+    const noMagicPath = join(scratch, 'no-magic.gezk');
+    const zip = new yazl.ZipFile();
+    zip.addBuffer(Buffer.from(`${JSON.stringify(report.manifest)}\n`), 'manifest.json');
+    await new Promise<void>((resolve, reject) => {
+      const out = createWriteStream(noMagicPath);
+      out.on('close', () => resolve());
+      out.on('error', reject);
+      zip.outputStream.pipe(out);
+      zip.end();
+    });
+    await expect(readGezkManifest(noMagicPath)).rejects.toMatchObject({ reason: 'mimetype' });
   });
 
   it('rejects a tampered archive', async () => {

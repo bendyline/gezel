@@ -10,7 +10,11 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { KnowledgeCatalogRef, KnowledgeUserRegistry } from '@bendyline/gezel';
+import type {
+  KnowledgeCatalogRef,
+  KnowledgeInstallSourceKind,
+  KnowledgeUserRegistry,
+} from '@bendyline/gezel';
 import { KnowledgeUserRegistrySchema, createLogger } from '@bendyline/gezel';
 import { knowledgeRegistryFile } from '@bendyline/gezel/paths';
 
@@ -71,10 +75,14 @@ export class KnowledgeRegistry {
 
   /**
    * Add or replace the entry for this catalog identity. The same-catalogId/
-   * different-publisher conflict is rejected here — the `knowledge://` URI
-   * carries no publisher, so two publishers cannot share a catalog id.
+   * different-publisher conflict is rejected here: the catalog id is the
+   * browse and route handle (`/api/knowledge/catalogs/:id`), so one id maps
+   * to one publisher per user even though `knowledge://` references carry both.
    */
-  upsert(ref: KnowledgeCatalogRef, opts: { enabled?: boolean; autoUpdate?: boolean } = {}): void {
+  upsert(
+    ref: KnowledgeCatalogRef,
+    opts: { enabled?: boolean; autoUpdate?: boolean; source?: KnowledgeInstallSourceKind } = {},
+  ): void {
     const registry = this.read();
     const conflict = registry.catalogs.find(
       (c) => c.ref.catalogId === ref.catalogId && c.ref.publisherId !== ref.publisherId,
@@ -91,6 +99,7 @@ export class KnowledgeRegistry {
       existing.ref = ref;
       existing.enabled = opts.enabled ?? existing.enabled;
       if (opts.autoUpdate !== undefined) existing.autoUpdate = opts.autoUpdate;
+      if (opts.source !== undefined) existing.source = opts.source;
       existing.disabledReason = undefined;
     } else {
       registry.catalogs.push({
@@ -98,6 +107,7 @@ export class KnowledgeRegistry {
         enabled: opts.enabled ?? true,
         addedAt: new Date().toISOString(),
         ...(opts.autoUpdate !== undefined ? { autoUpdate: opts.autoUpdate } : {}),
+        ...(opts.source !== undefined ? { source: opts.source } : {}),
       });
     }
     this.write(registry);

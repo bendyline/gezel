@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import {
   type DownloadResult,
   downloadWithRetry,
 } from './download-with-retry.js';
+import { downloadXet } from './xet-download.js';
 
 // A scheme-0 (uncompressed) Xet chunk: 8-byte header + raw payload.
 function noneChunk(payload: Buffer): Buffer {
@@ -38,6 +39,8 @@ function xetFetch(opts: {
   offsetIntoFirstRange?: number;
   tokenStatus?: number;
   uaSeen?: string[];
+  /** Lie about the term's size (a hostile or buggy manifest). */
+  declaredLength?: number;
 }): typeof fetch {
   const half = Math.ceil(opts.file.length / 2);
   const seg = Buffer.concat([
@@ -46,7 +49,13 @@ function xetFetch(opts: {
   ]);
   const recon = {
     offset_into_first_range: opts.offsetIntoFirstRange ?? 0,
-    terms: [{ hash: 'xorbA', unpacked_length: opts.file.length, range: { start: 0, end: 2 } }],
+    terms: [
+      {
+        hash: 'xorbA',
+        unpacked_length: opts.declaredLength ?? opts.file.length,
+        range: { start: 0, end: 2 },
+      },
+    ],
     fetch_info: {
       xorbA: [
         { range: { start: 0, end: 2 }, url: XORB, url_range: { start: 0, end: seg.length - 1 } },
@@ -303,5 +312,83 @@ describe('downloadWithRetry — Xet path', () => {
       expect(result.error).toMatch(/Access denied/i);
       expect(result.attemptsMade).toBe(1); // fatal → no retries burned
     }
+  });
+});
+
+describe('downloadWithRetry — Xet path with a byte cap', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'gezel-xet-cap-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('takes the reconstruction path for a bounded download that fits the cap', async () => {
+    const file = Buffer.from('bounded download through xet');
+    const dest = join(dir, 'model.bin');
+    const { result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath: dest,
+        approxSizeBytes: file.length,
+        maxBytes: file.length,
+        fetchImpl: xetFetch({ file }),
+      }),
+    );
+    expect(result.kind).toBe('ok');
+    expect(readFileSync(`${dest}.partial`)).toEqual(file);
+  });
+
+  it('refuses a reconstruction whose exact total exceeds the cap before streaming', async () => {
+    const file = Buffer.from('this file is larger than the caller allows');
+    const dest = join(dir, 'model.bin');
+    const { result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath: dest,
+        approxSizeBytes: file.length,
+        maxBytes: file.length - 1,
+        fetchImpl: xetFetch({ file }),
+      }),
+    );
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') expect(result.error).toMatch(/byte limit/);
+    expect(existsSync(`${dest}.partial`)).toBe(false);
+  });
+
+  it('stops a manifest that under-declares its size from over-delivering past the cap', async () => {
+    const file = Buffer.from('forty bytes of payload, declared as twenty!!');
+    const dest = join(dir, 'model.bin');
+    const { result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath: dest,
+        approxSizeBytes: 20,
+        maxBytes: 20,
+        fetchImpl: xetFetch({ file, declaredLength: 20 }),
+      }),
+    );
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') expect(result.error).toMatch(/byte limit/);
+  });
+
+  it('refuses an oversized .partial before touching the network', async () => {
+    const dest = join(dir, 'model.bin');
+    writeFileSync(`${dest}.partial`, Buffer.alloc(64));
+    const fetchImpl = (async () => {
+      throw new Error('network must not be touched');
+    }) as unknown as typeof fetch;
+    const { result } = await run(
+      downloadXet({
+        detection: { xetHash: XETHASH, authUrl: AUTH },
+        destPath: dest,
+        approxSizeBytes: 64,
+        maxBytes: 32,
+        fetchImpl,
+      }),
+    );
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') expect(result.error).toMatch(/byte limit/);
   });
 });

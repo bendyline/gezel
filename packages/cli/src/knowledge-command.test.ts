@@ -19,7 +19,7 @@ import {
 } from './knowledge-command.js';
 
 const FAKE_PROFILE: KnowledgeEmbeddingProfile = {
-  id: 'gezel-bge-small-en-v1.5@1',
+  id: 'bge-small-en-v1.5@1',
   model: { repo: 'test/hash', revision: 'fixture' },
   tokenizer: { kind: 'whitespace' },
   pooling: 'mean',
@@ -28,7 +28,7 @@ const FAKE_PROFILE: KnowledgeEmbeddingProfile = {
   maxTokens: 512,
   queryInstruction: '',
   passageInstruction: '',
-  vectorEncoding: 'bit384+int8',
+  vectorEncoding: 'bit+int8',
   distance: { stage1: 'hamming', stage2: 'cosine' },
   quantization: {
     int8: { method: 'symmetric-linear', scale: 127 },
@@ -120,7 +120,7 @@ describe('gezel knowledge (offline)', () => {
     const output = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(output).toContain('field-notes@1.0.0');
     expect(output).toContain('unsigned');
-    expect(output).toContain('gezel-bge-small-en-v1.5@1');
+    expect(output).toContain('bge-small-en-v1.5@1');
   });
 
   it('search finds documents and cites knowledge:// URIs', async () => {

@@ -15,9 +15,14 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, normalize, relative, resolve } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
-import { KnowledgeCatalogManifestSchema } from '@bendyline/gezel';
-import { MANIFEST_PATH } from '../format/constants.js';
+import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
+import { GEZK_MANIFEST_KIND, KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
+import {
+  GEZK_FORMAT_VERSION,
+  GEZK_MIME_TYPE,
+  MANIFEST_PATH,
+  MIMETYPE_PATH,
+} from '../format/constants.js';
 
 const nodeRequire = createRequire(import.meta.url);
 
@@ -40,6 +45,8 @@ export class GezkArchiveError extends Error {
       | 'undeclared-file'
       | 'missing-file'
       | 'hash-mismatch'
+      | 'mimetype'
+      | 'format-version'
       | 'io',
   ) {
     super(message);
@@ -51,6 +58,7 @@ interface YauzlEntry {
   fileName: string;
   uncompressedSize: number;
   compressedSize: number;
+  compressionMethod: number;
   generalPurposeBitFlag: number;
   externalFileAttributes: number;
 }
@@ -160,7 +168,7 @@ function reconcileEntries(
 ): void {
   const declared = new Map(manifest.files.map((file) => [file.path, file]));
   for (const path of entries.keys()) {
-    if (path === MANIFEST_PATH) continue;
+    if (path === MANIFEST_PATH || path === MIMETYPE_PATH) continue;
     if (!declared.has(path)) {
       throw new GezkArchiveError(`archive contains undeclared file: ${path}`, 'undeclared-file');
     }
@@ -199,13 +207,93 @@ export async function inspectGezkArchive(archivePath: string): Promise<GezkArchi
   };
 }
 
+/** The container magic: a stored `mimetype` entry, first, with the exact media type. */
+function assertMimetypeEntry(entry: YauzlEntry, position: number): void {
+  if (position !== 0) {
+    throw new GezkArchiveError('the mimetype entry must be the first archive entry', 'mimetype');
+  }
+  if (entry.compressionMethod !== 0 || entry.uncompressedSize !== GEZK_MIME_TYPE.length) {
+    throw new GezkArchiveError('the mimetype entry must be stored, not compressed', 'mimetype');
+  }
+}
+
+/** Reject a manifest from another format generation before schema parsing. */
+function assertSupportedFormat(raw: unknown): void {
+  const kind = (raw as { kind?: unknown } | null)?.kind;
+  const version = (raw as { formatVersion?: unknown } | null)?.formatVersion;
+  if (kind !== GEZK_MANIFEST_KIND || version !== GEZK_FORMAT_VERSION) {
+    throw new GezkArchiveError(
+      `unsupported gezk format (kind ${String(kind)}, version ${String(version)}); this reader supports ${GEZK_MANIFEST_KIND} ${GEZK_FORMAT_VERSION} — catalogs built for an earlier version must be rebuilt`,
+      'format-version',
+    );
+  }
+}
+
+function readEntryText(zip: YauzlZip, entry: YauzlEntry): Promise<string> {
+  return new Promise((resolveText, rejectText) => {
+    zip.openReadStream(entry, (err, stream) => {
+      if (err || !stream) {
+        rejectText(new GezkArchiveError(`${entry.fileName} read failed: ${err?.message}`, 'io'));
+        return;
+      }
+      const parts: Buffer[] = [];
+      stream.on('data', (d: Buffer) => parts.push(d));
+      stream.on('end', () => resolveText(Buffer.concat(parts).toString('utf8')));
+      stream.on('error', (streamErr: Error) =>
+        rejectText(
+          new GezkArchiveError(`${entry.fileName} read failed: ${streamErr.message}`, 'io'),
+        ),
+      );
+    });
+  });
+}
+
 /** Read + parse manifest.json without extracting anything else. */
 export async function readGezkManifest(archivePath: string): Promise<KnowledgeCatalogManifest> {
   const zip = await openZip(archivePath);
   return new Promise((resolvePromise, reject) => {
+    let position = 0;
+    let mimetypeSeen = false;
+    const fail = (err: unknown) => {
+      zip.close();
+      reject(
+        err instanceof GezkArchiveError
+          ? err
+          : new GezkArchiveError(err instanceof Error ? err.message : String(err), 'io'),
+      );
+    };
     zip.on('entry', (entry) => {
+      const index = position++;
+      if (entry.fileName === MIMETYPE_PATH) {
+        try {
+          assertMimetypeEntry(entry, index);
+        } catch (err) {
+          fail(err);
+          return;
+        }
+        readEntryText(zip, entry).then((text) => {
+          if (text !== GEZK_MIME_TYPE) {
+            fail(
+              new GezkArchiveError(
+                `not a gezk archive (mimetype ${JSON.stringify(text)})`,
+                'mimetype',
+              ),
+            );
+            return;
+          }
+          mimetypeSeen = true;
+          zip.readEntry();
+        }, fail);
+        return;
+      }
       if (entry.fileName !== MANIFEST_PATH) {
         zip.readEntry();
+        return;
+      }
+      if (!mimetypeSeen) {
+        fail(
+          new GezkArchiveError('archive does not start with the gezk mimetype entry', 'mimetype'),
+        );
         return;
       }
       if (entry.uncompressedSize > GEZK_ARCHIVE_LIMITS.maxManifestBytes) {
@@ -224,12 +312,14 @@ export async function readGezkManifest(archivePath: string): Promise<KnowledgeCa
         stream.on('end', () => {
           zip.close();
           try {
-            resolvePromise(
-              KnowledgeCatalogManifestSchema.parse(
-                JSON.parse(Buffer.concat(parts).toString('utf8')),
-              ),
-            );
+            const raw: unknown = JSON.parse(Buffer.concat(parts).toString('utf8'));
+            assertSupportedFormat(raw);
+            resolvePromise(KnowledgeCatalogManifestSchema.parse(raw));
           } catch (parseErr) {
+            if (parseErr instanceof GezkArchiveError) {
+              reject(parseErr);
+              return;
+            }
             reject(
               new GezkArchiveError(
                 `invalid manifest: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,

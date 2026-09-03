@@ -1,13 +1,13 @@
 /**
  * The canonical markdown chunker, parameterized over the two frozen
- * profiles (docs/gezk-format-v1.md §5):
+ * profiles (the gezk spec §7):
  *
- *   - `gezel-markdown-chunks@1` — unit 'chars', 4000/400: byte-for-byte the
+ *   - `markdown-chunks@1` — unit 'chars', 4000/400: byte-for-byte the
  *     algorithm lifted from the project indexer
  *     (packages/service/src/index-store/docs.ts `chunkMarkdown` /
  *     `chunkLineRange`), so the service can later re-point here with zero
  *     behavior change.
- *   - `gezel-markdown-chunks@2` — unit 'tokens', 420/64: the knowledge
+ *   - `markdown-chunks@2` — unit 'tokens', 420/64: the knowledge
  *     profile. Token counting is injected (`countTokens` — the embedding
  *     profile's own tokenizer), packing is per-line with sentence-level
  *     splitting for oversized lines, and every chunk carries a structural

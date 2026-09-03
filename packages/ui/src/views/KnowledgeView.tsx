@@ -14,6 +14,7 @@ import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js
 import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
+import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import '../styles/knowledge.css';
@@ -107,7 +108,10 @@ export function KnowledgeView() {
         });
     };
     refresh();
-    window.addEventListener('gezel:knowledge-catalogs-updated', refresh);
+    const onInventoryChanged = (event: Event) => {
+      if (changedInventoryKey(event) === 'knowledge') refresh();
+    };
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onInventoryChanged);
     const onOpenDocument = (e: Event) => {
       const detail = (e as CustomEvent<{ catalogId?: string; documentId?: string }>).detail;
       if (!detail?.catalogId) return;
@@ -117,7 +121,7 @@ export function KnowledgeView() {
     window.addEventListener('gezel:open-knowledge-document', onOpenDocument);
     return () => {
       alive = false;
-      window.removeEventListener('gezel:knowledge-catalogs-updated', refresh);
+      window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onInventoryChanged);
       window.removeEventListener('gezel:open-knowledge-document', onOpenDocument);
     };
   }, []);
@@ -245,13 +249,13 @@ export function KnowledgeView() {
     }
   }, [doc]);
 
-  const citation = useMemo(
-    () =>
-      selectedCatalogId && doc
-        ? formatKnowledgeUri({ catalogId: selectedCatalogId, documentId: doc.id })
-        : null,
-    [selectedCatalogId, doc],
-  );
+  const citation = useMemo(() => {
+    if (!selectedCatalogId || !doc) return null;
+    const publisherId = catalogs?.find((c) => c.ref.catalogId === selectedCatalogId)?.ref
+      .publisherId;
+    if (!publisherId) return null;
+    return formatKnowledgeUri({ publisherId, catalogId: selectedCatalogId, documentId: doc.id });
+  }, [catalogs, selectedCatalogId, doc]);
 
   const copyCitation = useCallback(() => {
     if (!citation) return;

@@ -195,7 +195,7 @@ describe('two-user privacy', () => {
         maxResults: 5,
       });
       expect(results?.length).toBeGreaterThan(0);
-      expect(results?.[0]?.uri).toMatch(/^knowledge:\/\/test-notes\//);
+      expect(results?.[0]?.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
     }
   });
 
@@ -208,5 +208,28 @@ describe('two-user privacy', () => {
       maxResults: 5,
     });
     expect(results?.length).toBeGreaterThan(0);
+  });
+});
+
+describe('machine-knowledge-assets streaming surface', () => {
+  it('ensure-stream replays a published coordinate as SSE and cancel is a no-op afterwards', async () => {
+    const token = await runtimeToken();
+    const res = await machineFetch(`${machineBase}/v1/remote/manage/knowledge/ensure-stream`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ coordinate: COORD() }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const text = await res.text();
+    expect(text).toContain('"type":"done"');
+    expect(text).toContain('"storageScope":"machine-shared"');
+
+    const cancel = await machineFetch(`${machineBase}/v1/remote/manage/knowledge/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ coordinate: COORD() }),
+    });
+    expect(await cancel.json()).toEqual({ aborted: false });
   });
 });

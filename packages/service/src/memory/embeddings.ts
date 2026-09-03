@@ -19,9 +19,17 @@
  */
 
 import { Worker } from 'node:worker_threads';
-import { createLogger } from '@bendyline/gezel';
+import { type KnowledgeEmbeddingProfile, createLogger, sameVectorSpace } from '@bendyline/gezel';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
-import { PipelineLoadError, passageInstruction, queryInstruction, runEmbed } from './embed-core.js';
+import {
+  PipelineLoadError,
+  daemonEmbedderPin,
+  daemonEmbedderVerified,
+  passageInstruction,
+  queryInstruction,
+  runEmbed,
+  runProfileQueryEmbed,
+} from './embed-core.js';
 
 const log = createLogger('memory');
 
@@ -100,6 +108,8 @@ export function embeddingsHealth(): { status: EmbeddingPipelineStatus; reason?: 
 interface Pending {
   resolve: (vectors: number[][]) => void;
   reject: (err: unknown) => void;
+  /** Set for knowledge-profile requests: their failures stay per profile. */
+  profileId?: string;
 }
 
 interface WorkerReply {
@@ -160,6 +170,16 @@ function onMessage(msg: WorkerReply): void {
   if (!p) return;
   pending.delete(msg.id);
   if (msg.error) {
+    if (p.profileId) {
+      if (msg.fatal || msg.retryable)
+        markProfileUnavailable(p.profileId, msg.error, msg.fatal ?? false);
+      p.reject(
+        msg.fatal || msg.retryable
+          ? new EmbeddingsUnavailableError(`profile ${p.profileId}: ${firstLine(msg.error)}`)
+          : new Error(msg.error),
+      );
+      return;
+    }
     if (msg.fatal) markDisabled(msg.error, msg.optionalPeerMissing ?? false);
     if (msg.retryable) {
       markTemporarilyUnavailable(msg.error);
@@ -192,11 +212,15 @@ function onWorkerDown(reason: string): void {
   }
 }
 
-function sendToWorker(w: Worker, texts: string[]): Promise<number[][]> {
+function sendToWorker(
+  w: Worker,
+  texts: string[],
+  profile?: KnowledgeEmbeddingProfile,
+): Promise<number[][]> {
   const id = nextId++;
   return new Promise<number[][]>((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    w.postMessage({ id, texts });
+    pending.set(id, { resolve, reject, ...(profile ? { profileId: profile.id } : {}) });
+    w.postMessage(profile ? { id, texts, profile } : { id, texts });
   });
 }
 
@@ -282,6 +306,90 @@ async function embedMany(texts: string[]): Promise<number[][]> {
     return vectors;
   } catch (err) {
     if (!disabledReason && !currentUnavailableReason()) pipelineStatus = 'cold';
+    throw err;
+  }
+}
+
+// ── knowledge-catalog profiles ─────────────────────────────────────────────
+
+/** Per-profile outages; a public catalog's model failing to download must not disable memory. */
+const profileOutages = new Map<string, { reason: string; until: number; permanent: boolean }>();
+
+function markProfileUnavailable(profileId: string, message: string, permanent: boolean): void {
+  profileOutages.set(profileId, {
+    reason: firstLine(message),
+    until: permanent ? Number.POSITIVE_INFINITY : Date.now() + EMBEDDING_RETRY_COOLDOWN_MS,
+    permanent,
+  });
+  log.warn(
+    `[memory] knowledge profile ${profileId} failed to load${permanent ? '' : `; semantic search for its catalogs retries after ${Math.ceil(EMBEDDING_RETRY_COOLDOWN_MS / 1_000)}s`}: ${firstLine(message)}`,
+  );
+}
+
+function profileOutage(profileId: string): string | null {
+  const outage = profileOutages.get(profileId);
+  if (!outage) return null;
+  if (Date.now() < outage.until) return outage.reason;
+  profileOutages.delete(profileId);
+  return null;
+}
+
+/**
+ * True when a catalog's profile IS the daemon's own embedder — the same
+ * pinned model files, tokenizer, pooling, instruction and width — so query
+ * vectors from `embedQuery` can be reused without loading a second model.
+ * A bare repo-string match is not enough: an instruction-prefix or precision
+ * difference silently changes vectors. This is the declarative half; whether
+ * the daemon's cached files really are those bytes is `daemonEmbedderVerified`'s
+ * call, made once the pipeline has run.
+ */
+export function sharesDaemonEmbedder(profile: KnowledgeEmbeddingProfile): boolean {
+  const pin = daemonEmbedderPin();
+  return (
+    pin !== null &&
+    sameVectorSpace(pin, profile) &&
+    profile.queryInstruction === queryInstruction() &&
+    profile.dimensions === (Number(process.env.GEZEL_EMBED_DIM) || 384)
+  );
+}
+
+/**
+ * Embed a knowledge-catalog QUERY in the catalog's own vector space. Reuses
+ * the daemon pipeline when the profile matches it; otherwise loads the
+ * profile's model (worker-first, in-process fallback) under a per-profile
+ * outage cooldown, so one catalog's missing model never darkens the others.
+ */
+export async function embedKnowledgeQuery(
+  text: string,
+  profile: KnowledgeEmbeddingProfile,
+): Promise<number[]> {
+  if (sharesDaemonEmbedder(profile)) {
+    const vector = await embedQuery(text);
+    if (await daemonEmbedderVerified()) return vector;
+    // The daemon's copy of the model is not provably the profile's bytes;
+    // fall through to the profile's own pinned, verified load.
+  }
+  if (disabledByEnv()) throw new EmbeddingsDisabledError(ENV_DISABLED_REASON);
+  const outage = profileOutage(profile.id);
+  if (outage) throw new EmbeddingsUnavailableError(`profile ${profile.id}: ${outage}`);
+  const w = ensureWorker();
+  if (w) {
+    try {
+      const [vector] = await sendToWorker(w, [text], profile);
+      return vector ?? [];
+    } catch (err) {
+      if (err instanceof EmbeddingsUnavailableError) throw err;
+      log.warn(`[memory] profile embed via worker failed; retrying in-process: ${describe(err)}`);
+    }
+  }
+  try {
+    const [vector] = await runProfileQueryEmbed([text], profile);
+    return vector ?? [];
+  } catch (err) {
+    if (err instanceof PipelineLoadError) {
+      markProfileUnavailable(profile.id, err.message, !err.retryable);
+      throw new EmbeddingsUnavailableError(`profile ${profile.id}: ${firstLine(err.message)}`);
+    }
     throw err;
   }
 }

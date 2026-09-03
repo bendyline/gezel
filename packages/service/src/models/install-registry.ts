@@ -68,6 +68,7 @@ export class ChatModelInstallRegistry<E extends ChatInstallEventBase, O> {
   private readonly engine: string;
   private readonly run: (id: string, opts: O) => AsyncIterable<E>;
   private readonly onDone: ((id: string) => void) | undefined;
+  private readonly finishedTtlMs: number;
 
   constructor(opts: {
     /** Label used in log lines only. */
@@ -78,10 +79,13 @@ export class ChatModelInstallRegistry<E extends ChatInstallEventBase, O> {
      *  the place to bust caches so subscribers observing `done` re-fetch
      *  fresh state. */
     onDone?: (id: string) => void;
+    /** How long a finished entry stays observable (default {@link FINISHED_TTL_MS}). */
+    finishedTtlMs?: number;
   }) {
     this.engine = opts.engine;
     this.run = opts.run;
     this.onDone = opts.onDone;
+    this.finishedTtlMs = opts.finishedTtlMs ?? FINISHED_TTL_MS;
   }
 
   /**
@@ -112,6 +116,29 @@ export class ChatModelInstallRegistry<E extends ChatInstallEventBase, O> {
   get(id: string): ChatInstallSnapshot | null {
     const entry = this.entries.get(id);
     return entry ? { ...entry.snapshot } : null;
+  }
+
+  /** The snapshot plus the events a late subscriber would be replayed. */
+  describe(
+    id: string,
+  ): (ChatInstallSnapshot & { lastEvent: E | null; terminalEvent: E | null }) | null {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    return { ...entry.snapshot, lastEvent: entry.lastEvent, terminalEvent: entry.terminalEvent };
+  }
+
+  /** Every install still running, with its latest progress — the polled twin of subscribe(). */
+  active(): Array<{ id: string; startedAt: string; lastEvent: E | null }> {
+    const out: Array<{ id: string; startedAt: string; lastEvent: E | null }> = [];
+    for (const entry of this.entries.values()) {
+      if (entry.snapshot.finished) continue;
+      out.push({
+        id: entry.snapshot.id,
+        startedAt: entry.snapshot.startedAt,
+        lastEvent: entry.lastEvent,
+      });
+    }
+    return out;
   }
 
   /**
@@ -215,7 +242,7 @@ export class ChatModelInstallRegistry<E extends ChatInstallEventBase, O> {
       entry.snapshot.finished = true;
       const timer = setTimeout(() => {
         if (this.entries.get(id) === entry) this.entries.delete(id);
-      }, FINISHED_TTL_MS);
+      }, this.finishedTtlMs);
       timer.unref?.();
     }
   }

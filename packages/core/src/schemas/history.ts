@@ -287,6 +287,17 @@ export const HistoryEventKindSchema = z.enum([
    * Used by the Benchmarks history view + future regression detector.
    */
   'eval.trial.completed',
+  /**
+   * Knowledge catalogs (.gezk) in THIS user's registry. `details` carries
+   * `{ publisherId, catalogId, version, source, storageScope }` (plus
+   * `previousVersion` on an update and `error` on a failure).
+   */
+  'knowledge.catalog.installed',
+  'knowledge.catalog.updated',
+  'knowledge.catalog.enabled',
+  'knowledge.catalog.disabled',
+  'knowledge.catalog.removed',
+  'knowledge.catalog.install_failed',
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 

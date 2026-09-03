@@ -1,234 +1,94 @@
+import {
+  KnowledgeIdSchema,
+  KnowledgeRegistryEntrySchema,
+  KnowledgeVersionSchema,
+  Sha256HexSchema,
+} from '@bendyline/gezk';
 import { z } from 'zod';
 
 /**
- * Knowledge catalogs — the wire/disk contracts for `.gezk` archives, the
- * per-user registry, the machine inventory, and the retrieval provenance
- * shapes. The format itself (DDL, sharding, routing, quantization,
- * determinism) is frozen in docs/gezk-format-v1.md; these schemas are its
- * type-level expression and are shared by the compiler
- * (@bendyline/gezel-knowledge), the daemon, the broker, the CLI, and the UI.
- *
- * Version discipline: `formatVersion` governs the container layout,
- * `indexSchemaVersion` the SQLite DDL. Readers never migrate a catalog —
- * incompatibility is a typed disabled-with-reason state, and a publisher's
- * signed artifact is never rewritten.
+ * Knowledge catalogs — gezel's product-side contracts around the `.gezk`
+ * format: the per-user registry, the machine inventory, project scope, HTTP
+ * request shapes and history events. The format itself (manifest, registry
+ * index, profiles, id grammars, `knowledge://` references) is owned by
+ * @bendyline/gezk and re-exported here so product code keeps one import.
  */
 
-// ── id grammars (frozen in gezk-format-v1.md §7) ────────────────────────────
-
-/** DNS-label style: publishers, catalogs, topics. */
-export const KNOWLEDGE_ID_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
-
-export const KnowledgeIdSchema = z.string().regex(KNOWLEDGE_ID_PATTERN);
+// Explicit names, not `export *`: esbuild lowers a star re-export of an
+// external package to a runtime namespace copy, which never reaches this
+// bundle's top-level exports (the format names then resolve to undefined in
+// every consumer). knowledge-reexports.test.ts keeps this list complete.
+export {
+  ArtifactDigestSchema,
+  CatalogDocumentSchema,
+  DEFAULT_EMBEDDING_ONNX_FILE,
+  DEFAULT_EMBEDDING_TOKENIZER_FILE,
+  GEZK_APPLICATION_ID,
+  GEZK_FORMAT_VERSION,
+  GEZK_INDEX_SCHEMA_VERSION,
+  GEZK_MANIFEST_KIND,
+  GEZK_MIME_TYPE,
+  GEZK_REGISTRY_KIND,
+  KNOWLEDGE_ID_PATTERN,
+  KNOWLEDGE_VERSION_PATTERN,
+  KnowledgeCatalogManifestSchema,
+  KnowledgeChunkUidSchema,
+  KnowledgeChunkingProfileSchema,
+  KnowledgeDocumentIdSchema,
+  KnowledgeEmbeddingProfileSchema,
+  KnowledgeIdSchema,
+  KnowledgeManifestFileSchema,
+  KnowledgeRegistryEntrySchema,
+  KnowledgeRegistryIndexSchema,
+  KnowledgeSignatureSchema,
+  KnowledgeVectorEncodingSchema,
+  KnowledgeVersionSchema,
+  LICENSE_NOTICE_PATH,
+  MANIFEST_PATH,
+  MIMETYPE_PATH,
+  README_PATH,
+  ROUTER_DB_PATH,
+  RepoRelativePathSchema,
+  SOURCE_NOTICES_PATH,
+  Sha256HexSchema,
+  SourceNoticesSchema,
+  embeddingProfileArtifacts,
+  formatKnowledgeUri,
+  parseKnowledgeUri,
+  sameVectorSpace,
+} from '@bendyline/gezk';
+export type {
+  CatalogDocument,
+  KnowledgeCatalogManifest,
+  KnowledgeChunkingProfile,
+  KnowledgeEmbeddingProfile,
+  KnowledgeRegistryEntry,
+  KnowledgeRegistryIndex,
+  KnowledgeSignature,
+  KnowledgeUri,
+  KnowledgeVectorEncoding,
+  SourceNotices,
+} from '@bendyline/gezk';
 
 /**
- * Portable, single-directory catalog version. Versions are identities, not
- * paths: separators, drive/ADS syntax, controls, dot segments, trailing dots
- * or spaces, and Windows device names are all rejected on every platform.
+ * Embedding profiles the daemon can produce query vectors for. A gilde
+ * `knowledge-catalog` entry may only advertise one of these; the knowledge
+ * package's profile registry test asserts the two lists stay identical.
  */
-export const KNOWLEDGE_VERSION_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,126}[A-Za-z0-9])?$/;
-export const KnowledgeVersionSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(KNOWLEDGE_VERSION_PATTERN, 'catalog version must be one portable path segment')
-  .refine(
-    (value) => !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value),
-    'catalog version must not use a reserved Windows device name',
-  );
-
-/** 1–256 Unicode scalars, NFC, no controls, trimmed. Wikipedia = decimal curid. */
-export const KnowledgeDocumentIdSchema = z
-  .string()
-  .min(1)
-  .max(256)
-  .refine((s) => s === s.normalize('NFC'), 'document id must be NFC-normalized')
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the control-character ban is the point
-  .refine((s) => !/[\u0000-\u001f\u007f-\u009f]/u.test(s), 'document id must not contain controls')
-  .refine((s) => s === s.trim(), 'document id must not have leading/trailing whitespace');
-
-/** Exactly 32 lowercase hex chars (first 16 bytes of the chunk-uid hash). */
-export const KnowledgeChunkUidSchema = z.string().regex(/^[0-9a-f]{32}$/);
-
-const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
-
-// ── embedding + chunking profiles ───────────────────────────────────────────
-
-export const KnowledgeVectorEncodingSchema = z.enum(['bit384+int8']);
-
-/**
- * The FULL vector-space identity of a catalog's embeddings. Matching only a
- * model name or a dimension is unsafe — two 384-dim models do not share a
- * space, and an instruction-prefix change silently changes vectors. Readers
- * compare the entire object (by `id`, with the rest as the id's definition).
- */
-export const KnowledgeEmbeddingProfileSchema = z.object({
-  /** e.g. `gezel-multilingual-e5-small@1`. New encoding/model = new id. */
-  id: z.string().min(1),
-  model: z.object({
-    repo: z.string().min(1),
-    revision: z.string().min(1),
-    onnxDigest: z.string().optional(),
-  }),
-  tokenizer: z.object({
-    kind: z.string().min(1),
-    digest: z.string().optional(),
-  }),
-  pooling: z.literal('mean'),
-  normalized: z.literal(true),
-  dimensions: z.number().int().positive(),
-  maxTokens: z.number().int().positive(),
-  queryInstruction: z.string(),
-  passageInstruction: z.string(),
-  vectorEncoding: KnowledgeVectorEncodingSchema,
-  distance: z.object({
-    stage1: z.literal('hamming'),
-    stage2: z.literal('cosine'),
-  }),
-  quantization: z.object({
-    int8: z.object({
-      method: z.literal('symmetric-linear'),
-      scale: z.literal(127),
-    }),
-    binary: z.object({
-      method: z.literal('sign'),
-      threshold: z.literal(0),
-      packing: z.literal('lsb-first'),
-    }),
-  }),
-});
-export type KnowledgeEmbeddingProfile = z.infer<typeof KnowledgeEmbeddingProfileSchema>;
-
-export const KnowledgeChunkingProfileSchema = z.object({
-  /** `gezel-markdown-chunks@2` for knowledge; `@1` names the project chunker. */
-  id: z.string().min(1),
-  unit: z.literal('tokens'),
-  tokenizer: z.literal('profile'),
-  targetTokens: z.number().int().positive(),
-  overlapTokens: z.number().int().nonnegative(),
-  contextHeader: z.object({ maxTokens: z.number().int().nonnegative() }),
-});
-export type KnowledgeChunkingProfile = z.infer<typeof KnowledgeChunkingProfileSchema>;
-
-// ── manifest ────────────────────────────────────────────────────────────────
-
-export const KnowledgeManifestFileSchema = z.object({
-  path: z.string().min(1),
-  sizeBytes: z.number().int().nonnegative(),
-  sha256: Sha256HexSchema,
-});
-
-export const KnowledgeCatalogManifestSchema = z.object({
-  kind: z.literal('gezel-knowledge-catalog'),
-  formatVersion: z.literal(1),
-  indexSchemaVersion: z.literal(1),
-  id: KnowledgeIdSchema,
-  version: KnowledgeVersionSchema,
-  name: z.string().min(1),
-  description: z.string().optional(),
-  language: z.string().min(2),
-  publisher: z.object({
-    id: KnowledgeIdSchema,
-    name: z.string().min(1),
-    url: z.string().optional(),
-  }),
-  createdAt: z.string(),
-  sourceSnapshot: z
-    .object({
-      name: z.string(),
-      date: z.string(),
-      taxonomyVersion: z.string().optional(),
-    })
-    .optional(),
-  license: z.object({
-    name: z.string().min(1),
-    noticePath: z.string().optional(),
-    attributionRequired: z.boolean(),
-  }),
-  embedding: KnowledgeEmbeddingProfileSchema,
-  chunking: KnowledgeChunkingProfileSchema,
-  topics: z
-    .array(z.object({ id: KnowledgeIdSchema, name: z.string().min(1) }))
-    .min(1, 'a catalog must ship a table of contents (at least one topic)'),
-  router: z.object({
-    shardTargetChunks: z.number().int().positive(),
-    shards: z.array(
-      z.object({
-        id: z.number().int().nonnegative(),
-        path: z.string().min(1),
-        chunks: z.number().int().nonnegative(),
-        documents: z.number().int().nonnegative(),
-        centroids: z.number().int().nonnegative(),
-        sha256: Sha256HexSchema,
-      }),
-    ),
-    totalCentroids: z.number().int().nonnegative(),
-  }),
-  counts: z.object({
-    documents: z.number().int().nonnegative(),
-    chunks: z.number().int().nonnegative(),
-    shards: z.number().int().positive(),
-  }),
-  files: z.array(KnowledgeManifestFileSchema).min(1),
-  compatibility: z.object({
-    minimumGezelVersion: z.string().optional(),
-    maximumIndexSchemaVersion: z.number().int().positive(),
-  }),
-  smokeQueries: z
-    .array(
-      z.object({
-        query: z.string().min(1),
-        expectedDocumentIds: z.array(KnowledgeDocumentIdSchema).min(1),
-      }),
-    )
-    .optional(),
-  toolchain: z
-    .object({
-      compiler: z.string(),
-      node: z.string(),
-      sqlite: z.string().optional(),
-      sqliteVec: z.string().optional(),
-      onnxruntime: z.string().optional(),
-      platform: z.string(),
-      modelDigest: z.string().optional(),
-      tokenizerDigest: z.string().optional(),
-    })
-    .optional(),
-  signature: z
-    .object({
-      algorithm: z.literal('ed25519'),
-      keyId: z.string().min(1),
-      canonicalization: z.literal('rfc8785'),
-      value: z.string().min(1),
-    })
-    .optional(),
-});
-export type KnowledgeCatalogManifest = z.infer<typeof KnowledgeCatalogManifestSchema>;
-
-// ── compiler input ──────────────────────────────────────────────────────────
-
-/** One normalized document streamed into the compiler. */
-export const CatalogDocumentSchema = z.object({
-  id: KnowledgeDocumentIdSchema,
-  title: z.string().min(1),
-  slug: z.string().min(1),
-  summary: z.string().optional(),
-  language: z.string().min(2),
-  /** Root→leaf topic id path; the first segment must exist in the manifest. */
-  topicPath: z.array(KnowledgeIdSchema).min(1),
-  markdown: z.string(),
-  sourceUrl: z.string().optional(),
-  sourceRevision: z.string().optional(),
-  sourceUpdatedAt: z.string().optional(),
-  attribution: z.record(z.string(), z.string()).optional(),
-  aliases: z.array(z.string()).optional(),
-});
-export type CatalogDocument = z.infer<typeof CatalogDocumentSchema>;
+export const KNOWLEDGE_EMBEDDING_PROFILE_IDS = [
+  'multilingual-e5-small@1',
+  'bge-small-en-v1.5@1',
+] as const;
+export type KnowledgeEmbeddingProfileId = (typeof KNOWLEDGE_EMBEDDING_PROFILE_IDS)[number];
 
 // ── the immutable catalog reference + user registry ─────────────────────────
 
 export const KnowledgeStorageScopeSchema = z.enum(['machine-shared', 'user']);
 export type KnowledgeStorageScope = z.infer<typeof KnowledgeStorageScopeSchema>;
+
+/** How a catalog reached this user's registry: a gilde entry, a local file, or a URL. */
+export const KnowledgeInstallSourceKindSchema = z.enum(['gilde', 'file', 'url']);
+export type KnowledgeInstallSourceKind = z.infer<typeof KnowledgeInstallSourceKindSchema>;
 
 /** The full immutable identity a user registry entry pins. */
 export const KnowledgeCatalogRefSchema = z.object({
@@ -255,6 +115,8 @@ export const KnowledgeUserRegistrySchema = z.object({
       enabled: z.boolean(),
       addedAt: z.string(),
       autoUpdate: z.boolean().optional(),
+      /** Where the install came from; entries written before it was recorded carry none. */
+      source: KnowledgeInstallSourceKindSchema.optional(),
       /** Set when the manager quarantined this catalog (with the reason). */
       disabledReason: z.string().optional(),
     }),
@@ -301,135 +163,21 @@ export const ProjectKnowledgeCatalogsSchema = z.object({
 });
 export type ProjectKnowledgeCatalogs = z.infer<typeof ProjectKnowledgeCatalogsSchema>;
 
-// ── knowledge:// URI ────────────────────────────────────────────────────────
+// ── catalog browsing and updates (gilde-backed) ─────────────────────────────
 
-export interface KnowledgeUri {
-  catalogId: string;
-  documentId: string;
-  fragment?: { chunk: string } | { lineStart: number; lineEnd?: number };
-}
-
-const KNOWLEDGE_URI_PREFIX = 'knowledge://';
-
-/** Format per the frozen ABNF in gezk-format-v1.md §8. */
-export function formatKnowledgeUri(uri: KnowledgeUri): string {
-  const encodedDoc = uri.documentId
-    .split('/')
-    .map((seg) => encodeURIComponent(seg))
-    .join('/');
-  let out = `${KNOWLEDGE_URI_PREFIX}${uri.catalogId}/${encodedDoc}`;
-  if (uri.fragment) {
-    out +=
-      'chunk' in uri.fragment
-        ? `#chunk=${uri.fragment.chunk}`
-        : `#line=${uri.fragment.lineStart}${uri.fragment.lineEnd !== undefined ? `-${uri.fragment.lineEnd}` : ''}`;
-  }
-  return out;
-}
-
-/** Strict parse; null for anything that is not a well-formed knowledge URI. */
-export function parseKnowledgeUri(raw: string): KnowledgeUri | null {
-  if (!raw.startsWith(KNOWLEDGE_URI_PREFIX)) return null;
-  const rest = raw.slice(KNOWLEDGE_URI_PREFIX.length);
-  const hashAt = rest.indexOf('#');
-  const body = hashAt === -1 ? rest : rest.slice(0, hashAt);
-  const fragmentRaw = hashAt === -1 ? null : rest.slice(hashAt + 1);
-
-  const slashAt = body.indexOf('/');
-  if (slashAt <= 0) return null;
-  const catalogId = body.slice(0, slashAt);
-  const encodedDoc = body.slice(slashAt + 1);
-  if (!KNOWLEDGE_ID_PATTERN.test(catalogId)) return null;
-  if (!encodedDoc || encodedDoc.length > 512) return null;
-
-  let documentId: string;
-  try {
-    documentId = encodedDoc
-      .split('/')
-      .map((seg) => {
-        if (!seg) throw new Error('empty segment');
-        return decodeURIComponent(seg);
-      })
-      .join('/');
-  } catch {
-    return null;
-  }
-  if (!KnowledgeDocumentIdSchema.safeParse(documentId).success) return null;
-
-  if (fragmentRaw === null) return { catalogId, documentId };
-  const chunkMatch = /^chunk=([0-9a-f]{32})$/.exec(fragmentRaw);
-  if (chunkMatch) return { catalogId, documentId, fragment: { chunk: chunkMatch[1] as string } };
-  const lineMatch = /^line=(\d+)(?:-(\d+))?$/.exec(fragmentRaw);
-  if (lineMatch) {
-    return {
-      catalogId,
-      documentId,
-      fragment: {
-        lineStart: Number.parseInt(lineMatch[1] as string, 10),
-        ...(lineMatch[2] !== undefined ? { lineEnd: Number.parseInt(lineMatch[2], 10) } : {}),
-      },
-    };
-  }
-  return null;
-}
-
-// ── the signed publisher registry (CDN `_knowledge/registry/index.json`) ────
-
-/** One downloadable catalog release a publisher's registry advertises. */
-export const KnowledgeRegistryEntrySchema = z.object({
-  catalogId: KnowledgeIdSchema,
-  version: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  language: z.string().min(2),
-  documents: z.number().int().nonnegative(),
-  /** Size of the `.gezk` archive itself (download accounting/preflight). */
-  archiveBytes: z.number().int().nonnegative(),
-  /** sha256 of the `.gezk` archive — the ref's contentDigest after install. */
-  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  /** Absolute download URL. Uploaded before the registry that names it. */
-  url: z.string().url(),
-  license: z.object({ name: z.string().min(1), attributionRequired: z.boolean() }),
-  sourceSnapshot: z
-    .object({ name: z.string(), date: z.string(), taxonomyVersion: z.string().optional() })
-    .optional(),
+/** The Hugging Face dataset coordinates a gilde `knowledge-catalog` version pins. */
+export const KnowledgeHuggingfaceFileSchema = z.object({
+  repo: z.string(),
+  /** A 40-hex commit sha, so the pinned URL is immutable. */
+  revision: z.string(),
+  path: z.string(),
 });
-export type KnowledgeRegistryEntry = z.infer<typeof KnowledgeRegistryEntrySchema>;
+export type KnowledgeHuggingfaceFile = z.infer<typeof KnowledgeHuggingfaceFileSchema>;
 
 /**
- * The publisher registry document. Signed exactly like a catalog manifest:
- * Ed25519 over the RFC 8785 canonical form minus `signature`, verified
- * against shipped keyId-indexed trust anchors. Published LAST — every
- * archive it names must already be live, so a half-published release is
- * invisible rather than broken, and withdrawing a release is deleting its
- * row and re-signing (installed catalogs are never affected).
- */
-export const KnowledgeRegistryIndexSchema = z.object({
-  kind: z.literal('gezel-knowledge-registry'),
-  formatVersion: z.literal(1),
-  publisher: z.object({
-    id: KnowledgeIdSchema,
-    name: z.string().min(1),
-    url: z.string().optional(),
-  }),
-  generatedAt: z.string(),
-  catalogs: z.array(KnowledgeRegistryEntrySchema),
-  signature: z
-    .object({
-      algorithm: z.literal('ed25519'),
-      keyId: z.string().min(1),
-      canonicalization: z.literal('rfc8785'),
-      value: z.string().min(1),
-    })
-    .optional(),
-});
-export type KnowledgeRegistryIndex = z.infer<typeof KnowledgeRegistryIndexSchema>;
-
-/**
- * One available upgrade: an installed catalog for which the signed registry
- * offers a strictly newer version. `contentDigest`/`url`/`archiveBytes` come
- * from the verified registry row — exactly what the install endpoint needs
- * to run the hardened URL install.
+ * One available upgrade: an installed catalog for which the shipped gilde
+ * content carries a strictly newer version. The gilde pin (sha256 + commit)
+ * is the trust root, exactly as it is for models.
  */
 export const KnowledgeUpdateCandidateSchema = z.object({
   publisherId: KnowledgeIdSchema,
@@ -437,27 +185,167 @@ export const KnowledgeUpdateCandidateSchema = z.object({
   name: z.string(),
   installedVersion: z.string(),
   availableVersion: z.string(),
+  releasedAt: z.string(),
   archiveBytes: z.number().int().nonnegative(),
-  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  url: z.string().url(),
+  contentDigest: Sha256HexSchema,
+  huggingface: KnowledgeHuggingfaceFileSchema,
 });
 export type KnowledgeUpdateCandidate = z.infer<typeof KnowledgeUpdateCandidateSchema>;
 
-export const KnowledgeUpdatesResponseSchema = z.discriminatedUnion('available', [
+export const KnowledgeUpdatesResponseSchema = z.object({
+  source: z.literal('gilde'),
+  checkedAt: z.string(),
+  updates: z.array(KnowledgeUpdateCandidateSchema),
+});
+export type KnowledgeUpdatesResponse = z.infer<typeof KnowledgeUpdatesResponseSchema>;
+
+export const KnowledgeSemanticSearchModeSchema = z.enum(['shared', 'profile', 'keyword-only']);
+export type KnowledgeSemanticSearchMode = z.infer<typeof KnowledgeSemanticSearchModeSchema>;
+
+/** One installed catalog as reported by `GET /api/knowledge/catalogs`. */
+export const KnowledgeCatalogStatusSchema = z.object({
+  ref: KnowledgeCatalogRefSchema,
+  enabled: z.boolean(),
+  addedAt: z.string(),
+  disabledReason: z.string().optional(),
+  mounted: z.boolean(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  language: z.string().optional(),
+  license: z.string().optional(),
+  documents: z.number().int().nonnegative().optional(),
+  chunks: z.number().int().nonnegative().optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  /** False only for `keyword-only` catalogs (an unregistered embedding profile). */
+  vectorCompatible: z.boolean().optional(),
+  /**
+   * `shared` — queries reuse the daemon's own embedder; `profile` — the
+   * catalog's model is loaded to embed queries; `keyword-only` — no model
+   * gezel can run matches the profile, so only full-text search applies.
+   */
+  semanticSearch: KnowledgeSemanticSearchModeSchema.optional(),
+  source: KnowledgeInstallSourceKindSchema,
+  /** A strictly newer version exists in the shipped catalog content. */
+  updateAvailable: z.boolean(),
+  availableVersion: z.string().optional(),
+});
+export type KnowledgeCatalogStatus = z.infer<typeof KnowledgeCatalogStatusSchema>;
+
+/** `GET /api/knowledge/available`: a gilde entry joined with this user's state. */
+export const KnowledgeAvailableCatalogSchema = z.object({
+  id: KnowledgeIdSchema,
+  publisherId: KnowledgeIdSchema,
+  name: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()),
+  language: z.string(),
+  category: z.string().optional(),
+  license: z.string().optional(),
+  licenseUrl: z.string().optional(),
+  version: z.string(),
+  releasedAt: z.string(),
+  formatVersion: z.string(),
+  huggingface: KnowledgeHuggingfaceFileSchema,
+  upstream: z.string().optional(),
+  parquet: z.object({ repo: z.string(), revision: z.string(), dir: z.string() }).optional(),
+  sha256: Sha256HexSchema,
+  archiveBytes: z.number().int().nonnegative(),
+  uncompressedBytes: z.number().int().nonnegative(),
+  documents: z.number().int().nonnegative(),
+  chunks: z.number().int().nonnegative(),
+  embeddingProfile: z.object({ id: z.string(), modelRepo: z.string() }),
+  topics: z.array(z.object({ id: z.string(), name: z.string() })),
+  minGezelVersion: z.string().optional(),
+  /** Present when this user's registry holds a version of the catalog. */
+  installed: z
+    .object({
+      version: z.string(),
+      contentDigest: Sha256HexSchema,
+      storageScope: KnowledgeStorageScopeSchema,
+      enabled: z.boolean(),
+      updateAvailable: z.boolean(),
+    })
+    .optional(),
+  /** The pinned bytes already sit in the machine-shared asset store. */
+  sharedOnDevice: z.boolean(),
+  installing: z.boolean(),
+  /** A resumable partial download of the pinned archive exists. */
+  incompleteDownload: z.boolean(),
+});
+export type KnowledgeAvailableCatalog = z.infer<typeof KnowledgeAvailableCatalogSchema>;
+
+// ── install jobs ────────────────────────────────────────────────────────────
+
+export const KnowledgeInstallPhaseSchema = z.enum(['download', 'extract', 'embedder']);
+export type KnowledgeInstallPhase = z.infer<typeof KnowledgeInstallPhaseSchema>;
+
+/** Events an install job streams (`GET /jobs/:id/events`, `POST /catalogs/:id/install`). */
+export const KnowledgeInstallEventSchema = z.discriminatedUnion('type', [
   z.object({
-    available: z.literal(false),
-    reason: z.enum(['no-registry-url', 'network-blocked', 'no-trust-anchors', 'fetch-failed']),
-    detail: z.string().optional(),
+    type: z.literal('progress'),
+    phase: KnowledgeInstallPhaseSchema,
+    bytesDone: z.number().nonnegative(),
+    bytesTotal: z.number().nonnegative(),
+  }),
+  z.object({ type: z.literal('verifying') }),
+  z.object({
+    type: z.literal('retrying'),
+    attempt: z.number().int(),
+    maxAttempts: z.number().int(),
+    delayMs: z.number().nonnegative(),
+    reason: z.string(),
   }),
   z.object({
-    available: z.literal(true),
-    registryUrl: z.string(),
-    publisher: z.object({ id: KnowledgeIdSchema, name: z.string() }),
-    checkedAt: z.string(),
-    updates: z.array(KnowledgeUpdateCandidateSchema),
+    type: z.literal('done'),
+    ref: KnowledgeCatalogRefSchema,
+    rootDir: z.string(),
+    storageScope: KnowledgeStorageScopeSchema,
+    /** Installed and mounted, but an optional step (the query embedder) did not complete. */
+    warning: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('error'),
+    error: z.string(),
+    /** Set when the downloaded bytes did not match the pinned digest. */
+    mismatch: z.object({ expected: Sha256HexSchema, actual: Sha256HexSchema }).optional(),
   }),
 ]);
-export type KnowledgeUpdatesResponse = z.infer<typeof KnowledgeUpdatesResponseSchema>;
+export type KnowledgeInstallEvent = z.infer<typeof KnowledgeInstallEventSchema>;
+
+export const KnowledgeInstallJobSchema = z.object({
+  id: z.string(),
+  startedAt: z.string(),
+  finished: z.boolean(),
+  error: z.string().optional(),
+  /** The latest progress event and, once finished, the terminal event. */
+  events: z.array(KnowledgeInstallEventSchema),
+});
+export type KnowledgeInstallJob = z.infer<typeof KnowledgeInstallJobSchema>;
+
+export const KnowledgeActiveInstallSchema = z.object({
+  jobId: z.string(),
+  /** Known up front for catalog installs; a file/URL install learns it at `done`. */
+  catalogId: KnowledgeIdSchema.optional(),
+  startedAt: z.string(),
+  phase: z.enum(['download', 'verifying', 'extract', 'embedder', 'retrying']),
+  bytesDone: z.number().nonnegative(),
+  bytesTotal: z.number().nonnegative(),
+});
+export type KnowledgeActiveInstall = z.infer<typeof KnowledgeActiveInstallSchema>;
+
+/** A `.partial` archive under `~/.gezel/knowledge/downloads/` that no job is writing. */
+export const IncompleteKnowledgeDownloadSchema = z.object({
+  /** The temp-file stem: the pinned sha256's first 16 hex chars, or a hash of the URL. */
+  key: z.string().regex(/^[0-9a-f]{16}$/),
+  bytes: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+  /** True when the key still matches a catalog entry, so a re-install resumes it. */
+  resumable: z.boolean(),
+  catalogId: KnowledgeIdSchema.optional(),
+  name: z.string().optional(),
+  archiveBytes: z.number().int().nonnegative().optional(),
+});
+export type IncompleteKnowledgeDownload = z.infer<typeof IncompleteKnowledgeDownloadSchema>;
 
 // ── HTTP request shapes ─────────────────────────────────────────────────────
 
@@ -473,6 +361,14 @@ export const KnowledgeInstallRequestSchema = z.object({
         .string()
         .regex(/^[0-9a-fA-F]{64}$/)
         .optional(),
+    }),
+    z.object({
+      kind: z.literal('catalog'),
+      /** A gilde `knowledge-catalog` id; its pinned sha256 + commit are the trust root. */
+      id: KnowledgeIdSchema,
+      version: z.string().optional(),
+      /** `auto` (default) prefers the machine-shared store when a machine engine is adopted. */
+      placement: z.enum(['auto', 'user']).optional(),
     }),
   ]),
 });

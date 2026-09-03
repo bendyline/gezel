@@ -10,15 +10,15 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { CatalogDocument, KnowledgeCatalogManifest } from '@bendyline/gezel';
 import { KnowledgeIdSchema, formatKnowledgeUri } from '@bendyline/gezel';
 import type { ProfileEmbedder } from '@bendyline/gezel-knowledge';
 import {
   CatalogHandle,
   EmbedderUnavailableError,
-  GEZEL_MARKDOWN_CHUNKS_2,
   KNOWLEDGE_EMBEDDING_PROFILES,
+  MARKDOWN_CHUNKS_2,
   compileKnowledgeCatalog,
   createProfileEmbedder,
   extractGezkVerified,
@@ -40,7 +40,7 @@ interface CatalogConfig {
   description?: string;
   language: string;
   publisher: { id: string; name: string; url?: string };
-  license: { name: string; noticePath?: string; attributionRequired: boolean };
+  license: { name: string; spdx?: string; noticePath?: string; attributionRequired: boolean };
   profile?: string;
   createdAt?: string;
 }
@@ -91,7 +91,7 @@ export async function runKnowledgeInit(dir: string): Promise<void> {
     language: 'en',
     publisher: { id, name: basename(root) },
     license: { name: 'All rights reserved', attributionRequired: false },
-    profile: 'gezel-bge-small-en-v1.5@1',
+    profile: 'bge-small-en-v1.5@1',
   };
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
   await writeFile(
@@ -133,7 +133,7 @@ export async function runKnowledgeBuild(
   const source = await loadMarkdownCatalog(hasContentDir ? contentDir : root, {
     language: config.language,
   });
-  const profileId = config.profile ?? 'gezel-bge-small-en-v1.5@1';
+  const profileId = config.profile ?? 'bge-small-en-v1.5@1';
   const profile = knowledgeEmbeddingProfile(profileId);
   if (!profile) {
     throw new CliError(
@@ -168,7 +168,7 @@ export async function runKnowledgeBuild(
       })(),
       outputPath,
       embeddingProfile: embedder.profile,
-      chunkingProfile: GEZEL_MARKDOWN_CHUNKS_2,
+      chunkingProfile: MARKDOWN_CHUNKS_2,
       embed: (texts) => embedder.embed(texts),
       countTokens: (text) => embedder.countTokens(text),
       workDir,
@@ -279,7 +279,7 @@ export async function runKnowledgeSearch(
         for (const hit of docHits) {
           const doc = handle.getDocument(hit.documentId);
           console.log(
-            `  ${doc?.title ?? hit.documentId}  ${formatKnowledgeUri({ catalogId: manifest.id, documentId: hit.documentId })}`,
+            `  ${doc?.title ?? hit.documentId}  ${formatKnowledgeUri({ publisherId: manifest.publisher.id, catalogId: manifest.id, documentId: hit.documentId })}`,
           );
         }
       }
@@ -306,6 +306,7 @@ export async function runKnowledgeSearch(
         console.log(opts.semantic ? 'Passages (semantic + full-text):' : 'Passages (full-text):');
         for (const hit of deduped.slice(0, limit)) {
           const uri = formatKnowledgeUri({
+            publisherId: manifest.publisher.id,
             catalogId: manifest.id,
             documentId: hit.documentId,
             fragment: { chunk: hit.chunkUid },
@@ -379,4 +380,61 @@ function formatBytes(bytes: number): string {
 /** Kept for parity with other command modules' hash-stamp helpers. */
 export function contentSha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Write the Parquet companion of a catalog — the same documents, chunks and
+ * embeddings as columnar tables for DuckDB, pandas, Polars or `datasets`.
+ * Uses the DuckDB CLI gezel installs for its data features (or
+ * `GEZEL_DUCKDB_BIN` / `--duckdb`), pinned to the release Parquet bytes are
+ * reproducible against.
+ */
+export async function runKnowledgeExportParquet(
+  path: string,
+  opts: { out?: string; duckdb?: string },
+): Promise<void> {
+  const { DUCKDB_VERSION, duckdbInstalledBinary } = await import('@bendyline/gezel/native');
+  const { exportCatalogParquet, findDuckdbBinary } = await import('@bendyline/gezel-knowledge');
+  const resolved = resolve(path);
+  const info = await stat(resolved).catch(() => null);
+  if (!info) throw new CliError(`no such catalog: ${resolved}`);
+  const source = info.isDirectory() ? { rootDir: resolved } : { archivePath: resolved };
+  const outDir = opts.out
+    ? resolve(opts.out)
+    : join(dirname(resolved), `${basename(resolved).replace(/\.gezk$/i, '')}-parquet`);
+
+  const installed = duckdbInstalledBinary(process.env.GEZEL_HOME ?? join(homedir(), '.gezel'));
+  const binaryPath =
+    opts.duckdb ??
+    process.env.GEZEL_DUCKDB_BIN?.trim() ??
+    ((await stat(installed).catch(() => null)) ? installed : await findDuckdbBinary());
+  if (!binaryPath) {
+    throw new CliError(
+      `no DuckDB CLI found — open a data feature in gezel once (it installs DuckDB ${DUCKDB_VERSION}), install DuckDB yourself, or pass --duckdb <binary>`,
+    );
+  }
+
+  const report = await exportCatalogParquet({
+    source,
+    outDir,
+    duckdb: { binaryPath, ...(opts.duckdb ? {} : { expectedVersion: DUCKDB_VERSION }) },
+    onProgress: (event) => {
+      if (!process.stderr.isTTY) return;
+      if (event.phase === 'extract') process.stderr.write('extracting the archive…\n');
+      else if (event.phase === 'stage') {
+        process.stderr.write(
+          `staged ${event.table}${event.shardId !== undefined ? ` shard ${event.shardId}` : ''}: ${event.rows} rows\n`,
+        );
+      } else process.stderr.write(`writing ${event.file}\n`);
+    },
+  });
+  console.log(`Parquet companion of ${report.catalogId}@${report.version} → ${outDir}`);
+  for (const file of report.files) {
+    console.log(
+      `  ${file.path.padEnd(24)} ${String(file.rows).padStart(9)} rows ${(file.sizeBytes / (1024 * 1024)).toFixed(1).padStart(8)} MB  ${file.sha256.slice(0, 16)}…`,
+    );
+  }
+  console.log(
+    `  written with DuckDB ${report.duckdbVersion}; report in ${join(outDir, 'parquet-manifest.json')}`,
+  );
 }

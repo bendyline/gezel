@@ -38,3 +38,17 @@ describe('fetchHuggingfaceCommit', () => {
     await expect(fetchHuggingfaceCommit('org/repo', { fetchImpl })).rejects.toThrow(/no valid sha/);
   });
 });
+
+describe('dataset repositories', () => {
+  it('resolves dataset commits through /api/datasets/', async () => {
+    let requestedUrl = '';
+    const fetchImpl = (async (input: string | URL) => {
+      requestedUrl = typeof input === 'string' ? input : input.toString();
+      return new Response(JSON.stringify({ sha: 'c'.repeat(40) }), { status: 200 });
+    }) as typeof fetch;
+    await fetchHuggingfaceCommit('Bendyline/wikipedia-physics', { repoType: 'dataset', fetchImpl });
+    expect(requestedUrl).toBe(
+      'https://huggingface.co/api/datasets/Bendyline/wikipedia-physics/revision/main',
+    );
+  });
+});

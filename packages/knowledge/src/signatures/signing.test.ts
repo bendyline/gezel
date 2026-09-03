@@ -1,4 +1,4 @@
-import type { KnowledgeCatalogManifest, KnowledgeRegistryIndex } from '@bendyline/gezel';
+import type { KnowledgeCatalogManifest, KnowledgeRegistryIndex } from '@bendyline/gezk';
 import { describe, expect, it } from 'vitest';
 import { canonicalizeJson } from './jcs.js';
 import {
@@ -43,18 +43,18 @@ describe('canonicalizeJson (RFC 8785)', () => {
 
 function minimalManifest(): KnowledgeCatalogManifest {
   return {
-    kind: 'gezel-knowledge-catalog',
-    formatVersion: 1,
-    indexSchemaVersion: 1,
+    kind: 'gezk-catalog',
+    formatVersion: '0.5',
+    indexSchemaVersion: 2,
     id: 'sig-test',
     version: '1.0.0',
     name: 'Sig Test',
     language: 'en',
     publisher: { id: 'gezel-tests', name: 'Gezel Tests' },
     createdAt: '2026-01-01T00:00:00.000Z',
-    license: { name: 'MIT', attributionRequired: false },
+    license: { name: 'MIT', noticePath: 'LICENSES/catalog.txt', attributionRequired: false },
     embedding: {
-      id: 'gezel-test-hash-embed@1',
+      id: 'test-hash-embed@1',
       model: { repo: 'test/hash', revision: 'fixture' },
       tokenizer: { kind: 'whitespace' },
       pooling: 'mean',
@@ -63,7 +63,7 @@ function minimalManifest(): KnowledgeCatalogManifest {
       maxTokens: 512,
       queryInstruction: '',
       passageInstruction: '',
-      vectorEncoding: 'bit384+int8',
+      vectorEncoding: 'bit+int8',
       distance: { stage1: 'hamming', stage2: 'cosine' },
       quantization: {
         int8: { method: 'symmetric-linear', scale: 127 },
@@ -71,18 +71,21 @@ function minimalManifest(): KnowledgeCatalogManifest {
       },
     },
     chunking: {
-      id: 'gezel-markdown-chunks@2',
+      id: 'markdown-chunks@2',
       unit: 'tokens',
       tokenizer: 'profile',
-      targetTokens: 420,
-      overlapTokens: 64,
-      contextHeader: { maxTokens: 64 },
+      target: 420,
+      overlap: 64,
+      contextHeader: { max: 64 },
     },
     topics: [{ id: 'root', name: 'Root' }],
     router: { shardTargetChunks: 200_000, shards: [], totalCentroids: 0 },
     counts: { documents: 1, chunks: 1, shards: 1 },
-    files: [{ path: 'index/router.db', sizeBytes: 1, sha256: 'a'.repeat(64) }],
-    compatibility: { maximumIndexSchemaVersion: 1 },
+    files: [
+      { path: 'index/router.db', sizeBytes: 1, sha256: 'a'.repeat(64) },
+      { path: 'LICENSES/catalog.txt', sizeBytes: 1, sha256: 'b'.repeat(64) },
+    ],
+    requires: { formatVersion: '0.5', features: [] },
   };
 }
 
@@ -155,8 +158,8 @@ describe('manifest signing', () => {
 
 describe('registry index signing', () => {
   const index = (): KnowledgeRegistryIndex => ({
-    kind: 'gezel-knowledge-registry',
-    formatVersion: 1,
+    kind: 'gezk-registry',
+    formatVersion: '0.5',
     publisher: { id: 'qualla', name: 'Qualla' },
     generatedAt: '2026-01-01T00:00:00.000Z',
     catalogs: [
