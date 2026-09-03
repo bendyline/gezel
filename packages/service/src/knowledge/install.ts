@@ -4,8 +4,9 @@
  * kill or cancel; the next attempt resumes) → archive sha256 = the ref's
  * contentDigest → identity check against the catalog entry → verified staged
  * extract (every file hashed against the manifest) → open + count validation
- * in staging → atomic sibling-rename publish → registry pointer → prune older
- * versions. Yields install events; the manager's job registry consumes them.
+ * in staging → atomic sibling-rename publish → registry pointer. Yields
+ * install events; the manager's job registry consumes them and prunes older
+ * versions after unmounting the catalog's SQLite handles.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -261,7 +262,6 @@ export async function* installKnowledgeCatalog(
     }
 
     opts.registry.upsert(ref, { enabled: true, source: origin });
-    await pruneOtherVersions(opts.home, ref);
     yield { type: 'done', ref, rootDir: targetDir, storageScope: 'user' };
   } catch (err) {
     yield { type: 'error', error: err instanceof Error ? err.message : String(err) };
@@ -270,8 +270,11 @@ export async function* installKnowledgeCatalog(
   }
 }
 
-/** Remove every installed version of this catalog except the active ref. */
-async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promise<void> {
+/** Remove every private version except the active ref after its host has been unmounted. */
+export async function pruneOtherKnowledgeCatalogVersions(
+  home: string,
+  ref: KnowledgeCatalogRef,
+): Promise<void> {
   const catalogsRoot = knowledgeCatalogsDir(home);
   const catalogDir = join(catalogsRoot, ref.publisherId, ref.catalogId);
   await assertKnowledgePathContained(catalogsRoot, catalogDir);
@@ -290,7 +293,12 @@ async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promi
         if (digest !== keepDigest) {
           const target = join(catalogDir, version, digest);
           if (await isKnowledgePathContained(catalogsRoot, target)) {
-            await rm(target, { recursive: true, force: true }).catch(() => {});
+            await rm(target, {
+              recursive: true,
+              force: true,
+              maxRetries: 5,
+              retryDelay: 100,
+            }).catch(() => {});
           }
         }
       }
@@ -301,7 +309,12 @@ async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promi
       log.warn(`refusing to prune catalog path outside the knowledge root: ${target}`);
       continue;
     }
-    await rm(target, { recursive: true, force: true }).catch((err) => {
+    await rm(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch((err) => {
       log.warn(`prune of ${ref.catalogId}@${version} failed: ${err}`);
     });
   }

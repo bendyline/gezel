@@ -247,6 +247,7 @@ describe('KnowledgeManager — gilde catalog installs', () => {
       { version: '1.0.0', bytes: archives.get('releases/1.0.0/test-notes-1.0.0.gezk') as Buffer },
       { version: '2.0.0', bytes: v2Bytes },
     ]);
+    await manager.stop();
     manager = new KnowledgeManager({
       home,
       host: await createInProcessCatalogHost(),
@@ -332,6 +333,11 @@ describe('KnowledgeManager — gilde catalog installs', () => {
       kind: 'knowledge.catalog.updated',
       details: { previousVersion: '1.0.0', version: '2.0.0' },
     });
+    expect(
+      await stat(join(knowledgeCatalogsDir(home), 'gezel-tests', 'test-notes', '1.0.0')).catch(
+        () => null,
+      ),
+    ).toBeNull();
     expect(await manager.listIncompleteDownloads()).toEqual([]);
     expect(await manager.checkAutoUpdates()).toEqual([]);
   }, 60_000);

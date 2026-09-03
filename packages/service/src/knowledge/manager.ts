@@ -64,6 +64,7 @@ import {
   type KnowledgeInstallSource,
   installKnowledgeCatalog,
   knowledgeDownloadKey,
+  pruneOtherKnowledgeCatalogVersions,
 } from './install.js';
 import { KnowledgeRegistry, type KnowledgeRegistryEntry } from './registry.js';
 import type { SharedEnsureResult, SharedKnowledgeInstaller } from './shared-install.js';
@@ -568,7 +569,12 @@ export class KnowledgeManager {
   /** Bytes a private install of this catalog left behind, once a shared copy replaces it. */
   private async deletePrivateBytes(ref: KnowledgeCatalogRef): Promise<void> {
     const catalogDir = join(knowledgeCatalogsDir(this.opts.home), ref.publisherId, ref.catalogId);
-    await rm(catalogDir, { recursive: true, force: true }).catch((err) => {
+    await rm(catalogDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch((err) => {
       log.warn(`could not delete ${catalogDir}: ${err}`);
     });
   }
@@ -605,11 +611,11 @@ export class KnowledgeManager {
           };
           const previous = this.registry.find(ref.publisherId, ref.catalogId);
           this.registry.upsert(ref, { enabled: true, source: plan.origin });
-          if (previous?.ref.storageScope === 'user') await this.deletePrivateBytes(ref);
           yield* this.finishInstall(
             { type: 'done', ref, rootDir: this.dirFor(ref), storageScope: 'machine-shared' },
             installedBefore,
             plan.origin,
+            previous?.ref.storageScope === 'user',
           );
           return;
         }
@@ -657,10 +663,16 @@ export class KnowledgeManager {
     event: DoneEvent,
     installedBefore: Map<string, string>,
     origin: KnowledgeInstallSourceKind,
+    deletePrivateBytes = false,
   ): AsyncGenerator<KnowledgeInstallEvent> {
     const key = this.keyFor(event.ref);
     await this.opts.host.unmount(key).catch(() => {});
     this.mountedByKey.delete(key);
+    if (deletePrivateBytes) {
+      await this.deletePrivateBytes(event.ref);
+    } else if (event.ref.storageScope === 'user') {
+      await pruneOtherKnowledgeCatalogVersions(this.opts.home, event.ref);
+    }
     const entry = this.registry.find(event.ref.publisherId, event.ref.catalogId);
     if (entry) {
       try {
