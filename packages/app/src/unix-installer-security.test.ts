@@ -218,22 +218,31 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('/usr/sbin/pkgutil --forget "$PACKAGE_ID"');
   });
 
-  it('rejects non-numeric and unsafe wait pids before numeric comparison', () => {
+  it('validates wait pids before numeric comparison', () => {
     const validator = shellFunction(macUninstall, 'valid_wait_pid', 'brace');
-    const probe = `${validator}
+    expect(validator).toContain('[[ "$1" =~ ^[0-9]+$ ]]');
+    expect(validator).toContain('[ "$1" -gt 1 ]');
+    expect(macUninstall).toContain('! valid_wait_pid "$WAIT_FOR_PID"');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'live probe: rejects non-numeric and unsafe wait pids',
+    () => {
+      const validator = shellFunction(macUninstall, 'valid_wait_pid', 'brace');
+      const probe = `${validator}
 for value in nope 0 1 2 4321; do
   if valid_wait_pid "$value"; then printf 'valid:%s\\n' "$value"; else printf 'invalid:%s\\n' "$value"; fi
 done`;
-    const output = execFileSync('/bin/bash', ['-c', probe], { encoding: 'utf8' });
-    expect(output.trim().split('\n')).toEqual([
-      'invalid:nope',
-      'invalid:0',
-      'invalid:1',
-      'valid:2',
-      'valid:4321',
-    ]);
-    expect(macUninstall).toContain('! valid_wait_pid "$WAIT_FOR_PID"');
-  });
+      const output = execFileSync('/bin/bash', ['-c', probe], { encoding: 'utf8' });
+      expect(output.trim().split('\n')).toEqual([
+        'invalid:nope',
+        'invalid:0',
+        'invalid:1',
+        'valid:2',
+        'valid:4321',
+      ]);
+    },
+  );
 
   it('waits for the LaunchDaemon job and process to exit before destructive cleanup', () => {
     const stop = shellFunction(macUninstall, 'stop_machine_service', 'brace');

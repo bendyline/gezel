@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   createDocumentLinkProvider,
   createDocumentMediaProvider,
@@ -209,6 +210,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
           workspaceContainer={markdown ? versionContainer : null}
           mediaProvider={markdown ? mediaProvider : null}
           documentLinkProvider={markdown ? documentLinkProvider : null}
+          calcEngineFactory={markdown ? ironCalcEngineFactory : undefined}
           proofing={markdown ? proofing : null}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={markdown}

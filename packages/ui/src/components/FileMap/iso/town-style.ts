@@ -1,4 +1,5 @@
-import type { MapBlock, MapBuilding } from '@bendyline/gezel';
+import type { FileUse, MapBlock, MapBuilding } from '@bendyline/gezel';
+import { blockUse } from '../file-use.js';
 import { type MaterialPair, materialsFor } from '../material.js';
 import { hash32, seeded } from '../seed.js';
 import { type UrbanityBand, bandOf } from '../urbanity.js';
@@ -74,7 +75,12 @@ export type TownArchetype =
   | 'town-hall'
   | 'warehouse'
   | 'works'
-  | 'terminus';
+  | 'terminus'
+  // by use, in every register: data is farmland, stylesheets are gardens,
+  // configuration is the municipal machinery
+  | 'field'
+  | 'park'
+  | 'signal-tower';
 
 export type TownRoof =
   | 'gable'
@@ -138,6 +144,8 @@ export interface TownTrim {
 
 export interface TownStyle {
   archetype: TownArchetype;
+  /** What the file is for — decides between a building, a field, and a park. */
+  use: FileUse;
   roof: TownRoof;
   ridge: RidgeAxis;
   storeys: number;
@@ -474,6 +482,37 @@ const ARCHETYPE_SPEC: Record<TownArchetype, ArchetypeSpec> = {
     cap: 'none',
     trim: { cornice: true, parapet: true },
   },
+
+  // ── by use ───────────────────────────────────────────────────────────────
+  // A field and a park are not buildings; their roof/eaves entries only keep
+  // the struct total so the renderer contract tests can drive them. The
+  // painters branch on the archetype before any roof is drawn.
+  field: {
+    roofs: ['shed'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: {},
+    roofFactor: 1.4,
+  },
+  park: { roofs: ['hip'], eaves: 'eave', ground: 'plain', cap: 'none', trim: {}, roofFactor: 2.2 },
+  // The control tower: a squat municipal block under a parapet, with the
+  // glazed cab on the roof. Declares the cab's height like any lantern.
+  'signal-tower': {
+    roofs: ['parapet'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'lantern',
+    trim: { cornice: true, parapet: true, quoins: true },
+    roofFactor: 1.9,
+  },
+};
+
+/** The archetype a non-code use resolves to, in every register. */
+const USE_ARCHETYPE: Partial<Record<FileUse, TownArchetype>> = {
+  data: 'field',
+  style: 'park',
+  config: 'signal-tower',
 };
 
 /** Every archetype, with the roofs and cap it can actually draw. Exported so
@@ -635,9 +674,15 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
   const zone = block.health?.zone ?? 'residential';
   const band = bandOf(block);
   const table = FAMILY_TABLE[band];
+  const use = blockUse(block);
 
+  // Use comes first: a JSON fixture under __tests__ is a field, not a
+  // schoolhouse, and a package.json that happens to be a landmark is still
+  // the signal tower. These branches consume no draw, like the test branch.
   let archetype: TownArchetype;
-  if (block.landmark) archetype = LANDMARK_ARCHETYPE[band];
+  const byUse = USE_ARCHETYPE[use];
+  if (byUse) archetype = byUse;
+  else if (block.landmark) archetype = LANDMARK_ARCHETYPE[band];
   else if (isTestFile(block.id) && zone !== 'industrial') archetype = 'schoolhouse';
   else archetype = pick(table[zone], random);
 
@@ -692,6 +737,7 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
 
   return {
     archetype,
+    use,
     roof,
     ridge,
     storeys,
@@ -773,6 +819,7 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
   const roofFactor = resolvedRoofFactor(roof, cap, chimneys, spec.roofFactor);
   return {
     archetype,
+    use: 'code',
     roof,
     // Per-symbol, not the parent's. Sharing one ridge axis across a campus
     // pointed every roof the same way, which is most of why a file read as one

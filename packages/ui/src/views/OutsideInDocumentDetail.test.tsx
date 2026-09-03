@@ -25,6 +25,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     onChange,
     toolbarSlotAfterActions,
     statusBarSlotRight,
+    calcEngineFactory,
   }: {
     initialMarkdown: string;
     fileName: string;
@@ -32,8 +33,14 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     onChange?: (value: string) => void;
     toolbarSlotAfterActions?: React.ReactNode;
     statusBarSlotRight?: React.ReactNode;
+    calcEngineFactory?: unknown;
   }) => (
-    <div data-testid="editor-shell" data-file={fileName} data-readonly={String(Boolean(readOnly))}>
+    <div
+      data-testid="editor-shell"
+      data-file={fileName}
+      data-readonly={String(Boolean(readOnly))}
+      data-calc-engine={typeof calcEngineFactory === 'function'}
+    >
       <span>{initialMarkdown}</span>
       <button type="button" data-testid="edit" onClick={() => onChange?.('# Edited')}>
         Edit
@@ -128,6 +135,7 @@ describe('OutsideInDocumentDetail', () => {
     const editor = await screen.findByTestId('editor-shell');
     expect(editor).toHaveAttribute('data-file', 'brief.docx');
     expect(editor).toHaveAttribute('data-readonly', 'false');
+    expect(editor).toHaveAttribute('data-calc-engine', 'true');
 
     screen.getByTestId('edit').click();
     await vi.advanceTimersByTimeAsync(1100);
@@ -148,7 +156,9 @@ describe('OutsideInDocumentDetail', () => {
     } as never);
     render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
 
-    expect(await screen.findByTestId('editor-shell')).toHaveAttribute('data-readonly', 'true');
+    const editor = await screen.findByTestId('editor-shell');
+    expect(editor).toHaveAttribute('data-readonly', 'true');
+    expect(editor).toHaveAttribute('data-calc-engine', 'false');
     expect(screen.getByText('DOCX preview · read-only.')).toBeInTheDocument();
     expect(screen.getByText('narrate')).toBeInTheDocument();
     screen.getByRole('button', { name: 'Enable editing' }).click();

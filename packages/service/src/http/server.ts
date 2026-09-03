@@ -286,9 +286,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         [
           "default-src 'self'",
           // 'wasm-unsafe-eval' is required to compile WebAssembly at all.
-          // The UI's proofing engine (harper.js) is served same-origin from
-          // /harper/ and instantiated inside a blob: worker; without this
-          // Chromium refuses the compile and proofing hangs on "Proofing...".
+          // The UI's proofing (harper.js) and spreadsheet calculation
+          // (IronCalc) engines are served same-origin; without this Chromium
+          // refuses their compilation. Harper is instantiated in a blob worker.
           // It permits WASM compilation only, NOT eval() of JavaScript.
           "script-src 'self' 'wasm-unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",

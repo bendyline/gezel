@@ -53,3 +53,5 @@ export {
 } from './proofing.js';
 export type { ProofingPreferences } from './proofing.js';
 export { useProofingCapability } from './useProofingCapability.js';
+
+export { ironCalcEngineFactory } from './calculation.js';

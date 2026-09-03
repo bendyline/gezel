@@ -15,6 +15,12 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
+  // IronCalc's wasm-bindgen shim is reached only after Squisq asks for a
+  // formula session. Pre-bundling it would break the explicit wasm asset URL
+  // supplied by our host factory and make dev differ from the packaged UI.
+  optimizeDeps: {
+    exclude: ['@bendyline/squisq-calc', '@ironcalc/wasm'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -5110,6 +5110,16 @@ export const MapStreetSchema = z.object({
   tier: z.number().int().min(0).max(3),
   /** Folder whose interior this street runs through; null at the map root. */
   districtId: z.string().nullable(),
+  /** Estimated flow: the import degree of every parcel fronting the street
+   *  plus everything that leaves the folders it bounds. Server policy from
+   *  [service/filemap/traffic.ts]; absent on pre-traffic payloads. */
+  traffic: z.number().nonnegative().optional(),
+  /** Road grade 0..7, bucketed from `traffic` and capped by the settlement:
+   *  narrow dirt → narrow cobble → narrow paved → wide dirt → wide paved →
+   *  wide paved with sidewalks → broad paved with sidewalks → broad paved
+   *  with trolley and sidewalks. The renderer maps it to carriageway width,
+   *  surface, and street furniture 1:1 and never re-derives thresholds. */
+  grade: z.number().int().min(0).max(7).optional(),
 });
 export type MapStreet = z.infer<typeof MapStreetSchema>;
 

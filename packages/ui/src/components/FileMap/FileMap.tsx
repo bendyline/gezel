@@ -10,6 +10,7 @@ import {
   zoomAround,
 } from './camera.js';
 import { render } from './draw.js';
+import { hasSymbolCampus } from './file-use.js';
 import { geomInView } from './iso/geometry.js';
 import {
   type LabelEngineState,
@@ -17,6 +18,7 @@ import {
   createLabelEngineState,
   fitToBoundsIso,
   geometryForModel,
+  groundRectInView,
   hitTestIso,
   hitTestIsoBuilding,
   renderIso,
@@ -24,6 +26,8 @@ import {
 import { issueMarkerStyle } from './issue-marker.js';
 import { buildPalette } from './palette.js';
 import { getSpriteAtlas } from './sprites.js';
+import { styleForModel } from './town-cache.js';
+import { trafficLayoutForModel } from './traffic.js';
 
 /**
  * Canvas city-map renderer. Pure consumer of a `FileMapResponse` (MapModel) — it
@@ -99,6 +103,24 @@ export function FileMap({
     [model],
   );
   const issueIds = useMemo(() => new Set(issueBlocks.map((block) => block.id)), [issueBlocks]);
+  // Ambient life — traffic on the busier streets and smoke over the works —
+  // only animates in the iso view at street zoom, and only while some of it
+  // is actually on screen.
+  const lifeStreets = useMemo(() => trafficLayoutForModel(model).animated, [model]);
+  const smokeIds = useMemo(() => {
+    const styles = styleForModel(model);
+    return new Set(
+      model.blocks
+        .filter(
+          (block) =>
+            block.state === 'live' &&
+            !block.phantom &&
+            block.health?.zone === 'industrial' &&
+            (styles.get(block.id)?.chimneys ?? 0) > 0,
+        )
+        .map((block) => block.id),
+    );
+  }, [model]);
 
   // keep the draw closure current (latest model / palette / selection / hover)
   drawFnRef.current = () => {
@@ -135,22 +157,30 @@ export function FileMap({
   };
 
   shouldAnimateRef.current = () => {
-    if (
-      reducedMotionRef.current ||
-      document.visibilityState !== 'visible' ||
-      ageLens ||
-      issueBlocks.length === 0 ||
-      lodTier(camRef.current.scale) === 'city'
-    ) {
+    if (reducedMotionRef.current || document.visibilityState !== 'visible' || ageLens) {
       return false;
     }
+    const tier = lodTier(camRef.current.scale);
+    if (tier === 'city') return false;
     const { w, h } = sizeRef.current;
-    if (mode === 'iso') {
-      return geometryForModel(model).geoms.some(
-        (geom) => issueIds.has(geom.block.id) && geomInView(camRef.current, geom, w, h),
-      );
+    const cam = camRef.current;
+    if (issueBlocks.length > 0) {
+      const burning =
+        mode === 'iso'
+          ? geometryForModel(model).geoms.some(
+              (geom) => issueIds.has(geom.block.id) && geomInView(cam, geom, w, h),
+            )
+          : issueBlocks.some((block) => rectInView(cam, block.rect, w, h));
+      if (burning) return true;
     }
-    return issueBlocks.some((block) => rectInView(camRef.current, block.rect, w, h));
+    if (mode !== 'iso' || tier !== 'street') return false;
+    if (lifeStreets.some((g) => groundRectInView(cam, g.reservation, w, h))) return true;
+    return (
+      smokeIds.size > 0 &&
+      geometryForModel(model).geoms.some(
+        (geom) => smokeIds.has(geom.block.id) && geomInView(cam, geom, w, h),
+      )
+    );
   };
 
   frameFnRef.current = (time) => {
@@ -273,6 +303,7 @@ export function FileMap({
         !block ||
         mode !== 'iso' ||
         block.state === 'tombstoned' ||
+        !hasSymbolCampus(block) ||
         lodTier(camRef.current.scale) !== 'street'
       ) {
         return null;

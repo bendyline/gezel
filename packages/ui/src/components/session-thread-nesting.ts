@@ -13,14 +13,14 @@ export interface SessionTreeBranch {
   ancestorContinuationLevels: number[];
 }
 
-export interface NestedSessionThreads<M extends MessageWithParent, S, T, TS> {
-  items: Array<TimelineThreadItem<M, S, T, TS>>;
+export interface NestedSessionThreads<M extends MessageWithParent, S, T, TS, I = never> {
+  items: Array<TimelineThreadItem<M, S, T, TS, I>>;
   depthBySession: Map<string, number>;
   branchBySession: Map<string, SessionTreeBranch>;
 }
 
 function parentIdFor<M extends MessageWithParent, S>(
-  item: Extract<TimelineThreadItem<M, S, unknown, unknown>, { kind: 'thread' }>,
+  item: Extract<TimelineThreadItem<M, S, unknown, unknown, unknown>, { kind: 'thread' }>,
 ): string | undefined {
   const rows = item.root ? [item.root, ...item.replies] : item.replies;
   for (const row of rows) {
@@ -41,10 +41,10 @@ function parentIdFor<M extends MessageWithParent, S>(
  * their parent's final visible turn, preserving each session's own turn order
  * and the relative order of siblings.
  */
-export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS>(
-  items: Array<TimelineThreadItem<M, S, T, TS>>,
-): NestedSessionThreads<M, S, T, TS> {
-  const sessionItems = new Map<string, Array<TimelineThreadItem<M, S, T, TS>>>();
+export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I = never>(
+  items: Array<TimelineThreadItem<M, S, T, TS, I>>,
+): NestedSessionThreads<M, S, T, TS, I> {
+  const sessionItems = new Map<string, Array<TimelineThreadItem<M, S, T, TS, I>>>();
   const firstIndex = new Map<string, number>();
   const parentBySession = new Map<string, string>();
 
@@ -125,7 +125,7 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS>(
     }
   }
 
-  const output: Array<TimelineThreadItem<M, S, T, TS>> = [];
+  const output: Array<TimelineThreadItem<M, S, T, TS, I>> = [];
   const emitted = new Set<string>();
   const emitSession = (sessionId: string, trail = new Set<string>()) => {
     if (emitted.has(sessionId) || trail.has(sessionId)) return;

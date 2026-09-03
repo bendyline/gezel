@@ -9,7 +9,7 @@ vi.mock('./GezelIcon.js', () => ({
   GezelIcon: ({ name }: { name: string }) => <span data-testid="gezel-icon" data-name={name} />,
 }));
 
-const { ChatStickyHeader } = await import('./ChatTimelineView.js');
+const { ChatStickyHeader } = await import('./ChatStickyHeader.js');
 
 function message(overrides: Partial<TimelineMessage>): TimelineMessage {
   return {

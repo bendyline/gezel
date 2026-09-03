@@ -35,16 +35,22 @@ export interface RoofRidge {
  * remaining headroom by them to pick a size that cannot overrun the budget.
  */
 const CAP_HEIGHT = {
-  // body 1.5w + spire 0.9w
+  // body 1.5w + spire 0.88w
   'clock-tower': 2.4,
-  // body 0.85w + dome 0.65w + spike 0.33w
+  // body 0.85w + spire 0.65w, spike to 0.95w
   cupola: 1.85,
-  // box 0.7w + cap 0.1w + roof 0.55w
+  // glass box 0.7w + slab 0.1w + roof 0.55w
   lantern: 1.35,
-  // post 1.0s + gable 0.5s
+  // frame 1.0s + pyramid 0.5s
   bellcote: 1.5,
   finial: 1.05,
 } as const;
+
+/** What a building left behind on screen that later passes care about. */
+export interface TownBuildingPaint {
+  /** Top of each chimney stack actually drawn — where smoke rises from. */
+  stacks: ScreenPt[];
+}
 
 /** Draw one code-generated isometric building in the 1890–1915 vocabulary. */
 export function drawTownBuilding(
@@ -54,7 +60,8 @@ export function drawTownBuilding(
   style: TownStyle,
   colors: PrismColors,
   options: TownDrawOptions = {},
-): void {
+): TownBuildingPaint {
+  const paint: TownBuildingPaint = { stacks: [] };
   drawPrism(ctx, prism, colors);
 
   const compact = options.compact === true;
@@ -102,8 +109,9 @@ export function drawTownBuilding(
     // apex reports. Budgeting against the apex let those caps overrun.
     const mountY = Math.min(ridge.a.y, ridge.b.y, ridge.apex.y);
     const capHeadroom = Math.max(0, budgetPx - (prism.tn.y - mountY));
-    drawRoofFurniture(ctx, s, prism, style, ridge, roofPx, capHeadroom, compact);
+    drawRoofFurniture(ctx, s, prism, style, ridge, roofPx, capHeadroom, compact, paint.stacks);
   }
+  return paint;
 }
 
 function drawRoof(
@@ -1222,6 +1230,7 @@ function drawRoofFurniture(
   roofRise: number,
   capHeadroom: number,
   compact: boolean,
+  stacks: ScreenPt[],
 ): void {
   const random = seeded(style.seed ^ SEED_SALT.ROOF_FURNITURE);
   const widthPx = p.te.x - p.tw.x;
@@ -1245,6 +1254,7 @@ function drawRoofFurniture(
     if (stackWidth < 1.5) continue;
     const x = at.x + (random() - 0.5) * stackWidth * 0.6;
     drawStack(ctx, x, at.y, stackWidth, stackWidth * 1.9, s.palette.masonry);
+    stacks.push({ x, y: at.y - stackWidth * 1.9 });
   }
 
   if (style.cupola && style.cap !== 'clock-tower') {
@@ -1255,7 +1265,9 @@ function drawRoofFurniture(
   switch (style.cap) {
     case 'bellcote': {
       const size = fit(unit * 2, CAP_HEIGHT.bellcote);
-      if (size >= 2.5) drawBellcote(ctx, ridge.a, size, s);
+      // Seated a little inboard of the gable tip, so its footprint sits on
+      // the roof instead of hanging off the end of the ridge.
+      if (size >= 2.5) drawBellcote(ctx, lerp(ridge.a, ridge.b, 0.14), size, s);
       break;
     }
     case 'finial': {
@@ -1269,7 +1281,10 @@ function drawRoofFurniture(
       break;
     }
     case 'lantern': {
-      const width = fit(unit * 2.2, CAP_HEIGHT.lantern);
+      // The signal tower's cab is the whole point of the building, so it is
+      // sized to the roof rather than to the trim unit.
+      const want = style.archetype === 'signal-tower' ? widthPx * 0.34 : unit * 2.2;
+      const width = fit(want, CAP_HEIGHT.lantern);
       if (width >= 3) drawLantern(ctx, ridge.apex, width, s);
       break;
     }
@@ -1292,25 +1307,125 @@ function drawRoofFurniture(
   }
 }
 
-/** A small open bell housing at the gable end — chapels and schoolhouses. */
+/**
+ * Roof caps are small buildings in their own right and are drawn as such:
+ * a square footprint projected to the 2:1 diamond, two visible walls (SW lit,
+ * SE in shade), and a pyramid spire whose two visible faces shade the same
+ * way. Before this they were front-on rectangles with a flat triangle on top,
+ * which read as a paper cut-out pinned to an otherwise dimetric roof.
+ *
+ * `footprint` is the diamond's full screen width; its vertical half-height is
+ * a quarter of that. Everything is sized from the cap's width argument so the
+ * `CAP_HEIGHT` budget table stays exact.
+ */
+interface Diamond {
+  n: ScreenPt;
+  e: ScreenPt;
+  s: ScreenPt;
+  w: ScreenPt;
+  c: ScreenPt;
+}
+
+function diamondAt(c: ScreenPt, footprint: number): Diamond {
+  const hw = footprint / 2;
+  const hh = footprint / 4;
+  return {
+    n: { x: c.x, y: c.y - hh },
+    e: { x: c.x + hw, y: c.y },
+    s: { x: c.x, y: c.y + hh },
+    w: { x: c.x - hw, y: c.y },
+    c,
+  };
+}
+
+/** The shade laid over an SE-facing surface so the NW light reads. */
+const SHADE = 'rgba(0, 0, 0, 0.3)';
+
+/** Two walls of a small prism standing on `base`, lifted by `height`. Returns
+ *  the lifted top diamond. */
+function drawCapBody(
+  ctx: CanvasRenderingContext2D,
+  base: Diamond,
+  height: number,
+  color: string,
+  alpha = 1,
+): Diamond {
+  const top = diamondAt(up(base.c, height), base.e.x - base.w.x);
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  path(ctx, [top.w, top.s, base.s, base.w], true);
+  ctx.fill();
+  path(ctx, [top.s, top.e, base.e, base.s], true);
+  ctx.fill();
+  ctx.fillStyle = SHADE;
+  path(ctx, [top.s, top.e, base.e, base.s], true);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  return top;
+}
+
+/** A pyramid spire on `top`, rising `rise` above its center. */
+function drawCapSpire(
+  ctx: CanvasRenderingContext2D,
+  top: Diamond,
+  rise: number,
+  color: string,
+): void {
+  const apex = up(top.c, rise);
+  // The back faces peek out above the front ones at a shallow pitch; paint
+  // them first so the front pair overlaps them correctly.
+  fillTriangle(ctx, color, top.w, top.n, apex);
+  fillTriangle(ctx, color, top.n, top.e, apex);
+  ctx.fillStyle = SHADE;
+  path(ctx, [top.n, top.e, apex], true);
+  ctx.fill();
+  fillTriangle(ctx, color, top.w, top.s, apex);
+  fillTriangle(ctx, color, top.s, top.e, apex);
+  ctx.fillStyle = SHADE;
+  path(ctx, [top.s, top.e, apex], true);
+  ctx.fill();
+}
+
+/** Flat lid on `top` (a parapet or a cornice slab). */
+function drawCapLid(ctx: CanvasRenderingContext2D, top: Diamond, color: string): void {
+  ctx.fillStyle = color;
+  path(ctx, [top.n, top.e, top.s, top.w], true);
+  ctx.fill();
+}
+
+/** A clock face centred on the lit SW wall of a cap body. */
+function drawClockFace(
+  ctx: CanvasRenderingContext2D,
+  base: Diamond,
+  top: Diamond,
+  radius: number,
+  s: IsoRenderState,
+): void {
+  const wallCentre = mid(mid(top.w, top.s), mid(base.w, base.s));
+  ctx.fillStyle = s.palette.windowLit;
+  ctx.beginPath();
+  ctx.arc(wallCentre.x, wallCentre.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = s.palette.window;
+  ctx.lineWidth = 0.7;
+  ctx.stroke();
+}
+
+/** A small open bell housing at the gable end — chapels and schoolhouses:
+ *  a slim masonry frame with the bell opening on its lit face, under a
+ *  pyramid cap. Total height 1.5 × size. */
 function drawBellcote(
   ctx: CanvasRenderingContext2D,
   at: ScreenPt,
   size: number,
   s: IsoRenderState,
 ): void {
-  const half = size * 0.32;
-  ctx.fillStyle = s.palette.masonry;
-  ctx.fillRect(at.x - half, at.y - size, half * 2, size);
-  fillTriangle(
-    ctx,
-    s.palette.domeAccent,
-    { x: at.x - half * 1.3, y: at.y - size },
-    { x: at.x, y: at.y - size * 1.5 },
-    { x: at.x + half * 1.3, y: at.y - size },
-  );
+  const base = diamondAt(at, size * 0.64);
+  const top = drawCapBody(ctx, base, size, s.palette.masonry);
+  const opening = mid(mid(top.w, top.s), mid(base.w, base.s));
   ctx.fillStyle = s.palette.window;
-  ctx.fillRect(at.x - half * 0.45, at.y - size * 0.8, half * 0.9, size * 0.5);
+  ctx.fillRect(opening.x - size * 0.12, opening.y - size * 0.28, size * 0.24, size * 0.5);
+  drawCapSpire(ctx, top, size * 0.5, s.palette.domeAccent);
 }
 
 /** A ridge-end spike or weathervane — the village's quiet flourish. */
@@ -1338,61 +1453,78 @@ function drawFinial(
   );
 }
 
-/** The city landmark's clock tower. Its extra height is declared by the
- *  archetype's `roofFactor`, so culling and hit-testing already account for it. */
+/** The city landmark's clock tower: body 1.5w, spire 0.88w. Its extra height
+ *  is declared by the archetype's `roofFactor`, so culling and hit-testing
+ *  already account for it. */
 function drawClockTower(
   ctx: CanvasRenderingContext2D,
   at: ScreenPt,
   width: number,
   s: IsoRenderState,
 ): void {
-  const half = width / 2;
+  const base = diamondAt(at, width);
   const bodyH = width * 1.5;
-  const top = at.y - bodyH;
-  ctx.fillStyle = s.palette.sidewalk;
-  ctx.fillRect(at.x - half, top, width, bodyH);
-  ctx.fillStyle = s.palette.masonry;
-  ctx.globalAlpha = 0.6;
-  ctx.fillRect(at.x, top, half, bodyH);
-  ctx.globalAlpha = 1;
-  fillTriangle(
-    ctx,
-    s.palette.domeAccent,
-    { x: at.x - half * 1.2, y: top },
-    { x: at.x, y: top - width * 0.9 },
-    { x: at.x + half * 1.2, y: top },
-  );
-  ctx.fillStyle = s.palette.windowLit;
-  ctx.beginPath();
-  ctx.arc(at.x, top + bodyH * 0.34, Math.max(1.6, width * 0.22), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = s.palette.window;
+  const top = drawCapBody(ctx, base, bodyH, s.palette.sidewalk);
+  // A cornice course just under the spire.
+  const cornice = diamondAt(up(base.c, bodyH * 0.86), width);
+  ctx.strokeStyle = s.palette.masonry;
   ctx.lineWidth = 0.7;
+  path(ctx, [cornice.w, cornice.s, cornice.e], false);
   ctx.stroke();
+  drawCapSpire(ctx, top, width * 0.88, s.palette.domeAccent);
+  drawClockFace(ctx, base, top, Math.max(1.6, width * 0.2), s);
 }
 
-/** A glazed roof lantern — grand hotels and institutes. */
+/**
+ * A park's centrepiece, drawn from the cap vocabulary: a bandstand (a wide low
+ * deck under a pyramid) or an obelisk (a slim shaft with a pointed top). Sized
+ * to `maxHeight` so it stays inside the block's declared roof headroom.
+ */
+export function drawParkFeature(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  centre: ScreenPt,
+  width: number,
+  maxHeight: number,
+  kind: 'bandstand' | 'obelisk',
+): void {
+  if (kind === 'bandstand') {
+    const w = Math.min(width, maxHeight / 0.95);
+    if (w < 4) return;
+    const base = diamondAt(centre, w);
+    const deck = drawCapBody(ctx, base, w * 0.12, s.palette.park.path);
+    const posts = drawCapBody(ctx, deck, w * 0.38, s.palette.sidewalk, 0.55);
+    drawCapSpire(ctx, posts, w * 0.45, s.palette.domeAccent);
+    return;
+  }
+  const w = Math.min(width * 0.32, maxHeight / 1.9);
+  if (w < 2) return;
+  const base = diamondAt(centre, w);
+  const shaft = drawCapBody(ctx, base, w * 1.6, s.palette.masonry);
+  drawCapSpire(ctx, shaft, w * 0.3, s.palette.masonry);
+}
+
+/** A glazed roof lantern — grand hotels and institutes: a lit glass box under
+ *  a slab and a low pyramid. Box 0.7w + slab 0.1w + roof 0.55w. */
 function drawLantern(
   ctx: CanvasRenderingContext2D,
   at: ScreenPt,
   width: number,
   s: IsoRenderState,
 ): void {
-  const half = width / 2;
-  const h = width * 0.7;
-  ctx.fillStyle = s.palette.windowLit;
-  ctx.globalAlpha = 0.85;
-  ctx.fillRect(at.x - half, at.y - h, width, h);
+  const base = diamondAt(at, width);
+  const glass = drawCapBody(ctx, base, width * 0.7, s.palette.windowLit, 0.85);
+  // Glazing bars down each lit pane.
+  ctx.strokeStyle = s.palette.masonry;
+  ctx.lineWidth = 0.6;
+  ctx.globalAlpha = 0.5;
+  path(ctx, [mid(glass.w, glass.s), mid(base.w, base.s)], false);
+  ctx.stroke();
+  path(ctx, [mid(glass.s, glass.e), mid(base.s, base.e)], false);
+  ctx.stroke();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = s.palette.masonry;
-  ctx.fillRect(at.x - half, at.y - h - 1.4, width, 1.4);
-  fillTriangle(
-    ctx,
-    s.palette.domeAccent,
-    { x: at.x - half, y: at.y - h - 1.4 },
-    { x: at.x, y: at.y - h - width * 0.55 },
-    { x: at.x + half, y: at.y - h - 1.4 },
-  );
+  const slab = drawCapBody(ctx, glass, width * 0.1, s.palette.masonry);
+  drawCapSpire(ctx, slab, width * 0.55, s.palette.domeAccent);
 }
 
 function drawStack(
@@ -1448,6 +1580,8 @@ function drawStack(
   }
 }
 
+/** The civic cupola: a slim lantern body, a pyramid, and a spike. Body 0.85w,
+ *  spire to 0.65w above it, spike to 0.95w — 1.8w of the 1.85w budget. */
 function drawCupola(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -1456,30 +1590,13 @@ function drawCupola(
   clock: boolean,
   s: IsoRenderState,
 ): void {
-  const half = width / 2;
+  const base = diamondAt({ x, y: roofY }, width * 0.72);
   const bodyH = width * 0.85;
-  ctx.fillStyle = s.palette.sidewalk;
-  ctx.fillRect(x - half * 0.72, roofY - bodyH, width * 0.72, bodyH);
-  ctx.fillStyle = s.palette.masonry;
-  ctx.globalAlpha = 0.65;
-  ctx.fillRect(x, roofY - bodyH + 1, half * 0.72, bodyH - 1);
-  ctx.globalAlpha = 1;
-  fillTriangle(
-    ctx,
-    s.palette.domeAccent,
-    { x: x - half, y: roofY - bodyH },
-    { x, y: roofY - bodyH - width * 0.65 },
-    { x: x + half, y: roofY - bodyH },
-  );
-  if (clock) {
-    ctx.fillStyle = s.palette.windowLit;
-    ctx.beginPath();
-    ctx.arc(x, roofY - bodyH * 0.55, Math.max(1.4, width * 0.12), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = s.palette.window;
-    ctx.lineWidth = 0.7;
-    ctx.stroke();
-  }
+  const top = drawCapBody(ctx, base, bodyH, s.palette.sidewalk);
+  // The eaves of the spire overhang the body a little, as a real cupola's do.
+  const eaves = diamondAt(top.c, width);
+  drawCapSpire(ctx, eaves, width * 0.65, s.palette.domeAccent);
+  if (clock) drawClockFace(ctx, base, top, Math.max(1.4, width * 0.12), s);
   ctx.strokeStyle = s.palette.masonry;
   ctx.lineWidth = 0.8;
   ctx.beginPath();

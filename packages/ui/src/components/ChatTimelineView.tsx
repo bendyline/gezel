@@ -15,9 +15,6 @@ import type {
 import {
   deriveThreadTitle,
   displayName,
-  handoffHeadline,
-  handoffKindLabel,
-  parseTaskHandoffNote,
   resolveGezelFontFamily,
   resolveGezelFontScale,
 } from '@bendyline/gezel';
@@ -35,8 +32,16 @@ import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
-import { GezelIcon } from './GezelIcon.js';
+import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
+import {
+  type IndexingReceipt,
+  IndexingReceiptRow,
+  indexedPathFromActivity,
+  readIndexingReceipts,
+  recordIndexedFile,
+  writeIndexingReceipts,
+} from './IndexingReceipt.js';
 import { QueuedTaskBubble } from './QueuedTaskBubble.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
@@ -46,19 +51,14 @@ import {
   GhostQueuedBubble,
   type InlineWarning,
   MessageBubble,
-  RoleSuffix,
   StreamingBubble,
-  StreamingStatusLine,
   type ToolActivity,
-  useElapsedSeconds,
 } from './chat-bubbles.js';
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
-  countSegmentTools,
   erroredSlotsWithPersistedTwin,
   liveStatusLabel,
   queueNoticeIsFresh,
-  segmentsHaveText,
   staleLiveSessionIds,
 } from './chat-live-slot.js';
 import { playAssistantNarration, stopNarration } from './chat-narration.js';
@@ -70,6 +70,20 @@ import {
 import { SessionTreeGuides } from './chat-session-tree-guides.js';
 import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
+import {
+  type OptimisticTimelineMessage,
+  cssAttrValue,
+  findLastForSession,
+  formatProviderLabel,
+  isExpectedAvailabilityError,
+  isModelUnavailableError,
+  isRetryableFailedTurn,
+  mergeTerminalEntries,
+  mergeTimelineMessages,
+  referencedFilesOf,
+  withinHours,
+} from './chat-timeline-helpers.js';
+import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { formatContextWindow } from './model-context.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
@@ -97,16 +111,10 @@ const LATE_REPLY_GAP_MS = 3 * 60 * 1000;
 const SCROLL_NEAR_BOTTOM_PX = 80;
 const SCROLL_NEAR_TOP_PX = 80;
 const SCROLLBAR_IDLE_MS = 700;
+/** Stable tail budget consumed by live work before the timeline is allowed to grow. */
+const TIMELINE_WORKING_RESERVE_PX = 300;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
-/**
- * Quote a value for use inside a `[attr="…"]` selector. `CSS.escape`
- * isn't available in every environment we render in (jsdom, older
- * webviews), and session ids are opaque strings we don't control.
- */
-function cssAttrValue(value: string): string {
-  return value.replace(/["\\]/g, '\\$&');
-}
 // A terminal "session" is a run of commands inside one
 // `(project, workingDir)` thread with no gap longer than this. The
 // gap is measured terminal-to-terminal within the same thread —
@@ -122,49 +130,6 @@ const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
  * the conversation they annotate.
  */
 const MAX_QUEUED_TASK_CARDS = 4;
-
-function mergeTerminalEntries(
-  snapshot: TerminalTimelineEntry[] | undefined,
-  liveEntries: TerminalTimelineEntry[],
-): TerminalTimelineEntry[] {
-  const byId = new Map((snapshot ?? []).map((entry) => [entry.messageId, entry]));
-  for (const entry of liveEntries) byId.set(entry.messageId, entry);
-  return [...byId.values()].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-}
-
-/**
- * Merge a newest-page snapshot into the rows already on screen. Older pages
- * remain intact, while a matching durable user row retires its optimistic
- * counterpart. Shared by completion refreshes and the initial
- * snapshot/subscription handoff reconciliation.
- */
-function mergeTimelineMessages(
-  existing: TimelineMessage[],
-  snapshot: TimelineMessage[],
-): TimelineMessage[] {
-  const canonicalUsers = snapshot.filter((message) => message.role === 'user');
-  const withoutReconciledOptimistic = existing.filter((message) => {
-    if (!(message as OptimisticTimelineMessage).optimistic) return true;
-    const optimisticAtMs = Date.parse(message.at);
-    return !canonicalUsers.some((real) => {
-      if (real.sessionId !== message.sessionId || real.content !== message.content) return false;
-      const realAtMs = Date.parse(real.at);
-      return Number.isFinite(optimisticAtMs) && Number.isFinite(realAtMs)
-        ? Math.abs(realAtMs - optimisticAtMs) < 2 * 60_000
-        : true;
-    });
-  });
-  const seen = new Set<string>();
-  const merged: TimelineMessage[] = [];
-  for (const message of [...withoutReconciledOptimistic, ...snapshot]) {
-    const key = `${message.sessionId}:${message.at}:${message.role}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(message);
-  }
-  merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  return merged;
-}
 
 /**
  * Human labels for the llama-cpp `engine_phase` event. Used by the
@@ -191,97 +156,6 @@ const PHASE_LABELS: Record<
   generating: 'Generating',
   ready: 'Ready',
 };
-
-/**
- * Render a single-line plain-text preview of a markdown message body.
- * Used by the sticky context-header to show the originating user
- * prompt without leaking raw `@[Name](gezel:id)` mention syntax,
- * `**bold**`, code fences, etc. The full text is available in the
- * sticky's `title` attribute for users who want to read the original.
- *
- * Deliberately regex-based and forgiving — the input is a chat message
- * (typically one short paragraph), not arbitrary CommonMark, so a
- * dedicated parser would be overkill. Order matters: image refs
- * before plain links (the `!` would survive otherwise), mention links
- * before plain links (so `@[Name]` keeps its `@`).
- */
-function previewifyMarkdown(s: string): string {
-  return s
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1') // ![alt](src) → alt
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1') // @[Name](gezel:id) → @Name
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) → text
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // **bold** → bold
-    .replace(/__([^_]+)__/g, '$1') // __bold__ → bold
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1') // *italic* → italic
-    .replace(/(?<!_)_([^_]+)_(?!_)/g, '$1') // _italic_ → italic
-    .replace(/~~([^~]+)~~/g, '$1') // ~~strike~~ → strike
-    .replace(/`+([^`]+)`+/g, '$1') // `code` → code
-    .replace(/^\s*#+\s+/gm, '') // # heading → heading
-    .replace(/^\s*>\s+/gm, '') // > quote → quote
-    .replace(/^\s*[-*+]\s+/gm, '') // bullet markers
-    .replace(/^\s*\d+\.\s+/gm, '') // ordered-list markers
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-type OptimisticTimelineMessage = TimelineMessage & { optimistic?: true };
-
-/**
- * A single narrow React subscription into a mutable streaming store. The
- * parent timeline supplies the stable structural position; only this child
- * redraws when fragments mutate the item at that position.
- */
-function FrameCoalescedItem<T>({
-  store,
-  itemKey,
-  render,
-  onRendered,
-}: {
-  store: FrameCoalescedStore<T>;
-  itemKey: string;
-  render: (item: T) => React.ReactNode;
-  onRendered?: () => void;
-}): React.ReactNode {
-  const subscribe = useCallback(
-    (listener: () => void) => store.subscribeItem(itemKey, listener),
-    [store, itemKey],
-  );
-  const getSnapshot = useCallback(() => store.getItemSnapshot(itemKey), [store, itemKey]);
-  const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const item = store.items.get(itemKey);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: version is the external-store render signal; item intentionally keeps mutable identity.
-  useLayoutEffect(() => {
-    if (item) onRendered?.();
-  }, [item, onRendered, version]);
-
-  return item ? <>{render(item)}</> : null;
-}
-
-function FrameCoalescedLiveStickyHeader({
-  store,
-  sessionId,
-  userMsg,
-  gezels,
-}: {
-  store: FrameCoalescedStore<LiveSlot>;
-  sessionId: string;
-  userMsg: TimelineMessage;
-  gezels: Map<string, GezelSummary>;
-}): React.ReactNode {
-  return (
-    <FrameCoalescedItem
-      store={store}
-      itemKey={sessionId}
-      render={(slot) => (
-        <ChatStickyHeader
-          payload={{ userMsg, assistantInfo: { kind: 'live', sessionId, slot } }}
-          gezels={gezels}
-        />
-      )}
-    />
-  );
-}
 
 export interface ChatTimelineViewProps {
   /** Stable cache key — changing it clears all state and re-loads. */
@@ -619,6 +493,12 @@ export function ChatTimelineView({
    * the project's terminal channel (deduped by messageId).
    */
   const [terminalEntries, setTerminalEntries] = useState<TerminalTimelineEntry[]>([]);
+  /**
+   * Observed per-file indexing one-shots. The live bubble is intentionally
+   * ephemeral; these receipts advance when work appears and coalesce a sweep
+   * into one expandable ledger row.
+   */
+  const [indexingReceipts, setIndexingReceipts] = useState<IndexingReceipt[]>([]);
   // Bumped when a fresh terminal row's five-minute bottom-placement
   // grace period ends. The timer lets ordering return to normal even
   // when no new chat or terminal event arrives to trigger a render.
@@ -727,6 +607,7 @@ export function ChatTimelineView({
     >
   >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const responseRunwayRef = useRef<HTMLDivElement | null>(null);
   const scrollbarIdleTimerRef = useRef<number | null>(null);
   /**
    * "Pinned to bottom" mode: when true, any new row auto-scrolls the
@@ -747,7 +628,7 @@ export function ChatTimelineView({
    * A prompt submitted from the composer attached to this timeline. It is
    * deliberately separate from ordinary row growth: background messages
    * preserve the reader's scroll position, while the user's own send always
-   * lands in view with a small response runway beneath it.
+   * lands in view with the stable working runway beneath it.
    */
   const [submissionAnchor, setSubmissionAnchor] = useState<
     | {
@@ -832,6 +713,7 @@ export function ChatTimelineView({
     setSessionErrorActions(new Map());
     setMessages([]);
     setTerminalEntries([]);
+    setIndexingReceipts(readIndexingReceipts(scopeKey));
     setHasMore(false);
     setOldestAt(undefined);
     registeredFileSightingsRef.current.clear();
@@ -2099,6 +1981,23 @@ export function ChatTimelineView({
         // Only retire the slot if it completed cleanly. An errored slot
         // stays visible until the next user_message replaces it.
         const slot = liveRef.current.get(sessionId);
+        const indexedPath = indexedPathFromActivity(slot?.activity);
+        if (slot && !slot.error && indexedPath) {
+          const completedAt = new Date().toISOString();
+          setIndexingReceipts((current) => {
+            const next = recordIndexedFile(current, {
+              sessionId,
+              gezelId: slot.gezelId,
+              projectId: slot.projectId,
+              path: indexedPath,
+              startedAt: new Date(slot.startedAt).toISOString(),
+              completedAt,
+            });
+            if (next === current) return current;
+            writeIndexingReceipts(scopeKey, next);
+            return next;
+          });
+        }
         if (slot && !slot.error) {
           liveRef.current.delete(sessionId);
           liveStore.markStructureChanged();
@@ -2177,6 +2076,28 @@ export function ChatTimelineView({
         }
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
+        // Count the file when its visible indexing work starts instead of
+        // waiting for a later `done` envelope. Besides making the receipt
+        // advance in lockstep with the card, this survives a reconnect that
+        // loses the terminal envelope. The `done` branch above remains a
+        // fallback, and recordIndexedFile de-duplicates the two observations.
+        const indexedPath = indexedPathFromActivity(event.activity);
+        if (indexedPath) {
+          const observedAt = new Date().toISOString();
+          setIndexingReceipts((current) => {
+            const next = recordIndexedFile(current, {
+              sessionId,
+              gezelId: slot.gezelId,
+              projectId: slot.projectId,
+              path: indexedPath,
+              startedAt: new Date(slot.startedAt).toISOString(),
+              completedAt: observedAt,
+            });
+            if (next === current) return current;
+            writeIndexingReceipts(scopeKey, next);
+            return next;
+          });
+        }
       } else if (event.type === 'gpu_swap') {
         // VRAM-tenancy change: a non-LLM workload (today: local
         // image generation) has taken or released the GPU. While
@@ -2330,6 +2251,7 @@ export function ChatTimelineView({
       defaultProvider,
       inflightProjectId,
       inflightGezelId,
+      scopeKey,
       liveStore.markItemChanged,
       liveStore.markStructureChanged,
     ],
@@ -2377,12 +2299,24 @@ export function ChatTimelineView({
         at: slot.startedAt,
       });
     }
+    const indexingRows = indexingReceipts.map((entry) => ({
+      kind: 'indexing' as const,
+      entry,
+      at: entry.completedAt,
+    }));
     const all: Array<
       | { kind: 'message'; msg: TimelineMessage; at: string }
       | { kind: 'streaming'; sessionId: string; slot: LiveSlot; at: string }
+      | { kind: 'indexing'; entry: IndexingReceipt; at: string }
       | { kind: 'terminal'; entry: TerminalTimelineEntry; at: string }
       | { kind: 'terminal-streaming'; runId: string; slot: TerminalLiveSlot; at: string }
-    > = [...messageRows, ...streamingAsRows, ...terminalRows, ...terminalStreamingRows];
+    > = [
+      ...messageRows,
+      ...streamingAsRows,
+      ...indexingRows,
+      ...terminalRows,
+      ...terminalStreamingRows,
+    ];
     // Active chat rows stay below persisted history. Fresh terminal
     // commands and their output get the final lane for five minutes,
     // so launching a command cannot push it above the pending chat
@@ -2392,6 +2326,7 @@ export function ChatTimelineView({
     return all;
   }, [
     messages,
+    indexingReceipts,
     terminalEntries,
     liveStructureVersion,
     terminalLiveStructureVersion,
@@ -2418,7 +2353,17 @@ export function ChatTimelineView({
   const nestedThreadItems = useMemo(
     () =>
       nestChildSessionThreads(
-        pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+        pinActiveThreadLast(
+          buildTimelineThreads<
+            TimelineMessage,
+            LiveSlot,
+            TerminalTimelineEntry,
+            TerminalLiveSlot,
+            IndexingReceipt
+          >(rows),
+          activeSessionId,
+          Date.now(),
+        ),
       ),
     [rows, activeSessionId, terminalOrderTick],
   );
@@ -2516,10 +2461,61 @@ export function ChatTimelineView({
   }, []);
 
   /**
+   * Keep a 300px tail below the timeline, but let live chat/indexing cards
+   * consume that tail before they increase scrollHeight. The cards remain in
+   * their normal chronological/thread positions; only the otherwise-empty
+   * runway changes size. ResizeObserver follows streaming bubbles as their
+   * text grows without routing token-frequency updates through this parent.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
+  useLayoutEffect(() => {
+    const timeline = scrollRef.current;
+    const runway = responseRunwayRef.current;
+    if (!timeline || !runway) return;
+
+    const measure = () => {
+      const timelineGap = Number.parseFloat(getComputedStyle(timeline).rowGap) || 0;
+      let consumed = 0;
+      const observed = new Set<HTMLElement>();
+      const liveNodes = timeline.querySelectorAll<HTMLElement>(
+        '[data-msg-id^="live:"], .terminal-group-streaming',
+      );
+      for (const node of liveNodes) {
+        if (observed.has(node)) continue;
+        observed.add(node);
+        consumed += node.getBoundingClientRect().height;
+
+        const rootlessThread = node.closest<HTMLElement>('.timeline-thread-rootless');
+        const activityDivider = rootlessThread?.previousElementSibling;
+        if (activityDivider?.classList.contains('timeline-session-divider-activity')) {
+          consumed += activityDivider.getBoundingClientRect().height + timelineGap;
+        }
+
+        const replyColumn = node.closest<HTMLElement>('.timeline-thread-replies');
+        const localGap = replyColumn
+          ? Number.parseFloat(getComputedStyle(replyColumn).rowGap) || timelineGap
+          : timelineGap;
+        consumed += localGap;
+      }
+      runway.style.blockSize = `${Math.max(0, TIMELINE_WORKING_RESERVE_PX - consumed)}px`;
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    for (const node of timeline.querySelectorAll<HTMLElement>(
+      '[data-msg-id^="live:"], .terminal-group-streaming',
+    )) {
+      observer.observe(node);
+    }
+    return () => observer.disconnect();
+  }, [liveStructureVersion, terminalLiveStructureVersion]);
+
+  /**
    * Align a locally-submitted prompt after its row has rendered. The target
    * may be nested inside a threaded group, so derive its scroll position from
    * viewport rectangles rather than `offsetTop` (whose offset parent would be
-   * the thread, not the timeline). The temporary runway rendered below makes
+   * the thread, not the timeline). The working runway rendered below makes
    * room for the first part of the response instead of pinning the prompt
    * against the composer's top edge.
    *
@@ -3670,6 +3666,20 @@ export function ChatTimelineView({
     return nodes;
   };
   for (const item of threadItems) {
+    if (item.kind === 'indexing') {
+      els.push(
+        <IndexingReceiptRow
+          key={item.entry.id}
+          receipt={item.entry}
+          gezels={gezels}
+          projects={projects}
+          showProjectName={showProjectName}
+          roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+          {...(onWorkspaceReference ? { onOpenWorkspaceFile: onWorkspaceReference } : {})}
+        />,
+      );
+      continue;
+    }
     // Terminal rows live outside session-divider logic — they belong
     // to a `(project, workingDir)` thread, not a (gezel, session)
     // pair, and rendering them through the divider code would emit
@@ -3963,16 +3973,6 @@ export function ChatTimelineView({
     activeContextStatus.numCtx > 0
       ? Math.round((100 * activeContextStatus.estimatedTokens) / activeContextStatus.numCtx)
       : null;
-  const submissionStillRunning =
-    submissionAnchor?.kind === 'chat'
-      ? liveRef.current.has(submissionAnchor.sessionId)
-      : submissionAnchor?.kind === 'terminal'
-        ? terminalLiveRef.current.has(submissionAnchor.runId)
-        : false;
-  const showResponseRunway =
-    submissionAnchor !== null &&
-    (alignedSubmissionKey !== submissionAnchor.key || submissionStillRunning);
-
   return (
     <div className="chat-timeline-viewport">
       {activeContextStatus && (
@@ -4058,7 +4058,7 @@ export function ChatTimelineView({
             (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
           : els}
         {queuedTaskEls}
-        {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
+        <div ref={responseRunwayRef} className="timeline-response-runway" aria-hidden="true" />
       </div>
       {!pinnedToBottom && (
         <button
@@ -4092,190 +4092,4 @@ export function ChatTimelineView({
       )}
     </div>
   );
-}
-
-function findLastForSession(
-  messages: TimelineMessage[],
-  sessionId: string,
-): TimelineMessage | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.sessionId === sessionId) return messages[i]!;
-  }
-  return null;
-}
-
-function isModelUnavailableError(message: string): boolean {
-  return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
-}
-
-function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
-  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
-}
-
-/**
- * Retry is contextual, not a reflex attached to every red surface. Prefer the
- * daemon's structured classification; keep a narrow prose fallback for older
- * daemons and MLX failures whose user-facing copy explicitly recommends a
- * retry. Deterministic "do not retry"/unrunnable failures never get the action.
- */
-export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDetail): boolean {
-  if (isUserCancelledTurnError(message) || isModelUnavailableError(message)) return false;
-  if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
-  if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
-  if (detail?.code === 'native-engine-crash') return true;
-  return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
-    message,
-  );
-}
-
-const NO_FILES: readonly ReferencedFile[] = [];
-
-/**
- * The message's referenced files, widening the legacy artifact-only field
- * for any surface still sending it. `listTimeline` backfills the current
- * shape on read, so this fallback is for live SSE rows written by an older
- * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
- */
-function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
-  if (message.referencedFiles?.length) return message.referencedFiles;
-  if (!message.referencedArtifacts?.length) return NO_FILES;
-  return message.referencedArtifacts.map((path) => ({ kind: 'artifact' as const, path }));
-}
-
-function withinHours(iso: string | undefined, ms: number): boolean {
-  if (!iso) return false;
-  try {
-    const t = new Date(iso).getTime();
-    return Date.now() - t <= ms;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Pinned at the top of the chat scroll viewport — surfaces the
- * user prompt + the assistant bubble header for whatever's
- * currently being scrolled past. Keeps the conversation context
- * visible while the user reads through a long response.
- *
- * Exported for its unit test (same reason as `staleLiveSessionIds`): it is
- * the second place that decides an author label, so it can drift from the
- * bubble's without a test holding the two together.
- */
-export function ChatStickyHeader({
-  payload,
-  gezels,
-}: {
-  payload: {
-    userMsg: TimelineMessage;
-    assistantInfo:
-      | { kind: 'live'; sessionId: string; slot: LiveSlot }
-      | { kind: 'message'; msg: TimelineMessage };
-  };
-  gezels: Map<string, GezelSummary>;
-}): React.ReactNode {
-  const { userMsg, assistantInfo } = payload;
-  // For the live-slot case we drive the same `THINKING · Ns · K
-  // tools · ····` line the streaming bubble renders. For
-  // completed-message case the bubble has no live status — just
-  // the author label.
-  const isLive = assistantInfo.kind === 'live';
-  const slotForLive = isLive ? assistantInfo.slot : null;
-  const liveElapsed = useElapsedSeconds(isLive ? (slotForLive?.startedAt ?? null) : null);
-  const assistantGezelId = isLive ? assistantInfo.sessionId : assistantInfo.msg.gezelId;
-  const assistantGezel = gezels.get(
-    isLive ? (slotForLive?.gezelId ?? '') : assistantInfo.msg.gezelId,
-  );
-  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
-  const assistantName = assistantGezel
-    ? displayName(
-        { name: assistantGezel.name, roleBasedName: assistantGezel.roleBasedName },
-        roleBasedNameOnlyMode,
-      )
-    : 'Gezel';
-  // A task dispatch seed rides the user role but is the machinery talking —
-  // the bubble labels it System, and the sticky header has to agree or the
-  // attribution flips as the user scrolls. A seed the card parser recognises
-  // goes one better: the header carries the same one-line hand-off sentence
-  // the card shows, instead of the dispatch paragraph truncated mid-word.
-  const handoffNote = userMsg.origin === 'system' ? parseTaskHandoffNote(userMsg.content) : null;
-  const userPreview = handoffNote
-    ? handoffHeadline(handoffNote, assistantName)
-    : previewifyMarkdown(userMsg.content);
-  return (
-    <div className="chat-sticky-header" aria-live="polite">
-      <div className="chat-sticky-header-user" title={userMsg.content}>
-        <span className="chat-sticky-header-author">
-          {handoffNote
-            ? handoffKindLabel(handoffNote).toUpperCase()
-            : userMsg.origin === 'system'
-              ? 'SYSTEM'
-              : 'YOU'}
-        </span>
-        <span className="chat-sticky-header-preview">{userPreview}</span>
-      </div>
-      <div className="chat-sticky-header-assistant" key={assistantGezelId}>
-        <GezelIcon
-          svg={assistantGezel?.icon ?? null}
-          poppetje={assistantGezel?.poppetje}
-          iconOverride={assistantGezel?.iconOverride}
-          name={assistantName}
-          size={18}
-        />
-        <span className="chat-sticky-header-author">{assistantName}</span>
-        {!roleBasedNameOnlyMode && assistantGezel?.role && (
-          <RoleSuffix role={assistantGezel.role} />
-        )}
-        {isLive && slotForLive && (
-          <StreamingStatusLine
-            failed={Boolean(slotForLive.error)}
-            queued={
-              slotForLive.queueAhead !== undefined &&
-              queueNoticeIsFresh(slotForLive.queuedAt, Date.now()) &&
-              !segmentsHaveText(slotForLive.segments)
-            }
-            queueAhead={slotForLive.queueAhead}
-            elapsedSeconds={liveElapsed}
-            toolCount={countSegmentTools(slotForLive.segments)}
-            wirePulseCount={slotForLive.wirePulseCount}
-            {...(liveStatusLabel(slotForLive)
-              ? { thinkingLabel: liveStatusLabel(slotForLive) }
-              : {})}
-            {...(slotForLive.thinkingProgress !== undefined
-              ? { thinkingProgress: slotForLive.thinkingProgress }
-              : {})}
-            {...(slotForLive.thinkingDetail ? { thinkingDetail: slotForLive.thinkingDetail } : {})}
-            {...(slotForLive.awaitingGezelName
-              ? { awaitingGezelName: slotForLive.awaitingGezelName }
-              : {})}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function formatProviderLabel(p: ProviderName): string {
-  switch (p) {
-    case 'copilot':
-      return 'Copilot';
-    case 'openai':
-      return 'OpenAI';
-    case 'anthropic':
-      return 'Claude';
-    case 'anthropic-cli':
-      return 'Claude CLI';
-    case 'codex-cli':
-      return 'Codex CLI';
-    case 'ollama':
-      return 'Ollama';
-    case 'llama-cpp':
-      return 'On-device';
-    case 'mlx':
-      return 'MLX';
-    case 'ds4':
-      return 'DwarfStar';
-    case 'remote':
-      return 'Remote';
-  }
 }

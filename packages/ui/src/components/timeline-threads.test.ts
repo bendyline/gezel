@@ -44,6 +44,7 @@ function shape(
   >,
 ) {
   return items.map((item) => {
+    if (item.kind === 'indexing') return 'indexing';
     if (item.kind === 'terminal') return `terminal(${item.entry.id})`;
     if (item.kind === 'terminal-streaming') return `terminal-streaming(${item.runId})`;
     const root = item.root ? item.root.msg.content.slice(0, 20) : '<rootless>';

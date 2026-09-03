@@ -1005,39 +1005,38 @@
   background: rgba(192, 57, 43, 0.25);
 }
 
-/* Night Shift trigger — same cream-on-sage chrome as the other titlebar
-   controls. A running shift gets quiet sky motion without giving this one
-   control a separate blue accent or hover halo. */
-.app-nightshift-trigger {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  /* Horizontal only. `align-self: center` already handles the vertical
-     placement, so a vertical margin here bought nothing and instead grew
-     the whole titlebar past the native overlay height — the tallest child
-     sets the band, and the extra 8px surfaced as wood-grain peeking out
-     below the window-control patch. */
-  margin: 0 2px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.55;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
-}
-.app-nightshift-trigger:hover,
-.app-nightshift-trigger[data-state="open"] {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-}
-.app-nightshift-trigger-active {
+/* Night Shift is the second section of the task-speed menu. While it runs,
+   its quiet sky motion replaces the selected engagement-mode glyph in the
+   shared trigger; the underlying mode remains selected in the menu. */
+.app-engagement-trigger-nightshift,
+.app-engagement-trigger-nightshift:hover {
   opacity: 1;
   color: var(--titlebar-ink);
+}
+.app-task-speed-menu {
+  width: 19rem;
+  max-width: calc(100vw - 1rem);
+}
+.app-task-speed-separator {
+  height: 1px;
+  margin: 0.35rem 0.35rem 0.25rem;
+  background: var(--border);
+  opacity: 0.7;
+}
+.app-nightshift-section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem 0.1rem;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  user-select: none;
+}
+.app-nightshift-section-label .app-nightshift-glyph {
+  width: 20px;
+  height: 15px;
+  color: var(--text-muted);
 }
 .app-nightshift-glyph {
   display: block;

@@ -12,7 +12,7 @@ import { resolveImportEdges, resolveImportEdgesDetailed } from './affinity.js';
 import { buildFileMap } from './build.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { buildPrOverlay } from './pr-overlay.js';
-import { isJsonFile, isTestFile } from './sections.js';
+import { isTestFile } from './sections.js';
 import { VillageFileStore } from './village-file.js';
 
 const gitOk = await isGitInstalled();
@@ -194,11 +194,6 @@ describe('section classification', () => {
     expect(isTestFile('src/a.ts')).toBe(false);
     expect(isTestFile('src/contest/a.ts')).toBe(true); // "*test*" folder, by design
   });
-  it('detects JSON-family files', () => {
-    expect(isJsonFile('package.json')).toBe(true);
-    expect(isJsonFile('data/x.ndjson')).toBe(true);
-    expect(isJsonFile('src/a.ts')).toBe(false);
-  });
 });
 
 describe('map health policy', () => {
@@ -359,9 +354,10 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       expect(blockIds.has('src/a.ts')).toBe(true);
       expect(blockIds.has('src/b.ts')).toBe(true);
       expect(blockIds.has('src/util/c.ts')).toBe(true);
-      // default 'core' scope excludes tests and JSON
+      // default 'core' scope excludes tests; config joins the map as a tower
       expect(blockIds.has('src/a.test.ts')).toBe(false);
-      expect(blockIds.has('tsconfig.json')).toBe(false);
+      expect(blockIds.has('tsconfig.json')).toBe(true);
+      expect(map.blocks.find((b) => b.id === 'tsconfig.json')!.levels).toBeGreaterThanOrEqual(3);
 
       // districts for both folders, nested
       const districtIds = new Set(map.districts.map((d) => d.id));
@@ -384,18 +380,18 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       expect(after.x).toBe(before.x);
       expect(after.y).toBe(before.y);
 
-      // 'tests' scope is the test city — only test files, no core, no JSON
+      // 'tests' scope is the test city — only test files, no core
       const tests = await buildFileMap(store, dir, { scope: 'tests', persist: true });
       const testIds = new Set(tests.blocks.map((b) => b.id));
       expect(testIds.has('src/a.test.ts')).toBe(true);
       expect(testIds.has('src/a.ts')).toBe(false);
 
-      // 'all' scope includes core + tests, still no JSON
+      // 'all' scope includes core + tests
       const all = await buildFileMap(store, dir, { scope: 'all', persist: true });
       const allIds = new Set(all.blocks.map((b) => b.id));
       expect(allIds.has('src/a.ts')).toBe(true);
       expect(allIds.has('src/a.test.ts')).toBe(true);
-      expect(allIds.has('tsconfig.json')).toBe(false);
+      expect(allIds.has('tsconfig.json')).toBe(true);
 
       // "All" composes the two durable neighborhoods instead of packing a
       // third city. Code stays put; Tests moves as one rigid body, preserving
@@ -448,13 +444,14 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       }
       expect(new Set(all.districts.map((d) => d.id)).size).toBe(all.districts.length);
 
-      // stale JSON persisted by an older build (before exclusion) is purged, not
-      // shown as a tombstone, and removed from the layout cache entirely.
+      // a persisted row that the scope now excludes (a test file in the core
+      // city) is purged, not shown as a tombstone, and removed from the layout
+      // cache entirely.
       store.replaceLayout('code', [
         ...store.layoutNodes('code'),
         {
           nodeKind: 'block',
-          nodeId: 'legacy.json',
+          nodeId: 'src/legacy.test.ts',
           parentId: null,
           contentHash: 'h',
           x: 0,
@@ -467,8 +464,8 @@ describe('buildFileMap (end-to-end over a real index)', () => {
         },
       ]);
       const purged = await buildFileMap(store, dir, { scope: 'core', persist: true });
-      expect(purged.blocks.some((b) => b.id === 'legacy.json')).toBe(false);
-      expect(store.layoutNodes('code').some((r) => r.nodeId === 'legacy.json')).toBe(false);
+      expect(purged.blocks.some((b) => b.id === 'src/legacy.test.ts')).toBe(false);
+      expect(store.layoutNodes('code').some((r) => r.nodeId === 'src/legacy.test.ts')).toBe(false);
 
       // v4 city layout: streets are materialized and every block has a lot
       // (persistence unit) enclosing its footprint (`rect`)
@@ -741,7 +738,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       store1.close();
     }
     const cityRaw = JSON.parse(await readFile(join(dir, '.gezel', 'village.json'), 'utf8'));
-    expect(cityRaw.domains.code.layoutVersion).toBe(5);
+    expect(cityRaw.domains.code.layoutVersion).toBe(6);
     expect(cityRaw.domains.code.journal.length).toBeGreaterThan(0);
     expect(cityRaw.domains.code.anchors.length).toBeGreaterThan(0);
 
@@ -834,7 +831,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       const docs = centroid('docs');
       expect(src.x).toBeLessThan(docs.x);
       expect(src.y).toBeLessThan(docs.y);
-      expect(store.getMeta('map_layout_version:code')).toBe('5');
+      expect(store.getMeta('map_layout_version:code')).toBe('6');
     } finally {
       store.close();
     }

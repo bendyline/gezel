@@ -12,6 +12,30 @@ export const STREET_WIDTHS = [16, 10, 6, 4] as const;
 
 export type StreetTier = 0 | 1 | 2 | 3;
 
+/**
+ * Road grade — how much traffic a street carries, as the road it would have
+ * been built into by 1910. Independent of `tier`: the tier is the right-of-way
+ * the layout reserved (an avenue between packages, a lane between parcel
+ * rows); the grade is what the traffic on it earned. A lane fronting a hub
+ * every file imports can be a trolley street, and a boulevard between two
+ * sleepy packages a dirt road with wide verges.
+ */
+export type StreetGrade = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export const STREET_GRADE_MAX = 7;
+
+/** Human-readable grade names, index-aligned with `StreetGrade`. */
+export const STREET_GRADE_LABELS: readonly string[] = [
+  'narrow dirt track',
+  'narrow cobbled lane',
+  'narrow paved lane',
+  'wide dirt road',
+  'wide paved road',
+  'wide paved street with sidewalks',
+  'broad paved avenue with sidewalks',
+  'broad avenue with trolley line and sidewalks',
+];
+
 export function streetTier(depth: number): StreetTier {
   return Math.max(0, Math.min(3, depth)) as StreetTier;
 }

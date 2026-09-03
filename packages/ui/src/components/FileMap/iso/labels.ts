@@ -1,4 +1,5 @@
 import { roundRect } from '../draw/util.js';
+import { hasSymbolCampus } from '../file-use.js';
 import { buildingAnchorScreen, geomInView } from './geometry.js';
 import { toIso } from './projection.js';
 import { type IsoRenderState, sp } from './state.js';
@@ -171,7 +172,7 @@ export function drawIsoLabels(ctx: CanvasRenderingContext2D, s: IsoRenderState):
   if (symbolAlpha > 0.05) {
     const visibleBlockIds = new Set(
       model.blocks
-        .filter((b) => b.state === 'live' && !b.phantom && b.buildingCount > 0)
+        .filter((b) => b.state === 'live' && !b.phantom && hasSymbolCampus(b))
         .map((b) => b.id),
     );
     for (const building of model.buildings) {

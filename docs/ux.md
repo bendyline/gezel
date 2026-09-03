@@ -1122,6 +1122,27 @@ Keep these separate:
 Symbol count becomes facade bays and dormers; churn may add workshop stacks;
 test files read as schoolhouses in every register.
 
+### What a file is for comes first
+
+Before zone and register, a file's **use** decides what kind of place it gets
+(`fileUseOf` in core, path-based so both renderers and every payload agree):
+
+- **data** (JSON, YAML, CSV, XML that hold content) is a **field**: the parcel
+  under crop, furrowed along the ridge axis, a shed in the corner. No walls, no
+  roof, and deliberately no language hue — the crop is the signal. Fields are
+  weight-capped in the layout so a 40k-line fixture is a big field, not the
+  largest thing in town.
+- **config** (package.json, tsconfig, `*.config.*`, rc files, workflows,
+  Dockerfiles) is a **signal tower**: a squat municipal block under a parapet
+  with the glazed control cab on the roof, given at least three storeys so the
+  cab clears the roofline. A config file with a couple of symbols is still a
+  tower, never a campus.
+- **style** (CSS, SCSS, Less) is a **park**: lawn, a gravel cross of paths, a
+  flowerbed in the language hue, and a bandstand, fountain, or obelisk by seed,
+  with trees at street zoom.
+
+Everything else is code and gets the vocabulary below.
+
 ### Vocabulary
 
 A 3×4 grid: four zone families crossed with three urbanity registers, each
@@ -1154,6 +1175,53 @@ pinned by `town-style.golden.test.ts`:
 If the golden test fails, the change moved buildings that already exist on
 users' maps. That is the finding — not a stale fixture.
 
+### Streets carry traffic
+
+Streets are the gaps the packer leaves between parcels and folders, so no
+street *is* an import. What a street can honestly show is how busy it is, and
+the service estimates that per street ([service/filemap/traffic.ts](../packages/service/src/filemap/traffic.ts)):
+the import degree of every parcel fronting it, the roads that travel along it
+between two sibling boxes of its folder, and the traffic leaving the folders it
+bounds. The sum is bucketed into a **road grade** 0..7 on a log scale against
+the map's own busiest streets, nudged by the neighborhood band (a hamlet lane
+stays dirt, a city lane is at least cobbled) and capped by the settlement, so a
+hamlet never grows a trolley line:
+
+| grade | built as |
+|---|---|
+| 0 | narrow dirt track, grass verges |
+| 1 | narrow cobbled lane |
+| 2 | narrow paved lane |
+| 3 | wide dirt road, wheel ruts, the odd cart |
+| 4 | wide paved road with curbs |
+| 5 | wide paved street with sidewalks, gas lamps, people |
+| 6 | broad paved avenue with sidewalks and street trees |
+| 7 | broad avenue with a trolley line: rails, poles, overhead wire, cars |
+
+The right-of-way width is the layout's street **tier** and never changes; the
+grade only varies what is built inside it. A narrow dirt track down a 16-unit
+boulevard reservation reads as a country road with wide verges, which is what
+a boulevard between two sleepy packages is. Same contract as urbanity: the
+renderer maps grade to geometry 1:1 in
+[traffic.ts](../packages/ui/src/components/FileMap/traffic.ts) and never
+re-derives thresholds; both the iso and the plan view read that one struct.
+
+Streets must meet. The packer leaves every folder's inner lanes a pad short
+of the parent's trunk, so each street end reaches across to the nearest
+perpendicular street within twenty units: to the met carriageway's edge at a
+T, and through to its far edge at an L-corner (`joinStreets` in
+[traffic.ts](../packages/ui/src/components/FileMap/traffic.ts)). A road that
+visibly stops a few units short of the road it turns onto is the single most
+artificial thing on the map; never reintroduce one by drawing from the raw
+`street.rect`.
+
+Street life — carts and horses, walkers on the sidewalks, trolley cars, and
+working smoke over the industrial zone — moves on the frame clock at street
+zoom only, honors reduced motion (a still frame at t=0), and stops repainting
+when none of it is on screen, exactly like the rooftop fire. The city overview
+stays a plain carriageway fill per surface, and the age lens suppresses all of
+it.
+
 ### The village file is committed, so it must not churn
 
 Placement memory lives in `.gezel/village.json` — anchors, user overrides, and
@@ -1177,11 +1245,13 @@ recomputed (see [urbanity.ts](../packages/service/src/filemap/urbanity.ts)).
 - **City** stays quiet: flat batched diamonds and landmark beacons. No lots, no
   hedges, no trim, no materials — a 20k-block map has to hold frame rate.
 - **District** is the roof-silhouette tier: all thirteen roof forms, secondary
-  massing, lot boundaries, urbanity street surfaces, and **cornices and string
+  massing, lot boundaries, road grades as fills (carriageway, sidewalks, a
+  single track line), and **cornices and string
   courses** — two 1px lines are most of what makes a core read as masonry at the
   zoom where windows would be sub-pixel mush.
 - **Street** gets everything: windows, shopfronts, cart doors, porticos, roof
-  furniture, yard decor.
+  furniture, yard decor, street furniture and moving traffic, plaza fountains
+  and park trees.
 
 Anything drawing taller than an ordinary roof — a clock tower, a kiln cone —
 must declare `roofFactor`. Culling, hit-testing, and the issue-marker anchor all

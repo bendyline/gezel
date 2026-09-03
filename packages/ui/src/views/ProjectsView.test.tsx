@@ -49,13 +49,19 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     onChange,
     statusBarSlotRight,
     toolbarSlotRight,
+    calcEngineFactory,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
     statusBarSlotRight?: React.ReactNode;
     toolbarSlotRight?: React.ReactNode;
+    calcEngineFactory?: unknown;
   }) => (
-    <div data-testid="editor" data-initial={initialMarkdown}>
+    <div
+      data-testid="editor"
+      data-initial={initialMarkdown}
+      data-calc-engine={typeof calcEngineFactory === 'function'}
+    >
       <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
       {onChange && (
         <button type="button" data-testid="editor-emit" onClick={() => onChange('edited content')}>
@@ -1551,7 +1557,7 @@ describe('ProjectsView', () => {
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
     fireEvent.click(await screen.findByRole('button', { name: 'report.md' }));
-    await screen.findByTestId('editor');
+    expect(await screen.findByTestId('editor')).toHaveAttribute('data-calc-engine', 'true');
 
     expect(documentContainerMocks.createArtifacts).toHaveBeenCalledWith(
       expect.objectContaining({ root: 'reports/report_files', referencePrefix: 'report_files' }),

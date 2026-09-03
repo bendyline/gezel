@@ -17,6 +17,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     workspaceContainer,
     mediaProvider,
     versionBasename,
+    calcEngineFactory,
   }: {
     initialMarkdown: string;
     fileName: string;
@@ -27,6 +28,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     workspaceContainer?: { root?: string } | null;
     mediaProvider?: { referencePrefix?: string } | null;
     versionBasename?: string;
+    calcEngineFactory?: unknown;
   }) => (
     <div
       data-testid="editor-shell"
@@ -34,6 +36,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       data-container-root={workspaceContainer?.root}
       data-media-prefix={mediaProvider?.referencePrefix}
       data-version-basename={versionBasename}
+      data-calc-engine={typeof calcEngineFactory === 'function'}
     >
       <div data-testid="editor-initial">{initialMarkdown}</div>
       <button type="button" data-testid="editor-emit" onClick={() => onChange('edited content')}>
@@ -147,6 +150,7 @@ describe('DocumentDetail', () => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
     });
     expect(screen.getByTestId('editor-shell').getAttribute('data-file')).toBe('mission.md');
+    expect(screen.getByTestId('editor-shell')).toHaveAttribute('data-calc-engine', 'true');
     expect(screen.getByTestId('editor-initial')).toHaveTextContent('# Mission');
     expect(document.querySelector('.document-detail-head')).not.toBeInTheDocument();
   });

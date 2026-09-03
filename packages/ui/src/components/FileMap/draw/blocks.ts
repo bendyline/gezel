@@ -1,5 +1,6 @@
 import type { MapBlock } from '@bendyline/gezel';
 import { rectInView } from '../camera.js';
+import { hasSymbolCampus } from '../file-use.js';
 import type { TownStyle } from '../iso/town-style.js';
 import { ageBucket, roofColors } from '../palette.js';
 import { hash32, seeded } from '../seed.js';
@@ -26,7 +27,7 @@ interface VisibleBlock {
  * vanish into empty pavement.
  */
 function isLotAtStreet(s: RenderState, b: MapBlock): boolean {
-  return s.tier === 'street' && b.buildingCount > 0;
+  return s.tier === 'street' && hasSymbolCampus(b);
 }
 
 export function drawBlocks(ctx: CanvasRenderingContext2D, s: RenderState): void {
@@ -176,6 +177,13 @@ function drawBlock(ctx: CanvasRenderingContext2D, s: RenderState, v: VisibleBloc
 
   const colors = roofColors(b.lang, p, age);
   const corner = Math.min(3, r.w / 6);
+  const style = styleForBlock(s.model, b);
+
+  // Fields and parks are ground, not buildings, in plan as in iso.
+  if (!s.ageLens && (style.archetype === 'field' || style.archetype === 'park')) {
+    drawGroundPlan(ctx, s, v, style, colors.roof);
+    return;
+  }
 
   if (s.tier === 'city' || r.w < MIN_3D_PX) {
     ctx.fillStyle = colors.roof;
@@ -226,7 +234,59 @@ function drawBlock(ctx: CanvasRenderingContext2D, s: RenderState, v: VisibleBloc
   ctx.lineTo(r.x + r.w - corner, r.y + 0.5);
   ctx.stroke();
 
-  if (!s.ageLens) drawRoofPlan(ctx, s, v, r.h - wallH, colors, styleForBlock(s.model, b));
+  if (!s.ageLens) drawRoofPlan(ctx, s, v, r.h - wallH, colors, style);
+}
+
+/** A field (crop with furrows) or a park (lawn, path cross, flowerbed) in plan. */
+function drawGroundPlan(
+  ctx: CanvasRenderingContext2D,
+  s: RenderState,
+  v: VisibleBlock,
+  style: TownStyle,
+  hue: string,
+): void {
+  const { r } = v;
+  const p = s.palette;
+  const corner = Math.min(3, r.w / 6);
+  if (style.archetype === 'field') {
+    ctx.fillStyle = p.farm.crops[(style.seed >>> 4) % 4]!;
+    roundRect(ctx, r.x, r.y, r.w, r.h, corner);
+    ctx.fill();
+    if (s.tier !== 'city' && r.w >= 10) {
+      const step = Math.max(3, 1.6 * s.cam.scale);
+      const alongX = style.ridge === 'x';
+      ctx.strokeStyle = p.farm.furrow;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      const span = alongX ? r.h : r.w;
+      for (let off = step / 2; off < span; off += step) {
+        if (alongX) {
+          ctx.moveTo(r.x + 1, r.y + off);
+          ctx.lineTo(r.x + r.w - 1, r.y + off);
+        } else {
+          ctx.moveTo(r.x + off, r.y + 1);
+          ctx.lineTo(r.x + off, r.y + r.h - 1);
+        }
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    return;
+  }
+  ctx.fillStyle = p.park.lawn;
+  roundRect(ctx, r.x, r.y, r.w, r.h, corner);
+  ctx.fill();
+  if (s.tier === 'city' || r.w < 10) return;
+  const pathW = Math.max(1, Math.min(r.w, r.h) * 0.1);
+  ctx.fillStyle = p.park.path;
+  ctx.fillRect(r.x, r.y + r.h / 2 - pathW / 2, r.w, pathW);
+  ctx.fillRect(r.x + r.w / 2 - pathW / 2, r.y, pathW, r.h);
+  const bed = Math.min(r.w, r.h) * 0.3;
+  ctx.fillStyle = hue;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(r.x + r.w / 2 - bed / 2, r.y + r.h / 2 - bed / 2, bed, bed);
+  ctx.globalAlpha = 1;
 }
 
 /**

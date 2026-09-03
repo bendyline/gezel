@@ -528,9 +528,9 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  * safe — and it is the real backstop against injected markup (e.g. a
  * model-authored inline SVG icon): with `script-src 'self'` an injected
  * <script> or on*= handler cannot execute even if it slips past the SVG
- * sanitizer. `'wasm-unsafe-eval'` rides alongside it for the proofing
- * engine and does not weaken that: it unblocks WebAssembly compilation
- * only, and injected markup has no way to reach it. Styles keep
+ * sanitizer. `'wasm-unsafe-eval'` rides alongside it for the local proofing
+ * and spreadsheet engines and does not weaken that: it unblocks WebAssembly
+ * compilation only, and injected markup has no way to reach it. Styles keep
  * 'unsafe-inline' (React inline styles); images allow only
  * self/data:/blob:. Remote passive resources are deliberately
  * excluded: images and media can still disclose user state through URLs even
@@ -547,8 +547,9 @@ const GEZEL_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' permits WebAssembly compilation and nothing else —
   // it is NOT a relaxation toward eval() or inline script. The renderer needs
-  // it for the proofing engine (harper.js), whose WASM the daemon serves
-  // same-origin under /harper/ and which compiles inside a blob: worker.
+  // it for the proofing (harper.js) and spreadsheet calculation (IronCalc)
+  // engines. Their WASM assets are served same-origin by the daemon; Harper
+  // compiles inside a blob: worker.
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",

@@ -1,12 +1,20 @@
-import { rectInView } from '../camera.js';
+import type { Rect } from '@bendyline/gezel';
+import { rectInView, worldToScreenX, worldToScreenY } from '../camera.js';
+import {
+  type StreetGeometry,
+  streetPoint,
+  streetSurfaceColor,
+  trafficLayoutForModel,
+} from '../traffic.js';
+import { districtBands } from '../urbanity.js';
 import type { RenderState } from './state.js';
 import { roundRect, screenRect } from './util.js';
 
 /**
  * The ground plane, painted in three passes: grass + paved district lots,
- * then the street network (avenues → alleys by tier — lanes cut through the
- * district paving), then curb/sidewalk edges so block outlines stay crisp
- * over the pavement. Leaf districts (the ones actually holding files) get the
+ * then the street network by road grade (the same `trafficLayoutForModel`
+ * geometry the iso view draws — verges, sidewalks, carriageways, rails),
+ * then curb/sidewalk edges so block outlines stay crisp over the pavement. Leaf districts (the ones actually holding files) get the
  * paved-lot + curb treatment; ancestors stay a faint outline so the folder
  * hierarchy reads without stacking fills.
  */
@@ -46,50 +54,60 @@ function drawDistrictFills(
 
 function drawStreets(ctx: CanvasRenderingContext2D, s: RenderState): void {
   const { cam, model, palette, viewW, viewH } = s;
-  const streets = model.streets;
-  if (!streets || streets.length === 0) return;
+  const layout = trafficLayoutForModel(model);
+  if (layout.streets.length === 0) return;
+  const visible = layout.streets.filter((g) => rectInView(cam, g.reservation, viewW, viewH));
+  const fill = (r: Rect): void => {
+    const q = screenRect(cam, r);
+    ctx.fillRect(q.x, q.y, q.w, q.h);
+  };
 
-  const pavement = [
-    palette.pavementAvenue,
-    palette.pavementStreet,
-    palette.pavementLane,
-    palette.pavementLane,
-  ];
-  for (let tier = 0; tier < 4; tier++) {
+  if (s.tier === 'city') {
     // lanes/alleys are sub-pixel noise at city zoom — skip them
-    if (s.tier === 'city' && tier > 1) break;
-    ctx.fillStyle = pavement[tier]!;
-    for (const st of streets) {
-      if (st.tier !== tier) continue;
-      if (!rectInView(cam, st.rect, viewW, viewH)) continue;
-      const r = screenRect(cam, st.rect);
-      ctx.fillRect(r.x, r.y, r.w, r.h);
+    for (const g of visible) {
+      if (g.street.tier > 1) continue;
+      ctx.fillStyle = streetSurfaceColor(g, palette);
+      fill(g.carriageway);
     }
+    return;
   }
 
-  // avenue center dashes, along the long axis
-  if (s.tier !== 'city') {
-    ctx.strokeStyle = palette.avenueDash;
-    ctx.lineWidth = Math.max(1, Math.min(2, 0.8 * cam.scale));
-    ctx.setLineDash([6 * cam.scale, 6 * cam.scale]);
-    ctx.beginPath();
-    for (const st of streets) {
-      if (st.tier !== 0) continue;
-      if (!rectInView(cam, st.rect, viewW, viewH)) continue;
-      const r = screenRect(cam, st.rect);
-      if (r.w >= r.h) {
-        const cy = r.y + r.h / 2;
-        ctx.moveTo(r.x + 2, cy);
-        ctx.lineTo(r.x + r.w - 2, cy);
-      } else {
-        const cx = r.x + r.w / 2;
-        ctx.moveTo(cx, r.y + 2);
-        ctx.lineTo(cx, r.y + r.h - 2);
-      }
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
+  const bands = districtBands(model);
+  const sidewalksVisible = (g: StreetGeometry): boolean =>
+    g.sidewalks !== null && g.sidewalkWidth * cam.scale >= 1.2;
+
+  ctx.fillStyle = palette.street.verge;
+  for (const g of visible) {
+    const band = g.street.districtId ? bands.get(g.street.districtId) : undefined;
+    if (!g.spec.verge || band === 'city') continue;
+    fill(g.reservation);
   }
+  ctx.fillStyle = palette.sidewalk;
+  for (const g of visible) {
+    if (!g.sidewalks || !sidewalksVisible(g)) continue;
+    fill(g.sidewalks[0]);
+    fill(g.sidewalks[1]);
+  }
+  // Busiest last, so an avenue is never overpainted by the lane crossing it.
+  const ordered = [...visible].sort((a, b) => a.grade - b.grade || b.street.tier - a.street.tier);
+  for (const g of ordered) {
+    ctx.fillStyle = streetSurfaceColor(g, palette);
+    fill(g.sidewalks && !sidewalksVisible(g) ? g.reservation : g.carriageway);
+  }
+
+  ctx.strokeStyle = palette.street.rail;
+  ctx.beginPath();
+  for (const g of visible) {
+    if (!g.rails) continue;
+    const pair = g.gauge * cam.scale >= 2.4;
+    ctx.lineWidth = pair ? Math.max(0.7, 0.26 * cam.scale) : 1;
+    const lines = pair ? g.rails : [{ a: streetPoint(g, g.a0, 0), b: streetPoint(g, g.a1, 0) }];
+    for (const line of lines) {
+      ctx.moveTo(worldToScreenX(cam, line.a.x), worldToScreenY(cam, line.a.y));
+      ctx.lineTo(worldToScreenX(cam, line.b.x), worldToScreenY(cam, line.b.y));
+    }
+  }
+  ctx.stroke();
 }
 
 function drawDistrictEdges(

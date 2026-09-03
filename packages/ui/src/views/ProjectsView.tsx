@@ -52,6 +52,7 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -3769,6 +3770,7 @@ function ProjectOutsideInEditor({
         fullWidth
         workspaceContainer={versionContainer}
         documentLinkProvider={documentLinkProvider}
+        calcEngineFactory={isReadOnly ? undefined : ironCalcEngineFactory}
         allowVersioning={!isReadOnly}
         versionBasename={versionBasename}
         outline
@@ -3941,6 +3943,7 @@ function ProjectFileEditor({
         mediaProvider={mediaProvider}
         documentLinkProvider={documentLinkProvider}
         fenceRenderers={fenceRenderers}
+        calcEngineFactory={markdown && !isReadOnly ? ironCalcEngineFactory : undefined}
         allowVersioning={markdown && !isReadOnly}
         versionBasename={versionBasename}
         outline={markdown}

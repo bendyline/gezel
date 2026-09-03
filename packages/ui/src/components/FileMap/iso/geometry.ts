@@ -57,10 +57,13 @@ export function levelsFor(b: MapBlock): number {
 function buildGeometry(model: FileMapResponse): GeometryCache {
   const styles = styleForModel(model);
   const geoms: BlockGeom[] = model.blocks.map((block) => {
-    const flat = block.state === 'tombstoned';
+    const style = styles.get(block.id);
+    // A field and a park have no walls; their features live in the roof
+    // headroom their archetype declares, so hit-testing still covers them.
+    const flat =
+      block.state === 'tombstoned' || style?.archetype === 'field' || style?.archetype === 'park';
     const hWorld = flat ? 0 : heightOf(levelsFor(block));
     const hIso = hWorld * HZ;
-    const style = styles.get(block.id);
     return {
       block,
       hWorld,

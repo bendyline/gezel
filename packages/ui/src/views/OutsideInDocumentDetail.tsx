@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -278,6 +279,7 @@ function OutsideInEditor({
           fullWidth
           workspaceContainer={versionContainer}
           documentLinkProvider={documentLinkProvider}
+          calcEngineFactory={prepared.editingEnabled ? ironCalcEngineFactory : undefined}
           proofing={proofing}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
