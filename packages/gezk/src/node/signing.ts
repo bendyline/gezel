@@ -1,10 +1,12 @@
 /**
  * Manifest signing (the gezk spec §12): Ed25519 over the RFC 8785
- * canonical form of the manifest WITHOUT its `signature` field. Key
- * encodings follow the repo's identity conventions (remotes/identity.ts):
- * SPKI/PKCS#8 PEM, base64 signatures, node:crypto one-shot sign/verify.
- * The private key never appears in CI — signing is a manual workstation
- * step (the plan's key-custody stance); verification is what ships.
+ * canonical form of the manifest WITHOUT its `signature` field. Public keys
+ * are SPKI PEM, private keys PKCS#8 PEM, signatures base64, all via
+ * node:crypto's one-shot sign/verify.
+ *
+ * Signing and verification are deliberately separable: a publisher signs on a
+ * workstation that holds the private key, and every reader ships only the
+ * verification half, so a release pipeline never needs custody of the key.
  */
 
 import {
@@ -22,7 +24,7 @@ import type { KnowledgeRegistryIndex } from '../schemas/registry.js';
 export interface KnowledgeTrustAnchor {
   keyId: string;
   publicKeyPem: string;
-  /** Display-only: whose key this is (e.g. `qualla`). */
+  /** Display-only: whose key this is. */
   publisherId?: string;
 }
 
@@ -51,7 +53,7 @@ export function generateKnowledgeSigningKeyPair(): {
 }
 
 /** The exact bytes the signature covers: JCS(manifest minus `signature`). */
-export function manifestSigningPayload(manifest: KnowledgeCatalogManifest): Buffer {
+export function manifestSigningPayload(manifest: KnowledgeCatalogManifest): Uint8Array {
   const { signature: _omitted, ...unsigned } = manifest;
   return Buffer.from(canonicalizeJson(unsigned), 'utf8');
 }
@@ -89,8 +91,8 @@ export function verifyManifestSignature(
 /**
  * The publisher registry (`_knowledge/registry/index.json`) signs with the
  * same discipline as a catalog manifest: Ed25519 over JCS(document minus
- * `signature`). The signing side lives in Qualla's release command; readers
- * (the machine broker's resolver, Settings → available catalogs) verify.
+ * `signature`). Publishers sign it as the last step of a release; readers
+ * verify it before trusting any archive it advertises.
  */
 export function signRegistryIndex(
   index: KnowledgeRegistryIndex,
