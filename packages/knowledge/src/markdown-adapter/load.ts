@@ -1,15 +1,15 @@
 /**
  * Markdown-folder catalog source — the `gezel knowledge build` input adapter.
  * Folders become the shipped table of contents (a format requirement:
- * gezk-format-v1.md §6.1), files become documents. A flat corpus — files at
+ * the gezk spec §5.2), files become documents. A flat corpus — files at
  * the root with no subfolders — gets the single root topic the compiler
  * demands. Deterministic: sorted walk, stable topic-id collision suffixes.
  */
 
 import { readFile, readdir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import type { CatalogDocument } from '@bendyline/gezel';
-import { CatalogDocumentSchema } from '@bendyline/gezel';
+import type { CatalogDocument } from '@bendyline/gezk';
+import { CatalogDocumentSchema } from '@bendyline/gezk';
 import type { CompileTopic } from '../compiler/compile.js';
 import { documentSlug } from '../format/ids.js';
 

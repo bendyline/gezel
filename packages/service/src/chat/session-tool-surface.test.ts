@@ -435,6 +435,25 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
+  it('grants any assigned role its exact step kit through the hard ceiling', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Meester',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'scope' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Lock scope',
+        advanceWhen: { file: 'scope.md', minBytes: 400 },
+        toolPolicy: { outputMedium: 'workspace' },
+      },
+    });
+
+    expect(allowlist?.has('read_file')).toBe(true);
+    expect(allowlist?.has('write_file')).toBe(true);
+    expect(allowlist?.has('replace_in_file')).toBe(true);
+    expect(allowlist?.has('advance_task_step')).toBe(true);
+  });
+
   it('keeps ordinary Planner chat read-only and honors a non-writable project ceiling', async () => {
     const ordinary = await resolveSessionToolSurface({
       ...baseOpts,
@@ -459,10 +478,10 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(lockedStep.allowlist?.has('replace_in_file')).toBe(false);
   });
 
-  it('a writes-off step session keeps the artifact drawer as its write channel', async () => {
-    // Wild-caught (molen dependency-audit night shift): kit narrowing
-    // stripped the drawer tools from a Developer on a writes-off project,
-    // leaving zero write channels while the gate demanded a deliverable.
+  it('a writes-off workspace step does not offer a wrong-drawer fallback', async () => {
+    // A workspace gate cannot be satisfied by writing an artifact. The task
+    // dispatcher diagnoses this as unsatisfiable; the chat surface must not
+    // tempt the model to fabricate progress in the wrong drawer.
     const clamps: string[] = [];
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -490,14 +509,12 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_file')).toBe(false);
     expect(allowlist!.has('replace_in_file')).toBe(false);
-    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(false);
     expect(allowlist!.has('read_artifact')).toBe(true);
     expect(allowlist!.has('list_artifacts')).toBe(true);
     expect(allowlist!.has('write_task_note')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
-    // The repair clamp applies (write_artifact satisfies the starvation
-    // guard) instead of silently skipping and leaving the wide surface.
-    expect(clamps).toContain('gate-repair');
+    expect(clamps).not.toContain('gate-repair');
   });
 
   it('does NOT grant step tools to a session with no active step', async () => {
@@ -509,6 +526,132 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_task_note')).toBe(false);
     expect(allowlist!.has('advance_task_step')).toBe(false);
+  });
+
+  it.each([
+    {
+      medium: 'workspace' as const,
+      step: { advanceWhen: { file: 'report.md' } },
+      kept: 'write_file',
+      removed: ['write_artifact'],
+    },
+    {
+      medium: 'artifact' as const,
+      step: { advanceWhen: { file: 'reports/audit.md', artifact: true } },
+      kept: 'write_artifact',
+      removed: ['write_file', 'replace_in_file', 'derive_file'],
+    },
+    {
+      medium: 'task-note' as const,
+      step: {},
+      kept: 'write_task_note',
+      removed: ['write_file', 'write_artifact', 'derive_file'],
+    },
+  ])('toolPolicy outputMedium=$medium exposes one result writer', async (row) => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/9', stepId: 'work' }),
+      tier: 'large',
+      activeStep: {
+        ...row.step,
+        toolPolicy: { outputMedium: row.medium },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has(row.kept)).toBe(true);
+    for (const name of row.removed) expect(allowlist!.has(name)).toBe(false);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps an explicitly declared secondary workspace output beside a primary artifact', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/9', stepId: 'fix' }),
+      tier: 'large',
+      activeStep: {
+        advanceWhen: { file: 'reports/fix-notes.md', artifact: true },
+        toolPolicy: {
+          outputMedium: 'artifact',
+          additionalOutputMedia: ['workspace'],
+        },
+      },
+    });
+
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(false);
+  });
+
+  it('keeps task-note writes required by a gate on a legacy artifact-only policy', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'gezel/74', stepId: 'scope' }),
+      tier: 'medium',
+      activeStep: {
+        advanceWhen: { file: 'tasks/74/pr-review/batches.json', artifact: true },
+        gate: {
+          at: 'completion',
+          scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+        },
+        toolPolicy: { outputMedium: 'artifact' },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps task-note writes implied by an older generated file policy', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/9', stepId: 'fix' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Fix',
+        prompt: 'Edit the source, then record the outcome in the task notes.',
+        advanceWhen: { file: 'src/fix.ts' },
+        toolPolicy: { outputMedium: 'workspace' },
+      },
+    });
+
+    expect(allowlist?.has('write_file')).toBe(true);
+    expect(allowlist?.has('write_task_note')).toBe(true);
+  });
+
+  it('structured built-in disallows remain a hard ceiling over a gezel override', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      toolsetsGroupOverride: [
+        'workspace-fs-read',
+        'workspace-fs-write',
+        'code-execution',
+        'git',
+        'tasks',
+      ],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'research' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          disallowBuiltinToolsets: ['code-execution', 'git'],
+          outputMedium: 'task-note',
+        },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('run_nodejs_script')).toBe(false);
+    expect(allowlist!.has('run_git')).toBe(false);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
   it('load-bearing floor keeps step tools alive even under the tiny cap', async () => {
@@ -908,6 +1051,91 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist!.has('message_gezel')).toBe(false);
   });
 
+  it('grants a role the exact canonical tool mandated by its assigned procedure', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'p1/1', stepId: 'inspect' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Inspect archive',
+        prompt: 'Use `list_archive` before writing the inspection report.',
+        advanceWhen: { file: 'reports/archive.md', artifact: true },
+        toolPolicy: { outputMedium: 'artifact' },
+      },
+    });
+
+    expect(allowlist?.has('list_archive')).toBe(true);
+    expect(allowlist?.has('extract_archive')).toBe(false);
+    expect(allowlist?.has('write_artifact')).toBe(true);
+  });
+
+  it('admits the large craftbook step editor only on the task step that mandates it', async () => {
+    const ordinary = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Planner',
+      session: baseSession({ taskRef: 'p1/1', stepId: 'frame' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Frame the plan',
+        prompt: 'Call `set_outcomes` for the draft, then advance.',
+        toolPolicy: { outputMedium: 'none' },
+      },
+    });
+    const editing = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Planner',
+      session: baseSession({ taskRef: 'p1/1', stepId: 'outline' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Outline the plan',
+        prompt:
+          'Call `craftbook_update_step` for the exact embedded task step, then `advance_task_step`.',
+        toolPolicy: { outputMedium: 'none' },
+      },
+    });
+
+    expect(ordinary.allowlist?.has('craftbook_update_step')).toBe(false);
+    expect(editing.allowlist?.has('craftbook_update_step')).toBe(true);
+  });
+
+  it('keeps enabled connector tools only on a step that conditionally references them', async () => {
+    const base = {
+      ...baseOpts,
+      role: 'Copywriter',
+      tier: 'medium' as const,
+      contextualBuiltinTools: ['draft_post', 'queue_post'],
+      securityPolicy: resolveSecurityPolicy({
+        securityPolicy: securityPolicyForLevel('free'),
+      }),
+    };
+    const unrelated = await resolveSessionToolSurface({
+      ...base,
+      session: baseSession({ taskRef: 'p1/1', stepId: 'draft' }),
+      activeStep: {
+        name: 'Draft',
+        prompt: 'Write the copy with `write_file`.',
+        advanceWhen: { file: 'post.md' },
+      },
+    });
+    const review = await resolveSessionToolSurface({
+      ...base,
+      session: baseSession({ taskRef: 'p1/1', stepId: 'review' }),
+      activeStep: {
+        name: 'Review',
+        prompt:
+          'Offer the queue choice only when `draft_post` and `queue_post` are in your function schema.',
+        advanceWhen: { file: 'review.md', artifact: true },
+        toolPolicy: { outputMedium: 'artifact' },
+      },
+    });
+
+    expect(unrelated.allowlist?.has('draft_post')).toBe(false);
+    expect(unrelated.allowlist?.has('queue_post')).toBe(false);
+    expect(review.allowlist?.has('draft_post')).toBe(true);
+    expect(review.allowlist?.has('queue_post')).toBe(true);
+  });
+
   it('keeps source-acquisition tools throughout a Researcher step and gate repair', async () => {
     for (const repairing of [false, true]) {
       const { allowlist } = await resolveSessionToolSurface({
@@ -1074,7 +1302,7 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_file')).toBe(false);
-    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(false);
     expect(allowlist!.has('read_file')).toBe(true);
     expect(allowlist!.has('read_files')).toBe(true);
     expect(allowlist!.has('list_dir')).toBe(true);
@@ -1161,6 +1389,31 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     // Repair surface drops everything outside file-core + floors.
     expect(allowlist!.has('list_dir')).toBe(true);
     expect(allowlist!.has('make_dir')).toBe(false);
+  });
+
+  it('keeps an exact procedure-mandated tool through gate repair', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({ taskRef: 'p1/1', stepId: 'test' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Run tests',
+        prompt: 'Run the suite with `run_package_script` and repair the failure.',
+        advanceWhen: { file: 'reports/test.md', artifact: true },
+        gate: {
+          at: 'completion',
+          checks: [{ kind: 'minBytes', file: 'reports/test.md', bytes: 100, artifact: true }],
+          onReject: 'test',
+        },
+        toolPolicy: { outputMedium: 'artifact' },
+        gateAttempts: 1,
+        lastGateReject: { at: '2026-07-07T00:00:00Z', message: 'Tests still fail.' } as never,
+      },
+    });
+
+    expect(allowlist?.has('run_package_script')).toBe(true);
+    expect(allowlist?.has('write_artifact')).toBe(true);
+    expect(allowlist?.has('advance_task_step')).toBe(true);
   });
 
   it('gateAttemptHistory alone (post-bump reset) keeps the clamp — the widen-back fix', async () => {

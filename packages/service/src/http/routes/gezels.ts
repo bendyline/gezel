@@ -372,6 +372,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
         sessionId: res.sessionId,
         toGezelId: res.toGezelId,
         toGezelName: res.toGezelName,
+        deliveryState: res.deliveryState,
         ...(res.deduplicated ? { deduplicated: true } : {}),
       });
     } catch (err) {

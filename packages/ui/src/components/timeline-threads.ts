@@ -43,9 +43,10 @@ export type ThreadStreamingRow<S> = {
 };
 
 /** Rows the thread builder understands. Terminal rows pass through untouched. */
-export type ThreadInputRow<M extends ThreadMessageLike, S, T, TS> =
+export type ThreadInputRow<M extends ThreadMessageLike, S, T, TS, I = never> =
   | ThreadMessageRow<M>
   | ThreadStreamingRow<S>
+  | { kind: 'indexing'; entry: I; at: string }
   | { kind: 'terminal'; entry: T; at: string }
   | { kind: 'terminal-streaming'; runId: string; slot: TS; at: string };
 
@@ -69,8 +70,9 @@ export interface ThreadGroup<M extends ThreadMessageLike, S> {
   replies: Array<ThreadMessageRow<M> | ThreadStreamingRow<S>>;
 }
 
-export type TimelineThreadItem<M extends ThreadMessageLike, S, T, TS> =
+export type TimelineThreadItem<M extends ThreadMessageLike, S, T, TS, I = never> =
   | ThreadGroup<M, S>
+  | { kind: 'indexing'; entry: I; at: string }
   | { kind: 'terminal'; entry: T; at: string }
   | { kind: 'terminal-streaming'; runId: string; slot: TS; at: string };
 
@@ -96,9 +98,9 @@ export type TimelineThreadItem<M extends ThreadMessageLike, S, T, TS> =
  * the latest progress settles nearest the bottom (before any later
  * terminal-work lane).
  */
-export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS>(
-  rows: Array<ThreadInputRow<M, S, T, TS>>,
-): Array<TimelineThreadItem<M, S, T, TS>> {
+export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS, I = never>(
+  rows: Array<ThreadInputRow<M, S, T, TS, I>>,
+): Array<TimelineThreadItem<M, S, T, TS, I>> {
   type MessageRow = ThreadMessageRow<M>;
   type Group = ThreadGroup<M, S>;
 
@@ -121,7 +123,7 @@ export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS>(
   const duplicateOf = new Map<MessageRow, MessageRow>();
   for (const [dup, kept] of wrapperDuplicateOf) duplicateOf.set(dup.ref, kept.ref);
 
-  const items: Array<TimelineThreadItem<M, S, T, TS>> = [];
+  const items: Array<TimelineThreadItem<M, S, T, TS, I>> = [];
   /**
    * Session → thread currently collecting that session's replies.
    * Never explicitly closed: a session's thread stays open until the
@@ -132,7 +134,7 @@ export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS>(
   const groupByRoot = new Map<MessageRow, Group>();
 
   for (const row of rows) {
-    if (row.kind === 'terminal' || row.kind === 'terminal-streaming') {
+    if (row.kind === 'indexing' || row.kind === 'terminal' || row.kind === 'terminal-streaming') {
       items.push(row);
       continue;
     }

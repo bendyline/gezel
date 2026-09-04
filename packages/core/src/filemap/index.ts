@@ -10,7 +10,11 @@ export {
 export {
   folderPad,
   mergeStreets,
+  STREET_GRADE_LABELS,
+  STREET_GRADE_MAX,
   STREET_WIDTHS,
+  type StreetGrade,
+  type StreetTier,
   streetId,
   streetTier,
   streetWidth,
@@ -23,6 +27,7 @@ export {
 } from './engine.js';
 export { PLATE_H, collapseFiles, displayLabels, plateRectFor } from './plates.js';
 export { assignRegions, deriveAnchorsFromPrior, regionCell, regionOf } from './anchors.js';
+export { type FileUse, fileUseOf } from './file-use.js';
 export {
   packTownNode,
   packTownRoot,

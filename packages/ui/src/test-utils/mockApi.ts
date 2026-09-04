@@ -27,6 +27,38 @@ export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
   getEngineRetention: { idleTimeoutMs: 300_000 },
+  // Prompt drafts: an empty composer with nothing saved is the common case
+  // for a view test, so listing returns nothing and a create hands back a
+  // plausible fresh draft.
+  listPromptDrafts: { drafts: [] },
+  createPromptDraft: {
+    id: '2026-09-03-0001',
+    projectId: 'default',
+    gezelId: 'tomas',
+    sessionId: null,
+    createdAt: '2026-09-03T12:00:00.000Z',
+    updatedAt: '2026-09-03T12:00:00.000Z',
+    status: 'draft',
+    title: '',
+    hasFiles: false,
+    fileCount: 0,
+    content: '',
+  },
+  getPromptDraft: {
+    id: '2026-09-03-0001',
+    projectId: 'default',
+    gezelId: 'tomas',
+    sessionId: null,
+    createdAt: '2026-09-03T12:00:00.000Z',
+    updatedAt: '2026-09-03T12:00:00.000Z',
+    status: 'draft',
+    title: '',
+    hasFiles: false,
+    fileCount: 0,
+    content: '',
+  },
+  writePromptDraftContent: { draft: null, deleted: false },
+  deletePromptDraft: { ok: true, deleted: true },
   listGezels: { gezels: [] },
   // A project with no data tables is the common case for a view test.
   toolListTables: { tables: [] },
@@ -64,6 +96,10 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listActiveVideoPulls: { pulls: [] },
   listCatalogItems: { items: [] },
   listKnowledgeCatalogs: { catalogs: [] },
+  listAvailableKnowledgeCatalogs: { catalogs: [] },
+  listKnowledgeActiveInstalls: { installs: [] },
+  listIncompleteKnowledgeDownloads: { incomplete: [] },
+  knowledgeUpdates: { source: 'gilde', checkedAt: '2026-01-01T00:00:00.000Z', updates: [] },
   knowledgeCatalogTopics: { topics: [] },
   knowledgeCatalogDocuments: { documents: [], total: 0 },
   searchKnowledge: { results: [] },

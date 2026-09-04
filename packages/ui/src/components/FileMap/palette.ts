@@ -64,17 +64,68 @@ export interface CityPalette {
   cobble: string;
   /** Market-stall awning on a village square. */
   stall: string;
+  /** Leaf-district ground by register: meadow out in the village band, the
+   *  plain paving in town, a harder grey in the city core. */
+  districtFillVillage: string;
+  districtFillCity: string;
+  /** The streetscape and its life — see `traffic.ts` and `iso/streets.ts`. */
+  street: StreetPalette;
+  /** Fields (data files) and parks (stylesheets). */
+  farm: FarmPalette;
+  park: ParkPalette;
+}
+
+export interface FarmPalette {
+  /** Crop tones a field picks from by seed: wheat, green crop, ploughed, hay. */
+  crops: readonly [string, string, string, string];
+  furrow: string;
+  shed: LifePrism;
+}
+
+export interface ParkPalette {
+  lawn: string;
+  /** Gravel paths and the bandstand deck. */
+  path: string;
+}
+
+/** Three-face colors for a small prism (a cart, a trolley car). */
+export interface LifePrism {
+  top: string;
+  wallL: string;
+  wallR: string;
+}
+
+export interface StreetPalette {
+  /** Grass verge either side of a narrow lane. */
+  verge: string;
+  /** Trolley rails and the overhead wire. */
+  rail: string;
+  wire: string;
+  lampPost: string;
+  lampGlow: string;
+  /** Overhead-line pole. */
+  pole: string;
+  cart: LifePrism;
+  horse: LifePrism;
+  trolley: LifePrism;
+  trolleyRoof: string;
+  walker: string;
+  /** Industrial chimney smoke. */
+  smoke: string;
+  /** Fountain water on a plaza. */
+  water: string;
+  basin: string;
 }
 
 export function buildPalette(dark: boolean): CityPalette {
   return dark
     ? {
         dark: true,
-        ground: 'hsl(150 10% 12%)',
-        districtFill: 'hsl(228 8% 15%)',
-        districtStroke: '#34373f',
-        curb: 'hsl(228 10% 28%)',
-        sidewalk: 'hsl(228 7% 18%)',
+        ground: 'hsl(130 10% 12%)',
+        districtFill: 'hsl(40 7% 15%)',
+        districtStroke: '#3a3733',
+        curb: 'hsl(40 10% 36%)',
+        sidewalk: 'hsl(40 8% 30%)',
         districtLabel: '#8b8f99',
         label: '#c9ccd4',
         road: '#4a4d56',
@@ -95,9 +146,9 @@ export function buildPalette(dark: boolean): CityPalette {
         windowLit: 'hsl(41 72% 61%)',
         masonry: 'hsl(18 24% 28%)',
         awning: 'hsl(8 48% 48%)',
-        pavementAvenue: 'hsl(228 8% 24%)',
-        pavementStreet: 'hsl(228 8% 21%)',
-        pavementLane: 'hsl(228 8% 18%)',
+        pavementAvenue: 'hsl(36 8% 25%)',
+        pavementStreet: 'hsl(36 8% 22%)',
+        pavementLane: 'hsl(36 7% 19%)',
         avenueDash: 'hsl(45 45% 48%)',
         labelPlate: 'hsl(228 10% 10% / 0.85)',
         labelPlateStroke: 'hsl(228 10% 34%)',
@@ -105,8 +156,39 @@ export function buildPalette(dark: boolean): CityPalette {
         fence: 'hsl(36 16% 38%)',
         orchard: 'hsl(120 18% 20%)',
         dirtLane: 'hsl(32 16% 20%)',
-        cobble: 'hsl(226 7% 22%)',
+        cobble: 'hsl(30 9% 23%)',
         stall: 'hsl(12 42% 42%)',
+        districtFillVillage: 'hsl(120 9% 14%)',
+        districtFillCity: 'hsl(40 5% 16%)',
+        street: {
+          verge: 'hsl(110 12% 15%)',
+          rail: 'hsl(40 10% 42%)',
+          wire: 'hsl(40 10% 50%)',
+          lampPost: 'hsl(36 12% 40%)',
+          lampGlow: 'hsl(41 80% 62%)',
+          pole: 'hsl(30 14% 34%)',
+          cart: { top: 'hsl(28 30% 42%)', wallL: 'hsl(28 30% 32%)', wallR: 'hsl(28 28% 25%)' },
+          horse: { top: 'hsl(24 22% 30%)', wallL: 'hsl(24 22% 22%)', wallR: 'hsl(24 20% 17%)' },
+          trolley: {
+            top: 'hsl(150 16% 28%)',
+            wallL: 'hsl(46 50% 60%)',
+            wallR: 'hsl(46 40% 46%)',
+          },
+          trolleyRoof: 'hsl(150 16% 28%)',
+          walker: 'hsl(40 10% 62%)',
+          smoke: 'hsl(40 6% 58%)',
+          water: 'hsl(200 30% 36%)',
+          basin: 'hsl(40 10% 34%)',
+        },
+        farm: {
+          crops: ['hsl(44 40% 34%)', 'hsl(96 26% 24%)', 'hsl(30 22% 22%)', 'hsl(58 30% 30%)'],
+          furrow: 'hsl(30 20% 12%)',
+          shed: { top: 'hsl(24 26% 30%)', wallL: 'hsl(24 24% 24%)', wallR: 'hsl(24 22% 18%)' },
+        },
+        park: {
+          lawn: 'hsl(118 18% 20%)',
+          path: 'hsl(40 12% 34%)',
+        },
       }
     : {
         dark: false,
@@ -147,6 +229,37 @@ export function buildPalette(dark: boolean): CityPalette {
         dirtLane: 'hsl(34 24% 70%)',
         cobble: 'hsl(44 8% 74%)',
         stall: 'hsl(10 48% 58%)',
+        districtFillVillage: 'hsl(92 22% 84%)',
+        districtFillCity: 'hsl(44 14% 85%)',
+        street: {
+          verge: 'hsl(88 30% 80%)',
+          rail: 'hsl(40 8% 52%)',
+          wire: 'hsl(40 8% 45%)',
+          lampPost: 'hsl(36 14% 42%)',
+          lampGlow: 'hsl(42 90% 70%)',
+          pole: 'hsl(30 16% 40%)',
+          cart: { top: 'hsl(28 36% 52%)', wallL: 'hsl(28 34% 42%)', wallR: 'hsl(28 32% 34%)' },
+          horse: { top: 'hsl(24 26% 38%)', wallL: 'hsl(24 26% 30%)', wallR: 'hsl(24 24% 24%)' },
+          trolley: {
+            top: 'hsl(150 20% 36%)',
+            wallL: 'hsl(46 62% 70%)',
+            wallR: 'hsl(46 48% 56%)',
+          },
+          trolleyRoof: 'hsl(150 20% 36%)',
+          walker: 'hsl(30 18% 32%)',
+          smoke: 'hsl(40 8% 62%)',
+          water: 'hsl(200 42% 62%)',
+          basin: 'hsl(40 12% 62%)',
+        },
+        farm: {
+          crops: ['hsl(46 62% 66%)', 'hsl(96 36% 52%)', 'hsl(30 30% 58%)', 'hsl(58 48% 72%)'],
+          furrow: 'hsl(30 30% 40%)',
+          shed: { top: 'hsl(24 30% 46%)', wallL: 'hsl(24 28% 38%)', wallR: 'hsl(24 26% 30%)' },
+        },
+        park: {
+          lawn: 'hsl(112 34% 62%)',
+          path: 'hsl(42 30% 86%)',
+        },
       };
 }
 

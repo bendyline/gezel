@@ -117,7 +117,7 @@ export function SecurityComplianceSettings({
       </p>
 
       <div
-        className="engagement-mode-switch gz-tray"
+        className="engagement-mode-switch gz-tray gz-tray--described"
         role="radiogroup"
         aria-label="Security posture"
       >
@@ -147,10 +147,17 @@ export function SecurityComplianceSettings({
           </button>
         )}
       </div>
-      <p className="engagement-mode-description" aria-live="polite">
-        {level === 'custom'
-          ? 'Custom posture — individual capabilities below differ from the presets.'
-          : (LEVELS.find((l) => l.id === level)?.description ?? '')}
+      <p className="engagement-mode-description gz-tray-description" aria-live="polite">
+        {level === 'custom' ? (
+          <>
+            <strong>Custom</strong> — individual capabilities below differ from the presets.
+          </>
+        ) : (
+          <>
+            <strong>{LEVELS.find((l) => l.id === level)?.label}</strong> —{' '}
+            {LEVELS.find((l) => l.id === level)?.description ?? ''}
+          </>
+        )}
       </p>
 
       <div className="workshop-tempo" style={{ marginTop: '1rem' }}>

@@ -535,6 +535,14 @@ export type ToolCallCard = z.infer<typeof ToolCallCardSchema>;
 
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
+  /**
+   * ISO timestamp of the call's START. Optional: absent on every message
+   * persisted before this field existed, so readers must not assume it.
+   * End time derives as `at + durationMs`. This is what gives replay
+   * (run recordings, the eval movie pipeline) intra-turn ordering with
+   * absolute time — array order alone cannot place calls on a timeline.
+   */
+  at: z.string().optional(),
   durationMs: z.number(),
   success: z.boolean(),
   errorMessage: z.string().optional(),
@@ -645,6 +653,23 @@ export const ReferencedFileSchema = z.object({
 export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
 
 /**
+ * User-facing facts about a persisted automatic context compaction.
+ *
+ * This metadata is deliberately display-only: the synthesized message's
+ * `content` is still the only text replayed to the model. Keeping the facts
+ * beside that message lets the chat timeline explain what happened after a
+ * reload without injecting context-pressure narration into the model prompt.
+ */
+export const ContextCompactionSchema = z.object({
+  removedCount: z.number().int().nonnegative(),
+  contextWindow: z.number().int().positive(),
+  estimatedTokensBefore: z.number().int().nonnegative(),
+  compactionCount: z.number().int().positive(),
+  autoCompactRatio: z.number().positive().max(1),
+});
+export type ContextCompaction = z.infer<typeof ContextCompactionSchema>;
+
+/**
  * A single turn in an agent chat. Stored in memory while a chat session is
  * active; dropped when the session ends or the daemon restarts.
  *
@@ -661,6 +686,17 @@ export const ChatMessageSchema = z.object({
     .object({
       gezelId: z.string(),
       gezelName: z.string(),
+      /**
+       * The SENDER's session id — the durable per-edge record of which
+       * thread this message came from. `session.parentSession` only says
+       * which session first opened the thread (stable containment);
+       * this field is the ground truth for every individual delegation
+       * edge, including later senders into an existing session. Optional:
+       * absent on messages persisted before the field existed.
+       */
+      sessionId: z.string().optional(),
+      /** How the sender reached this session; mirrors SessionParent.kind. */
+      kind: z.enum(['delegation', 'consultation', 'task-entry', 'task-handoff']).optional(),
     })
     .optional(),
   /**
@@ -783,6 +819,13 @@ export const ChatMessageSchema = z.object({
     ])
     .optional(),
   /**
+   * Present on a synthetic `compaction-summary` message. The UI renders this
+   * as an explicit context-maintenance marker (including the effective token
+   * window and number of messages summarized) rather than pretending it was
+   * an ordinary assistant reply.
+   */
+  contextCompaction: ContextCompactionSchema.optional(),
+  /**
    * Display flag: the model sees this message as normal history, but the
    * chat transcript UI never renders a bubble for it. Set on
    * machine-authored facilitation seeds that would only be noise to the
@@ -802,6 +845,13 @@ export const ChatMessageSchema = z.object({
    * renders a small "nudged" chip on the bubble.
    */
   nudge: z.boolean().optional(),
+  /**
+   * The prompt draft (`artifacts/prompts/<draftId>/`) this user message was
+   * sent from. Display-only: the model never sees it, and the draft may since
+   * have been swept, so the UI must treat a dangling id as "no prompt to
+   * open" rather than an error.
+   */
+  draftId: z.string().optional(),
   /**
    * The machinery — not the human — authored this `role: 'user'` message.
    * Task dispatch seeds, step handoffs, and project-page reaction seeds
@@ -969,6 +1019,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool'),
     name: z.string(),
+    /** ISO start-of-call timestamp; see ChatMessageToolCallSchema.at. */
+    at: z.string().optional(),
     durationMs: z.number(),
     success: z.boolean(),
     errorMessage: z.string().optional(),
@@ -1146,16 +1198,33 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     reason: z.enum(['started', 'canceled', 'rejected']),
   }),
   /**
-   * Local-provider context policy: emitted when accumulated conversation
-   * exceeds a safety fraction of the session's effective model context.
-   * The UI may suggest starting fresh because this event is never emitted
-   * for a first-turn standing system/tool prefix.
+   * Effective context policy for a local or remote-local session. Emitted on
+   * each turn so the live UI can show the model's token window immediately;
+   * the same values are persisted on the session for reloads.
+   */
+  z.object({
+    type: z.literal('context_window'),
+    numCtx: z.number().int().positive(),
+    model: z.string(),
+    autoCompactRatio: z.number().positive().max(1),
+    /**
+     * Estimated prompt size for the turn about to run, in the same
+     * chars/4 units the compaction check itself uses. Absent on older
+     * daemons, which published the window without the fill.
+     */
+    estimatedTokens: z.number().int().nonnegative().optional(),
+  }),
+  /**
+   * Local-provider context policy: emitted only when accumulated conversation
+   * could not be compacted automatically. Normal pressure is handled without
+   * a warning; this is the exceptional maintenance-failure path.
    */
   z.object({
     type: z.literal('context_warning'),
     estimatedTokens: z.number(),
     numCtx: z.number(),
     model: z.string(),
+    reason: z.literal('compaction_failed').optional(),
   }),
   /**
    * Local-provider context policy: emitted right after in-flight compaction collapses
@@ -1168,6 +1237,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('context_compacted'),
     removedCount: z.number().int().nonnegative(),
     model: z.string(),
+    /** Optional for wire compatibility with pre-context-visibility daemons. */
+    numCtx: z.number().int().positive().optional(),
+    estimatedTokensBefore: z.number().int().nonnegative().optional(),
+    autoCompactRatio: z.number().positive().max(1).optional(),
+    compactionCount: z.number().int().positive().optional(),
+    mode: z.enum(['between-turn', 'mid-turn']).optional(),
   }),
   /**
    * Emitted when the chat manager detects a self-chat / compaction loop —
@@ -1463,6 +1538,26 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('gezel_created'),
     gezelId: z.string(),
     name: z.string(),
+  }),
+  /**
+   * A prompt draft was created, edited, re-filed, sent, or removed. Emitted
+   * on the project stream so a thread picker open in another window folds the
+   * change in. Content-only churn rides this event too (autosave fires it
+   * about once a second per typing user), so consumers must debounce and
+   * should ignore an event for the draft they are themselves editing.
+   *
+   * `gezelId` is the draft's, not the envelope's: a draft that will start a
+   * new thread has no session for the envelope to be scoped by.
+   */
+  z.object({
+    type: z.literal('prompt_draft_changed'),
+    projectId: z.string(),
+    gezelId: z.string(),
+    draftId: z.string(),
+    sessionId: z.string().nullable(),
+    status: z.enum(['draft', 'sent']),
+    deleted: z.boolean().optional(),
+    updatedAt: z.string(),
   }),
   /**
    * Global (project-less) signal that Night Shift mode flipped ON/OFF.

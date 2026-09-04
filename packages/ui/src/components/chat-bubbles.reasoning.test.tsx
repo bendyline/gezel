@@ -107,7 +107,7 @@ describe('MessageBubble reasoning marks', () => {
     );
 
     const mark = screen.getByTitle('read_file ran here');
-    expect(mark).toHaveTextContent('read_file · path: "about.md"');
+    expect(mark).toHaveTextContent('read_file · path: about.md');
     // The trace itself still reads as one continuous block around it.
     expect(mark.closest('pre')).toHaveTextContent('I should look at the file.');
     expect(mark.closest('pre')).toHaveTextContent('Now I know.');

@@ -134,3 +134,32 @@ export function simplifyJsonSchemaForLlamaCpp(schema: unknown): unknown {
 export function isLlamaCppGrammarParseError(text: string): boolean {
   return /failed to (?:initialize samplers:[^\r\n]*failed to )?parse grammar/i.test(text);
 }
+
+/**
+ * Detect the sampler-init failure a server raises for a FORCED tool call
+ * (`tool_choice: "required"`) on a model whose vocabulary the eager
+ * tool-call grammar cannot be built against.
+ *
+ * Deliberately disjoint from {@link isLlamaCppGrammarParseError}: that one
+ * matches a sampler-init failure whose stated cause is a grammar *parse*
+ * error, which the schema-permissiveness ladder can climb out of by sending
+ * simpler tool schemas. This one matches the bare form — llama.cpp surfaces
+ * it as an untyped `std::exception` with no cause — which no amount of
+ * schema simplification fixes, because the payload is not the problem. The
+ * only recovery is to stop forcing the tool call, so keeping the two
+ * predicates non-overlapping keeps each retry path honest.
+ *
+ * Wild-caught on Nanbeige4.2-3B: bisected to `tool_choice: "required"`
+ * alone. A single-tool request fails while forty tools pass under
+ * `"auto"`; a hand-written generic ChatML template fails identically, so it
+ * is not the model's embedded template; and qwen3.5-2b on the same binary
+ * and flags accepts the same forced request. Because forcing a tool call is
+ * how the local-model rescue paths below recover a model that narrates
+ * instead of acting, an unhandled rejection here means the *rescue* fails
+ * and the turn burns its whole repair allowance — surfacing as a
+ * capability verdict (`model-stuck`) for what is an engine-compat fault.
+ */
+export function isLlamaCppForcedToolChoiceError(text: string): boolean {
+  if (isLlamaCppGrammarParseError(text)) return false;
+  return /failed to initialize samplers/i.test(text);
+}

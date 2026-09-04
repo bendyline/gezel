@@ -34,6 +34,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
     'GEZEL_MCP_TOOL_NAMING',
     'GEZEL_SCRIPT_TOOLS',
     'GEZEL_CRAFTBOOK_ID',
+    'GEZEL_CRAFTBOOK_STEP_EDITING',
     'GEZEL_MAIL_ENABLED',
     'GEZEL_SOCIAL_ENABLED',
     'GEZEL_CONNECTORS_ENABLED',
@@ -50,6 +51,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
   // Include the contextual surgical schema in the contract corpus even
   // though ordinary sessions do not advertise it.
   process.env.GEZEL_CRAFTBOOK_ID = 'schema-lint-craftbook';
+  process.env.GEZEL_CRAFTBOOK_STEP_EDITING = '1';
   process.env.GEZEL_MAIL_ENABLED = '1';
   process.env.GEZEL_SOCIAL_ENABLED = '1';
   process.env.GEZEL_CONNECTORS_ENABLED = '1';

@@ -138,34 +138,43 @@ compute but is not an authorization model for shared project data.
 ## Knowledge catalog assets (`machine-knowledge-assets`)
 
 Knowledge catalogs ([knowledge-catalogs.md](knowledge-catalogs.md), format in
-[gezk-format-v1.md](gezk-format-v1.md)) extend the broker with exactly one new
+[gezk-format.md](gezk-format.md)) extend the broker with exactly one new
 responsibility: acting as the **narrow installer-owned publisher of trusted
 immutable knowledge bytes** into `<sharedAssets>/knowledge/`, beside the
 existing shared model-asset tree. The boundary rules:
 
-- **Inputs are allowlisted signed registry coordinates only** — a
+- **Inputs are trusted coordinates only** — a
   `(publisherId, catalogId, version, sha256)` tuple. The broker independently
-  resolves the signed Qualla registry, verifies the Ed25519 registry signature
-  against shipped trust anchors, downloads, verifies the archive digest,
-  stages, validates (per-file hashes, manifest signature, schema/profile
+  resolves the bytes, downloads, verifies the archive digest, stages,
+  validates (per-file hashes, manifest signature, schema/profile
   compatibility, `quick_check`, embedder-free smoke), and atomically publishes
-  `catalogs/<publisher>/<id>/versions/<version>/<sha256>/`. Arbitrary URLs and
-  local paths are rejected at the route boundary.
-- **Archive resolution is broker-side, in a fixed ladder** (both rungs
-  operator-configured env, never request data): the local drop directory
-  `GEZEL_KNOWLEDGE_REGISTRY_DIR` (a file whose sha256 equals the coordinate's
-  digest), then the signed CDN registry `GEZEL_KNOWLEDGE_REGISTRY_URL` —
-  fetched, schema-parsed, and Ed25519-verified against the built-in trust
-  anchors plus the `GEZEL_KNOWLEDGE_TRUST_ANCHORS` overlay (a JSON file that
-  can only ADD anchors, never remove built-ins). A registry no anchor verifies
-  is ignored outright. The registry only locates bytes: the row must match the
-  coordinate exactly (digest included), the row's declared size hard-caps the
+  `<sharedAssets>/knowledge/<publisher>/<id>/<version>/<digest16>/`. Arbitrary
+  URLs and local paths are rejected at the route boundary.
+- **Archive resolution is broker-side, in a fixed ladder** (every rung is
+  broker configuration or shipped content, never request data): the local
+  drop directory `GEZEL_KNOWLEDGE_REGISTRY_DIR` (a file whose sha256 equals
+  the coordinate's digest); then the gilde `knowledge-catalog` pin shipped
+  with the broker's own `@bendyline/gilde` — accepted only when its publisher
+  and pinned sha256 equal the coordinate's, and resolved to the commit-pinned
+  Hugging Face URL exactly as the user daemon would; then the optional signed
+  publisher registry `GEZEL_KNOWLEDGE_REGISTRY_URL` — fetched, schema-parsed,
+  and Ed25519-verified against the built-in trust anchors plus the
+  `GEZEL_KNOWLEDGE_TRUST_ANCHORS` overlay (a JSON file that can only ADD
+  anchors, never remove built-ins). A registry no anchor verifies is ignored
+  outright. Every rung only locates bytes: the pin or row must match the
+  coordinate exactly (digest included), its declared size hard-caps the
   download, the digest is re-verified on the downloaded bytes, and the
-  download is deleted after extraction.
+  download is deleted after extraction. A broker whose gilde predates a
+  catalog answers `not-found`, and the requesting daemon installs privately.
 - **The broker never receives** a search query, prompt, chunk request,
   project/session/gezel id, enabled-catalog list, or user path — and no route
   exists that could return catalog content. Its surface is content-addressed
-  `ensure`, `status`, `inventory`, and deliberately machine-wide `reclaim`.
+  `ensure`, its streaming twin `ensure-stream` (the same install as a
+  background job whose progress the requester follows over SSE — a
+  disconnect never abandons the download, a second request attaches), the
+  explicit `cancel`, `status`, `inventory`, and deliberately machine-wide
+  `reclaim`. The requesting daemon relays the stream to its own UI; the
+  broker learns nothing about who is watching.
 - **Scope**: the routes mount under `/v1/remote/manage/knowledge/*` behind a
   dedicated `machine-knowledge-assets` scope, a sibling of `machine-models`.
   Paired-LAN `remote-inference` grants cannot call it (the manage surface is
@@ -194,5 +203,5 @@ existing shared model-asset tree. The boundary rules:
 
 This is not permission to widen the broker into a product daemon: the roles
 table above still governs, and any future knowledge-related route on the
-broker beyond ensure/status/inventory/reclaim requires revisiting this
-section.
+broker beyond ensure/ensure-stream/cancel/status/inventory/reclaim requires
+revisiting this section.

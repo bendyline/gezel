@@ -95,7 +95,10 @@ function seedApi(mem: {
 }
 
 describe('RecommendedMediaDownloads', () => {
-  it('offers a download for every fitting media modality on a big-GPU device', async () => {
+  it('offers ONE quiet plan link, never per-modality download buttons', async () => {
+    // The single-link shape is deliberate: the required chat-model CTA above
+    // this section must stay the page's one loud action (2026-09-02 UX
+    // review). Per-modality choice lives inside the plan dialog.
     seedApi({
       platform: 'win32',
       gpuVramBytes: 34 * GB,
@@ -103,14 +106,21 @@ describe('RecommendedMediaDownloads', () => {
       usableBytes: 32 * GB,
     });
     render(<RecommendedMediaDownloads />);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Download image model/ })).toBeInTheDocument(),
-    );
-    expect(screen.getByRole('button', { name: /Download speech-to-text/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Download text-to-speech/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Download image reading/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Download video model/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Choose downloads/ })).toBeInTheDocument();
+    const link = await screen.findByRole('button', {
+      name: /Also download the optional media models/,
+    });
+    expect(link).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download image model/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download video model/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Choose downloads/ })).not.toBeInTheDocument();
+
+    // Every fitting modality is still offered — inside the review dialog.
+    fireEvent.click(link);
+    expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Qwen3-VL/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Kokoro/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).toBeInTheDocument();
   });
 
   it('hides the video model when the device lacks the VRAM floor', async () => {
@@ -121,13 +131,14 @@ describe('RecommendedMediaDownloads', () => {
       usableBytes: 16 * GB,
     });
     render(<RecommendedMediaDownloads />);
-    // Image (RAM 32 ≥ 16) + both audio still appear…
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Download image model/ })).toBeInTheDocument(),
+    // Image (RAM 32 ≥ 16) + both audio still appear in the plan dialog…
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
     );
-    expect(screen.getByRole('button', { name: /Download speech-to-text/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
     // …but the 24 GB-VRAM video model is hidden on a GPU-less box.
-    expect(screen.queryByRole('button', { name: /Download video model/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Wan 2\.2/ })).not.toBeInTheDocument();
   });
 
   it('reattaches progress bars for service-owned downloads when the view mounts again', async () => {
@@ -175,8 +186,10 @@ describe('RecommendedMediaDownloads', () => {
 
     expect(await screen.findByText('1.0 GB of 4.0 GB · 25%')).toBeInTheDocument();
     expect(screen.getByText('17.0 GB of 34.0 GB · 50%')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Download image model/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Download video model/ })).not.toBeInTheDocument();
+    // The plan link stays for the still-pending modalities (audio + reading).
+    expect(
+      screen.getByRole('button', { name: /Also download the optional media models/ }),
+    ).toBeInTheDocument();
     expect(api.subscribeImagePull).toHaveBeenCalledWith(
       'flux-2-klein-4b-q4',
       expect.any(Function),
@@ -203,7 +216,9 @@ describe('RecommendedMediaDownloads', () => {
     });
     render(<RecommendedMediaDownloads />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Choose downloads/ }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    );
 
     expect(screen.getByRole('alertdialog', { name: 'Review model downloads' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeChecked();
@@ -240,10 +255,18 @@ describe('RecommendedMediaDownloads', () => {
     });
     render(<RecommendedMediaDownloads />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Download video model/ }));
-    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).not.toBeChecked();
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    );
+    // Video arrives unchecked and flagged; the only start path is checking it
+    // explicitly inside the plan.
+    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).not.toBeChecked();
     expect(screen.getByText('Large download')).toBeInTheDocument();
+    for (const name of [/FLUX\.2 Klein/, /Qwen3-VL/, /Whisper Base/, /Kokoro/]) {
+      fireEvent.click(screen.getByRole('checkbox', { name }));
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: /Wan 2\.2/ }));
+    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).toBeChecked();
     await waitFor(() =>
       expect(api.checkModelDownloadSpace).toHaveBeenCalledWith({
         sizeBytes: Math.ceil(videoItem.manifest.approxSizeBytes),
@@ -269,7 +292,9 @@ describe('RecommendedMediaDownloads', () => {
     } as never);
     render(<RecommendedMediaDownloads />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Choose downloads/ }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    );
     expect(await screen.findByText(/Not enough free space/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download 4 models' })).toBeDisabled();
     expect(api.pullImageModel).not.toHaveBeenCalled();
@@ -285,7 +310,13 @@ describe('RecommendedMediaDownloads', () => {
     vi.mocked(api.pullImageModel).mockImplementation((() => new Promise<void>(() => {})) as never);
     render(<RecommendedMediaDownloads />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Download image model/ }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    );
+    // Narrow the default plan down to just the image model.
+    for (const name of [/Qwen3-VL/, /Whisper Base/, /Kokoro/]) {
+      fireEvent.click(screen.getByRole('checkbox', { name }));
+    }
     const confirm = await screen.findByRole('button', { name: 'Download 1 model' });
     await waitFor(() => expect(confirm).toBeEnabled());
     fireEvent.click(confirm);
@@ -295,6 +326,9 @@ describe('RecommendedMediaDownloads', () => {
     });
     fireEvent.click(cancel);
     await waitFor(() => expect(api.cancelImagePull).toHaveBeenCalledWith('flux-2-klein-4b-q4'));
-    expect(await screen.findByRole('button', { name: /Download image model/ })).toBeInTheDocument();
+    // Back to idle: the quiet plan link is the way to try again.
+    expect(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    ).toBeInTheDocument();
   });
 });

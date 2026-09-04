@@ -1,5 +1,6 @@
 import type {
   CraftbookAuditResult,
+  CraftbookEvalMode,
   CraftbookEvalValidationScope,
   CraftbookTemplateSummary,
 } from './types.ts';
@@ -21,6 +22,7 @@ export interface CraftbookBatchPlanItem {
   name: string;
   score: number;
   evalStatus: string;
+  evalMode: CraftbookEvalMode;
   validationScope: CraftbookEvalValidationScope;
   priority: number;
   harness: CraftbookHarnessKind[];
@@ -30,6 +32,7 @@ export interface CraftbookBatchPlanItem {
 
 export interface CraftbookBatchPlan {
   target: number;
+  mode?: CraftbookEvalMode;
   runnableNow: string[];
   items: CraftbookBatchPlanItem[];
   harnessCounts: Record<CraftbookHarnessKind, number>;
@@ -52,6 +55,7 @@ export function buildCraftbookBatchPlan(args: {
   templates: CraftbookTemplateSummary[];
   audits: CraftbookAuditResult[];
   target: number;
+  mode?: CraftbookEvalMode;
   /**
    * Declared task-class tags per craftbook (from each book's `test.json`).
    * When present for a book, they are the harness-selection truth; the
@@ -60,11 +64,14 @@ export function buildCraftbookBatchPlan(args: {
   tagsByCraftbookId?: ReadonlyMap<string, readonly string[]>;
 }): CraftbookBatchPlan {
   const byTemplate = new Map(args.templates.map((template) => [template.id, template]));
-  const runnableNow = args.audits
+  const candidateAudits = args.mode
+    ? args.audits.filter((audit) => audit.evalMode === args.mode)
+    : args.audits.filter((audit) => audit.evalMode !== 'none');
+  const runnableNow = candidateAudits
     .filter((audit) => audit.evalStatus === 'implemented' || audit.evalStatus === 'validated')
     .map((audit) => audit.craftbookId)
     .sort();
-  const items = args.audits
+  const items = candidateAudits
     .map((audit) => {
       const template = byTemplate.get(audit.craftbookId);
       if (!template) return null;
@@ -81,7 +88,13 @@ export function buildCraftbookBatchPlan(args: {
   for (const item of items) {
     for (const kind of item.harness) harnessCounts[kind]++;
   }
-  return { target: args.target, runnableNow, items, harnessCounts };
+  return {
+    target: args.target,
+    ...(args.mode ? { mode: args.mode } : {}),
+    runnableNow,
+    items,
+    harnessCounts,
+  };
 }
 
 function planItem(
@@ -89,6 +102,9 @@ function planItem(
   audit: CraftbookAuditResult,
   declaredTags?: readonly string[],
 ): CraftbookBatchPlanItem {
+  if (audit.evalMode === 'none') {
+    throw new Error(`cannot plan ${audit.craftbookId} without an eval mode`);
+  }
   const text = [
     template.id,
     template.name,
@@ -119,6 +135,7 @@ function planItem(
     name: template.name,
     score: audit.score,
     evalStatus: audit.evalStatus,
+    evalMode: audit.evalMode,
     validationScope: audit.validationScope,
     priority,
     harness,
@@ -224,6 +241,7 @@ function inferSimulators(kinds: CraftbookHarnessKind[], id: string): string[] {
 function reasonFor(kinds: CraftbookHarnessKind[], audit: CraftbookAuditResult): string {
   const parts = [
     `${audit.evalStatus} eval`,
+    `${audit.evalMode} mode`,
     `${audit.validationScope} workflow evidence`,
     `${audit.score}/110 quality`,
   ];

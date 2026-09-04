@@ -1,4 +1,9 @@
-import type { ChatEventEnvelope, ListTimelineResponse, TimelineMessage } from '@bendyline/gezel';
+import type {
+  ChatEventEnvelope,
+  ListTimelineResponse,
+  Question,
+  TimelineMessage,
+} from '@bendyline/gezel';
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -92,6 +97,7 @@ describe('ChatTimelineView — canonical completion reconciliation', () => {
       cache: [],
       at: '',
     } as never);
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] });
   });
 
   it('closes the initial snapshot-to-subscription race with a trailing canonical read', async () => {
@@ -155,5 +161,87 @@ describe('ChatTimelineView — canonical completion reconciliation', () => {
 
     await screen.findByText('The playable space war game is ready.');
     expect(loadTimeline).toHaveBeenCalledTimes(3);
+  });
+
+  it('attaches an unclaimed pending question to the persisted ask tool call', async () => {
+    const pendingQuestion: Question = {
+      id: 'q-first-turn',
+      projectId: 'p1',
+      gezelId: 'g1',
+      sessionId: 's1',
+      prompt: 'Which path should I take?',
+      choices: ['Fix the bug', 'Plan the feature'],
+      createdAt: '2026-08-05T10:12:00.000Z',
+    };
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [pendingQuestion] });
+    const askingMessage = message({
+      role: 'assistant',
+      content: '',
+      at: '2026-08-05T10:12:00.000Z',
+      reasoning: 'I need the user to choose.',
+      toolCalls: [
+        {
+          name: 'ask_user_question',
+          durationMs: 25,
+          success: true,
+          argsSummary: 'question: Which path?',
+        },
+      ],
+    });
+    const loadTimeline = vi.fn(
+      async (): Promise<ListTimelineResponse> =>
+        ({ messages: [userMessage, askingMessage], hasMore: false }) as ListTimelineResponse,
+    );
+
+    renderTimeline(loadTimeline);
+
+    const prompt = await screen.findByText('Which path should I take?');
+    expect(prompt.closest('.pending-question')).not.toBeNull();
+    expect(
+      screen.queryByText('(model produced reasoning but no visible reply — see Thinking above)'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reloads an answered legacy question as a collapsed inline receipt', async () => {
+    const answeredQuestion: Question = {
+      id: 'q-answered',
+      projectId: 'p1',
+      gezelId: 'g1',
+      sessionId: 's1',
+      prompt: 'Which path should I take?',
+      choices: ['Fix the bug', 'Plan the feature'],
+      createdAt: '2026-08-05T10:12:00.000Z',
+      answer: {
+        writeIn: 'Never mind',
+        at: '2026-08-05T10:13:00.000Z',
+      },
+    };
+    vi.mocked(api.listQuestions).mockImplementation(async (opts) =>
+      opts?.projectId ? { questions: [answeredQuestion] } : { questions: [] },
+    );
+    const askingMessage = message({
+      role: 'assistant',
+      content: '',
+      at: '2026-08-05T10:12:00.000Z',
+      toolCalls: [
+        {
+          name: 'ask_user_question',
+          durationMs: 25,
+          success: true,
+          argsSummary: 'question: "\\"quoted\\" value"',
+        },
+      ],
+    });
+    const loadTimeline = vi.fn(
+      async (): Promise<ListTimelineResponse> =>
+        ({ messages: [userMessage, askingMessage], hasMore: false }) as ListTimelineResponse,
+    );
+
+    renderTimeline(loadTimeline);
+
+    const answer = await screen.findByText('Never mind');
+    expect(answer.closest('.pending-question-answered')).not.toBeNull();
+    expect(screen.queryByText(/Last action:/)).not.toBeInTheDocument();
+    expect(api.listQuestions).toHaveBeenCalledWith({ projectId: 'p1' });
   });
 });

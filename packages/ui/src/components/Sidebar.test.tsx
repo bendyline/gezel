@@ -1,5 +1,6 @@
 import type { GezelSummary, Project, RecentTab } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -13,25 +14,54 @@ vi.mock('./GezelIcon.js', () => ({
 vi.mock('./FileTree.js', () => ({
   FileTree: ({
     entries,
+    onSelect,
     onRename,
     onDelete,
+    actionsForEntry,
+    trailingForEntry,
   }: {
-    entries: Array<{ name: string; path: string; isDirectory: boolean }>;
+    entries: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    onSelect?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onRename?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onDelete?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    actionsForEntry?: (entry: {
+      name: string;
+      path: string;
+      isDirectory: boolean;
+    }) => Array<{
+      label: string;
+      onSelect: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    }>;
+    trailingForEntry?: (entry: {
+      name: string;
+      path: string;
+      isDirectory: boolean;
+    }) => React.ReactNode;
   }) => (
     <div data-testid="file-tree">
       {entries.length} docs
-      {entries.map((entry) => (
-        <span key={entry.path}>
-          <button type="button" onClick={() => onRename?.(entry)}>
-            Rename {entry.name}
-          </button>
-          <button type="button" onClick={() => onDelete?.(entry)}>
-            Delete {entry.name}
-          </button>
-        </span>
-      ))}
+      {entries.map((entry) => {
+        const actions = actionsForEntry?.(entry) ?? [];
+        return (
+          <span key={entry.path} data-testid={`sidebar-document-${entry.path}`}>
+            <button type="button" onClick={() => onSelect?.(entry)}>
+              Select {entry.name}
+            </button>
+            <button type="button" onClick={() => onRename?.(entry)}>
+              Rename {entry.name}
+            </button>
+            <button type="button" onClick={() => onDelete?.(entry)}>
+              Delete {entry.name}
+            </button>
+            {actions.map((action) => (
+              <button key={action.label} type="button" onClick={() => action.onSelect(entry)}>
+                {action.label} {entry.name}
+              </button>
+            ))}
+            {trailingForEntry?.(entry)}
+          </span>
+        );
+      })}
     </div>
   ),
 }));
@@ -50,10 +80,35 @@ const GEZELS: GezelSummary[] = [{ id: 'g1', name: 'Maya', role: 'Researcher' } a
 describe('Sidebar', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: window.__GEZEL__?.token ?? 'test-token',
+      platform: 'linux',
+    };
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+  });
+
+  it.each([
+    ['darwin', 'Open Documents folder in Finder'],
+    ['win32', 'Open Documents folder in File Explorer'],
+    ['linux', 'Open Documents folder in file manager'],
+  ])('opens the Documents folder from its %s context menu', async (platform, label) => {
+    const user = userEvent.setup();
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: window.__GEZEL__?.token ?? 'test-token',
+      platform,
+    };
+    vi.mocked(api.revealDocuments).mockResolvedValue({ ok: true, path: '/tmp/documents' });
+
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByTestId('sidebar-group-documents'));
+    await user.click(await screen.findByRole('menuitem', { name: label }));
+
+    expect(api.revealDocuments).toHaveBeenCalledOnce();
   });
 
   it('renders Home, groups, and area links', async () => {
@@ -91,26 +146,113 @@ describe('Sidebar', () => {
     expect(onPreload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'project', id: 'p1' }));
   });
 
-  it('omits document folders that contain no visible files', async () => {
+  it('shows the five most recent documents alphabetically and omits folders', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
       files: [
-        { name: 'empty', path: 'empty', isDirectory: true },
-        { name: 'nested-empty', path: 'nested-empty', isDirectory: true },
-        { name: 'child', path: 'nested-empty/child', isDirectory: true },
-        { name: 'kept', path: 'kept', isDirectory: true },
-        { name: 'notes.md', path: 'kept/notes.md', isDirectory: false },
+        { name: 'folder', path: 'folder', isDirectory: true, mtimeMs: 10_000 },
+        { name: 'zulu.md', path: 'zulu.md', isDirectory: false, mtimeMs: 100 },
+        { name: 'echo.md', path: 'echo.md', isDirectory: false, mtimeMs: 200 },
+        { name: 'delta.md', path: 'delta.md', isDirectory: false, mtimeMs: 300 },
+        { name: 'charlie.md', path: 'charlie.md', isDirectory: false, mtimeMs: 400 },
+        { name: 'bravo.md', path: 'bravo.md', isDirectory: false, mtimeMs: 500 },
+        { name: 'alpha.md', path: 'alpha.md', isDirectory: false, mtimeMs: 600 },
       ],
     } as never);
 
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('2 docs'));
-    expect(screen.queryByRole('button', { name: 'Rename empty' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rename nested-empty' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rename child' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rename kept' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rename notes.md' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('5 docs'));
+    const paths = Array.from(screen.getByTestId('file-tree').querySelectorAll('[data-testid]')).map(
+      (element) => element.getAttribute('data-testid'),
+    );
+    expect(paths).toEqual([
+      'sidebar-document-alpha.md',
+      'sidebar-document-bravo.md',
+      'sidebar-document-charlie.md',
+      'sidebar-document-delta.md',
+      'sidebar-document-echo.md',
+    ]);
+    expect(screen.queryByRole('button', { name: 'Rename folder' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename zulu.md' })).not.toBeInTheDocument();
+  });
+
+  it('imports OS-dropped Markdown and Office files into the shared Documents root', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false, mtimeMs: 100 }],
+    } as never);
+    vi.mocked(api.writeDocument).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.writeDocumentBinary).mockResolvedValue({ ok: true } as never);
+    const created = vi.fn();
+    window.addEventListener('gezel:document-created', created);
+
+    const { container } = render(
+      <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+    await waitFor(() => expect(api.listDocuments).toHaveBeenCalled());
+
+    const markdown = new File(['# Dropped'], 'notes.md', { type: 'text/markdown' });
+    Object.defineProperty(markdown, 'text', { value: vi.fn(async () => '# Dropped') });
+    const docx = new File(['docx bytes'], 'brief.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    const xlsx = new File(['xlsx bytes'], 'budget.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const dataTransfer = {
+      types: ['Files'],
+      files: [markdown, docx, xlsx],
+      dropEffect: 'none',
+    };
+    const target = container.querySelector('[data-group="documents"]');
+    expect(target).not.toBeNull();
+
+    fireEvent.dragEnter(target!, { dataTransfer });
+    expect(screen.getByText('Drop to add to Documents')).toBeInTheDocument();
+    fireEvent.drop(target!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith('notes 2.md', '# Dropped');
+      expect(api.writeDocumentBinary).toHaveBeenCalledWith('brief.docx', docx, docx.type);
+      expect(api.writeDocumentBinary).toHaveBeenCalledWith('budget.xlsx', xlsx, xlsx.type);
+    });
+    expect(await screen.findByText('Added 3 files.')).toBeInTheDocument();
+    expect(created).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: {
+          path: 'budget.xlsx',
+          paths: ['notes 2.md', 'brief.docx', 'budget.xlsx'],
+        },
+      }),
+    );
+
+    window.removeEventListener('gezel:document-created', created);
+  });
+
+  it('keeps pinned documents in the list beyond the five recent slots', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    window.localStorage.setItem(
+      'gezel:documents:quick-list:v1',
+      JSON.stringify({ pinnedPaths: ['zulu.md'], lastUsedAt: {} }),
+    );
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        { name: 'zulu.md', path: 'zulu.md', isDirectory: false, mtimeMs: 100 },
+        { name: 'echo.md', path: 'echo.md', isDirectory: false, mtimeMs: 200 },
+        { name: 'delta.md', path: 'delta.md', isDirectory: false, mtimeMs: 300 },
+        { name: 'charlie.md', path: 'charlie.md', isDirectory: false, mtimeMs: 400 },
+        { name: 'bravo.md', path: 'bravo.md', isDirectory: false, mtimeMs: 500 },
+        { name: 'alpha.md', path: 'alpha.md', isDirectory: false, mtimeMs: 600 },
+      ],
+    } as never);
+
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('6 docs'));
+    expect(screen.getByLabelText('Pinned')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Unpin from Documents list zulu.md' }),
+    ).toBeInTheDocument();
   });
 
   it('shows a per-row actions menu for each gezel', async () => {
@@ -591,7 +733,11 @@ describe('Sidebar', () => {
   it('renames a document from the sidebar row menu and broadcasts the new path', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
-      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+      files: [
+        { name: 'notes.md', path: 'notes.md', isDirectory: false },
+        { name: 'notes_files', path: 'notes_files', isDirectory: true },
+        { name: 'hero.png', path: 'notes_files/hero.png', isDirectory: false },
+      ],
     } as never);
     vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
     const renamed = vi.fn();
@@ -606,6 +752,10 @@ describe('Sidebar', () => {
     await waitFor(() => {
       expect(api.renameDocument).toHaveBeenCalledWith('notes.md', 'meeting-notes.md');
     });
+    expect(vi.mocked(api.renameDocument).mock.calls.slice(0, 2)).toEqual([
+      ['notes_files', 'meeting-notes_files'],
+      ['notes.md', 'meeting-notes.md'],
+    ]);
     expect(renamed).toHaveBeenCalledWith(
       expect.objectContaining({
         detail: expect.objectContaining({ fromPath: 'notes.md', toPath: 'meeting-notes.md' }),
@@ -617,7 +767,11 @@ describe('Sidebar', () => {
   it('confirms before deleting a document from the sidebar row menu', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({
-      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+      files: [
+        { name: 'notes.md', path: 'notes.md', isDirectory: false },
+        { name: 'notes_files', path: 'notes_files', isDirectory: true },
+        { name: 'hero.png', path: 'notes_files/hero.png', isDirectory: false },
+      ],
     } as never);
     vi.mocked(api.deleteDocument).mockResolvedValue({ ok: true } as never);
     const deleted = vi.fn();
@@ -629,7 +783,11 @@ describe('Sidebar', () => {
     expect(api.deleteDocument).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledWith('notes.md'));
+    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.deleteDocument).mock.calls.slice(0, 2)).toEqual([
+      ['notes.md'],
+      ['notes_files'],
+    ]);
     expect(deleted).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.objectContaining({ path: 'notes.md' }) }),
     );

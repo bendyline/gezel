@@ -38,7 +38,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { KeyedLock, createLogger } from '@bendyline/gezel';
+import { KeyedLock, createLogger, resolveDistributionProfile } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('uv');
@@ -302,6 +302,22 @@ export class UvRuntime {
   }
 
   private async resolveInstaller(minPy: string): Promise<ProbedInstaller> {
+    // ── 0. Builds that may not provision Python at all ────────────
+    // Every rung below ends in creating a venv and installing wheels, which
+    // is downloading executable code. A store build must refuse here rather
+    // than probe successfully and fail later: finding a system interpreter it
+    // is then forbidden to install into produces a confusing failure deep in
+    // a model load instead of a sentence the user can act on.
+    //
+    // The frozen-runtime rung a packaged Python will resolve through belongs
+    // directly above this check, and turns the refusal into a resolution.
+    const distribution = resolveDistributionProfile();
+    if (distribution.pythonProvisioning === 'frozen-only') {
+      const err = new Error(distribution.refusalReason('python'));
+      (err as Error & { isActionable: boolean }).isActionable = true;
+      throw err;
+    }
+
     const bundledUvBin = this.resolveBundledUvBin();
     // A runtime download can stamp GEZEL_UV_BIN after this manager was
     // constructed (the CLI first-run bootstrap does exactly that). Prefer the

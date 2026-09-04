@@ -17,13 +17,14 @@ import {
   formatCraftbookDocErrors,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
+import { applyDefaultCraftbookStepPolicies } from '../src/craftbook-step-policy.js';
 import { CAREFUL_MODE, FREEZE_SCOPE, GUARDRAIL_RELEASED_AT } from '../src/guardrail-books.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 
 const dataRoot = join(requireGildeCheckout().dataDir, 'craftbook-templates');
 
 async function writeBook(doc: CraftbookDoc): Promise<void> {
-  const parsed = CraftbookDocSchema.parse(doc);
+  const parsed = applyDefaultCraftbookStepPolicies(CraftbookDocSchema.parse(doc));
   const runtime = craftbookFromDoc(parsed, { now: GUARDRAIL_RELEASED_AT });
   if (!runtime.ok) {
     throw new Error(

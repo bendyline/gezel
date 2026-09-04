@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import {
   isReservedDiffpackArtifactPath,
+  isReservedPromptDraftArtifactPath,
   isReservedShadowArtifactPath,
   isReservedTabularArtifactPath,
 } from '@bendyline/gezel';
@@ -121,6 +122,25 @@ export class TabularPathWriteDeniedError extends Error {
       'artifacts/tabular/ holds tables derived from workspace spreadsheets and data files, rebuilt automatically whenever the source file changes. Anything written there would be overwritten. Write your file elsewhere in artifacts.',
     );
     this.name = 'TabularPathWriteDeniedError';
+  }
+}
+
+/**
+ * `artifacts/prompts/` holds the messages the user is still writing. Reading
+ * one is fine and often useful; editing, moving, or deleting it is not
+ * something a gezel gets to do to a person's unsent words.
+ *
+ * Gezel-conditional, unlike the shadow and tabular guards: the composer
+ * itself writes `message_files/` through the ordinary artifact routes, so an
+ * unconditional denial would block the user's own uploads.
+ */
+export class PromptDraftPathWriteDeniedError extends Error {
+  readonly code = 'prompt-drafts-readonly' as const;
+  constructor() {
+    super(
+      "artifacts/prompts/ holds the user's chat prompt drafts. You can read them, but only the person writing one may change it. Write your file elsewhere in artifacts.",
+    );
+    this.name = 'PromptDraftPathWriteDeniedError';
   }
 }
 
@@ -422,6 +442,9 @@ export class ProjectArtifactsStore {
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
+    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
+      throw new PromptDraftPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -433,7 +456,7 @@ export class ProjectArtifactsStore {
     id: string,
     filePath: string,
     data: Buffer,
-    options?: { createOnly?: boolean },
+    options?: { createOnly?: boolean; initiatedByGezel?: boolean },
   ): Promise<string> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
@@ -442,6 +465,9 @@ export class ProjectArtifactsStore {
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
+    if (options?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
+      throw new PromptDraftPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -450,17 +476,28 @@ export class ProjectArtifactsStore {
     return cleaned;
   }
 
-  async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
+  async deleteProjectArtifact(
+    id: string,
+    filePath: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<void> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) return;
+    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
+      throw new PromptDraftPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
   }
 
-  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
+  async createProjectArtifactFolder(
+    id: string,
+    folderPath: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<string> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(folderPath);
     if (!cleaned) throw new Error('empty artifact path');
@@ -468,6 +505,9 @@ export class ProjectArtifactsStore {
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
+    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
+      throw new PromptDraftPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(full, { recursive: true });
@@ -484,6 +524,7 @@ export class ProjectArtifactsStore {
     id: string,
     fromPath: string,
     toPath: string,
+    opts?: { initiatedByGezel?: boolean },
   ): Promise<{ fromPath: string; toPath: string }> {
     const base = this.projectArtifactsDir(id);
     const from = normalizeArtifactPath(fromPath);
@@ -495,6 +536,12 @@ export class ProjectArtifactsStore {
     }
     if (isReservedTabularArtifactPath(from) || isReservedTabularArtifactPath(to)) {
       throw new TabularPathWriteDeniedError();
+    }
+    if (
+      opts?.initiatedByGezel &&
+      (isReservedPromptDraftArtifactPath(from) || isReservedPromptDraftArtifactPath(to))
+    ) {
+      throw new PromptDraftPathWriteDeniedError();
     }
     const fromFull = safeJoin(base, from);
     const toFull = safeJoin(base, to);

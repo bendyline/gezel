@@ -192,6 +192,8 @@ export function ModelActionsMenu({
         state={exporter.progress}
         canceling={exporter.canceling}
         onCancel={exporter.cancel}
+        onSkipVerification={exporter.skipVerification}
+        skippingVerification={exporter.skippingVerification}
         onDismiss={exporter.dismissProgress}
       />
     </>

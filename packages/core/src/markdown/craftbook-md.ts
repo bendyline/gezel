@@ -96,6 +96,8 @@ const STEP_FENCE_KEYS = [
   'suggestedGezelId',
   'suggestedRole',
   'capabilityFloor',
+  'retrieval',
+  'toolPolicy',
   'assignee',
   'deliverable',
   'onEnter',

@@ -16,6 +16,7 @@ import {
   parseJsonRecords,
   parseJsonValue,
   taskReferencesCraftbook,
+  unfinishedTaskFailure,
   ungatedBuildStepIds,
 } from './helpers.ts';
 import { CRAFTBOOK_AUTHORING_SCENARIOS } from './index.ts';
@@ -447,5 +448,32 @@ describe('countTasksForCraftbook (craftbook-author-params)', () => {
     const tasks = [task('regional-rollup'), task('other', ['regional-rollup']), task('unrelated')];
     expect(countTasksForCraftbook(tasks, 'regional-rollup')).toBe(2);
     expect(countTasksForCraftbook(tasks, 'absent')).toBe(0);
+  });
+});
+
+describe('unfinishedTaskFailure', () => {
+  /**
+   * The 2026-09-02 sweep sent craftbook-author-gate-script 24 nudges reading
+   * "task X has status active — drive it to completion". The model minted
+   * task /2 and /3 from the same craftbook rather than advancing /1, so the
+   * score froze while the failing detail churned. The remedy has to be in
+   * the sentence.
+   */
+  it('forbids re-invocation, not just inaction', () => {
+    const text = unfinishedTaskFailure({
+      ref: 'inventory-health-check/1',
+      status: 'active',
+      source: 'from craftbook "inventory-health-report"',
+    });
+    expect(text).toContain('inventory-health-check/1');
+    expect(text).toContain('from craftbook "inventory-health-report"');
+    expect(text).toContain('advance THIS task');
+    expect(text).toMatch(/do NOT invoke the recipe again or create a second task/i);
+  });
+
+  it('omits the parenthetical when no provenance is given', () => {
+    const text = unfinishedTaskFailure({ ref: 'quarterly-brief/1', status: 'paused' });
+    expect(text).toContain('task quarterly-brief/1 has status "paused"');
+    expect(text).not.toContain('(');
   });
 });

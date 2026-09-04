@@ -151,6 +151,23 @@ export interface GgufSummary {
    * cache-owning layers; ignoring this field overprices its full KV cache.
    */
   sharedKvLayers?: number;
+  /**
+   * `<arch>.num_loops` — a LOOPED transformer runs its whole block stack
+   * this many times over the same shared weights, and **each pass keeps its
+   * own KV cache**. llama.cpp unrolls the loops into `n_layer`, so a model
+   * declaring `block_count: 22, num_loops: 2` reports `n_layer = 44` and
+   * allocates 44 layers' worth of cache.
+   *
+   * The mirror image of {@link sharedKvLayers}: that one SUBTRACTS layers
+   * that own no cache, this one MULTIPLIES layers that own one each. Without
+   * it every KV estimate is short by exactly this factor — Nanbeige4.2-3B
+   * (`num_loops: 2`) was priced at 90112 B/token against a measured 180224
+   * (`llama_kv_cache: size = 1408.00 MiB (8192 cells, 44 layers)`), so a 256K
+   * window was admitted as 23.6 GB and then claimed 47.2 GB.
+   *
+   * Absent / `1` on ordinary models.
+   */
+  loopCount?: number;
   /** `<arch>.attention.key_length_swa` — per-head K dim on SWA layers when it differs (Gemma 4: 256 vs 512). */
   keyLengthSwa?: number;
   /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
@@ -631,6 +648,8 @@ export function readGgufSummary(
         if (pattern) summary.slidingWindowPattern = pattern;
       } else if (key.endsWith('.attention.shared_kv_layers')) {
         summary.sharedKvLayers = readUintScalar(r, type);
+      } else if (key.endsWith('.num_loops')) {
+        summary.loopCount = readUintScalar(r, type);
       } else if (key.endsWith('.attention.key_length_swa')) {
         summary.keyLengthSwa = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length_swa')) {

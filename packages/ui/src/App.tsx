@@ -8,7 +8,6 @@ import type {
   SecurityPolicy,
 } from '@bendyline/gezel';
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import logotypeUrl from './assets/gezellogotype.png';
@@ -37,6 +36,7 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { DropdownMenu } from './primitives/index.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -754,8 +754,11 @@ function FullApp() {
             <EngineStatusPill />
             <ClaudeCliPoolPill />
             <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-            <NightShiftMenu state={nightShift} onChange={setNightShift} />
-            <EngagementMenu mode={engagementMode} />
+            <TaskSpeedMenu
+              mode={engagementMode}
+              nightShift={nightShift}
+              onNightShiftChange={setNightShift}
+            />
             {outputPaneMaximized && (
               <button
                 type="button"
@@ -869,17 +872,7 @@ function OutputPaneRestoreIcon() {
   );
 }
 
-/**
- * Header control for the install-wide AI engagement mode. The trigger
- * reflects the selected mode with the same glyph used in the dropdown.
- * The dropdown lets the user pick any of the four modes directly without
- * the round-trip through Settings.
- *
- * Persists by calling `api.updateConfig({ aiEngagementMode })` and
- * dispatches the same `gezel:config-updated` event SettingsView fires —
- * `App` listens for it and reflects the change locally without a
- * second roundtrip.
- */
+/** Task-speed choices shared by the titlebar menu and its trigger glyph. */
 type EngagementOption = {
   mode: EngagementMode;
   label: string;
@@ -944,96 +937,57 @@ function EngagementModeIcon({ mode }: { mode: EngagementMode }) {
   );
 }
 
-function EngagementMenu({ mode }: { mode: EngagementMode }) {
-  const current = ENGAGEMENT_OPTIONS.find((o) => o.mode === mode) ?? ENGAGEMENT_OPTIONS[0]!;
-  const title = `AI engagement: ${current.label}. Click to change.`;
+type NightShiftState = { active: boolean; source: 'scheduled' | 'manual' | null };
 
-  // Mirrors NavMenu's broadcast: opening this dropdown should dismiss
-  // any other header popover so they don't stack.
-  const handleOpenChange = (open: boolean) => {
-    if (open) window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
-  };
-
-  const handleSelect = (next: EngagementMode) => {
-    if (next === mode) return;
-    void api
-      .updateConfig({ aiEngagementMode: next })
-      .then((res) => {
-        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      })
-      .catch(() => {
-        /* swallow — the badge stays on the previous mode and the user can retry */
-      });
-  };
-
+function NightShiftGlyph({ active }: { active: boolean }) {
   return (
-    <DropdownMenu.Root onOpenChange={handleOpenChange}>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          className={`app-engagement-trigger app-engagement-trigger-${mode}`}
-          aria-label={title}
-          title={title}
-        >
-          <EngagementModeIcon mode={mode} />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align="end">
-          {ENGAGEMENT_OPTIONS.map((opt) => (
-            <DropdownMenu.Item
-              key={opt.mode}
-              className={`app-nav-menu-item${opt.mode === mode ? ' active' : ''}`}
-              onSelect={() => handleSelect(opt.mode)}
-            >
-              <span className="app-engagement-menu-row">
-                <span className="app-engagement-menu-icon">
-                  <EngagementModeIcon mode={opt.mode} />
-                </span>
-                <span className="app-engagement-menu-label">{opt.label}</span>
-                <span className="app-engagement-menu-check" aria-hidden="true">
-                  {opt.mode === mode ? (
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : null}
-                </span>
-              </span>
-              <span className="app-engagement-menu-hint">{opt.hint}</span>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <svg
+      className="app-nightshift-glyph"
+      width="24"
+      height="18"
+      viewBox="0 0 32 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      {active && (
+        <g className="app-nightshift-cloud app-nightshift-cloud-far">
+          <g transform="translate(0 -4) scale(.74)">
+            <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+          </g>
+        </g>
+      )}
+      <path
+        className={`app-nightshift-moon${active ? ' is-active' : ''}`}
+        transform="translate(4 0)"
+        d={NIGHT_SHIFT_MOON_PATH}
+      />
+      {active && (
+        <g className="app-nightshift-cloud app-nightshift-cloud-near">
+          <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+        </g>
+      )}
+    </svg>
   );
 }
 
-type NightShiftState = { active: boolean; source: 'scheduled' | 'manual' | null };
-
 /**
- * Header control for Night Shift. Passing clouds + a quiet moon glow show
- * when a shift is active; the dropdown lets the user start a shift on demand
- * (e.g. stepping out) and end a manual one. Scheduled shifts can't be
- * force-ended here — they latch off on their own once their work drains.
+ * The titlebar's task-speed control. Engagement mode and Night Shift are
+ * independent settings presented in one menu: the mode remains latched while
+ * the shift runs, and the animated moon temporarily becomes the trigger icon.
  */
-function NightShiftMenu({
-  state,
-  onChange,
+function TaskSpeedMenu({
+  mode,
+  nightShift: state,
+  onNightShiftChange: onChange,
 }: {
-  state: NightShiftState;
-  onChange: (s: NightShiftState) => void;
+  mode: EngagementMode;
+  nightShift: NightShiftState;
+  onNightShiftChange: (s: NightShiftState) => void;
 }) {
-  const title = state.active ? `Night Shift: on (${state.source ?? 'active'})` : 'Night Shift: off';
+  const current = ENGAGEMENT_OPTIONS.find((o) => o.mode === mode) ?? ENGAGEMENT_OPTIONS[0]!;
+  const title = state.active
+    ? `Task speed: Night Shift running (${state.source ?? 'active'}); ${current.label} mode. Click to change.`
+    : `Task speed: ${current.label}. Click to change.`;
 
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
@@ -1044,6 +998,30 @@ function NightShiftMenu({
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
+  };
+
+  const handleModeSelect = (next: EngagementMode) => {
+    if (next !== mode) {
+      void api
+        .updateConfig({ aiEngagementMode: next })
+        .then((res) => {
+          window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+        })
+        .catch(() => {
+          /* the trigger stays on the previous mode and the user can retry */
+        });
+    }
+
+    // Reactive and Off cannot leave unattended work running. Keep mode and
+    // shift orthogonal for every other transition, including Tasks/Proactive.
+    if (state.active && (next === 'reactive' || next === 'off')) {
+      void api
+        .setNightShiftManual('stop')
+        .then(onChange)
+        .catch(() => {
+          /* the SSE event remains the source of truth */
+        });
+    }
   };
 
   // "Done last night" — fetched on open regardless of active state, so the
@@ -1150,40 +1128,56 @@ function NightShiftMenu({
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          className={`app-nightshift-trigger${state.active ? ' app-nightshift-trigger-active' : ''}`}
+          className={`app-engagement-trigger app-engagement-trigger-${mode}${state.active ? ' app-engagement-trigger-nightshift' : ''}`}
           aria-label={title}
           title={title}
         >
-          <svg
-            className="app-nightshift-glyph"
-            width="24"
-            height="18"
-            viewBox="0 0 32 24"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            {state.active && (
-              <g className="app-nightshift-cloud app-nightshift-cloud-far">
-                <g transform="translate(0 -4) scale(.74)">
-                  <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
-                </g>
-              </g>
-            )}
-            <path
-              className={`app-nightshift-moon${state.active ? ' is-active' : ''}`}
-              transform="translate(4 0)"
-              d={NIGHT_SHIFT_MOON_PATH}
-            />
-            {state.active && (
-              <g className="app-nightshift-cloud app-nightshift-cloud-near">
-                <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
-              </g>
-            )}
-          </svg>
+          {state.active ? <NightShiftGlyph active /> : <EngagementModeIcon mode={mode} />}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align="end">
+        <DropdownMenu.Content
+          className="app-nav-menu app-task-speed-menu"
+          sideOffset={4}
+          align="end"
+        >
+          {ENGAGEMENT_OPTIONS.map((opt) => (
+            <DropdownMenu.Item
+              key={opt.mode}
+              className={`app-nav-menu-item${opt.mode === mode ? ' active' : ''}`}
+              onSelect={() => handleModeSelect(opt.mode)}
+            >
+              <span className="app-engagement-menu-row">
+                <span className="app-engagement-menu-icon">
+                  <EngagementModeIcon mode={opt.mode} />
+                </span>
+                <span className="app-engagement-menu-label">{opt.label}</span>
+                <span className="app-engagement-menu-check" aria-hidden="true">
+                  {opt.mode === mode ? (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : null}
+                </span>
+              </span>
+              <span className="app-engagement-menu-hint">{opt.hint}</span>
+            </DropdownMenu.Item>
+          ))}
+          <DropdownMenu.Separator className="app-task-speed-separator" />
+          <DropdownMenu.Label className="app-nightshift-section-label">
+            <NightShiftGlyph active={false} />
+            <span>Night Shift</span>
+          </DropdownMenu.Label>
           <div className="app-nightshift-status">
             {state.active
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`

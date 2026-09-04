@@ -1,12 +1,19 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BGE_SMALL_EN_V15_1, MULTILINGUAL_E5_SMALL_1 } from '@bendyline/gezel-knowledge';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   PipelineLoadError,
+  daemonEmbedderPin,
+  daemonEmbedderVerified,
   embedModelId,
   embedProfileId,
   isRetryablePipelineLoadFailure,
   queryInstruction,
+  resetDaemonEmbedderVerification,
 } from './embed-core.js';
-import { embed, embeddingsDisabledReason } from './embeddings.js';
+import { embed, embeddingsDisabledReason, sharesDaemonEmbedder } from './embeddings.js';
 
 const prior = process.env.GEZEL_EMBED_MODEL;
 const priorNoInstr = process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;
@@ -115,5 +122,84 @@ describe('embedding model-load failure classification', () => {
     expect(isRetryablePipelineLoadFailure(new Error('ERR_DLOPEN_FAILED'))).toBe(false);
     expect(isRetryablePipelineLoadFailure(new Error('Cannot find module sharp'))).toBe(false);
     expect(new PipelineLoadError('invalid model').retryable).toBe(false);
+  });
+});
+
+describe('daemon embedder pin', () => {
+  const priorCacheDir = process.env.GEZEL_HF_CACHE_DIR;
+  afterEach(() => {
+    resetDaemonEmbedderVerification();
+    if (priorCacheDir === undefined) delete process.env.GEZEL_HF_CACHE_DIR;
+    else process.env.GEZEL_HF_CACHE_DIR = priorCacheDir;
+  });
+
+  it('is the registered profile of the configured model, or nothing', () => {
+    delete process.env.GEZEL_EMBED_MODEL;
+    expect(daemonEmbedderPin()?.id).toBe('bge-small-en-v1.5@1');
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/multilingual-e5-small';
+    expect(daemonEmbedderPin()?.id).toBe('multilingual-e5-small@1');
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/gte-small';
+    expect(daemonEmbedderPin()).toBeNull();
+  });
+
+  it('shares the daemon embedder only with a profile in exactly its vector space', () => {
+    delete process.env.GEZEL_EMBED_MODEL;
+    delete process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;
+    expect(sharesDaemonEmbedder(BGE_SMALL_EN_V15_1)).toBe(true);
+    expect(sharesDaemonEmbedder(MULTILINGUAL_E5_SMALL_1)).toBe(false);
+    // A pin naming other bytes, or another graph, is another space whatever the id says.
+    expect(
+      sharesDaemonEmbedder({
+        ...BGE_SMALL_EN_V15_1,
+        model: { ...BGE_SMALL_EN_V15_1.model, onnxDigest: `sha256:${'0'.repeat(64)}` },
+      }),
+    ).toBe(false);
+    expect(
+      sharesDaemonEmbedder({
+        ...BGE_SMALL_EN_V15_1,
+        model: {
+          repo: BGE_SMALL_EN_V15_1.model.repo,
+          revision: BGE_SMALL_EN_V15_1.model.revision,
+          onnxFile: 'onnx/model_fp16.onnx',
+        },
+      }),
+    ).toBe(false);
+    // An older archive that pins nothing still shares: it makes no contrary claim.
+    expect(
+      sharesDaemonEmbedder({
+        ...BGE_SMALL_EN_V15_1,
+        model: { repo: BGE_SMALL_EN_V15_1.model.repo, revision: BGE_SMALL_EN_V15_1.model.revision },
+        tokenizer: { kind: BGE_SMALL_EN_V15_1.tokenizer.kind },
+      }),
+    ).toBe(true);
+    // The instruction kill-switch changes the daemon's query vectors.
+    process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION = '1';
+    expect(sharesDaemonEmbedder(BGE_SMALL_EN_V15_1)).toBe(false);
+    delete process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/gte-small';
+    expect(sharesDaemonEmbedder(BGE_SMALL_EN_V15_1)).toBe(false);
+  });
+
+  it('refuses to vouch for daemon model files that are absent or hash differently', async () => {
+    delete process.env.GEZEL_EMBED_MODEL;
+    const cacheDir = await mkdtemp(join(tmpdir(), 'gezel-daemon-pin-'));
+    try {
+      process.env.GEZEL_HF_CACHE_DIR = cacheDir;
+      expect(await daemonEmbedderVerified()).toBe(false);
+
+      const repoDir = join(cacheDir, 'Xenova', 'bge-small-en-v1.5');
+      await mkdir(join(repoDir, 'onnx'), { recursive: true });
+      await writeFile(join(repoDir, 'onnx', 'model.onnx'), 'not the pinned graph');
+      await writeFile(join(repoDir, 'tokenizer.json'), '{}');
+      resetDaemonEmbedderVerification();
+      expect(await daemonEmbedderVerified()).toBe(false);
+
+      // A custom model has no pin, so there is nothing to vouch for.
+      process.env.GEZEL_EMBED_MODEL = 'Xenova/gte-small';
+      resetDaemonEmbedderVerification();
+      expect(await daemonEmbedderVerified()).toBe(false);
+    } finally {
+      await rm(cacheDir, { recursive: true, force: true });
+    }
   });
 });

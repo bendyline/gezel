@@ -4,6 +4,7 @@ import {
   TOOL_ERROR_SUMMARY_MAX,
   isKnownTool,
   toolActivityPhrase,
+  toolArgsDisplaySummary,
   toolDisplayName,
   toolErrorSummary,
 } from './tool-display.js';
@@ -54,6 +55,22 @@ describe('toolDisplayName', () => {
       ([, label]) => label[0] !== label[0]!.toUpperCase(),
     );
     expect(lowercase).toEqual([]);
+  });
+});
+
+describe('toolArgsDisplaySummary', () => {
+  it('removes JSON value wrappers without exposing escaped inner quotes', () => {
+    expect(
+      toolArgsDisplaySummary(
+        'question: "\\"dsaav\\" — What now?", prompt: "What should I work on?", choices: [4 items]',
+      ),
+    ).toBe('question: "dsaav" — What now?, prompt: What should I work on?, choices: [4 items]');
+  });
+
+  it('leaves malformed quoted fragments unchanged', () => {
+    expect(toolArgsDisplaySummary('question: "unfinished \\x value"')).toBe(
+      'question: "unfinished \\x value"',
+    );
   });
 });
 

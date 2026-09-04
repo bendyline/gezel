@@ -237,11 +237,34 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   if (!project) return { done: false };
   const report = await readWorkspace(ctx.client, project.id, REPORT);
   if (!report) {
+    // Record the absence rather than returning silently. Without this the
+    // scenario emits NO sniff for the whole trial: no `[scenario]` line, no
+    // facts.json progression, and `recoveryFilePathForSniff(null)` is null
+    // so the re-engage nudge cannot even name the file it wants. A 2026-08-31
+    // trial ground for 56 minutes and 138 tool calls and left nothing to
+    // triage from. `deliverableMissing` keeps every retry-loop path stood
+    // down, so this is instrumentation and not a new way to fail.
+    ctx.recordSniff?.({
+      key: 'large-pr-review',
+      score: 0,
+      bytes: 0,
+      repairFilePath: REPORT,
+      deliverableMissing: true,
+      failReason: `${REPORT} does not exist yet`,
+    });
     await postMissingDeliverableFeedback(ctx, REPORT, { projectId: project.id });
     return { done: false };
   }
   const coverageText = await readWorkspace(ctx.client, project.id, COVERAGE);
   if (!coverageText) {
+    ctx.recordSniff?.({
+      key: 'large-pr-review',
+      score: 0,
+      bytes: report.length,
+      repairFilePath: COVERAGE,
+      deliverableMissing: true,
+      failReason: `${COVERAGE} does not exist yet`,
+    });
     await postMissingDeliverableFeedback(ctx, COVERAGE, { projectId: project.id });
     return { done: false };
   }
@@ -309,13 +332,25 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       : []),
     ...(!sourcesUnchanged ? ['restore all seeded source files byte-for-byte'] : []),
   ];
+  const score = signals.length + (sourcesUnchanged ? 1 : 0);
+  ctx.recordSniff?.({
+    key: 'large-pr-review',
+    score,
+    bytes: report.length,
+    repairFilePath: REPORT,
+    ...(missingRequiredSignals[0] === undefined ? {} : { failReason: missingRequiredSignals[0] }),
+  });
+  ctx.logChanged(
+    'large-pr-review',
+    `[scenario] large-pr-review bytes=${report.length} score=${score}/6 coverage=${reviewedSet.size}/${TOTAL_FILES} signals=${signals.join(',') || 'none'}`,
+  );
   await postSniffFeedback(
     ctx,
     REPORT,
     {
       ok: false,
       signals,
-      score: signals.length + (sourcesUnchanged ? 1 : 0),
+      score,
       scoreMax: 6,
       failReason: missingRequiredSignals[0],
       missingRequiredSignals,
@@ -340,7 +375,7 @@ The final report must include "Coverage: 120/120 changed files", a findings tabl
   // Bounded for the `developer` suite. Until that suite landed this
   // scenario carried no ceiling at all and inherited the runner's 8-hour
   // default, so a wedged trial could hold the device for a working day.
-  timeoutMs: 40 * 60_000,
+  timeoutMs: 60 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   skipInitialPrompt: true,
   setup,

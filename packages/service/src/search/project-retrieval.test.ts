@@ -39,7 +39,7 @@ function knowledgeHit(n: number, relevance = 0.8): UnifiedSearchResult {
     catalogId: 'shop-notes',
     catalogVersion: '1.0.0',
     documentId: 'dovetails',
-    uri: `knowledge://shop-notes/dovetails#chunk=${'a'.repeat(31)}${n}`,
+    uri: `knowledge://gezel-tests/shop-notes/dovetails#chunk=${'a'.repeat(31)}${n}`,
     ...scoreResult('knowledge', relevance),
   };
 }
@@ -93,7 +93,7 @@ describe('knowledge injection ceilings', () => {
     expect(knowledge.length).toBeLessThanOrEqual(2);
     expect(knowledge.length).toBeGreaterThan(0);
     for (const hit of knowledge) {
-      expect(hit.uri).toMatch(/^knowledge:\/\/shop-notes\//);
+      expect(hit.uri).toMatch(/^knowledge:\/\/gezel-tests\/shop-notes\//);
       expect(result?.prompt).toContain(`[knowledge] ${hit.uri}`);
       expect(result?.prompt).toContain('shop-notes@1.0.0');
     }
@@ -115,7 +115,7 @@ describe('knowledge injection ceilings', () => {
     const knowledge = result?.hits.filter((h) => h.source === 'knowledge') ?? [];
     expect(knowledge.length).toBe(1);
     expect(knowledge[0]?.excerpt).toBe('');
-    expect(result?.prompt).toContain('[knowledge] knowledge://shop-notes/');
+    expect(result?.prompt).toContain('[knowledge] knowledge://gezel-tests/shop-notes/');
     expect(result?.prompt).not.toContain('tails and pins interlock');
   });
 

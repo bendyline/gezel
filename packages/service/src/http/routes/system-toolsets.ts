@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
 import { resetCopilotAvailabilityCache } from '../../providers/copilot-availability.js';
+import { SystemToolsetInstallUnavailableError } from '../../system-toolsets/install-registry.js';
 import { SYSTEM_TOOLSETS, isPlaceholder } from '../../system-toolsets/manifest.js';
 import type { ServiceContext } from '../context.js';
 
@@ -72,7 +73,18 @@ export function systemToolsetRoutes(ctx: ServiceContext): Hono {
       );
     }
 
-    const { toolsetId: key } = ctx.systemToolsetInstalls.ensure(entry);
+    let key: string;
+    try {
+      key = ctx.systemToolsetInstalls.ensure(entry).toolsetId;
+    } catch (err) {
+      // Answered before the stream opens: a store build's refusal is a
+      // property of the build, so the client needs a status code it can act
+      // on rather than an SSE stream that immediately errors.
+      if (err instanceof SystemToolsetInstallUnavailableError) {
+        return c.json({ error: 'unavailable_in_build', reason: err.message }, 403);
+      }
+      throw err;
+    }
     return streamSSE(c, async (stream) => {
       await subscribeInstallSse(ctx, key, stream);
     });

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { isProcessAlive, readRuntime } from '@bendyline/gezel-client/node';
 import { type HostingPin, readHostingPin } from './home-signals.js';
 import { type MachineServiceState, queryMachineServiceState } from './service-registration.js';
+import { type StoreRendezvous, findStoreRendezvous } from './store-rendezvous.js';
 import { readSystemServiceRuntime, systemServiceHome } from './system-service.js';
 import type { SystemServiceRuntime } from './system-service.js';
 
@@ -35,6 +36,14 @@ export type Mode =
        */
       hostingPin: HostingPin;
     }
+  | {
+      kind: 'store-connect';
+      baseUrl: string;
+      token: string;
+      cert: string | null;
+      /** Where the rendezvous was found, for the notice shown if it is declined. */
+      source: StoreRendezvous['source'];
+    }
   | { kind: 'local-adopt'; baseUrl: string; token: string; cert: string | null; pid: number }
   | { kind: 'local-spawn-packaged' }
   | { kind: 'local-spawn-dev' }
@@ -53,6 +62,15 @@ export interface ResolveModeOptions {
   queryMachineService?: () => Promise<MachineServiceState>;
   /** Test seam for runtime-file discovery. */
   readSystemRuntime?: (home: string) => Promise<SystemServiceRuntime | null>;
+  /**
+   * True in an App Store / Microsoft Store build. Such a build may CONNECT to
+   * a daemon a direct-download install is running, but must never manage one:
+   * it did not spawn it, cannot signal it under the macOS sandbox, and the
+   * other install's lifecycle is not its to schedule.
+   */
+  storeProfile?: boolean;
+  /** Test seam for rendezvous discovery. */
+  findRendezvous?: () => Promise<StoreRendezvous | null>;
 }
 
 /**
@@ -78,6 +96,35 @@ export async function resolveMode(opts: ResolveModeOptions): Promise<Mode> {
     // Remote daemons are user-managed — they bring their own TLS chain
     // (or none). We never ship a cert pin for a URL we didn't generate.
     return { kind: 'remote', ...remote, cert: null };
+  }
+
+  // Store ladder. Deliberately placed BEFORE system-service and local-adopt
+  // rather than woven into them, because every branch below this point either
+  // waits on, stops, or spawns a daemon — all things a store build must not do
+  // to an install it does not own. `local-adopt` in particular SIGTERMs a
+  // version-mismatched daemon and respawns it, which against a direct-download
+  // install would be one product killing another.
+  //
+  // An explicitly configured remote still wins, because that is the user
+  // naming a service by hand rather than us discovering one.
+  if (opts.storeProfile) {
+    const rendezvous = await (opts.findRendezvous ?? findStoreRendezvous)();
+    if (rendezvous) {
+      logger?.info?.(
+        `[supervisor] mode=store-connect url=${rendezvous.baseUrl} via=${rendezvous.source}`,
+      );
+      return {
+        kind: 'store-connect',
+        baseUrl: rendezvous.baseUrl,
+        token: rendezvous.token,
+        cert: rendezvous.cert,
+        source: rendezvous.source,
+      };
+    }
+    // No direct install on this machine — the ordinary case. Run our own
+    // service, silently: there is nothing degraded to report.
+    logger?.info?.('[supervisor] mode=embedded (store build, no local service to adopt)');
+    return { kind: 'embedded' };
   }
 
   // Branch 1.5: system engine discovery (plus compatibility with older

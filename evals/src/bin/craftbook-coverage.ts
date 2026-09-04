@@ -27,6 +27,10 @@ async function main(): Promise<void> {
     console.log(`  eval specs:       ${summary.evalSpecs}`);
     console.log(`  implemented:      ${summary.implementedSpecs}`);
     console.log(`  validated:        ${summary.validatedSpecs}`);
+    console.log('  eval mode:');
+    console.log(`    workflow:       ${summary.workflowSpecs}`);
+    console.log(`    artifact-task:  ${summary.artifactTaskSpecs}`);
+    console.log('  validated proof:');
     console.log(`    workflow:       ${summary.workflowValidatedSpecs}`);
     console.log(`    artifact-only:  ${summary.artifactOnlyValidatedSpecs}`);
     console.log(`  avg quality:      ${summary.averageQualityScore}/110`);
@@ -49,7 +53,7 @@ async function main(): Promise<void> {
     for (const audit of prioritized) {
       const lead = audit.issues.find((issue) => issue.severity !== 'info');
       console.log(
-        `  ${audit.craftbookId.padEnd(28)} ${String(audit.score).padStart(3)}/110 ${audit.band.padEnd(10)} eval=${audit.evalStatus}/${audit.validationScope}${lead ? `  ${lead.code}: ${lead.message}` : ''}`,
+        `  ${audit.craftbookId.padEnd(28)} ${String(audit.score).padStart(3)}/110 ${audit.band.padEnd(10)} eval=${audit.evalStatus}/${audit.evalMode}/${audit.validationScope}${lead ? `  ${lead.code}: ${lead.message}` : ''}`,
       );
     }
   }

@@ -868,7 +868,7 @@ describe('ChatReferences reference picker', () => {
     expect(apiMocks.fetchProjectArtifactBlob).toHaveBeenCalledWith('project-1', path);
   });
 
-  it('renders a converted PPTX companion through the Squisq markdown viewer', async () => {
+  it('renders a converted PPTX companion as a Squisq slideshow', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
     apiMocks.previewReference.mockResolvedValue({
@@ -888,8 +888,10 @@ describe('ChatReferences reference picker', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Open deck' }));
-    expect(await screen.findByText('Converted deck')).toBeInTheDocument();
-    expect(container.querySelector('.chat-rail-viewer-markdown')).not.toBeNull();
+    await waitFor(() => expect(container.querySelector('.doc-player')).not.toBeNull());
+    expect(container.querySelector('.chat-rail-viewer-slideshow')).not.toBeNull();
+    expect(container.querySelector('[data-testid="slideshow-controls"]')).not.toBeNull();
+    expect(container.querySelector('.chat-rail-viewer-markdown')).toBeNull();
     expect(container.querySelector('.chat-rail-viewer-code')).toBeNull();
   });
 

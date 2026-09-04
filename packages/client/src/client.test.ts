@@ -49,6 +49,42 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient project error reset', () => {
+  it('forwards cancellation to the clear-errors request', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/projects/project-1/clear-errors');
+      expect(init?.method).toBe('POST');
+      expect(init?.signal).toBe(controller.signal);
+      return Response.json({ cleared: 1 });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(client.clearProjectErrors('project-1', controller.signal)).resolves.toEqual({
+      cleared: 1,
+    });
+  });
+});
+
+describe('GezelClient authenticated file blobs', () => {
+  it.each([
+    ['document', (client: GezelClient) => client.fetchDocumentBlob('missing.png')],
+    ['artifact', (client: GezelClient) => client.fetchProjectArtifactBlob('p1', 'missing.png')],
+    ['workspace', (client: GezelClient) => client.fetchProjectWorkspaceBlob('p1', 'missing.png')],
+  ])('preserves a typed 404 for a missing %s file', async (_label, fetchBlob) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('missing', { status: 404 }));
+    const client = new GezelClient({
+      baseUrl: 'http://test',
+      token: 't',
+      fetch: fetchImpl as unknown as typeof fetch,
+    });
+
+    const error = await fetchBlob(client).catch((caught) => caught);
+    expect(error).toBeInstanceOf(GezelApiError);
+    expect(error.status).toBe(404);
+  });
+});
+
 describe('GezelClient speech transcription', () => {
   it('forwards cancellation without serializing the AbortSignal into the audio request', async () => {
     const controller = new AbortController();

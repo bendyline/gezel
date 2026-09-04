@@ -395,6 +395,42 @@ describe('readGgufSummary', () => {
     expect(s.valueLengthSwa).toBe(256);
   });
 
+  it('reads num_loops on a looped transformer', () => {
+    // Nanbeige4.2-3B: 22 logical blocks run twice over shared weights, so
+    // llama.cpp allocates 44 layers of KV. Without this key every KV estimate
+    // is short by exactly the loop factor.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'nanbeige')
+      .metaU32('nanbeige.block_count', 22)
+      .metaU32('nanbeige.embedding_length', 3072)
+      .metaU32('nanbeige.attention.head_count', 48)
+      .metaU32('nanbeige.attention.head_count_kv', 8)
+      .metaU32('nanbeige.attention.key_length', 128)
+      .metaU32('nanbeige.attention.value_length', 128)
+      .metaU32('nanbeige.num_loops', 2)
+      .finish();
+    const path = join(dir, 'looped.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.blockCount).toBe(22);
+    expect(s.loopCount).toBe(2);
+  });
+
+  it('leaves loopCount absent on an ordinary header', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'llama')
+      .metaU32('llama.block_count', 32)
+      .metaU32('llama.attention.head_count_kv', 8)
+      .finish();
+    const path = join(dir, 'unlooped.gguf');
+    writeFileSync(path, blob);
+
+    expect(readGgufSummary(path).loopCount).toBeUndefined();
+  });
+
   it('leaves SWA fields absent on non-SWA headers and keeps the stream in sync past them', () => {
     const blob = new GgufBuilder()
       .header(3, 0n)

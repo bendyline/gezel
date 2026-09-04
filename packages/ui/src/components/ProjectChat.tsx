@@ -23,6 +23,15 @@ import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
 /**
+ * Which composer surface this project's drafts are filed under. The composer
+ * stamps it on every draft it creates and the picker filters on it, so the
+ * two must be the same string: a picker asking for a scope nobody writes
+ * lists no drafts at all, and the only visible symptom is a Drafts section
+ * that is always empty.
+ */
+const DRAFT_SCOPE = 'project';
+
+/**
  * Is this thread one the user is still in the middle of? Past the shared
  * freshness window the conversation is not one the user is still having,
  * so the default reverts to the voorman on a blank thread; the older thread
@@ -246,6 +255,10 @@ function ProjectChatBody({
   // it for the (selectedGezel, project) pair; the timeline highlights it
   // as the active session; the composer posts into it.
   const [sessionId, setSessionId] = useState<string>('');
+  // The prompt draft the composer has open. Tracked here because both the
+  // composer and the thread picker act on it, and a draft with no thread
+  // yet has nothing else to hang off.
+  const [draftId, setDraftId] = useState<string>('');
   // The task the pill row (or the rail) last focused. It scopes BOTH the
   // SessionSwitcher's thread list and the composer's next send: without it
   // the switcher lists only non-task threads, decides the focused task
@@ -659,7 +672,7 @@ function ProjectChatBody({
                   recentReferences={recentReferences}
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
-                  draftScope="project"
+                  draftScope={DRAFT_SCOPE}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus
@@ -695,6 +708,8 @@ function ProjectChatBody({
                       : undefined
                   }
                   addressLineTrailing={composeModeTabs}
+                  draftId={draftId || undefined}
+                  onDraftIdChange={(next) => setDraftId(next ?? '')}
                   belowAddressLine={
                     <SessionSwitcher
                       gezelId={selectedGezel.id}
@@ -704,8 +719,11 @@ function ProjectChatBody({
                       {...(activeTask ? { taskRef: activeTask.ref } : {})}
                       {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
-                      onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
+                      onFreshThread={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
+                      activeDraftId={draftId || undefined}
+                      onDraftSelect={(next) => setDraftId(next ?? '')}
+                      draftScope={DRAFT_SCOPE}
                       // A task scope is always an explicit navigation, so it
                       // keeps the ordinary newest-thread pick.
                       autoPickNewest={!startFreshThread || Boolean(activeTask)}

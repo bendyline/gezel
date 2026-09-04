@@ -2,9 +2,13 @@ import type { MediaEntry, MediaProvider } from '@bendyline/squisq';
 import { api } from '../api.js';
 
 /**
- * Media provider for the chat composer — bridges Squisq's pluggable
- * image storage to the gezel service's project-scoped attachment
- * endpoints.
+ * Media provider for project-scoped chat attachments.
+ *
+ * The composer no longer uploads through this: a pasted file belongs to the
+ * prompt draft being written, so new uploads go through
+ * {@link ./PromptDraftMediaProvider.js} instead. This stays as the read path
+ * for transcripts — every message written before that holds an
+ * `attachments/<file>` reference, and those still have to render.
  *
  * Attachments are **project-scoped**, not session-scoped: one paste
  * shows up in every chat in the same project and appears in the

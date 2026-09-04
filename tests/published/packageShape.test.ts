@@ -41,6 +41,7 @@ interface PackResult {
 const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Roughly 1.5x the measured size at the time of writing, so ordinary
   // feature work has room without a ratchet.        measured (packed)
+  '@bendyline/gezk': 100_000, //                     ~30 KB
   '@bendyline/gezel': 1_700_000, //                    1.08 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB

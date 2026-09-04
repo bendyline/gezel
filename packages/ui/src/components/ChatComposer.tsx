@@ -4,17 +4,24 @@ import {
   useEditorContext,
 } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
-import { type GezelSummary, displayName, parseTaskRef } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  displayName,
+  parseTaskRef,
+  rewritePromptDraftFileRefs,
+} from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
+import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
+import { createPromptDraftMediaProvider } from './PromptDraftMediaProvider.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import {
   type OpenChatReference,
@@ -24,15 +31,10 @@ import {
   resolveOpenChatTarget,
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
-import {
-  clearComposerDraft,
-  composerDraftKey,
-  moveComposerDraft,
-  readComposerDraft,
-  writeComposerDraft,
-} from './composer-drafts.js';
+import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
+import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 export type ComposerTurnState = 'idle' | 'streaming' | 'queued' | 'error';
@@ -51,11 +53,34 @@ interface ComposerDraftSnapshot {
   editVersion: number;
 }
 
-function newlineShortcutLabel(): string {
-  const platform =
-    window.__GEZEL__?.platform ??
-    (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
-  return platform === 'darwin' || /Mac/i.test(platform) ? '⌘⏎' : 'Ctrl+Enter';
+/** Chevrons pushing apart — the draft is about to take the window. */
+function ExpandDraftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 6.4 8 3.4l3 3M11 9.6l-3 3-3-3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The same chevrons closing back toward the bottom strip. */
+function CollapseDraftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 3.4l3 3 3-3M11 12.6l-3-3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 export interface ChatComposerProps {
@@ -195,6 +220,14 @@ export interface ChatComposerProps {
    * `taskRef` or `craftbookRef` don't need it. See `composer-drafts.ts`.
    */
   draftScope?: string;
+  /**
+   * The prompt draft to open, when the surface tracks one (the thread picker
+   * can select a draft that has no thread yet). Uncontrolled surfaces leave
+   * it undefined and the composer resolves its own.
+   */
+  draftId?: string;
+  /** The composer created, switched, or finished with a draft. */
+  onDraftIdChange?: (draftId: string | undefined) => void;
 }
 
 interface ComposerNarrateButtonProps {
@@ -282,6 +315,8 @@ export function ChatComposer({
   onPassiveCcConsumed,
   onTerminalEscape,
   draftScope,
+  draftId: selectedDraftId,
+  onDraftIdChange,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -300,6 +335,13 @@ export function ChatComposer({
     roleBasedNameOnlyMode,
   );
   const [streaming, setStreaming] = useState(false);
+  /**
+   * Whether the draft surface has taken the top of the chat window. A
+   * prompt long enough to want the room — a brief, a PRD, a spec being
+   * pasted in — is unreadable through a three-line slot, and scrolling
+   * it inside the slot loses the shape of the thing being written.
+   */
+  const [expanded, setExpanded] = useState(false);
   // The local SSE is only one view of a turn. Navigation, remounts, and a
   // renderer reconnect can drop it while the service keeps generating.
   // Track the service's authoritative in-flight state separately so the
@@ -330,34 +372,37 @@ export function ChatComposer({
     elapsedMs: number;
     sessionId: string;
   } | null>(null);
-  // The surface this composer's draft is filed under while it is unmounted.
-  // Session id is deliberately absent: a draft belongs to the conversation the
-  // user is addressing, and switching threads in the picker must not swap the
-  // message they are in the middle of writing out from under them.
-  const draftKey = useMemo(
-    () =>
-      composerDraftKey({
-        ...(draftScope ? { scope: draftScope } : {}),
-        projectId,
-        gezelId,
-        ...(taskRef ? { taskRef } : {}),
-        ...(craftbookRef ? { craftbookRef } : {}),
-      }),
+  // Where this composer's draft is filed. Unlike the old in-memory store,
+  // the thread is part of the address: a draft belongs to the conversation it
+  // is going into, and picking another thread brings up that thread's own.
+  const draftAddress = useMemo(
+    () => ({
+      ...(draftScope ? { scope: draftScope } : {}),
+      projectId,
+      gezelId,
+      ...(taskRef ? { taskRef } : {}),
+      ...(craftbookRef ? { craftbookRef } : {}),
+    }),
     [craftbookRef, draftScope, gezelId, projectId, taskRef],
   );
-  const draftKeyRef = useRef(draftKey);
-  const draftRef = useRef<string>(readComposerDraft(draftKey));
-  // The address can move under a live composer — an @-mention pivot in project
-  // chat, a To-line recipient swap. The text stays with the instance in both
-  // cases, so the stored copy follows it rather than being replaced by
-  // whatever the destination address happened to hold.
-  useEffect(() => {
-    const previous = draftKeyRef.current;
-    if (previous === draftKey) return;
-    draftKeyRef.current = draftKey;
-    moveComposerDraft(previous, draftKey, draftRef.current);
-  }, [draftKey]);
+  // Seed the editor from the last text we knew for this slot's draft so a
+  // remount paints immediately; the hook reconciles with disk right after.
+  const draftRef = useRef<string>(
+    (() => {
+      const slot = promptDraftSlotKey({ ...draftAddress, sessionId: sessionId ?? null });
+      const id = selectedDraftId ?? readActiveDraftId(slot);
+      return (id ? readDraftText(id) : undefined) ?? '';
+    })(),
+  );
   const draftEditVersionRef = useRef(0);
+  // The draft hook is declared further down (it needs the state setters this
+  // component defines below), so the write paths above it reach the one
+  // persistence path through refs rather than through a second one.
+  const draftUpdateRef = useRef<(markdown: string) => void>(() => {});
+  const draftDiscardRef = useRef<() => Promise<void>>(async () => {});
+  const draftEnsureRef = useRef<() => Promise<string>>(async () => '');
+  const draftNoteFileRef = useRef<() => void>(() => {});
+  const draftFreshThreadRef = useRef(false);
   // Tracks the length of the previous draft so we can detect "the
   // user just started typing a new draft" — the signal for the
   // terminal escape. Only the first transition out of an essentially-
@@ -397,7 +442,7 @@ export function ChatComposer({
     const existing = draftRef.current.trim();
     const merged = existing ? `${existing}\n\n${queued}` : queued;
     draftRef.current = merged;
-    writeComposerDraft(draftKeyRef.current, merged);
+    draftUpdateRef.current(merged);
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
@@ -420,6 +465,35 @@ export function ChatComposer({
   const [mentioned, setMentioned] = useState<MentionToken[]>(() =>
     extractMentionTokens(draftRef.current),
   );
+  // Prompt draft: what the user is writing, kept on disk so it survives a
+  // restart, a thread switch, and a week of coming back to it. The hook owns
+  // persistence; `draftRef` above stays the live text, because the editor
+  // reports changes rather than being driven.
+  const draft = usePromptDraft({
+    address: draftAddress,
+    sessionId,
+    draftId: selectedDraftId,
+    onDraftIdChange,
+    getText: () => draftRef.current,
+    onLoaded: (markdown) => {
+      draftRef.current = markdown;
+      prevDraftLenRef.current = markdown.length;
+      // A load is a new edit generation: a send still in flight from the
+      // previous draft must not clear the text that just arrived.
+      draftEditVersionRef.current += 1;
+      setDraftNonEmpty(markdown.trim().length > 0);
+      setOpenCommandQuery(parseOpenChatQuery(markdown));
+      setMentioned(extractMentionTokens(markdown));
+      setEditorRevision((revision) => revision + 1);
+    },
+  });
+  const draftIdRef = useRef<string | null>(draft.draftId);
+  draftIdRef.current = draft.draftId;
+  draftUpdateRef.current = draft.update;
+  draftDiscardRef.current = draft.discard;
+  draftEnsureRef.current = draft.ensureDraft;
+  draftNoteFileRef.current = draft.noteFileAdded;
+  draftFreshThreadRef.current = draft.isFreshThread;
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.
@@ -467,8 +541,27 @@ export function ChatComposer({
     setLiveSessionId(sessionId ?? null);
   }, [sessionId]);
 
+  const createFreshSession = useCallback(async (): Promise<string> => {
+    const created = await api.createChatSession({
+      gezelId,
+      projectId,
+      ...(taskRef ? { taskRef } : {}),
+      ...(stepId ? { stepId } : {}),
+      ...(craftbookRef ? { craftbookRef } : {}),
+    });
+    liveSessionIdRef.current = created.id;
+    setLiveSessionId(created.id);
+    onSessionCreated?.(created.id);
+    return created.id;
+  }, [gezelId, projectId, taskRef, stepId, craftbookRef, onSessionCreated]);
+
   const ensureSessionId = useCallback(async (): Promise<string> => {
     if (liveSessionIdRef.current) return liveSessionIdRef.current;
+    // A draft the user opened as "new thread" means it: skip the reuse probe
+    // below, which exists for the opposite case (typing before the picker's
+    // auto-pick landed) and would otherwise silently drop the message into
+    // whatever thread happened to be newest.
+    if (draftFreshThreadRef.current) return createFreshSession();
     // Look for an existing unarchived session before creating a fresh
     // one. The user-facing bug this protects: if the user navigates
     // (Home → back to Chat) and types fast enough that the
@@ -507,26 +600,28 @@ export function ChatComposer({
     } catch {
       /* fall through to create */
     }
-    const body = {
-      gezelId,
-      projectId,
-      ...(taskRef ? { taskRef } : {}),
-      ...(stepId ? { stepId } : {}),
-      ...(craftbookRef ? { craftbookRef } : {}),
-    };
-    const created = await api.createChatSession(body);
-    liveSessionIdRef.current = created.id;
-    setLiveSessionId(created.id);
-    onSessionCreated?.(created.id);
-    return created.id;
-  }, [gezelId, projectId, taskRef, stepId, craftbookRef, onSessionCreated]);
+    return createFreshSession();
+  }, [gezelId, projectId, taskRef, createFreshSession, onSessionCreated]);
 
-  // Media provider is now project-scoped — paste in any session and
-  // the file lands in `artifacts/attachments/`, browseable in the
-  // Artifacts tab and usable in every chat in the project. No session
-  // creation needed up front: the attachment exists independent of
-  // whether the user ever hits Send.
-  const mediaProvider = useMemo(() => createGezelMediaProvider({ projectId }), [projectId]);
+  // Media belongs to the draft, in the `message_files/` companion beside its
+  // `message.md` — the same shape every other squisq document here uses. A
+  // paste into an empty composer is what brings the draft into being, so the
+  // provider creates one on demand rather than assuming an id. Stable across
+  // draft switches: rebuilding it would revoke blob URLs the editor is still
+  // showing.
+  const mediaProvider = useMemo(
+    () =>
+      createPromptDraftMediaProvider({
+        projectId,
+        getDraftId: () => draftIdRef.current,
+        ensureDraftId: async () => {
+          const id = await draftEnsureRef.current();
+          draftNoteFileRef.current();
+          return id;
+        },
+      }),
+    [projectId],
+  );
 
   // Abort any in-flight SSE stream when this composer unmounts. Without
   // this, the held connection counts against Chromium's 6-per-origin
@@ -668,7 +763,7 @@ export function ChatComposer({
       prevDraftLenRef.current = source.length;
       const sourceChanged = draftRef.current !== source;
       draftRef.current = source;
-      writeComposerDraft(draftKeyRef.current, source);
+      draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
       setOpenCommandQuery(parseOpenChatQuery(source));
@@ -684,7 +779,7 @@ export function ChatComposer({
           // The keystrokes move to the terminal composer. Drop the stored
           // draft too, or flipping back to chat later restores the `> ` sigil
           // the user already spent on the handoff.
-          clearComposerDraft(draftKeyRef.current);
+          void draftDiscardRef.current();
           onTerminalEscape((m[1] ?? '').trim());
           return;
         }
@@ -707,7 +802,7 @@ export function ChatComposer({
     const current = draftRef.current;
     const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
     draftRef.current = merged;
-    writeComposerDraft(draftKeyRef.current, merged);
+    draftUpdateRef.current(merged);
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(true);
@@ -745,7 +840,6 @@ export function ChatComposer({
       return;
     }
     draftRef.current = '';
-    clearComposerDraft(draftKeyRef.current);
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
     setOpenCommandQuery(null);
@@ -785,6 +879,7 @@ export function ChatComposer({
         } else {
           throw new Error('Recent file opening is unavailable in this chat.');
         }
+        void draftDiscardRef.current();
         clearAcceptedDraft(draftSnapshot);
       } catch (err) {
         setError(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -844,6 +939,19 @@ export function ChatComposer({
     const userText = draftSnapshot.source.trim();
     setError(null);
     setQueuedAhead(null);
+
+    // Settle the draft before it becomes a message: the service reads its
+    // files to resolve the refs, and it stamps the sent record from what is
+    // on disk, not from what the editor happens to hold.
+    let sentDraftId: string | undefined;
+    try {
+      await draft.flush();
+      sentDraftId = (await draft.ensureDraft()) ?? undefined;
+    } catch {
+      // A draft that could not be saved must not block the message. The text
+      // is right here and sending it is what the user asked for.
+      sentDraftId = undefined;
+    }
 
     let activeSessionId: string;
     try {
@@ -970,11 +1078,15 @@ export function ChatComposer({
       // through stale state — sending a CC to yourself is a no-op
       // server-side but a confusing transcript ghost client-side.
       const ccIds = (passiveCcGezelIds ?? []).filter((id) => id && id !== gezelId);
-      const body: { message: string; mentions?: string[]; passiveCcGezelIds?: string[] } = {
-        message: userText,
-      };
+      const body: {
+        message: string;
+        mentions?: string[];
+        passiveCcGezelIds?: string[];
+        draftId?: string;
+      } = { message: userText };
       if (mentionIds.length > 0) body.mentions = mentionIds;
       if (ccIds.length > 0) body.passiveCcGezelIds = ccIds;
+      if (sentDraftId) body.draftId = sentDraftId;
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
@@ -987,12 +1099,19 @@ export function ChatComposer({
           /* the periodic poll remains the recovery path */
         });
       }
+      // Forget the draft BEFORE clearing the editor: the clear remounts the
+      // editor, which reports its now-empty content, and a draft still being
+      // tracked at that moment would be saved over with nothing.
+      if (sentDraftId) draft.markSent();
       clearAcceptedDraft(draftSnapshot);
       publishOptimisticUserMessage({
         sessionId: activeSessionId,
         gezelId,
         projectId,
-        content: userText,
+        // The bubble paints before the persisted message arrives, so it needs
+        // the same rewrite the service performs — otherwise a just-sent image
+        // shows broken for a beat.
+        content: sentDraftId ? rewritePromptDraftFileRefs(userText, sentDraftId) : userText,
         at: new Date().toISOString(),
       });
       // CC fires once per pivot; tell the parent to drop the list so
@@ -1053,6 +1172,7 @@ export function ChatComposer({
     passiveCcGezelIds,
     onPassiveCcConsumed,
     executeOpenTarget,
+    draft,
   ]);
 
   const cancelWedged = useCallback(async () => {
@@ -1125,15 +1245,34 @@ export function ChatComposer({
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
     setError(null);
+    let sentDraftId: string | undefined;
     try {
-      await api.sendToChatSession(sid, { message: userText, nudge: true });
+      await draft.flush();
+      sentDraftId = (await draft.ensureDraft()) ?? undefined;
+    } catch {
+      sentDraftId = undefined;
+    }
+    try {
+      await api.sendToChatSession(sid, {
+        message: userText,
+        nudge: true,
+        ...(sentDraftId ? { draftId: sentDraftId } : {}),
+      });
+      if (sentDraftId) draft.markSent();
       clearAcceptedDraft(draftSnapshot);
     } catch (err) {
       setError(humanizeChatError((err as Error).message ?? String(err)));
     } finally {
       finishDraftSubmission();
     }
-  }, [gezelId, engagementOff, beginDraftSubmission, clearAcceptedDraft, finishDraftSubmission]);
+  }, [
+    gezelId,
+    engagementOff,
+    beginDraftSubmission,
+    clearAcceptedDraft,
+    finishDraftSubmission,
+    draft,
+  ]);
 
   /**
    * Interrupt: stop the running turn (partial reply is salvaged, same
@@ -1151,8 +1290,19 @@ export function ChatComposer({
     const userText = draftSnapshot.source.trim();
     setError(null);
     setServerInflight(true);
+    let sentDraftId: string | undefined;
     try {
-      await api.interruptChatSession(sid, { message: userText });
+      await draft.flush();
+      sentDraftId = (await draft.ensureDraft()) ?? undefined;
+    } catch {
+      sentDraftId = undefined;
+    }
+    try {
+      await api.interruptChatSession(sid, {
+        message: userText,
+        ...(sentDraftId ? { draftId: sentDraftId } : {}),
+      });
+      if (sentDraftId) draft.markSent();
       clearAcceptedDraft(draftSnapshot);
       void syncInflight(sid).catch(() => {
         /* the periodic poll remains the recovery path */
@@ -1169,12 +1319,13 @@ export function ChatComposer({
     clearAcceptedDraft,
     finishDraftSubmission,
     syncInflight,
+    draft,
   ]);
 
-  // Enter routing. Squisq reads `submitOnEnter` when the editor mounts;
-  // the mid-turn/idle decision must be made at keypress time, not
-  // capture time, so the stable closure dereferences this ref. Mid-turn
-  // Enter queues a nudge — previously it silently did nothing.
+  // Submit routing. The mid-turn/idle decision must be made at keypress
+  // time, not at handler-install time, so the stable handler below
+  // dereferences this ref. Mid-turn the shortcut queues a nudge —
+  // previously it silently did nothing.
   const submitRef = useRef<() => void>(() => {});
   submitRef.current = draftSubmissionPending
     ? () => {}
@@ -1184,8 +1335,42 @@ export function ChatComposer({
         ? () => void queueNudge()
         : () => void send();
 
+  /**
+   * Shift+Enter sends; Enter opens a new line, because a chat composer
+   * that also drafts a brief has to let people write paragraphs without
+   * firing one off per line break.
+   *
+   * Squisq's `submitOnEnter` hook is the opposite arrangement and takes
+   * no modifier option, so the composer does not pass it at all — Enter
+   * then falls through to the editor's own paragraph break — and this
+   * handler claims Shift+Enter on the way down, before ProseMirror can
+   * turn it into a soft break. Capture on the wrapper is what puts us
+   * ahead of the contenteditable's own listener; stopping propagation
+   * there is what keeps the editor from seeing the key at all.
+   */
+  const handleSubmitShortcut = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || !event.shiftKey) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // Only from inside the typing surface. A Shift+Enter aimed at a
+    // focused toolbar key belongs to that key, not to the draft.
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target?.closest('.squisq-wysiwyg-editor, .squisq-raw-editor-container')) return;
+    // The mention picker owns Enter for as long as it is open.
+    const popover = event.currentTarget.querySelector<HTMLElement>('.squisq-mention-popover');
+    if (popover && popover.style.display !== 'none') return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitRef.current();
+  }, []);
+
   return (
-    <div ref={composerRef} className="chat-composer" data-testid="chat-composer">
+    <div
+      ref={composerRef}
+      className="chat-composer"
+      data-testid="chat-composer"
+      data-composer-expanded={expanded ? 'true' : undefined}
+      onKeyDownCapture={handleSubmitShortcut}
+    >
       {engagementOff && (
         <div className="chat-composer-disabled-banner" role="alert">
           <span>AI disabled in Settings → General. Chat is paused.</span>
@@ -1365,8 +1550,12 @@ export function ChatComposer({
           {...(placeholder ? { placeholder } : {})}
           imageDisplayMode="thumbnail"
           onChange={handleDraftChange}
-          minHeight="120px"
-          maxHeight="50vh"
+          // Expanded, the shell fills the frame the CSS handed it rather
+          // than growing with the text: a tall empty box that only fills
+          // as you type would put the caret somewhere different on every
+          // keystroke. Collapsed, it auto-grows from three lines.
+          minHeight={expanded ? '100%' : '120px'}
+          maxHeight={expanded ? '100%' : '50vh'}
           colorScheme={editorTheme}
           uxFont="var(--font-ui)"
           showPlayTab={false}
@@ -1378,18 +1567,34 @@ export function ChatComposer({
           {...CHAT_ACCESSORY_BIN_PROPS}
           fullWidth
           thinMargins
-          submitOnEnter={() => submitRef.current()}
           toolbarSlotAfterActions={
             <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
           }
           toolbarSlotRight={
             <>
+              <AutosaveStatus autosave={draft.autosave} failuresOnly />
               <ComposerNarrateButton
                 projectId={projectId}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}
                 onAppendTranscript={appendNarratedText}
                 onError={setError}
               />
+              <button
+                type="button"
+                className="squisq-toolbar-button chat-composer-expand-btn"
+                data-testid="chat-composer-expand"
+                onClick={() => setExpanded((current) => !current)}
+                aria-pressed={expanded}
+                aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
+                title={
+                  expanded
+                    ? 'Collapse the draft back to a few lines'
+                    : 'Expand the draft to fill the chat window'
+                }
+                data-tooltip={expanded ? 'Collapse the draft' : 'Expand the draft'}
+              >
+                {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
+              </button>
               {openCommandQuery !== null ? (
                 <button
                   type="button"
@@ -1397,7 +1602,7 @@ export function ChatComposer({
                   data-testid="chat-open"
                   onClick={() => void executeOpenTarget()}
                   disabled={draftSubmissionPending}
-                  title="Open this folder or recent file (Enter)"
+                  title="Open this folder or recent file (Shift+Enter)"
                 >
                   {draftSubmissionPending ? 'Opening…' : 'Open'}
                 </button>
@@ -1411,7 +1616,7 @@ export function ChatComposer({
                         data-testid="chat-nudge"
                         onClick={() => void queueNudge()}
                         disabled={draftSubmissionPending}
-                        title="Queue for after this turn (Enter)"
+                        title="Queue for after this turn (Shift+Enter)"
                       >
                         Nudge
                       </button>
@@ -1452,7 +1657,7 @@ export function ChatComposer({
                   title={
                     engagementOff
                       ? 'AI is disabled in Settings → General'
-                      : `Enter to send, ${newlineShortcutLabel()} for newline`
+                      : 'Shift+Enter to send, Enter for newline'
                   }
                 >
                   <SubmitArrow />

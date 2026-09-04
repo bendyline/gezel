@@ -1,10 +1,10 @@
 /**
  * Tiny Hugging Face Hub API client used by catalog tooling.
  *
- * Scope: enough to list the files in a model repo and extract their
- * sha256 + size for manifest generation. Not a general-purpose HF SDK —
- * we don't need authentication, dataset endpoints, model cards, or
- * downloads (the install path has its own streaming downloader).
+ * Scope: enough to list the files in a model or dataset repo and extract
+ * their sha256 + size for manifest generation. Not a general-purpose HF SDK —
+ * we don't need authentication, model cards, or downloads (the install path
+ * has its own streaming downloader).
  *
  * The Hub publishes file metadata at `/api/models/<repo>/tree/<rev>`.
  * Each entry looks like:
@@ -41,9 +41,18 @@ export interface HfFileEntry {
   lfsBacked: boolean;
 }
 
+/** Hub repository kind; the API path differs (`/api/models/` vs `/api/datasets/`). */
+export type HfRepoType = 'model' | 'dataset';
+
+function apiPrefix(repoType: HfRepoType | undefined): string {
+  return `${HF_HUB_BASE}/api/${repoType === 'dataset' ? 'datasets' : 'models'}`;
+}
+
 export interface FetchTreeOptions {
   /** Branch / tag / commit. Defaults to `main`. */
   rev?: string;
+  /** Defaults to `model`. Knowledge catalogs live in dataset repos. */
+  repoType?: HfRepoType;
   /** Test seam — defaults to global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -61,7 +70,7 @@ export async function fetchHuggingfaceTree(
   const rev = opts.rev ?? 'main';
   const fetchImpl = opts.fetchImpl ?? fetch;
   const out: HfFileEntry[] = [];
-  await walk(repo, rev, '', out, fetchImpl);
+  await walk(repo, rev, '', out, fetchImpl, opts.repoType);
   return out;
 }
 
@@ -76,11 +85,11 @@ export async function fetchHuggingfaceTree(
  */
 export async function fetchHuggingfaceCommit(
   repo: string,
-  opts: { rev?: string; fetchImpl?: typeof fetch } = {},
+  opts: { rev?: string; repoType?: HfRepoType; fetchImpl?: typeof fetch } = {},
 ): Promise<string> {
   const rev = opts.rev ?? 'main';
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const url = `${HF_HUB_BASE}/api/models/${repo}/revision/${encodeURIComponent(rev)}`;
+  const url = `${apiPrefix(opts.repoType)}/${repo}/revision/${encodeURIComponent(rev)}`;
   const res = await fetchImpl(url);
   if (!res.ok) {
     throw new Error(`[hf] commit resolve ${url} failed: ${res.status} ${res.statusText}`);
@@ -106,8 +115,9 @@ async function walk(
   subpath: string,
   out: HfFileEntry[],
   fetchImpl: typeof fetch,
+  repoType: HfRepoType | undefined,
 ): Promise<void> {
-  const url = `${HF_HUB_BASE}/api/models/${repo}/tree/${rev}${subpath ? `/${subpath}` : ''}`;
+  const url = `${apiPrefix(repoType)}/${repo}/tree/${rev}${subpath ? `/${subpath}` : ''}`;
   const res = await fetchImpl(url);
   if (!res.ok) {
     throw new Error(`[hf] tree fetch ${url} failed: ${res.status} ${res.statusText}`);
@@ -115,7 +125,7 @@ async function walk(
   const entries = (await res.json()) as RawTreeEntry[];
   for (const e of entries) {
     if (e.type === 'directory') {
-      await walk(repo, rev, e.path, out, fetchImpl);
+      await walk(repo, rev, e.path, out, fetchImpl, repoType);
       continue;
     }
     if (e.type !== 'file') continue;

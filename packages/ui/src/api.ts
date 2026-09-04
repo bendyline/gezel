@@ -225,12 +225,19 @@ declare global {
             canceled?: false;
             path: string;
             bytesWritten: number;
-            verified: true;
+            verified: boolean;
           }
         | { ok: false; error: string }
       >;
       /** Stop an active native export and remove its unpublished partial file. */
       cancelModelBundleExport?: (
+        exportId: string,
+      ) => Promise<{ ok: true } | { ok: false; error: string }>;
+      /**
+       * End the read-back checksum pass early and keep the written file. Unlike
+       * cancelling, the export still publishes — verification moves to import.
+       */
+      skipModelBundleExportVerification?: (
         exportId: string,
       ) => Promise<{ ok: true } | { ok: false; error: string }>;
       onModelBundleExportProgress?: (

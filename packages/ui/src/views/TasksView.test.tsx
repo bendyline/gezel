@@ -146,6 +146,14 @@ describe('TasksView', () => {
     } as never);
     render(<TasksView />);
 
+    // A system job is shelved as scheduled work — the default One-time view
+    // must never lead a fresh install with it (2026-09-02 UX review).
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Scheduled tasks' })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Noor · system')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Scheduled tasks' }));
     await waitFor(() => {
       expect(screen.getByText('Noor · system')).toBeInTheDocument();
     });

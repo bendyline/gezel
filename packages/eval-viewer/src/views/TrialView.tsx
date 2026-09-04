@@ -5,13 +5,16 @@ import { ArtifactGallery } from '../components/ArtifactGallery.js';
 import { OutcomeBadge, ScoreBadge } from '../components/Badge.js';
 import { LogTail } from '../components/LogTail.js';
 import { MarkdownView } from '../components/Markdown.js';
+import { MovieTab } from '../components/MovieTab.js';
 import { findTrial, formatDuration } from '../data.js';
 
 export function TrialView() {
   const runs = useRuns();
   const { trialId } = useParams<{ trialId: string }>();
   const trial = trialId ? findTrial(runs, trialId) : undefined;
-  const [tab, setTab] = useState<'postmortem' | 'artifacts' | 'log' | 'related'>('postmortem');
+  const [tab, setTab] = useState<'postmortem' | 'movie' | 'artifacts' | 'log' | 'related'>(
+    'postmortem',
+  );
 
   // Sibling trials in the same group (matrix or batch) and other trials of
   // the same (scenario, model) combo elsewhere in time.
@@ -93,6 +96,15 @@ export function TrialView() {
         >
           Postmortem{trial.hasPostmortem ? '' : ' (none)'}
         </button>
+        {trial.hasRecording && (
+          <button
+            type="button"
+            className={tab === 'movie' ? 'active' : ''}
+            onClick={() => setTab('movie')}
+          >
+            Transcript
+          </button>
+        )}
         <button
           type="button"
           className={tab === 'artifacts' ? 'active' : ''}
@@ -129,6 +141,7 @@ export function TrialView() {
               <code>.claude/skills/eval-run</code>).
             </div>
           ))}
+        {tab === 'movie' && <MovieTab trial={trial} />}
         {tab === 'artifacts' && <ArtifactGallery artifacts={trial.artifacts} />}
         {tab === 'log' && (
           <div>

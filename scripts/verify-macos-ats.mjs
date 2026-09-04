@@ -18,8 +18,9 @@
  * Usage: node scripts/verify-macos-ats.mjs <path-to-.app>
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** Loopback plaintext HTTP is legitimate: local engines and the preview server. */
 const REQUIRED_EXCEPTION_DOMAINS = ['127.0.0.1', 'localhost'];
@@ -108,4 +109,5 @@ function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  main();

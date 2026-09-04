@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Audit exact production versions through npm's current bulk advisory API. */
 
+import { requestAdvisories } from './audit-vulnerabilities-lib.mjs';
 import {
   packageVersionsFromInventory,
   readProductionLicenseInventory,
@@ -14,22 +15,7 @@ if (threshold < 0) {
 }
 
 const packages = packageVersionsFromInventory(readProductionLicenseInventory());
-const response = await fetch('https://registry.npmjs.org/-/npm/v1/security/advisories/bulk', {
-  method: 'POST',
-  headers: {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    'User-Agent': 'gezel-production-audit/1',
-  },
-  body: JSON.stringify(packages),
-  redirect: 'error',
-  signal: AbortSignal.timeout(30_000),
-});
-if (!response.ok) {
-  await response.body?.cancel();
-  throw new Error(`npm bulk advisory endpoint returned HTTP ${response.status}`);
-}
-const advisories = await readAdvisories(response);
+const advisories = await requestAdvisories(packages);
 const failing = advisories.filter((advisory) => severityOf(advisory) >= threshold);
 
 if (advisories.length === 0) {
@@ -71,34 +57,4 @@ function valueAfter(flag) {
 function severityOf(advisory) {
   const index = levels.indexOf(String(advisory.severity ?? '').toLowerCase());
   return index < 0 ? Number.POSITIVE_INFINITY : index;
-}
-
-async function readAdvisories(response) {
-  const maxBytes = 10 * 1024 * 1024;
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await response.body?.cancel();
-    throw new Error('npm bulk advisory response exceeded 10 MiB');
-  }
-  const text = await response.text();
-  if (Buffer.byteLength(text) > maxBytes)
-    throw new Error('npm bulk advisory response exceeded 10 MiB');
-  const body = JSON.parse(text);
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new Error('npm bulk advisory endpoint returned an invalid response');
-  }
-  const unique = new Map();
-  for (const [packageName, entries] of Object.entries(body)) {
-    if (!Array.isArray(entries)) throw new Error('npm returned an invalid advisory group');
-    for (const advisory of entries) {
-      if (!advisory || typeof advisory !== 'object')
-        throw new Error('npm returned an invalid advisory');
-      const normalized = { ...advisory, name: advisory.name ?? packageName };
-      const key = `${normalized.id ?? ''}\0${normalized.name}\0${normalized.url ?? ''}`;
-      unique.set(key, normalized);
-    }
-  }
-  return [...unique.values()].sort(
-    (a, b) => severityOf(b) - severityOf(a) || String(a.name).localeCompare(String(b.name)),
-  );
 }

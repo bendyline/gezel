@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
-import { buildTransformPrompt, transformText } from './generator.js';
+import { buildTransformPrompt, rewriteText, transformText } from './generator.js';
 
 describe('buildTransformPrompt', () => {
   it('rewrite mode always uses the fragment scope and includes the input', () => {
@@ -83,6 +83,7 @@ describe('transformText', () => {
         onReasoningDelta?: (chunk: string) => void;
         onQueueWait?: (info: { aheadOf: number }) => void;
         useKlerk?: boolean;
+        lane?: 'interactive' | 'background';
         jobLabel?: string;
       },
     ) => Promise<string>,
@@ -95,6 +96,7 @@ describe('transformText', () => {
     const output: string[] = [];
     const manager = managerWith(async (_prompt, _timeout, opts) => {
       expect(opts.useKlerk).toBe(true);
+      expect(opts.lane).toBe('interactive');
       expect(opts.jobLabel).toBe('transform · rewrite');
       opts.onDelta?.('<think>considering tone</think>');
       opts.onDelta?.('Result ');
@@ -127,5 +129,15 @@ describe('transformText', () => {
     expect(result).toBe('done');
     expect(thinking.join('')).toBe('deep thought');
     expect(queued).toEqual([2]);
+  });
+
+  it('routes the legacy blocking rewrite through the interactive lane too', async () => {
+    const manager = managerWith(async (_prompt, _timeout, opts) => {
+      expect(opts.useKlerk).toBe(true);
+      expect(opts.lane).toBe('interactive');
+      return 'clean copy';
+    });
+
+    await expect(rewriteText(manager, { text: 'rough copy' })).resolves.toBe('clean copy');
   });
 });

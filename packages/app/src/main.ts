@@ -34,7 +34,6 @@ import {
   modelBytesFromResponse,
   portableGezmodelFilename,
   streamAllChatEvents,
-  verifyModelBundleArchive,
   writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
 import { ambientDir } from '@bendyline/gezel/paths';
@@ -63,12 +62,14 @@ import {
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
+import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
+import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
@@ -124,7 +125,15 @@ let trayActivityAbort: AbortController | null = null;
 let apiClient: GezelClient | null = null;
 const activeModelBundleExports = new Map<
   string,
-  { controller: AbortController; webContentsId: number }
+  {
+    controller: AbortController;
+    // Skipping verification must keep the written bytes, so it aborts only the
+    // read-back pass — never the export's own controller, whose abort path
+    // deletes the unpublished partial file.
+    verifyController: AbortController;
+    verificationSkipped: boolean;
+    webContentsId: number;
+  }
 >();
 const activeModelBundleImports = new Map<
   string,
@@ -235,6 +244,17 @@ const linuxDesktopId = app.isPackaged ? 'com.bendyline.gezel' : 'com.bendyline.g
 if (process.platform === 'linux') {
   app.setDesktopName(`${linuxDesktopId}.desktop`);
   app.commandLine.appendSwitch('class', linuxDesktopId);
+}
+
+// Which distribution channel this artifact was built for. Resolved once, at
+// the top, because two things downstream depend on it before anything else
+// runs: the home directory this launch uses (a store build must not share
+// `~/.gezel` with a direct install) and the profile stamped into the
+// environment every child inherits.
+const storeBuild = detectStoreBuild({ resourcesPath: process.resourcesPath });
+stampDistributionProfile(storeBuild);
+if (storeBuild.channel) {
+  console.log(`[gezel] store build: ${storeBuild.channel} (via ${storeBuild.source})`);
 }
 
 // We were handed the daemon entrypoint but booted as an application, which
@@ -374,6 +394,32 @@ interface ResolvedLaunch {
  *      don't pollute the real packaged-app data under `~/.gezel`.
  *   4. Packaged default — `~/.gezel`.
  */
+/**
+ * Stamp the distribution profile for every child that inherits this
+ * environment — the service (spawned or embedded) and, through it, the MCP
+ * subprocess.
+ *
+ * Fail-closed in both directions, which is the whole point of doing it here
+ * rather than trusting whatever arrived:
+ *
+ *   - A store build OVERWRITES any inherited value, so nothing in the
+ *     environment can talk it out of its restrictions.
+ *   - A non-store build DELETES an inherited 'store', so a stray variable
+ *     cannot silently disable engine downloads or Playwright in a direct
+ *     install that is perfectly entitled to them.
+ *
+ * Same shape as the packaged-mode `GEZEL_NODE_PATH` handling in the
+ * supervisor, and for the same reason: an inherited value is evidence about
+ * the parent, never authority over this process.
+ */
+function stampDistributionProfile(store: StoreBuildInfo): void {
+  if (store.channel) {
+    process.env.GEZEL_DISTRIBUTION_PROFILE = 'store';
+    return;
+  }
+  delete process.env.GEZEL_DISTRIBUTION_PROFILE;
+}
+
 function resolveLaunch(): ResolvedLaunch {
   const cliHomeArg = process.argv.find((a) => a.startsWith('--gezel-home='));
   if (cliHomeArg) {
@@ -385,6 +431,20 @@ function resolveLaunch(): ResolvedLaunch {
   }
   if (!app.isPackaged) {
     return { home: join(homedir(), '.gezel-dev'), forceEmbeddedFromCli: false };
+  }
+  // A store build keeps its own home, because it may be running beside a
+  // direct-download install that owns `~/.gezel`. Two processes writing one
+  // home is the single-writer violation every other path in the supervisor
+  // exists to avoid, and a store build cannot coordinate with the other
+  // install to prevent it — they are separate products with separate update
+  // schedules. Sharing happens by adopting the other DAEMON (see
+  // store-rendezvous.ts), never by sharing its files.
+  //
+  // On macOS this is belt-and-braces: the sandbox already rewrites `$HOME` to
+  // the container, so `~/.gezel` is private there whatever we do. On Windows,
+  // where a full-trust MSIX sees the real profile, it is load-bearing.
+  if (storeBuild.channel) {
+    return { home: join(app.getPath('userData'), 'gezel-home'), forceEmbeddedFromCli: false };
   }
   return { home: join(homedir(), '.gezel'), forceEmbeddedFromCli: false };
 }
@@ -476,9 +536,9 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  * safe — and it is the real backstop against injected markup (e.g. a
  * model-authored inline SVG icon): with `script-src 'self'` an injected
  * <script> or on*= handler cannot execute even if it slips past the SVG
- * sanitizer. `'wasm-unsafe-eval'` rides alongside it for the proofing
- * engine and does not weaken that: it unblocks WebAssembly compilation
- * only, and injected markup has no way to reach it. Styles keep
+ * sanitizer. `'wasm-unsafe-eval'` rides alongside it for the local proofing
+ * and spreadsheet engines and does not weaken that: it unblocks WebAssembly
+ * compilation only, and injected markup has no way to reach it. Styles keep
  * 'unsafe-inline' (React inline styles); images allow only
  * self/data:/blob:. Remote passive resources are deliberately
  * excluded: images and media can still disclose user state through URLs even
@@ -495,8 +555,9 @@ const GEZEL_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' permits WebAssembly compilation and nothing else —
   // it is NOT a relaxation toward eval() or inline script. The renderer needs
-  // it for the proofing engine (harper.js), whose WASM the daemon serves
-  // same-origin under /harper/ and which compiles inside a blob: worker.
+  // it for the proofing (harper.js) and spreadsheet calculation (IronCalc)
+  // engines. Their WASM assets are served same-origin by the daemon; Harper
+  // compiles inside a blob: worker.
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
@@ -1059,7 +1120,9 @@ ipcMain.on('gezel:current-connection', (event) => {
 // while an update was already staged.
 ipcMain.handle('gezel:update:state', () => updateState);
 ipcMain.handle('gezel:update:install', async () => {
-  const delivery = appUpdateDeliveryPolicy(process.platform);
+  const delivery = appUpdateDeliveryPolicy(process.platform, {
+    store: storeBuild.channel !== null,
+  });
   if (delivery.installation === 'manual') {
     return {
       ok: false as const,
@@ -1367,7 +1430,7 @@ ipcMain.handle(
     },
   ): Promise<
     | { ok: true; canceled: true }
-    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: true }
+    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: boolean }
     | { ok: false; error: string }
   > => {
     const engines = new Set(['llama-cpp', 'mlx', 'ds4']);
@@ -1387,7 +1450,12 @@ ipcMain.handle(
       return { ok: false, error: 'model export request is already active' };
     }
     const controller = new AbortController();
-    const activeExport = { controller, webContentsId: event.sender.id };
+    const activeExport = {
+      controller,
+      verifyController: new AbortController(),
+      verificationSkipped: false,
+      webContentsId: event.sender.id,
+    };
     activeModelBundleExports.set(args.exportId, activeExport);
     const abortOnRendererClose = () => controller.abort();
     event.sender.once('destroyed', abortOnRendererClose);
@@ -1458,14 +1526,15 @@ ipcMain.handle(
         true,
       );
       let latestVerified = { bytesCompleted: 0, bytesTotal: modelBytes };
-      await verifyModelBundleArchive(
-        partial,
-        (progress) => {
+      const verified = await verifyUnlessSkipped({
+        path: partial,
+        active: activeExport,
+        signal: controller.signal,
+        onProgress: (progress) => {
           latestVerified = progress;
           publishProgress({ phase: 'verifying', filename, ...progress });
         },
-        controller.signal,
-      );
+      });
       publishProgress({ phase: 'verifying', filename, ...latestVerified }, true);
 
       // Keep an existing export recoverable until the verified replacement is
@@ -1481,13 +1550,13 @@ ipcMain.handle(
       if (backedUp) await rename(picked.filePath, backup);
       try {
         controller.signal.throwIfAborted();
-        await rename(partial, picked.filePath);
+        await publishExportedBundle(partial, picked.filePath);
       } catch (error) {
         if (backedUp) await rename(backup, picked.filePath).catch(() => {});
         throw error;
       }
       if (backedUp) await rm(backup, { force: true }).catch(() => {});
-      return { ok: true, path: picked.filePath, bytesWritten, verified: true };
+      return { ok: true, path: picked.filePath, bytesWritten, verified };
     } catch (err) {
       if (partial) await rm(partial, { force: true }).catch(() => {});
       if (controller.signal.aborted) return { ok: true, canceled: true };
@@ -1509,6 +1578,21 @@ ipcMain.handle(
     }
     const active = activeModelBundleExports.get(exportId);
     if (active?.webContentsId === event.sender.id) active.controller.abort();
+    return { ok: true };
+  },
+);
+
+ipcMain.handle(
+  'gezel:skip-model-bundle-export-verification',
+  (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
+    if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
+      return { ok: false, error: 'invalid model export verification skip request' };
+    }
+    const active = activeModelBundleExports.get(exportId);
+    if (active?.webContentsId === event.sender.id) {
+      active.verificationSkipped = true;
+      active.verifyController.abort();
+    }
     return { ok: true };
   },
 );
@@ -2510,7 +2594,9 @@ async function checkAppReleaseForUpdates(): Promise<void> {
       return;
     }
     appUpdateRelease = release;
-    const delivery = appUpdateDeliveryPolicy(process.platform);
+    const delivery = appUpdateDeliveryPolicy(process.platform, {
+      store: storeBuild.channel !== null,
+    });
     if (!delivery.initializeElectronUpdater) {
       if (!isNewerAppVersion(release.version, app.getVersion())) {
         setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
@@ -2543,7 +2629,9 @@ async function checkAppReleaseForUpdates(): Promise<void> {
 
 function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   if (autoUpdaterRef) return autoUpdaterRef;
-  const delivery = appUpdateDeliveryPolicy(process.platform);
+  const delivery = appUpdateDeliveryPolicy(process.platform, {
+    store: storeBuild.channel !== null,
+  });
   // Defense in depth: Linux and unsupported platforms never construct
   // electron-updater, keeping its elevating DEB/RPM installers unreachable.
   if (!delivery.initializeElectronUpdater) return null;
@@ -3070,6 +3158,7 @@ app.whenReady().then(async () => {
         launch.forceEmbeddedFromCli ||
         process.env.GEZEL_EMBEDDED === '1' ||
         (!app.isPackaged && process.env.GEZEL_SPAWN !== '1'),
+      ...(storeBuild.channel ? { storeProfile: true } : {}),
       uiDir: resolveBundledUi(),
       logger: {
         info: (m) => {

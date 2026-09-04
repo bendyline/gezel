@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { type FileEntry, defaultIconFor } from './FileTree.js';
+import { ContextMenu, DropdownMenu } from '../primitives/index.js';
+import { type FileEntry, type FileTreeAction, defaultIconFor } from './FileTree.js';
 import { parentDirOf } from './file-view-modes.js';
 
 export interface FileFlatListProps {
@@ -17,6 +18,8 @@ export interface FileFlatListProps {
    * put there squeezes the name out of the row entirely.
    */
   detailForEntry?: (entry: FileEntry) => ReactNode;
+  /** Optional host-defined actions exposed through both row menus. */
+  actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
   emptyMessage?: ReactNode;
 }
 
@@ -33,6 +36,7 @@ export function FileFlatList({
   iconFor = defaultIconFor,
   trailingForEntry,
   detailForEntry,
+  actionsForEntry,
   emptyMessage,
 }: FileFlatListProps) {
   if (entries.length === 0) {
@@ -44,7 +48,8 @@ export function FileFlatList({
         const parent = parentDirOf(entry.path);
         const trailing = trailingForEntry?.(entry);
         const detail = detailForEntry?.(entry);
-        return (
+        const actions = actionsForEntry?.(entry) ?? [];
+        const row = (
           <div
             key={entry.path}
             className={`tree-row${selectedPath === entry.path ? ' tree-row-selected' : ''}${
@@ -78,7 +83,60 @@ export function FileFlatList({
                 {trailing}
               </button>
             )}
+            {actions.length > 0 && (
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    className="tree-actions-trigger"
+                    aria-label={`Actions for ${entry.name}`}
+                    title={`Actions for ${entry.name}`}
+                  >
+                    <span aria-hidden="true">⋯</span>
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="app-nav-menu tree-actions-menu"
+                    sideOffset={4}
+                    align="end"
+                  >
+                    {actions.map((action) => (
+                      <DropdownMenu.Item
+                        key={action.label}
+                        className="app-nav-menu-item"
+                        disabled={action.disabled}
+                        onSelect={() => void action.onSelect(entry)}
+                      >
+                        {action.label}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
           </div>
+        );
+        return actions.length > 0 ? (
+          <ContextMenu.Root key={entry.path}>
+            <ContextMenu.Trigger asChild>{row}</ContextMenu.Trigger>
+            <ContextMenu.Portal>
+              <ContextMenu.Content className="app-nav-menu tree-actions-menu">
+                {actions.map((action) => (
+                  <ContextMenu.Item
+                    key={action.label}
+                    className="app-nav-menu-item"
+                    disabled={action.disabled}
+                    onSelect={() => void action.onSelect(entry)}
+                  >
+                    {action.label}
+                  </ContextMenu.Item>
+                ))}
+              </ContextMenu.Content>
+            </ContextMenu.Portal>
+          </ContextMenu.Root>
+        ) : (
+          row
         );
       })}
     </div>

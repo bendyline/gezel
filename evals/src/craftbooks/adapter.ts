@@ -1,7 +1,12 @@
 import type { CraftbookTestSpec } from '@bendyline/gezel';
 import type { CraftbookEvalOverride } from './overrides.ts';
 import type { LoadedCraftbookTestSpec } from './test-spec-loader.ts';
-import type { CraftbookEvalGateCheck, CraftbookEvalSimulator, CraftbookEvalSpec } from './types.ts';
+import type {
+  CraftbookEvalGateCheck,
+  CraftbookEvalMode,
+  CraftbookEvalSimulator,
+  CraftbookEvalSpec,
+} from './types.ts';
 
 /**
  * Adapt a catalog-shipped `test.json` (plus the evals-internal override
@@ -16,8 +21,14 @@ export function evalSpecFromTestSpec(
 ): CraftbookEvalSpec {
   const { craftbookId, spec } = loaded;
   const legacySimulators = readLegacySimulators(spec);
+  const mode: CraftbookEvalMode = override?.existingScenarioId
+    ? (override.mode ?? 'artifact-task')
+    : loaded.hasSpawn
+      ? 'workflow'
+      : (override?.mode ?? 'artifact-task');
   return {
     craftbookId,
+    mode,
     scenarioId: override?.scenarioId ?? `craftbook-${craftbookId}`,
     title: spec.title,
     objective: spec.objective,
@@ -88,7 +99,6 @@ export function evalSpecFromTestSpec(
     ...(spec.mocks.length > 0 ? { mocks: spec.mocks } : {}),
     testSpecVersion: loaded.version,
     ...(loaded.stepPathTokens.length > 0 ? { stepPathTokens: loaded.stepPathTokens } : {}),
-    ...(loaded.hasSpawn || override?.runAsCraftbookTask ? { runAsCraftbookTask: true } : {}),
     ...(override?.timeoutMs !== undefined ? { timeoutMs: override.timeoutMs } : {}),
     ...(override?.progressTimeoutMs !== undefined
       ? { progressTimeoutMs: override.progressTimeoutMs }

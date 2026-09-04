@@ -91,17 +91,20 @@ describe('Output pane titlebar restore', () => {
   });
 });
 
-describe('AI engagement menu', () => {
+describe('Task speed menu', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+    vi.mocked(api.updateConfig).mockImplementation(async (body) => body as never);
+    vi.mocked(api.setNightShiftManual).mockResolvedValue({ active: false, source: null });
   });
 
-  it('gives every execution mode its own glyph and marks the active mode clearly', async () => {
+  it('combines execution modes and the moon-labelled Night Shift area', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     const trigger = await screen.findByRole('button', {
-      name: 'AI engagement: Proactive. Click to change.',
+      name: 'Task speed: Proactive. Click to change.',
     });
     expect(trigger.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
 
@@ -124,6 +127,47 @@ describe('AI engagement menu', () => {
     expect(
       screen.getByRole('menuitem', { name: /^Off/ }).querySelector('.app-engagement-mode-icon-off'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Night Shift')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Start night shift now/ })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['Reactive only', 'reactive'],
+    ['Off', 'off'],
+  ] as const)('stops a running Night Shift when %s is selected', async (label, nextMode) => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: new RegExp(`^${label}`) }));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: nextMode });
+      expect(api.setNightShiftManual).toHaveBeenCalledWith('stop');
+    });
+  });
+
+  it('keeps Night Shift running when Tasks + Reactive is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: /Tasks \+ Reactive/ }));
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' }),
+    );
+    expect(api.setNightShiftManual).not.toHaveBeenCalled();
   });
 });
 
@@ -141,28 +185,39 @@ describe('Night Shift header status', () => {
     });
   });
 
-  it('adds passing clouds only while a shift is running', async () => {
+  it('replaces the mode glyph with moving Night Shift while preserving the mode selection', async () => {
+    const user = userEvent.setup();
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
     render(<App />);
 
-    const trigger = await screen.findByRole('button', { name: 'Night Shift: on (manual)' });
+    const trigger = await screen.findByRole('button', {
+      name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+    });
     expect(trigger.querySelectorAll('.app-nightshift-cloud')).toHaveLength(2);
     expect(trigger.querySelector('.app-nightshift-moon')).toHaveClass('is-active');
+
+    await user.click(trigger);
+    const proactive = await screen.findByRole('menuitem', { name: /Proactive/ });
+    expect(proactive.querySelector('.app-engagement-menu-check svg')).toBeInTheDocument();
   });
 
-  it('keeps the resting moon still when Night Shift is off', async () => {
+  it('shows the selected mode glyph when Night Shift is off', async () => {
     render(<App />);
 
-    const trigger = await screen.findByRole('button', { name: 'Night Shift: off' });
-    expect(trigger.querySelector('.app-nightshift-cloud')).not.toBeInTheDocument();
-    expect(trigger.querySelector('.app-nightshift-moon')).not.toHaveClass('is-active');
+    const trigger = await screen.findByRole('button', {
+      name: 'Task speed: Proactive. Click to change.',
+    });
+    expect(trigger.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
+    expect(trigger.querySelector('.app-nightshift-glyph')).not.toBeInTheDocument();
   });
 
   it('sets the start command into a raised key tray', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+    );
 
     const action = await screen.findByRole('menuitem', { name: /Start night shift now/ });
     expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
@@ -174,7 +229,11 @@ describe('Night Shift header status', () => {
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
 
     const action = await screen.findByRole('menuitem', { name: /Stop night shift/ });
     expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
@@ -198,7 +257,11 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
 
     expect(await screen.findByText('Workspace indexing')).toBeInTheDocument();
     expect(screen.getByText('molen-internal · Studying workspace files')).toBeInTheDocument();
@@ -210,7 +273,11 @@ describe('Night Shift header status', () => {
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
 
     expect(await screen.findByText('No work is running or queued.')).toBeInTheDocument();
     expect(screen.queryByText('Up next')).not.toBeInTheDocument();
@@ -232,7 +299,11 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (scheduled)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (scheduled); Proactive mode. Click to change.',
+      }),
+    );
 
     expect(
       await screen.findByText(
@@ -253,7 +324,9 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+    );
 
     expect(
       await screen.findByText(`Next window ${clock(start)} – ${clock(end)}`),
@@ -275,7 +348,11 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
 
     expect(
       await screen.findByText(`Started ${clock(startedAt)} · runs until the work is done`),
@@ -302,7 +379,11 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      }),
+    );
 
     expect(await screen.findByText('So far this shift')).toBeInTheDocument();
     const chips = document.querySelectorAll('.app-nightshift-tally-item');
@@ -334,7 +415,11 @@ describe('Night Shift header status', () => {
       diffpacks: [],
     });
     const running = render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (scheduled)' }));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Task speed: Night Shift running (scheduled); Proactive mode. Click to change.',
+      }),
+    );
     expect(await screen.findByText('Finished so far')).toBeInTheDocument();
     running.unmount();
 
@@ -348,7 +433,9 @@ describe('Night Shift header status', () => {
       diffpacks: [],
     });
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+    );
     expect(await screen.findByText('Done last night')).toBeInTheDocument();
   });
 
@@ -377,7 +464,9 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+    );
 
     expect(
       await screen.findByText(
@@ -502,23 +591,22 @@ describe('quota meter', () => {
     await waitFor(() => expect(screen.queryByText('Remaining')).not.toBeInTheDocument());
   });
 
-  it('sits before the Night Shift and engagement controls', async () => {
+  it('sits before the combined task-speed control', async () => {
     render(<App />);
     await screen.findByRole('button', { name: /1239\/1500/ });
 
     const cluster = screen.getByTestId('app-header').querySelector('.app-header-right');
     const children = [...(cluster?.children ?? [])];
     const quotaIndex = children.findIndex((child) => child.classList.contains('quota-meter-root'));
-    const nightShiftIndex = children.findIndex((child) =>
-      child.classList.contains('app-nightshift-trigger'),
-    );
     const engagementIndex = children.findIndex((child) =>
       child.classList.contains('app-engagement-trigger'),
     );
 
     expect(quotaIndex).toBeGreaterThanOrEqual(0);
-    expect(nightShiftIndex).toBeGreaterThan(quotaIndex);
     expect(engagementIndex).toBeGreaterThan(quotaIndex);
+    expect(
+      children.filter((child) => child.classList.contains('app-engagement-trigger')),
+    ).toHaveLength(1);
   });
 
   it('stays hidden while its provider is idle', async () => {

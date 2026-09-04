@@ -27,10 +27,15 @@ export const CHAT_FEED_ROW_STYLES: Record<
 };
 
 /**
- * Scrolling view of the live multi-agent feed. Shows the last `visible`
- * rows; each row is prefixed with the speaking gezel (or "you" for user
- * turns). The `focused` session is highlighted so it's clear where input
- * will land when you interject.
+ * Scrolling view of the live multi-agent feed. `visible` is a physical
+ * terminal-line budget, not just an event count: one event may contain
+ * newlines or wrap across many lines. Keeping the rendered box within that
+ * budget prevents Ink's live region from crossing the terminal scroll
+ * boundary and leaving stale output elsewhere in the viewport.
+ *
+ * Each row is prefixed with the speaking gezel (or "you" for user turns).
+ * The `focused` session is highlighted so it's clear where input will land
+ * when you interject.
  */
 export function ChatFeed(props: {
   rows: ReadonlyArray<FeedRow>;
@@ -47,7 +52,14 @@ export function ChatFeed(props: {
   const shown = visibleRows.slice(Math.max(0, visibleRows.length - visible));
 
   return (
-    <Box flexDirection="column" flexGrow={1} marginBottom={1}>
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      maxHeight={visible}
+      overflowY="hidden"
+      justifyContent="flex-end"
+      marginBottom={1}
+    >
       {shown.length === 0 ? (
         <Box flexDirection="row">
           <Text color="yellow">{TABLE_LOGO}</Text>
@@ -65,9 +77,9 @@ export function ChatFeed(props: {
           // makes column-aware output such as `ls` wrap asymmetrically.
           if (row.kind === 'shell' && row.sessionId.startsWith('term-')) {
             return (
-              <Text key={row.key} wrap="wrap">
-                {clip(row.text)}
-              </Text>
+              <Box key={row.key} flexShrink={0}>
+                <Text wrap="wrap">{clip(row.text)}</Text>
+              </Box>
             );
           }
           const who =
@@ -93,7 +105,7 @@ export function ChatFeed(props: {
           // Only the speaker prefix is fixed; long chat replies render in
           // full rather than being clipped to a line.
           return (
-            <Box key={row.key} flexDirection="row">
+            <Box key={row.key} flexDirection="row" flexShrink={0}>
               <Text dimColor={!isFocused} color={isFocused ? 'green' : undefined}>
                 {isFocused ? '▎' : ' '}
               </Text>

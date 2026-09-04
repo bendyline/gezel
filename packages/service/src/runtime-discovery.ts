@@ -6,9 +6,9 @@
  * other accounts, so its permission handling is deliberate rather than left
  * to the service manager's umask.
  */
-import { chmod, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { type ServiceRole, createLogger } from '@bendyline/gezel';
+import { GEZEL_VERSION, type ServiceRole, createLogger } from '@bendyline/gezel';
 import type { gezelPaths } from '@bendyline/gezel/paths';
 import type { LoopbackCert } from './http/cert.js';
 
@@ -113,6 +113,77 @@ export async function writeRuntime(args: {
       rm(args.paths.runtime.cert, { force: true }),
       rm(args.paths.runtime.fingerprint, { force: true }),
     ]);
+  }
+
+  await writeRendezvousMirror(args);
+}
+
+/**
+ * Publish discovery metadata into a second directory a sandboxed client can
+ * reach.
+ *
+ * A Mac App Store build lives in its own container and cannot see
+ * `~/.gezel/runtime/` at all — the files are outside its sandbox, and 0600 on
+ * top of that. Without a rendezvous it would always run its own daemon beside
+ * the one the user already installed. The macOS answer is an App Group
+ * container, which both builds may open by entitlement; `GEZEL_RUNTIME_MIRROR_DIR`
+ * points at it.
+ *
+ * Written here, inside `writeRuntime`, rather than by anything that copies
+ * later: the client credential rotates on every service start, so a mirror
+ * produced out-of-band is a stale token the moment the daemon restarts.
+ *
+ * The pid is deliberately NOT mirrored. A store client must never manage a
+ * daemon it did not spawn — it cannot signal one under the sandbox and must
+ * not try — so liveness is the health probe's answer, and offering a pid
+ * would only invite code that acts on it.
+ */
+async function writeRendezvousMirror(args: {
+  paths: ReturnType<typeof gezelPaths>;
+  port: number;
+  token: string;
+  cert: LoopbackCert | null;
+  serviceRole: ServiceRole;
+}): Promise<void> {
+  const dir = process.env.GEZEL_RUNTIME_MIRROR_DIR;
+  if (!dir) return;
+  try {
+    await mkdir(dir, { recursive: true });
+    // Same unlink-then-exclusive-create discipline as the primary token: an
+    // existing file keeps its DACL/owner on Windows, and `wx` fails closed if
+    // something raced us to the path.
+    await rm(join(dir, 'auth-token'), { force: true });
+    await writeFile(join(dir, 'auth-token'), args.token, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    await writeFile(join(dir, 'port'), `${args.port}\n`, { encoding: 'utf8', mode: 0o600 });
+    await writeFile(join(dir, 'service-role'), `${args.serviceRole}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await writeFile(join(dir, 'version'), `${GEZEL_VERSION}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    if (args.cert) {
+      await writeFile(join(dir, 'cert.pem'), args.cert.certPem, 'utf8');
+      await writeFile(join(dir, 'cert-fingerprint'), `${args.cert.sha256Hex}\n`, 'utf8');
+    } else {
+      // Mirror the cleanup too: discovery infers the transport from cert
+      // presence, so stale public material sends clients at HTTPS against a
+      // plain HTTP listener.
+      await Promise.all([
+        rm(join(dir, 'cert.pem'), { force: true }),
+        rm(join(dir, 'cert-fingerprint'), { force: true }),
+      ]);
+    }
+  } catch (err) {
+    // The mirror is an optimization: without it a store client runs its own
+    // daemon, which is correct behavior, just not the shared one. Never fail
+    // a daemon launch over it.
+    log.warn(`[service] could not publish runtime rendezvous mirror: ${String(err)}`);
   }
 }
 

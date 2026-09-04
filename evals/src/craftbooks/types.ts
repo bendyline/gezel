@@ -47,11 +47,21 @@ export type CraftbookEvalGateCheck =
 export type CraftbookEvalCoverageStatus = 'missing' | 'planned' | 'implemented' | 'validated';
 
 /**
+ * The contract exercised by a craftbook eval.
+ *
+ * `artifact-task` sends a bounded prompt directly to a worker and proves the
+ * requested artifact. It does not claim that the craftbook runtime drove the
+ * work. `workflow` creates and dispatches a real craftbook task; the generic
+ * harness additionally requires craftbook attribution and terminal progress.
+ */
+export type CraftbookEvalMode = 'artifact-task' | 'workflow';
+
+/**
  * What a recorded local-model validation actually proves. Artifact-only
  * validations show that the prompt produced deliverables which passed the
- * scenario gates. Workflow validations additionally prove observable runtime
- * progression (terminal-step, gate, dispatch, hook, or draft-workflow evidence);
- * mere task existence is intentionally insufficient.
+ * scenario gates. Workflow validations ran under the workflow-mode invariant:
+ * an attributed craftbook task reached a terminal step or completed. Mere task
+ * existence is intentionally insufficient.
  */
 export type CraftbookEvalValidationScope = 'none' | 'artifact-only' | 'workflow';
 
@@ -166,6 +176,9 @@ export interface CraftbookEvalSpec {
   /** Bundled craftbook template id, e.g. `html-arcade-game`. */
   craftbookId: string;
 
+  /** Explicitly states whether this eval proves an artifact or the workflow. */
+  mode: CraftbookEvalMode;
+
   /**
    * Backticked slash-containing path tokens from the book's own step
    * prompts, uninterpolated. Fed (with params) to the runtime's citation
@@ -188,6 +201,8 @@ export interface CraftbookEvalSpec {
   success: CraftbookEvalSuccessSpec;
   coverage: {
     status: Exclude<CraftbookEvalCoverageStatus, 'missing'>;
+    /** Mode used by the recorded validation; omit for migrated artifact-only evidence. */
+    validatedMode?: CraftbookEvalMode;
     localModels?: string[];
     notes?: string;
   };
@@ -210,14 +225,6 @@ export interface CraftbookEvalSpec {
   mocks?: MockService[];
   /** Version of the test.json the spec was adapted from (shim provenance header). */
   testSpecVersion?: string;
-  /**
-   * Run the book as a real craftbook TASK — create
-   * the task from the craftbook and dispatch its entry step, so the runtime
-   * drives the step chain (and per-item fanout, when declared) instead of the
-   * freehand direct-worker kickoff. Set from the loaded craftbook or an eval
-   * override when the scenario must prove role routing and tool handoffs.
-   */
-  runAsCraftbookTask?: boolean;
   /** Max trial duration, ms. Unset inherits the runner's 8-hour default. */
   timeoutMs?: number;
   /** Hard no-progress timeout, ms. Unset inherits the runner's 45 minutes. */
@@ -270,6 +277,7 @@ export interface CraftbookAuditResult {
   band: 'strong' | 'needs-work' | 'weak';
   hasEvalSpec: boolean;
   evalStatus: CraftbookEvalCoverageStatus;
+  evalMode: CraftbookEvalMode | 'none';
   validationScope: CraftbookEvalValidationScope;
   issues: CraftbookAuditIssue[];
 }
@@ -279,6 +287,8 @@ export interface CraftbookCoverageSummary {
   evalSpecs: number;
   implementedSpecs: number;
   validatedSpecs: number;
+  artifactTaskSpecs: number;
+  workflowSpecs: number;
   artifactOnlyValidatedSpecs: number;
   workflowValidatedSpecs: number;
   averageQualityScore: number;

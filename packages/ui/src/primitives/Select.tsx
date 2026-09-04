@@ -64,6 +64,7 @@ export function Item({
   disabled,
   style,
   textValue,
+  trailing,
 }: {
   value: string;
   children: ReactNode;
@@ -74,6 +75,14 @@ export function Item({
   /** Plain-text label for typeahead + the trigger's accessible value
    *  when `children` is rich JSX (e.g. mention pills). */
   textValue?: string;
+  /**
+   * Row-scoped content rendered OUTSIDE `ItemText` — a per-row action, say.
+   * The distinction matters: Radix portals an item's `ItemText` into the
+   * trigger when that item is the selected one, so anything placed there
+   * shows up twice, and an interactive control would land inside the
+   * trigger's own button.
+   */
+  trailing?: ReactNode;
 }) {
   return (
     <RadixSelect.Item
@@ -84,6 +93,7 @@ export function Item({
       textValue={textValue}
     >
       <RadixSelect.ItemText>{children}</RadixSelect.ItemText>
+      {trailing}
     </RadixSelect.Item>
   );
 }

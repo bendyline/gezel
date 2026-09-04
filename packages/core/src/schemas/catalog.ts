@@ -17,6 +17,7 @@ import {
 } from './craftbook.js';
 import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
+import { KNOWLEDGE_EMBEDDING_PROFILE_IDS, KnowledgeIdSchema } from './knowledge.js';
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
@@ -2285,6 +2286,141 @@ export const VideoModelManifestSchema = z.object({
 });
 export type VideoModelManifest = z.infer<typeof VideoModelManifestSchema>;
 
+// ─ Knowledge catalog ───────────────────────────────────────────────
+//
+// A published `.gezk` knowledge catalog (docs/gezk-format.md), hosted as a
+// Hugging Face dataset repository and pinned here by commit sha + sha256 —
+// the same trust root chat models use. The archive's own manifest is the
+// authority on its contents; this entry carries what the catalog browser
+// and the installer need before a single byte is downloaded.
+
+export const KnowledgeCatalogCategorySchema = z.enum([
+  'encyclopedia',
+  'reference',
+  'science',
+  'history',
+  'technology',
+  'culture',
+  'manuals',
+  'other',
+]);
+export type KnowledgeCatalogCategory = z.infer<typeof KnowledgeCatalogCategorySchema>;
+
+const HfDatasetRepoRegex = /^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/;
+const HfCommitRegex = /^[0-9a-f]{40}$/;
+const HfRepoPathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (p) => !p.startsWith('/') && p.split('/').every((seg) => seg !== '' && seg !== '..'),
+    'a relative repo path without empty or parent segments',
+  );
+
+export const KnowledgeCatalogHuggingfaceSourceSchema = z.object({
+  /** Dataset repo id, e.g. `Bendyline/wikipedia-physics`. */
+  repo: z.string().regex(HfDatasetRepoRegex),
+  /** Commit sha. Immutability is the trust model, so a branch name is not accepted. */
+  revision: z.string().regex(HfCommitRegex),
+  /** Path of the `.gezk` inside the repo at that commit. */
+  path: HfRepoPathSchema,
+});
+export type KnowledgeCatalogHuggingfaceSource = z.infer<
+  typeof KnowledgeCatalogHuggingfaceSourceSchema
+>;
+
+export const KnowledgeCatalogIdentitySchema = IdentityCommonSchema.extend({
+  kind: z.literal('knowledge-catalog'),
+  /** Equals the archive manifest's `id`. */
+  id: KnowledgeIdSchema,
+  /** Equals the archive manifest's `publisher.id`. */
+  publisherId: KnowledgeIdSchema,
+  language: z.string().min(2),
+  category: KnowledgeCatalogCategorySchema.optional(),
+  /** The Hugging Face dataset card. */
+  upstream: z.string().url().optional(),
+});
+export type KnowledgeCatalogIdentity = z.infer<typeof KnowledgeCatalogIdentitySchema>;
+
+const KnowledgeCatalogTopicSchema = z.object({ id: KnowledgeIdSchema, name: z.string().min(1) });
+const KnowledgeCatalogParquetSchema = z.object({
+  repo: z.string().regex(HfDatasetRepoRegex),
+  revision: z.string().regex(HfCommitRegex),
+  dir: HfRepoPathSchema,
+});
+
+export const KnowledgeCatalogVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  version: z.string().regex(SemverRegex),
+  releasedAt: z.string(),
+  /** The archive's gezk format version, so a reader can refuse before downloading. */
+  formatVersion: z.string().min(1),
+  huggingface: KnowledgeCatalogHuggingfaceSourceSchema,
+  /** SHA-256 of the archive — the installed ref's contentDigest. */
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  archiveBytes: z.number().int().positive(),
+  uncompressedBytes: z.number().int().positive(),
+  documents: z.number().int().nonnegative(),
+  chunks: z.number().int().nonnegative(),
+  embeddingProfile: z.object({
+    id: z.enum(KNOWLEDGE_EMBEDDING_PROFILE_IDS),
+    modelRepo: z.string().min(1),
+  }),
+  /** Top-level table of contents, for the browser card. */
+  topics: z.array(KnowledgeCatalogTopicSchema).min(1),
+  sourceSnapshot: z
+    .object({ name: z.string(), date: z.string(), taxonomyVersion: z.string().optional() })
+    .optional(),
+  /** The Parquet companion (documents, chunks, embeddings), display-only. */
+  parquet: KnowledgeCatalogParquetSchema.optional(),
+  notes: z.string().optional(),
+});
+export type KnowledgeCatalogVersionManifest = z.infer<typeof KnowledgeCatalogVersionManifestSchema>;
+
+/** Resolved identity ∪ version. "Item" avoids clashing with the archive's own manifest type. */
+export const KnowledgeCatalogItemManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  kind: z.literal('knowledge-catalog'),
+  id: KnowledgeIdSchema,
+  name: z.string().min(1),
+  description: z.string(),
+  tags: z.array(z.string()).default([]),
+  maintainer: z.object({
+    name: z.string(),
+    url: z.string().url().optional(),
+  }),
+  logo: z.string().optional(),
+  license: z.string().optional(),
+  ...LicenseMetaShape,
+  ...RecoMetaShape,
+  publisherId: KnowledgeIdSchema,
+  language: z.string().min(2),
+  category: KnowledgeCatalogCategorySchema.optional(),
+  upstream: z.string().url().optional(),
+  version: z.string(),
+  releasedAt: z.string(),
+  formatVersion: z.string().min(1),
+  huggingface: KnowledgeCatalogHuggingfaceSourceSchema,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  archiveBytes: z.number().int().positive(),
+  uncompressedBytes: z.number().int().positive(),
+  documents: z.number().int().nonnegative(),
+  chunks: z.number().int().nonnegative(),
+  embeddingProfile: z.object({
+    id: z.enum(KNOWLEDGE_EMBEDDING_PROFILE_IDS),
+    modelRepo: z.string().min(1),
+  }),
+  topics: z.array(KnowledgeCatalogTopicSchema).min(1),
+  sourceSnapshot: z
+    .object({ name: z.string(), date: z.string(), taxonomyVersion: z.string().optional() })
+    .optional(),
+  parquet: KnowledgeCatalogParquetSchema.optional(),
+  notes: z.string().optional(),
+  availableVersions: z.array(z.string()).default([]),
+});
+export type KnowledgeCatalogItemManifest = z.infer<typeof KnowledgeCatalogItemManifestSchema>;
+
 // ─ Identity / version unions ────────────────────────────────────────
 
 export const CatalogItemIdentitySchema = z.discriminatedUnion('kind', [
@@ -2296,6 +2432,7 @@ export const CatalogItemIdentitySchema = z.discriminatedUnion('kind', [
   ChatModelIdentitySchema,
   ImageModelIdentitySchema,
   VideoModelIdentitySchema,
+  KnowledgeCatalogIdentitySchema,
 ]);
 export type CatalogItemIdentity = z.infer<typeof CatalogItemIdentitySchema>;
 
@@ -2310,6 +2447,7 @@ export const CatalogItemManifestSchema = z.discriminatedUnion('kind', [
   ChatModelManifestSchema,
   ImageModelManifestSchema,
   VideoModelManifestSchema,
+  KnowledgeCatalogItemManifestSchema,
 ]);
 export type CatalogItemManifest = z.infer<typeof CatalogItemManifestSchema>;
 
@@ -2322,6 +2460,7 @@ export const CatalogKindSchema = z.enum([
   'chat-model',
   'image-model',
   'video-model',
+  'knowledge-catalog',
 ]);
 export type CatalogKind = z.infer<typeof CatalogKindSchema>;
 

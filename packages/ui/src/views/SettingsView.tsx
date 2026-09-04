@@ -826,6 +826,23 @@ export function SettingsView() {
     }
   }, []);
 
+  /**
+   * How long a SENT prompt draft is kept. The sweep also removes the files
+   * that draft attached, which a message in the transcript may still be
+   * showing — so the copy says that plainly rather than presenting this as
+   * free disk hygiene.
+   */
+  const savePromptDraftRetention = useCallback(async (keepSentDays: number) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ promptDrafts: { keepSentDays } });
+      setConfig(res);
+      setStatus('draft retention saved');
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
+
   const saveNightShift = useCallback(
     async (patch: {
       enabled?: boolean;
@@ -884,32 +901,24 @@ export function SettingsView() {
     [config?.nightShift?.quotaReserve, saveNightShift],
   );
 
-  const saveRoleBasedNameOnlyMode = useCallback(async (roleBasedNameOnlyMode: boolean) => {
+  /**
+   * One switch over the two persisted display flags (roleBasedNameOnlyMode +
+   * showPoppetjes) — the UI deliberately offers no way to set them apart.
+   * Formerly "Boring mode": the negative in-joke framing read poorly during
+   * onboarding (2026-09-02 UX review), so both first run and Settings now ask
+   * the same positive question. The flags stay separate in config for API
+   * compatibility.
+   */
+  const saveShowNamesAndPoppetjes = useCallback(async (show: boolean) => {
     setStatus('saving…');
     try {
-      const res = await api.updateConfig({ roleBasedNameOnlyMode });
+      const res = await api.updateConfig({ roleBasedNameOnlyMode: !show, showPoppetjes: show });
       setConfig(res);
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(
-        roleBasedNameOnlyMode
-          ? 'boring mode ON — gezels show their role-based names'
-          : 'boring mode OFF — friendly names restored',
-      );
-    } catch (err) {
-      setStatus(`save failed: ${(err as Error).message}`);
-    }
-  }, []);
-
-  const saveShowPoppetjes = useCallback(async (showPoppetjes: boolean) => {
-    setStatus('saving…');
-    try {
-      const res = await api.updateConfig({ showPoppetjes });
-      setConfig(res);
-      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      setStatus(
-        showPoppetjes
-          ? 'poppetjes ON — avatars shown across the UI'
-          : 'poppetjes OFF — avatars hidden',
+        show
+          ? 'gezels show their names and poppetjes'
+          : 'gezels show role-based names and plain letter avatars',
       );
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1619,35 +1628,24 @@ export function SettingsView() {
                 <SidebarSidePicker />
               </section>
               <section style={{ marginBottom: '2rem' }}>
-                <h3>Boring mode</h3>
+                <h3>Gezel names and poppetjes</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Hide friendly names everywhere. Each gezel shows only their role-based name (e.g.{' '}
-                  <code>visual-designer</code> instead of "Mira"). The same name flows into system
-                  prompts and chat handoffs, so the model addresses itself by role.
-                </p>
-                <label className="debug-toggle">
-                  <input
-                    type="checkbox"
-                    checked={config?.roleBasedNameOnlyMode === true}
-                    onChange={(e) => void saveRoleBasedNameOnlyMode(e.target.checked)}
-                  />
-                  <span>Use role-based names only</span>
-                </label>
-                <p className="muted" style={{ marginBottom: 0 }}>
                   Poppetjes are the little character figures shown beside each gezel — like your
-                  meester's here. Turn them off to fall back to a plain letter avatar everywhere.
+                  meester's here. Turn this off and every gezel shows a role-based name (e.g.{' '}
+                  <code>visual-designer</code> instead of "Mira") with a plain letter avatar; the
+                  role-based name also flows into system prompts and chat handoffs, so the model
+                  addresses itself by role.
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  {/* UI-level inversion only: the persisted flag stays
-                    `showPoppetjes` (true = shown). The checkbox reads/writes
-                    its negation so the label can be the more natural "Hide". */}
                   <label className="debug-toggle" style={{ marginTop: 0 }}>
                     <input
                       type="checkbox"
-                      checked={config?.showPoppetjes === false}
-                      onChange={(e) => void saveShowPoppetjes(!e.target.checked)}
+                      checked={
+                        config?.roleBasedNameOnlyMode !== true && config?.showPoppetjes !== false
+                      }
+                      onChange={(e) => void saveShowNamesAndPoppetjes(e.target.checked)}
                     />
-                    <span>Hide poppetjes</span>
+                    <span>Show gezel names and poppetjes</span>
                   </label>
                   {(() => {
                     const meester = gezels.find((g) => g.id === config?.meesterGezelId);
@@ -1704,6 +1702,35 @@ export function SettingsView() {
                 </label>
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   (Grammar checking is currently only available for English)
+                </p>
+              </section>
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Prompt drafts</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  A message you start writing is saved to the project as you type, so you can leave
+                  it and come back days later. Unsent drafts are kept until you delete them. A draft
+                  you have already sent is kept for a while so you can reopen or reuse it.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>Keep sent drafts for</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={3650}
+                    value={config?.promptDrafts?.keepSentDays ?? 90}
+                    onChange={(e) => {
+                      const days = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(days) && days >= 0) {
+                        void savePromptDraftRetention(days);
+                      }
+                    }}
+                    style={{ width: '5rem' }}
+                  />
+                  <span>days (0 keeps them forever)</span>
+                </label>
+                <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                  Clearing out an old sent draft also removes the files it attached, so an image in
+                  a message that old will stop showing in the transcript.
                 </p>
               </section>
               <section style={{ marginTop: '2rem' }}>
@@ -4452,7 +4479,11 @@ function EngagementModePanel({
         Global control over how much AI activity is allowed. Use this as a panic button when you
         want to conserve tokens or step away from the app.
       </p>
-      <div className="engagement-mode-switch gz-tray" role="radiogroup" aria-label="AI engagement">
+      <div
+        className="engagement-mode-switch gz-tray gz-tray--described"
+        role="radiogroup"
+        aria-label="AI engagement"
+      >
         {ENGAGEMENT_MODES.map((m) => (
           <button
             key={m.id}
@@ -4467,7 +4498,9 @@ function EngagementModePanel({
           </button>
         ))}
       </div>
-      <p className="engagement-mode-description">{current.description}</p>
+      <p className="engagement-mode-description gz-tray-description">
+        <strong>{current.label}</strong> — {current.description}
+      </p>
       {mode === 'off' && (
         <div className="engagement-mode-banner" role="alert">
           AI is disabled. The chat composer is inactive and all background activity is paused.
@@ -4480,7 +4513,11 @@ function EngagementModePanel({
             How frenetic the meester and voormannen feel. Adjusts check-in intervals and the tone of
             the meester's nudges.
           </p>
-          <div className="workshop-tempo-switch gz-tray" role="radiogroup" aria-label="Tempo">
+          <div
+            className="workshop-tempo-switch gz-tray gz-tray--described"
+            role="radiogroup"
+            aria-label="Tempo"
+          >
             {TEMPOS.map((t) => (
               <button
                 key={t.id}
@@ -4497,7 +4534,9 @@ function EngagementModePanel({
               </button>
             ))}
           </div>
-          <p className="engagement-mode-description">{currentTempo.description}</p>
+          <p className="engagement-mode-description gz-tray-description">
+            <strong>{currentTempo.label}</strong> — {currentTempo.description}
+          </p>
         </div>
       )}
     </section>

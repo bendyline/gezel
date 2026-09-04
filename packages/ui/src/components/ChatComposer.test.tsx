@@ -30,6 +30,9 @@ vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
+vi.mock('./PromptDraftMediaProvider.js', () => ({
+  createPromptDraftMediaProvider: () => ({ dispose: vi.fn() }),
+}));
 vi.mock('./ChatNarrateButton.js', async () => {
   const { useState } = await import('react');
   return {
@@ -60,13 +63,15 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder,
       toolbarSlotRight,
       onChange,
-      submitOnEnter,
+      minHeight,
+      maxHeight,
     }: {
       initialMarkdown?: string;
       placeholder?: string;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
-      submitOnEnter?: () => void;
+      minHeight?: string;
+      maxHeight?: string;
     }) => {
       // Match Squisq's mount-time-only placeholder configuration so this
       // mock catches regressions where a recipient change merely updates a
@@ -86,6 +91,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
               }}
             />
             <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
+            <span data-testid="editor-heights">{`${minHeight ?? ''}/${maxHeight ?? ''}`}</span>
             <span data-testid="editor-draft">{draft}</span>
             <button
               type="button"
@@ -96,9 +102,6 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             >
               Fill draft
             </button>
-            <button type="button" onClick={() => submitOnEnter?.()}>
-              Press Enter
-            </button>
             {toolbarSlotRight}
           </div>
         </EditorTestContext.Provider>
@@ -107,32 +110,63 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
   };
 });
 
+/**
+ * The send gesture, fired the way a person makes it. Enter alone is a
+ * newline now, so nothing here may go through a shim: the composer's own
+ * capture handler is the thing under test.
+ */
+function pressSendShortcut() {
+  fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter', shiftKey: true });
+}
+
 describe('ChatComposer keyboard hints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
   });
 
-  it('uses the native modifier name for Windows and macOS', () => {
-    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'win32' };
-    const { rerender } = render(
+  it('names the send gesture on the primary key', () => {
+    render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
 
     expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
       'title',
-      'Enter to send, Ctrl+Enter for newline',
+      'Shift+Enter to send, Enter for newline',
     );
+  });
 
-    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
-    rerender(
+  it('sends on Shift+Enter and leaves a bare Enter to the editor', async () => {
+    vi.mocked(api.sendToChatSession).mockResolvedValue(undefined as never);
+    render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
 
-    expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
-      'title',
-      'Enter to send, ⌘⏎ for newline',
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    // A bare Enter is a new line: the composer must not claim it, and the
+    // editor must still see it.
+    const bareEnter = fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' });
+    expect(bareEnter).toBe(true);
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+
+    pressSendShortcut();
+
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+  });
+
+  it('leaves Shift+Enter alone outside the typing surface', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: /^send$/i }), {
+      key: 'Enter',
+      shiftKey: true,
+    });
+
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
   });
 
   it('focuses the editor when its focus request key changes', async () => {
@@ -242,7 +276,7 @@ describe('ChatComposer /open command', () => {
         target: { value: `/open ${folder}` },
       });
       expect(screen.getByRole('menuitem', { name: `Open ${folder} folder` })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+      pressSendShortcut();
 
       await waitFor(() => expect(api.revealProject).toHaveBeenCalledWith('project-1', folder));
       expect(api.sendToChatSession).not.toHaveBeenCalled();
@@ -290,7 +324,7 @@ describe('ChatComposer /open command', () => {
     );
 
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: '/open missing.md' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+    pressSendShortcut();
 
     expect(await screen.findByText(/no recent file matches/i)).toBeTruthy();
     expect(screen.getByTestId('editor-draft')).toHaveTextContent('/open missing.md');
@@ -338,6 +372,7 @@ describe('ChatComposer lossless draft submission', () => {
     expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
       message: source.trim(),
       mentions: ['ada'],
+      draftId: '2026-09-03-0001',
     });
   });
 
@@ -536,6 +571,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
       expect(api.getChatSessionInflight).toHaveBeenCalledTimes(2);
     });
@@ -658,6 +694,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         nudge: true,
+        draftId: '2026-09-03-0001',
       });
     });
     // The draft cleared: the editor remounted empty and the mid-turn
@@ -675,12 +712,13 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
 
     await screen.findByRole('button', { name: /stop/i });
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+    pressSendShortcut();
 
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         nudge: true,
+        draftId: '2026-09-03-0001',
       });
     });
   });
@@ -697,6 +735,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
     await waitFor(() => {
       expect(api.interruptChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
     });
     expect(api.sendToChatSession).not.toHaveBeenCalled();
@@ -826,6 +865,7 @@ describe('ChatComposer recipient picker', () => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
         message: 'Hello from the test',
         mentions: ['ada'],
+        draftId: '2026-09-03-0001',
       });
     });
   });
@@ -882,6 +922,7 @@ describe('ChatComposer ordinary-session fallback', () => {
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('ordinary-session', {
         message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
       });
     });
     expect(api.createChatSession).not.toHaveBeenCalled();
@@ -1040,5 +1081,48 @@ describe('ChatComposer transport resilience', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('ChatComposer expand toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+  });
+
+  it('hands the draft the chat window and gives it back', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    const composer = screen.getByTestId('chat-composer');
+    const toggle = screen.getByTestId('chat-composer-expand');
+    expect(composer.getAttribute('data-composer-expanded')).toBeNull();
+    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(toggle);
+
+    expect(composer.getAttribute('data-composer-expanded')).toBe('true');
+    // Expanded, the shell fills its frame rather than growing with the text.
+    expect(screen.getByTestId('editor-heights').textContent).toBe('100%/100%');
+    expect(screen.getByTestId('chat-composer-expand')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByTestId('chat-composer-expand'));
+
+    expect(composer.getAttribute('data-composer-expanded')).toBeNull();
+    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+  });
+
+  it('stays reachable while a turn is running', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.click(screen.getByTestId('chat-composer-expand'));
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    expect(screen.getByTestId('chat-composer').getAttribute('data-composer-expanded')).toBe('true');
+    expect(screen.getByTestId('chat-composer-expand')).toBeTruthy();
   });
 });

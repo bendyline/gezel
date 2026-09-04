@@ -1,5 +1,5 @@
 /**
- * Catalog validation (gezk-format-v1.md §6.3) over an EXTRACTED catalog
+ * Catalog validation (the gezk spec §3.3 and §5) over an EXTRACTED catalog
  * directory: manifest parse, per-file hash reconciliation, read-only opens,
  * count reconciliation, and — in deep mode — SQLite quick_check, per-shard
  * vector-table alignment, the embedder-free self-KNN smoke, and the
@@ -9,8 +9,8 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
-import { KnowledgeCatalogManifestSchema } from '@bendyline/gezel';
+import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
+import { KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
 import { GEZK_ARCHIVE_LIMITS } from '../archive/read.js';
 import {
   MANIFEST_PATH,
@@ -119,6 +119,11 @@ export async function validateExtractedCatalog(
     // counts
     const topics = handle.topics();
     check('toc-present', topics.length >= 1, `${topics.length} topics`);
+    check(
+      'license-notice',
+      manifest.files.some((f) => f.path === manifest.license.noticePath),
+      `manifest.files lacks the declared notice ${manifest.license.noticePath}`,
+    );
     const topicDocSum = topics.reduce((sum, t) => sum + t.documentCount, 0);
     check(
       'counts-documents',
@@ -173,7 +178,11 @@ export async function validateExtractedCatalog(
             (db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number | bigint }).n,
           );
           const vecCount = Number(
-            (db.prepare('SELECT COUNT(*) AS n FROM vec_chunks').get() as { n: number | bigint }).n,
+            (
+              db.prepare('SELECT COUNT(*) AS n FROM chunk_vectors_bit').get() as {
+                n: number | bigint;
+              }
+            ).n,
           );
           const int8Count = Number(
             (
@@ -186,6 +195,35 @@ export async function validateExtractedCatalog(
             `vectors-aligned:${shard.path}`,
             chunkCount === shard.chunkCount && vecCount === chunkCount && int8Count === chunkCount,
             `chunks ${chunkCount}, vec ${vecCount}, int8 ${int8Count}, shards row ${shard.chunkCount}`,
+          );
+          const dims = manifest.embedding.dimensions;
+          const badBit = Number(
+            (
+              db
+                .prepare('SELECT COUNT(*) AS n FROM chunk_vectors_bit WHERE length(v) != ?')
+                .get(Math.ceil(dims / 8)) as { n: number | bigint }
+            ).n,
+          );
+          const badInt8 = Number(
+            (
+              db
+                .prepare('SELECT COUNT(*) AS n FROM chunk_vectors_int8 WHERE length(v) != ?')
+                .get(dims) as { n: number | bigint }
+            ).n,
+          );
+          check(
+            `vector-widths:${shard.path}`,
+            badBit === 0 && badInt8 === 0,
+            `${badBit} bit rows and ${badInt8} int8 rows have the wrong width for ${dims} dimensions`,
+          );
+          const span = db.prepare('SELECT MIN(id) AS lo, MAX(id) AS hi FROM chunks').get() as {
+            lo: number | bigint | null;
+            hi: number | bigint | null;
+          };
+          check(
+            `chunk-ids-dense:${shard.path}`,
+            chunkCount === 0 || (Number(span.lo) === 1 && Number(span.hi) === chunkCount),
+            `ids span ${String(span.lo)}..${String(span.hi)} for ${chunkCount} chunks`,
           );
         } finally {
           conn.close();

@@ -99,7 +99,7 @@ describe('resultToActions', () => {
         id: 'knowledge:shop-notes:abc123',
         catalogId: 'shop-notes',
         documentId: 'dovetails',
-        uri: 'knowledge://shop-notes/dovetails#chunk=abc123',
+        uri: 'knowledge://gezel-tests/shop-notes/dovetails#chunk=abc123',
       }),
     );
     const intent = { catalogId: 'shop-notes', documentId: 'dovetails' };

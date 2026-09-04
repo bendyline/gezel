@@ -41,8 +41,9 @@ for (const platformKey of platformDirs) {
   platforms[platformKey] = await buildNativePlatformManifest({
     dir,
     platformKey,
-    signatureFor(name) {
-      return platformKey.startsWith('win32-') && isThirdPartyBinary(name)
+    signatureFor(_name, path) {
+      return platformKey.startsWith('win32-') &&
+        isThirdPartyBinary(`native/build/${platformKey}/${path}`)
         ? 'vendor-hash-only'
         : platformKey.startsWith('win32-') || platformKey.startsWith('darwin-')
           ? 'bendyline'

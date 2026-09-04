@@ -13,6 +13,7 @@ import {
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
 import { isAccessoryArtifactPath } from './artifact-surface.js';
+import { applyDefaultCraftbookStepPolicies } from './craftbook-step-policy.js';
 
 // `DeliverableKind`, the gate-class helpers, and `deliverableStep` now live in
 // core (`@bendyline/gezel`) so the MCP server and the plan craftbook reuse the
@@ -495,17 +496,19 @@ export function archetypeToFiles(
   // Schema-parse before serializing: Zod re-emits keys in schema
   // declaration order, so generated books are byte-identical with docs
   // that took the migration path (which also serialized the parse output).
-  const doc: CraftbookDoc = CraftbookDocSchema.parse({
-    id: spec.id,
-    name: spec.name,
-    description: aboutMarkdown(spec),
-    entryStepId,
-    ...(spec.triggers && spec.triggers.length > 0 ? { triggers: spec.triggers } : {}),
-    ...(spec.toolsets && spec.toolsets.length > 0 ? { toolsets: spec.toolsets } : {}),
-    steps,
-    version,
-    releasedAt,
-  } satisfies CraftbookDoc);
+  const doc: CraftbookDoc = applyDefaultCraftbookStepPolicies(
+    CraftbookDocSchema.parse({
+      id: spec.id,
+      name: spec.name,
+      description: aboutMarkdown(spec),
+      entryStepId,
+      ...(spec.triggers && spec.triggers.length > 0 ? { triggers: spec.triggers } : {}),
+      ...(spec.toolsets && spec.toolsets.length > 0 ? { toolsets: spec.toolsets } : {}),
+      steps,
+      version,
+      releasedAt,
+    } satisfies CraftbookDoc),
+  );
 
   return {
     shard,

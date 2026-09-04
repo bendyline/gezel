@@ -1,6 +1,8 @@
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
 import { GEZEL_VERSION, type StorageJob, getLogOutput, setLogOutput } from '@bendyline/gezel';
 import {
+  GezelApiError,
+  type KnowledgeInstallEvent,
   type LlamaCppInstallEvent,
   type MlxInstallEvent,
   streamChatEvents,
@@ -825,6 +827,21 @@ knowledge
   });
 
 knowledge
+  .command('export-parquet <path>')
+  .description(
+    'Write the Parquet companion (documents, chunks, topics) of a .gezk archive or extracted catalog',
+  )
+  .option('--out <dir>', 'output directory (default: <archive>-parquet beside the archive)')
+  .option(
+    '--duckdb <binary>',
+    'DuckDB CLI to use (default: $GEZEL_DUCKDB_BIN or the one gezel installed)',
+  )
+  .action(async (path: string, opts: { out?: string; duckdb?: string }) => {
+    const { runKnowledgeExportParquet } = await loadKnowledgeCommand();
+    await runKnowledgeExportParquet(path, opts);
+  });
+
+knowledge
   .command('search <path> <query>')
   .description('Search a catalog file offline (full-text; --semantic adds vector search)')
   .option('--semantic', 'embed the query with the catalog profile (loads the model)')
@@ -835,38 +852,94 @@ knowledge
   });
 
 knowledge
-  .command('install <source>')
-  .description('Install a .gezk catalog into the running gezel (file path or URL)')
-  .option('--sha256 <digest>', 'optional expected SHA-256 digest for URL installs')
-  .action(async (source: string, opts: { sha256?: string }) => {
-    const installSource = resolveKnowledgeInstallSource(source, opts.sha256);
+  .command('available')
+  .description('List the knowledge catalogs the gilde offers for download')
+  .action(async () => {
     const client = await connectOwned(cliGlobals());
-    const { jobId } = await client.installKnowledgeCatalog({
-      source: installSource,
-    });
-    for (;;) {
-      const job = await client.getKnowledgeJob(jobId);
-      const last = job.events[job.events.length - 1];
-      if (process.stderr.isTTY && last?.type === 'progress') {
-        const done = Number(last.bytesDone ?? 0);
-        const total = Number(last.bytesTotal ?? 0);
-        const pct = total > 0 ? ` (${Math.floor((done / total) * 100)}%)` : '';
-        process.stderr.write(`\r${String(last.phase ?? 'working')}${pct}   `);
-      }
-      if (job.finished) {
-        if (process.stderr.isTTY) process.stderr.write('\n');
-        if (job.error) throw new CliError(`install failed: ${job.error}`);
-        const doneEvent = job.events.find((e) => e.type === 'done') as
-          | { ref?: { catalogId?: string; version?: string } }
-          | undefined;
-        console.log(
-          `Installed ${doneEvent?.ref?.catalogId ?? 'catalog'}@${doneEvent?.ref?.version ?? ''} — enabled for search.`,
-        );
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 250));
+    const { catalogs } = await client.listAvailableKnowledgeCatalogs();
+    if (catalogs.length === 0) {
+      console.log('The catalog offers no knowledge catalogs for this build.');
+      return;
+    }
+    for (const c of catalogs) {
+      const state = c.installing
+        ? 'downloading'
+        : c.installed
+          ? c.installed.updateAvailable
+            ? `installed ${c.installed.version} — update to ${c.version} available`
+            : 'installed'
+          : c.incompleteDownload
+            ? 'partial download — install resumes it'
+            : c.sharedOnDevice
+              ? 'on this device — install adopts it'
+              : 'available';
+      const size = `${(c.archiveBytes / (1024 * 1024)).toFixed(0)} MB`;
+      console.log(
+        `${c.id.padEnd(28)} ${c.version.padEnd(10)} ${c.language.padEnd(4)} ${String(c.documents).padStart(7)} docs ${size.padStart(8)}  ${state}`,
+      );
     }
   });
+
+knowledge
+  .command('install <source>')
+  .description('Install a .gezk catalog into the running gezel (catalog id, file path, or URL)')
+  .option('--sha256 <digest>', 'optional expected SHA-256 digest for URL installs')
+  .option('--version <version>', 'catalog ids only: the version to install (default: newest)')
+  .option('--private', 'catalog ids only: keep the catalog in your own home, never machine-shared')
+  .action(
+    async (source: string, opts: { sha256?: string; version?: string; private?: boolean }) => {
+      const installSource = resolveKnowledgeInstallSource(source, opts.sha256, {
+        ...(opts.version ? { version: opts.version } : {}),
+        ...(opts.private ? { privatePlacement: true } : {}),
+      });
+      const client = await connectOwned(cliGlobals());
+      let started: { jobId: string; alreadyRunning: boolean };
+      try {
+        started = await client.installKnowledgeCatalog({ source: installSource });
+      } catch (err) {
+        if (err instanceof GezelApiError && err.status === 403) {
+          throw new CliError(
+            'Downloading knowledge catalogs needs app network access, which the security policy turns off (Settings → Security).',
+          );
+        }
+        throw err;
+      }
+      if (started.alreadyRunning)
+        console.error('Attaching to the install that is already running.');
+      let done: Extract<KnowledgeInstallEvent, { type: 'done' }> | undefined;
+      let failure: string | undefined;
+      const tty = process.stderr.isTTY;
+      await client.subscribeKnowledgeInstall(started.jobId, (event) => {
+        if (event.type === 'progress') {
+          const pct =
+            event.bytesTotal > 0
+              ? ` (${Math.floor((event.bytesDone / event.bytesTotal) * 100)}%)`
+              : '';
+          if (tty) process.stderr.write(`\r${event.phase}${pct}   `);
+        } else if (event.type === 'retrying') {
+          if (tty) process.stderr.write('\n');
+          console.error(
+            `Retrying (${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s: ${event.reason}`,
+          );
+        } else if (event.type === 'verifying') {
+          if (tty) process.stderr.write('\rverifying   ');
+        } else if (event.type === 'done') {
+          done = event;
+        } else {
+          failure = event.error;
+        }
+      });
+      if (tty) process.stderr.write('\n');
+      if (failure) throw new CliError(`install failed: ${failure}`);
+      if (!done) throw new CliError('install ended without a result');
+      const placement =
+        done.storageScope === 'machine-shared' ? 'shared on this device' : 'private';
+      console.log(
+        `Installed ${done.ref.catalogId}@${done.ref.version} (${placement}) — enabled for search.`,
+      );
+      if (done.warning) console.error(`Note: ${done.warning}`);
+    },
+  );
 
 knowledge
   .command('list')
@@ -887,8 +960,9 @@ knowledge
             : 'enabled'
           : 'disabled';
       const size = c.sizeBytes ? ` ${(c.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : '';
+      const update = c.availableVersion ? ` — update to ${c.availableVersion} available` : '';
       console.log(
-        `${c.ref.catalogId.padEnd(24)} ${c.ref.version.padEnd(10)} ${String(c.documents ?? '?').padStart(6)} docs${size}  ${state}`,
+        `${c.ref.catalogId.padEnd(24)} ${c.ref.version.padEnd(10)} ${String(c.documents ?? '?').padStart(6)} docs${size}  ${state} (${c.source})${update}`,
       );
     }
   });

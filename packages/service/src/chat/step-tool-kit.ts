@@ -21,6 +21,7 @@ import {
   normalizeStepGate,
   stepDeliverablePath,
 } from '@bendyline/gezel';
+import { outputMediaForStep } from '../craftbook/step-toolsets.js';
 
 export { firstActionForKind };
 
@@ -55,13 +56,17 @@ export const RESEARCH_STEP_TOOLS: readonly string[] = [
   'run_playwright_script',
 ];
 
-/** Read/inspect/write/edit — the core of every file-producing step. */
-const FILE_CORE: readonly string[] = [
+/** Read/inspect — valid regardless of which drawer receives the result. */
+const WORKSPACE_READ_CORE: readonly string[] = [
   'read_file',
   'read_files',
   'list_dir',
   'stat',
   'validate',
+];
+
+/** Mutate the shipped workspace (or its diffpack overlay). */
+const WORKSPACE_WRITE_CORE: readonly string[] = [
   'write_file',
   'append_to_file',
   'replace_in_file',
@@ -147,38 +152,44 @@ export interface StepKit {
 }
 
 /**
- * The artifacts drawer is "deliberately never gated" (role-tool-filter's
- * security-gate contract): it is the write-to-the-sandbox escape hatch that
- * must survive every ceiling, including a writes-off project where the
- * whole `workspace-fs-write` group is stripped. Kit narrowing removing
- * these stranded a step-scoped Developer with zero write channels while
- * its gate demanded a deliverable (molen dependency-audit night shift).
+ * Artifact reads remain available to workspace-output steps because their
+ * declared inputs and research corpus may live there. The WRITE verb is
+ * separate: exposing both write channels is exactly what made models put a
+ * gated workspace file in the drawer (or an artifact in the workspace).
  */
-const ARTIFACT_DRAWER_TOOLS: readonly string[] = [
-  'list_artifacts',
-  'read_artifact',
-  'write_artifact',
-  'grep_artifact',
-];
+const ARTIFACT_READ_TOOLS: readonly string[] = ['list_artifacts', 'read_artifact', 'grep_artifact'];
+const ARTIFACT_WRITE_TOOLS: readonly string[] = ['write_artifact'];
 
 /**
  * The kit for a persisted step, or null when the step targets no file
  * (pure-routing / user steps) — null means "no kit narrowing". The
- * artifact drawer tools ride along for every kit so drawer-targeted
- * deliverables work and workspace-targeted steps keep the drawer as
- * their fallback output surface.
+ * The kit carries exactly one deliverable write channel. Artifact reads may
+ * still ride along as inputs, but a workspace step cannot silently fall back
+ * to `write_artifact`, and an artifact step cannot mutate the workspace.
  */
 export function stepToolKit(
-  step: Pick<CraftbookStep, 'advanceWhen' | 'gate' | 'onExit'>,
+  step: Pick<CraftbookStep, 'advanceWhen' | 'gate' | 'onExit' | 'toolPolicy' | 'consumes'>,
 ): StepKit | null {
   const kind = deliverableKindForStep(step);
   if (!kind) return null;
   const path = stepDeliverablePath(step);
-  const tools = new Set<string>(FILE_CORE);
+  const media = outputMediaForStep(step);
+  const tools = new Set<string>(WORKSPACE_READ_CORE);
+  for (const t of ARTIFACT_READ_TOOLS) tools.add(t);
+  if (media.has('artifact')) {
+    for (const t of ARTIFACT_WRITE_TOOLS) tools.add(t);
+  }
+  if (media.has('workspace')) {
+    for (const t of WORKSPACE_WRITE_CORE) tools.add(t);
+  }
   for (const t of KIND_ADDITIONS[kind] ?? []) tools.add(t);
   for (const t of gateDrivenAdditions(step, path)) tools.add(t);
   if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_installed_script');
-  for (const t of ARTIFACT_DRAWER_TOOLS) tools.add(t);
+  if (!media.has('workspace')) {
+    // Kind additions describe how workspace files are produced. Keep the
+    // computational tools, but not their workspace mutation side effects.
+    for (const t of ['apply_patch', 'make_dir', 'rename', 'derive_file']) tools.delete(t);
+  }
   return { kind, path: stepDeliverablePath(step), tools };
 }
 
@@ -189,17 +200,31 @@ export function stepToolKit(
  * hand-typing rows (the exact failure transform-by-execution exists
  * to prevent).
  */
-export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySet<string> {
-  const base = new Set<string>(FILE_CORE);
-  for (const t of ARTIFACT_DRAWER_TOOLS) base.add(t);
+export function gateRepairToolsForKind(
+  kind: DeliverableKind | null,
+  media: ReadonlySet<'workspace' | 'artifact' | 'task-note' | 'none'> | null = null,
+): ReadonlySet<string> {
+  const base = new Set<string>(WORKSPACE_READ_CORE);
+  for (const t of ARTIFACT_READ_TOOLS) base.add(t);
+  if (media?.has('artifact')) {
+    for (const t of ARTIFACT_WRITE_TOOLS) base.add(t);
+  }
+  if (media?.has('workspace')) {
+    for (const t of WORKSPACE_WRITE_CORE) base.add(t);
+  }
+  // Null is the ad-hoc/legacy repair case: preserve both write channels.
+  if (media === null) {
+    for (const t of WORKSPACE_WRITE_CORE) base.add(t);
+    for (const t of ARTIFACT_WRITE_TOOLS) base.add(t);
+  }
   if (kind === 'data-file' || kind === 'json') {
-    base.add('derive_file');
+    if (media === null || media.has('workspace')) base.add('derive_file');
     base.add('run_nodejs_script');
-    base.add('make_dir');
+    if (media === null || media.has('workspace')) base.add('make_dir');
   }
   if (kind === 'code-module' || kind === 'code-with-tests') {
     base.add('run_nodejs_script');
-    base.add('apply_patch');
+    if (media === null || media.has('workspace')) base.add('apply_patch');
   }
   return base;
 }

@@ -1,4 +1,4 @@
-import type { FileMapScope, LayoutFileInput } from '@bendyline/gezel';
+import { type FileMapScope, type LayoutFileInput, fileUseOf } from '@bendyline/gezel';
 import type { IndexStore } from '../../index-store/index-store.js';
 import { type ResolvedEdge, resolveImportEdges } from '../affinity.js';
 import { isExcludedFromCodeMap } from '../sections.js';
@@ -26,6 +26,9 @@ export interface CollectedMap {
   edges: ResolvedEdge[];
 }
 
+/** Line-count ceiling for a data file's footprint. */
+const MAX_FIELD_LOC = 800;
+
 export function collectCodeMap(
   index: IndexStore,
   scope: FileMapScope = 'core',
@@ -36,10 +39,13 @@ export function collectCodeMap(
   for (const f of index.allFiles()) {
     if (f.trivial || f.modality === 'image') continue; // images aren't city blocks
     if (ignoredPaths.has(f.path)) continue; // workspace Git ignore policy
-    if (isExcludedFromCodeMap(f.path, scope)) continue; // JSON always; tests per scope
+    if (isExcludedFromCodeMap(f.path, scope)) continue; // tests per scope
     // loc is the block size; estimate from bytes when we never line-counted it.
     const loc = f.loc ?? Math.max(1, Math.round((f.size ?? 0) / 40));
-    files.push({ path: f.path, weight: loc, contentHash: f.hash });
+    // A data file is a field on the map, and a field is bounded: a 40k-line
+    // fixture must read as a big field, not as the largest thing in town.
+    const weight = fileUseOf(f.path, f.lang) === 'data' ? Math.min(loc, MAX_FIELD_LOC) : loc;
+    files.push({ path: f.path, weight, contentHash: f.hash });
     meta.set(f.path, { lang: f.lang, kind: f.kind });
   }
 

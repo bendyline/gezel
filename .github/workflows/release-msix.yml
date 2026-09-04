@@ -1,0 +1,476 @@
+# Microsoft Store (MSIX) build.
+#
+# Deliberately a separate workflow rather than another job in
+# release-electron.yml. That file's contract test counts its steps ("exactly 3
+# Smoke-test … app steps", "exactly 4 verify-release-version invocations") to
+# prove every shipped platform is exercised; adding a store lane there would
+# either trip those counts or force them to be loosened, weakening a check that
+# exists for the primary release.
+#
+# Produces a draft artifact on the workflow run. Nothing is published: the
+# .appx is downloaded and hand-uploaded to Partner Center after review, which
+# is also why no signing secrets are needed — the Store signs the package on
+# ingest, and an Authenticode signature applied here would be rejected.
+#
+# KNOWN OPEN ITEM (first-run spike): the Visual C++ runtime. The NSIS installer
+# runs vc_redist.x64.exe from its customInstall hook; an MSIX has no such hook,
+# and the VCLibs desktop framework package is deprecated. The likely answer is
+# staging the CRT DLLs app-local beside the engines in native-bin/. Until that
+# is settled, engines may fail to load on a machine with no MSVC runtime — so
+# validate on a clean Windows VM before the first submission.
+name: Release MSIX (Microsoft Store)
+
+on:
+  workflow_dispatch:
+    inputs:
+      nativeTag:
+        description: 'Required native-binaries tag to bundle (e.g. native-v1.2.3).'
+        required: true
+        type: string
+      installSmoke:
+        description: 'Self-sign the package, install it, and launch it once. Slower; unproven on hosted runners.'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-msix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  store-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reject local workspace links
+        run: node scripts/check-no-local-links.mjs
+
+      - name: Validate native tag
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$NATIVE_TAG" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::nativeTag is required and must name a versioned native release (native-vX.Y.Z)"
+            exit 1
+          fi
+
+      - name: Verify native release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          set -euo pipefail
+          version="${NATIVE_TAG#native-v}"
+          release="$(gh api "repos/${GH_REPO}/releases/tags/${NATIVE_TAG}")"
+          if [ "$(jq -r '.draft' <<<"$release")" != 'false' ]; then
+            echo "::error::Native release ${NATIVE_TAG} is still a draft"
+            exit 1
+          fi
+
+          # Only the Windows keys matter here, but the whole expected set is
+          # derived from the same table build-native.yml packs against so a
+          # variant added to the native pipeline cannot be silently omitted.
+          expected=()
+          while read -r key; do
+            [[ -n "$key" ]] || continue
+            case "$key" in
+              win32-*) expected+=("gezel-native-${version}-${key}.zip") ;;
+            esac
+          done < <(node scripts/check-native-payload.mjs --list-keys)
+          expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
+          missing=0
+          for name in "${expected[@]}"; do
+            if ! jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release" >/dev/null; then
+              echo "::error::Native release ${NATIVE_TAG} is missing ${name}"
+              missing=1
+            fi
+          done
+          if (( missing )); then exit 1; fi
+
+          # The package may only reuse the bundled native tree when its
+          # source-bundled per-file pins describe this exact release.
+          node scripts/verify-native-file-manifest.mjs \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
+          pinned_release="$(
+            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\\([^']*\\)';/\\1/p" \
+              packages/service/src/engines/native-manifest.ts
+          )"
+          if [[ "$pinned_release" != "$version" ]]; then
+            echo "::error::nativeTag ${NATIVE_TAG} does not match source-pinned native-v${pinned_release}"
+            echo "::error::Run scripts/pin-native-release.mjs ${NATIVE_TAG} before building a store package."
+            exit 1
+          fi
+
+      - name: Determine package version
+        id: version
+        run: |
+          version="$(node scripts/stamp-version.mjs --inc "$GITHUB_RUN_NUMBER" --print)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Store package version: $version" >> "$GITHUB_STEP_SUMMARY"
+          # MSIX versions are four-part numeric and must increase monotonically.
+          # electron-builder derives 1.YYDDD.RUN.0 from the CalVer above, so a
+          # re-run on the same day with a LOWER run number produces a lower
+          # package version that Partner Center will reject as a downgrade.
+          echo "Partner Center version will be: 1.${version#1.}.0" >> "$GITHUB_STEP_SUMMARY"
+
+  quality-lite:
+    needs: store-preflight
+    runs-on: ubuntu-latest
+    # Deliberately narrower than the primary release's full quality gate: main
+    # and release-electron already run the complete suite, and a store package
+    # is hand-reviewed before it is uploaded anywhere. What must run here is
+    # everything that could make the STORE configs wrong.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
+
+      - name: Stamp package version
+        run: node scripts/stamp-version.mjs --version "${{ needs.store-preflight.outputs.version }}"
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Packaging contract tests
+        # Includes store-packaging-contract.test.mjs, which pins the store
+        # configs, the MSIX manifest extension, and the MAS entitlement sets.
+        run: pnpm --filter @bendyline/gezel-app test
+
+  build-msix:
+    needs: [quality-lite, store-preflight]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
+
+      - name: Stamp package version
+        run: node scripts/stamp-version.mjs --version "${{ needs.store-preflight.outputs.version }}"
+
+      - name: Stage native engine binaries (Windows)
+        shell: bash
+        env:
+          GEZEL_GITHUB_TOKEN: ${{ github.token }}
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          set -euo pipefail
+          version="${NATIVE_TAG#native-v}"
+          node scripts/fetch-native-binaries.mjs --version "$version"
+          ls -la packages/app/native-bin/
+
+      - name: Verify staged native payload is complete
+        shell: bash
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          version="${NATIVE_TAG#native-v}"
+          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/verify-native-file-manifest.mjs \
+            --root packages/app/native-bin \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
+
+      - name: Verify Authenticode on staged native binaries
+        shell: pwsh
+        # Same gate as the primary Windows release: the native workflow signs
+        # every engine we compile at birth, and a native release built without
+        # signing secrets must never reach a store submission. Vendor binaries
+        # are exempt by the same sign-only-what-we-compile policy.
+        run: |
+          $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
+          if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
+          $extensions = node packages/app/scripts/third-party-binaries.cjs --extensions | ConvertFrom-Json
+          if (-not $extensions) { throw 'third-party-binaries.cjs --extensions returned nothing' }
+          $nativeCode = Get-ChildItem 'packages/app/native-bin' -Recurse -File |
+            Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() }
+          if ($nativeCode.Count -eq 0) { throw 'No native executable/loadable binaries staged' }
+          $verified = 0
+          foreach ($exe in $nativeCode) {
+            $path = $exe.FullName.Replace('\', '/')
+            $isThirdParty = $false
+            foreach ($p in $patterns) { if ($path -imatch $p) { $isThirdParty = $true; break } }
+            if ($isThirdParty) {
+              Write-Host "[native] third-party, left unsigned by policy: $($exe.Name)"
+              continue
+            }
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            if ($sig.Status -ne 'Valid') {
+              throw "Unsigned/invalid native binary $($exe.FullName): $($sig.Status)"
+            }
+            $verified += 1
+          }
+          if ($verified -eq 0) { throw 'No first-party native binaries were signature-verified' }
+
+      - name: Build + produce service bundle
+        # GEZEL_REQUIRE_BUNDLE_PE_VERIFY audits the service tree while it is
+        # still loose, before the tarball seals it. It needs no Azure
+        # credentials: it verifies existing signatures rather than applying
+        # any, which is why this store lane can run with no signing secrets at
+        # all. (Step order matters — the primary release installs the Trusted
+        # Signing SDK only after this same step.)
+        run: pnpm build:packaged
+        env:
+          GEZEL_REQUIRE_BUNDLE_PE_VERIFY: '1'
+
+      - name: Verify release version propagation
+        shell: bash
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.store-preflight.outputs.version }}" \
+            --service-meta packages/app/dist/service-bundle.meta.json
+
+      - name: Stage the model pack
+        # Store-lane only. The direct-download installers ship no weights; this
+        # channel does because the store CDN serves them. The script hard-fails
+        # on an unpinned entry rather than producing a package that advertises
+        # models it does not contain — do NOT set GEZEL_MODEL_PACK_SKIP here.
+        run: node scripts/stage-model-pack.mjs
+
+      - name: Write the store-build marker
+        # Tells the packaged app which channel it is, so it takes the store
+        # ladder (adopt a direct install's daemon, never manage it) and the
+        # store distribution profile (no runtime code downloads). A build
+        # missing this would behave like a direct download and try to download
+        # code the Store forbids.
+        run: node scripts/write-store-build-marker.mjs microsoft-store
+
+      - name: Package MSIX
+        run: pnpm --filter @bendyline/gezel-app exec electron-builder --win --config electron-builder.appx.yml --publish never
+
+      - name: Inspect the generated package manifest
+        shell: pwsh
+        # Everything asserted here is invisible in the config: electron-builder
+        # generates the manifest, and a wrong identity or a stray capability
+        # only surfaces as a Partner Center rejection hours later.
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+            Select-Object -First 1
+          if (-not $pkg) { throw 'electron-builder produced no .appx package' }
+          Write-Host "[msix] package: $($pkg.Name) ($([math]::Round($pkg.Length/1MB,1)) MB)"
+
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          try {
+            $entry = $zip.Entries | Where-Object { $_.FullName -eq 'AppxManifest.xml' }
+            if (-not $entry) { throw 'package contains no AppxManifest.xml' }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $manifest = $reader.ReadToEnd()
+            $reader.Dispose()
+          } finally {
+            $zip.Dispose()
+          }
+
+          Write-Host '[msix] --- AppxManifest.xml (Identity + Extensions) ---'
+          ([xml]$manifest).Package.Identity | Format-List | Out-String | Write-Host
+
+          # A four-part numeric version; Partner Center rejects anything else.
+          if ($manifest -notmatch 'Version="\d+\.\d+\.\d+\.\d+"') {
+            throw 'manifest Version is not the required four-part numeric form'
+          }
+          # Autostart must be declared and must ship disabled — the user opts in.
+          if ($manifest -notmatch 'windows\.startupTask') {
+            throw 'manifest is missing the windows.startupTask extension'
+          }
+          if ($manifest -notmatch 'TaskId="GezelStartup"') {
+            throw 'manifest startupTask is missing the stable GezelStartup TaskId'
+          }
+          # A service declaration would fail certification: Microsoft states the
+          # packagedServices capability will not generally be approved.
+          if ($manifest -match 'windows\.service' -or $manifest -match 'packagedServices') {
+            throw 'manifest declares a Windows service, which the Store will reject'
+          }
+          if ($manifest -match 'REPLACE_WITH_PARTNER_CENTER') {
+            Write-Warning 'Package identity is still a placeholder — this build cannot be uploaded until the Partner Center reservation is filled in.'
+          }
+          Write-Host '[msix] manifest checks passed'
+
+      - name: Verify store package legal payload
+        shell: pwsh
+        # The licenses tree rides in as extraResources. A package missing it
+        # would ship without the notices the dependency licenses require.
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+            Select-Object -First 1
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          try {
+            $licenses = $zip.Entries | Where-Object { $_.FullName -like '*resources/licenses/*' }
+          } finally {
+            $zip.Dispose()
+          }
+          if ($licenses.Count -eq 0) { throw 'package carries no resources/licenses payload' }
+          Write-Host "[msix] legal payload present: $($licenses.Count) files"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Uploaded BEFORE the optional install smoke, deliberately: a smoke
+          # failure then still leaves the package downloadable for diagnosis,
+          # and the job failing is what stops it being submitted — nothing here
+          # publishes on its own.
+          #
+          # Kept as .appx, the extension electron-builder produces. MSIX and
+          # APPX are the same container format and Partner Center accepts
+          # either; renaming would imply a conversion that did not happen.
+          name: msix-store-artifacts
+          path: packages/app/dist/installers/*.appx
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install and launch the package once
+        # Opt-in, because it is the one step here whose failure mode may be the
+        # runner rather than the package: an MSIX must be signed by a
+        # certificate the machine trusts before Windows will install it, and
+        # launching a packaged app on a headless hosted runner is unproven.
+        # When it does run it catches what nothing else can — that the package
+        # actually installs and the app inside it reaches ready, which a
+        # manifest inspection cannot tell you.
+        #
+        # The self-signed certificate exists only on this runner and never
+        # touches the artifact: the .appx uploaded below is the unsigned one
+        # the Store expects. Signing happens on a COPY.
+        if: ${{ inputs.installSmoke }}
+        shell: pwsh
+        env:
+          GEZEL_PACKAGED_SMOKE: '1'
+          GEZEL_EXPECTED_VERSION: ${{ needs.store-preflight.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+            Select-Object -First 1
+
+          # The certificate subject must equal the manifest publisher exactly,
+          # or Windows refuses the package without saying which field differed.
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          try {
+            $entry = $zip.Entries | Where-Object { $_.FullName -eq 'AppxManifest.xml' }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $manifest = [xml]$reader.ReadToEnd()
+            $reader.Dispose()
+          } finally {
+            $zip.Dispose()
+          }
+          $publisher = $manifest.Package.Identity.Publisher
+          Write-Host "[smoke] manifest publisher: $publisher"
+
+          $signed = Join-Path $env:RUNNER_TEMP 'gezel-selfsigned.appx'
+          Copy-Item $pkg.FullName $signed -Force
+
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher `
+            -KeyUsage DigitalSignature -FriendlyName 'Gezel MSIX smoke' `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $pfxPassword = ConvertTo-SecureString -String ([guid]::NewGuid().ToString()) -Force -AsPlainText
+          $pfx = Join-Path $env:RUNNER_TEMP 'gezel-smoke.pfx'
+          Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath $pfx -Password $pfxPassword | Out-Null
+          # Windows will only install a package whose signer it trusts, so the
+          # throwaway certificate has to go into the machine's trusted root for
+          # the duration of this job.
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation 'Cert:\LocalMachine\Root' -Password $pfxPassword | Out-Null
+
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter 'signtool.exe' |
+            Where-Object { $_.FullName -like '*x64*' } | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found on this runner' }
+          & $signtool.FullName sign /fd SHA256 /a /f $pfx /p ([System.Net.NetworkCredential]::new('', $pfxPassword).Password) $signed
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+
+          Add-AppxPackage -Path $signed
+          $installed = Get-AppxPackage | Where-Object { $_.Name -eq $manifest.Package.Identity.Name }
+          if (-not $installed) { throw 'the package did not install' }
+          Write-Host "[smoke] installed $($installed.PackageFullName)"
+
+          # The same sentinel the NSIS smoke uses: the app boots its service,
+          # confirms its own version, and exits 0 without opening a window.
+          $smokeHome = Join-Path $env:RUNNER_TEMP 'gezel-msix-smoke'
+          $arguments = "--gezel-packaged-smoke --gezel-expected-version=${{ needs.store-preflight.outputs.version }} --gezel-home=$smokeHome"
+          $proc = Start-Process -FilePath 'powershell' -PassThru -Wait -NoNewWindow -ArgumentList @(
+            '-NoProfile', '-Command',
+            "Invoke-CommandInDesktopPackage -PackageFamilyName '$($installed.PackageFamilyName)' -AppId 'Gezel' -Command 'gezel.exe' -Args '$arguments'"
+          )
+          if ($proc.ExitCode -ne 0) {
+            throw "launching the packaged app failed with exit code $($proc.ExitCode)"
+          }
+          Write-Host '[smoke] packaged app launched'
+
+      - name: Remove the smoke install
+        if: ${{ always() && inputs.installSmoke }}
+        shell: pwsh
+        run: |
+          # Best-effort teardown so a failed smoke cannot leave a trusted
+          # throwaway certificate or an installed package behind on a reused
+          # runner image.
+          Get-AppxPackage | Where-Object { $_.Publisher -like '*Bendyline*' -or $_.Name -like '*Gezel*' } |
+            ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue }
+          Get-ChildItem 'Cert:\LocalMachine\Root' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FriendlyName -eq 'Gezel MSIX smoke' } |
+            ForEach-Object { Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue }
+          Get-ChildItem 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FriendlyName -eq 'Gezel MSIX smoke' } |
+            ForEach-Object { Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue }
+
+      - name: Check store tile art
+        shell: pwsh
+        # electron-builder silently substitutes its own stock tile images for
+        # any that are missing. Harmless for a local install, wrong for a
+        # submission — those tiles are what the Store shows as Gezel.
+        run: |
+          $tiles = 'packages/app/assets/appx'
+          if (-not (Test-Path $tiles)) {
+            Write-Warning "No assets/appx/ tile art — this package carries electron-builder's stock images and must not be submitted as-is."
+          } else {
+            Get-ChildItem $tiles -File | ForEach-Object { Write-Host "[msix] tile: $($_.Name)" }
+          }
+
+      - name: Upload instructions
+        shell: bash
+        run: |
+          {
+            echo '## Microsoft Store package ready'
+            echo
+            echo 'Download the `msix-store-artifacts` artifact from this run and upload the'
+            echo '`.appx` to Partner Center. Nothing was published automatically.'
+            echo
+            echo 'Before the FIRST submission:'
+            echo '- Reserve the app identity in Partner Center and replace the'
+            echo '  `REPLACE_WITH_PARTNER_CENTER_*` placeholders in `electron-builder.appx.yml`.'
+            echo '- Author `packages/app/assets/appx/` tile art (stock images ship otherwise).'
+            echo '- Validate engines load on a clean Windows VM (the VC++ runtime open item'
+            echo '  in this workflow header).'
+            echo
+            echo 'To test locally before submitting, sign it with a self-signed certificate'
+            echo 'whose subject matches the manifest publisher exactly:'
+            echo
+            echo '```powershell'
+            echo 'New-SelfSignedCertificate -Type Custom -Subject "CN=<publisher from manifest>" \'
+            echo '  -KeyUsage DigitalSignature -CertStoreLocation "Cert:\CurrentUser\My" \'
+            echo '  -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")'
+            echo 'signtool sign /fd SHA256 /a /f test.pfx /p <password> Gezel-*.appx'
+            echo 'Add-AppxPackage .\Gezel-*.appx'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

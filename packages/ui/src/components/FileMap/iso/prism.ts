@@ -44,6 +44,21 @@ export function prismScreen(cam: Camera, r: Rect, hIso: number): PrismScreen {
   };
 }
 
+/** Path a world ground rect as its projected diamond. */
+export function pathGroundRect(ctx: CanvasRenderingContext2D, cam: Camera, r: Rect): void {
+  const c = isoCorners(r);
+  const n = sp(cam, c.n.u, c.n.v);
+  const e = sp(cam, c.e.u, c.e.v);
+  const s = sp(cam, c.s.u, c.s.v);
+  const w = sp(cam, c.w.u, c.w.v);
+  ctx.beginPath();
+  ctx.moveTo(n.x, n.y);
+  ctx.lineTo(e.x, e.y);
+  ctx.lineTo(s.x, s.y);
+  ctx.lineTo(w.x, w.y);
+  ctx.closePath();
+}
+
 export function pathQuad(
   ctx: CanvasRenderingContext2D,
   a: ScreenPt,

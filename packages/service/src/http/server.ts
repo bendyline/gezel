@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
+import {
+  GEZEL_API_GENERATION,
+  GEZEL_API_GENERATION_FLOOR,
+  GEZEL_VERSION,
+  createLogger,
+  isSafeEntityId,
+} from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
@@ -82,6 +88,7 @@ import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
+import { promptDraftRoutes } from './routes/prompt-drafts.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
@@ -280,9 +287,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         [
           "default-src 'self'",
           // 'wasm-unsafe-eval' is required to compile WebAssembly at all.
-          // The UI's proofing engine (harper.js) is served same-origin from
-          // /harper/ and instantiated inside a blob: worker; without this
-          // Chromium refuses the compile and proofing hangs on "Proofing...".
+          // The UI's proofing (harper.js) and spreadsheet calculation
+          // (IronCalc) engines are served same-origin; without this Chromium
+          // refuses their compilation. Harper is instantiated in a blob worker.
           // It permits WASM compilation only, NOT eval() of JavaScript.
           "script-src 'self' 'wasm-unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",
@@ -513,6 +520,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     return c.json({
       ok: true as const,
       version: GEZEL_VERSION,
+      // Sent unconditionally for the same reason as `ds4ServerBundled` below:
+      // a client must be able to tell this daemon's answer apart from a
+      // daemon too old to have one.
+      apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
       serviceRole: ctx.serviceRole,
       ...(ctx.machineEngine ? { machineEngineConnected: ctx.machineEngine.isConnected() } : {}),
       startedAt: ctx.startedAt,
@@ -562,7 +573,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     });
     // Model ensure must win over the exact `/models` discovery handler.
     app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
-    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes());
+    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes({ catalog: ctx.catalog }));
     app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
     app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
     app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
@@ -630,6 +641,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
   app.route('/api/projects', diffpackRoutes(ctx));
+  app.route('/api/projects', promptDraftRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
   // Legacy alias: the same local-git routes under the old /github segment,

@@ -52,12 +52,18 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
   createArtifactsContentContainer,
+  createDataReferenceContainer,
   createDocumentLinkProvider,
+  createDocumentMediaProvider,
   createProjectContentContainer,
+  createVersionCompatibleContentContainer,
+  deriveContainerScope,
+  documentVersionBasename,
   importOutsideInDocument,
   isOutsideInInternalPath,
   isOutsideInMarkdownEditingEnabled,
@@ -65,6 +71,7 @@ import {
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
+  supportsOutsideInMarkdownEditing,
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
@@ -125,6 +132,8 @@ import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
+import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
+import { formatPreviewComplaint, formatPreviewLog } from './projects/project-preview-log.js';
 
 const loadProjectChatModule = () => import('../components/ProjectChat.js');
 const loadProjectConnectionsModule = () => import('../components/ProjectConnectionsTab.js');
@@ -1692,7 +1701,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         layout: { ...layout, markdownPath: sourcePath },
         sourcePath,
         content: linkedContent,
-        editingEnabled: isOutsideInMarkdownEditingEnabled(linkedContent),
+        editingEnabled:
+          supportsOutsideInMarkdownEditing(layout.format) &&
+          isOutsideInMarkdownEditingEnabled(linkedContent),
       };
     },
     [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
@@ -1744,6 +1755,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const allowOutsideInMarkdownEditing = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
+      const layout = resolveOutsideInLayout(entry.path);
+      if (!layout || !supportsOutsideInMarkdownEditing(layout.format)) {
+        setError('CSV data previews are read-only.');
+        return;
+      }
       if (!canWriteProjectFiles(source)) {
         setError('Enable workspace writes before allowing Markdown editing.');
         return;
@@ -1824,6 +1840,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           primaryDocumentFilename: basenameOf(sourcePath),
           source: openFile.source,
         });
+        const dataReferenceContainer = createDataReferenceContainer(container);
         const allEntries = openFile.source === 'workspace' ? workspaceFiles : artifactFiles;
         const runtimePath =
           layout.format === 'html'
@@ -1840,7 +1857,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         const rendered = await renderOutsideInDocument(
           linkedContent,
           layout,
-          container,
+          dataReferenceContainer,
           runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
         );
 
@@ -3354,9 +3371,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           : undefined
                       }
                       actionsForEntry={(entry) => {
+                        const layout = entry.isDirectory
+                          ? null
+                          : resolveOutsideInLayout(entry.path);
                         if (
                           entry.isDirectory ||
-                          !resolveOutsideInLayout(entry.path) ||
+                          !layout ||
+                          !supportsOutsideInMarkdownEditing(layout.format) ||
                           (openFile?.path === entry.path &&
                             openFile.source === fileTab &&
                             openFile.outsideIn?.editingEnabled)
@@ -3685,120 +3706,10 @@ function WorkspaceSourceLineReveal({
   return null;
 }
 
-/** Editor for a rendered document's editable Markdown companion. */
-function ProjectOutsideInEditor({
-  projectId,
-  file,
-  outsideIn,
-  isReadOnly,
-  editorTheme,
-  onChange,
-  onSave,
-  toolbarIndexToggle,
-}: {
-  projectId: string;
-  file: {
-    path: string;
-    content: string;
-    source: FileTab;
-  };
-  outsideIn: OutsideInOpenFile;
-  isReadOnly: boolean;
-  editorTheme: 'light' | 'dark';
-  onChange: (source: string) => void;
-  onSave: (content?: string) => void | Promise<void>;
-  toolbarIndexToggle?: ReactNode;
-}) {
-  const { layout, sourcePath } = outsideIn;
-  const autosave = useSerializedAutosave({
-    resourceKey: `outside-in:${projectId}:${file.source}:${sourcePath}`,
-    initialValue: normalizeMarkdownBaseline(file.content),
-    save: async (content) => {
-      await onSave(content);
-    },
-  });
-  const handleChange = useCallback(
-    (content: string) => {
-      onChange(content);
-      autosave.update(content);
-    },
-    [autosave.update, onChange],
-  );
-  const container = useMemo(
-    () =>
-      createProjectContentContainer({
-        projectId,
-        root: layout.companionDirectory,
-        client: api,
-        primaryDocumentFilename: basenameOf(sourcePath),
-        source: file.source,
-      }),
-    [file.source, layout.companionDirectory, projectId, sourcePath],
-  );
-  const documentLinkProvider = useMemo(
-    () =>
-      file.source === 'artifacts'
-        ? createDocumentLinkProvider({
-            client: api,
-            currentDocumentPath: sourcePath,
-            source: 'project-artifacts',
-            projectId,
-          })
-        : undefined,
-    [file.source, projectId, sourcePath],
-  );
-  return (
-    <div className="editor-wrap" style={{ height: '100%' }}>
-      <EditorShell
-        initialMarkdown={autosave.desiredValue()}
-        fileName={file.path}
-        readOnly={isReadOnly}
-        onChange={isReadOnly ? undefined : handleChange}
-        height="100%"
-        colorScheme={editorTheme}
-        fullWidth
-        workspaceContainer={container}
-        documentLinkProvider={documentLinkProvider}
-        allowVersioning={!isReadOnly}
-        versionBasename={basenameOf(sourcePath)}
-        outline
-        toolbarSlotAfterActions={
-          <>
-            {!isReadOnly && <TransformToolbarButton context="generic" />}
-            <DocumentNarration fileName={file.path} projectId={projectId} />
-          </>
-        }
-        toolbarSlotRight={
-          <>
-            {toolbarIndexToggle}
-            {!isReadOnly && <AutosaveStatus autosave={autosave} />}
-            {!isReadOnly && (
-              <button
-                type="button"
-                onClick={() => void autosave.flush()}
-                style={{ marginLeft: '0.5rem' }}
-              >
-                Save {layout.format.toUpperCase()}
-              </button>
-            )}
-            {file.source === 'artifacts' && (
-              <ExportToolbarControls
-                selectedFile={file.path}
-                mediaContainer={container}
-                mediaSource={{ kind: 'project-artifacts', projectId }}
-              />
-            )}
-          </>
-        }
-      />
-    </div>
-  );
-}
-
 /**
  * The text editor for any project file that isn't a rendered document or an
  * HTML page. Markdown artifacts get the full squisq feature set — the Files
- * panel for image uploads (writes land next to the markdown), the
+ * panel for image uploads (writes land in the document's hidden companion), the
  * DocBlocks-style Export menu, version history, a sibling-artifact link
  * picker, and the report-action fence renderers that mount recommendation
  * blocks as live cards. Workspace files (code) and non-markdown artifacts
@@ -3828,8 +3739,11 @@ function ProjectFileEditor({
   toolbarIndexToggle?: ReactNode;
 }) {
   const markdown = isMarkdown(file.path) && file.source === 'artifacts';
-  const root = useMemo(() => parentDir(file.path), [file.path]);
-  const primaryDocumentFilename = useMemo(() => basenameOf(file.path), [file.path]);
+  const { root, parentDirectory, companionName, primaryDocumentFilename } = useMemo(
+    () => deriveContainerScope(file.path),
+    [file.path],
+  );
+  const versionBasename = useMemo(() => documentVersionBasename(file.path), [file.path]);
   const autosave = useSerializedAutosave({
     resourceKey: `file:${file.source}:${file.path}`,
     initialValue: markdown ? normalizeMarkdownBaseline(file.content) : file.content,
@@ -3851,11 +3765,48 @@ function ProjectFileEditor({
             projectId,
             root,
             client: api,
+            referencePrefix: companionName,
+          })
+        : null,
+    [companionName, markdown, projectId, root],
+  );
+  const exportContainer = useMemo(
+    () =>
+      markdown
+        ? createArtifactsContentContainer({
+            projectId,
+            root: parentDirectory,
+            client: api,
             primaryDocumentFilename,
           })
         : null,
-    [markdown, projectId, root, primaryDocumentFilename],
+    [markdown, parentDirectory, primaryDocumentFilename, projectId],
   );
+  const mediaProvider = useMemo(
+    () =>
+      container && exportContainer
+        ? createDocumentMediaProvider(container, companionName, exportContainer)
+        : null,
+    [companionName, container, exportContainer],
+  );
+  const versionContainer = useMemo(
+    () =>
+      container && exportContainer
+        ? createVersionCompatibleContentContainer(
+            container,
+            versionBasename,
+            [
+              {
+                container: exportContainer,
+                basenames: [primaryDocumentFilename, versionBasename],
+              },
+            ],
+            exportContainer,
+          )
+        : null,
+    [container, exportContainer, primaryDocumentFilename, versionBasename],
+  );
+  useEffect(() => () => mediaProvider?.dispose(), [mediaProvider]);
   const documentLinkProvider = useMemo(
     () =>
       markdown
@@ -3887,11 +3838,13 @@ function ProjectFileEditor({
         colorScheme={editorTheme}
         fullWidth
         showPlayTab={markdown}
-        workspaceContainer={container}
+        workspaceContainer={versionContainer}
+        mediaProvider={mediaProvider}
         documentLinkProvider={documentLinkProvider}
         fenceRenderers={fenceRenderers}
+        calcEngineFactory={markdown && !isReadOnly ? ironCalcEngineFactory : undefined}
         allowVersioning={markdown && !isReadOnly}
-        versionBasename={primaryDocumentFilename}
+        versionBasename={versionBasename}
         outline={markdown}
         toolbarSlotAfterActions={
           markdown ? (
@@ -3904,10 +3857,10 @@ function ProjectFileEditor({
         toolbarSlotRight={
           <>
             {toolbarIndexToggle}
-            {markdown && container && (
+            {markdown && exportContainer && (
               <ExportToolbarControls
                 selectedFile={file.path}
-                mediaContainer={container}
+                mediaContainer={exportContainer}
                 mediaSource={{ kind: 'project-artifacts', projectId }}
               />
             )}
@@ -4173,59 +4126,6 @@ function HtmlPreviewLogPanel({
       )}
     </div>
   );
-}
-
-function formatPreviewLog(entry: HtmlPreviewLogEntry): string {
-  if (entry.kind === 'console.error') {
-    return (entry.detail.args ?? []).join(' ');
-  }
-  return entry.detail.message ?? '(unknown error)';
-}
-
-/**
- * Build a chat message seeded from a preview-pane JavaScript error.
- * Includes the file the user was previewing, the kind of event
- * (runtime error / rejection / console.error), the message, the
- * filename+line+col if reported, and the stack trace when available.
- * The format is prose so the gezel reads it as a user report rather
- * than a structured log.
- */
-function formatPreviewComplaint(
-  entry: HtmlPreviewLogEntry,
-  file: { path: string; source: FileTab },
-): string {
-  const lines: string[] = [];
-  lines.push(
-    `I was previewing \`${file.source}/${file.path}\` and the browser surfaced a JavaScript error.`,
-  );
-  lines.push('');
-  lines.push(`- **Kind:** ${entry.kind}`);
-  const message = formatPreviewLog(entry);
-  if (message) lines.push(`- **Message:** ${message}`);
-  if (entry.detail.filename) {
-    const loc = entry.detail.filename;
-    const withPos = [
-      loc,
-      entry.detail.lineno ? String(entry.detail.lineno) : null,
-      entry.detail.colno ? String(entry.detail.colno) : null,
-    ]
-      .filter(Boolean)
-      .join(':');
-    lines.push(`- **Location:** ${withPos}`);
-  }
-  if (entry.url) lines.push(`- **Preview URL:** ${entry.url}`);
-  if (entry.detail.stack) {
-    lines.push('');
-    lines.push('Stack trace:');
-    lines.push('```');
-    lines.push(entry.detail.stack);
-    lines.push('```');
-  }
-  lines.push('');
-  lines.push(
-    "Can you take a look and figure out what's going wrong? Feel free to edit the file directly.",
-  );
-  return lines.join('\n');
 }
 
 /**

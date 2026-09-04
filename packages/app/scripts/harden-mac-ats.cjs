@@ -46,6 +46,16 @@ const { execFileSync } = require('node:child_process');
 const ATS_KEYPATH = 'NSAppTransportSecurity.NSAllowsArbitraryLoads';
 
 /**
+ * Both macOS lanes. electron-builder reports the Mac App Store target as its
+ * own platform name, so these must be listed rather than compared to `darwin`.
+ * On the `mas` lane `configureLocalhostAts` does not inject the blanket key at
+ * all, and `decideAtsAction` reads that absence as "already strict" — the hook
+ * runs, finds nothing to narrow, and says so. Which is the point: it should be
+ * a verified no-op there, not an unreached branch.
+ */
+const MACOS_PLATFORMS = new Set(['darwin', 'mas']);
+
+/**
  * Map the current value of the key to what the hook should do. Split out as a
  * pure function so the policy is testable without packing an application.
  *
@@ -77,7 +87,11 @@ function readBooleanKeypath(plistPath, keypath) {
 }
 
 module.exports = async function hardenMacAts(context) {
-  if (context.electronPlatformName !== 'darwin') return;
+  // `mas` is a distinct electronPlatformName from `darwin`, so a bare
+  // `!== 'darwin'` check silently skipped the App Store build — the one lane
+  // where shipping a blanket NSAllowsArbitraryLoads goes in front of a
+  // reviewer. Both macOS lanes get the narrowing.
+  if (!MACOS_PLATFORMS.has(context.electronPlatformName)) return;
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const plistPath = path.join(context.appOutDir, appName, 'Contents', 'Info.plist');

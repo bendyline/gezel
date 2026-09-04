@@ -2,13 +2,14 @@ import type { MapBlock, MapBuilding } from '@bendyline/gezel';
 import type { LodTier } from '../camera.js';
 import { decorForModel } from '../decor.js';
 import { crosshatchPattern } from '../draw/util.js';
+import { hasSymbolCampus } from '../file-use.js';
 import {
   drawIssueMarker,
   issueMarkerStyle,
   issueMarkerZoomScale,
   representativeIssueBuilding,
 } from '../issue-marker.js';
-import { ageBucket, prismColors } from '../palette.js';
+import { type CityPalette, ageBucket, prismColors } from '../palette.js';
 import { hash32, seeded } from '../seed.js';
 import { urbanityOf } from '../urbanity.js';
 import {
@@ -18,6 +19,7 @@ import {
   geomInView,
   roofHeadroom,
 } from './geometry.js';
+import { drawFountainAt } from './ground.js';
 import { drawIsoLot } from './lots.js';
 import {
   DiamondBatcher,
@@ -37,8 +39,9 @@ import {
   toIso,
   townRoofRiseIso,
 } from './projection.js';
-import { type IsoRenderState, sp } from './state.js';
-import { drawTownBuilding } from './town-buildings.js';
+import { drawChimneySmoke } from './smoke.js';
+import { type IsoRenderState, type ScreenPt, sp } from './state.js';
+import { drawParkFeature, drawTownBuilding } from './town-buildings.js';
 import { type TownStyle, townStyleForBlock, townStyleForSymbol } from './town-style.js';
 
 /**
@@ -61,8 +64,9 @@ export function shouldDrawSymbolCampus(
   tier: LodTier,
   ageLens: boolean | undefined,
   placedMiniCount: number,
+  block: Pick<MapBlock, 'id' | 'lang' | 'buildingCount'>,
 ): boolean {
-  return tier !== 'city' && ageLens !== true && placedMiniCount > 0;
+  return tier !== 'city' && ageLens !== true && placedMiniCount > 0 && hasSymbolCampus(block);
 }
 
 export function drawIsoBlocks(ctx: CanvasRenderingContext2D, s: IsoRenderState): void {
@@ -86,7 +90,16 @@ export function drawIsoBlocks(ctx: CanvasRenderingContext2D, s: IsoRenderState):
         continue;
       }
       const colors = prismColors(b.lang, s.palette, age);
-      batch.add(colors.top, ...diamondPts(s, b));
+      // Fields and parks keep their ground reading at the overview too: a
+      // data district is farmland from the air, not a roof field.
+      const top = s.ageLens
+        ? colors.top
+        : g.style?.archetype === 'field'
+          ? cropColor(g.style, s.palette)
+          : g.style?.archetype === 'park'
+            ? s.palette.park.lawn
+            : colors.top;
+      batch.add(top, ...diamondPts(s, b));
       if (b.landmark) landmarks.push(g);
     }
     batch.flush(ctx);
@@ -140,7 +153,7 @@ function drawIsoIssueMarker(ctx: CanvasRenderingContext2D, s: IsoRenderState, g:
   if (!style) return;
 
   const minis = buildingsForBlock(s.model, g.block.id);
-  const representative = shouldDrawSymbolCampus(s.tier, s.ageLens, minis.length)
+  const representative = shouldDrawSymbolCampus(s.tier, s.ageLens, minis.length, g.block)
     ? representativeIssueBuilding(minis)
     : null;
   const anchor = representative
@@ -300,7 +313,7 @@ function drawOneBlock(
   // symbol-carrying block has no buildings and must read as a normal prism,
   // not an empty parking lot.
   const placedMinis = b.buildingCount > 0 ? buildingsForBlock(s.model, b.id) : NO_MINIS;
-  const minis = shouldDrawSymbolCampus(s.tier, s.ageLens, placedMinis.length)
+  const minis = shouldDrawSymbolCampus(s.tier, s.ageLens, placedMinis.length, b)
     ? placedMinis
     : NO_MINIS;
 
@@ -317,16 +330,25 @@ function drawOneBlock(
     ctx.globalAlpha = 0.25;
     fillQuad(ctx, colors.top, podiumPrism.tn, podiumPrism.te, podiumPrism.ts, podiumPrism.tw);
     ctx.globalAlpha = 1;
-    drawPodiumBuildings(ctx, s, minis, podiumPrism.liftPx, b, colors);
+    const stacks = drawPodiumBuildings(ctx, s, minis, podiumPrism.liftPx, b, colors);
+    drawIndustrialSmoke(ctx, s, b, stacks);
     return;
   }
 
   const style = g.style ?? townStyleForBlock(b);
+  if (!s.ageLens && style.archetype === 'field') {
+    drawField(ctx, s, g, style);
+    return;
+  }
+  if (!s.ageLens && style.archetype === 'park') {
+    drawPark(ctx, s, g, style, colors);
+    return;
+  }
   const massing = s.ageLens ? null : massingPrism(s, b, g, style);
   // An N/W wing paints BEFORE the main mass and an S/E wing after, so the
   // secondary volume occludes correctly against its own building.
   if (massing?.behind) drawMassing(ctx, s, massing.prism, style, colors);
-  drawTownBuilding(ctx, s, prism, style, colors, {
+  const paint = drawTownBuilding(ctx, s, prism, style, colors, {
     suppressDetails: s.ageLens === true,
   });
   if (massing && !massing.behind) drawMassing(ctx, s, massing.prism, style, colors);
@@ -338,9 +360,181 @@ function drawOneBlock(
   ctx.lineTo(prism.tn.x, prism.tn.y);
   ctx.lineTo(prism.te.x, prism.te.y);
   ctx.stroke();
+  drawIndustrialSmoke(ctx, s, b, paint.stacks);
 }
 
 const NO_MINIS: MapBuilding[] = [];
+
+function cropColor(style: TownStyle, p: CityPalette): string {
+  return p.farm.crops[(style.seed >>> 4) % 4]!;
+}
+
+/** Furrow spacing in world units by tier. */
+const FURROW_STEP = { district: 3.2, street: 1.6 } as const;
+const MAX_FURROWS = 80;
+
+/**
+ * A data file is a field: the footprint under crop, furrowed along the ridge
+ * axis, with a shed in the corner. No walls, no roof — the parcel itself is
+ * the building. Language hue is deliberately dropped here; the crop IS the
+ * signal, and a purple wheatfield would say nothing true.
+ */
+function drawField(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  g: BlockGeom,
+  style: TownStyle,
+): void {
+  const b = g.block;
+  const p = s.palette;
+  const r = b.rect;
+  const [n, e, sPt, w] = diamondPts(s, b);
+  const widthPx = e.x - w.x;
+  ctx.fillStyle = cropColor(style, p);
+  pathQuad(ctx, n, e, sPt, w);
+  ctx.fill();
+
+  if (widthPx >= 16) {
+    const step = FURROW_STEP[s.tier === 'street' ? 'street' : 'district'];
+    const alongX = style.ridge === 'x';
+    const span = alongX ? r.h : r.w;
+    const count = Math.min(MAX_FURROWS, Math.floor(span / step));
+    ctx.strokeStyle = p.farm.furrow;
+    ctx.globalAlpha = 0.38;
+    ctx.lineWidth = Math.max(0.5, 0.22 * s.cam.scale);
+    ctx.beginPath();
+    for (let i = 1; i <= count; i++) {
+      const off = (i - 0.5) * step;
+      const a = alongX ? toIso(r.x + 0.6, r.y + off) : toIso(r.x + off, r.y + 0.6);
+      const z = alongX ? toIso(r.x + r.w - 0.6, r.y + off) : toIso(r.x + off, r.y + r.h - 0.6);
+      const pa = sp(s.cam, a.u, a.v);
+      const pz = sp(s.cam, z.u, z.v);
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pz.x, pz.y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (widthPx >= 24) {
+    // The shed sits in the south-east corner of the plot, the last thing
+    // painted so it stands in front of the crop.
+    const side = Math.max(2, Math.min(r.w, r.h) * 0.22);
+    const shed = { x: r.x + r.w - side - 0.8, y: r.y + r.h - side - 0.8, w: side, h: side * 0.8 };
+    drawPrism(ctx, prismScreen(s.cam, shed, LEVEL_H * HZ * 0.55), p.farm.shed);
+  }
+}
+
+/**
+ * A stylesheet is a park: lawn, a gravel cross of paths, a flowerbed in the
+ * language hue (the one place a park carries the field's colour), and a
+ * centrepiece — bandstand, fountain, or obelisk by seed — with trees at
+ * street zoom.
+ */
+function drawPark(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  g: BlockGeom,
+  style: TownStyle,
+  colors: { top: string },
+): void {
+  const b = g.block;
+  const p = s.palette;
+  const r = b.rect;
+  const [n, e, sPt, w] = diamondPts(s, b);
+  const widthPx = e.x - w.x;
+  ctx.fillStyle = p.park.lawn;
+  pathQuad(ctx, n, e, sPt, w);
+  ctx.fill();
+  if (widthPx < 14) return;
+
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const pathW = Math.min(1.4, Math.min(r.w, r.h) * 0.12);
+  ctx.fillStyle = p.park.path;
+  for (const band of [
+    { x: r.x, y: cy - pathW / 2, w: r.w, h: pathW },
+    { x: cx - pathW / 2, y: r.y, w: pathW, h: r.h },
+  ]) {
+    const c = isoCorners(band);
+    pathQuad(
+      ctx,
+      sp(s.cam, c.n.u, c.n.v),
+      sp(s.cam, c.e.u, c.e.v),
+      sp(s.cam, c.s.u, c.s.v),
+      sp(s.cam, c.w.u, c.w.v),
+    );
+    ctx.fill();
+  }
+
+  const bedSide = Math.min(r.w, r.h) * 0.34;
+  const bed = { x: cx - bedSide / 2, y: cy - bedSide / 2, w: bedSide, h: bedSide };
+  const bc = isoCorners(bed);
+  ctx.fillStyle = colors.top;
+  ctx.globalAlpha = 0.85;
+  pathQuad(
+    ctx,
+    sp(s.cam, bc.n.u, bc.n.v),
+    sp(s.cam, bc.e.u, bc.e.v),
+    sp(s.cam, bc.s.u, bc.s.v),
+    sp(s.cam, bc.w.u, bc.w.v),
+  );
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  if (widthPx >= 30) {
+    const centre = sp(s.cam, toIso(cx, cy).u, toIso(cx, cy).v);
+    const budget = roofHeadroom(g, s.cam.scale) * s.cam.scale;
+    const size = Math.min(r.w, r.h) * 0.3 * s.cam.scale;
+    const pick = (style.seed >>> 6) % 3;
+    if (pick === 0) drawParkFeature(ctx, s, centre, size, budget, 'bandstand');
+    else if (pick === 1) drawFountainAt(ctx, s, centre, size * 0.6);
+    else drawParkFeature(ctx, s, centre, size, budget, 'obelisk');
+  }
+
+  if (s.tier === 'street' && s.atlas) {
+    const rng = seeded(style.seed ^ 0x51ed270b);
+    const count = 2 + Math.floor(rng() * 3);
+    for (let i = 0; i < count; i++) {
+      // Trees stand in the four lawn quarters, off the paths and the bed.
+      const qx = i % 2 === 0 ? 0.2 : 0.8;
+      const qy = i < 2 ? 0.2 : 0.8;
+      const x = r.x + r.w * (qx + (rng() - 0.5) * 0.14);
+      const y = r.y + r.h * (qy + (rng() - 0.5) * 0.14);
+      const size = (1.8 + rng() * 1.2) * s.cam.scale * 2;
+      const sprite = rng() < 0.75 ? 'tree1' : 'tree2';
+      const pt = sp(s.cam, toIso(x, y).u, toIso(x, y).v);
+      const src = s.atlas.index[sprite] * s.atlas.cell;
+      ctx.drawImage(
+        s.atlas.canvas,
+        src,
+        0,
+        s.atlas.cell,
+        s.atlas.cell,
+        pt.x - size / 2,
+        pt.y - size,
+        size,
+        size,
+      );
+    }
+  }
+}
+
+/**
+ * Working smoke over the industrial zone only, at street zoom. Residential
+ * hearths stay quiet: a whole village smoking at once is noise, and a plume
+ * is the one cue that says "this is a works" from across the map.
+ */
+function drawIndustrialSmoke(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  b: MapBlock,
+  stacks: readonly ScreenPt[],
+): void {
+  if (s.tier !== 'street' || s.ageLens || stacks.length === 0) return;
+  if (b.health?.zone !== 'industrial') return;
+  drawChimneySmoke(ctx, s.palette, stacks, b.id, s.cam.scale, s.animationTime ?? 0);
+}
 
 /** Below this projected width a wing is a smudge, not a wing. */
 const MIN_MASSING_PX = 26;
@@ -415,7 +609,8 @@ function drawPodiumBuildings(
   podiumLiftPx: number,
   parent: MapBlock,
   colors: ReturnType<typeof prismColors>,
-): void {
+): ScreenPt[] {
+  const stacks: ScreenPt[] = [];
   for (let i = 0; i < minis.length; i++) {
     const bld = minis[i]!;
     const mini = prismScreen(s.cam, bld.rect, miniHIso(bld.height));
@@ -453,12 +648,16 @@ function drawPodiumBuildings(
             variance: ((symbolStyle.seed >>> 8) % 200) / 100 - 1,
           });
     ctx.globalAlpha = 0.5 + 0.45 * bld.height;
-    drawTownBuilding(ctx, s, lifted, symbolStyle, miniColors, {
+    const paint = drawTownBuilding(ctx, s, lifted, symbolStyle, miniColors, {
       compact: true,
       suppressDetails: s.ageLens === true,
     });
     ctx.globalAlpha = 1;
+    // The front-most (last-painted) stacks win: smoke from a mini at the back
+    // would drift behind the campus in front of it.
+    stacks.unshift(...paint.stacks);
   }
+  return stacks;
 }
 
 /** Selection / hover chrome: silhouette strokes over the finished city. */

@@ -1,0 +1,262 @@
+{
+  "formatVersion": "0.5",
+  "hashEmbedder": {
+    "id": "test-hash-embed@1",
+    "description": "A deterministic stand-in for a model: SHA-256 of the UTF-8 text, extended by re-hashing the previous digest, each byte read as a signed int8 and mapped to (b + 0.5) / 128; the compiler L2-normalizes the result.",
+    "dimensions": 384,
+    "sample": {
+      "text": "drift vellum 0003\nMeridian copper beacon vellum saffron sonata garnet anvil tide anvil copper jasper ember russet sonata.",
+      "unitVector": [
+        -0.07198064029216766,
+        -0.0167158842086792,
+        0.029679222032427788,
+        -0.06038186326622963,
+        -0.08153257519006729,
+        -0.025585535913705826,
+        0.07061608135700226,
+        -0.008528511971235275
+      ]
+    }
+  },
+  "chunkUid": [
+    {
+      "documentId": "doc-0001",
+      "ordinal": 0,
+      "text": "Hello, world.",
+      "expected": "00298b56550c3ba5df8528912aac985d"
+    },
+    {
+      "documentId": "Mechanics/Newton laws",
+      "ordinal": 12,
+      "text": "Force equals mass times acceleration.",
+      "expected": "98a3f8f66c03885ad010b77f45868562"
+    },
+    {
+      "documentId": "ünïcode",
+      "ordinal": 3,
+      "text": "Zwölf Boxkämpfer",
+      "expected": "98aebd349797da5258a1a3e01dd67928"
+    }
+  ],
+  "contentHash": [
+    {
+      "text": "Hello, world.",
+      "expected": "f8c3bf62a9aa3e6fc1619c250e48abe7519373d3edf41be62eb5dc45199af2ef"
+    }
+  ],
+  "quantization": [
+    {
+      "input": [
+        1,
+        -1,
+        0.5,
+        -0.5,
+        0,
+        0.0039,
+        -0.0039,
+        2
+      ],
+      "int8": [
+        127,
+        -127,
+        64,
+        -63,
+        0,
+        0,
+        0,
+        127
+      ],
+      "bits": [
+        165
+      ]
+    },
+    {
+      "input": [
+        0.1,
+        0,
+        -0.1,
+        0.2,
+        0,
+        0,
+        0,
+        0.3,
+        0.4
+      ],
+      "int8": [
+        13,
+        0,
+        -13,
+        25,
+        0,
+        0,
+        0,
+        38,
+        51
+      ],
+      "bits": [
+        137,
+        1
+      ]
+    }
+  ],
+  "jcs": [
+    {
+      "input": {
+        "b": 1,
+        "a": [
+          true,
+          null,
+          "x"
+        ],
+        "ä": 2
+      },
+      "canonical": "{\"a\":[true,null,\"x\"],\"b\":1,\"ä\":2}"
+    },
+    {
+      "input": {
+        "n": 1e+21,
+        "m": 0.000001,
+        "k": 10,
+        "s": "quo\"te\\n"
+      },
+      "canonical": "{\"k\":10,\"m\":0.000001,\"n\":1e+21,\"s\":\"quo\\\"te\\\\n\"}"
+    },
+    {
+      "input": {
+        "1": 0,
+        "a": 0,
+        "A": 0,
+        "<": 0
+      },
+      "canonical": "{\"1\":0,\"<\":0,\"A\":0,\"a\":0}"
+    }
+  ],
+  "uri": [
+    {
+      "uri": "knowledge://bendyline/wikipedia-physics/Mechanics/Newton%20laws#chunk=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "parsed": {
+        "publisherId": "bendyline",
+        "catalogId": "wikipedia-physics",
+        "documentId": "Mechanics/Newton laws",
+        "fragment": {
+          "chunk": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "uri": "knowledge://me/notes/readme#line=12-40",
+      "parsed": {
+        "publisherId": "me",
+        "catalogId": "notes",
+        "documentId": "readme",
+        "fragment": {
+          "lineStart": 12,
+          "lineEnd": 40
+        }
+      }
+    },
+    {
+      "uri": "knowledge://me/notes/readme",
+      "parsed": {
+        "publisherId": "me",
+        "catalogId": "notes",
+        "documentId": "readme"
+      }
+    },
+    {
+      "uri": "knowledge://notes/doc",
+      "parsed": null
+    },
+    {
+      "uri": "knowledge://Bad_Publisher/notes/doc",
+      "parsed": null
+    },
+    {
+      "uri": "knowledge://me/notes/doc#page=3",
+      "parsed": null
+    }
+  ],
+  "uriFormat": {
+    "input": {
+      "publisherId": "bendyline",
+      "catalogId": "wikipedia-physics",
+      "documentId": "Mechanics/Newton laws",
+      "fragment": {
+        "chunk": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "expected": "knowledge://bendyline/wikipedia-physics/Mechanics/Newton%20laws#chunk=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "hamming": {
+    "rows": [
+      0,
+      255,
+      170,
+      15,
+      240,
+      1,
+      128,
+      85
+    ],
+    "bytesPerRow": 2,
+    "query": [
+      1,
+      255
+    ],
+    "k": 3,
+    "expected": [
+      {
+        "chunkId": 1,
+        "distance": 1
+      },
+      {
+        "chunkId": 4,
+        "distance": 6
+      },
+      {
+        "chunkId": 2,
+        "distance": 9
+      }
+    ]
+  },
+  "signature": {
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAjEGBSH8XNNyYVwtWJ8NaHPkmQ0tlJdpl8BwgtIlxsc4=\n-----END PUBLIC KEY-----\n",
+    "keyId": "8e6ca7cdbcb0041c",
+    "manifestSignatureKeyId": "8e6ca7cdbcb0041c",
+    "tamperedField": "name"
+  },
+  "fixture": {
+    "path": "fixtures/conformance-0.5.gezk",
+    "sha256": "2c8def4ddd61cff555b0f721f4400b44bc1d9abe7901b86ac8fd878cb4f4022e",
+    "sizeBytes": 520284,
+    "catalogId": "conformance",
+    "version": "0.5.0",
+    "publisherId": "bendyline",
+    "documents": 40,
+    "chunks": 167,
+    "shards": 1,
+    "ftsQueries": [
+      {
+        "query": "lattice ember 0000",
+        "expectedDocumentId": "doc-0000"
+      },
+      {
+        "query": "meridian drift 0001",
+        "expectedDocumentId": "doc-0001"
+      },
+      {
+        "query": "orchard lumen 0002",
+        "expectedDocumentId": "doc-0002"
+      }
+    ],
+    "semanticProbe": {
+      "chunkUid": "f7e2da2aba098f4bfddcb69941835d3b",
+      "embedInput": "drift vellum 0003\nMeridian copper beacon vellum saffron sonata garnet anvil tide anvil copper jasper ember russet sonata.",
+      "documentId": "doc-0003"
+    },
+    "documentRoundTrip": {
+      "documentId": "doc-0001",
+      "markdownSha256": "22831553fc4a2c5bb95c5777d2794f31da2fa318343de39bf62ff6ac817b0766"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * `.gezk` compiler (gezk-format-v1.md). One owner of normalization, chunk
+ * `.gezk` compiler (gezk 0.5; spec in bendyline/gezk). One owner of normalization, chunk
  * ids, embedding-profile conformance, SQLite schema, shard assignment,
  * centroid routing, and deterministic archive layout — the CLI's Markdown
  * adapter and Qualla's Wikipedia adapter both feed this API.
@@ -18,7 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
@@ -27,8 +27,8 @@ import type {
   KnowledgeCatalogManifest,
   KnowledgeChunkingProfile,
   KnowledgeEmbeddingProfile,
-} from '@bendyline/gezel';
-import { KnowledgeCatalogManifestSchema } from '@bendyline/gezel';
+} from '@bendyline/gezk';
+import { GEZK_MANIFEST_KIND, KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
 import { writeGezkArchive } from '../archive/write.js';
 import { type MarkdownChunk, chunkMarkdownProfile } from '../chunking/markdown-chunker.js';
 import {
@@ -40,18 +40,20 @@ import {
   GEZK_APPLICATION_ID,
   GEZK_FORMAT_VERSION,
   GEZK_INDEX_SCHEMA_VERSION,
+  LICENSE_NOTICE_PATH,
   MANIFEST_PATH,
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
+  README_PATH,
   ROUTER_DB_PATH,
   SHARD_TARGET_CHUNKS,
 } from '../format/constants.js';
-import { ROUTER_DDL, SHARD_DDL, vecChunksDdl } from '../format/ddl.js';
+import { ROUTER_DDL, SHARD_DDL } from '../format/ddl.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
 import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
 import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
-import { loadVecExtension } from './vec-load.js';
+import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 
 export interface CompileTopic {
   id: string;
@@ -71,7 +73,7 @@ export interface CompileKnowledgeCatalogOptions {
     publisher: { id: string; name: string; url?: string };
     /** Supplied, never wall-clock — determinism. */
     createdAt: string;
-    license: { name: string; noticePath?: string; attributionRequired: boolean };
+    license: { name: string; spdx?: string; noticePath?: string; attributionRequired: boolean };
     sourceSnapshot?: { name: string; date: string; taxonomyVersion?: string };
   };
   /** The shipped table of contents — the compiler REJECTS an empty list. */
@@ -107,8 +109,13 @@ export interface CompileKnowledgeCatalogOptions {
    *   know in advance which titles win the BM25 rank race.
    */
   smokeQueryPolicy?: 'require' | 'select';
+  /** Provenance; defaults to this package's identity. */
   toolchain?: KnowledgeCatalogManifest['toolchain'];
-  /** Extra archive files (README.md, LICENSES/…): path → utf8 content. */
+  /**
+   * Extra archive files (path → utf8 content). `README.md` and
+   * `LICENSES/catalog.txt` are always shipped: minimal ones are generated
+   * from the catalog block unless supplied here.
+   */
   extraFiles?: Record<string, string>;
   /**
    * Last touch before the manifest is archived — the signing seam
@@ -120,7 +127,7 @@ export interface CompileKnowledgeCatalogOptions {
   onProgress?: (progress: { phase: string; done: number; total: number }) => void;
   embedBatchSize?: number;
   /**
-   * TEST/EVAL override of the 200k shard target (gezk-format-v1.md §3.1) —
+   * TEST/EVAL override of the 200k shard target (the gezk spec §8.1) —
    * lets a small corpus build multi-shard so routing recall can be measured
    * against a scan-all control without a 2M-document corpus. Production
    * builds must not set it: the constant IS the format's scale design.
@@ -153,9 +160,9 @@ export async function compileKnowledgeCatalog(
   const topicIds = new Set(opts.topics.map((t) => t.id));
   const profile = opts.embeddingProfile;
   const chunkerOpts = {
-    unit: 'tokens' as const,
-    target: opts.chunkingProfile.targetTokens,
-    overlap: opts.chunkingProfile.overlapTokens,
+    unit: opts.chunkingProfile.unit,
+    target: opts.chunkingProfile.target,
+    overlap: opts.chunkingProfile.overlap,
     countTokens: opts.countTokens,
   };
 
@@ -238,7 +245,6 @@ export async function compileKnowledgeCatalog(
     router.exec('BEGIN');
     if (embedded) {
       router.exec(SHARD_DDL.replace('CREATE TABLE meta', 'CREATE TABLE IF NOT EXISTS meta'));
-      router.exec(vecChunksDdl(profile.dimensions));
     }
 
     const commonMeta: Record<string, string> = {
@@ -346,7 +352,6 @@ export async function compileKnowledgeCatalog(
       if (!db) {
         db = createCatalogDb(join(opts.workDir, shardPath(id)));
         db.exec(SHARD_DDL);
-        db.exec(vecChunksDdl(profile.dimensions));
         db.exec('BEGIN');
         shardDbs.set(id, db);
       }
@@ -362,7 +367,7 @@ export async function compileKnowledgeCatalog(
       let stmts = vecStmts.get(db);
       if (!stmts) {
         stmts = {
-          vec: db.prepare('INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?, vec_bit(?))'),
+          vec: db.prepare('INSERT INTO chunk_vectors_bit (chunk_id, v) VALUES (?, ?)'),
           int8: db.prepare('INSERT INTO chunk_vectors_int8 (chunk_id, v) VALUES (?, ?)'),
         };
         vecStmts.set(db, stmts);
@@ -449,7 +454,7 @@ export async function compileKnowledgeCatalog(
         const header = buildContextHeader(
           p.doc.title,
           chunk.headingPath,
-          opts.chunkingProfile.contextHeader.maxTokens,
+          opts.chunkingProfile.contextHeader.max,
           opts.countTokens,
         );
         pendingTexts.push(`${profile.passageInstruction}${header}${chunk.text}`);
@@ -458,6 +463,37 @@ export async function compileKnowledgeCatalog(
       }
     }
     await flushEmbeds();
+
+    // ── per-shard meta, then seal external shards so the router can record
+    //    their real byte sizes ─────────────────────────────────────────────────
+    for (let id = 0; id < shardCount; id++) {
+      if (!embedded)
+        putMeta(shardDb(id), {
+          shard_id: String(id),
+          chunk_count: String(shardChunkCounts.get(id) ?? 0),
+        });
+    }
+    if (embedded) putMeta(router, { shard_id: '0', chunk_count: String(totalChunks) });
+
+    // VACUUM INTO final staged files (deterministic layout).
+    const finalDir = join(opts.workDir, 'final');
+    mkdirSync(join(finalDir, 'index', 'shards'), { recursive: true });
+    const vacuumed: Array<{ archivePath: string; absPath: string }> = [];
+    const vacuumInto = (db: DatabaseSync, archivePath: string): string => {
+      db.exec('COMMIT');
+      const dest = join(finalDir, archivePath);
+      db.exec(`VACUUM INTO '${dest.replaceAll("'", "''").replaceAll('\\', '/')}'`);
+      vacuumed.push({ archivePath, absPath: dest });
+      return dest;
+    };
+    // The embedded shard IS the router, whose size is unknowable until it is
+    // sealed: its shards row records 0 and the manifest carries the size.
+    const shardBytes = new Map<number, number>();
+    if (!embedded) {
+      for (let id = 0; id < shardCount; id++) {
+        shardBytes.set(id, statSync(vacuumInto(shardDb(id), shardPath(id))).size);
+      }
+    }
 
     // ── shards table + centroids (§3.3) ───────────────────────────────────────
     {
@@ -483,37 +519,14 @@ export async function compileKnowledgeCatalog(
           BigInt(shardDocCounts.get(id) ?? 0),
           JSON.stringify([...(shardTopicIds.get(id) ?? [])].sort()),
           BigInt(centroids.length),
-          BigInt(0), // authoritative sizes live in the manifest (post-VACUUM)
+          BigInt(shardBytes.get(id) ?? 0),
         );
         for (const c of centroids) {
           insertCentroid.run(BigInt(id), Buffer.from(c.centroid.buffer.slice(0)), BigInt(c.weight));
         }
       }
     }
-
-    for (let id = 0; id < shardCount; id++) {
-      if (!embedded)
-        putMeta(shardDb(id), {
-          shard_id: String(id),
-          chunk_count: String(shardChunkCounts.get(id) ?? 0),
-        });
-    }
-    if (embedded) putMeta(router, { shard_id: '0', chunk_count: String(totalChunks) });
-
-    // ── VACUUM INTO final staged files (deterministic layout, §11) ────────────
-    const finalDir = join(opts.workDir, 'final');
-    mkdirSync(join(finalDir, 'index', 'shards'), { recursive: true });
-    const vacuumed: Array<{ archivePath: string; absPath: string }> = [];
-    const vacuumInto = (db: DatabaseSync, archivePath: string): void => {
-      db.exec('COMMIT');
-      const dest = join(finalDir, archivePath);
-      db.exec(`VACUUM INTO '${dest.replaceAll("'", "''").replaceAll('\\', '/')}'`);
-      vacuumed.push({ archivePath, absPath: dest });
-    };
     vacuumInto(router, ROUTER_DB_PATH);
-    if (!embedded) {
-      for (let id = 0; id < shardCount; id++) vacuumInto(shardDb(id), shardPath(id));
-    }
     router.close();
     for (const db of shardDbs.values()) db.close();
 
@@ -555,12 +568,6 @@ export async function compileKnowledgeCatalog(
       }
     }
 
-    // Patch shard byte sizes into the (already vacuumed) router? No — the
-    // shards row records the PRE-vacuum estimate being wrong would drift the
-    // manifest. Instead: sizes are measured from the vacuumed files and only
-    // recorded in the MANIFEST (authoritative); shards.bytes stays 0 in v1
-    // readers' eyes as "see manifest". Simpler than a re-vacuum cycle.
-
     // ── manifest + archive ────────────────────────────────────────────────────
     const files: KnowledgeCatalogManifest['files'] = [];
     const routerShardStats: KnowledgeCatalogManifest['router']['shards'] = [];
@@ -586,7 +593,11 @@ export async function compileKnowledgeCatalog(
         });
       }
     }
-    const extraFiles = opts.extraFiles ?? {};
+    const extraFiles: Record<string, string> = {
+      [README_PATH]: defaultReadme(opts),
+      [LICENSE_NOTICE_PATH]: defaultLicenseNotice(opts),
+      ...(opts.extraFiles ?? {}),
+    };
     for (const [path, content] of Object.entries(extraFiles)) {
       const bytes = Buffer.from(content, 'utf8');
       files.push({
@@ -597,7 +608,7 @@ export async function compileKnowledgeCatalog(
     }
 
     const unsignedManifest: KnowledgeCatalogManifest = KnowledgeCatalogManifestSchema.parse({
-      kind: 'gezel-knowledge-catalog',
+      kind: GEZK_MANIFEST_KIND,
       formatVersion: GEZK_FORMAT_VERSION,
       indexSchemaVersion: GEZK_INDEX_SCHEMA_VERSION,
       id: opts.catalog.id,
@@ -608,7 +619,10 @@ export async function compileKnowledgeCatalog(
       publisher: opts.catalog.publisher,
       createdAt: opts.catalog.createdAt,
       ...(opts.catalog.sourceSnapshot ? { sourceSnapshot: opts.catalog.sourceSnapshot } : {}),
-      license: opts.catalog.license,
+      license: {
+        ...opts.catalog.license,
+        noticePath: opts.catalog.license.noticePath ?? LICENSE_NOTICE_PATH,
+      },
       embedding: profile,
       chunking: opts.chunkingProfile,
       topics: opts.topics.map((t) => ({ id: t.id, name: t.name })),
@@ -619,9 +633,9 @@ export async function compileKnowledgeCatalog(
       },
       counts: { documents: prepared.length, chunks: totalChunks, shards: shardCount },
       files: [...files].sort((a, b) => (a.path < b.path ? -1 : 1)),
-      compatibility: { maximumIndexSchemaVersion: GEZK_INDEX_SCHEMA_VERSION },
+      requires: { formatVersion: GEZK_FORMAT_VERSION, features: [] },
       ...(smokeQueries && smokeQueries.length > 0 ? { smokeQueries } : {}),
-      ...(opts.toolchain ? { toolchain: opts.toolchain } : {}),
+      toolchain: opts.toolchain ?? KNOWLEDGE_TOOLCHAIN,
     });
     const manifest = opts.finalizeManifest
       ? KnowledgeCatalogManifestSchema.parse(opts.finalizeManifest(unsignedManifest))
@@ -657,13 +671,43 @@ export async function compileKnowledgeCatalog(
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function createCatalogDb(absPath: string): DatabaseSync {
-  const db = new DatabaseSync(absPath, { allowExtension: true });
-  loadVecExtension(db);
+  const db = new DatabaseSync(absPath);
   db.exec('PRAGMA page_size=8192');
   db.exec(`PRAGMA application_id=${GEZK_APPLICATION_ID}`);
   db.exec(`PRAGMA user_version=${GEZK_INDEX_SCHEMA_VERSION}`);
   db.exec('PRAGMA journal_mode=DELETE');
   return db;
+}
+
+/** Every catalog ships a README; producers usually supply a richer one. */
+function defaultReadme(opts: CompileKnowledgeCatalogOptions): string {
+  const c = opts.catalog;
+  return [
+    `# ${c.name}`,
+    '',
+    ...(c.description ? [c.description, ''] : []),
+    `A gezk knowledge catalog (${c.id}@${c.version}) published by ${c.publisher.name}.`,
+    `Language: ${c.language}. License: ${c.license.name} (see ${c.license.noticePath ?? LICENSE_NOTICE_PATH}).`,
+    ...(c.sourceSnapshot
+      ? [`Source snapshot: ${c.sourceSnapshot.name} (${c.sourceSnapshot.date}).`]
+      : []),
+    '',
+  ].join('\n');
+}
+
+function defaultLicenseNotice(opts: CompileKnowledgeCatalogOptions): string {
+  const c = opts.catalog;
+  const publisher = c.publisher.url ? `${c.publisher.name} <${c.publisher.url}>` : c.publisher.name;
+  const license = c.license.spdx ? `${c.license.name} (SPDX: ${c.license.spdx})` : c.license.name;
+  return [
+    `${c.name} (${c.id}@${c.version})`,
+    `Publisher: ${publisher}`,
+    `License: ${license}`,
+    ...(c.license.attributionRequired
+      ? ['Attribution is required when redistributing this content.']
+      : []),
+    '',
+  ].join('\n');
 }
 
 function normalizeMarkdown(md: string): string {

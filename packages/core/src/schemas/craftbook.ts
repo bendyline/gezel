@@ -58,7 +58,8 @@ export {
  * work.
  *
  * Edge resolution at completion of a step (in order):
- *   1. explicit `next` arg from the caller (a "jump")
+ *   1. explicit `next` arg from the caller (a "jump", considered only
+ *      after every `onExit` script succeeds)
  *   2. `step.terminal === true` → no further edges; complete the task
  *   3. `step.branches`: evaluate each predicate against the step's
  *      `onExit` script output; first match wins (`goto`)
@@ -140,6 +141,125 @@ export const CraftbookStepInputSchema = z.object({
 export type CraftbookStepInput = z.infer<typeof CraftbookStepInputSchema>;
 
 /**
+ * The single persistence surface a step is expected to WRITE as its result.
+ * Reads are deliberately independent: an artifact-output step may consume a
+ * workspace file, and a task-note reviewer may inspect either drawer. Task
+ * notes may remain available as short progress metadata on file-producing
+ * steps, but never satisfy or substitute for the declared result medium.
+ */
+export const CraftbookStepWritableOutputMediumSchema = z.enum([
+  'workspace',
+  'artifact',
+  'task-note',
+]);
+export type CraftbookStepWritableOutputMedium = z.infer<
+  typeof CraftbookStepWritableOutputMediumSchema
+>;
+export const CraftbookStepOutputMediumSchema = z.enum([
+  ...CraftbookStepWritableOutputMediumSchema.options,
+  'none',
+]);
+export type CraftbookStepOutputMedium = z.infer<typeof CraftbookStepOutputMediumSchema>;
+
+/**
+ * Standard gate scripts whose exit criterion can only be satisfied by
+ * writing to a particular persistence surface. Keep this mapping structural:
+ * a gate requirement must not depend on whether its neighboring prose happens
+ * to spell the corresponding tool name exactly.
+ */
+const REQUIRED_OUTPUT_MEDIA_BY_STANDARD_GATE_SCRIPT: Readonly<
+  Record<string, readonly CraftbookStepWritableOutputMedium[]>
+> = {
+  checkTaskNoteContains: ['task-note'],
+};
+
+/** Output surfaces required by the scripts attached to a step gate. */
+export function requiredOutputMediaForGate(
+  gate: StepGateUnion | null | undefined,
+): ReadonlySet<CraftbookStepWritableOutputMedium> {
+  const media = new Set<CraftbookStepWritableOutputMedium>();
+  if (!gate) return media;
+  for (const ref of normalizeStepGate(gate).scripts) {
+    if (ref.scope !== 'standard') continue;
+    for (const medium of REQUIRED_OUTPUT_MEDIA_BY_STANDARD_GATE_SCRIPT[ref.name] ?? []) {
+      media.add(medium);
+    }
+  }
+  return media;
+}
+
+/**
+ * Subtractive per-step tool policy. A craftbook never has to enumerate the
+ * complete positive tool roster: the role, install, security policy, and
+ * model tier still establish that roster, then this policy removes what the
+ * active step cannot need.
+ *
+ * `disallowToolsets` targets installed catalog/MCP ids (for example
+ * `docblocks`). `disallowBuiltinToolsets` targets Gezel's stable built-in
+ * group ids (for example `code-execution` or `workspace-fs-write`). These
+ * are intentionally NOT the broad catalog categories, whose classification
+ * is heuristic and therefore unsuitable for runtime authority.
+ */
+export const CraftbookStepToolPolicySchema = z
+  .object({
+    disallowToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
+    disallowBuiltinToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
+    outputMedium: CraftbookStepOutputMediumSchema.optional(),
+    /**
+     * Other intentional write surfaces used while producing the primary
+     * result (for example edit workspace source + emit an artifact report).
+     * `none` is never a secondary medium.
+     */
+    additionalOutputMedia: z.array(CraftbookStepWritableOutputMediumSchema).min(1).optional(),
+  })
+  .strict()
+  .superRefine((policy, ctx) => {
+    const additional = new Set(policy.additionalOutputMedia ?? []);
+    if (policy.outputMedium === 'none' && additional.size > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['additionalOutputMedia'],
+        message: '`none` cannot have secondary output media',
+      });
+    }
+    if (
+      policy.outputMedium &&
+      policy.outputMedium !== 'none' &&
+      additional.has(policy.outputMedium)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['additionalOutputMedia'],
+        message: 'the primary output medium must not be repeated as a secondary medium',
+      });
+    }
+    const media = new Set([policy.outputMedium, ...additional]);
+    const denied = new Set(policy.disallowBuiltinToolsets ?? []);
+    if (media.has('workspace') && denied.has('workspace-fs-write')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['disallowBuiltinToolsets'],
+        message: 'workspace output conflicts with disallowing `workspace-fs-write`',
+      });
+    }
+    if (media.has('artifact') && denied.has('artifacts')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['disallowBuiltinToolsets'],
+        message: 'artifact output conflicts with disallowing `artifacts`',
+      });
+    }
+    if (media.has('task-note') && denied.has('tasks')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['disallowBuiltinToolsets'],
+        message: 'task-note output conflicts with disallowing `tasks`',
+      });
+    }
+  });
+export type CraftbookStepToolPolicy = z.infer<typeof CraftbookStepToolPolicySchema>;
+
+/**
  * Wire twin of {@link ModelTier} (roles/tier.ts) — derived from the
  * canonical `MODEL_TIER_ORDER` tuple so the two can never drift.
  */
@@ -177,13 +297,17 @@ export const CraftbookStepSchema = z.object({
   capabilityFloor: ModelTierSchema.optional(),
   /** Per-phase indexed-context policy; overrides gezel and install defaults. */
   retrieval: RetrievalPolicySchema.optional(),
+  /** Per-step subtractive tool and output-surface policy. */
+  toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
   /** Setup scripts, run in order when the step activates. Single ref = legacy shape. */
   onEnter: ScriptRefListSchema.optional(),
   /**
    * Cleanup scripts — the `finally` of the step. Run in order AFTER the
-   * gate (if any) approves; never on a gate reject. Branch predicates
-   * read the LAST ref's output (legacy routing; prefer gate routing).
+   * gate (if any) approves; never on a gate reject. Every script must
+   * succeed or the step remains incomplete and the task pauses. Branch
+   * predicates read the LAST ref's output (legacy routing; prefer gate
+   * routing).
    */
   onExit: ScriptRefListSchema.optional(),
   /** Required file inputs for this step, in the order they should be opened. */
@@ -886,6 +1010,8 @@ export const NewCraftbookStepSchema = z.object({
   capabilityFloor: ModelTierSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.retrieval}. */
   retrieval: RetrievalPolicySchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
+  toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
   onEnter: ScriptRefListSchema.optional(),
   onExit: ScriptRefListSchema.optional(),
@@ -1089,6 +1215,8 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.suggestedGezelId ? { suggestedGezelId: s.suggestedGezelId } : {}),
       ...(s.suggestedRole ? { suggestedRole: s.suggestedRole } : {}),
       ...(s.capabilityFloor ? { capabilityFloor: s.capabilityFloor } : {}),
+      ...(s.retrieval ? { retrieval: s.retrieval } : {}),
+      ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),
       ...(s.onExit ? { onExit: s.onExit } : {}),

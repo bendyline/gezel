@@ -964,3 +964,79 @@ describe('BundledSource — dynamic root provider', () => {
     expect(await src.get('toolset', 'aa-tool')).toBeNull();
   });
 });
+
+describe('BundledSource — knowledge-catalog kind', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'catalog-knowledge-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const identity = {
+    schemaVersion: 1,
+    kind: 'knowledge-catalog',
+    id: 'wikipedia-physics',
+    name: 'Wikipedia: Physics',
+    description: 'Physics reference articles.',
+    tags: ['wikipedia', 'physics'],
+    maintainer: { name: 'Bendyline', url: 'https://bendyline.com' },
+    license: 'CC BY-SA 4.0',
+    licenseClass: 'open',
+    publisherId: 'bendyline',
+    language: 'en',
+    category: 'encyclopedia',
+    upstream: 'https://huggingface.co/datasets/Bendyline/wikipedia-physics',
+    yankedVersions: [],
+  };
+  const version = (v: string) => ({
+    schemaVersion: 1,
+    version: v,
+    releasedAt: '2026-09-01T00:00:00.000Z',
+    formatVersion: '0.5',
+    huggingface: {
+      repo: 'Bendyline/wikipedia-physics',
+      revision: 'a'.repeat(40),
+      path: `releases/${v}/wikipedia-physics-${v}.gezk`,
+    },
+    sha256: 'b'.repeat(64),
+    archiveBytes: 1_234_567,
+    uncompressedBytes: 2_345_678,
+    documents: 57_210,
+    chunks: 199_481,
+    embeddingProfile: { id: 'multilingual-e5-small@1', modelRepo: 'Xenova/multilingual-e5-small' },
+    topics: [{ id: 'physics', name: 'Physics' }],
+    sourceSnapshot: { name: 'enwiki', date: '2026-09-01' },
+  });
+
+  it('lists and resolves the newest version with every field carried through', async () => {
+    const dir = await writeIdentity(root, 'knowledge-catalog', 'wikipedia-physics', identity);
+    await writeVersion(dir, '2026.8.1', version('2026.8.1'));
+    await writeVersion(dir, '2026.9.1', version('2026.9.1'));
+    const src = new BundledSource(root);
+    const items = await src.list('knowledge-catalog');
+    expect(items).toHaveLength(1);
+    const manifest = items[0]?.manifest;
+    if (manifest?.kind !== 'knowledge-catalog') throw new Error('wrong kind');
+    expect(manifest.version).toBe('2026.9.1');
+    expect(manifest.publisherId).toBe('bendyline');
+    expect(manifest.huggingface.path).toBe('releases/2026.9.1/wikipedia-physics-2026.9.1.gezk');
+    expect(manifest.sha256).toBe('b'.repeat(64));
+    expect(manifest.embeddingProfile.id).toBe('multilingual-e5-small@1');
+    expect(manifest.topics).toEqual([{ id: 'physics', name: 'Physics' }]);
+    expect(manifest.availableVersions).toEqual(['2026.9.1', '2026.8.1']);
+  });
+
+  it('rejects a version pinned to a branch instead of a commit', async () => {
+    const dir = await writeIdentity(root, 'knowledge-catalog', 'wikipedia-physics', identity);
+    await writeVersion(dir, '2026.9.1', {
+      ...version('2026.9.1'),
+      huggingface: { ...version('2026.9.1').huggingface, revision: 'main' },
+    });
+    const src = new BundledSource(root);
+    expect(await src.list('knowledge-catalog')).toHaveLength(0);
+  });
+});

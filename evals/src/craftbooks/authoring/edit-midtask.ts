@@ -1,13 +1,13 @@
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findTaskForCraftbook,
   finishAuthoringPoll,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -191,7 +191,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     );
   }
   if (task.status !== 'complete') {
-    failures.push(`task ${task.ref} has status "${task.status}" — drive it to completion`);
+    failures.push(unfinishedTaskFailure({ ref: task.ref, status: task.status }));
   }
 
   const workspace = workspaceFromClient(ctx.client, projectId);
@@ -203,9 +203,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // The "task exists" milestone is implicitly passed once we get here.
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(summaryText, JSON.stringify(stepPrompts)) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    // The step prompts are seeded content the scenario hands the model, so
+    // counting them reported bytes before anything was produced. Only the
+    // summary the model writes counts.
+    bytes: progressBytes(summaryText),
+    deliverableMissing: summaryText === null || summaryText.length === 0,
     repairPath: `task ${task.ref} craftbook`,
     repairDirective: [
       "CRAFTBOOK_MIDTASK_REPAIR: fix the FIRST failure above by editing the TASK'S craftbook",

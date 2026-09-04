@@ -8,8 +8,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CatalogDocument, KnowledgeEmbeddingProfile } from '@bendyline/gezel';
-import type { KnowledgeChunkingProfile } from '@bendyline/gezel';
+import type { CatalogDocument, KnowledgeEmbeddingProfile } from '@bendyline/gezk';
+import type { KnowledgeChunkingProfile } from '@bendyline/gezk';
 import type { CompileTopic } from '../compiler/compile.js';
 
 const VOCAB = (
@@ -97,8 +97,9 @@ export function fakeCountTokens(text: string): number {
   return trimmed ? trimmed.split(/\s+/).length : 0;
 }
 
+/** The conformance profile: a hash embedder anyone can reimplement. */
 export const FIXTURE_EMBEDDING_PROFILE: KnowledgeEmbeddingProfile = {
-  id: 'gezel-test-hash-embed@1',
+  id: 'test-hash-embed@1',
   model: { repo: 'test/hash-embed', revision: 'fixture' },
   tokenizer: { kind: 'whitespace' },
   pooling: 'mean',
@@ -107,7 +108,7 @@ export const FIXTURE_EMBEDDING_PROFILE: KnowledgeEmbeddingProfile = {
   maxTokens: 512,
   queryInstruction: '',
   passageInstruction: '',
-  vectorEncoding: 'bit384+int8',
+  vectorEncoding: 'bit+int8',
   distance: { stage1: 'hamming', stage2: 'cosine' },
   quantization: {
     int8: { method: 'symmetric-linear', scale: 127 },
@@ -116,10 +117,10 @@ export const FIXTURE_EMBEDDING_PROFILE: KnowledgeEmbeddingProfile = {
 };
 
 export const FIXTURE_CHUNKING_PROFILE: KnowledgeChunkingProfile = {
-  id: 'gezel-markdown-chunks@2',
+  id: 'markdown-chunks@2',
   unit: 'tokens',
   tokenizer: 'profile',
-  targetTokens: 420,
-  overlapTokens: 64,
-  contextHeader: { maxTokens: 64 },
+  target: 420,
+  overlap: 64,
+  contextHeader: { max: 64 },
 };

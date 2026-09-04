@@ -7,6 +7,7 @@ import type {
 } from '@bendyline/gezel';
 import { SHARED_PROJECT_ID, displayName, isOutsideInInternalPath } from '@bendyline/gezel';
 import {
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -17,7 +18,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
-import { Tooltip } from '../primitives/index.js';
+import { ContextMenu, Tooltip } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
@@ -31,8 +32,14 @@ import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectIcon } from './ProjectIcon.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
+import {
+  isMarkdownDocumentPath,
+  markdownCompanionDirectory,
+  moveFileWithCompanion,
+} from './SquisqIntegration/document-companion.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
+import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
@@ -82,17 +89,14 @@ async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
   return resolveOutsideInLayout(path);
 }
 
-/**
- * The sidebar is a compact document navigator, so a folder only earns a row
- * when it leads to a visible document. The full Documents view still keeps
- * empty folders available for selection and creation.
- */
-function hideEmptyDocumentFolders(entries: FileEntry[]): FileEntry[] {
-  const filePaths = entries.filter((entry) => !entry.isDirectory).map((entry) => entry.path);
-  return entries.filter(
-    (entry) =>
-      !entry.isDirectory || filePaths.some((filePath) => filePath.startsWith(`${entry.path}/`)),
-  );
+function documentsFolderContextLabel(platform?: string): string {
+  const fileManager =
+    platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'file manager';
+  return `Open Documents folder in ${fileManager}`;
+}
+
+function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files');
 }
 
 interface SidebarProps {
@@ -246,6 +250,13 @@ export function Sidebar({
   const [renameDocError, setRenameDocError] = useState<string | null>(null);
   const [deleteDocTarget, setDeleteDocTarget] = useState<FileEntry | null>(null);
   const [deleteDocError, setDeleteDocError] = useState<string | null>(null);
+  const [documentDropActive, setDocumentDropActive] = useState(false);
+  const [documentDropStatus, setDocumentDropStatus] = useState('');
+  const documentQuickList = useDocumentQuickList();
+  const quickDocs = useMemo(
+    () => documentQuickListEntries(docs, documentQuickList.state),
+    [docs, documentQuickList.state],
+  );
   const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
@@ -347,13 +358,114 @@ export function Sidebar({
   }, []);
   const refreshDocs = useCallback(() => {
     api
-      .listDocuments('', true)
+      .listDocuments('', true, { stats: true, hidden: false })
       .then((r) => {
         const visibleEntries = r.files.filter((entry) => !isOutsideInInternalPath(entry.path));
-        setDocs(hideEmptyDocumentFolders(visibleEntries));
+        setDocs(visibleEntries);
       })
       .catch(() => {});
   }, []);
+  const revealDocumentsFolder = useCallback(async () => {
+    try {
+      await api.revealDocuments();
+    } catch {
+      // The menu is already closed when the OS launcher answers. Keep this
+      // action safely retryable, matching the other file-manager actions.
+    }
+  }, []);
+
+  const handleDocumentDrop = useCallback(
+    async (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDocumentDropActive(false);
+
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length === 0) return;
+      setDocumentDropStatus(
+        `Adding ${files.length === 1 ? files[0]?.name : `${files.length} files`}…`,
+      );
+
+      try {
+        // Read a fresh, unfiltered listing for collision detection. Managed
+        // outside-in companion folders stay hidden in the rail, but still
+        // reserve their names when an OS drop chooses a destination.
+        const current = await api.listDocuments('', true, { stats: true, hidden: false });
+        // Keep the document conversion stack out of the always-mounted
+        // sidebar bundle; it is only needed once a user actually drops files.
+        const { importDroppedFiles } = await import('./SquisqIntegration/document-import.js');
+        const result = await importDroppedFiles({
+          target: {
+            writeText: async (path, content) => {
+              await api.writeDocument(path, content);
+            },
+            writeBinary: async (path, data, mimeType) => {
+              await api.writeDocumentBinary(path, data, mimeType);
+            },
+          },
+          files,
+          destination: '',
+          existingPaths: current.files.map((entry) => entry.path),
+        });
+
+        if (result.importedPaths.length > 0) {
+          const lastPath = result.importedPaths.at(-1)!;
+          documentQuickList.noteUsed(lastPath);
+          window.dispatchEvent(
+            new CustomEvent('gezel:document-created', {
+              detail: { path: lastPath, paths: result.importedPaths },
+            }),
+          );
+        }
+
+        const added = result.importedPaths.length;
+        if (result.rejected.length > 0) {
+          const first = result.rejected[0]!;
+          setDocumentDropStatus(
+            `${added > 0 ? `Added ${added}; ` : ''}couldn't add ${first.name}: ${first.reason}${result.rejected.length > 1 ? ` (+${result.rejected.length - 1} more)` : ''}`,
+          );
+        } else {
+          setDocumentDropStatus(`Added ${added} ${added === 1 ? 'file' : 'files'}.`);
+        }
+      } catch (error) {
+        setDocumentDropStatus(
+          `Couldn't add files: ${(error as Error).message || 'Unknown error.'}`,
+        );
+      }
+    },
+    [documentQuickList.noteUsed],
+  );
+
+  const documentDropTarget = useMemo<GroupDropTarget>(
+    () => ({
+      active: documentDropActive,
+      hint: 'Drop to add to Documents',
+      status: documentDropStatus,
+      onDragEnter: (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        setDocumentDropActive(true);
+      },
+      onDragOver: (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        setDocumentDropActive(true);
+      },
+      onDragLeave: (event) => {
+        if (!isFileDrag(event)) return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        setDocumentDropActive(false);
+      },
+      onDrop: (event) => void handleDocumentDrop(event),
+    }),
+    [documentDropActive, documentDropStatus, handleDocumentDrop],
+  );
 
   useEffect(() => {
     refreshProjects();
@@ -361,6 +473,12 @@ export function Sidebar({
     refreshMeesterConfig();
     refreshDocs();
   }, [refreshProjects, refreshGezels, refreshMeesterConfig, refreshDocs]);
+
+  // A direct document tab can be restored or opened from outside either
+  // documents pane. Count that as use so it joins the five-item quick list.
+  useEffect(() => {
+    if (selection?.kind === 'document') documentQuickList.noteUsed(selection.path);
+  }, [selection, documentQuickList.noteUsed]);
 
   // Renames / creates / deletes elsewhere flow back in via the same
   // window events the detail views already broadcast.
@@ -598,15 +716,33 @@ export function Sidebar({
           setRenameDocError(`Keep the .${oldLayout.format} extension when renaming this document.`);
           return;
         }
-        const outsideInListing = oldLayout ? await api.listDocuments('', true) : null;
+        const oldCompanionDirectory =
+          oldLayout?.companionDirectory ??
+          (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
+        const nextCompanionDirectory =
+          nextLayout?.companionDirectory ??
+          (entry.isDirectory ? null : markdownCompanionDirectory(toPath));
         if (
-          oldLayout &&
-          nextLayout &&
-          outsideInListing?.files.some(
+          !entry.isDirectory &&
+          isMarkdownDocumentPath(entry.path) &&
+          !isMarkdownDocumentPath(toPath)
+        ) {
+          setRenameDocError('Keep the Markdown extension when renaming this document.');
+          return;
+        }
+        const companionListing = oldCompanionDirectory ? await api.listDocuments('', true) : null;
+        if (
+          nextCompanionDirectory &&
+          companionListing?.files.some(
             (candidate) =>
               candidate.path === toPath ||
-              candidate.path === nextLayout.companionDirectory ||
-              candidate.path.startsWith(`${nextLayout.companionDirectory}/`),
+              ((candidate.path === nextCompanionDirectory ||
+                candidate.path.startsWith(`${nextCompanionDirectory}/`)) &&
+                !(
+                  oldCompanionDirectory &&
+                  (candidate.path === oldCompanionDirectory ||
+                    candidate.path.startsWith(`${oldCompanionDirectory}/`))
+                )),
           )
         ) {
           setRenameDocError('A document or companion folder with that name already exists.');
@@ -622,17 +758,22 @@ export function Sidebar({
             await flushSerializedAutosave(`outside-in:documents:${oldLayout.markdownPath}`);
           }
         }
-        await api.renameDocument(entry.path, toPath);
-        if (oldLayout && nextLayout) {
-          const hasCompanion = outsideInListing?.files.some(
-            (candidate) =>
-              candidate.path === oldLayout.companionDirectory ||
-              candidate.path.startsWith(`${oldLayout.companionDirectory}/`),
-          );
-          if (hasCompanion) {
-            await api.renameDocument(oldLayout.companionDirectory, nextLayout.companionDirectory);
-          }
-        }
+        const hasCompanion = Boolean(
+          oldCompanionDirectory &&
+            companionListing?.files.some(
+              (candidate) =>
+                candidate.path === oldCompanionDirectory ||
+                candidate.path.startsWith(`${oldCompanionDirectory}/`),
+            ),
+        );
+        await moveFileWithCompanion(
+          (fromPath, nextPath) => api.renameDocument(fromPath, nextPath).then(() => undefined),
+          entry.path,
+          toPath,
+          hasCompanion && oldCompanionDirectory && nextCompanionDirectory
+            ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
+            : null,
+        );
         window.dispatchEvent(
           new CustomEvent('gezel:document-renamed', {
             detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
@@ -658,6 +799,9 @@ export function Sidebar({
     try {
       const selectedPath = selection?.kind === 'document' ? selection.path : null;
       const layout = entry.isDirectory ? null : await outsideInLayout(entry.path);
+      const companionDirectory =
+        layout?.companionDirectory ??
+        (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
       if (
         selectedPath &&
         (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
@@ -667,8 +811,15 @@ export function Sidebar({
           await flushSerializedAutosave(`outside-in:documents:${layout.markdownPath}`);
         }
       }
+      const hasCompanion = companionDirectory
+        ? (await api.listDocuments('', true)).files.some(
+            (candidate) =>
+              candidate.path === companionDirectory ||
+              candidate.path.startsWith(`${companionDirectory}/`),
+          )
+        : false;
       await api.deleteDocument(entry.path);
-      if (layout) await api.deleteDocument(layout.companionDirectory);
+      if (companionDirectory && hasCompanion) await api.deleteDocument(companionDirectory);
       window.dispatchEvent(
         new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
       );
@@ -693,6 +844,20 @@ export function Sidebar({
       onPointerDown: () => onPreload?.(tab),
     }),
     [onPreload],
+  );
+  const documentActionsForEntry = useCallback(
+    (entry: FileEntry) => {
+      if (entry.isDirectory) return [];
+      const pinned = documentQuickList.pinnedPaths.has(entry.path);
+      return [
+        {
+          label: pinned ? 'Unpin from Documents list' : 'Pin to Documents list',
+          onSelect: () =>
+            pinned ? documentQuickList.unpin(entry.path) : documentQuickList.pin(entry.path),
+        },
+      ];
+    },
+    [documentQuickList.pin, documentQuickList.pinnedPaths, documentQuickList.unpin],
   );
 
   return (
@@ -886,17 +1051,27 @@ export function Sidebar({
           onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'documents' }))}
           onAdd={openNewDoc}
           addTitle="New document"
+          dropTarget={documentDropTarget}
+          contextMenu={
+            <ContextMenu.Item
+              className="app-nav-menu-item"
+              onSelect={() => void revealDocumentsFolder()}
+            >
+              {documentsFolderContextLabel(window.__GEZEL__?.platform)}
+            </ContextMenu.Item>
+          }
         >
-          {docs.length === 0 ? (
+          {quickDocs.length === 0 ? (
             <li className="app-sidebar-empty">No documents yet.</li>
           ) : (
             <li className="app-sidebar-tree">
               <FileTree
-                entries={docs}
+                entries={quickDocs}
                 labelFor={(entry) => documentLabel(entry.name)}
                 selectedPath={selection?.kind === 'document' ? selection.path : undefined}
                 onSelect={(entry) => {
                   if (entry.isDirectory) return;
+                  documentQuickList.noteUsed(entry.path);
                   onSelect(toRecentTab({ kind: 'document', path: entry.path }));
                 }}
                 onIntent={(entry) => {
@@ -906,7 +1081,15 @@ export function Sidebar({
                 }}
                 onRename={openRenameDocument}
                 onDelete={openDeleteDocument}
-                defaultExpandedDepth={1}
+                actionsForEntry={documentActionsForEntry}
+                trailingForEntry={(entry) =>
+                  documentQuickList.pinnedPaths.has(entry.path) ? (
+                    <span className="document-pin-marker" title="Pinned" aria-label="Pinned">
+                      <i className="fa-solid fa-thumbtack" />
+                    </span>
+                  ) : null
+                }
+                sortMode="alpha"
               />
             </li>
           )}
@@ -1177,7 +1360,21 @@ interface GroupProps {
   onPreload?: () => void;
   onAdd: (e: ReactMouseEvent) => void;
   addTitle: string;
+  /** Optional right-click actions for this group's header. */
+  contextMenu?: React.ReactNode;
+  /** Optional OS file-drop target spanning this group. */
+  dropTarget?: GroupDropTarget;
   children: React.ReactNode;
+}
+
+interface GroupDropTarget {
+  active: boolean;
+  hint: string;
+  status: string;
+  onDragEnter: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDrop: (event: ReactDragEvent<HTMLDivElement>) => void;
 }
 
 function Group({
@@ -1192,87 +1389,122 @@ function Group({
   onPreload,
   onAdd,
   addTitle,
+  contextMenu,
+  dropTarget,
   children,
 }: GroupProps) {
   const showList = expanded && !collapsed;
-  return (
-    <div className="app-sidebar-group" data-group={id}>
-      <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
-        {!collapsed && (
-          <button
-            type="button"
-            className="app-sidebar-caret-btn"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
-            data-testid={`sidebar-group-toggle-${id}`}
-          >
-            <span className={`app-sidebar-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
-              <svg
-                width={14}
-                height={14}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                focusable="false"
-                aria-hidden="true"
-              >
-                <polyline points="9 6 15 12 9 18" />
-              </svg>
-            </span>
-          </button>
-        )}
+  const header = (
+    <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
+      {!collapsed && (
         <button
           type="button"
-          className="app-sidebar-group-toggle"
-          // Always opens the full area screen ("all projects/documents/gezels"),
-          // matching a click on the text header in expanded mode. In the
-          // collapsed icon-rail the caret is hidden, but the dedicated
-          // collapse toggle / drag grip still expand the rail, so the icon is
-          // free to navigate rather than toggle the inline list.
-          onClick={onOpen}
-          onPointerEnter={onPreload}
-          onFocus={onPreload}
-          onPointerDown={onPreload}
-          title={label}
-          data-testid={`sidebar-group-${id}`}
+          className="app-sidebar-caret-btn"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          data-testid={`sidebar-group-toggle-${id}`}
         >
-          <span className="app-sidebar-item-icon">
-            <AreaIcon area={area} size={18} />
-          </span>
-          <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
-        </button>
-        {!collapsed && (
-          <button
-            type="button"
-            className="app-sidebar-add"
-            onClick={onAdd}
-            title={addTitle}
-            aria-label={addTitle}
-          >
-            {/* An SVG plus, not a "+" glyph: flex centering aligns the text
-                line box, and the font's ascender/descender asymmetry then
-                leaves the character sitting visibly low in the 22px key. */}
+          <span className={`app-sidebar-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
             <svg
-              width={12}
-              height={12}
+              width={14}
+              height={14}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth={2.4}
+              strokeWidth={2.2}
               strokeLinecap="round"
+              strokeLinejoin="round"
               focusable="false"
               aria-hidden="true"
             >
-              <path d="M12 5v14M5 12h14" />
+              <polyline points="9 6 15 12 9 18" />
             </svg>
-          </button>
-        )}
-      </div>
+          </span>
+        </button>
+      )}
+      <button
+        type="button"
+        className="app-sidebar-group-toggle"
+        // Always opens the full area screen ("all projects/documents/gezels"),
+        // matching a click on the text header in expanded mode. In the
+        // collapsed icon-rail the caret is hidden, but the dedicated
+        // collapse toggle / drag grip still expand the rail, so the icon is
+        // free to navigate rather than toggle the inline list.
+        onClick={onOpen}
+        onPointerEnter={onPreload}
+        onFocus={onPreload}
+        onPointerDown={onPreload}
+        title={label}
+        data-testid={`sidebar-group-${id}`}
+      >
+        <span className="app-sidebar-item-icon">
+          <AreaIcon area={area} size={18} />
+        </span>
+        <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
+      </button>
+      {!collapsed && (
+        <button
+          type="button"
+          className="app-sidebar-add"
+          onClick={onAdd}
+          title={addTitle}
+          aria-label={addTitle}
+        >
+          {/* An SVG plus, not a "+" glyph: flex centering aligns the text
+              line box, and the font's ascender/descender asymmetry then
+              leaves the character sitting visibly low in the 22px key. */}
+          <svg
+            width={12}
+            height={12}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.4}
+            strokeLinecap="round"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+  return (
+    <div
+      className={`app-sidebar-group${dropTarget?.active ? ' app-sidebar-group-drop-active' : ''}`}
+      data-group={id}
+      onDragEnter={dropTarget?.onDragEnter}
+      onDragOver={dropTarget?.onDragOver}
+      onDragLeave={dropTarget?.onDragLeave}
+      onDrop={dropTarget?.onDrop}
+    >
+      {contextMenu ? (
+        <ContextMenu.Root>
+          <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content className="app-nav-menu">{contextMenu}</ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu.Root>
+      ) : (
+        header
+      )}
       {showList && <ul className="app-sidebar-list">{children}</ul>}
+      {dropTarget?.active && (
+        <div className="app-sidebar-document-drop-overlay" aria-hidden="true">
+          <i className="fa-solid fa-file-arrow-down" />
+          <span>{dropTarget.hint}</span>
+        </div>
+      )}
+      {dropTarget?.status && (
+        <output
+          className={`app-sidebar-document-drop-status${collapsed ? ' sr-only' : ''}`}
+          aria-live="polite"
+        >
+          {dropTarget.status}
+        </output>
+      )}
     </div>
   );
 }

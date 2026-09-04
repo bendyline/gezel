@@ -1,19 +1,23 @@
 /**
  * Private-tier catalog install (docs/knowledge-catalogs.md install sequence):
  * resolve source → disk preflight → resumable download (`.partial` stays on
- * kill, next attempt resumes) → archive sha256 = the ref's contentDigest →
- * verified staged extract (every file hashed against the manifest) → open +
- * count validation in staging → atomic sibling-rename publish → registry
- * pointer → prune older versions. Yields install events; the job registry
- * in manager.ts consumes them.
+ * kill or cancel; the next attempt resumes) → archive sha256 = the ref's
+ * contentDigest → identity check against the catalog entry → verified staged
+ * extract (every file hashed against the manifest) → open + count validation
+ * in staging → atomic sibling-rename publish → registry pointer. Yields
+ * install events; the manager's job registry consumes them and prunes older
+ * versions after unmounting the catalog's SQLite handles.
  */
 
-import { createHash } from 'node:crypto';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { KnowledgeCatalogRef } from '@bendyline/gezel';
+import type {
+  KnowledgeCatalogRef,
+  KnowledgeInstallEvent,
+  KnowledgeInstallSourceKind,
+} from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import {
   type CatalogValidationReport,
@@ -34,25 +38,27 @@ import type { KnowledgeRegistry } from './registry.js';
 
 const log = createLogger('knowledge');
 
-export type KnowledgeInstallEvent =
-  | {
-      type: 'progress';
-      phase: 'download' | 'extract';
-      bytesDone: number;
-      bytesTotal: number;
-    }
-  | { type: 'verifying' }
-  | { type: 'retrying'; attempt: number; reason: string }
-  | { type: 'done'; ref: KnowledgeCatalogRef; rootDir: string }
-  | { type: 'error'; error: string };
+export type { KnowledgeInstallEvent } from '@bendyline/gezel';
 
 export type KnowledgeInstallSource =
   | { kind: 'file'; path: string }
   | { kind: 'url'; url: string; expectedSha256?: string };
 
+/** The identity a catalog entry pins; the archive must agree before it is installed. */
+export interface KnowledgeExpectedIdentity {
+  publisherId: string;
+  catalogId: string;
+  version: string;
+}
+
 export interface KnowledgeInstallOptions {
   home: string;
   source: KnowledgeInstallSource;
+  /** Recorded on the registry entry (default: the source kind). */
+  origin?: KnowledgeInstallSourceKind;
+  /** The pinned archive size: the download's byte cap and the disk preflight. */
+  archiveBytes?: number;
+  expectedIdentity?: KnowledgeExpectedIdentity;
   registry: KnowledgeRegistry;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
@@ -63,12 +69,27 @@ export interface KnowledgeInstallOptions {
 
 const MAX_GEZK_ARCHIVE_BYTES = GEZK_ARCHIVE_LIMITS.maxTotalBytes + 512 * 1024 * 1024;
 
+export const KNOWLEDGE_DOWNLOAD_KEY_PATTERN = /^[0-9a-f]{16}$/;
+
+/**
+ * The download's temp-file stem. A pinned digest keys the file by content, so
+ * an interrupted catalog download resumes across jobs, restarts, and any
+ * later entry that pins the same bytes; an unpinned URL keys by the URL.
+ */
+export function knowledgeDownloadKey(
+  source: Extract<KnowledgeInstallSource, { kind: 'url' }>,
+): string {
+  if (source.expectedSha256) return source.expectedSha256.toLowerCase().slice(0, 16);
+  return createHash('sha256').update(source.url, 'utf8').digest('hex').slice(0, 16);
+}
+
 export async function* installKnowledgeCatalog(
   opts: KnowledgeInstallOptions,
 ): AsyncGenerator<KnowledgeInstallEvent, void> {
   let archivePath: string;
   let archiveSha: string | null = null;
   let downloadedTemp = false;
+  const origin = opts.origin ?? opts.source.kind;
 
   if (opts.source.kind === 'file') {
     archivePath = resolve(opts.source.path);
@@ -81,14 +102,10 @@ export async function* installKnowledgeCatalog(
   } else {
     const downloads = knowledgeDownloadsDir(opts.home);
     await mkdir(downloads, { recursive: true });
-    const nameHash = createHash('sha256')
-      .update(opts.source.url, 'utf8')
-      .digest('hex')
-      .slice(0, 16);
-    archivePath = join(downloads, `${nameHash}.gezk`);
+    archivePath = join(downloads, `${knowledgeDownloadKey(opts.source)}.gezk`);
     downloadedTemp = true;
 
-    const disk = await checkDiskSpace(downloads, 0);
+    const disk = await checkDiskSpace(downloads, opts.archiveBytes ?? 0);
     if (!disk.ok) {
       yield { type: 'error', error: describeDiskShortfall(disk, 'the catalog download') };
       return;
@@ -97,34 +114,46 @@ export async function* installKnowledgeCatalog(
     const download = downloadWithRetry({
       url: opts.source.url,
       destPath: archivePath,
-      approxSizeBytes: 0,
+      approxSizeBytes: opts.archiveBytes ?? 0,
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
-      maxBytes: MAX_GEZK_ARCHIVE_BYTES,
+      maxBytes: opts.archiveBytes ?? MAX_GEZK_ARCHIVE_BYTES,
     });
     let final: { bytesWritten: number; sha256?: string } | null = null;
-    while (true) {
-      const step = await download.next();
-      if (step.done) {
-        const value = step.value;
-        if (value.kind === 'aborted') return; // .partial stays for resume
-        if (value.kind !== 'ok') {
-          yield { type: 'error', error: value.error };
-          return;
+    try {
+      while (true) {
+        const step = await download.next();
+        if (step.done) {
+          const value = step.value;
+          if (value.kind === 'aborted') return; // .partial stays for resume
+          if (value.kind !== 'ok') {
+            yield { type: 'error', error: value.error };
+            return;
+          }
+          final = value;
+          break;
         }
-        final = value;
-        break;
+        if (step.value.type === 'progress') {
+          yield {
+            type: 'progress',
+            phase: 'download',
+            bytesDone: step.value.bytesWritten,
+            bytesTotal: step.value.totalBytes,
+          };
+        } else {
+          yield {
+            type: 'retrying',
+            attempt: step.value.attempt,
+            maxAttempts: step.value.maxAttempts,
+            delayMs: step.value.delayMs,
+            reason: step.value.reason,
+          };
+        }
       }
-      if (step.value.type === 'progress') {
-        yield {
-          type: 'progress',
-          phase: 'download',
-          bytesDone: step.value.bytesWritten,
-          bytesTotal: step.value.totalBytes,
-        };
-      } else {
-        yield { type: 'retrying', attempt: step.value.attempt, reason: step.value.reason };
-      }
+    } finally {
+      // Closing this generator early (a cancel) must unwind the download
+      // too, or its socket and file handle outlive the job.
+      await download.return(undefined as never).catch(() => {});
     }
     // Rename .partial into place; sha comes inline only on a fresh full
     // transfer — resumed downloads are re-hashed below like local files.
@@ -142,6 +171,7 @@ export async function* installKnowledgeCatalog(
         yield {
           type: 'error',
           error: `archive sha256 mismatch: expected ${expected}, got ${archiveSha}`,
+          mismatch: { expected, actual: archiveSha },
         };
         return;
       }
@@ -149,6 +179,20 @@ export async function* installKnowledgeCatalog(
 
     const inspection = await inspectGezkArchive(archivePath);
     const manifest = inspection.manifest;
+    if (opts.expectedIdentity) {
+      const pinned = opts.expectedIdentity;
+      if (
+        manifest.publisher.id !== pinned.publisherId ||
+        manifest.id !== pinned.catalogId ||
+        manifest.version !== pinned.version
+      ) {
+        yield {
+          type: 'error',
+          error: `catalog identity mismatch: the catalog entry pins ${pinned.publisherId}/${pinned.catalogId}@${pinned.version}, the archive is ${manifest.publisher.id}/${manifest.id}@${manifest.version}`,
+        };
+        return;
+      }
+    }
     const ref: KnowledgeCatalogRef = {
       publisherId: manifest.publisher.id,
       catalogId: manifest.id,
@@ -170,12 +214,11 @@ export async function* installKnowledgeCatalog(
     const existing = await stat(join(targetDir, 'manifest.json')).catch(() => null);
     if (existing) {
       // Bytes already on disk — just (re)point the registry.
-      opts.registry.upsert(ref, { enabled: true });
-      yield { type: 'done', ref, rootDir: targetDir };
+      opts.registry.upsert(ref, { enabled: true, source: origin });
+      yield { type: 'done', ref, rootDir: targetDir, storageScope: 'user' };
       return;
     }
 
-    const archiveBytes = (await stat(archivePath)).size;
     const disk = await checkDiskSpace(dirname(targetDir), inspection.totalUncompressedBytes);
     if (!disk.ok) {
       yield { type: 'error', error: describeDiskShortfall(disk, 'the catalog install') };
@@ -218,9 +261,8 @@ export async function* installKnowledgeCatalog(
       throw err;
     }
 
-    opts.registry.upsert(ref, { enabled: true });
-    await pruneOtherVersions(opts.home, ref);
-    yield { type: 'done', ref, rootDir: targetDir };
+    opts.registry.upsert(ref, { enabled: true, source: origin });
+    yield { type: 'done', ref, rootDir: targetDir, storageScope: 'user' };
   } catch (err) {
     yield { type: 'error', error: err instanceof Error ? err.message : String(err) };
   } finally {
@@ -228,8 +270,11 @@ export async function* installKnowledgeCatalog(
   }
 }
 
-/** Remove every installed version of this catalog except the active ref. */
-async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promise<void> {
+/** Remove every private version except the active ref after its host has been unmounted. */
+export async function pruneOtherKnowledgeCatalogVersions(
+  home: string,
+  ref: KnowledgeCatalogRef,
+): Promise<void> {
   const catalogsRoot = knowledgeCatalogsDir(home);
   const catalogDir = join(catalogsRoot, ref.publisherId, ref.catalogId);
   await assertKnowledgePathContained(catalogsRoot, catalogDir);
@@ -248,7 +293,12 @@ async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promi
         if (digest !== keepDigest) {
           const target = join(catalogDir, version, digest);
           if (await isKnowledgePathContained(catalogsRoot, target)) {
-            await rm(target, { recursive: true, force: true }).catch(() => {});
+            await rm(target, {
+              recursive: true,
+              force: true,
+              maxRetries: 5,
+              retryDelay: 100,
+            }).catch(() => {});
           }
         }
       }
@@ -259,7 +309,12 @@ async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promi
       log.warn(`refusing to prune catalog path outside the knowledge root: ${target}`);
       continue;
     }
-    await rm(target, { recursive: true, force: true }).catch((err) => {
+    await rm(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch((err) => {
       log.warn(`prune of ${ref.catalogId}@${version} failed: ${err}`);
     });
   }

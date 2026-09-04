@@ -656,3 +656,234 @@ describe('facade richness at street zoom', () => {
     expect(Math.min(...furnitureY)).toBeLessThan(localRidgeY);
   });
 });
+
+/** The v5 fixture with server road grades: the avenue a trolley street, the
+ *  lane a bare dirt track. */
+function gradedModel(): FileMapResponse {
+  const m = model(false);
+  return {
+    ...m,
+    streets: [
+      { id: 'st:1', rect: { x: 10, y: 62, w: 110, h: 8 }, tier: 0, districtId: null, grade: 7 },
+      { id: 'st:2', rect: { x: 55, y: 10, w: 4, h: 90 }, tier: 2, districtId: 'src', grade: 0 },
+    ],
+  };
+}
+
+describe('streets by road grade', () => {
+  const count = (calls: RecordedCall[], method: string) =>
+    calls.filter((c) => c.method === method).length;
+
+  it('builds a trolley avenue with sidewalks, lamps, and an overhead wire at street zoom', () => {
+    const graded = recordingCtx();
+    renderIso(graded.ctx, state(3, gradedModel()));
+    const bare = recordingCtx();
+    renderIso(bare.ctx, state(3, { ...gradedModel(), streets: [] }));
+    // Lamp heads are arcs; the wire between poles is the only quadratic curve
+    // the ground pass draws.
+    expect(count(graded.calls, 'arc')).toBeGreaterThan(count(bare.calls, 'arc'));
+    expect(count(graded.calls, 'quadraticCurveTo')).toBeGreaterThan(0);
+    expect(count(bare.calls, 'quadraticCurveTo')).toBe(0);
+    // Sidewalk bands, carriageway, rails: more fills and strokes than no street.
+    expect(count(graded.calls, 'fill')).toBeGreaterThan(count(bare.calls, 'fill') + 2);
+  });
+
+  it('draws wheel ruts on a dirt track and setts on a cobbled lane', () => {
+    const dirt = recordingCtx();
+    renderIso(dirt.ctx, state(3, gradedModel()));
+    // The dirt lane is the only thing that dashes at street zoom on this
+    // fixture: two broken rut lines.
+    expect(
+      dirt.calls.some((c) => c.method === 'setLineDash' && (c.args[0] as number[]).length === 2),
+    ).toBe(true);
+    const cobbled = recordingCtx();
+    const m = gradedModel();
+    m.streets![1] = { ...m.streets![1]!, grade: 1 };
+    renderIso(cobbled.ctx, state(3, m));
+    // Setts are many short cross joints: a lot more line segments than ruts.
+    expect(count(cobbled.calls, 'lineTo')).toBeGreaterThan(count(dirt.calls, 'lineTo'));
+  });
+
+  it('moves the traffic between frames, and stands still at t=0', () => {
+    const rects = (t: number) => {
+      const { ctx, calls } = recordingCtx();
+      renderIso(ctx, state(3, gradedModel(), { animationTime: t }));
+      return calls.filter((c) => c.method === 'fillRect').map((c) => c.args.join(','));
+    };
+    expect(rects(0)).toEqual(rects(0));
+    expect(rects(0)).not.toEqual(rects(4000));
+  });
+
+  it('keeps the city overview to plain carriageway fills', () => {
+    const graded = recordingCtx();
+    renderIso(graded.ctx, state(0.2, gradedModel()));
+    const bare = recordingCtx();
+    renderIso(bare.ctx, state(0.2, { ...gradedModel(), streets: [] }));
+    // The only arcs at city zoom are the landmark beacons, streets or not.
+    expect(count(graded.calls, 'arc')).toBe(count(bare.calls, 'arc'));
+    expect(count(graded.calls, 'quadraticCurveTo')).toBe(0);
+    expect(graded.calls.some((c) => c.method === 'drawImage')).toBe(false);
+  });
+
+  it('suppresses street life under the age lens', () => {
+    const { ctx, calls } = recordingCtx();
+    renderIso(ctx, state(3, gradedModel(), { ageLens: true, atlas: fakeAtlas() }));
+    expect(count(calls, 'quadraticCurveTo')).toBe(0);
+    expect(calls.some((c) => c.method === 'drawImage')).toBe(false);
+  });
+
+  it('renders a pre-traffic payload (no grades) by tier without throwing', () => {
+    const { ctx, calls } = recordingCtx();
+    renderIso(ctx, state(2, model(false)));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      for (const a of c.args) {
+        if (typeof a === 'number') expect(Number.isFinite(a)).toBe(true);
+      }
+    }
+  });
+
+  it('smokes the works at street zoom and nowhere else', () => {
+    const m = gradedModel();
+    // Make the landmark an industrial works with a stack.
+    const works = m.blocks.find((b) => b.id === 'src/x/huge.py')!;
+    works.landmark = false;
+    works.health = { ...works.health!, zone: 'industrial' };
+    const street = recordingCtx();
+    renderIso(street.ctx, state(3, m));
+    const district = recordingCtx();
+    renderIso(district.ctx, state(1, m));
+    // Smoke puffs are arcs drawn with the smoke tone; at district zoom the
+    // roof furniture is not drawn at all, so nothing can smoke.
+    const smokeArcs = (calls: RecordedCall[]) =>
+      calls.filter((c) => c.method === 'arc' && (c.args[2] as number) > 0).length;
+    expect(smokeArcs(street.calls)).toBeGreaterThan(smokeArcs(district.calls));
+  });
+});
+
+/** One block per file use, laid out on a row: data, style, config, code. */
+function usesModel(): FileMapResponse {
+  const base = model(false);
+  const mk = (id: string, i: number, lang: string, buildingCount = 0): MapBlock => ({
+    id,
+    districtId: 'pkg',
+    rect: { x: i * 60, y: 0, w: 40, h: 32 },
+    lot: { x: i * 60 - 3, y: -3, w: 46, h: 38 },
+    label: id.slice(id.lastIndexOf('/') + 1),
+    weight: 300,
+    lang,
+    state: 'live',
+    buildingCount,
+    levels: 3,
+    settlement: 'town',
+    urbanity: 0.6,
+    placedAt: new Date(NOW).toISOString(),
+    health: {
+      findings: 0,
+      maxSeverity: null,
+      fanIn: 1,
+      fanOut: 1,
+      vibe: 'tidy',
+      zone: 'residential',
+      importance: 0.3,
+      churn: 2,
+    },
+  });
+  return {
+    ...base,
+    bounds: { x: -10, y: -10, w: 260, h: 60 },
+    districts: [
+      {
+        id: 'pkg',
+        parentId: null,
+        rect: { x: -6, y: -6, w: 252, h: 46 },
+        label: 'pkg',
+        depth: 1,
+        fileCount: 4,
+        weight: 1200,
+      },
+    ],
+    blocks: [
+      mk('pkg/models.json', 0, 'json'),
+      mk('pkg/theme.css', 1, 'css'),
+      mk('pkg/vite.config.ts', 2, 'typescript', 2),
+      mk('pkg/index.ts', 3, 'typescript', 2),
+    ],
+    buildings: [
+      {
+        id: 'pkg/vite.config.ts#cfg',
+        blockId: 'pkg/vite.config.ts',
+        rect: { x: 124, y: 4, w: 8, h: 8 },
+        height: 0.5,
+        label: 'cfg',
+        kind: 'function',
+      },
+      {
+        id: 'pkg/index.ts#main',
+        blockId: 'pkg/index.ts',
+        rect: { x: 184, y: 4, w: 8, h: 8 },
+        height: 0.5,
+        label: 'main',
+        kind: 'function',
+      },
+    ],
+    roads: [],
+    streets: [],
+    plazas: [],
+  };
+}
+
+describe('file uses: fields, parks, signal towers', () => {
+  it('resolves the archetype from the file use in every register', () => {
+    const m = usesModel();
+    const styles = m.blocks.map((b) => townStyleForBlock(b).archetype);
+    expect(styles.slice(0, 3)).toEqual(['field', 'park', 'signal-tower']);
+    expect(styles[3]).not.toBe('field');
+    expect(townStyleForBlock(m.blocks[2]!).cap).toBe('lantern');
+  });
+
+  it('draws every use at every tier with finite coordinates', () => {
+    for (const scale of [0.2, 1, 3]) {
+      const { ctx, calls } = recordingCtx();
+      renderIso(ctx, state(scale, usesModel(), { atlas: fakeAtlas() }));
+      expect(calls.length).toBeGreaterThan(0);
+      for (const c of calls) {
+        for (const a of c.args) {
+          if (typeof a === 'number') expect(Number.isFinite(a), `${scale} ${c.method}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('furrows the field and paints the park lawn, and lays no roof on either', () => {
+    const m = usesModel();
+    const { ctx, calls } = recordingCtx();
+    renderIso(ctx, state(3, m));
+    const fills = calls.filter((c) => c.method === 'fill').length;
+    expect(fills).toBeGreaterThan(0);
+    // Furrows: a run of moveTo/lineTo pairs across the field.
+    expect(calls.filter((c) => c.method === 'lineTo').length).toBeGreaterThan(20);
+    // Neither the field nor the park draws a prism wall: the ridge-highlight
+    // stroke that every building ends with is absent for them, so a model of
+    // only ground uses ends with fewer strokes than one building would.
+    const groundOnly = { ...m, blocks: m.blocks.slice(0, 2), buildings: [] };
+    const g = recordingCtx();
+    renderIso(g.ctx, state(3, groundOnly));
+    const one = { ...m, blocks: m.blocks.slice(3), buildings: m.buildings.slice(1) };
+    const b = recordingCtx();
+    renderIso(b.ctx, state(3, one));
+    const rects = (cs: RecordedCall[]) => cs.filter((c) => c.method === 'fillRect').length;
+    // A building at street zoom fills window rectangles; ground uses fill none
+    // beyond the viewport background.
+    expect(rects(g.calls)).toBeLessThan(rects(b.calls));
+  });
+
+  it('never tags or campuses a config file, but does a code file', () => {
+    const m = usesModel();
+    const { ctx, calls } = recordingCtx();
+    renderIso(ctx, state(3, m));
+    const texts = calls.filter((c) => c.method === 'fillText').map((c) => c.args[0]);
+    expect(texts).toContain('main');
+    expect(texts).not.toContain('cfg');
+  });
+});

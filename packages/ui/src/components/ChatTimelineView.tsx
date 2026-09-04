@@ -15,11 +15,9 @@ import type {
 import {
   deriveThreadTitle,
   displayName,
-  handoffHeadline,
-  handoffKindLabel,
-  parseTaskHandoffNote,
   resolveGezelFontFamily,
   resolveGezelFontScale,
+  stripMcpPrefix,
 } from '@bendyline/gezel';
 import type { SseStreamOptions } from '@bendyline/gezel-client';
 import {
@@ -35,8 +33,16 @@ import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
-import { GezelIcon } from './GezelIcon.js';
+import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
+import {
+  type IndexingReceipt,
+  IndexingReceiptRow,
+  indexedPathFromActivity,
+  readIndexingReceipts,
+  recordIndexedFile,
+  writeIndexingReceipts,
+} from './IndexingReceipt.js';
 import { QueuedTaskBubble } from './QueuedTaskBubble.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
@@ -46,19 +52,14 @@ import {
   GhostQueuedBubble,
   type InlineWarning,
   MessageBubble,
-  RoleSuffix,
   StreamingBubble,
-  StreamingStatusLine,
   type ToolActivity,
-  useElapsedSeconds,
 } from './chat-bubbles.js';
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
-  countSegmentTools,
   erroredSlotsWithPersistedTwin,
   liveStatusLabel,
   queueNoticeIsFresh,
-  segmentsHaveText,
   staleLiveSessionIds,
 } from './chat-live-slot.js';
 import { playAssistantNarration, stopNarration } from './chat-narration.js';
@@ -70,6 +71,20 @@ import {
 import { SessionTreeGuides } from './chat-session-tree-guides.js';
 import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
+import {
+  type OptimisticTimelineMessage,
+  cssAttrValue,
+  findLastForSession,
+  formatProviderLabel,
+  isExpectedAvailabilityError,
+  isModelUnavailableError,
+  isRetryableFailedTurn,
+  mergeTerminalEntries,
+  mergeTimelineMessages,
+  referencedFilesOf,
+  withinHours,
+} from './chat-timeline-helpers.js';
+import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
@@ -96,16 +111,10 @@ const LATE_REPLY_GAP_MS = 3 * 60 * 1000;
 const SCROLL_NEAR_BOTTOM_PX = 80;
 const SCROLL_NEAR_TOP_PX = 80;
 const SCROLLBAR_IDLE_MS = 700;
+/** Stable tail budget consumed by live work before the timeline is allowed to grow. */
+const TIMELINE_WORKING_RESERVE_PX = 300;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
-/**
- * Quote a value for use inside a `[attr="…"]` selector. `CSS.escape`
- * isn't available in every environment we render in (jsdom, older
- * webviews), and session ids are opaque strings we don't control.
- */
-function cssAttrValue(value: string): string {
-  return value.replace(/["\\]/g, '\\$&');
-}
 // A terminal "session" is a run of commands inside one
 // `(project, workingDir)` thread with no gap longer than this. The
 // gap is measured terminal-to-terminal within the same thread —
@@ -121,48 +130,17 @@ const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
  * the conversation they annotate.
  */
 const MAX_QUEUED_TASK_CARDS = 4;
+/** A local metadata reset should settle promptly, even if an HTTP socket stalls. */
+const FAILED_TURN_ACTION_TIMEOUT_MS = 10_000;
 
-function mergeTerminalEntries(
-  snapshot: TerminalTimelineEntry[] | undefined,
-  liveEntries: TerminalTimelineEntry[],
-): TerminalTimelineEntry[] {
-  const byId = new Map((snapshot ?? []).map((entry) => [entry.messageId, entry]));
-  for (const entry of liveEntries) byId.set(entry.messageId, entry);
-  return [...byId.values()].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-}
-
-/**
- * Merge a newest-page snapshot into the rows already on screen. Older pages
- * remain intact, while a matching durable user row retires its optimistic
- * counterpart. Shared by completion refreshes and the initial
- * snapshot/subscription handoff reconciliation.
- */
-function mergeTimelineMessages(
-  existing: TimelineMessage[],
-  snapshot: TimelineMessage[],
-): TimelineMessage[] {
-  const canonicalUsers = snapshot.filter((message) => message.role === 'user');
-  const withoutReconciledOptimistic = existing.filter((message) => {
-    if (!(message as OptimisticTimelineMessage).optimistic) return true;
-    const optimisticAtMs = Date.parse(message.at);
-    return !canonicalUsers.some((real) => {
-      if (real.sessionId !== message.sessionId || real.content !== message.content) return false;
-      const realAtMs = Date.parse(real.at);
-      return Number.isFinite(optimisticAtMs) && Number.isFinite(realAtMs)
-        ? Math.abs(realAtMs - optimisticAtMs) < 2 * 60_000
-        : true;
-    });
-  });
-  const seen = new Set<string>();
-  const merged: TimelineMessage[] = [];
-  for (const message of [...withoutReconciledOptimistic, ...snapshot]) {
-    const key = `${message.sessionId}:${message.at}:${message.role}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(message);
-  }
-  merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  return merged;
+function messageAskedUserQuestion(message: TimelineMessage): boolean {
+  return (
+    message.role === 'assistant' &&
+    message.toolCalls?.some(
+      (call) =>
+        call.success && stripMcpPrefix(call.name).replace(/^gezel-/, '') === 'ask_user_question',
+    ) === true
+  );
 }
 
 /**
@@ -190,97 +168,6 @@ const PHASE_LABELS: Record<
   generating: 'Generating',
   ready: 'Ready',
 };
-
-/**
- * Render a single-line plain-text preview of a markdown message body.
- * Used by the sticky context-header to show the originating user
- * prompt without leaking raw `@[Name](gezel:id)` mention syntax,
- * `**bold**`, code fences, etc. The full text is available in the
- * sticky's `title` attribute for users who want to read the original.
- *
- * Deliberately regex-based and forgiving — the input is a chat message
- * (typically one short paragraph), not arbitrary CommonMark, so a
- * dedicated parser would be overkill. Order matters: image refs
- * before plain links (the `!` would survive otherwise), mention links
- * before plain links (so `@[Name]` keeps its `@`).
- */
-function previewifyMarkdown(s: string): string {
-  return s
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1') // ![alt](src) → alt
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1') // @[Name](gezel:id) → @Name
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) → text
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // **bold** → bold
-    .replace(/__([^_]+)__/g, '$1') // __bold__ → bold
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1') // *italic* → italic
-    .replace(/(?<!_)_([^_]+)_(?!_)/g, '$1') // _italic_ → italic
-    .replace(/~~([^~]+)~~/g, '$1') // ~~strike~~ → strike
-    .replace(/`+([^`]+)`+/g, '$1') // `code` → code
-    .replace(/^\s*#+\s+/gm, '') // # heading → heading
-    .replace(/^\s*>\s+/gm, '') // > quote → quote
-    .replace(/^\s*[-*+]\s+/gm, '') // bullet markers
-    .replace(/^\s*\d+\.\s+/gm, '') // ordered-list markers
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-type OptimisticTimelineMessage = TimelineMessage & { optimistic?: true };
-
-/**
- * A single narrow React subscription into a mutable streaming store. The
- * parent timeline supplies the stable structural position; only this child
- * redraws when fragments mutate the item at that position.
- */
-function FrameCoalescedItem<T>({
-  store,
-  itemKey,
-  render,
-  onRendered,
-}: {
-  store: FrameCoalescedStore<T>;
-  itemKey: string;
-  render: (item: T) => React.ReactNode;
-  onRendered?: () => void;
-}): React.ReactNode {
-  const subscribe = useCallback(
-    (listener: () => void) => store.subscribeItem(itemKey, listener),
-    [store, itemKey],
-  );
-  const getSnapshot = useCallback(() => store.getItemSnapshot(itemKey), [store, itemKey]);
-  const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const item = store.items.get(itemKey);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: version is the external-store render signal; item intentionally keeps mutable identity.
-  useLayoutEffect(() => {
-    if (item) onRendered?.();
-  }, [item, onRendered, version]);
-
-  return item ? <>{render(item)}</> : null;
-}
-
-function FrameCoalescedLiveStickyHeader({
-  store,
-  sessionId,
-  userMsg,
-  gezels,
-}: {
-  store: FrameCoalescedStore<LiveSlot>;
-  sessionId: string;
-  userMsg: TimelineMessage;
-  gezels: Map<string, GezelSummary>;
-}): React.ReactNode {
-  return (
-    <FrameCoalescedItem
-      store={store}
-      itemKey={sessionId}
-      render={(slot) => (
-        <ChatStickyHeader
-          payload={{ userMsg, assistantInfo: { kind: 'live', sessionId, slot } }}
-          gezels={gezels}
-        />
-      )}
-    />
-  );
-}
 
 export interface ChatTimelineViewProps {
   /** Stable cache key — changing it clears all state and re-loads. */
@@ -618,6 +505,12 @@ export function ChatTimelineView({
    * the project's terminal channel (deduped by messageId).
    */
   const [terminalEntries, setTerminalEntries] = useState<TerminalTimelineEntry[]>([]);
+  /**
+   * Observed per-file indexing one-shots. The live bubble is intentionally
+   * ephemeral; these receipts advance when work appears and coalesce a sweep
+   * into one expandable ledger row.
+   */
+  const [indexingReceipts, setIndexingReceipts] = useState<IndexingReceipt[]>([]);
   // Bumped when a fresh terminal row's five-minute bottom-placement
   // grace period ends. The timer lets ordering return to normal even
   // when no new chat or terminal event arrives to trigger a render.
@@ -658,6 +551,12 @@ export function ChatTimelineView({
   const [sessionErrorActions, setSessionErrorActions] = useState<
     Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
   >(new Map());
+  // A timeline fetch already in flight when Acknowledge completes can still
+  // return the pre-clear row. Suppress that stale snapshot until a genuinely
+  // new error event arrives (or this scope remounts).
+  const [acknowledgedErrorProjects, setAcknowledgedErrorProjects] = useState<Set<string>>(
+    new Set(),
+  );
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
   const gezelsRef = useRef(gezels);
   gezelsRef.current = gezels;
@@ -669,6 +568,9 @@ export function ChatTimelineView({
    * across all messages so a single fetch covers cross-project surfaces.
    */
   const [questionsById, setQuestionsById] = useState<Map<string, Question>>(new Map());
+  const fullyLoadedQuestionProjectsRef = useRef<Set<string>>(new Set());
+  const questionLookupScopeRef = useRef(scopeKey);
+  questionLookupScopeRef.current = scopeKey;
   const liveStoreRef = useRef<FrameCoalescedStore<LiveSlot> | null>(null);
   if (!liveStoreRef.current) liveStoreRef.current = new FrameCoalescedStore<LiveSlot>();
   const liveStore = liveStoreRef.current;
@@ -688,6 +590,54 @@ export function ChatTimelineView({
     terminalLiveStoreRef.current = new FrameCoalescedStore<TerminalLiveSlot>();
   }
   const terminalLiveStore = terminalLiveStoreRef.current;
+
+  // The project menu can clear these flags without going through this
+  // component. Retire both persisted and live error shells in every mounted
+  // timeline when that project-wide reset is acknowledged, otherwise an old
+  // in-memory row can keep advertising an error that no longer exists on disk.
+  useEffect(() => {
+    const onSessionErrorCleared = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: unknown }>).detail?.projectId;
+      if (typeof projectId !== 'string' || projectId.length === 0) return;
+
+      setAcknowledgedErrorProjects((prev) => {
+        const next = new Set(prev);
+        next.add(projectId);
+        return next;
+      });
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.projectId === projectId
+            ? {
+                ...message,
+                sessionLastTurnError: undefined,
+                sessionLastTurnErrorDetail: undefined,
+              }
+            : message,
+        ),
+      );
+
+      let retiredLiveError = false;
+      for (const [sessionId, slot] of liveRef.current) {
+        if (slot.projectId !== projectId || !slot.error) continue;
+        liveRef.current.delete(sessionId);
+        retiredLiveError = true;
+      }
+      if (retiredLiveError) liveStore.markStructureChanged();
+
+      setSessionErrorActions((prev) => {
+        const next = new Map(prev);
+        for (const message of messagesRef.current) {
+          if (message.projectId === projectId) next.delete(message.sessionId);
+        }
+        return next;
+      });
+    };
+
+    window.addEventListener('gezel:session-error-cleared', onSessionErrorCleared);
+    return () => window.removeEventListener('gezel:session-error-cleared', onSessionErrorCleared);
+  }, [liveStore]);
   const terminalLiveRef = useRef(terminalLiveStore.items);
   const terminalLiveStructureVersion = useSyncExternalStore(
     terminalLiveStore.subscribeStructure,
@@ -705,30 +655,8 @@ export function ChatTimelineView({
   const queuedRef = useRef<
     Map<string, Array<{ id: string; preview: string; enqueuedAt: string; nudge?: boolean }>>
   >(new Map());
-  /**
-   * Per-session context-window status — sticky once set, shown as a
-   * banner above the timeline when the session is the active one.
-   * `kind: 'warning'` → accumulated conversation crossed the model-context
-   * threshold; `kind: 'compacted'` → the service collapsed
-   * older messages. The banner stays
-   * visible even after the originating turn completes; only a fresh
-   * (different) session clears it. Mutated by `context_warning` and
-   * `context_compacted` SSE events.
-   */
-  const contextStatusRef = useRef<
-    Map<
-      string,
-      {
-        kind: 'warning' | 'compacted';
-        estimatedTokens?: number;
-        numCtx?: number;
-        model: string;
-        removedCount?: number;
-        at: number;
-      }
-    >
-  >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const responseRunwayRef = useRef<HTMLDivElement | null>(null);
   const scrollbarIdleTimerRef = useRef<number | null>(null);
   /**
    * "Pinned to bottom" mode: when true, any new row auto-scrolls the
@@ -749,7 +677,7 @@ export function ChatTimelineView({
    * A prompt submitted from the composer attached to this timeline. It is
    * deliberately separate from ordinary row growth: background messages
    * preserve the reader's scroll position, while the user's own send always
-   * lands in view with a small response runway beneath it.
+   * lands in view with the stable working runway beneath it.
    */
   const [submissionAnchor, setSubmissionAnchor] = useState<
     | {
@@ -834,15 +762,17 @@ export function ChatTimelineView({
     setSessionErrorActions(new Map());
     setMessages([]);
     setTerminalEntries([]);
+    setIndexingReceipts(readIndexingReceipts(scopeKey));
     setHasMore(false);
     setOldestAt(undefined);
+    setAcknowledgedErrorProjects(new Set());
     registeredFileSightingsRef.current.clear();
+    fullyLoadedQuestionProjectsRef.current.clear();
     liveRef.current.clear();
     liveStore.markStructureChanged();
     terminalLiveRef.current.clear();
     terminalLiveStore.markStructureChanged();
     queuedRef.current.clear();
-    contextStatusRef.current.clear();
     // Reset the stick-to-bottom state too. Otherwise, if the user
     // was scrolled up reading older history in the previous scope,
     // `pinnedToBottom === false` would carry that forward — and the
@@ -1176,6 +1106,41 @@ export function ChatTimelineView({
   useEffect(() => {
     void refreshQuestions();
   }, [scopeKey, refreshQuestions]);
+
+  // Pending questions arrive from the cheap global lookup above. Once a
+  // transcript references a question (or contains a legacy ask tool call
+  // that predates the durable id stamp), load that project's full question
+  // file as well. This keeps answered cards collapsed in place after submit
+  // and after reload instead of reverting to a raw tool-only summary.
+  useEffect(() => {
+    const projectIds = new Set<string>();
+    for (const message of messages) {
+      if (!message.pendingQuestionId && !messageAskedUserQuestion(message)) continue;
+      if (fullyLoadedQuestionProjectsRef.current.has(message.projectId)) continue;
+      projectIds.add(message.projectId);
+    }
+    if (projectIds.size === 0) return;
+
+    const requested = [...projectIds];
+    const requestedScope = scopeKey;
+    for (const projectId of requested) fullyLoadedQuestionProjectsRef.current.add(projectId);
+    void Promise.allSettled(requested.map((projectId) => api.listQuestions({ projectId }))).then(
+      (results) => {
+        if (questionLookupScopeRef.current !== requestedScope) return;
+        const loaded: Question[] = [];
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') loaded.push(...result.value.questions);
+          else fullyLoadedQuestionProjectsRef.current.delete(requested[index]!);
+        });
+        if (loaded.length === 0) return;
+        setQuestionsById((prev) => {
+          const next = new Map(prev);
+          for (const question of loaded) next.set(question.id, question);
+          return next;
+        });
+      },
+    );
+  }, [messages, scopeKey]);
 
   // Live SSE — open one connection per scope, abort on scope change /
   // unmount. Updates the mutable live store; each affected session publishes
@@ -2059,6 +2024,12 @@ export function ChatTimelineView({
           });
         }
       } else if (event.type === 'error') {
+        setAcknowledgedErrorProjects((prev) => {
+          if (!prev.has(projectId)) return prev;
+          const next = new Set(prev);
+          next.delete(projectId);
+          return next;
+        });
         setMessages((prev) =>
           prev.map((message) =>
             message.sessionId === sessionId
@@ -2101,6 +2072,23 @@ export function ChatTimelineView({
         // Only retire the slot if it completed cleanly. An errored slot
         // stays visible until the next user_message replaces it.
         const slot = liveRef.current.get(sessionId);
+        const indexedPath = indexedPathFromActivity(slot?.activity);
+        if (slot && !slot.error && indexedPath) {
+          const completedAt = new Date().toISOString();
+          setIndexingReceipts((current) => {
+            const next = recordIndexedFile(current, {
+              sessionId,
+              gezelId: slot.gezelId,
+              projectId: slot.projectId,
+              path: indexedPath,
+              startedAt: new Date(slot.startedAt).toISOString(),
+              completedAt,
+            });
+            if (next === current) return current;
+            writeIndexingReceipts(scopeKey, next);
+            return next;
+          });
+        }
         if (slot && !slot.error) {
           liveRef.current.delete(sessionId);
           liveStore.markStructureChanged();
@@ -2179,6 +2167,28 @@ export function ChatTimelineView({
         }
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
+        // Count the file when its visible indexing work starts instead of
+        // waiting for a later `done` envelope. Besides making the receipt
+        // advance in lockstep with the card, this survives a reconnect that
+        // loses the terminal envelope. The `done` branch above remains a
+        // fallback, and recordIndexedFile de-duplicates the two observations.
+        const indexedPath = indexedPathFromActivity(event.activity);
+        if (indexedPath) {
+          const observedAt = new Date().toISOString();
+          setIndexingReceipts((current) => {
+            const next = recordIndexedFile(current, {
+              sessionId,
+              gezelId: slot.gezelId,
+              projectId: slot.projectId,
+              path: indexedPath,
+              startedAt: new Date(slot.startedAt).toISOString(),
+              completedAt: observedAt,
+            });
+            if (next === current) return current;
+            writeIndexingReceipts(scopeKey, next);
+            return next;
+          });
+        }
       } else if (event.type === 'gpu_swap') {
         // VRAM-tenancy change: a non-LLM workload (today: local
         // image generation) has taken or released the GPU. While
@@ -2230,32 +2240,13 @@ export function ChatTimelineView({
         }
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
-      } else if (event.type === 'context_warning') {
-        // Don't downgrade an existing 'compacted' status to a 'warning'
-        // — once the system has had to compact, that's the user-facing
-        // signal that matters; a subsequent warning event below the
-        // compact threshold doesn't add information.
-        const existing = contextStatusRef.current.get(sessionId);
-        if (existing?.kind !== 'compacted') {
-          contextStatusRef.current.set(sessionId, {
-            kind: 'warning',
-            estimatedTokens: event.estimatedTokens,
-            numCtx: event.numCtx,
-            model: event.model,
-            at: Date.now(),
-          });
-          liveStore.markStructureChanged();
-        }
       } else if (event.type === 'context_compacted') {
-        contextStatusRef.current.set(sessionId, {
-          kind: 'compacted',
-          model: event.model,
-          removedCount: event.removedCount,
-          at: Date.now(),
-        });
-        // Refetch the timeline — older messages were dropped from disk
-        // by the compaction, so the rendered list needs to match.
-        void refreshLatest();
+        // The window/fill readings these events carry drive the context meter
+        // beside the thread picker (SessionSwitcher); the timeline's own
+        // stake is the transcript. Refetch it — older messages were dropped
+        // from disk by the compaction, so the rendered list needs to match.
+        // Older daemons emitted no mode and only had the between-turn path.
+        if (event.mode !== 'mid-turn') void refreshLatest();
         liveStore.markStructureChanged();
       } else if (event.type === 'question_asked' || event.type === 'question_answered') {
         // Update the lookup directly (cheaper than re-fetching) and
@@ -2316,6 +2307,7 @@ export function ChatTimelineView({
       defaultProvider,
       inflightProjectId,
       inflightGezelId,
+      scopeKey,
       liveStore.markItemChanged,
       liveStore.markStructureChanged,
     ],
@@ -2363,12 +2355,24 @@ export function ChatTimelineView({
         at: slot.startedAt,
       });
     }
+    const indexingRows = indexingReceipts.map((entry) => ({
+      kind: 'indexing' as const,
+      entry,
+      at: entry.completedAt,
+    }));
     const all: Array<
       | { kind: 'message'; msg: TimelineMessage; at: string }
       | { kind: 'streaming'; sessionId: string; slot: LiveSlot; at: string }
+      | { kind: 'indexing'; entry: IndexingReceipt; at: string }
       | { kind: 'terminal'; entry: TerminalTimelineEntry; at: string }
       | { kind: 'terminal-streaming'; runId: string; slot: TerminalLiveSlot; at: string }
-    > = [...messageRows, ...streamingAsRows, ...terminalRows, ...terminalStreamingRows];
+    > = [
+      ...messageRows,
+      ...streamingAsRows,
+      ...indexingRows,
+      ...terminalRows,
+      ...terminalStreamingRows,
+    ];
     // Active chat rows stay below persisted history. Fresh terminal
     // commands and their output get the final lane for five minutes,
     // so launching a command cannot push it above the pending chat
@@ -2378,6 +2382,7 @@ export function ChatTimelineView({
     return all;
   }, [
     messages,
+    indexingReceipts,
     terminalEntries,
     liveStructureVersion,
     terminalLiveStructureVersion,
@@ -2404,7 +2409,17 @@ export function ChatTimelineView({
   const nestedThreadItems = useMemo(
     () =>
       nestChildSessionThreads(
-        pinActiveThreadLast(buildTimelineThreads(rows), activeSessionId, Date.now()),
+        pinActiveThreadLast(
+          buildTimelineThreads<
+            TimelineMessage,
+            LiveSlot,
+            TerminalTimelineEntry,
+            TerminalLiveSlot,
+            IndexingReceipt
+          >(rows),
+          activeSessionId,
+          Date.now(),
+        ),
       ),
     [rows, activeSessionId, terminalOrderTick],
   );
@@ -2502,10 +2517,61 @@ export function ChatTimelineView({
   }, []);
 
   /**
+   * Keep a 300px tail below the timeline, but let live chat/indexing cards
+   * consume that tail before they increase scrollHeight. The cards remain in
+   * their normal chronological/thread positions; only the otherwise-empty
+   * runway changes size. ResizeObserver follows streaming bubbles as their
+   * text grows without routing token-frequency updates through this parent.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
+  useLayoutEffect(() => {
+    const timeline = scrollRef.current;
+    const runway = responseRunwayRef.current;
+    if (!timeline || !runway) return;
+
+    const measure = () => {
+      const timelineGap = Number.parseFloat(getComputedStyle(timeline).rowGap) || 0;
+      let consumed = 0;
+      const observed = new Set<HTMLElement>();
+      const liveNodes = timeline.querySelectorAll<HTMLElement>(
+        '[data-msg-id^="live:"], .terminal-group-streaming',
+      );
+      for (const node of liveNodes) {
+        if (observed.has(node)) continue;
+        observed.add(node);
+        consumed += node.getBoundingClientRect().height;
+
+        const rootlessThread = node.closest<HTMLElement>('.timeline-thread-rootless');
+        const activityDivider = rootlessThread?.previousElementSibling;
+        if (activityDivider?.classList.contains('timeline-session-divider-activity')) {
+          consumed += activityDivider.getBoundingClientRect().height + timelineGap;
+        }
+
+        const replyColumn = node.closest<HTMLElement>('.timeline-thread-replies');
+        const localGap = replyColumn
+          ? Number.parseFloat(getComputedStyle(replyColumn).rowGap) || timelineGap
+          : timelineGap;
+        consumed += localGap;
+      }
+      runway.style.blockSize = `${Math.max(0, TIMELINE_WORKING_RESERVE_PX - consumed)}px`;
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    for (const node of timeline.querySelectorAll<HTMLElement>(
+      '[data-msg-id^="live:"], .terminal-group-streaming',
+    )) {
+      observer.observe(node);
+    }
+    return () => observer.disconnect();
+  }, [liveStructureVersion, terminalLiveStructureVersion]);
+
+  /**
    * Align a locally-submitted prompt after its row has rendered. The target
    * may be nested inside a threaded group, so derive its scroll position from
    * viewport rectangles rather than `offsetTop` (whose offset parent would be
-   * the thread, not the timeline). The temporary runway rendered below makes
+   * the thread, not the timeline). The working runway rendered below makes
    * room for the first part of the response instead of pinning the prompt
    * against the composer's top edge.
    *
@@ -3095,46 +3161,21 @@ export function ChatTimelineView({
 
   const acknowledgeFailedTurn = async (sessionId: string, projectId: string) => {
     setSessionAction(sessionId, { busy: 'acknowledge' });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), FAILED_TURN_ACTION_TIMEOUT_MS);
     try {
-      await api.clearProjectErrors(projectId);
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.projectId === projectId
-            ? {
-                ...message,
-                sessionLastTurnError: undefined,
-                sessionLastTurnErrorDetail: undefined,
-              }
-            : message,
-        ),
-      );
-      // The live failed bubble preserves partial streamed content. Its
-      // synthetic persisted twin already carries that content, so retire the
-      // red live shell and reconcile the durable row when the alert is acked.
-      let retiredLiveError = false;
-      for (const [liveSessionId, slot] of liveRef.current) {
-        if (slot.projectId !== projectId || !slot.error) continue;
-        liveRef.current.delete(liveSessionId);
-        retiredLiveError = true;
-      }
-      if (retiredLiveError) {
-        liveStore.markStructureChanged();
-        void refreshLatest();
-      }
-      setSessionErrorActions((prev) => {
-        const next = new Map(prev);
-        for (const message of messagesRef.current) {
-          if (message.projectId === projectId) next.delete(message.sessionId);
-        }
-        return next;
-      });
+      await api.clearProjectErrors(projectId, controller.signal);
       window.dispatchEvent(
         new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
       );
     } catch {
       setSessionAction(sessionId, {
-        error: 'Could not clear the alert. Check the connection and try again.',
+        error: controller.signal.aborted
+          ? 'Clearing the alert took too long. Check the connection and try again.'
+          : 'Could not clear the alert. Check the connection and try again.',
       });
+    } finally {
+      window.clearTimeout(timeout);
     }
   };
 
@@ -3287,25 +3328,42 @@ export function ChatTimelineView({
   // attaches the question id to the now-persisted assistant message
   // and the regular `MessageBubble` slot takes over rendering.
   //
-  // Build a per-session lookup once: most-recent unanswered question
-  // per session id. Tiny Map walk; bounded by total pending questions
-  // (typically ≤ a handful). Skip ids already claimed by a persisted
-  // message — `ask_user_question` stamps the prior assistant bubble
-  // synchronously, so without this exclusion the same card would
-  // render twice (once on the stamped bubble, once on the streaming
-  // bubble of the in-flight follow-up turn).
+  // Build a per-session lookup once. Skip ids already claimed by a
+  // persisted message; the remainder either belongs to a legacy unlinked
+  // ask turn or, when still unanswered, to the live streaming bubble.
   const claimedQuestionIds = new Set<string>();
   for (const m of messages) {
     if (m.pendingQuestionId) claimedQuestionIds.add(m.pendingQuestionId);
   }
-  const liveQuestionsBySession = new Map<string, Question>();
+  const unclaimedQuestionsBySession = new Map<string, Question>();
   for (const q of questionsById.values()) {
-    if (q.answer) continue;
     if (claimedQuestionIds.has(q.id)) continue;
-    const existing = liveQuestionsBySession.get(q.sessionId);
+    const existing = unclaimedQuestionsBySession.get(q.sessionId);
     if (!existing || q.createdAt > existing.createdAt) {
-      liveQuestionsBySession.set(q.sessionId, q);
+      unclaimedQuestionsBySession.set(q.sessionId, q);
     }
+  }
+  // Backward-compatible correlation for turns written before the service
+  // could stamp a first-turn question at commit time. The tool call itself
+  // is durable evidence of which assistant message asked; attach the newest
+  // unclaimed question for that session to its newest successful ask call.
+  // Questions with no persisted asking turn still belong on the live bubble.
+  const fallbackAskMessageBySession = new Map<string, { key: string; at: string }>();
+  for (const m of messages) {
+    if (m.role !== 'assistant' || m.pendingQuestionId || !messageAskedUserQuestion(m)) {
+      continue;
+    }
+    const key = `${m.sessionId}\u0000${m.at}\u0000${m.role}`;
+    const existing = fallbackAskMessageBySession.get(m.sessionId);
+    if (!existing || m.at > existing.at)
+      fallbackAskMessageBySession.set(m.sessionId, { key, at: m.at });
+  }
+  const fallbackQuestionsByMessage = new Map<string, Question>();
+  const liveQuestionsBySession = new Map<string, Question>();
+  for (const [sessionId, question] of unclaimedQuestionsBySession) {
+    const askingMessage = fallbackAskMessageBySession.get(sessionId);
+    if (askingMessage) fallbackQuestionsByMessage.set(askingMessage.key, question);
+    else if (!question.answer) liveQuestionsBySession.set(sessionId, question);
   }
   const els: React.ReactNode[] = [];
   const emitSessionErrorBanner = (
@@ -3377,6 +3435,12 @@ export function ChatTimelineView({
     // Resolved once: the legacy widening allocates, and a fresh array per
     // render would defeat the bubble's linkify memo.
     const files = referencedFilesOf(m);
+    const explicitQuestion = m.pendingQuestionId
+      ? questionsById.get(m.pendingQuestionId)
+      : undefined;
+    const attachedQuestion =
+      explicitQuestion ??
+      fallbackQuestionsByMessage.get(`${m.sessionId}\u0000${m.at}\u0000${m.role}`);
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3440,9 +3504,10 @@ export function ChatTimelineView({
         {...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {})}
         {...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {})}
         {...(m.synthetic ? { synthetic: m.synthetic } : {})}
-        {...(m.pendingQuestionId && questionsById.get(m.pendingQuestionId)
+        {...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {})}
+        {...(attachedQuestion
           ? {
-              question: questionsById.get(m.pendingQuestionId)!,
+              question: attachedQuestion,
               onQuestionAnswered: (q) =>
                 setQuestionsById((prev) => {
                   const next = new Map(prev);
@@ -3655,6 +3720,20 @@ export function ChatTimelineView({
     return nodes;
   };
   for (const item of threadItems) {
+    if (item.kind === 'indexing') {
+      els.push(
+        <IndexingReceiptRow
+          key={item.entry.id}
+          receipt={item.entry}
+          gezels={gezels}
+          projects={projects}
+          showProjectName={showProjectName}
+          roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+          {...(onWorkspaceReference ? { onOpenWorkspaceFile: onWorkspaceReference } : {})}
+        />,
+      );
+      continue;
+    }
     // Terminal rows live outside session-divider logic — they belong
     // to a `(project, workingDir)` thread, not a (gezel, session)
     // pair, and rendering them through the divider code would emit
@@ -3781,7 +3860,12 @@ export function ChatTimelineView({
     // Session-level error metadata rides on every message row of the
     // session, so the first message row in the group is as good as any.
     const errorSource = item.root ?? item.replies.find((r) => r.kind === 'message');
-    if (errorSource && errorSource.kind === 'message' && errorSource.msg.sessionLastTurnError) {
+    if (
+      errorSource &&
+      errorSource.kind === 'message' &&
+      errorSource.msg.sessionLastTurnError &&
+      !acknowledgedErrorProjects.has(errorSource.msg.projectId)
+    ) {
       prevSessionError = errorSource.msg.sessionLastTurnError;
       prevSessionErrorDetail = errorSource.msg.sessionLastTurnErrorDetail;
       prevSessionProjectId = errorSource.msg.projectId;
@@ -3895,65 +3979,8 @@ export function ChatTimelineView({
     );
   }
 
-  // Surface the active session's context-window status (if any) as
-  // a sticky banner above the scroll area. Only one banner at a time
-  // — keying off `activeSessionId` keeps cross-session timelines
-  // (Meester global view) from stacking warnings for every session.
-  const activeContextStatus = activeSessionId
-    ? contextStatusRef.current.get(activeSessionId)
-    : undefined;
-  const activeContextPercent =
-    activeContextStatus?.kind === 'warning' &&
-    typeof activeContextStatus.estimatedTokens === 'number' &&
-    typeof activeContextStatus.numCtx === 'number' &&
-    activeContextStatus.numCtx > 0
-      ? Math.round((100 * activeContextStatus.estimatedTokens) / activeContextStatus.numCtx)
-      : null;
-  const submissionStillRunning =
-    submissionAnchor?.kind === 'chat'
-      ? liveRef.current.has(submissionAnchor.sessionId)
-      : submissionAnchor?.kind === 'terminal'
-        ? terminalLiveRef.current.has(submissionAnchor.runId)
-        : false;
-  const showResponseRunway =
-    submissionAnchor !== null &&
-    (alignedSubmissionKey !== submissionAnchor.key || submissionStillRunning);
-
   return (
     <div className="chat-timeline-viewport">
-      {activeContextStatus && (
-        <output className={`chat-context-banner chat-context-banner-${activeContextStatus.kind}`}>
-          {activeContextStatus.kind === 'warning' ? (
-            <>
-              <span className="chat-context-banner-icon" aria-hidden>
-                ⚠
-              </span>
-              <span className="chat-context-banner-body">
-                <strong>Context window getting full</strong> — this thread{' '}
-                {activeContextPercent === null
-                  ? 'is approaching'
-                  : activeContextPercent > 100
-                    ? 'has exceeded'
-                    : `has used about ${activeContextPercent}% of`}{' '}
-                the model&apos;s available context. Earlier context may become less reliable —
-                consider starting fresh for better recall.
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="chat-context-banner-icon" aria-hidden>
-                ✦
-              </span>
-              <span className="chat-context-banner-body">
-                <strong>Compacted older messages</strong> to fit the model context.{' '}
-                {activeContextStatus.removedCount ?? 0} earlier turn
-                {activeContextStatus.removedCount === 1 ? '' : 's'} were summarized into a single
-                bubble; the gezel will continue from the synthesis.
-              </span>
-            </>
-          )}
-        </output>
-      )}
       {stickyPayload &&
         (stickyPayload.assistantInfo.kind === 'live' ? (
           <FrameCoalescedLiveStickyHeader
@@ -3991,7 +4018,7 @@ export function ChatTimelineView({
             (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
           : els}
         {queuedTaskEls}
-        {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
+        <div ref={responseRunwayRef} className="timeline-response-runway" aria-hidden="true" />
       </div>
       {!pinnedToBottom && (
         <button
@@ -4025,190 +4052,4 @@ export function ChatTimelineView({
       )}
     </div>
   );
-}
-
-function findLastForSession(
-  messages: TimelineMessage[],
-  sessionId: string,
-): TimelineMessage | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.sessionId === sessionId) return messages[i]!;
-  }
-  return null;
-}
-
-function isModelUnavailableError(message: string): boolean {
-  return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
-}
-
-function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
-  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
-}
-
-/**
- * Retry is contextual, not a reflex attached to every red surface. Prefer the
- * daemon's structured classification; keep a narrow prose fallback for older
- * daemons and MLX failures whose user-facing copy explicitly recommends a
- * retry. Deterministic "do not retry"/unrunnable failures never get the action.
- */
-export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDetail): boolean {
-  if (isUserCancelledTurnError(message) || isModelUnavailableError(message)) return false;
-  if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
-  if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
-  if (detail?.code === 'native-engine-crash') return true;
-  return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
-    message,
-  );
-}
-
-const NO_FILES: readonly ReferencedFile[] = [];
-
-/**
- * The message's referenced files, widening the legacy artifact-only field
- * for any surface still sending it. `listTimeline` backfills the current
- * shape on read, so this fallback is for live SSE rows written by an older
- * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
- */
-function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
-  if (message.referencedFiles?.length) return message.referencedFiles;
-  if (!message.referencedArtifacts?.length) return NO_FILES;
-  return message.referencedArtifacts.map((path) => ({ kind: 'artifact' as const, path }));
-}
-
-function withinHours(iso: string | undefined, ms: number): boolean {
-  if (!iso) return false;
-  try {
-    const t = new Date(iso).getTime();
-    return Date.now() - t <= ms;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Pinned at the top of the chat scroll viewport — surfaces the
- * user prompt + the assistant bubble header for whatever's
- * currently being scrolled past. Keeps the conversation context
- * visible while the user reads through a long response.
- *
- * Exported for its unit test (same reason as `staleLiveSessionIds`): it is
- * the second place that decides an author label, so it can drift from the
- * bubble's without a test holding the two together.
- */
-export function ChatStickyHeader({
-  payload,
-  gezels,
-}: {
-  payload: {
-    userMsg: TimelineMessage;
-    assistantInfo:
-      | { kind: 'live'; sessionId: string; slot: LiveSlot }
-      | { kind: 'message'; msg: TimelineMessage };
-  };
-  gezels: Map<string, GezelSummary>;
-}): React.ReactNode {
-  const { userMsg, assistantInfo } = payload;
-  // For the live-slot case we drive the same `THINKING · Ns · K
-  // tools · ····` line the streaming bubble renders. For
-  // completed-message case the bubble has no live status — just
-  // the author label.
-  const isLive = assistantInfo.kind === 'live';
-  const slotForLive = isLive ? assistantInfo.slot : null;
-  const liveElapsed = useElapsedSeconds(isLive ? (slotForLive?.startedAt ?? null) : null);
-  const assistantGezelId = isLive ? assistantInfo.sessionId : assistantInfo.msg.gezelId;
-  const assistantGezel = gezels.get(
-    isLive ? (slotForLive?.gezelId ?? '') : assistantInfo.msg.gezelId,
-  );
-  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
-  const assistantName = assistantGezel
-    ? displayName(
-        { name: assistantGezel.name, roleBasedName: assistantGezel.roleBasedName },
-        roleBasedNameOnlyMode,
-      )
-    : 'Gezel';
-  // A task dispatch seed rides the user role but is the machinery talking —
-  // the bubble labels it System, and the sticky header has to agree or the
-  // attribution flips as the user scrolls. A seed the card parser recognises
-  // goes one better: the header carries the same one-line hand-off sentence
-  // the card shows, instead of the dispatch paragraph truncated mid-word.
-  const handoffNote = userMsg.origin === 'system' ? parseTaskHandoffNote(userMsg.content) : null;
-  const userPreview = handoffNote
-    ? handoffHeadline(handoffNote, assistantName)
-    : previewifyMarkdown(userMsg.content);
-  return (
-    <div className="chat-sticky-header" aria-live="polite">
-      <div className="chat-sticky-header-user" title={userMsg.content}>
-        <span className="chat-sticky-header-author">
-          {handoffNote
-            ? handoffKindLabel(handoffNote).toUpperCase()
-            : userMsg.origin === 'system'
-              ? 'SYSTEM'
-              : 'YOU'}
-        </span>
-        <span className="chat-sticky-header-preview">{userPreview}</span>
-      </div>
-      <div className="chat-sticky-header-assistant" key={assistantGezelId}>
-        <GezelIcon
-          svg={assistantGezel?.icon ?? null}
-          poppetje={assistantGezel?.poppetje}
-          iconOverride={assistantGezel?.iconOverride}
-          name={assistantName}
-          size={18}
-        />
-        <span className="chat-sticky-header-author">{assistantName}</span>
-        {!roleBasedNameOnlyMode && assistantGezel?.role && (
-          <RoleSuffix role={assistantGezel.role} />
-        )}
-        {isLive && slotForLive && (
-          <StreamingStatusLine
-            failed={Boolean(slotForLive.error)}
-            queued={
-              slotForLive.queueAhead !== undefined &&
-              queueNoticeIsFresh(slotForLive.queuedAt, Date.now()) &&
-              !segmentsHaveText(slotForLive.segments)
-            }
-            queueAhead={slotForLive.queueAhead}
-            elapsedSeconds={liveElapsed}
-            toolCount={countSegmentTools(slotForLive.segments)}
-            wirePulseCount={slotForLive.wirePulseCount}
-            {...(liveStatusLabel(slotForLive)
-              ? { thinkingLabel: liveStatusLabel(slotForLive) }
-              : {})}
-            {...(slotForLive.thinkingProgress !== undefined
-              ? { thinkingProgress: slotForLive.thinkingProgress }
-              : {})}
-            {...(slotForLive.thinkingDetail ? { thinkingDetail: slotForLive.thinkingDetail } : {})}
-            {...(slotForLive.awaitingGezelName
-              ? { awaitingGezelName: slotForLive.awaitingGezelName }
-              : {})}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function formatProviderLabel(p: ProviderName): string {
-  switch (p) {
-    case 'copilot':
-      return 'Copilot';
-    case 'openai':
-      return 'OpenAI';
-    case 'anthropic':
-      return 'Claude';
-    case 'anthropic-cli':
-      return 'Claude CLI';
-    case 'codex-cli':
-      return 'Codex CLI';
-    case 'ollama':
-      return 'Ollama';
-    case 'llama-cpp':
-      return 'On-device';
-    case 'mlx':
-      return 'MLX';
-    case 'ds4':
-      return 'DwarfStar';
-    case 'remote':
-      return 'Remote';
-  }
 }

@@ -11,9 +11,8 @@
  * cannot steer downloads at attacker-sized garbage or hide/reorder releases.
  */
 
-import { awakeTimeoutSignal } from '@bendyline/gezel';
-import type { KnowledgeRegistryEntry, KnowledgeRegistryIndex } from '@bendyline/gezel';
-import { KnowledgeRegistryIndexSchema } from '@bendyline/gezel';
+import type { KnowledgeRegistryEntry, KnowledgeRegistryIndex } from '@bendyline/gezk';
+import { KnowledgeRegistryIndexSchema } from '@bendyline/gezk';
 import type { KnowledgeTrustAnchor } from '../signatures/signing.js';
 import { verifyRegistryIndex } from '../signatures/signing.js';
 
@@ -35,8 +34,10 @@ export class KnowledgeRegistryFetchError extends Error {
 export interface FetchKnowledgeRegistryOptions {
   anchors: readonly KnowledgeTrustAnchor[];
   maxBytes?: number;
-  /** Awake-time budget (suspend-aware) for the whole fetch. */
+  /** Budget for the whole fetch when no `signal` is supplied. */
   timeoutMs?: number;
+  /** Caller-owned deadline (the daemon passes a suspend-aware signal). */
+  signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }
 
@@ -53,7 +54,7 @@ export async function fetchKnowledgeRegistry(
   let response: Response;
   try {
     response = await fetchImpl(url, {
-      signal: awakeTimeoutSignal(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: opts.signal ?? AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       redirect: 'follow',
       headers: { accept: 'application/json' },
     });
@@ -87,7 +88,7 @@ export async function fetchKnowledgeRegistry(
   } catch (err) {
     throw new KnowledgeRegistryFetchError(
       'invalid',
-      `registry is not a valid gezel-knowledge-registry document: ${err instanceof Error ? err.message : String(err)}`,
+      `registry is not a valid gezk-registry document: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 

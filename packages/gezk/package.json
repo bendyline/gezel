@@ -1,0 +1,60 @@
+{
+  "name": "@bendyline/gezk",
+  "version": "0.1.0",
+  "description": "The gezk knowledge-catalog format: manifest and registry schemas, id grammars, knowledge:// references, vector quantization, SQLite DDL, canonical JSON, and Ed25519 manifest signatures.",
+  "license": "MIT",
+  "keywords": ["gezk", "knowledge", "rag", "embeddings", "sqlite", "file-format", "zod"],
+  "homepage": "https://github.com/bendyline/gezk",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/gezk"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": ["dist", "!dist/**/*.map"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "export-schemas": "tsx scripts/export-schemas.ts",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

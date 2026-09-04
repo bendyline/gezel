@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Sandbox entitlements for the Mac App Store build of Gezel.app.
+
+  This is a SEPARATE set from entitlements.mac.plist, not an extension of it,
+  and the two are deliberately not shared. The Developer ID build runs under
+  hardened runtime with no sandbox, where each entitlement gives back a
+  protection the runtime otherwise grants for free; here the sandbox denies
+  everything by default and each entitlement grants a capability back. Opposite
+  directions, so a key can be load-bearing in one file and meaningless — or
+  actively wrong — in the other.
+
+  Two differences are worth stating outright, because they read as omissions:
+
+    com.apple.security.cs.disable-library-validation is NOT here, on purpose.
+      The Developer ID build needs it for two things a store build does not
+      have: vendor-signed Mach-Os kept byte-identical (node, DuckDB, the native
+      engines), and native addons fetched at runtime by pnpm/uv. The MAS lane
+      re-signs every Mach-O in the payload with our own Apple Distribution
+      identity, and the store distribution profile forbids runtime code
+      downloads outright, so nothing without our team ID is ever loaded.
+      Library validation can therefore stay ON — a strictly stronger posture
+      than the Developer ID build, and it must not be weakened back without a
+      concrete binary that needs it.
+
+    com.apple.security.network.client / .network.server ARE here, though the
+      hardened-runtime plist documents removing them. Both statements are
+      correct: without com.apple.security.app-sandbox those keys gate nothing,
+      which is why they were dropped there. Under the sandbox they are what
+      permits the loopback daemon to bind and the app to reach a provider at
+      all, so their absence here would be a non-booting product.
+
+  scripts/verify-mas-entitlements.mjs pins this list against the signed app.
+  Adding a key is a deliberate, reviewed act — App Review reads it too.
+-->
+<plist version="1.0">
+<dict>
+    <!-- The sandbox itself. Everything below is a hole deliberately punched
+         back through it; this key is what the Mac App Store requires and what
+         makes the rest meaningful. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Outbound connections: cloud providers the user configures, model and
+         knowledge-catalog downloads (data, which the store rules permit), and
+         the daemon's own loopback client calls. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Gezel's architecture is a local HTTP daemon the UI talks to over
+         loopback. Without this the service cannot bind a listener and the app
+         has nothing to connect to. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- V8 and the Chromium renderers JIT-compile. Electron 12+ uses the
+         narrower MAP_JIT path this authorizes; Electron cannot start without
+         it. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Projects point at folders the user chooses. Under the sandbox that
+         access arrives through an open panel and persists as a
+         security-scoped bookmark; this key is what makes the grant possible
+         at all. It grants nothing on its own — no folder is reachable until
+         the user picks it. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- The chat composer's explicit Narrate action records microphone-only
+         audio for the configured speech-to-text engine. Paired with the
+         NSMicrophoneUsageDescription string in electron-builder.yml's
+         extendInfo, which macOS requires alongside this key. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- The rendezvous container. A Developer-ID-installed Gezel mirrors its
+         runtime discovery metadata (port, scoped client token, cert
+         fingerprint — never the daemon root credential, never the pid) into
+         this shared group so the store build can adopt the daemon the user
+         already runs instead of starting a second one beside it. Both builds
+         must declare the same group for the handoff to work; see
+         GEZEL_RUNTIME_MIRROR_DIR in packages/service/src/runtime-discovery.ts. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>JXA5M4VK3V.com.bendyline.gezel</string>
+    </array>
+</dict>
+</plist>

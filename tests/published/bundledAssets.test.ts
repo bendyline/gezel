@@ -85,9 +85,22 @@ describe('service bundled assets', () => {
     // assets/ — one that cannot even work, since the slim-sibling filename
     // substitution finds no match in a hashed name. The UI build stubs that
     // entry out (packages/ui/scripts/vite-harper-wasm.ts); this guards it.
+    // Other opt-in engines may legitimately publish their own WASM here
+    // (IronCalc does). Identify a duplicate by content instead of treating
+    // every renderer WASM asset as Harper.
+    const harper = ['harper_wasm_bg.wasm', 'harper_wasm_slim_bg.wasm'].map((file) =>
+      readFileSync(resolve(service.dist, 'ui/harper', file)),
+    );
     const assets = resolve(service.dist, 'ui/assets');
-    const strays = existsSync(assets) ? readdirSync(assets).filter((f) => f.endsWith('.wasm')) : [];
-    expect(strays).toEqual([]);
+    const duplicates = existsSync(assets)
+      ? readdirSync(assets)
+          .filter((file) => file.endsWith('.wasm'))
+          .filter((file) => {
+            const contents = readFileSync(resolve(assets, file));
+            return harper.some((binary) => binary.equals(contents));
+          })
+      : [];
+    expect(duplicates).toEqual([]);
   });
 
   it('does not ship the browser ffmpeg runtime', () => {

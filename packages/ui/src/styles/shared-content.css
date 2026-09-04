@@ -534,10 +534,15 @@
 }
 
 /* `thinMargins` removes horizontal page padding but retains 1.5rem above
-   and below every page section. That document rhythm is too loose inside
-   a bubble; the bubble itself already supplies the needed inset. */
+   and below every page section. Chat needs a tighter editorial rhythm, but
+   not a collapsed one: every heading gets a clear breath before it while
+   the bubble itself still supplies the outer inset. */
 .msg-body-rendered .squisq-page--thin .squisq-page-section {
-  padding-block: 0.15rem;
+  padding-block: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page--thin .squisq-page-section + .squisq-page-section {
+  padding-top: 1.1rem;
 }
 
 /* Chat replies are a conversation, not a centered document: Squisq's
@@ -1134,6 +1139,32 @@
      content panes, not this host wrapper. */
 }
 
+/* ── Expanded draft ──────────────────────────────────────────────────
+   The toolbar's expand key hands the composer the top ~80% of the chat
+   column and leaves the transcript the rest, so a brief or a PRD can be
+   written where it will be sent. Height only reaches the editor if every
+   box between the column and it stops sizing to content, which is what
+   these rules spend it on — the timeline is already shrinkable
+   (`.chat-timeline-viewport .chat-timeline`), so it gives the room up
+   without a floor override. */
+.chat-composer[data-composer-expanded="true"] {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 80%;
+  min-height: 0;
+}
+
+.chat-composer[data-composer-expanded="true"] .chat-editor-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Icon key for the expand toggle. Sits immediately left of the primary
+   key so the pair reads as one cluster at the toolbar's right edge. */
+.chat-composer-expand-btn > svg {
+  display: block;
+}
+
 /* Local `/open` command suggestions. The tray sits inside the compose frame
    and follows the editor's width instead of using a body portal, so it remains
    anchored in compact/embedded chat hosts as well as the desktop project view. */
@@ -1255,6 +1286,16 @@
 .chat-composer-toolbar-spacer {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Prompt-draft save state. The chat composer runs with no status bar, so the
+   one place this can live is the quiet end of the toolbar row — see
+   AutosaveStatus. It says nothing at rest, which is most of the time. */
+.chat-editor-wrap .autosave-status {
+  margin-right: 0.35rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* The dedicated Attach file action owns the empty-state affordance. Reveal

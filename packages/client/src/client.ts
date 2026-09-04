@@ -12,7 +12,12 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResponse,
   ImageModelPullEvent,
+  IncompleteKnowledgeDownload,
+  KnowledgeActiveInstall,
+  KnowledgeAvailableCatalog,
   KnowledgeCatalogRef,
+  KnowledgeCatalogStatus,
+  KnowledgeInstallEvent,
   KnowledgeInstallRequest,
   KnowledgeSearchRequest,
   KnowledgeUpdatesResponse,
@@ -87,6 +92,7 @@ import type {
   CreatePreviewCapabilityRequest,
   CreatePreviewCapabilityResponse,
   CreateProjectRequest,
+  CreatePromptDraftRequest,
   CreateScriptRequest,
   CreateScriptResponse,
   CreateTaskRequest,
@@ -94,6 +100,7 @@ import type {
   CreateTypedProjectResponse,
   DelegateSecurityFindingRequest,
   DelegateSecurityFindingResponse,
+  DeletePromptDraftResponse,
   DescribeFolderRequest,
   DescribeFolderResponse,
   DescribeTableRequest,
@@ -109,6 +116,7 @@ import type {
   DraftScriptResponse,
   DriveIndexEnrichmentRequest,
   DriveIndexEnrichmentResponse,
+  DuplicatePromptDraftRequest,
   EnableSuggestedWorkRequest,
   EnsureGezelRequest,
   EnsureGezelResponse,
@@ -225,6 +233,7 @@ import type {
   ListPeopleResponse,
   ListProjectsForGezelResponse,
   ListProjectsResponse,
+  ListPromptDraftsResponse,
   ListQuestionsResponse,
   ListScriptsResponse,
   ListSessionQueueResponse,
@@ -260,6 +269,7 @@ import type {
   PageCheckResponse,
   PageReadRequest,
   PageReadResponse,
+  PatchPromptDraftRequest,
   PendingImports,
   PiSetupStatusResponse,
   Poppetje,
@@ -273,6 +283,9 @@ import type {
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  PromptDraft,
+  PromptDraftStatus,
+  PromptDraftSummary,
   ProviderName,
   QueryTableRequest,
   QueryTableResponse,
@@ -404,8 +417,9 @@ import type {
   WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
+  WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
-import { parseTaskRef } from '@bendyline/gezel';
+import { KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
@@ -1350,6 +1364,15 @@ export interface ConfigResponse {
     };
   };
   /**
+   * Prompt-draft retention. See `GezelConfig.promptDrafts` in core schemas:
+   * how many days a SENT draft (and the files it attached) is kept before the
+   * daily sweep removes it. `0` keeps them forever; unsent drafts are never
+   * swept whatever this says.
+   */
+  promptDrafts?: {
+    keepSentDays?: number;
+  };
+  /**
    * Tool-filtering policy. See `GezelConfig.toolFilterMode` in core
    * schemas. The GET response always materializes this (defaults to
    * `small-model`) so the Settings UI can bind to it without a
@@ -2259,22 +2282,14 @@ const OllamaPullEventSchema: z.ZodType<OllamaPullEvent> = z.discriminatedUnion('
   z.object({ type: z.literal('done') }),
 ]);
 
-/** One installed knowledge catalog as reported by `/api/knowledge/catalogs`. */
-export interface KnowledgeCatalogStatus {
-  ref: KnowledgeCatalogRef;
-  enabled: boolean;
-  addedAt: string;
-  disabledReason?: string;
-  mounted: boolean;
-  name?: string;
-  description?: string;
-  language?: string;
-  license?: string;
-  documents?: number;
-  chunks?: number;
-  sizeBytes?: number;
-  vectorCompatible?: boolean;
-}
+export type {
+  IncompleteKnowledgeDownload,
+  KnowledgeActiveInstall,
+  KnowledgeAvailableCatalog,
+  KnowledgeCatalogRef,
+  KnowledgeCatalogStatus,
+  KnowledgeInstallEvent,
+};
 
 export interface KnowledgeInstallJobSnapshot {
   id: string;
@@ -2825,14 +2840,96 @@ export class GezelClient {
     return this.request('GET', '/api/knowledge/catalogs');
   }
 
-  /** Newer versions available in the publisher's signed registry. */
+  /** Every gilde knowledge catalog joined with this user's state (installed, downloading, partial, shared). */
+  listAvailableKnowledgeCatalogs(): Promise<{ catalogs: KnowledgeAvailableCatalog[] }> {
+    return this.request('GET', '/api/knowledge/available');
+  }
+
+  /** Installed catalogs with a strictly newer version in the shipped catalog content. */
   knowledgeUpdates(): Promise<KnowledgeUpdatesResponse> {
     return this.request('GET', '/api/knowledge/updates');
   }
 
-  /** Kick off a catalog install (file path or URL); poll or stream the job. */
-  installKnowledgeCatalog(body: KnowledgeInstallRequest): Promise<{ jobId: string }> {
+  /**
+   * Kick off a catalog install (file path, URL, or a gilde catalog id); poll
+   * the job or subscribe to its events. A 403 `network-blocked` means the
+   * security policy turns off app network access.
+   */
+  installKnowledgeCatalog(
+    body: KnowledgeInstallRequest,
+  ): Promise<{ jobId: string; alreadyRunning: boolean }> {
     return this.request('POST', '/api/knowledge/install', body);
+  }
+
+  /**
+   * Install a gilde knowledge catalog and stream its events. The install is a
+   * background job on the service — disconnecting never cancels it, and a
+   * second call for a running id attaches to the same job. Cancel with
+   * {@link cancelKnowledgeCatalogInstall}.
+   */
+  async installKnowledgeCatalogFromCatalog(
+    catalogId: string,
+    onEvent: (event: KnowledgeInstallEvent) => void,
+    signal?: AbortSignal,
+    options?: { version?: string; placement?: 'auto' | 'user' },
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.version) params.set('version', options.version);
+    if (options?.placement) params.set('placement', options.placement);
+    const query = params.toString();
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/install${query ? `?${query}` : ''}`,
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal,
+      fetch: this.fetchImpl,
+      schema: KnowledgeInstallEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: `Knowledge install stream for "${catalogId}"`,
+    });
+  }
+
+  /** Attach to a running (or just finished) install job's event stream. */
+  async subscribeKnowledgeInstall(
+    jobId: string,
+    onEvent: (event: KnowledgeInstallEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/knowledge/jobs/${encodeURIComponent(jobId)}/events`,
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal,
+      fetch: this.fetchImpl,
+      schema: KnowledgeInstallEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: `Knowledge install stream for job "${jobId}"`,
+    });
+  }
+
+  /** Cancel a running catalog install. Disconnecting the stream never cancels; this does. */
+  cancelKnowledgeCatalogInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request(
+      'DELETE',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/install`,
+    );
+  }
+
+  /** Running installs with their latest progress — the polled twin of the SSE. */
+  listKnowledgeActiveInstalls(): Promise<{ installs: KnowledgeActiveInstall[] }> {
+    return this.request('GET', '/api/knowledge/active-installs');
+  }
+
+  /** Partial downloads no job is writing; resumable ones re-install from where they stopped. */
+  listIncompleteKnowledgeDownloads(): Promise<{ incomplete: IncompleteKnowledgeDownload[] }> {
+    return this.request('GET', '/api/knowledge/incomplete');
+  }
+
+  deleteIncompleteKnowledgeDownload(key: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/knowledge/incomplete/${encodeURIComponent(key)}`);
   }
 
   getKnowledgeJob(jobId: string): Promise<KnowledgeInstallJobSnapshot> {
@@ -3285,7 +3382,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`artifact fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`artifact fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 
@@ -3299,7 +3396,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`workspace fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`workspace fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 
@@ -4857,7 +4954,14 @@ export class GezelClient {
     sessionId: string,
     body:
       | string
-      | { message: string; mentions?: string[]; passiveCcGezelIds?: string[]; nudge?: boolean },
+      | {
+          message: string;
+          mentions?: string[];
+          passiveCcGezelIds?: string[];
+          nudge?: boolean;
+          /** The prompt draft this message was written in. */
+          draftId?: string;
+        },
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);
@@ -4975,6 +5079,21 @@ export class GezelClient {
   }
 
   /**
+   * Summarize this thread's older messages on demand — the same collapse the
+   * runtime performs automatically under context pressure, reached from the
+   * context meter. Rejects with 409 while a turn is running, and when the
+   * thread is too short to have anything worth summarizing.
+   */
+  compactChatSession(sessionId: string): Promise<{
+    compacted: true;
+    removedCount: number;
+    compactionCount: number;
+    transcriptTokens: number;
+  }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/compact`);
+  }
+
+  /**
    * Snapshot of any turn currently running on this session. Returns
    * `{ inflight: null }` when idle. Used by the composer to render a
    * "still waiting on X (Ys)" banner + cancel button when a previous
@@ -5062,8 +5181,14 @@ export class GezelClient {
    * so a project-wide reset is what gets the project working again. Returns
    * the number of sessions cleared.
    */
-  clearProjectErrors(projectId: string): Promise<{ cleared: number }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/clear-errors`);
+  clearProjectErrors(projectId: string, signal?: AbortSignal): Promise<{ cleared: number }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/clear-errors`,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   /**
@@ -5133,7 +5258,7 @@ export class GezelClient {
    */
   interruptChatSession(
     sessionId: string,
-    body: { message: string },
+    body: { message: string; draftId?: string },
   ): Promise<{ accepted: true; sessionId: string }> {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, body);
   }
@@ -6072,6 +6197,96 @@ export class GezelClient {
 
   renderImage(req: RenderImageRequest): Promise<RenderImageResponse> {
     return this.request('POST', '/api/render/image', req);
+  }
+
+  // ── Prompt drafts (artifacts/prompts/<draftId>/) ──
+  //
+  // The draft's own uploads are NOT here: they live at
+  // `prompts/<id>/message_files/` and go through the artifact read/raw/list/
+  // delete methods above, which is what lets the editor treat a draft as the
+  // same kind of document folder it already knows.
+
+  listPromptDrafts(
+    projectId: string,
+    filter?: { gezelId?: string; sessionId?: string | null; status?: PromptDraftStatus },
+  ): Promise<ListPromptDraftsResponse> {
+    const params = new URLSearchParams();
+    if (filter?.gezelId) params.set('gezelId', filter.gezelId);
+    // `null` is "not addressed to a thread yet" and is a different question
+    // from an omitted filter, which means "any thread".
+    if (filter?.sessionId === null) params.set('sessionId', 'new');
+    else if (filter?.sessionId) params.set('sessionId', filter.sessionId);
+    if (filter?.status) params.set('status', filter.status);
+    const query = params.toString();
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts${query ? `?${query}` : ''}`,
+    );
+  }
+
+  createPromptDraft(projectId: string, body: CreatePromptDraftRequest): Promise<PromptDraft> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts`,
+      body,
+    );
+  }
+
+  getPromptDraft(projectId: string, draftId: string): Promise<PromptDraft> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+    );
+  }
+
+  /**
+   * Autosave the draft's text. A draft left with no text and no files is
+   * deleted server-side — the response says so, and the caller should forget
+   * the id rather than write to it again.
+   */
+  writePromptDraftContent(
+    projectId: string,
+    draftId: string,
+    content: string,
+  ): Promise<WritePromptDraftContentResponse> {
+    return this.request(
+      'PUT',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}/content`,
+      { content },
+    );
+  }
+
+  /** Re-file a draft onto another thread or gezel. `null` clears a ref. */
+  patchPromptDraft(
+    projectId: string,
+    draftId: string,
+    patch: PatchPromptDraftRequest,
+  ): Promise<PromptDraftSummary> {
+    return this.request(
+      'PATCH',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+      patch,
+    );
+  }
+
+  /** "Use again" — copy a sent draft's text and files into a fresh draft. */
+  duplicatePromptDraft(
+    projectId: string,
+    draftId: string,
+    body: DuplicatePromptDraftRequest = {},
+  ): Promise<PromptDraft> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}/duplicate`,
+      body,
+    );
+  }
+
+  deletePromptDraft(projectId: string, draftId: string): Promise<DeletePromptDraftResponse> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-drafts/${encodeURIComponent(draftId)}`,
+    );
   }
 
   deleteProjectArtifact(id: string, filePath: string): Promise<{ ok: true }> {
@@ -7305,7 +7520,7 @@ export class GezelClient {
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) throw new Error(`document fetch failed: ${res.status}`);
+    if (!res.ok) throw new GezelApiError(`document fetch failed: ${res.status}`, res.status);
     return res.blob();
   }
 

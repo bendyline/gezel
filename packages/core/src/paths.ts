@@ -591,6 +591,34 @@ export function projectDiffpackDir(
   return join(projectDiffpacksDir(root, projectId, external), packId);
 }
 
+/**
+ * Reserved artifacts subtree holding the user's chat prompt drafts. Each draft
+ * owns `message.md` (the prompt markdown), `message_files/` (its uploads,
+ * referenced document-relatively while editing) and `draft.json` (thread
+ * association, status, sent stamps). Lives under artifacts so a draft is an
+ * ordinary inspectable file the user can open, back up, and grep.
+ */
+export const PROJECT_PROMPTS_DIR_NAME = 'prompts';
+
+/** Per-project `artifacts/prompts/` root. */
+export function projectPromptsDir(
+  root: string,
+  projectId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectArtifactsDir(root, projectId, external), PROJECT_PROMPTS_DIR_NAME);
+}
+
+/** One draft's folder: `artifacts/prompts/<draftId>/`. */
+export function projectPromptDraftDir(
+  root: string,
+  projectId: string,
+  draftId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectPromptsDir(root, projectId, external), draftId);
+}
+
 /** Per-project memories folder (daily markdown + summary + vectra index). */
 export function projectMemoriesDir(
   root: string,

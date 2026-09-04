@@ -1,4 +1,4 @@
-import type { ProviderName, ServiceRole } from '@bendyline/gezel';
+import type { ProviderName, ResolvedDistributionPolicy, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
 import type { AppServeController } from '../app-serve/controller.js';
@@ -35,6 +35,7 @@ import type { DuckRunner } from '../observations/duck.js';
 import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
 import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
+import type { PromptDraftManager } from '../prompt-drafts/manager.js';
 import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
 import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
 import type { GpuArbiter } from '../providers/gpu-arbiter.js';
@@ -75,6 +76,12 @@ import type { TokenStore } from './token-store.js';
 export interface ServiceContext {
   /** Process responsibility; used to keep the machine route table deny-by-default. */
   serviceRole: ServiceRole;
+  /**
+   * What this build's distribution channel permits. Resolved once at boot and
+   * passed here so routes take it as a dependency instead of each re-reading
+   * the environment and risking a different answer.
+   */
+  distribution: ResolvedDistributionPolicy;
   home: string;
   store: Store;
   chatEvents: ChatEventBus;
@@ -134,6 +141,8 @@ export interface ServiceContext {
   reportActions: ReportActionManager;
   /** Proposed change sets a gezel drafted for the user to review and apply. */
   diffpacks: DiffpackManager;
+  /** Chat prompt drafts the user is writing (artifacts/prompts/). */
+  promptDrafts: PromptDraftManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   /**

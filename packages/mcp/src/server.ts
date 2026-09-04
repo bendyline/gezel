@@ -82,6 +82,7 @@ import {
   assigneeArg,
   normalizeAssigneeArg,
 } from './assignee-arg.js';
+import { extractPageElementsFromYaml, scorePageElementMatch } from './browser-page-elements.js';
 import { commandResultIsError } from './command-result.js';
 import {
   RootTurnInvocationCache,
@@ -160,6 +161,7 @@ import {
   LEGACY_SPELLING_BY_CANONICAL,
   RESERVED_TOOL_NAMES,
   canonicalToolName,
+  distributionWithheldTools,
   resolveToolNameSpelling,
 } from './tool-inventory.js';
 import {
@@ -540,6 +542,7 @@ const excludedToolNames = new Set(
     ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
       ? []
       : unavailableToolsForPlatform(process.platform)),
+    ...distributionWithheldTools(),
   ].map(canonicalToolName),
 );
 // Compatibility handlers remain available to direct MCP clients for one
@@ -557,10 +560,13 @@ if (process.env.GEZEL_MCP_LEGACY_TOOLS !== '1') {
   }
 }
 // `craftbook_update_step` carries the full gate/branch unions (~18K compact
-// schema chars). Load it only for the explicit Craftbook editor; ordinary
-// task/project sessions use craftbook_read + craftbook_write for structural
-// edits and the focused set_step_deliverable tool for gate repairs.
-if (!sessionCraftbookId) excludedToolNames.add('craftbook_update_step');
+// schema chars). Register it only for explicit template editors and
+// task-scoped craftbook authoring. The service's exact per-turn allowlist is
+// the second gate: registration makes the capability reachable when a step
+// mandates it without advertising the schema on unrelated task turns.
+if (process.env.GEZEL_CRAFTBOOK_STEP_EDITING !== '1') {
+  excludedToolNames.add('craftbook_update_step');
+}
 const allowEnv = process.env.GEZEL_MCP_ALLOW;
 const allowedToolNames =
   allowEnv === undefined
@@ -4176,97 +4182,6 @@ server.tool(
   },
 );
 
-// Roles whose `[ref=eN]` is worth surfacing to a model trying to
-// pick the next click/type target. Excludes purely structural roles
-// (generic, banner, navigation) — those exist to group children and
-// aren't actionable on their own. Mirrors the list in
-// `service/src/providers/mcp-wrappers/playwright-yaml.ts`; kept
-// inline here so this package doesn't depend on service.
-const PAGE_ELEMENT_INTERACTIVE_ROLES = [
-  'button',
-  'link',
-  'textbox',
-  'searchbox',
-  'combobox',
-  'checkbox',
-  'radio',
-  'switch',
-  'slider',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'tab',
-  'option',
-  'spinbutton',
-];
-
-const PAGE_ELEMENT_REF_RE = new RegExp(
-  String.raw`^\s*- (` +
-    PAGE_ELEMENT_INTERACTIVE_ROLES.join('|') +
-    String.raw`)\s+"([^"]+)"\s+\[ref=(e\d+)\]`,
-);
-
-interface PageElementMatch {
-  role: string;
-  name: string;
-  ref: string;
-}
-
-/**
- * Walk an aria-tree YAML body and collect every interactive element
- * (`- ROLE "NAME" [ref=eN]`). Dedupes on (ref, role, name) so the
- * same logical control showing up twice in the tree (mirrored in
- * desktop + mobile nav, etc.) doesn't pad the list.
- */
-function extractPageElementsFromYaml(yaml: string): PageElementMatch[] {
-  const out: PageElementMatch[] = [];
-  const seen = new Set<string>();
-  for (const line of yaml.split('\n')) {
-    const m = line.match(PAGE_ELEMENT_REF_RE);
-    if (!m) continue;
-    const role = m[1];
-    const name = m[2];
-    const ref = m[3];
-    if (!role || !name || !ref) continue;
-    const key = `${ref}:${role}:${name}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ role, name, ref });
-  }
-  return out;
-}
-
-/**
- * Score how well an element matches a free-text description. Higher
- * is better. The shape:
- *
- *   - Exact role match (when caller passed `role`)        +10
- *   - Full description appears as a substring of name     +5
- *   - Each whitespace-separated word in description that
- *     appears in name OR role                             +1 each
- *   - Description is a substring of role                  +1
- *
- * Returns 0 when no signal — caller filters those out before
- * sorting. Case-insensitive throughout.
- */
-function scorePageElementMatch(
-  el: PageElementMatch,
-  description: string,
-  role: string | undefined,
-): number {
-  const desc = description.toLowerCase().trim();
-  const elRole = el.role.toLowerCase();
-  const elName = el.name.toLowerCase();
-  let score = 0;
-  if (role && elRole === role.toLowerCase()) score += 10;
-  if (desc.length > 0 && elName.includes(desc)) score += 5;
-  if (desc.length > 0 && elRole.includes(desc)) score += 1;
-  for (const word of desc.split(/\s+/).filter(Boolean)) {
-    if (elName.includes(word) || elRole.includes(word)) score += 1;
-  }
-  return score;
-}
-
 /**
  * Find the most recent auto-saved browser snapshot. Returns its
  * artifact path or null if none exist. The auto/browser_snapshot/
@@ -6477,7 +6392,7 @@ server.tool(
 
 server.tool(
   'message_gezel',
-  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in your next turn. Use this for fan-out and ambient updates; for explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
+  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in a later turn. After a successful call, END YOUR TURN immediately — remaining alive can keep the recipient parked and occupies a provider slot. Use this for fan-out and ambient updates; emit every fan-out call in the same tool-call batch before ending. For explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
   {
     gezel: z.string().optional().describe('Target gezel id or display name'),
     // `gezelId` is the spelling models reach for; without it the slip
@@ -6550,9 +6465,13 @@ server.tool(
     // during workspace-local typechecks; the wire field is optional so this
     // remains compatible with both response revisions.
     const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean }).deduplicated;
+    const deliveryState = messageGezelDeliveryState(res);
+    const releaseInstruction = asyncHandoffReleaseInstruction(res.toGezelName, deliveryState);
     const responseText = responseWasDeduplicated
-      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of queueing another message.`
-      : `Pinged ${res.toGezelName}.${deliverableText} Their reply will land in your next turn.`;
+      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of creating another message. ${releaseInstruction}`
+      : deliveryState === 'parked'
+        ? `Accepted the message for ${res.toGezelName}.${deliverableText} ${releaseInstruction}`
+        : `Dispatched the message to ${res.toGezelName}.${deliverableText} ${releaseInstruction}`;
     return {
       content: [
         {
@@ -6563,6 +6482,25 @@ server.tool(
     };
   },
 );
+
+function messageGezelDeliveryState(response: {
+  deliveryState?: unknown;
+}): 'parked' | 'dispatched' {
+  // Fail safe for a mixed workspace build: an older client declaration may
+  // omit the new field, and telling the caller to release its turn is safer
+  // than claiming the recipient has already entered the provider queue.
+  return response.deliveryState === 'dispatched' ? 'dispatched' : 'parked';
+}
+
+function asyncHandoffReleaseInstruction(
+  recipientName: string,
+  deliveryState: 'parked' | 'dispatched',
+): string {
+  if (deliveryState === 'parked') {
+    return `The handoff is durably parked and has NOT entered ${recipientName}'s provider queue because your current turn still holds its slot. END YOUR TURN NOW — do not call more tools or wait — so this turn releases the slot and ${recipientName}'s turn can dispatch. Their reply will arrive asynchronously in a later turn.`;
+  }
+  return `${recipientName}'s turn has entered the provider queue. END YOUR TURN NOW — do not call more tools or wait — so your turn releases its provider slot. Their reply will arrive asynchronously in a later turn.`;
+}
 
 function normalizeFileHandoffMessage(
   message: string,
@@ -6978,7 +6916,7 @@ const DELEGATION_ROLE_SPECS: ReadonlyArray<{
 for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
   server.tool(
     `delegate_${slug}`,
-    `Hand a task to a project's ${label} (${hint}) — ASYNC. Auto-creates a ${label} if none exists; their reply lands in your next turn. The target IS this tool, so you never pick a name. For work in a project you created from Default, pass \`project\` so files land in that project. For a quick synchronous question instead, use \`consult_${slug}\`.`,
+    `Hand a task to a project's ${label} (${hint}) — ASYNC. Auto-creates a ${label} if none exists; their reply lands in a later turn. After a successful call, END YOUR TURN immediately so the recipient can dispatch and your provider slot is released. The target IS this tool, so you never pick a name. For work in a project you created from Default, pass \`project\` so files land in that project. For a quick synchronous question instead, use \`consult_${slug}\`.`,
     {
       task: z
         .string()
@@ -7030,13 +6968,15 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean })
           .deduplicated;
+        const deliveryState = messageGezelDeliveryState(res);
+        const releaseInstruction = asyncHandoffReleaseInstruction(res.toGezelName, deliveryState);
         return {
           content: [
             {
               type: 'text' as const,
               text: responseWasDeduplicated
-                ? `An identical file handoff is already pending with ${res.toGezelName} (${label}); joined it instead of queueing another message.`
-                : `Handed off to ${res.toGezelName} (${label}) in project "${resolvedProject}". Their reply will arrive in your next turn. [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
+                ? `An identical file handoff is already pending with ${res.toGezelName} (${label}); joined it instead of creating another message. ${releaseInstruction}`
+                : `${deliveryState === 'parked' ? 'Accepted the handoff for' : 'Dispatched the handoff to'} ${res.toGezelName} (${label}) in project "${resolvedProject}". ${releaseInstruction} [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
             },
           ],
         };
@@ -9672,24 +9612,34 @@ server.tool(
     }
     const { task, gate } = advanced;
     if (gate) {
-      // The step's completion gate judged the work and rejected it. The
-      // message is prescriptive — surfacing it as the tool result lets
-      // the model fix exactly what's named, in this same turn.
-      const pausedNote = gate.infrastructureError
-        ? ' The gate itself could not run, so the task is PAUSED and no deliverable attempt was consumed. Do not rewrite the deliverable; report the gate/runtime problem.'
-        : gate.paused
-          ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
-          : ' Address these specifically, then call `advance_task_step` again.';
+      // A declarative gate can reject the work, or an onExit lifecycle
+      // script can fail after gate approval. Both use the same compatible
+      // wire envelope, but a hook failure is infrastructure—not a defect
+      // the model should try to repair in the deliverable.
+      const exitHookFailed = gate.hook === 'onExit';
+      const pausedNote = exitHookFailed
+        ? ' The lifecycle script could not finish, so the task is PAUSED and the step remains incomplete. Do not retry or rewrite the deliverable; report the script/runtime problem.'
+        : gate.infrastructureError
+          ? ' The gate itself could not run, so the task is PAUSED and no deliverable attempt was consumed. Do not rewrite the deliverable; report the gate/runtime problem.'
+          : gate.paused
+            ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
+            : ' Address these specifically, then call `advance_task_step` again.';
       const failedRun = gate.scriptRuns?.find((run) => run.error || run.runId);
       const diagnosticNote = failedRun
         ? `\nScript diagnostic: ${failedRun.scriptName}${failedRun.runId ? ` (run ${failedRun.runId})` : ''}${failedRun.error ? ` — ${failedRun.error}` : ''}. Full redacted logs are in the task note.`
         : '';
       return errorResult(
-        gate.infrastructureError
-          ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
-          : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
+        exitHookFailed
+          ? `Step "${stepId}" on ${ref} was NOT completed because its onExit script failed:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
+          : gate.infrastructureError
+            ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
+            : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
         {
-          code: gate.infrastructureError ? 'gate_infrastructure_error' : 'gate_rejected',
+          code: exitHookFailed
+            ? 'step_exit_script_failed'
+            : gate.infrastructureError
+              ? 'gate_infrastructure_error'
+              : 'gate_rejected',
           retryable: !gate.paused && !gate.infrastructureError,
         },
       );

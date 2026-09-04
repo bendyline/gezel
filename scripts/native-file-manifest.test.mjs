@@ -201,6 +201,34 @@ test('generator rejects an empty native root', async () => {
   }
 });
 
+test('native manifest grants vendor-hash-only only at the reviewed native path', async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const root = join(temp, 'native');
+    const dir = join(root, 'win32-x64');
+    const output = join(temp, 'manifest.json');
+    await mkdir(join(dir, 'nested'), { recursive: true });
+    await writeFile(join(dir, 'uv.exe'), 'vendor uv fixture');
+    await writeFile(join(dir, 'nested', 'uv.exe'), 'same basename, wrong path');
+
+    await execFileP(process.execPath, [
+      generator,
+      '--root',
+      root,
+      '--version',
+      '9.9.9',
+      '--out',
+      output,
+    ]);
+
+    const files = JSON.parse(await readFile(output, 'utf8')).platforms['win32-x64'].files;
+    assert.equal(files['uv.exe'].signature, 'vendor-hash-only');
+    assert.equal(files['nested/uv.exe'].signature, 'bendyline');
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test('native release generates the link-aware manifest before packing archives', async () => {
   const workflow = await readFile(buildNativeWorkflow, 'utf8');
   const generate = workflow.indexOf('      - name: Generate per-file native integrity manifest');

@@ -566,7 +566,7 @@ async function installMockMcpToolsets(
 async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<string | null> {
   const worker =
     spec.setup?.worker ??
-    (spec.runAsCraftbookTask
+    (spec.mode === 'workflow'
       ? {
           name: 'Craftbook Runner',
           role: 'Workflow Operator',
@@ -603,14 +603,9 @@ function craftbookTaskDescription(spec: CraftbookEvalSpec): string {
 }
 
 /**
- * Run a declarative-fanout book as a real craftbook TASK: create the task
- * from the catalog craftbook (the runtime derives the spawn host from the
- * book's `spawn` block) and dispatch its entry step, so the runtime drives
- * the step chain — scope -> draft (fanout) -> collect -> ... — and spawns
- * one child per item itself. The worker is the task assignee; each step's
- * suggestedRole resolves to a role-matched gezel at activation. This replaces
- * the freehand direct-worker kickoff for spawn books so the craftbook's
- * step/gate/fanout machinery actually executes.
+ * Run workflow mode as a real craftbook task: create it from the catalog
+ * craftbook and dispatch its entry step so the runtime, rather than a freehand
+ * kickoff prompt, drives the step/gate chain and any declarative fanout.
  */
 async function dispatchCraftbookTask(
   ctx: EvalContext,
@@ -633,7 +628,7 @@ async function dispatchCraftbookTask(
     dispatchEntry: true,
   });
   ctx.log(
-    `[craftbook:${spec.craftbookId}] created + dispatched fanout craftbook task ${task.ref} in project ${projectId}`,
+    `[craftbook:${spec.craftbookId}] created + dispatched workflow craftbook task ${task.ref} in project ${projectId}`,
   );
 }
 
@@ -728,8 +723,40 @@ async function wrongSurfaceNearMiss(
 ): Promise<MissingDeliverableNearMiss | undefined> {
   return (
     (await documentNearMiss(client, filePath)) ??
-    (await artifactNearMiss(client, projectId, filePath))
+    (await artifactNearMiss(client, projectId, filePath)) ??
+    (await workspaceNearMiss(client, projectId, filePath))
   );
+}
+
+/**
+ * The mirror of {@link artifactNearMiss}: an ARTIFACT deliverable the model
+ * wrote to the workspace instead.
+ *
+ * Its absence was the asymmetry that made three trials unrecoverable on the
+ * 2026-09-02 sweep. `codemod-sweep` declares all four deliverables
+ * `artifact: true` at `{{task.dir}}`; both models placed the earlier ones in
+ * the drawer and wrote `review.md` to the workspace, and the harness answered
+ * with "tasks/1/review.md is 0 bytes" and "not found" while the file sat on
+ * disk at 1856 B one surface over. Feedback a model can check and find false
+ * is worse than none: it teaches it to distrust the channel, and it cannot
+ * suggest the one-token fix (`write_artifact`, not `write_file`).
+ *
+ * Cheap because it only runs once the deliverable has already been read as
+ * missing on its declared surface.
+ */
+async function workspaceNearMiss(
+  client: GezelClient,
+  projectId: string,
+  filePath: string,
+): Promise<MissingDeliverableNearMiss | undefined> {
+  try {
+    const blob = await client.fetchProjectWorkspaceBlob(projectId, filePath);
+    const text = await blob.text();
+    if (!text) return undefined;
+    return { path: filePath, location: `workspace/${filePath}`, bytes: text.length };
+  } catch {
+    return undefined;
+  }
 }
 
 async function taskNotesTextForSpec(
@@ -803,12 +830,16 @@ async function taskGraphTextForSpec(
   const listed = await client.listProjectTasks(projectId);
   const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
   const failures: string[] = [];
-  if (spec.success.taskGraph?.requireCraftbookTask && matching.length === 0) {
+  const requireCraftbookTask =
+    spec.mode === 'workflow' || spec.success.taskGraph?.requireCraftbookTask === true;
+  const requireTerminalStep =
+    spec.mode === 'workflow' || spec.success.taskGraph?.requireTerminalStep === true;
+  if (requireCraftbookTask && matching.length === 0) {
     failures.push(
       `no task sourced from craftbook ${spec.craftbookId}; saw ${listed.tasks.length} task(s)`,
     );
   }
-  if (spec.success.taskGraph?.requireTerminalStep && matching.length > 0) {
+  if (requireTerminalStep && matching.length > 0) {
     const reachedTerminal = matching.some((task) => {
       if (task.status === 'complete') return true;
       const active = task.craftbook.steps.find((step) => step.id === task.activeStepId);
@@ -1113,11 +1144,22 @@ async function evaluateUnchangedFixtures(
     const expected = fixtures.get(path);
     const actual = await workspace.read(path);
     if (expected === undefined) {
+      // An authoring error, not a model one — no remedy to offer the model.
       failures.push(`unchanged fixture ${path} is not defined in setup.files`);
     } else if (actual === null) {
-      failures.push(`unchanged fixture ${path} was deleted`);
+      failures.push(
+        `unchanged fixture ${path} was deleted — restore it byte-for-byte. This scenario grades a REVIEW: the seeded sources must end exactly as they started.`,
+      );
     } else if (actual !== expected) {
-      failures.push(`unchanged fixture ${path} differs from its seeded content`);
+      // Name the remedy, not just the breach. `large-pr-review` has said
+      // "restore all seeded source files byte-for-byte" all along and its
+      // models do not trip this; the craftbook members said only that the
+      // file "differs", and qwen3.8-27b-q4 failed craftbook-code-review twice
+      // by editing src/payment.js — then spent the rest of the trial being
+      // told a fact it already knew, with no instruction to undo it.
+      failures.push(
+        `unchanged fixture ${path} differs from its seeded content — revert it byte-for-byte. This scenario grades a REVIEW: report the defect in your findings, do not fix it in the source.`,
+      );
     }
   }
   return failures;
@@ -1138,7 +1180,57 @@ function failureReferencesPath(failure: string, path: string): boolean {
   return failureMentionsPath(failure, path) || failure.includes(path);
 }
 
-function repairDeliverableForFailures(
+/**
+ * Is this repair target actually the subject of an outstanding failure?
+ *
+ * `repairDeliverableForFailures` ends in `?? deliverables[0]`, so when no
+ * failure names any deliverable — the remaining gate is a directory glob,
+ * a count, or an executable check — the repair target silently becomes the
+ * FIRST deliverable, which by then is usually one that already passes.
+ * Feeding that to the stale-no-write watchdog inverts its meaning: a
+ * finished file is supposed to stop changing.
+ *
+ * Wild-caught on craftbook-invoice-run. It reached 7/8 with report.md
+ * complete and one gate left — "found 0 html file(s) in invoices/, need
+ * >= 3", which names a directory and no deliverable. Five minutes later
+ * the trial was failed for report.md "having unchanged content", 24
+ * minutes inside its ceiling, while the model was working on the invoices
+ * the gate had asked for.
+ */
+export function staleNoWriteTargetIsFailing(
+  failures: readonly string[],
+  deliverablePath: string,
+): boolean {
+  return failures.some((failure) => failureReferencesPath(failure, deliverablePath));
+}
+
+/**
+ * Pick the deliverable the current failures are about, or nothing.
+ *
+ * This used to end in `?? deliverables[0]`, which is wrong whenever the
+ * remaining gate is about something that is not a deliverable at all — an
+ * unchanged-fixture check, a directory glob, a count, an executable
+ * assertion. The blind fallback then named a file that was very often
+ * PASSING, and two consumers acted on it:
+ *
+ *   - the repair feedback told the model to edit that file in place and
+ *     "do NOT recreate" it;
+ *   - the stale-no-write watchdog waited for that file to change and
+ *     failed the trial when it did not.
+ *
+ * Both wild-caught in one sweep. craftbook-code-review modified
+ * `src/payment.js` — a fixture a REVIEW must not touch, so a real and
+ * well-caught failure — and then spent eleven minutes being told to fix
+ * `reviews/rev-eval-1/report.md`, which was passing, before being killed
+ * for stubbornly rewriting it. craftbook-invoice-run reached 7/8 with one
+ * directory-glob gate outstanding and was failed for `report.md` "having
+ * unchanged content", which is what a finished file is supposed to do.
+ *
+ * With no deliverable named, the honest answer is that there is no
+ * deliverable repair target. The feedback still carries the real failure
+ * text; it just stops attributing it to the wrong file.
+ */
+export function repairDeliverableForFailures(
   spec: CraftbookEvalSpec,
   failures: readonly string[],
 ): CraftbookEvalDeliverable | undefined {
@@ -1146,7 +1238,13 @@ function repairDeliverableForFailures(
   return (
     deliverables.find((deliverable) =>
       failures.some((failure) => failureMentionsPath(failure, deliverable.path)),
-    ) ?? deliverables[0]
+    ) ??
+    // Looser second pass: `failureReferencesPath` also accepts a bare
+    // substring, which catches a checker that prints the path without the
+    // surrounding grammar `failureMentionsPath` looks for.
+    deliverables.find((deliverable) =>
+      failures.some((failure) => failureReferencesPath(failure, deliverable.path)),
+    )
   );
 }
 
@@ -1340,11 +1438,12 @@ function repairVirtualTargetForFailures(
       return { path: 'task-notes.md', failures: taskNoteFailures };
     }
   }
-  if (!spec.success.taskGraph) return undefined;
+  if (spec.mode !== 'workflow' && !spec.success.taskGraph) return undefined;
   const taskGraphFailures = prioritized.filter(
     (failure) =>
       failureMentionsPath(failure, 'task-graph.md') ||
       failure.startsWith('no task sourced from craftbook') ||
+      failure.startsWith('task sourced from craftbook') ||
       failure.startsWith('no draftRef') ||
       failure.startsWith('no draft task') ||
       failure.startsWith('draft ') ||
@@ -1355,7 +1454,21 @@ function repairVirtualTargetForFailures(
     : undefined;
 }
 
-function taskGraphRepairDirective(taskGraph: { text: string } | undefined): string {
+function taskGraphRepairDirective(
+  spec: CraftbookEvalSpec,
+  taskGraph: { text: string } | undefined,
+): string {
+  const authoringRef = taskGraph?.text.match(/Authoring task:\s*Task\s+([^:\n]+):/)?.[1];
+  if (spec.mode === 'workflow' && spec.success.taskGraph?.draft === undefined) {
+    return [
+      'TASK_GRAPH_REPAIR: `task-graph.md` is a virtual grader view of the task graph; do not write, patch, or create a file named `task-graph.md`.',
+      authoringRef
+        ? `Continue the real craftbook task \`${authoringRef}\` through its active steps and gates.`
+        : 'Create or resume the requested craftbook task; an unrelated task does not satisfy this workflow eval.',
+      'Use the task tools to inspect the active step, satisfy its real gate, and call `advance_task_step` until a terminal step is active or the task is complete.',
+      'Do not replace the craftbook workflow with an ad-hoc file task or a prose-only answer.',
+    ].join(' ');
+  }
   const draftRef = taskGraph?.text.match(/Draft task:\s*Task\s+([^:\n]+):/)?.[1];
   const draftArg = draftRef ? JSON.stringify(draftRef) : '"<draftRef>"';
   return [
@@ -1598,14 +1711,14 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     // and the trial runs unwinnable-by-design while the failure books as
     // "model" (wild-caught: page-spread, tileset-batch, 2026-07-24 matrix).
     ...(directWorkerNeedsImageToolset(spec) ? { defaultImageModelId: 'sdxl-lightning-4step' } : {}),
-    skipInitialPrompt: !!spec.setup?.worker || !!spec.runAsCraftbookTask,
+    skipInitialPrompt: !!spec.setup?.worker || spec.mode === 'workflow',
     async setup(ctx) {
       const projectId = await ensureProject(ctx, spec);
       if (projectId) await writeFixtureFiles(ctx, projectId, spec);
       if (projectId && ctx.mocks) await setupMockServices(ctx, projectId, spec);
       if (projectId && ctx.mocks) await installMockMcpToolsets(ctx, spec, projectId);
       if (projectId) await applyProjectWritePolicy(ctx, projectId, spec);
-      if (projectId && (spec.setup?.worker || spec.runAsCraftbookTask)) {
+      if (projectId && (spec.setup?.worker || spec.mode === 'workflow')) {
         const workerId = await ensureWorker(ctx, spec);
         if (!workerId) return;
         if (directWorkerNeedsWorkspaceToolsets(spec)) {
@@ -1619,7 +1732,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         // inherits its role's tasks/artifacts groups. A real craftbook task
         // needs both surfaces: task notes/advancement plus intermediate
         // artifact handoffs between specialist phases.
-        if (spec.runAsCraftbookTask) {
+        if (spec.mode === 'workflow') {
           await ensureCraftbookTaskToolsetsForWorker(ctx.client, workerId);
           ctx.log(
             `[craftbook:${spec.craftbookId}] installed task + artifact eval toolsets for ${workerId}`,
@@ -1650,10 +1763,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         ctx.log(
           `[craftbook:${spec.craftbookId}] joined worker ${workerId} to project ${projectId}`,
         );
-        // Spawn/fanout books run as a real craftbook task so the runtime
-        // drives the steps + declarative fanout; every other book keeps the
-        // freehand direct-worker kickoff.
-        if (spec.runAsCraftbookTask) {
+        // Workflow mode runs a real craftbook task so the runtime drives the
+        // steps, gates, and declarative fanout. Artifact-task mode keeps the
+        // bounded direct-worker kickoff and makes no workflow claim.
+        if (spec.mode === 'workflow') {
           await dispatchCraftbookTask(ctx, spec, projectId, workerId);
         } else {
           const primaryDeliverablePath = spec.success.deliverables?.[0]?.path;
@@ -1715,7 +1828,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         taskNotes = await taskNotesTextForSpec(ctx.client, projectId, spec);
         virtualFiles.set('task-notes.md', taskNotes.text);
       }
-      if (spec.success.taskGraph) {
+      if (spec.mode === 'workflow' || spec.success.taskGraph) {
         taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec);
         virtualFiles.set('task-graph.md', taskGraph.text);
       }
@@ -1773,8 +1886,8 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       }
       const repairFailures = prioritizeRepairFailures(failures);
       const taskGraphRequirementCount =
-        Number(spec.success.taskGraph?.requireCraftbookTask === true) +
-        Number(spec.success.taskGraph?.requireTerminalStep === true) +
+        Number(spec.mode === 'workflow' || spec.success.taskGraph?.requireCraftbookTask === true) +
+        Number(spec.mode === 'workflow' || spec.success.taskGraph?.requireTerminalStep === true) +
         Number(spec.success.taskGraph?.requireDraftRef === true) +
         Object.values(spec.success.taskGraph?.draft ?? {}).filter((value) => value !== undefined)
           .length;
@@ -1859,7 +1972,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
                 : undefined,
             repairDirective:
               virtualRepairTarget.path === 'task-graph.md'
-                ? taskGraphRepairDirective(taskGraph)
+                ? taskGraphRepairDirective(spec, taskGraph)
                 : undefined,
             expectedDeliverable:
               virtualRepairTarget.path === 'task-notes.md'
@@ -1880,6 +1993,19 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           : repairDeliverable
             ? await readDeliverable(workspace, repairDeliverable)
             : null;
+      // Refine the sniff now that the repair target has been read. Only
+      // `deliverableMissing` is added, deliberately: it is absent from
+      // `retryLoopSniffKey`, so this cannot churn the plateau the way a
+      // late-arriving `repairFilePath` would.
+      if (repairDeliverable) {
+        ctx.recordSniff?.({
+          key: spec.scenarioId,
+          score: passed,
+          bytes: sniffBytes,
+          failReason: repairFailures[0],
+          deliverableMissing: repairText === null || repairText.length === 0,
+        });
+      }
       if (repairDeliverable) {
         if (repairText === null) {
           noWriteRepairState = null;
@@ -1891,6 +2017,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           await postMissingDeliverableFeedback(ctx, repairDeliverable.path, {
             projectId,
             nearMiss,
+            expectedSurface: repairDeliverable.artifact ? 'artifact' : 'workspace',
             repairDirective: craftbookMissingDeliverableRepairDirective(spec, failures),
           });
           return { done: false };
@@ -1922,7 +2049,11 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             : null,
         },
       );
-      if (repairDeliverable && repairText !== null) {
+      if (
+        repairDeliverable &&
+        repairText !== null &&
+        staleNoWriteTargetIsFailing(failures, repairDeliverable.path)
+      ) {
         const key = noWriteRepairKey({
           projectId,
           filePath: repairDeliverable.path,
@@ -1961,7 +2092,13 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             const stabilityDetail =
               noWriteRepairState.rewriteCount > 0
                 ? `was rewritten ${noWriteRepairState.rewriteCount} time(s) but kept failing the same gate for ${ageSeconds}s`
-                : `stayed unchanged at ${repairText.length} bytes for ${ageSeconds}s`;
+                : // NOT "no write happened": this branch only knows the DIGEST never
+                  // moved. A model that re-emits byte-identical content lands here too,
+                  // and "stayed unchanged" reads as an idle team — sending triage to ask
+                  // why it stopped writing instead of why its rewrite changes nothing.
+                  // Wild-caught on codemod-sweep, where sites.md was rewritten at 3036
+                  // bytes inside the window the message called unchanged.
+                  `had unchanged content (${repairText.length} bytes) for ${ageSeconds}s — a re-emission of identical bytes counts as unchanged here`;
             return {
               done: true,
               success: false,
@@ -1969,7 +2106,12 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
               reason:
                 `${spec.scenarioId} stale no-write repair loop: ${repairDeliverable.path} ` +
                 `${stabilityDetail} after repair feedback ` +
-                `and newer chat activity; still failing ${passed}/${checks.length}: ${repairFeedbackFailures[0] ?? repairFailures[0]}`,
+                // `passed` is derived from checkCount (gate checks PLUS history,
+                // unchangedFixtures and the taskNotes/taskGraph requirements), so
+                // pairing it with the raw `checks.length` prints impossible scores
+                // — a real trial reported "still failing 22/12". A failure reason
+                // is the first thing a triager reads; it may not lie about arithmetic.
+                `and newer chat activity; still failing ${passed}/${checkCount}: ${repairFeedbackFailures[0] ?? repairFailures[0]}`,
             };
           }
         }

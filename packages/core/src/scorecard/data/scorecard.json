@@ -2,6 +2,60 @@
   "schemaVersion": 1,
   "runs": [
     {
+      "id": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "provenance": {
+        "startedAt": "2026-09-02T13:36:06.466Z",
+        "device": {
+          "label": "Ryzen AI HX 370 + RTX 5070 Ti Laptop",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 31,
+          "osRelease": "win32 10.0.26200",
+          "cpuModel": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+          "gpuModel": "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+        },
+        "harnessCommit": "7694351b",
+        "gildeVersion": "0.1.52",
+        "count": 1,
+        "judgeModelId": "claude-sonnet-4-6",
+        "engineBuilds": {
+          "llama-cpp": "native 0.1.38 · v0.3.0 (build 10621, c1d0e7a) · CUDA"
+        }
+      },
+      "suites": ["core", "productivity"],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-research-to-document",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief"
+        ]
+      },
+      "note": "Five-model Ryzen AI HX 370 candidate screen using native binaries 0.1.38. Count 1; core and productivity only. Claude CLI judging ran post-hoc with Sonnet 4.6. Playwright Chromium was unavailable, so applicable browser-runtime checks were skipped."
+    },
+    {
       "id": "2026-08-30-dgx-spark-class",
       "provenance": {
         "startedAt": "2026-08-30T19:31:42.840Z",
@@ -519,6 +573,1106 @@
     }
   ],
   "results": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1495,
+        "decodeTokensPerSec": 24.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 157696,
+        "peakMemoryMb": 11493,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 7.4,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47499
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 95702
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 65343
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 143434
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32969
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 136507
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 192360
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 104398
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 143265
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31543
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 98005
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-9b-q4",
+      "label": "ornith1.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 2230,
+        "decodeTokensPerSec": 57.7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 139264,
+        "peakMemoryMb": 8105,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 7.2,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 87003
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 157835
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 220705
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 242424
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103129
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 96520
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2998782
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 220876
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 74381
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 94677
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 598269
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "qwen3.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 329,
+        "decodeTokensPerSec": 29.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 133120,
+        "peakMemoryMb": 10058,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.2,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 111760
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 129592
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 101648
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 145055
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 444928
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 72040
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2938202
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130702
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 87159
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 59377
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 138164
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.6-35b-a3b-q4",
+      "label": "qwen3.6-35b-a3b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 80,
+        "decodeTokensPerSec": 15.1,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 21487,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 8.1,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 308640
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1242105
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 230924
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 199420
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 87991
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 128242
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1583306
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 165997
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 160459
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 85897
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 846004
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q2",
+      "label": "qwen3.8-27b-q2",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 55,
+        "decodeTokensPerSec": 7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 15306,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 7.9,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 393139
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1889320
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 629786
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1346235
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 903057
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 265354
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 882976
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1159396
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 572173
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 413101
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 334124
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1495,
+        "decodeTokensPerSec": 24.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 157696,
+        "peakMemoryMb": 11165,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31452
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64259
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 207361
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 36515
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30604
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 36348
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47746
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 234950
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 389352
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 58513
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 50063
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1198625
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 76923
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-9b-q4",
+      "label": "ornith1.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 2230,
+        "decodeTokensPerSec": 57.7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 139264,
+        "peakMemoryMb": 7699,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 142650
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 108870
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 222558
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 57409
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 96414
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 62874
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 40737
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 194472
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2636428
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 235812
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 35230
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2109299
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 120213
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "qwen3.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 329,
+        "decodeTokensPerSec": 29.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 133120,
+        "peakMemoryMb": 8479,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42575
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 95273
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 218981
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 82479
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 35509
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 81591
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64247
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 207534
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 92918
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 53079
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 58175
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1235814
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 124366
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.6-35b-a3b-q4",
+      "label": "qwen3.6-35b-a3b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 80,
+        "decodeTokensPerSec": 15.1,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 21562,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.9,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 122384
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 201674
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 310790
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 109982
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79674
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103733
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 137227
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 287349
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 546580
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 86285
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 89075
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3870345
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 154330
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q2",
+      "label": "qwen3.8-27b-q2",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-09-02-ryzen-ai-hx-370-core-productivity",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 55,
+        "decodeTokensPerSec": 7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 14871,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 169400
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1544162
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 833518
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1070299
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 238259
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 859595
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 448395
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 955457
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1232726
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 304265
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 396167
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3839676
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1351804
+        }
+      ]
+    },
     {
       "modelId": "ornith1.5-9b-q8",
       "label": "ornith1.5-9b-q8",

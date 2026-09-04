@@ -9,12 +9,17 @@ import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
 
 /**
- * First-run "on-device media" section: one Download button per media modality
- * (image / speech-to-text / text-to-speech / video) for the RECOMMENDED model
- * of that kind that fits this device. A size-aware plan dialog is the only
- * start path: it defaults to the modest media set, leaves video opt-in, checks
- * the model-store filesystem, and never starts the separately-managed chat
- * model as a hidden side effect.
+ * First-run "on-device media" section: ONE quiet, desaturated link that opens
+ * the size-aware plan dialog for the recommended media sidecars (image /
+ * image reading / speech-to-text / text-to-speech) that fit this device. The
+ * dialog is the only start path: it defaults to the modest media set, leaves
+ * video opt-in, checks the model-store filesystem, and never starts the
+ * separately-managed chat model as a hidden side effect.
+ *
+ * Deliberately a single link, not a button per modality: the required chat
+ * model download above is the page's one primary action, and a stack of
+ * terracotta media buttons out-shouted it (2026-09-02 UX review, "the visual
+ * hierarchy is inverted"). Per-modality choice lives inside the plan dialog.
  *
  * "Recommended" = the highest-`recoScore`, fully-open catalog entry of that
  * kind (the same gate as the chat picker + ★ badge). Non-fitting modalities
@@ -431,19 +436,14 @@ export function RecommendedMediaDownloads() {
     [pendingRecos],
   );
 
-  const openPlan = useCallback(
-    (only?: ModalityKey) => {
-      const selected = only
-        ? pendingRecos.filter((r) => r.key === only)
-        : pendingRecos.filter((r) => r.key !== 'video');
-      setSelectedKeys(new Set(selected.map((r) => r.key)));
-      setPreflight(null);
-      setPreflightError(null);
-      setPreflightChecking(selected.length > 0);
-      setPlanOpen(true);
-    },
-    [pendingRecos],
-  );
+  const openPlan = useCallback(() => {
+    const selected = pendingRecos.filter((r) => r.key !== 'video');
+    setSelectedKeys(new Set(selected.map((r) => r.key)));
+    setPreflight(null);
+    setPreflightError(null);
+    setPreflightChecking(selected.length > 0);
+    setPlanOpen(true);
+  }, [pendingRecos]);
 
   useEffect(() => {
     if (!planOpen || selectedRecos.length === 0) {
@@ -504,25 +504,22 @@ export function RecommendedMediaDownloads() {
 
   return (
     <section className="setup-section home-media-section">
-      <h3>On-device media creation and processing</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Optional local models for images, speech, and video — the recommended picks that fit this
-        device. Browse the rest, or manage downloads, in Settings.
-      </p>
-      <button
-        type="button"
-        className="home-media-btn home-media-btn-primary"
-        onClick={() => openPlan()}
-        disabled={!anyPending}
-      >
-        Choose downloads{defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
-      </button>
-      <p className="muted small home-media-plan-hint">
-        Video stays off until you select it. Chat models are managed separately above.
-      </p>
+      {anyPending && (
+        <>
+          <button type="button" className="gz-link-button home-media-plan-link" onClick={openPlan}>
+            Also download the optional media models (image + speech)
+            {defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
+          </button>
+          <p className="muted small home-media-plan-hint">
+            Lets your gezellen create images, read pictures, and speak. You review the list — and
+            can add video — before anything downloads.
+          </p>
+        </>
+      )}
       <div className="home-media-downloads">
         {recos.map((r) => {
           const st = states[r.key] ?? { status: 'idle', pct: null };
+          if (st.status === 'idle') return null;
           return (
             <div key={r.key} className="home-media-row">
               {st.status === 'done' ? (
@@ -559,13 +556,9 @@ export function RecommendedMediaDownloads() {
                   </span>
                 </div>
               ) : (
-                <button type="button" className="home-media-btn" onClick={() => openPlan(r.key)}>
-                  Download {r.what} ({r.name}
-                  {r.sizeBytes ? `, ${fmtSize(r.sizeBytes)}` : ''})
-                </button>
-              )}
-              {st.status === 'error' && (
-                <span className="home-probe home-probe-fail small">✗ {st.error}</span>
+                <span className="home-probe home-probe-fail small">
+                  ✗ {r.name}: {st.error}
+                </span>
               )}
             </div>
           );

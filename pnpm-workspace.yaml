@@ -45,13 +45,14 @@ networkConcurrency: 8
 minimumReleaseAgeExclude:
   - "@anthropic-ai/sdk@0.113.0"
   - "@bendyline/gilde"
-  - "@bendyline/squisq-cli@2.7.2"
-  - "@bendyline/squisq-editor-react@2.10.3"
-  - "@bendyline/squisq-formats@2.5.1"
-  - "@bendyline/squisq-react@2.10.1"
-  - '@bendyline/squisq-video-react@2.4.1 || 2.4.2 || 2.4.3'
-  - '@bendyline/squisq-video@2.3.1 || 2.3.2'
-  - "@bendyline/squisq@2.10.0"
+  - "@bendyline/squisq-cli@2.8.0"
+  - "@bendyline/squisq-calc@2.11.0"
+  - "@bendyline/squisq-editor-react@2.11.0"
+  - "@bendyline/squisq-formats@2.6.0"
+  - "@bendyline/squisq-react@2.11.0"
+  - "@bendyline/squisq-video-react@2.4.4"
+  - "@bendyline/squisq-video@2.3.3"
+  - "@bendyline/squisq@2.11.0"
   - "@csstools/css-calc@3.3.0"
   - "@csstools/css-color-parser@4.1.10"
   - "@csstools/css-syntax-patches-for-csstree@1.1.7"
@@ -63,6 +64,7 @@ minimumReleaseAgeExclude:
   - "mermaid@11.16.1"
   - "postcss@8.5.22"
   - "tar@7.5.21"
+  - '@bendyline/squisq-grid-react@2.11.1'
 
 allowBuilds:
   '@bendyline/gezel-service@file:packages/service': true

@@ -1223,6 +1223,36 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain(`Task artifact folder: \`tasks/${task.num}/\``);
   });
 
+  it('pre-registers step surgery for a task graph but advertises it only on the mandating step', async () => {
+    const { TaskManager } = await import('../tasks/manager.js');
+    const taskMgr = new TaskManager(store);
+    const task = await taskMgr.create('default', {
+      title: 'Author a plan',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        { id: 'frame', name: 'Frame', prompt: 'Call `set_outcomes`, then advance.' },
+        {
+          id: 'outline',
+          name: 'Outline',
+          prompt: 'Call `craftbook_update_step` on the embedded draft step.',
+        },
+      ],
+    });
+
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: 'frame',
+    });
+    mock.script('ok');
+    await manager.send(session.id, 'start');
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create?.opts?.mcpServer?.env.GEZEL_CRAFTBOOK_STEP_EDITING).toBe('1');
+    expect(create?.opts?.toolAllowlist?.has('craftbook_update_step')).toBe(false);
+  });
+
   it('injects predecessor-step notes into a newly created successor session', async () => {
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);
@@ -1846,12 +1876,13 @@ describe('ChatManager — parked handoff durability', () => {
     });
 
     // Parks: the sender is mid-turn, so delivery waits for it to idle.
-    await manager.messageGezel({
+    const accepted = await manager.messageGezel({
       fromGezelId: 'ada',
       fromSessionId: sender.id,
       toGezelIdOrName: 'bo',
       text: 'please review the draft',
     });
+    expect(accepted.deliveryState).toBe('parked');
     const parked = await store.readPendingHandoffs();
     expect(parked).toHaveLength(1);
     expect(parked[0]).toMatchObject({ fromGezelId: 'ada', toGezelIdOrName: 'bo' });
@@ -2227,6 +2258,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     expect(res.toGezelId).toBe('maya');
     expect(res.toGezelName).toBe('Maya');
+    expect(res.deliveryState).toBe('dispatched');
 
     await waitForCondition(async () => {
       const disk = await store.getSession('maya', res.sessionId);
@@ -2244,10 +2276,15 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(mayaDisk!.messages[0]?.from).toEqual({
       gezelId: 'ada',
       gezelName: 'Ada',
+      sessionId: adaSession.id,
+      kind: 'delegation',
     });
     expect(mayaDisk!.messages[1]?.role).toBe('assistant');
     expect(mayaDisk!.messages[1]?.content).toBe('I checked — all good.');
   });
+
+  // Delegation-lineage coverage (retro-stamp + per-message edges) lives in
+  // manager-lineage.test.ts — extracted to keep this module under its ceiling.
 
   it('resolves relay names per side: a boring-pinned sender never sees friendly names', async () => {
     await store.createGezel({ name: 'Maya', role: 'Voorman' });
@@ -2547,6 +2584,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(duplicate).toMatchObject({
       sessionId: first.sessionId,
       toGezelId: first.toGezelId,
+      deliveryState: 'parked',
       deduplicated: true,
     });
     expect(internals.afterSessionIdle.get(adaSession.id)).toHaveLength(1);
@@ -4514,7 +4552,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
   // through MockProvider with the Ollama-only context surface
   // (`numCtx` + `estimatePromptChars`) configured. Each test sets a
   // promptChars closure that the test mutates to simulate the
-  // estimate climbing toward the warning / compaction thresholds.
+  // estimate climbing toward the automatic-compaction threshold.
 
   /**
    * Configure the manager to route Ollama: register the mock under
@@ -4556,7 +4594,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     return { home, store, events, manager: mgr, mock: ollamaMock };
   }
 
-  it('publishes context_warning for an accumulated conversation but does NOT compact', async () => {
+  it('publishes context_warning only when accumulated conversation cannot be compacted', async () => {
     let promptChars = 0;
     const { home, manager, events, mock, store } = await setupOllamaManager({
       numCtx: 1000,
@@ -4583,6 +4621,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       await manager.send(session.id, 'hi');
 
       expect(eventTypes).toContain('context_warning');
+      expect(eventTypes).toContain('context_window');
       expect(eventTypes).not.toContain('context_compacted');
       const rec = await manager.getSessionRecord(session.id);
       expect(rec?.compactionCount).toBeUndefined();
@@ -4615,6 +4654,7 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(reply.content).toBe('reply');
       expect(eventTypes).not.toContain('context_warning');
       expect(eventTypes).not.toContain('context_compacted');
+      expect(eventTypes).toContain('context_window');
     } finally {
       promptChars = 0;
       await manager.drainBackground();
@@ -4712,6 +4752,25 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(synthCount).toBe(1);
       const synth = rec?.messages.find((m) => m.synthetic === 'compaction-summary');
       expect(synth?.content).toContain('compacted bullet');
+      expect(synth?.contextCompaction).toEqual({
+        removedCount: 15,
+        contextWindow: 1000,
+        estimatedTokensBefore: 1129,
+        compactionCount: 1,
+        autoCompactRatio: 0.7,
+      });
+      expect(rec?.contextWindow).toBe(1000);
+      expect(rec?.contextAutoCompactRatio).toBe(0.7);
+      const timeline = await store.listTimeline({ projectId: 'default', limit: 50 });
+      const compactionRow = timeline.messages.find(
+        (message) => message.synthetic === 'compaction-summary',
+      );
+      expect(compactionRow).toMatchObject({
+        sessionContextWindow: 1000,
+        sessionContextAutoCompactRatio: 0.7,
+        sessionCompactionCount: 1,
+        contextCompaction: synth?.contextCompaction,
+      });
       const rebuilt = mock.calls.filter((call) => call.kind === 'create').at(-1);
       expect(
         rebuilt?.opts?.priorMessages?.filter(
@@ -5079,7 +5138,12 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
       kind: 'consultation',
     });
     expect(consult!.messages[0]?.content).toBe('[Question from Ada]: is task 47 done?');
-    expect(consult!.messages[0]?.from).toEqual({ gezelId: 'ada', gezelName: 'Ada' });
+    expect(consult!.messages[0]?.from).toEqual({
+      gezelId: 'ada',
+      gezelName: 'Ada',
+      sessionId: adaSession.id,
+      kind: 'consultation',
+    });
     expect(consult!.messages[1]?.content).toBe('Task 47 is in code review.');
   });
 

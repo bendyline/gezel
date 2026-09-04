@@ -231,8 +231,12 @@ function fallbackLicenseMaterials(input) {
     (typeof pkg.author === 'string' ? pkg.author : null) ??
     (typeof packageJson.author === 'string' ? packageJson.author : packageJson.author?.name) ??
     `${pkg.name} contributors`;
-  if (reportedLicense === 'MIT' || reportedLicense === 'MIT OR Apache') {
-    const choice = reportedLicense === 'MIT OR Apache' ? 'Gezel elects the MIT option.\n\n' : '';
+  if (
+    reportedLicense === 'MIT' ||
+    reportedLicense === 'MIT OR Apache' ||
+    reportedLicense === 'MIT/Apache-2.0'
+  ) {
+    const choice = reportedLicense === 'MIT' ? '' : 'Gezel elects the MIT option.\n\n';
     return [
       {
         name: 'GENERATED-LICENSE-MIT.txt',

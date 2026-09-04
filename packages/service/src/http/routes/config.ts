@@ -363,6 +363,17 @@ export function configRoutes(ctx: ServiceContext): Hono {
       braveSearchApiKey,
       tavilyApiKey,
     });
+    // A build that cannot bind the Ollama listener must not persist a setting
+    // saying it will. Pinned rather than rejected: generic config writers (the
+    // CLI, a restored backup, a settings round-trip from another install)
+    // would otherwise fail on a field they never meant to change, and the
+    // honest result of asking for it here is simply "off".
+    if (
+      plainPatch.openaiEndpoints?.emulateOllama === true &&
+      !ctx.distribution.allowOllamaEmulation
+    ) {
+      plainPatch.openaiEndpoints = { ...plainPatch.openaiEndpoints, emulateOllama: false };
+    }
     const updated = await ctx.store.writeConfig(plainPatch);
     if (body.remoteServing !== undefined) {
       try {

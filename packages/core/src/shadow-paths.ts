@@ -1,5 +1,6 @@
 import {
   PROJECT_DIFFPACKS_DIR_NAME,
+  PROJECT_PROMPTS_DIR_NAME,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
 } from './paths.js';
@@ -69,4 +70,20 @@ export function isReservedDiffpackArtifactPath(path: string): boolean {
   if (segments.length < 3) return false;
   const third = segments[2]?.toLowerCase();
   return third === 'after' || third === 'files';
+}
+
+/**
+ * True for artifacts-relative paths inside the reserved `prompts/` subtree —
+ * the user's chat prompt drafts (`prompts/<draftId>/message.md`,
+ * `message_files/`, `draft.json`).
+ *
+ * Unlike `shadow/` and `tabular/` this is a GEZEL-ONLY denial, and callers
+ * must gate it on `initiatedByGezel` exactly like the connector-corpus guard.
+ * The composer writes `message_files/` through the ordinary artifact raw
+ * route, so an unconditional denial would break the user's own uploads. What
+ * it protects is narrower and sharper: a gezel must never edit, delete, or
+ * move the message a person is still writing — reading it is fine.
+ */
+export function isReservedPromptDraftArtifactPath(path: string): boolean {
+  return artifactSegments(path)[0]?.toLowerCase() === PROJECT_PROMPTS_DIR_NAME;
 }

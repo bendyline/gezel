@@ -8,7 +8,12 @@
  */
 export const TERMINAL_BOTTOM_GRACE_MS = 5 * 60 * 1000;
 
-export type TimelineOrderKind = 'message' | 'streaming' | 'terminal' | 'terminal-streaming';
+export type TimelineOrderKind =
+  | 'message'
+  | 'streaming'
+  | 'indexing'
+  | 'terminal'
+  | 'terminal-streaming';
 
 export interface TimelineOrderRow {
   kind: TimelineOrderKind;
@@ -58,7 +63,7 @@ function timelineRowPriority(row: TimelineOrderRow, nowMs: number): number {
 /**
  * Ascending timeline order with two live-work lanes:
  *
- *  1. persisted chat/history rows;
+ *  1. persisted chat/history rows and completed indexing receipts;
  *  2. active chat streaming rows;
  *  3. active terminal output and terminal rows still in their grace period.
  *

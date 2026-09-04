@@ -114,6 +114,11 @@ export async function transformText(
   const context = opts.context ?? 'generic';
   const raw = await manager.oneShotCompletion(prompt, 120_000, {
     useKlerk: true,
+    // The person is blocked on this modal. Task handoffs and other autonomous
+    // work use the background lane, so classify the transform as interactive:
+    // it can claim reserved foreground headroom immediately, or take the next
+    // physical engine slot at the safe boundary between inference rounds.
+    lane: 'interactive',
     jobLabel: `transform · ${opts.mode}${context !== 'generic' ? ` · ${context}` : ''}`,
     onDelta: (chunk) => splitter.push(chunk),
     onReasoningDelta: (chunk) => hooks.onThinking?.(chunk),
@@ -188,6 +193,9 @@ export async function rewriteText(
 
   const raw = await manager.oneShotCompletion(prompt, 120_000, {
     useKlerk: true,
+    // Legacy clients block on this request just like the streaming transform
+    // dialog, so it must not sit behind autonomous background task work.
+    lane: 'interactive',
     jobLabel: `rewrite${opts.isSelection ? ' · selection' : ''}${
       context !== 'generic' ? ` · ${context}` : ''
     }`,

@@ -74,6 +74,49 @@ sites; a quantity spelled "two". The difficulty is finding it in volume and not
 crying wolf — not subtlety. A subtle defect makes the scenario a coin flip, which
 measures nothing.
 
+## Ceilings: set them from the slowest observed PASS, never from frontier
+
+A scenario's `timeoutMs` is a runaway safety net, not a performance target — but it
+still has to be a number some real model can finish inside, or the suite reports
+throughput as capability.
+
+The original rule here was to take ceilings from the **p95 of frontier pass durations**.
+That is wrong, and the 2026-09-01 `developer`/`complex-work` sweep is the evidence.
+Frontier clears those members in 3–8 minutes; the 27B/31B local class needs 5–15x that.
+The consequences were not subtle:
+
+- **5 of 6 passes exceeded their authored ceiling** (1.18x–1.77x). Not one hard pass
+  landed inside its budget; every one survived only because `hardCeilingCapMs` doubles
+  the deadline for a trial still making progress.
+- **7 of 14 failures were the clock**, all at exactly that 2x cap, four still recording
+  hard progress within two minutes of the kill and two within twenty seconds.
+- `developer` ranked `gemma4-31b-q4` two members below `qwen3.8-27b-q4` on a
+  decomposition showing **one genuine failure each** — a ranking produced entirely by
+  wall-clock. `craftbook-author-params` passed one run at 62.0m under a 70m cap and
+  failed the next at a 72m cap, same model and gates.
+
+The rule that replaces it:
+
+**Set each ceiling from the maximum observed PASS across every measured model, plus
+headroom. A member no model has completed gets a deliberately generous value and is
+re-measured, not a value inferred from how long you think it should take.**
+
+Not from one model's leg, either. The wall-clock gap is per-(model, member) and swings
+both ways — `gemma4-31b-q4` is 1.8x faster than `qwen3.8-27b-q4` on
+`craftbook-route-multi` and 4x slower on `craftbook-invoice-run` — so there is no
+"slowest model" to calibrate against, only a slowest model per member.
+
+Two related traps:
+
+- **`throughputScaledMaxDurationMs` does not save you.** It scales the ceiling by measured
+  decode tok/s, but agentic wall-clock is dominated by **tool-loop churn**, not decode
+  rate. It granted gemma a 1.04x correction on two members where gemma needed at least
+  1.25x qwen's time. A correction that small is worse than none, because it looks like
+  the problem was handled.
+- **The 2x extension is not the bug and should stay.** It only fires for a trial still
+  making hard progress, which is exactly the case worth rescuing. The defect was that
+  base ceilings were so low the rescue became load-bearing for ordinary passes.
+
 ## Suites — standardized units of evaluation
 
 The registry has grown well past the point where "run everything" is a routine act, and the three anchored scenarios alone no longer differentiate current models (they mostly saturate). [evals/src/suites.ts](../evals/src/suites.ts) names the curated sets (membership pinned by `suites.test.ts`; run via `pnpm eval:all --suite <id> --count <N>`):
@@ -82,8 +125,8 @@ The registry has grown well past the point where "run everything" is a routine a
 - **`smoke`** — 3 fast probes for a pulse check before/after a risky change. Never a scorecard.
 - **`extended-coding` / `extended-grounding` / `extended-retrieval`** — per-axis deep dives, reached for when core surfaces a weakness on that axis or a change targets it.
 - **`productivity`** — end-user knowledge work: constrained communications, meeting follow-through, records, planning, calendar synthesis, experiment analysis, local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks document production (PPTX, DOCX, and a theme round-trip). Six of its thirteen members are shared with `core`/`extended-grounding` (the axes genuinely overlap with office work); the other seven are what it uniquely buys. Deliberately excludes creative writing (that's `extended-writing`) and coding. Three gate kinds: prose/structure, **arithmetic oracles** (a locked-schema JSON of computed figures checked field-by-field, so a well-shaped readout with a wrong p-value fails), and **binary container gates** (the DocBlocks members must produce a real ZIP-shaped PPTX/DOCX — a byte floor alone accepted the Markdown source renamed to `.pptx`). Hermetic by *enforcement*, not assertion: mocked dependencies, a mocked web-search backend, and a grader assertion that no live-retrieval tool was called — the live Wikipedia API is keyless and on by default, so a config-only guarantee would fail silently while every content gate still passed. Budget 6h05m at `--count 1`; `productivity-smoke` is the 1h15m pulse-check subset.
-- **`developer`** — the engineering scorecard, and deliberately hard. Ten hermetic scenarios covering recipe routing under near-neighbour ambiguity, defect identification graded on **precision as well as recall**, and code change proven by execution receipts. The target band is a frontier cloud model passing most of it, the best local model landing around 4/10, and a small local model 1-2/10. Budget 5h40m at `--count 1`; `developer-smoke` is the 1h40m subset.
-- **`complex-work`** — multi-phase orchestration and, in six of its nine members, **authoring the recipe rather than consuming one**: a parameterized book run twice, a fanout book, an embedded gate script, a book repaired mid-task, one-off work generalized into a reusable recipe. Same difficulty target as `developer`. Budget 5h40m; `complex-work-smoke` is the 1h50m subset.
+- **`developer`** — the engineering scorecard, and deliberately hard. Ten hermetic scenarios covering recipe routing under near-neighbour ambiguity, defect identification graded on **precision as well as recall**, and code change proven by execution receipts. The target band is a frontier cloud model passing most of it, the best local model landing around 4/10, and a small local model 1-2/10. Budget 9h15m at `--count 1` (up to 18h30m with ceiling extensions); `developer-smoke` is the 2h35m subset.
+- **`complex-work`** — multi-phase orchestration and, in six of its nine members, **authoring the recipe rather than consuming one**: a parameterized book run twice, a fanout book, an embedded gate script, a book repaired mid-task, one-off work generalized into a reusable recipe. Same difficulty target as `developer`. Budget 10h50m (up to 21h40m with ceiling extensions); `complex-work-smoke` is the 1h55m subset.
 - **`headroom`** — deliberately hard probes (arcade-deluxe, squisq-review) that are NOT expected to pass 100%; they keep a saturated scorecard honest and separate frontier-class from medium-class execution.
 
 Suite membership changes are deliberate: adding to `core` taxes every future scorecard's wall-clock, and removing breaks comparability across time. Grow the extended suites freely; promote into `core` only when an axis has proven to differentiate models and is missing there.

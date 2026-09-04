@@ -2,6 +2,7 @@ import type {
   ChatEvent,
   ChatMessageToolCall,
   ChatTurnErrorDetail,
+  ContextCompaction,
   Question,
   ReferencedFile,
   SessionGpuTask,
@@ -21,13 +22,13 @@ import {
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { queueNoticeIsFresh } from './chat-live-slot.js';
+import { formatContextWindow } from './model-context.js';
 
 // Chat-bubble light surface — shared with the Home intro's embedded
 // Handboek page; the scheme and its rationale live in
 // [chat-theme.ts](./chat-theme.ts).
 const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
-import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
 import {
@@ -57,6 +58,7 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
+import { markdownToChatDoc } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
@@ -72,7 +74,31 @@ import {
 } from './pending-tool-calls.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
 import { renderToolArgsFragment } from './tool-args-fragment.js';
-import { formatDurationShort, toolDisplayName, toolErrorSummary } from './tool-display.js';
+import {
+  formatDurationShort,
+  toolArgsDisplaySummary,
+  toolDisplayName,
+  toolErrorSummary,
+} from './tool-display.js';
+
+/**
+ * A tool-only turn still said something through its final action. Use the
+ * existing human label + persisted argument summary as the visible closing
+ * line instead of blaming the model for omitting prose. The full sequence
+ * remains available in the step disclosure immediately above it.
+ */
+export function summarizeTerminalToolCall(toolCalls: ChatMessageToolCall[]): string {
+  const finalCall = toolCalls[toolCalls.length - 1];
+  if (!finalCall) return '';
+  const detail = finalCall.argsSummary
+    ? toolArgsDisplaySummary(finalCall.argsSummary.trim())
+    : finalCall.path?.trim();
+  const action = `${toolDisplayName(finalCall.name)}${detail ? ` — ${detail}` : ''}`.replace(
+    /[.!?]+$/,
+    '',
+  );
+  return finalCall.success ? `Last action: ${action}.` : `Last action failed: ${action}.`;
+}
 
 /**
  * Build the inline style for a rendered bubble body: the gezel's font
@@ -425,6 +451,8 @@ export interface MessageBubbleProps {
    * "produced reasoning but no visible reply".
    */
   synthetic?: import('@bendyline/gezel').ChatMessage['synthetic'];
+  /** Facts displayed by the dedicated automatic-compaction timeline marker. */
+  contextCompaction?: ContextCompaction;
   /**
    * Warnings persisted on the message — on a `turn-aborted` record the
    * first entry is the abort reason itself (`[llama-cpp] timed out
@@ -575,6 +603,7 @@ export function MessageBubble({
   suppressHeader,
   timestampLabel,
   synthetic,
+  contextCompaction,
   warnings,
 }: MessageBubbleProps) {
   // When the assistant reply referenced real files, pre-process the
@@ -780,6 +809,46 @@ export function MessageBubble({
     );
   }
 
+  if (synthetic === 'compaction-summary') {
+    const contextLabel = formatContextWindow(contextCompaction?.contextWindow);
+    const triggerPercent = contextCompaction
+      ? Math.round(contextCompaction.autoCompactRatio * 100)
+      : undefined;
+    return (
+      <aside
+        className={`msg msg-context-compaction${extraClass ? ` ${extraClass}` : ''}`}
+        data-msg-id={dataMsgId}
+        data-session-id={dataSessionId}
+        aria-label="Automatic context compaction"
+      >
+        <div className="msg-context-compaction-summary">
+          <span className="msg-context-compaction-mark" aria-hidden="true" />
+          <span className="msg-context-compaction-copy">
+            <strong>Context auto-compacted</strong>
+            <span>
+              {contextCompaction
+                ? `${contextCompaction.removedCount} earlier message${contextCompaction.removedCount === 1 ? '' : 's'} summarized · ${contextLabel}-token window · compaction #${contextCompaction.compactionCount}`
+                : 'Earlier messages were summarized so the conversation could continue.'}
+            </span>
+          </span>
+        </div>
+        <details className="msg-context-compaction-details">
+          <summary>
+            View continuity summary
+            {triggerPercent !== undefined ? ` · triggered around ${triggerPercent}%` : ''}
+          </summary>
+          <div className="msg-context-compaction-body" style={bodyStyle}>
+            <RenderedMarkdown
+              markdown={displayContent}
+              mediaProvider={mediaProvider}
+              fontFamily={fontFamily}
+            />
+          </div>
+        </details>
+      </aside>
+    );
+  }
+
   if (from) {
     const body = stripFromPrefix(displayContent, from.gezelName);
     const cls = `msg msg-from-gezel${extraClass ? ` ${extraClass}` : ''}`;
@@ -878,45 +947,47 @@ export function MessageBubble({
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
       )}
       {!isUser && content.trim().length === 0 ? (
-        // Assistant turn finished with no visible text. Build the
-        // bubble body from whatever signal we DO have so the user
-        // never sees a generic "No response" placeholder when the
-        // model was actually doing work:
-        //   1. `recoveredInNextTurn` — continuation loop produced the
-        //      follow-up; quiet stub.
-        //   1b. `synthetic: 'turn-aborted'` — the turn was killed (turn
-        //      timeout, guard abort, cancelled request) and this is its
-        //      salvage record. Ranked above the signal-sniffing branches
-        //      below because every one of them describes what the model
-        //      was DOING, and none can say that it was stopped; the
-        //      reason itself rides in `warnings`, banner-rendered under
-        //      the body.
-        //   2. `attemptedToolCalls` — model tried to call a tool but
-        //      the salvage layer dropped it; surface what they tried
-        //      to do so the user sees intent, not "nothing happened."
-        //   3. `reasoning` — model produced chain-of-thought but no
-        //      visible reply; the ReasoningExpando above already
-        //      renders the trace, so the body just acknowledges that.
-        //   4. `toolCalls` — tools ran but no summary; explicit
-        //      "tools ran, recap missing" copy.
-        //   5. Genuine silence — last-resort copy.
-        <div className="msg-body msg-body-empty muted">
-          <em>
-            {recoveredInNextTurn
-              ? '(continued in the next turn)'
-              : synthetic === 'turn-aborted'
-                ? warnings && warnings.length > 0
-                  ? '(this turn was stopped before the model wrote a reply — see the notice below)'
-                  : '(this turn was stopped before the model wrote a reply)'
-                : attemptedToolCalls && attemptedToolCalls.length > 0
-                  ? buildAttemptedCallSummary(attemptedToolCalls)
-                  : reasoning && reasoning.trim().length > 0
-                    ? '(model produced reasoning but no visible reply — see Thinking above)'
+        question ? null : (
+          // Assistant turn finished with no visible text. Build the
+          // bubble body from whatever signal we DO have so the user
+          // never sees a generic "No response" placeholder when the
+          // model was actually doing work:
+          //   1. `recoveredInNextTurn` — continuation loop produced the
+          //      follow-up; quiet stub.
+          //   1b. `synthetic: 'turn-aborted'` — the turn was killed (turn
+          //      timeout, guard abort, cancelled request) and this is its
+          //      salvage record. Ranked above the signal-sniffing branches
+          //      below because every one of them describes what the model
+          //      was DOING, and none can say that it was stopped; the
+          //      reason itself rides in `warnings`, banner-rendered under
+          //      the body.
+          //   2. `attemptedToolCalls` — model tried to call a tool but
+          //      the salvage layer dropped it; surface what they tried
+          //      to do so the user sees intent, not "nothing happened."
+          //   3. `toolCalls` — the final action is the closing summary;
+          //      the full sequence is already in the expando above.
+          //   4. `reasoning` — model produced chain-of-thought but no
+          //      visible reply; the ReasoningExpando above already
+          //      renders the trace, so the body just acknowledges that.
+          //   5. Genuine silence — last-resort copy.
+          <div className="msg-body msg-body-empty muted">
+            <em>
+              {recoveredInNextTurn
+                ? '(continued in the next turn)'
+                : synthetic === 'turn-aborted'
+                  ? warnings && warnings.length > 0
+                    ? '(this turn was stopped before the model wrote a reply — see the notice below)'
+                    : '(this turn was stopped before the model wrote a reply)'
+                  : attemptedToolCalls && attemptedToolCalls.length > 0
+                    ? buildAttemptedCallSummary(attemptedToolCalls)
                     : toolCalls && toolCalls.length > 0
-                      ? `No written response — ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'} ran but the model didn't produce a summary. Ask again or prompt for a recap.`
-                      : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
-          </em>
-        </div>
+                      ? summarizeTerminalToolCall(toolCalls)
+                      : reasoning && reasoning.trim().length > 0
+                        ? '(model produced reasoning but no visible reply — see Thinking above)'
+                        : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
+            </em>
+          </div>
+        )
       ) : (
         // biome-ignore lint/a11y/useKeyWithClickEvents: event delegation to child <a>
         <div
@@ -3201,7 +3272,7 @@ export function spliceReasoningMarks(
 
 /** Compact label for an inline reasoning mark — verb plus target. */
 function reasoningMarkLabel(tool: ChatMessageToolCall): string {
-  const summary = tool.argsSummary?.trim();
+  const summary = tool.argsSummary ? toolArgsDisplaySummary(tool.argsSummary.trim()) : undefined;
   if (!summary) return tool.name;
   return `${tool.name} · ${summary.length > 60 ? `${summary.slice(0, 59)}…` : summary}`;
 }
@@ -3674,7 +3745,7 @@ export function RenderedMarkdown({
       )
         ? parseMarkdown(toHtmlCodeFence(markdown))
         : mdDoc;
-      return markdownToDoc(source, { articleId: 'gezel-chat' });
+      return markdownToChatDoc(source, { articleId: 'gezel-chat' });
     } catch {
       return null;
     }

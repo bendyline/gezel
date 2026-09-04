@@ -17,9 +17,10 @@ install. It offers the verified Gezel native toolkit first, downloaded from
 the [Gezel GitHub Releases](https://github.com/bendyline/gezel/releases/), then
 device-ranked model choices:
 
-1. The best chat model plus every recommended image, speech, reading, and video
-   helper that fits this device.
-2. The best chat model only.
+1. The best chat model for this device, by itself. This is the recommended
+   default and keeps the first download small.
+2. An optional complete workshop set that adds every recommended image,
+   speech, reading, and video helper that fits this device.
 3. Other compatible chat-only models, ordered for this device.
 
 Downloads show live progress and activate inside the running daemon, so setup

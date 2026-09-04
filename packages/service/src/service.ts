@@ -24,6 +24,7 @@ import {
   type ExternalFolders,
   KeyedLock,
   type TaskAssignee,
+  resolveDistributionProfile,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -120,6 +121,7 @@ import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { KnowledgeManager } from './knowledge/manager.js';
+import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
@@ -150,6 +152,8 @@ import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
+import { PromptDraftManager } from './prompt-drafts/manager.js';
+import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
 import { GpuArbiter, resolveGpuPolicy } from './providers/gpu-arbiter.js';
@@ -426,6 +430,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
   const serviceRole = await resolveEffectiveServiceRole(opts.role, process.env, home);
+  // Resolved once and passed down, never re-read from env at the enforcement
+  // seams — the same discipline `resolveSecurityPolicy` follows, and what
+  // keeps one subsystem from disagreeing with another about what this build
+  // is allowed to do.
+  const distribution = resolveDistributionProfile(process.env);
+  if (distribution.profile !== 'standard') {
+    log.info(`[service] distribution=${distribution.profile}`);
+  }
   const privateUserHome = process.env.GEZEL_SYSTEM_SCOPE !== '1';
   // Secure the home before the runtime lock or config probe creates/reads any
   // per-user state. Store.ensureLayout repeats this idempotently so direct
@@ -1162,6 +1174,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         attempt: outcome.gate.attempt,
         ...(outcome.gate.paused ? { paused: true } : {}),
         ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
+        ...(outcome.gate.hook ? { hook: outcome.gate.hook } : {}),
         ...(outcome.gate.unsatisfiable ? { unsatisfiable: true } : {}),
         ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
         ...(outcome.gate.escalationStage !== undefined
@@ -1886,6 +1899,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // task against the draft overlay (proposed tree), not the real workspace.
   tasks.setDraftReader(diffpacks.drafts);
   chat.setDraftReader(diffpacks.drafts);
+  // Prompt drafts: the messages the user is writing, kept on disk so they
+  // survive a restart. The chat manager needs it only to stamp a sent draft
+  // and to clean up after a deleted thread.
+  const promptDrafts = new PromptDraftManager({ store, events: chatEvents });
+  chat.setPromptDrafts(promptDrafts);
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
@@ -2085,6 +2103,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       : new KnowledgeManager({
           home,
           host: createWorkerCatalogHost(),
+          catalog,
+          history,
+          readConfig: () => store.readConfig(),
+          ...(machineEngine
+            ? { sharedInstaller: createSharedKnowledgeInstaller(machineEngine) }
+            : {}),
           projectPolicy: async (projectId) => {
             const project = await store.getProject(projectId);
             return project?.knowledgeCatalogs ?? null;
@@ -2095,6 +2119,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     search.setKnowledgeSearch({
       search: (query, opts) => knowledge.searchUnified(query, opts),
     });
+    knowledge.startAutoUpdateTimer();
   }
   // Drop the cached name catalog when a project/gezel/document is
   // created/renamed/deleted, so a just-created entity is quick-openable
@@ -2447,6 +2472,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return ollamaEmulationFetchRef.value;
     },
     ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
+    allowListener: distribution.allowOllamaEmulation,
   });
 
   // Codex needs a stable plain-HTTP origin because the product daemon's port
@@ -2657,6 +2683,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const context: ServiceContext = {
     serviceRole,
+    distribution,
     home,
     store,
     chatEvents,
@@ -2685,6 +2712,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     codeReviews,
     reportActions,
     diffpacks,
+    promptDrafts,
     connectors,
     connectorActions,
     duck,
@@ -3101,8 +3129,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // pre-existing `GEZEL_MOCK_PROVIDER=1` (implies mocked environment where
   // real tarball downloads would only add teardown-time `EBUSY` races on
   // temp dirs).
+  // A store build skips it for a different reason than the two below: not
+  // "this environment doesn't want the download" but "this build may not
+  // download executable code at all". The published phase is still `ready` —
+  // nothing is pending, and the toolsets are simply absent.
   const skipBootstrap =
     serviceRole === 'machine-engine' ||
+    !distribution.allowRuntimeCodeDownloads ||
     process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
     process.env.GEZEL_MOCK_PROVIDER === '1';
   if (skipBootstrap) {
@@ -3224,6 +3257,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       );
     },
   });
+  const promptDraftSweeper = new PromptDraftSweeper({ store, drafts: promptDrafts });
+  if (serviceRole !== 'machine-engine') promptDraftSweeper.start();
   if (serviceRole !== 'machine-engine') digestGenerator.start();
   if (serviceRole !== 'machine-engine') gildeUpdates.startScheduler();
 
@@ -3323,6 +3358,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
+      promptDraftSweeper.stop();
       gildeUpdates.stop();
       await shutdownStep('knowledge workers', async () => knowledge?.stop());
       keurmeesterDigest.stop();

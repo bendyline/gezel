@@ -1,0 +1,76 @@
+# Microsoft Store build. Selected with `--config electron-builder.appx.yml`.
+#
+# Extends the NSIS config for the same reason the MAS one does — see the header
+# there. Windows is the easy half: an MSIX declaring `runFullTrust` keeps child
+# processes, the bundled node/pnpm/DuckDB runtimes, the native engines, loopback
+# TLS, and a real `%USERPROFILE%` (MSIX virtualizes AppData and the registry,
+# not the profile root). The only things that change are how the package is
+# built, that the Store signs it, and that it registers no Windows service.
+extends: ./electron-builder.yml
+
+win:
+  target:
+    - target: appx
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-store-${arch}.${ext}
+  # The parent ships gezel-service-host.exe beside the Electron exe so the NSIS
+  # customInstall hook can register it as GezelService's ImagePath. A store
+  # build registers no service: the `packagedServices` capability exists, but
+  # Microsoft states it will not generally be approved for Store submissions,
+  # and the supervisor's per-user path covers this build. Shipping the host
+  # anyway would carry a binary nothing can invoke.
+  extraFiles: []
+  # The Store signs the package on ingest; a submission is uploaded unsigned.
+  # Nulled rather than left inherited so a machine that happens to have the
+  # Azure Trusted Signing environment set cannot Authenticode the .msix and
+  # produce an artifact Partner Center then rejects.
+  signtoolOptions: null
+
+# The batteries-included model pack. Weights are data, not code, so they raise
+# no store-rules question — they are here because the store CDN serves them at
+# no egress cost to us, which is what makes a complete offline first boot
+# affordable on this channel and nowhere else. Staged by
+# scripts/stage-model-pack.mjs, which the store workflow runs before packaging;
+# the array replaces the base config's, so the licenses tree is restated.
+extraResources:
+  - from: dist/licenses
+    to: licenses
+  - from: dist/model-pack
+    to: model-pack
+  # The channel marker. This is what makes "is this a store build?" a fact
+  # about the artifact rather than about the environment it launches in — see
+  # packages/app/src/store-build.ts for why an env var must never be able to
+  # answer that question.
+  - from: dist/store-build
+    to: .
+
+appx:
+  # Identity comes from Partner Center and MUST match the reserved app
+  # identity exactly, or the upload is rejected. `publisher` is the CN of the
+  # Store-assigned certificate — a GUID-shaped string, not "Bendyline LLC".
+  # These are placeholders until the Partner Center reservation exists; the
+  # store-packaging contract test asserts they were replaced before a real
+  # submission can be built.
+  identityName: REPLACE_WITH_PARTNER_CENTER_IDENTITY_NAME
+  publisher: CN=REPLACE_WITH_PARTNER_CENTER_PUBLISHER_GUID
+  publisherDisplayName: Bendyline LLC
+  applicationId: Gezel
+  displayName: Gezel
+  backgroundColor: '#464646'
+  showNameOnTiles: true
+  # Tile art is read from `<buildResources>/appx/` — i.e. assets/appx/ — and
+  # electron-builder substitutes its own stock images for anything missing
+  # rather than failing. That is fine for a build you install locally and wrong
+  # for a submission: the Store surfaces these at several sizes and stock art
+  # would ship as Gezel's identity. Authoring them (StoreLogo, Square44x44Logo,
+  # Square150x150Logo, Wide310x150Logo, plus scaled variants) is a required
+  # manual step before the first upload — see the workflow summary.
+  # Raw XML spliced into the generated manifest's <Extensions> block.
+  # electron-builder's own auto-launch helper hardcodes TaskId="SlackStartup"
+  # (a leftover from the app it was written for), so the startup task is
+  # declared by hand instead — see installer/appx-manifest-extensions.xml.
+  customExtensionsPath: installer/appx-manifest-extensions.xml
+
+# The Store owns delivery. Same reasoning as the MAS config.
+publish: null

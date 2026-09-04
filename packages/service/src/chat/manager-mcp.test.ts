@@ -479,6 +479,13 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       paths: ['src/alpha.txt', 'src/beta.txt'],
       success: true,
     });
+    // Start-of-call timestamp lands on the persisted record and sits at or
+    // before the assistant message's own commit time — the replay-timeline
+    // contract (intra-turn ordering with absolute time).
+    const callAt = assistantMsg?.toolCalls?.[0]?.at;
+    expect(callAt).toBeDefined();
+    expect(Date.parse(callAt!)).not.toBeNaN();
+    expect(Date.parse(callAt!)).toBeLessThanOrEqual(Date.parse(assistantMsg!.at));
   }, 30_000);
 
   it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {
@@ -490,8 +497,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         name: 'message_gezel',
         arguments: {
           gezel: 'maya',
-          message: 'Create the requested page.',
-          expectedDeliverable: { kind: 'file', filePath: 'index.html' },
+          message: 'Check the project status and report back.',
         },
       },
     ]);
@@ -499,15 +505,20 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     // handoff is nevertheless the terminal action for this sender turn.
     mock.script('Let me hand this off.');
 
-    await manager.send(session.id, 'Create a single-file project page.');
+    await manager.send(session.id, 'Ask Maya for a project status check.');
 
     const senderSends = mock.calls.filter(
       (call) => call.kind === 'send' && call.sendOpts?.queue?.sessionId === session.id,
     );
     expect(senderSends).toHaveLength(1);
-    expect(mock.toolCallOutputs.find((output) => output.name === 'message_gezel')?.output).toMatch(
-      /Pinged Maya/,
+    const handoffOutput = mock.toolCallOutputs.find(
+      (output) => output.name === 'message_gezel',
+    )?.output;
+    expect(handoffOutput).toContain('END YOUR TURN NOW');
+    expect(handoffOutput).toMatch(
+      /Maya's provider queue|Maya's turn has entered the provider queue/,
     );
+    expect(handoffOutput).toMatch(/releases (?:the slot|its provider slot)/);
   }, 30_000);
 
   it('runs the generate_image tool and writes a real PNG to project artifacts', async () => {

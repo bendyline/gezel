@@ -1,5 +1,8 @@
 import react from '@vitejs/plugin-react';
+import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
+
+const workspaceRoot = searchForWorkspaceRoot(import.meta.dirname);
 
 /**
  * Vitest config for the UI package.
@@ -19,6 +22,16 @@ export default defineConfig({
   // objects react-dom 19 refuses to render (React error #130).
   resolve: {
     dedupe: ['react', 'react-dom'],
+  },
+  // Vitest narrows Vite's file-serving allow-list to this package. On Linux,
+  // pnpm resolves `@ironcalc/wasm/...wasm?url` through the workspace-level
+  // virtual store, so Vite rejects the asset before vi.mock can intercept it.
+  // Keep test transforms inside this workspace while permitting dependencies
+  // installed by the workspace package manager.
+  server: {
+    fs: {
+      allow: [workspaceRoot],
+    },
   },
   test: {
     // Dedupe only applies to modules vite PROCESSES. Vitest externalizes

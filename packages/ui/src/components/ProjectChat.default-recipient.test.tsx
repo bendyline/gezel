@@ -214,6 +214,35 @@ describe('ProjectChat default recipient', () => {
       expect(composer).toHaveAttribute('data-session', 'wren-stale');
     });
   });
+
+  it('lists the thread starters the composer files here', async () => {
+    // The composer stamps every draft with this surface's scope and the
+    // picker filters on it. When the two disagree the Drafts section is
+    // permanently empty, and a draft you can see yourself typing vanishes
+    // from the menu the moment you look at another thread.
+    mockSessions([session('s1', 'g1')]);
+    vi.mocked(api.listPromptDrafts).mockResolvedValue({
+      drafts: [
+        {
+          id: '2026-09-03-0007',
+          projectId: 'p1',
+          gezelId: 'g1',
+          sessionId: null,
+          scope: 'project',
+          status: 'draft',
+          title: 'sdfsd',
+          createdAt: HOURS_AGO_2,
+          updatedAt: HOURS_AGO_2,
+          hasFiles: false,
+          fileCount: 0,
+        },
+      ],
+    } as never);
+
+    render(<ProjectChat project={PROJECT} />);
+
+    expect(await screen.findByRole('option', { name: /sdfsd/ })).toBeInTheDocument();
+  });
 });
 
 function stale(): Partial<ChatSessionSummary> {

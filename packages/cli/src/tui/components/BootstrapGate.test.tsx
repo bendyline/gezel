@@ -107,8 +107,8 @@ describe('BootstrapGate interactions', () => {
     await chooseFirst(harness, 'Install the Gezel native toolkit');
 
     await vi.waitFor(() => {
-      expect(harness.text()).toContain('Recommended workshop set — Qwen 27B');
-      expect(harness.text()).not.toContain('Recommended workshop set — Small');
+      expect(harness.text()).toContain('Recommended — Download Qwen 27B');
+      expect(harness.text()).not.toContain('Recommended — Download Small');
     });
     expect(client.getMemoryProfile).toHaveBeenCalledTimes(2);
   });
@@ -131,7 +131,7 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await chooseFirst(harness, 'Recommended workshop set');
+    await chooseFirst(harness, 'Recommended — Download Chat Model');
     await vi.waitFor(() => {
       expect(harness.text()).toContain(
         'Downloading local models from Hugging Face (huggingface.co)',
@@ -155,7 +155,7 @@ describe('BootstrapGate interactions', () => {
     });
   });
 
-  it('keeps the model-only choice free of image-reader and other helper downloads', async () => {
+  it('makes the recommended first choice model-only and leaves helpers optional', async () => {
     const client = createClient({
       listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
       listCatalogItems: vi.fn(async (kind: string) =>
@@ -169,7 +169,13 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await chooseOption(harness, 'Download Chat Model', '2');
+    await vi.waitFor(() => {
+      const text = harness.text();
+      expect(text.indexOf('Recommended — Download Chat Model')).toBeLessThan(
+        text.indexOf('Complete workshop set'),
+      );
+    });
+    await chooseFirst(harness, 'Recommended — Download Chat Model');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).toHaveBeenCalledWith(
@@ -202,8 +208,8 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await vi.waitFor(() => expect(harness.text()).toContain('includes image reader'));
-    await chooseFirst(harness, 'Recommended workshop set');
+    await vi.waitFor(() => expect(harness.text()).toContain('Complete workshop set'));
+    await chooseOption(harness, 'Complete workshop set', '2');
     await vi.waitFor(() => {
       expect(harness.text()).toContain('2/2 Reader');
       expect(harness.text()).toContain('25%');
@@ -265,13 +271,13 @@ describe('BootstrapGate interactions', () => {
 
     await vi.waitFor(() => {
       const text = harness.text();
-      expect(text).toContain('Recommended workshop set — Best Fit');
+      expect(text).toContain('Recommended — Download Best Fit');
       expect(text).toContain('Use Shared Small');
-      expect(text.indexOf('Recommended workshop set — Best Fit')).toBeLessThan(
+      expect(text.indexOf('Recommended — Download Best Fit')).toBeLessThan(
         text.indexOf('Use Shared Small'),
       );
     });
-    await chooseFirst(harness, 'Recommended workshop set — Best Fit');
+    await chooseFirst(harness, 'Recommended — Download Best Fit');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).toHaveBeenCalledWith(
@@ -300,7 +306,7 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await chooseFirst(harness, 'Recommended workshop set — Best Fit');
+    await chooseFirst(harness, 'Recommended — Use Best Fit');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).not.toHaveBeenCalled();

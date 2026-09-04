@@ -1,23 +1,30 @@
 import { EditorShell } from '@bendyline/squisq-editor-react';
+import { createMediaProviderFromContainer } from '@bendyline/squisq/storage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
+  createDataReferenceContainer,
   createDocumentLinkProvider,
   createDocumentsContentContainer,
+  createVersionCompatibleContentContainer,
+  documentVersionBasename,
   gezelProofingIgnoreStore,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
   relativePath,
   renderOutsideInDocument,
   runtimePathForTarget,
+  supportsOutsideInMarkdownEditing,
   useProofingCapability,
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
+import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -59,8 +66,9 @@ async function prepareDocument(path: string, layout: OutsideInLayout): Promise<P
       // copying it into the companion would make it appear as an unused file
       // attachment in the editor's Files panel.
       if (
+        !entry.path.includes('/') &&
         basename(entry.path).toLocaleLowerCase('en-US') ===
-        basename(path).toLocaleLowerCase('en-US')
+          basename(path).toLocaleLowerCase('en-US')
       ) {
         continue;
       }
@@ -81,7 +89,8 @@ async function prepareDocument(path: string, layout: OutsideInLayout): Promise<P
   return {
     sourcePath,
     content,
-    editingEnabled: isOutsideInMarkdownEditingEnabled(content),
+    editingEnabled:
+      supportsOutsideInMarkdownEditing(layout.format) && isOutsideInMarkdownEditingEnabled(content),
   };
 }
 
@@ -118,6 +127,10 @@ export function OutsideInDocumentDetail({
 
   const enableEditing = useCallback(async () => {
     if (!prepared || enabling) return;
+    if (!supportsOutsideInMarkdownEditing(layout.format)) {
+      setEnableError('CSV data previews are read-only.');
+      return;
+    }
     setEnabling(true);
     setEnableError(null);
     try {
@@ -190,9 +203,28 @@ function OutsideInEditor({
       }),
     [layout.companionDirectory, prepared.sourcePath],
   );
+  const dataReferenceContainer = useMemo(
+    () => createDataReferenceContainer(container),
+    [container],
+  );
   const documentLinkProvider = useMemo(
     () => createDocumentLinkProvider({ client: api, currentDocumentPath: prepared.sourcePath }),
     [prepared.sourcePath],
+  );
+  const versionBasename = useMemo(
+    () => documentVersionBasename(prepared.sourcePath),
+    [prepared.sourcePath],
+  );
+  const versionContainer = useMemo(
+    () => createVersionCompatibleContentContainer(dataReferenceContainer, versionBasename),
+    [dataReferenceContainer, versionBasename],
+  );
+  // Outside-in Markdown is rooted directly in the companion directory. Its
+  // imported media and threshold-spilled data paths are already relative to
+  // that root, so use the container adapter without adding another prefix.
+  const mediaProvider = useMemo(
+    () => createMediaProviderFromContainer(dataReferenceContainer),
+    [dataReferenceContainer],
   );
   const saveDocument = useCallback(
     async (source: string) => {
@@ -212,7 +244,7 @@ function OutsideInEditor({
       const rendered = await renderOutsideInDocument(
         linked,
         layout,
-        container,
+        dataReferenceContainer,
         runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
       );
       await api.writeDocument(prepared.sourcePath, linked);
@@ -221,8 +253,9 @@ function OutsideInEditor({
         await api.writeDocument(runtimePath, PLAYER_BUNDLE);
       }
       await api.writeDocumentBinary(layout.targetPath, rendered.bytes, rendered.mimeType);
+      recordDocumentUsed(path);
     },
-    [container, layout, prepared.sourcePath],
+    [dataReferenceContainer, layout, path, prepared.sourcePath],
   );
   const initialContent = useMemo(
     () => normalizeMarkdownBaseline(prepared.content),
@@ -233,6 +266,7 @@ function OutsideInEditor({
     initialValue: initialContent,
     save: saveDocument,
   });
+  useEffect(() => () => mediaProvider.dispose(), [mediaProvider]);
   const handleChange = useCallback(
     (source: string) => {
       autosave.update(source);
@@ -244,32 +278,48 @@ function OutsideInEditor({
     <section className="document-detail" data-testid="document-detail">
       {!prepared.editingEnabled && (
         <output className="outside-in-readonly-banner">
-          <span>
-            <strong>{layout.format.toUpperCase()} preview · read-only.</strong> If you enable
-            editing via markdown, the structure of your {layout.format.toUpperCase()} will not be
-            fully preserved.
-          </span>
+          {supportsOutsideInMarkdownEditing(layout.format) ? (
+            <span>
+              <strong>{layout.format.toUpperCase()} preview · read-only.</strong> If you enable
+              editing via markdown, the structure of your {layout.format.toUpperCase()} will not be
+              fully preserved.
+            </span>
+          ) : (
+            <span>
+              <strong>CSV data preview · source preserved.</strong> Large datasets stay in a sidecar
+              and open as a virtualized grid.
+            </span>
+          )}
           {enableError && <span className="error">Could not enable editing: {enableError}</span>}
-          <button type="button" disabled={enabling} onClick={() => void onEnableEditing()}>
-            {enabling ? 'Preparing…' : 'Enable editing'}
-          </button>
+          {supportsOutsideInMarkdownEditing(layout.format) && (
+            <button type="button" disabled={enabling} onClick={() => void onEnableEditing()}>
+              {enabling ? 'Preparing…' : 'Enable editing'}
+            </button>
+          )}
         </output>
       )}
       <div className="editor-wrap">
         <EditorShell
           initialMarkdown={autosave.desiredValue()}
-          fileName={path}
+          // The visible file is CSV/XLSX/etc., but EditorShell is editing the
+          // generated Markdown companion. Passing the visible extension makes
+          // Squisq correctly treat an unhandled CSV as code and force Source
+          // view, which hides the data card this host just synthesized.
+          fileName={prepared.sourcePath}
+          initialView="wysiwyg"
           readOnly={!prepared.editingEnabled}
           onChange={prepared.editingEnabled ? handleChange : undefined}
           height="100%"
           colorScheme={editorTheme}
           fullWidth
-          workspaceContainer={container}
+          workspaceContainer={versionContainer}
+          mediaProvider={mediaProvider}
           documentLinkProvider={documentLinkProvider}
+          calcEngineFactory={prepared.editingEnabled ? ironCalcEngineFactory : undefined}
           proofing={proofing}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
-          versionBasename={basename(prepared.sourcePath)}
+          versionBasename={versionBasename}
           toolbarSlotAfterActions={
             <>
               {prepared.editingEnabled && <TransformToolbarButton context="generic" />}

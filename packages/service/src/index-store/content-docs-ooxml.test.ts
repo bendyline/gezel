@@ -51,9 +51,10 @@ async function makePptx(md: string): Promise<Uint8Array> {
   return new Uint8Array(await fmt.markdownDocToPptx(parseMarkdown(md)));
 }
 
-// Like DOCX conversion, this exercises a denyNet parser child and therefore
-// runs only where macOS Seatbelt provides the required OS network boundary.
-describe.runIf(process.platform === 'darwin')('doc-intel: pptx conversion', () => {
+// The converter is a fixed, shipped worker. Platforms with an enforceable OS
+// network boundary use it; Windows retains the remaining sandbox layers plus
+// the JS network neutralizer through the trusted-provenance lane.
+describe('doc-intel: pptx conversion', () => {
   it('converts a .pptx deck and makes it searchable', async () => {
     if (!(await pptxImportAvailable())) {
       // An older linked squisq checkout may not include the importer yet.

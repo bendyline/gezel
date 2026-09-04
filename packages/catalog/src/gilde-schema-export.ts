@@ -34,6 +34,8 @@ import {
   GezelTemplateVersionManifestSchema,
   ImageModelIdentitySchema,
   ImageModelVersionManifestSchema,
+  KnowledgeCatalogIdentitySchema,
+  KnowledgeCatalogVersionManifestSchema,
   ProjectTypeIdentitySchema,
   ProjectTypeVersionManifestSchema,
   ToolsetIdentitySchema,
@@ -60,6 +62,8 @@ export const GILDE_SCHEMA_EXPORTS: Array<[filename: string, schema: z.ZodType]> 
   ['image-model-version.schema.json', ImageModelVersionManifestSchema],
   ['video-model-identity.schema.json', VideoModelIdentitySchema],
   ['video-model-version.schema.json', VideoModelVersionManifestSchema],
+  ['knowledge-catalog-identity.schema.json', KnowledgeCatalogIdentitySchema],
+  ['knowledge-catalog-version.schema.json', KnowledgeCatalogVersionManifestSchema],
   ['craftbook-doc.schema.json', CraftbookDocSchema],
   ['craftbook-test.schema.json', CraftbookTestSpecSchema],
 ];

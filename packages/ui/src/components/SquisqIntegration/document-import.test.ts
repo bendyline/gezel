@@ -46,6 +46,7 @@ describe('document drop import', () => {
     ['workbook.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     ['slides.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
     ['handout.pdf', 'application/pdf'],
+    ['catalog.csv', 'text/csv'],
     ['page.html', 'text/html'],
     ['legacy.htm', 'text/html'],
   ])('keeps a dropped %s raw until outside-in editing is enabled', async (name, mimeType) => {

@@ -1,11 +1,15 @@
 import type { HealthResponse, Project, SecurityPresetLevel } from '@bendyline/gezel';
-import { displayName, isLocalProvider, securityPolicyForLevel } from '@bendyline/gezel';
+import {
+  DEFAULT_SECURITY_LEVEL,
+  displayName,
+  isLocalProvider,
+  securityPolicyForLevel,
+} from '@bendyline/gezel';
 import type { ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
-import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
@@ -15,6 +19,7 @@ import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
 import '../styles/home-view.css';
+import { Poppetje } from '../poppetje/index.js';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
 import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
 import { FIRST_RUN_INTRO_ANCHOR_ID } from './home/first-run-intro-anchor.js';
@@ -52,13 +57,12 @@ const OLLAMA_RETRY_INTERVAL_MS = 20_000;
 const OLLAMA_MAX_RETRIES = 720;
 
 /**
- * The first screen a user sees. Three stacked sections:
- *   1. Intro — what gezels are and how to use the app. Compact once
- *      the user is past setup + has done anything.
- *   2. Setup — provider credentials with a "Test connection" green
- *      checkmark, plus a runtime sanity check (node version, daemon).
- *   3. Meester chat — always present; becomes the dominant surface once
- *      the user is onboarded.
+ * The first screen a user sees. Two states:
+ *   - First run (unconfigured): setup in the left column — the one
+ *     required model download, quiet optional links, security posture,
+ *     preferences — with the "What is gezel?" tutorial (player + article)
+ *     riding in a second column beside it.
+ *   - Configured: the Meester workshop (HomeWorkshop) takes the surface.
  */
 export function HomeView({
   platform,
@@ -92,7 +96,6 @@ export function HomeView({
     ? displayName({ name: meesterName, roleBasedName: meesterRoleBasedName }, roleBasedNameOnlyMode)
     : undefined;
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' });
-  const [collapseIntro, setCollapseIntro] = useState<boolean | null>(null);
   // The settled verdict on whether setup is done — `true` → workshop, `false`
   // → first-run onboarding. `null` while we're still determining it, which
   // holds the loading splash. Made *sticky* on purpose: it only ever changes
@@ -162,33 +165,6 @@ export function HomeView({
   }, [config?.meesterGezelId]);
 
   const provider: Provider = config?.provider ?? UI_FALLBACK_PROVIDER;
-  // Resolve the effective default model name for the banner. For
-  // llama-cpp, when the user hasn't pinned a default, the supervisor
-  // falls through to the first installed model (see
-  // `LlamaCppModelManager.resolveDefaultModelPath`). Match that here
-  // so the banner reads "using On-device gemma-4-E2B by default"
-  // instead of a bare "using On-device by default".
-  const configuredDefaultModel = config?.defaultModel?.[provider];
-  const [llamaCppAutoModel, setLlamaCppAutoModel] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (provider !== 'llama-cpp' || configuredDefaultModel) {
-      setLlamaCppAutoModel(undefined);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await api.listLlamaCppModels();
-        if (!cancelled) setLlamaCppAutoModel(res.models[0]?.name);
-      } catch {
-        /* non-fatal — banner just omits the model name */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [provider, configuredDefaultModel]);
-  const effectiveDefaultModel = configuredDefaultModel ?? llamaCppAutoModel;
   const hasCreds =
     provider === 'copilot'
       ? Boolean(config?.hasGithubToken)
@@ -379,128 +355,153 @@ export function HomeView({
     <div className="home-view">
       {banner}
       {/* ── First run setup ──────────────────────────────────────── */}
-      {/* Setup leads, the intro follows. A first-run user's one job is to get a
-          model onto the machine, so the download affordance owns the top of the
-          screen; the "what is gezel?" pitch is reading material for after. */}
-      {/* Everything below the intro is grouped + slightly indented so the
-          steps read as one "First run setup" block. */}
-      <h1 className="home-firstrun-heading">First run setup</h1>
-      <p className="home-firstrun-lede muted">
-        Use the buttons below to download local models from{' '}
-        <a
-          href="https://huggingface.co"
-          target="_blank"
-          rel="noreferrer"
-          style={{ color: 'inherit' }}
-        >
-          Hugging Face
-        </a>{' '}
-        that will get you started.
-      </p>
-      <div className="home-firstrun-body">
-        {/* First-run on-device install banner. Visible only while
-          the bootstrapped default model is still downloading (or
-          has failed). Hides itself once the model appears in the
-          installed list. */}
-        {config && (
-          <FirstRunInstallBanner
-            config={config}
-            onConfigChanged={setConfig}
-            onModelInstalled={reprobeCurrentProvider}
-          />
-        )}
-
-        {/* One link into the full on-device chat-engine page — MLX on Mac,
-          llama.cpp elsewhere — to browse other chat models. Cloud providers
-          (Copilot, OpenAI, …) live in Settings too; first run is
-          intentionally local-only. */}
-        <section className="setup-section home-ondevice-link">
-          <button
-            type="button"
-            className="gz-link-button"
-            onClick={() => {
-              const section =
-                onDeviceProviderForPlatform(health?.platform) === 'mlx' ? 'mlx' : 'llamaCpp';
-              requestSettingsSection(section);
-              window.dispatchEvent(
-                new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
-              );
-            }}
-          >
-            Manage Chat AI Models →
-          </button>
-          <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
-            Browse other local models, or connect a cloud provider (GitHub Copilot, OpenAI, …), in
-            Settings.
+      {/* Setup leads; the "what is gezel?" tutorial rides in a second column
+          beside it when the window is wide enough (stacking beneath on
+          narrow windows), so the pitch is readable while the model
+          downloads without ever pushing setup below the fold. */}
+      <div className="home-firstrun-columns">
+        <div className="home-firstrun-main">
+          <h1 className="home-firstrun-heading">First run setup</h1>
+          <p className="home-firstrun-lede muted">
+            Gezel chats through a local AI model that runs privately on this device — download the
+            recommended one to get started.
           </p>
-        </section>
+          <div className="home-firstrun-body">
+            {/* First-run on-device install banner — the page's ONE primary action.
+          Visible only while the bootstrapped default model is still
+          downloading (or has failed). Hides itself once the model appears in
+          the installed list. Everything after it is deliberately quiet links:
+          the 2026-09-02 UX review found the old stack of terracotta media
+          buttons out-shouting this required step. */}
+            {config && (
+              <FirstRunInstallBanner
+                config={config}
+                onConfigChanged={setConfig}
+                onModelInstalled={reprobeCurrentProvider}
+              />
+            )}
 
-        {/* Optional local media models (image / speech / video) — recommended
-          picks that fit this device, reviewed explicitly before download. */}
-        <RecommendedMediaDownloads />
+            {/* Optional media sidecars — one desaturated link into a review
+          dialog; recommended picks that fit this device. */}
+            <RecommendedMediaDownloads />
 
-        {/* ── 2. Experience ────────────────────────────────────────── */}
-        {/* "Boring mode" is one toggle over the two existing display flags:
-          gezels show their role instead of a name (roleBasedNameOnlyMode)
-          and their avatar/poppetje is hidden in favour of a plain letter
-          tile (showPoppetjes=false). Dispatch config-updated so the live
-          name/avatar hooks update everywhere without a reload. Either flag
-          is still adjustable on its own in Settings. */}
-        <section className="setup-section">
-          <h3>Experience</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Tune how your gezellen present themselves. Adjustable any time in Settings.
-          </p>
-          <label className="debug-toggle">
-            <input
-              type="checkbox"
-              checked={config?.roleBasedNameOnlyMode === true && config?.showPoppetjes === false}
-              onChange={async (e) => {
-                const boring = e.target.checked;
+            {/* The one Settings link: the full on-device chat-engine page — MLX
+          on Mac, llama.cpp elsewhere. Cloud providers (Copilot, OpenAI, …)
+          live in Settings too; first run is intentionally local-only. */}
+            <section className="setup-section home-ondevice-link">
+              <button
+                type="button"
+                className="gz-link-button"
+                onClick={() => {
+                  const section =
+                    onDeviceProviderForPlatform(health?.platform) === 'mlx' ? 'mlx' : 'llamaCpp';
+                  requestSettingsSection(section);
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
+                  );
+                }}
+              >
+                Manage AI models in Settings →
+              </button>
+              <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                Browse other local models, or connect a cloud provider (GitHub Copilot, OpenAI, …).
+              </p>
+            </section>
+
+            {/* ── 2. Security level ────────────────────────────────────── */}
+            {/* Persists immediately; adjustable later in Settings → Security &
+          Compliance. Super Lockdown keeps everything local-only. Ordered
+          above the display toggle on purpose: this is the one first-run
+          choice with real consequences (2026-09-02 UX review). */}
+            <SecurityLevelSection
+              level={config?.securityPolicy?.level}
+              onChange={async (next) => {
                 try {
                   const res = await api.updateConfig({
-                    roleBasedNameOnlyMode: boring,
-                    showPoppetjes: !boring,
+                    securityPolicy: securityPolicyForLevel(next),
                   });
                   setConfig(res);
-                  window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
                 } catch {
-                  /* non-fatal — adjustable later in Settings */
+                  /* non-fatal — the user can set this later in Settings */
                 }
               }}
             />
-            <span>Boring mode — don't use names or show avatars</span>
-          </label>
-        </section>
 
-        {/* ── 3. Security level ────────────────────────────────────── */}
-        {/* Persists immediately; adjustable later in Settings → Security &
-          Compliance. Super Lockdown keeps everything local-only. */}
-        <SecurityLevelSection
-          level={config?.securityPolicy?.level}
-          onChange={async (next) => {
-            try {
-              const res = await api.updateConfig({ securityPolicy: securityPolicyForLevel(next) });
-              setConfig(res);
-            } catch {
-              /* non-fatal — the user can set this later in Settings */
-            }
-          }}
-        />
+            {/* ── 3. Preferences ───────────────────────────────────────── */}
+            {/* One positive toggle over the two display flags: unchecking shows
+          role-based names (roleBasedNameOnlyMode) and plain letter avatars
+          (showPoppetjes=false). Same single-switch shape as Settings →
+          General. Dispatch config-updated so the live name/avatar hooks
+          update everywhere without a reload. The heading keeps the toggle
+          from reading as part of Security & compliance above it. */}
+            <section className="setup-section">
+              <h3>Preferences</h3>
+              {/* The example makes the toggle concrete before the user has
+                  met anyone: the real meester's name in the label and their
+                  actual poppetje beside it — the very things the switch
+                  shows or hides. Raw meesterName on purpose (not the
+                  role-based display name): the example must show what
+                  turning the toggle ON looks like. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <label className="debug-toggle" style={{ marginTop: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={
+                      config?.roleBasedNameOnlyMode !== true && config?.showPoppetjes !== false
+                    }
+                    onChange={async (e) => {
+                      const show = e.target.checked;
+                      try {
+                        const res = await api.updateConfig({
+                          roleBasedNameOnlyMode: !show,
+                          showPoppetjes: show,
+                        });
+                        setConfig(res);
+                        window.dispatchEvent(
+                          new CustomEvent('gezel:config-updated', { detail: res }),
+                        );
+                      } catch {
+                        /* non-fatal — adjustable later in Settings */
+                      }
+                    }}
+                  />
+                  <span>
+                    Show gezel names and poppetjes
+                    {meesterName ? ` (e.g., ${meesterName}, your meester)` : ''}
+                  </span>
+                </label>
+                {meesterPoppetje && (
+                  <div
+                    className="gezel-icon"
+                    style={{ width: 36, height: 36 }}
+                    title={meesterName ? `${meesterName}'s poppetje` : 'example poppetje'}
+                  >
+                    <div className="gezel-icon-poppetje">
+                      <Poppetje poppetje={meesterPoppetje} variant="headshot" size={36} />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                Adjustable any time in Settings.
+              </p>
+            </section>
+          </div>
+        </div>
+
+        {/* ── Tutorial column ─────────────────────────────────────── */}
+        {/* The "What is gezel?" article, stacked: the DocPlayer (watch view)
+            on top and the readable page beneath, scrolling on its own
+            beside setup. Keeps the download banner's "read what gezel is"
+            scroll anchor. */}
+        <aside
+          className="home-firstrun-tutorial"
+          id={FIRST_RUN_INTRO_ANCHOR_ID}
+          aria-label="What is gezel?"
+        >
+          <IntroHandboekArticle variant="stacked" />
+        </aside>
       </div>
-
-      {/* ── Intro ────────────────────────────────────────────────── */}
-      <IntroSection
-        collapsed={collapseIntro ?? false}
-        onToggle={() => setCollapseIntro((c) => !(c ?? false))}
-        version={health?.version}
-        meesterName={meesterDisplayName}
-        isConfigured={false}
-        provider={provider}
-        defaultModel={effectiveDefaultModel}
-        llamaCppBackend={health?.llamaCppBackend}
-        llamaCppDetectedVendor={health?.llamaCppDetectedVendor}
-      />
     </div>
   );
 }
@@ -597,18 +598,23 @@ function SecurityLevelSection({
   level: SecurityPresetLevel | 'custom' | undefined;
   onChange: (next: SecurityPresetLevel) => void | Promise<void>;
 }) {
-  const active = SECURITY_LEVEL_PRESETS.find((l) => l.id === level);
+  // An unset policy already behaves as Lockdown (resolveSecurityPolicy falls
+  // back to DEFAULT_SECURITY_LEVEL), so show that key latched instead of a
+  // "no level chosen yet" placeholder — the tray reflects what is actually
+  // in force from the first paint.
+  const effective = level ?? DEFAULT_SECURITY_LEVEL;
+  const active = SECURITY_LEVEL_PRESETS.find((l) => l.id === effective);
   return (
     // The engagement-mode-<level> class carries the posture-semantic latch
     // colors (sealed green / open amber) — same treatment as Settings.
-    <section className={`setup-section${level ? ` engagement-mode-${level}` : ''}`}>
+    <section className={`setup-section engagement-mode-${effective}`}>
       <h3>Security &amp; compliance</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
+      <p className="muted" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
         How much should gezellen be allowed to do? Pick a starting posture — you can fine-tune every
         capability later in Settings → Security &amp; Compliance.
       </p>
       <div
-        className="engagement-mode-switch gz-tray"
+        className="engagement-mode-switch gz-tray gz-tray--described"
         role="radiogroup"
         aria-label="Security posture"
       >
@@ -618,8 +624,8 @@ function SecurityLevelSection({
             type="button"
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
-            aria-checked={level === l.id}
-            className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
+            aria-checked={effective === l.id}
+            className={`gz-key${effective === l.id ? ' gz-key-active' : ''}`}
             onClick={() => void onChange(l.id)}
           >
             {l.label}
@@ -627,180 +633,18 @@ function SecurityLevelSection({
           </button>
         ))}
       </div>
-      <p className="engagement-mode-description" aria-live="polite">
-        {active
-          ? active.description
-          : 'No level chosen yet — Lockdown (★) is a good default for most people.'}
+      <p className="engagement-mode-description gz-tray-description" aria-live="polite">
+        {active ? (
+          <>
+            <strong>{active.label}</strong> — {active.description}
+          </>
+        ) : (
+          <>
+            <strong>Custom</strong> — capability switches were adjusted individually. Fine-tune in
+            Settings → Security &amp; Compliance.
+          </>
+        )}
       </p>
     </section>
   );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Intro section
-// ─────────────────────────────────────────────────────────────────
-
-function IntroSection({
-  collapsed,
-  onToggle,
-  version,
-  meesterName,
-  isConfigured,
-  provider,
-  defaultModel,
-  llamaCppBackend,
-  llamaCppDetectedVendor,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-  version?: string;
-  meesterName?: string;
-  isConfigured: boolean;
-  provider: Provider;
-  defaultModel?: string;
-  llamaCppBackend?: 'cuda' | 'vulkan' | 'metal' | 'cpu';
-  llamaCppDetectedVendor?: 'amd' | 'nvidia' | 'intel';
-}) {
-  if (collapsed) {
-    const providerSuffix = ` ${describeRunningEngine(provider, defaultModel, llamaCppBackend, llamaCppDetectedVendor)}`;
-    return (
-      <section className="home-intro home-intro-compact">
-        <span>
-          Welcome back{version ? ` — gezel v${version}` : ''}
-          {providerSuffix}
-        </span>
-        <button
-          type="button"
-          className="home-intro-toggle"
-          onClick={onToggle}
-          aria-label="Expand intro"
-          title="Expand intro"
-        >
-          <span aria-hidden>▾</span>
-        </button>
-      </section>
-    );
-  }
-  return (
-    // The download banner scrolls a waiting first-run user to this section.
-    <section className="home-intro" id={FIRST_RUN_INTRO_ANCHOR_ID}>
-      <div className="home-intro-body">
-        <header>
-          <h2>
-            <img src={gezelLogotypeUrl} alt="gezel" className="home-intro-logotype" />
-          </h2>
-          <button
-            type="button"
-            className="home-intro-toggle"
-            onClick={onToggle}
-            aria-label="Collapse intro"
-            title="Collapse intro"
-          >
-            <span aria-hidden>▴</span>
-          </button>
-        </header>
-        {/* The intro copy lives in the Handboek's "What is gezel?" article
-            (docs/handboek/conceptual/welcome.md) — embedded here as a live
-            page so the first-run pitch and the documentation never drift. */}
-        <IntroHandboekArticle />
-        {isConfigured ? (
-          <p>
-            Get started with <strong>{meesterName ?? 'your Meester'}</strong>, your meester, who
-            acts as your concierge. You can work with{' '}
-            <strong>{meesterName ?? 'your Meester'}</strong> to create a project and a crew to solve
-            any productivity need you have.
-          </p>
-        ) : (
-          <>
-            <p>
-              To get started, download the recommended <strong>on-device</strong> model above — it
-              runs privately on your machine, with no account or network required.
-            </p>
-            <p className="muted small">
-              <strong>Note:</strong> Gezel is still in very early preview. On-device models are
-              humbler than cloud AI, but they're the easiest way to get a feel for Gezel. Want a
-              different local model, or a cloud provider like GitHub Copilot or OpenAI? Manage them
-              from the on-device engine page and Settings.
-            </p>
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/**
- * Build the "using …" line shown under "Welcome back". Local engines
- * (llama.cpp, MLX) say *what* is running and on what hardware ("using
- * Nvidia GPU with qwen3.5-9b") so users see whether the GPU path is
- * actually engaged. Cloud providers stay with their existing
- * "using <provider> [<model>] by default" — there's no hardware to
- * surface there.
- */
-function describeRunningEngine(
-  provider: Provider,
-  model: string | undefined,
-  llamaCppBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu' | undefined,
-  llamaCppDetectedVendor: 'amd' | 'nvidia' | 'intel' | undefined,
-): string {
-  if (provider === 'llama-cpp') {
-    const backendLabel = llamaCppBackendLabel(llamaCppBackend, llamaCppDetectedVendor);
-    return model ? `using ${backendLabel} with ${model}` : `using ${backendLabel}`;
-  }
-  if (provider === 'mlx') {
-    return model ? `using MLX with ${model}` : 'using MLX';
-  }
-  return model
-    ? `using ${providerLabel(provider)} ${model} by default`
-    : `using ${providerLabel(provider)} by default`;
-}
-
-function llamaCppBackendLabel(
-  b: 'cuda' | 'vulkan' | 'metal' | 'cpu' | undefined,
-  vendor: 'amd' | 'nvidia' | 'intel' | undefined,
-): string {
-  if (b === 'cuda') return 'Nvidia GPU';
-  if (b === 'metal') return 'Apple GPU';
-  if (b === 'cpu') return 'CPU';
-  if (b === 'vulkan') {
-    // Vulkan covers any GPU vendor — disambiguate when we can. AMD is
-    // the case that motivated this: a Radeon user reading just "GPU"
-    // can't tell whether their card is being used or whether they're
-    // on an Intel iGPU. NVIDIA-via-Vulkan is rare (CUDA wins the
-    // probe) but we label it for the few configurations where Vulkan
-    // got picked anyway.
-    if (vendor === 'amd') return 'AMD GPU';
-    if (vendor === 'intel') return 'Intel GPU';
-    if (vendor === 'nvidia') return 'Nvidia GPU';
-    return 'GPU';
-  }
-  // Backend unknown — supervisor didn't set GEZEL_LLAMA_SERVER_BACKEND
-  // (e.g. running in a non-Electron context). Fall back to the prior
-  // generic label so the line still reads naturally.
-  return 'On-device';
-}
-
-function providerLabel(p: Provider): string {
-  switch (p) {
-    case 'copilot':
-      return 'GitHub Copilot';
-    case 'openai':
-      return 'OpenAI';
-    case 'anthropic':
-      return 'Anthropic Claude';
-    case 'anthropic-cli':
-      return 'Anthropic Claude CLI';
-    case 'codex-cli':
-      return 'OpenAI Codex CLI';
-    case 'ollama':
-      return 'Ollama';
-    case 'llama-cpp':
-      return 'On-device';
-    case 'mlx':
-      return 'MLX';
-    case 'ds4':
-      return 'DwarfStar (ds4)';
-    case 'remote':
-      return 'Remote';
-  }
 }

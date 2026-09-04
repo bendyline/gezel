@@ -1,8 +1,19 @@
 export {
+  createDocumentMediaProvider,
   createDocumentsContentContainer,
   deriveContainerScope,
 } from './documents-container.js';
 export type { DocumentsContentContainerOptions } from './documents-container.js';
+
+export {
+  documentVersionBasename,
+  isMarkdownDocumentPath,
+  markdownCompanionDirectory,
+  moveFileWithCompanion,
+} from './document-companion.js';
+
+export { createVersionCompatibleContentContainer } from './version-compatible-container.js';
+export { createDataReferenceContainer } from './data-reference-container.js';
 
 export {
   createArtifactsContentContainer,
@@ -18,6 +29,7 @@ export {
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
+  supportsOutsideInMarkdownEditing,
   withOutsideInMetadata,
   withOutsideInMarkdownEditing,
 } from './outside-in.js';
@@ -43,3 +55,5 @@ export {
 } from './proofing.js';
 export type { ProofingPreferences } from './proofing.js';
 export { useProofingCapability } from './useProofingCapability.js';
+
+export { ironCalcEngineFactory } from './calculation.js';

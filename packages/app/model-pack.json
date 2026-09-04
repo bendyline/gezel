@@ -1,0 +1,59 @@
+{
+  "$comment": [
+    "The batteries-included model pack for the app-store builds.",
+    "",
+    "WHY THIS EXISTS. A store build cannot download executable code, but model",
+    "weights and knowledge catalogs are DATA and stay legal to ship or fetch.",
+    "Shipping them in the package is nonetheless the deliberate choice: the",
+    "store CDN carries the bandwidth (Apple and Microsoft both serve multi-GB",
+    "packages at no egress cost to us), a fresh install answers its first",
+    "prompt, speaks, and transcribes with nothing downloaded, and no first-run",
+    "trip to Hugging Face is required for the app to be useful.",
+    "",
+    "WHAT GOES IN. Enough for a complete, offline first boot on a low-end",
+    "machine — a small chat model, speech-to-text, and text-to-speech. Not the",
+    "best model available: the point is that the app works before the user has",
+    "chosen anything. Larger models stay a download the user opts into.",
+    "",
+    "SHA PINS ARE MANDATORY. Every entry is verified byte-for-byte before it is",
+    "staged, and an all-zero sha is a hard build error rather than a warning —",
+    "the same rule node-version.ts and pnpm-version.ts follow. A store package",
+    "is signed and reviewed; an unpinned blob inside one is not something that",
+    "can be walked back after the fact.",
+    "",
+    "DELTA-FRIENDLINESS. Keep `targetPath` stable across releases. Both stores",
+    "ship differential updates, and a weight file at a stable path with",
+    "unchanged bytes is one an app update does not re-ship. Bump `packVersion`",
+    "only when the CONTENTS change, independently of the app version."
+  ],
+  "packVersion": "0.1.0",
+  "entries": [
+    {
+      "id": "chat-gemma-e2b",
+      "kind": "chat-model",
+      "description": "Gemma E2B, GGUF quantized — the default on-device chat model for a first boot, sized for machines without a capable GPU.",
+      "url": "",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sizeBytes": 0,
+      "targetPath": "models/chat/gemma-e2b.gguf"
+    },
+    {
+      "id": "stt-whisper-base",
+      "kind": "speech-to-text",
+      "description": "whisper.cpp base model — backs the chat composer's Narrate action offline.",
+      "url": "",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sizeBytes": 0,
+      "targetPath": "models/stt/whisper-base.bin"
+    },
+    {
+      "id": "tts-kokoro",
+      "kind": "text-to-speech",
+      "description": "Kokoro voices — read-aloud without a network round trip.",
+      "url": "",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sizeBytes": 0,
+      "targetPath": "models/tts/kokoro.bin"
+    }
+  ]
+}

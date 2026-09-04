@@ -142,6 +142,7 @@ import {
   ProjectTabVisibilitySchema,
   ProjectTypeProvenanceSchema,
 } from './project.js';
+import { PromptDraftConfigSchema } from './prompt-draft.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
@@ -274,6 +275,26 @@ export const HealthResponseSchema = z.object({
    * service registration, so the only correct response is to say so.
    */
   childProcessSpawn: z.enum(['ok', 'denied']).optional(),
+  /**
+   * The HTTP contract generation this daemon speaks (`current`) and the
+   * oldest one it still serves (`floor`). See `GEZEL_API_GENERATION`.
+   *
+   * Answers a question `version` cannot: whether a client built separately
+   * from this daemon can safely use it. The store builds need that, since
+   * they connect to whatever service the user already installed and cannot
+   * replace it — their only alternative is running their own.
+   *
+   * Absence is itself a verdict, not silence: a daemon predating this field
+   * is older than any generation a store build knows, so a client reading
+   * `undefined` must treat it as incompatible rather than assume the best.
+   * Optional in the schema only so older clients keep parsing.
+   */
+  apiCompat: z
+    .object({
+      floor: z.number().int(),
+      current: z.number().int(),
+    })
+    .optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -2119,6 +2140,8 @@ export const GezelConfigSchema = z.object({
       enabled: z.boolean().optional(),
     })
     .optional(),
+  /** Retention for chat prompt drafts under `artifacts/prompts/`. */
+  promptDrafts: PromptDraftConfigSchema.optional(),
   /**
    * Opt-in live gilde content updates. Default OFF. When enabled, the
    * daemon checks registry.npmjs.org roughly daily for newer
@@ -2159,9 +2182,16 @@ export const GezelConfigSchema = z.object({
    */
   knowledge: z
     .object({
-      /** Check the signed registry for catalog updates (default off). */
+      /**
+       * Install newer versions of catalog-sourced knowledge automatically
+       * (default off). Newer versions come from the shipped gilde content;
+       * a per-catalog `autoUpdate` in the registry overrides this default.
+       */
       autoUpdate: z.boolean().optional(),
-      /** Override the signed Qualla registry URL (operators/tests). */
+      /**
+       * Signed publisher registry URL, the machine-shared broker's operator
+       * seam. The user daemon resolves updates from gilde and ignores this.
+       */
       registryUrl: z.string().optional(),
     })
     .optional(),
@@ -3349,6 +3379,12 @@ export const MessageGezelResponseSchema = z.object({
   sessionId: z.string(),
   toGezelId: z.string(),
   toGezelName: z.string(),
+  /**
+   * `parked` means the sender still owns its provider turn, so the recipient
+   * has not entered the provider queue yet. `dispatched` means the recipient
+   * send has been handed to that queue; completion remains asynchronous.
+   */
+  deliveryState: z.enum(['parked', 'dispatched']),
   /** True when an identical file handoff was already pending and was joined. */
   deduplicated: z.boolean().optional(),
 });
@@ -3934,6 +3970,17 @@ export const CopilotAvailabilitySchema = z.object({
   cliPath: z.string().optional(),
   /** True when a managed install exists but this build pins a different version. */
   updateAvailable: z.boolean(),
+  /**
+   * Whether this build may install the managed SDK at all.
+   *
+   * False in store builds, which cannot download executable code. It is a
+   * separate question from `available`: the `env` and `path` rungs still work
+   * there, so someone who installed the Copilot CLI themselves keeps full
+   * Copilot support — they simply are never offered an install button. Absent
+   * on daemons predating the field, which the UI reads as "installing is
+   * fine", matching how those builds behave.
+   */
+  canInstall: z.boolean().optional(),
 });
 export type CopilotAvailability = z.infer<typeof CopilotAvailabilitySchema>;
 
@@ -5073,6 +5120,16 @@ export const MapStreetSchema = z.object({
   tier: z.number().int().min(0).max(3),
   /** Folder whose interior this street runs through; null at the map root. */
   districtId: z.string().nullable(),
+  /** Estimated flow: the import degree of every parcel fronting the street
+   *  plus everything that leaves the folders it bounds. Server policy from
+   *  [service/filemap/traffic.ts]; absent on pre-traffic payloads. */
+  traffic: z.number().nonnegative().optional(),
+  /** Road grade 0..7, bucketed from `traffic` and capped by the settlement:
+   *  narrow dirt → narrow cobble → narrow paved → wide dirt → wide paved →
+   *  wide paved with sidewalks → broad paved with sidewalks → broad paved
+   *  with trolley and sidewalks. The renderer maps it to carriageway width,
+   *  surface, and street furniture 1:1 and never re-derives thresholds. */
+  grade: z.number().int().min(0).max(7).optional(),
 });
 export type MapStreet = z.infer<typeof MapStreetSchema>;
 

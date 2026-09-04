@@ -3,7 +3,7 @@ import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
-import { LinearDocView } from '@bendyline/squisq-react';
+import { DocPlayer, LinearDocView } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import {
@@ -180,6 +180,10 @@ function isMarkdown(path: string): boolean {
 
 function isHtml(path: string): boolean {
   return /\.html?$/i.test(path);
+}
+
+function isPresentation(path: string): boolean {
+  return /\.pptx$/i.test(path);
 }
 
 export interface ChatReferencesApi {
@@ -1590,6 +1594,7 @@ function ReferenceViewer({
               markdown={content}
               projectId={projectId}
               reportPath={resolvedKind === 'artifact' ? reference.path : undefined}
+              displayMode={isPresentation(reference.path) ? 'slideshow' : 'linear'}
             />
           ) : isHtml(reference.path) &&
             (resolvedKind === 'artifact' || resolvedKind === 'workspace') ? (
@@ -1749,6 +1754,7 @@ function RenderedMarkdownPreview({
   projectId,
   reportPath,
   articleId = 'ref-preview',
+  displayMode = 'linear',
 }: {
   markdown: string;
   projectId: string;
@@ -1756,6 +1762,8 @@ function RenderedMarkdownPreview({
   reportPath?: string;
   /** Keeps multiple compact Markdown documents from sharing generated ids. */
   articleId?: string;
+  /** Imported presentations navigate one slide at a time; other documents scroll. */
+  displayMode?: 'linear' | 'slideshow';
 }) {
   const doc = useMemo(() => {
     try {
@@ -1781,6 +1789,19 @@ function RenderedMarkdownPreview({
   // of the app chrome.
   const surface = effective === 'dark' ? GEZEL_DARK_SURFACE : GEZEL_LIGHT_SURFACE;
   if (!doc) return <pre className="chat-rail-viewer-raw">{markdown}</pre>;
+  if (displayMode === 'slideshow') {
+    return (
+      <div className="chat-rail-viewer-slideshow">
+        <DocPlayer
+          doc={doc}
+          displayMode="slideshow"
+          showControls
+          enableSwipe
+          globalKeyboardShortcuts={false}
+        />
+      </div>
+    );
+  }
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView

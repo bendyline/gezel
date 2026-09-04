@@ -426,6 +426,10 @@ function parseSniffLogLine(line: string): {
     return {
       atIso,
       filePath: bareTokens[bareTokens.length - 1] ?? '',
+      // A logger that omits `bytes=` lands here as 0, which reads in
+      // facts.json exactly like a scenario that wrote nothing. Every
+      // in-tree logger now emits the token; keep it that way rather than
+      // relying on this fallback to mean anything.
       bytes: checkPayload[1] ? Number(checkPayload[1]) : 0,
       score: Number(checkPayload[2]),
       scoreMax: Number(checkPayload[3]),

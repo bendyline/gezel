@@ -2524,51 +2524,57 @@ body.chat-rail-resizing webview {
   text-overflow: ellipsis;
 }
 
-/* Context-window status banner — sticky above the scroll area for
-   the active session. Two variants: 'warning' (75-90% full) is a
-   yellow caution; 'compacted' (system has summarized older turns)
-   is a calmer accent. Both stay visible until the user starts a
-   new session, since the underlying state persists across turns. */
-.chat-context-banner {
+/* Persisted, chronological context-maintenance marker. It replaces the
+   ordinary gezel bubble for a synthetic compaction summary, while the model
+   still receives the summary text as normal assistant history. */
+.msg-context-compaction {
+  width: min(44rem, calc(100% - 1rem));
+  margin: 0.65rem auto;
+  padding: 0.6rem 0.72rem;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 4%);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--accent));
+  border-radius: var(--radius-md, 6px);
+}
+.msg-context-compaction-summary {
   display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-  padding: 0.55rem 0.8rem;
-  border-radius: 6px;
-  margin: 0 0 0.5rem 0;
-  font-size: 0.85rem;
-  line-height: 1.35;
+  align-items: center;
+  gap: 0.58rem;
 }
-.chat-context-banner-icon {
-  flex-shrink: 0;
-  font-size: 0.95rem;
-  line-height: 1.35;
+.msg-context-compaction-mark {
+  width: 0.58rem;
+  height: 0.58rem;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 74%, var(--border));
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  transform: rotate(45deg);
 }
-.chat-context-banner-body {
-  flex: 1;
+.msg-context-compaction-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.22rem 0.45rem;
+  align-items: baseline;
   min-width: 0;
+  font-size: var(--text-xs, 0.78rem);
 }
-.chat-context-banner-warning {
-  color: #8a6310;
-  background: rgba(232, 200, 117, 0.18);
-  border: 1px solid rgba(176, 132, 30, 0.5);
+.msg-context-compaction-copy strong {
+  color: var(--text);
+  font-weight: 600;
 }
-[data-theme="dark"] .chat-context-banner-warning {
-  color: #f0d488;
-  background: rgba(232, 200, 117, 0.1);
-  border: 1px solid rgba(232, 200, 117, 0.35);
+.msg-context-compaction-details {
+  margin: 0.45rem 0 0 1.16rem;
+  font-size: var(--text-xs, 0.78rem);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .chat-context-banner-warning {
-    color: #f0d488;
-    background: rgba(232, 200, 117, 0.1);
-    border: 1px solid rgba(232, 200, 117, 0.35);
-  }
+.msg-context-compaction-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent);
 }
-.chat-context-banner-compacted {
-  color: var(--accent, #b0724c);
-  background: rgba(176, 114, 76, 0.08);
-  border: 1px solid rgba(176, 114, 76, 0.25);
+.msg-context-compaction-body {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--text);
 }
 
 .chat-timeline-viewport .chat-timeline {
@@ -2735,13 +2741,15 @@ body.chat-rail-resizing webview {
   border: 1px solid var(--border);
 }
 
-/* A short-lived tail below a prompt submitted from the composer attached to
-   this timeline. It gives the first response lines somewhere to appear instead
-   of wedging the new prompt directly against the composer. The element is
-   removed when the chat turn / terminal run settles. */
+/* A permanent working tail below the conversation. Live chat, indexing, and
+   terminal cards subtract their measured height from this 300px reserve, so
+   short-lived work can appear and retire without changing scrollHeight. Once
+   live work exceeds the reserve the timeline grows normally. */
 .timeline-response-runway {
-  flex: 0 0 clamp(4.5rem, 22vh, 10rem);
+  flex: 0 0 auto;
+  block-size: 300px;
   width: 100%;
+  overflow-anchor: none;
   pointer-events: none;
 }
 
@@ -2940,6 +2948,114 @@ button.timeline-session-divider::before {
 .timeline-session-divider-activity:hover {
   background: transparent;
   opacity: 0.85;
+}
+
+/* An indexing sweep updates one quiet ledger row while its chain of
+   short-lived per-file bubbles runs. Native details supplies keyboard and
+   screen-reader disclosure semantics; the list mounts only once opened. */
+.timeline-indexing-receipt {
+  width: 100%;
+  margin: 0.2rem 0;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.timeline-indexing-receipt > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.25rem 0.35rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 140ms ease-out, color 140ms ease-out;
+}
+
+.timeline-indexing-receipt > summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-indexing-receipt > summary::after {
+  content: "▸";
+  margin-left: auto;
+  font-size: var(--text-xs);
+  opacity: 0.7;
+  transition: transform 140ms ease-out;
+}
+
+.timeline-indexing-receipt[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.timeline-indexing-receipt > summary:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.timeline-indexing-receipt > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.timeline-indexing-receipt-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-indexing-receipt-label strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.timeline-indexing-file-list {
+  max-height: min(18rem, 45vh);
+  margin: 0.25rem 0 0.35rem 1.45rem;
+  padding: 0.35rem 0.5rem 0.35rem 1.25rem;
+  overflow: auto;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+
+.timeline-indexing-file-list li {
+  padding: 0.12rem 0;
+}
+
+.timeline-indexing-file-link,
+.timeline-indexing-file-path {
+  max-width: 100%;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.timeline-indexing-file-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+.timeline-indexing-file-link:hover {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  text-decoration-color: currentColor;
+}
+
+.timeline-indexing-file-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .timeline-session-divider-active {
@@ -4299,6 +4415,24 @@ button.timeline-session-divider-child::before {
   min-height: 20rem;
 }
 
+/* Every preview here brings its own frame — Monaco's gutter and status bar,
+   squisq's page padding, an iframe's chrome — so the sheet's 0.5rem plus the
+   body's own padding read as a band of parchment around a box that already
+   has an edge. Drop the padding and bleed back out over `.chat-rail-side`'s,
+   which the sheet clips to its radius. Only the top gap stays: that one
+   separates the preview from the header row above it. */
+.chat-rail-side .chat-rail-viewer-body {
+  padding: 0.4rem 0 0;
+  margin: 0 -0.5rem -0.5rem;
+  border-radius: 4px 4px 5px 5px;
+}
+
+/* The raw fallback is a bare <pre> — the one preview with no frame of its
+   own, so it keeps the gutter the others supply themselves. */
+.chat-rail-side .chat-rail-viewer-body > .chat-rail-viewer-raw {
+  padding: 0 0.4rem;
+}
+
 .chat-rail-audio-preview {
   min-height: 8rem;
   align-items: center;
@@ -4355,6 +4489,23 @@ button.timeline-session-divider-child::before {
   color: var(--text);
   max-width: 100%;
   overflow-wrap: break-word;
+}
+
+.chat-rail-viewer-slideshow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 20rem;
+  overflow: hidden;
+  background: #000;
+}
+
+.chat-rail-viewer-slideshow .doc-player {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 100%;
 }
 
 /* Squisq's LinearDocView wraps itself in `.squisq-linear` with a fixed

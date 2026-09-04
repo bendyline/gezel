@@ -188,6 +188,64 @@
   box-shadow: var(--focus-ring);
 }
 
+/* Described trays: a tray whose latched choice explains itself in a panel
+   directly beneath (`.gz-tray-description`). Without the connection the
+   description floats between the tray and whatever follows, reading as
+   attached to neither — "A posture for trusted work" never visibly belonged
+   to the Lockdown key. Two pieces make the ownership legible: the panel
+   leads with the latched mode's name in bold (the caller renders
+   `<strong>{label}</strong> — …`), and the latched key drops a short
+   color-matched stem through the tray's bottom edge into the panel, like a
+   pressed key plugging into its readout. The stem inherits the key's fill
+   and border color, so state-colored latches (danger-red Off, sealed-green
+   Super Lockdown, amber Unrestricted) carry their color down the
+   connection. The stem is a slot in the panel's own material — panel fill
+   with panel-border side walls — rising from the readout to meet the
+   latched key, so the panel visibly reaches up to the choice it explains
+   without repeating the key's loud fill. It must actually TOUCH both
+   ends, so the geometry is pinned here rather than inherited: the tray
+   goes block-level flex (inline-flex leaves line-box leading under the
+   tray that no calc can see) with fit-content width to keep the
+   shrink-wrap, and the tray→panel gap is fixed at 0.5rem (winning over
+   legacy per-surface tray margins). The stem starts just under the key's
+   own border and spans bottom padding (0.3rem) + tray border + 0.5rem
+   gap + panel border, plus a ~2px tuck into the panel so the seams it
+   crosses stay erased. */
+.gz-tray--described {
+  display: flex;
+  width: fit-content;
+  margin-bottom: 0.5rem;
+}
+.gz-tray--described .gz-key-active {
+  position: relative;
+}
+.gz-tray--described .gz-key-active::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 50%;
+  width: 12px;
+  height: calc(0.8rem + 5px);
+  transform: translateX(-50%);
+  background: var(--tray-bg);
+  border-color: var(--tray-border);
+  border-style: solid;
+  border-width: 0 1px;
+  z-index: 1;
+}
+.gz-tray-description {
+  padding: 0.6rem 0.9rem;
+  background: var(--tray-bg);
+  border: 1px solid var(--tray-border);
+  border-radius: var(--radius-lg);
+}
+/* The mode name leading the panel takes full text ink so it reads as the
+   heading of the readout while the explanation stays muted around it. */
+.gz-tray-description strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* --- Settings → About → Storage on this device ------------------------
    A plain two-column ledger: what the category is on the left, how much
    room it takes on the right. Sizes are the reason anyone opens this, so

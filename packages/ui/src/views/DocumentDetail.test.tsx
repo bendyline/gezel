@@ -14,6 +14,10 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     toolbarSlotAfterActions,
     toolbarSlotRight,
     statusBarSlotRight,
+    workspaceContainer,
+    mediaProvider,
+    versionBasename,
+    calcEngineFactory,
   }: {
     initialMarkdown: string;
     fileName: string;
@@ -21,8 +25,19 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     toolbarSlotAfterActions?: React.ReactNode;
     toolbarSlotRight?: React.ReactNode;
     statusBarSlotRight?: React.ReactNode;
+    workspaceContainer?: { root?: string } | null;
+    mediaProvider?: { referencePrefix?: string } | null;
+    versionBasename?: string;
+    calcEngineFactory?: unknown;
   }) => (
-    <div data-testid="editor-shell" data-file={fileName}>
+    <div
+      data-testid="editor-shell"
+      data-file={fileName}
+      data-container-root={workspaceContainer?.root}
+      data-media-prefix={mediaProvider?.referencePrefix}
+      data-version-basename={versionBasename}
+      data-calc-engine={typeof calcEngineFactory === 'function'}
+    >
       <div data-testid="editor-initial">{initialMarkdown}</div>
       <button type="button" data-testid="editor-emit" onClick={() => onChange('edited content')}>
         emit-change
@@ -55,13 +70,26 @@ vi.mock('../components/DocumentNarration.js', () => ({
   DocumentNarration: () => <span data-testid="narration-toolbar">narrate</span>,
 }));
 vi.mock('../components/SquisqIntegration/index.js', () => ({
-  createDocumentsContentContainer: () => ({}),
+  createDocumentsContentContainer: (options: { root: string }) => ({ root: options.root }),
+  createDocumentMediaProvider: (_container: unknown, referencePrefix: string) => ({
+    referencePrefix,
+    resolveUrl: async (path: string) => path,
+    listMedia: async () => [],
+    addMedia: async (name: string) => name,
+    removeMedia: async () => {},
+    dispose: () => {},
+  }),
+  createVersionCompatibleContentContainer: (container: unknown) => container,
   createArtifactsContentContainer: () => ({}),
   createDocumentLinkProvider: () => async () => [],
   deriveContainerScope: (p: string) => ({
-    root: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
+    root: `${p.replace(/\.[^.]+$/, '')}_files`,
+    parentDirectory: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
+    companionName: `${(p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p).replace(/\.[^.]+$/, '')}_files`,
     primaryDocumentFilename: p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p,
   }),
+  documentVersionBasename: (p: string) =>
+    (p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p).replace(/\.[^.]+$/, ''),
   resolveOutsideInLayout: (path: string) =>
     path.endsWith('.docx') ? { targetPath: path, format: 'docx' } : null,
   gezelProofingProvider: () => ({ kind: 'proofing-provider' }),
@@ -122,6 +150,7 @@ describe('DocumentDetail', () => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
     });
     expect(screen.getByTestId('editor-shell').getAttribute('data-file')).toBe('mission.md');
+    expect(screen.getByTestId('editor-shell')).toHaveAttribute('data-calc-engine', 'true');
     expect(screen.getByTestId('editor-initial')).toHaveTextContent('# Mission');
     expect(document.querySelector('.document-detail-head')).not.toBeInTheDocument();
   });
@@ -265,5 +294,14 @@ describe('DocumentDetail', () => {
     expect(screen.getByTestId('ai-toolbar')).toBeInTheDocument();
     expect(screen.getByTestId('narration-toolbar')).toBeInTheDocument();
     expect(screen.getByTestId('export-toolbar')).toBeInTheDocument();
+  });
+
+  it('scopes each text document editor to its own companion directory', async () => {
+    render(<DocumentDetail path="notes/diary.md" />);
+    const editor = await screen.findByTestId('editor-shell');
+
+    expect(editor).toHaveAttribute('data-container-root', 'notes/diary_files');
+    expect(editor).toHaveAttribute('data-media-prefix', 'diary_files');
+    expect(editor).toHaveAttribute('data-version-basename', 'diary');
   });
 });

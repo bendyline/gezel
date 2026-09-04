@@ -13,6 +13,7 @@
 
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { ContentContainer, ContentEntry } from '@bendyline/squisq/storage';
+import { isContentNotFound } from './container-errors.js';
 
 const EXTENSION_MIME: Record<string, string> = {
   md: 'text/markdown',
@@ -81,6 +82,8 @@ export interface ArtifactsContentContainerOptions {
   client: GezelClient;
   /** Primary-doc filename override — basename of the file the user opened. */
   primaryDocumentFilename?: string;
+  /** Prefix exposed in Markdown while storage remains companion-relative. */
+  referencePrefix?: string;
   /** Storage tree to wrap. Defaults to the project artifact drawer. */
   source?: 'artifacts' | 'workspace';
 }
@@ -88,12 +91,27 @@ export interface ArtifactsContentContainerOptions {
 export function createProjectContentContainer(
   options: ArtifactsContentContainerOptions,
 ): ContentContainer {
-  const { projectId, root, client, primaryDocumentFilename, source = 'artifacts' } = options;
+  const {
+    projectId,
+    root,
+    client,
+    primaryDocumentFilename,
+    referencePrefix,
+    source = 'artifacts',
+  } = options;
+
+  const relativePath = (path: string): string => {
+    const normalized = path.replace(/^\.\//, '').replace(/^\/+/, '');
+    if (!referencePrefix) return normalized;
+    const prefix = referencePrefix.replace(/^\/+|\/+$/g, '');
+    return normalized.startsWith(`${prefix}/`) ? normalized.slice(prefix.length + 1) : normalized;
+  };
 
   return {
     async readFile(path: string): Promise<ArrayBuffer | null> {
-      const full = joinRoot(root, path);
-      const mime = guessMime(path);
+      const relative = relativePath(path);
+      const full = joinRoot(root, relative);
+      const mime = guessMime(relative);
       try {
         if (isTextMime(mime)) {
           const res =
@@ -107,8 +125,9 @@ export function createProjectContentContainer(
             ? await client.fetchProjectWorkspaceBlob(projectId, full)
             : await client.fetchProjectArtifactBlob(projectId, full);
         return await blob.arrayBuffer();
-      } catch {
-        return null;
+      } catch (error) {
+        if (isContentNotFound(error)) return null;
+        throw error;
       }
     },
 
@@ -117,8 +136,9 @@ export function createProjectContentContainer(
       data: ArrayBuffer | Uint8Array,
       mimeType?: string,
     ): Promise<void> {
-      const full = joinRoot(root, path);
-      const mime = mimeType ?? guessMime(path);
+      const relative = relativePath(path);
+      const full = joinRoot(root, relative);
+      const mime = mimeType ?? guessMime(relative);
       if (isTextMime(mime)) {
         const text = new TextDecoder().decode(data);
         if (source === 'workspace') {
@@ -136,20 +156,21 @@ export function createProjectContentContainer(
     },
 
     async removeFile(path: string): Promise<void> {
-      const full = joinRoot(root, path);
+      const full = joinRoot(root, relativePath(path));
       try {
         if (source === 'workspace') {
           await client.rmProjectWorkspacePath(projectId, full, { recursive: true });
         } else {
           await client.deleteProjectArtifact(projectId, full);
         }
-      } catch {
-        // no-op
+      } catch (error) {
+        if (!isContentNotFound(error)) throw error;
       }
     },
 
     async listFiles(prefix?: string): Promise<ContentEntry[]> {
-      const subpath = prefix ? joinRoot(root, prefix) : root || undefined;
+      const relativePrefix = prefix ? relativePath(prefix) : '';
+      const subpath = relativePrefix ? joinRoot(root, relativePrefix) : root || undefined;
       const res =
         source === 'workspace'
           ? await client.listProjectWorkspace(projectId, subpath, true)

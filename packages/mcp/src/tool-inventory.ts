@@ -19,6 +19,8 @@
  * contract. Registration guards them against colliding with these names.
  */
 
+import { resolveDistributionProfile } from '@bendyline/gezel';
+
 export const ALWAYS_REGISTERED_TOOLS = [
   // Memory
   'search_memory',
@@ -279,11 +281,13 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     modelFacing: false,
   },
   // The large surgical-step schema is useful in the explicit craftbook
-  // editor, but wasteful on every ordinary coordinator turn. `*` means any
-  // non-empty GEZEL_CRAFTBOOK_ID enables it.
+  // editor and in task-scoped plan authoring, but wasteful on every ordinary
+  // coordinator turn. The chat manager enables this MCP-side registration
+  // for those session types; its exact per-turn allowlist still decides
+  // whether the schema reaches the model.
   craftbook_update_step: {
-    envVar: 'GEZEL_CRAFTBOOK_ID',
-    envValue: '*',
+    envVar: 'GEZEL_CRAFTBOOK_STEP_EDITING',
+    envValue: '1',
     modelFacing: true,
   },
   request_tool_permission: {
@@ -317,6 +321,20 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     modelFacing: true,
   },
 } as const;
+
+/**
+ * Tools this build's distribution channel forbids, withheld from `tools/list`
+ * exactly like the platform-unavailable ones.
+ *
+ * A store build may not fetch executable code, so `npm_install` could only
+ * ever decline. Withholding beats registering-and-refusing: the model pays no
+ * schema cost for it and cannot spend turns reaching for the one capability
+ * the build lacks. Tools that operate on packages already present — `run_npx`,
+ * `list_packages`, `run_package_script` — are untouched.
+ */
+export function distributionWithheldTools(env: NodeJS.ProcessEnv = process.env): readonly string[] {
+  return resolveDistributionProfile(env).allowNpmInstalls ? [] : ['npm_install'];
+}
 
 export type AlwaysRegisteredToolName = (typeof ALWAYS_REGISTERED_TOOLS)[number];
 export type ConditionallyRegisteredToolName = keyof typeof CONDITIONALLY_REGISTERED_TOOLS;

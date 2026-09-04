@@ -3,15 +3,16 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -306,7 +307,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       if (found.task.status !== 'complete') {
         craftbookFailures.push(
-          `task ${found.task.ref} (from craftbook "${book.craftbook.id}") has status "${found.task.status}" — drive it to completion`,
+          unfinishedTaskFailure({
+            ref: found.task.ref,
+            status: found.task.status,
+            source: `from craftbook "${book.craftbook.id}"`,
+          }),
         );
       }
     }
@@ -378,15 +383,14 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(
-        q1Report,
-        q1Clean,
-        q2Report,
-        q2Clean,
-        book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
-      ) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(
+      q1Report,
+      q1Clean,
+      q2Report,
+      q2Clean,
+      book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
+    ),
+    deliverableMissing: noDeliverableWritten(q1Report, q1Clean, q2Report, q2Clean),
     repairPath: 'craftbook: supplier intake recipe',
     repairDirective: [
       'CRAFTBOOK_GENERALIZE_REPAIR: this eval grades the craftbook catalog, the task graph, and',
@@ -412,7 +416,7 @@ export const exportGeneralizeScenario: EvalScenario = {
   evidenceTexts: [EXPORT_GENERALIZE_KICKOFF_MESSAGE, EXPORT_GENERALIZE_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 40 * 60_000,
+  timeoutMs: 80 * 60_000,
   progressTimeoutMs: 12 * 60_000,
   setup,
   successCheck,

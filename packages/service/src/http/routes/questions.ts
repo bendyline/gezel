@@ -69,9 +69,10 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       createdAt: nowIso(),
     };
     await ctx.store.writeQuestion(question);
-    // Stamp pendingQuestionId onto the most recent assistant message so
-    // the chat UI can attach the card to the bubble that asked. Best
-    // effort — the panel + badge surfaces still work without the
+    // Correlate the question with its chat bubble. During an active model
+    // turn ChatManager holds the id until that turn's assistant message is
+    // committed; outside a turn it falls back to the most recent assistant.
+    // Best effort — the panel + badge surfaces still work without the
     // in-chat correlation.
     await ctx.chat
       .stampPendingQuestion(question.gezelId, question.sessionId, question.id)

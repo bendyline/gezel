@@ -3,7 +3,7 @@
 Status: Accepted architecture (2026-08). The container format, index schema,
 embedding/chunking profiles, and scale design (sharding, routing, vector
 encoding, latency budgets) are **frozen separately** in
-[gezk-format-v1.md](gezk-format-v1.md), which supersedes this document's
+[gezk-format.md](gezk-format.md) and the public specification in bendyline/gezk, which supersede this document's
 embedding/schema sketches where they differ — notably: the extension is
 `.gezk` (sibling of `.gezmodel`); the public profile is
 `gezel-multilingual-e5-small@1` with a `bit384+int8` two-stage encoding (not
@@ -120,7 +120,8 @@ Knowledge catalogs are:
 - buildable offline with the Gezel CLI, using the same compiler Qualla uses for
   published Wikipedia catalogs.
 
-Signed, public, redownloadable Qualla catalogs default to the **shared machine
+Public, redownloadable catalogs pinned by the shipped gilde content (the
+Bendyline releases on Hugging Face) default to the **shared machine
 asset store**, alongside the existing shared model-asset concept. Locally
 compiled, private, third-party, or unsigned catalogs default to the **per-user
 knowledge store**. Activation, project selection, routing, browsing, search, and
@@ -128,8 +129,9 @@ RAG always remain private to the user's product daemon.
 
 This requires one deliberate service-boundary extension: the machine engine broker
 also becomes the narrow installer-owned publisher of trusted immutable knowledge
-bytes. It may resolve an allowlisted signed registry coordinate, download, verify,
-stage, publish, inventory, and report progress. It must never receive a search
+bytes. It may resolve a trusted coordinate (through its own gilde pin, an operator
+drop directory, or an optional signed registry), download, verify, stage,
+publish, inventory, and stream progress. It must never receive a search
 query, prompt, project/session/gezel id, enabled-catalog list, or arbitrary user
 path, and it must not expose knowledge search APIs. Before implementation, this
 boundary and its credential scope must be recorded in `docs/service-boundaries.md`
@@ -166,7 +168,7 @@ Markdown folder                     Wikipedia + Wikidata dumps
                          |
              +-----------+-------------+
              |                         |
-       local import             Qualla CDN registry
+       local import          Hugging Face (gilde-pinned)
              |                         |
              v                         v
      per-user catalog store      machine asset broker
@@ -189,184 +191,45 @@ Markdown folder                     Wikipedia + Wikidata dumps
 
 ## Container format: `.gezk`
 
-`.gezk` means **Gezel Knowledge**. It is a renamed ZIP so normal archival tools can
-inspect it. Format version 1 uses this layout:
+`.gezk` is an **open format** specified in
+[bendyline/gezk](https://github.com/bendyline/gezk) (version 0.5, preliminary
+until 1.0); [gezk-format.md](gezk-format.md) maps it onto this repository and
+[ADR 0012](decisions/0012-gezk-open-format.md) records why it was opened.
+What this document needs from it:
 
-```text
-physics-en-2026.08.gezk
-├── manifest.json
-├── README.md                       human-facing scope and provenance
-├── LICENSES/
-│   ├── catalog.txt
-│   └── source-notices.json
-├── index/
-│   ├── router.db                   catalog/topic routing + document directory
-│   └── shards/
-│       ├── 000.db                  chunks, FTS5, and sqlite-vec vectors
-│       └── 001.db
-└── sources/                        optional for small, author-built catalogs
-    └── ... original Markdown tree
-```
+- A catalog is a ZIP whose first entry is the stored `mimetype` magic
+  (`application/vnd.gezk+zip`), followed by `manifest.json`, `README.md`,
+  `LICENSES/catalog.txt`, `index/router.db` (topics, document directory,
+  brotli bodies, routing centroids, document FTS) and, for large catalogs,
+  `index/shards/NNN.db` (chunks, chunk FTS, sign-bit and int8 vectors in
+  plain BLOB tables). Every entry is stored uncompressed. Nothing beyond stock
+  SQLite with FTS5 reads it — sqlite-vec is not part of the format.
+- The manifest (`kind: gezk-catalog`, `formatVersion: "0.5"`,
+  `indexSchemaVersion: 2`) carries identity, publisher, license (with the
+  notice path), the full embedding and chunking profiles, the shipped table of
+  contents, shard statistics, every file's SHA-256, and an optional Ed25519
+  signature over its RFC 8785 canonical form. The archive's own SHA-256 lives
+  wherever the archive is named (the gilde entry, a registry row).
+- Vectors use the two-stage `bit+int8` encoding: 384 sign bits for a hamming
+  pre-filter, int8 for the cosine rerank, with the rounding rule pinned by the
+  conformance kit. The reader keeps a shard's sign-bit rows in memory (9.6 MB
+  per 200,000 chunks) and scans them; no index structure is part of the format.
+- Embedding profiles are self-describing (Hugging Face repo + revision, the
+  exact ONNX graph and tokenizer file with their sha256 digests, pooling,
+  normalization, instructions, encoding). Published profiles:
+  `multilingual-e5-small@1` (public catalogs) and `bge-small-en-v1.5@1`
+  (local builds), both pinned to the full-precision `onnx/model.onnx`. A
+  reader never mixes vectors across profile ids; matching only a dimension
+  is unsafe, and gezel's embedders refuse to serve a profile whose fetched
+  files do not hash to its pins (see [gezk-format.md](gezk-format.md)).
+- References are publisher-qualified: `knowledge://<publisherId>/<catalogId>/<documentId>[#chunk=…]`.
+  Within one install a catalog id still maps to one publisher (the user
+  registry refuses a second), so product routes keep addressing catalogs by id.
 
-For a small catalog, `index/router.db` may also hold all chunks and vectors and
-`index/shards/` may be absent. The manifest declares the actual files; readers
-must not infer a layout from catalog size.
-
-### Content representation
-
-Do **not** create one file per chunk. That becomes millions of tiny files for
-Wikipedia, performs poorly on Windows, makes extraction slow, and duplicates text
-already required by FTS. The canonical runtime representation is:
-
-- normalized document metadata and compressed Markdown bodies in `router.db`;
-- bounded retrieval chunks in the shard databases;
-- FTS rows and vector rows adjacent to those chunks; and
-- optional original `.md` sources only when preserving a small author's source
-  tree is useful.
-
-JSONL is the compiler's streaming interchange format, not the installed query
-format. Qualla may spool normalized `CatalogDocument` records as NDJSON while a
-build runs, but those spools do not need to ship in the `.gezk`.
-
-This gives the browser a full Markdown document without reconstructing overlapping
-chunks, keeps search random-access, and keeps the installed catalog to a small
-number of immutable files.
-
-### Manifest contract
-
-The core package owns a `KnowledgeCatalogManifestSchema`. A representative
-manifest is:
-
-```jsonc
-{
-  "kind": "gezel-knowledge-catalog",
-  "formatVersion": 1,
-  "indexSchemaVersion": 1,
-  "id": "physics-en",
-  "version": "2026.08.0",
-  "name": "Physics",
-  "description": "Reference material about physics and astronomy.",
-  "language": "en",
-  "publisher": {
-    "id": "qualla",
-    "name": "Qualla",
-    "url": "https://qualla.com"
-  },
-  "createdAt": "2026-08-19T00:00:00.000Z",
-  "sourceSnapshot": {
-    "name": "Wikipedia",
-    "date": "2026-08-01",
-    "taxonomyVersion": "1"
-  },
-  "license": {
-    "name": "<source license>",
-    "noticePath": "LICENSES/catalog.txt",
-    "attributionRequired": true
-  },
-  "embedding": {
-    "profile": "gezel-minilm-l6-v2@1",
-    "dimensions": 384,
-    "distance": "cosine",
-    "normalized": true,
-    "vectorEncoding": "float32",
-    "sqliteVecVersion": "0.1"
-  },
-  "chunking": {
-    "profile": "gezel-markdown-chunks@1",
-    "targetTokens": 420,
-    "overlapTokens": 64
-  },
-  "topics": [
-    { "id": "mechanics", "name": "Mechanics" },
-    { "id": "astronomy", "name": "Astronomy" }
-  ],
-  "counts": {
-    "documents": 120000,
-    "chunks": 640000,
-    "shards": 8
-  },
-  "files": [
-    {
-      "path": "index/router.db",
-      "sizeBytes": 123,
-      "sha256": "<64 lowercase hex characters>"
-    }
-  ],
-  "compatibility": {
-    "minimumGezelVersion": "<version>",
-    "maximumIndexSchemaVersion": 1
-  },
-  "smokeQueries": [
-    { "query": "Newton's laws of motion", "expectedDocumentIds": ["..."] }
-  ],
-  "signature": {
-    "algorithm": "ed25519",
-    "keyId": "qualla-knowledge-1",
-    "value": "<base64 signature over the canonical unsigned manifest>"
-  }
-}
-```
-
-Every document also carries stable provenance: document id, title, source URL,
-source revision, source timestamp, topic path, language, and attribution data.
-Catalog-level license metadata is not enough when a catalog combines sources.
-
-The CDN registry records the archive's byte length, SHA-256, URL, and ETag. That
-archive hash cannot sign itself from inside the archive, so it belongs in the
-separately signed registry record. `manifest.files` protects every extracted
-payload.
-
-### Read-only index schema
-
-The schema is deliberately smaller than the project index:
-
-```sql
-meta(key PRIMARY KEY, value)
-documents(
-  id PRIMARY KEY, title, slug, summary, language, topic_id,
-  source_url, source_revision, source_updated_at,
-  attribution_json, body_codec, body_blob
-)
-topics(id PRIMARY KEY, parent_id, name, description, sort_key, document_count)
-aliases(alias, document_id)
-shards(id PRIMARY KEY, path, topic_ids_json, chunk_count)
-route_centroids(id PRIMARY KEY, shard_id, topic_id, embedding)
-fts_documents(title, summary, aliases, document_id UNINDEXED)
-```
-
-Each shard contains:
-
-```sql
-chunks(
-  id INTEGER PRIMARY KEY, document_id, ordinal, heading_path,
-  content_hash, token_count, text
-)
-fts_chunks(title, heading_path, body, chunk_id UNINDEXED, document_id UNINDEXED)
-vec_chunks(embedding float[384])
-```
-
-The reader opens databases read-only with SQLite immutable mode, loads the
-compatible sqlite-vec extension, checks `formatVersion`, schema version, and
-embedding profile, and never runs migrations. An incompatible catalog stays
-installed but disabled with an actionable reason; Gezel does not rewrite a
-publisher's signed artifact.
-
-### Embedding compatibility
-
-The embedding profile includes model identity, revision/digest, tokenizer,
-pooling, normalization, dimension, and vector encoding. Matching only the
-dimension is unsafe: two 384-dimensional models do not share a vector space.
-
-Version 1 should standardize public catalogs on one profile matching Gezel's
-shipped MiniLM query pipeline. Search embeds a query once per distinct active
-profile and reuses that vector across every catalog and shard with that profile.
-Project indexes using a developer override may require a separate query vector.
-
-Float vectors compress poorly and exact sqlite-vec scans do not scale to an entire
-Wikipedia dump in one table. Before public production, benchmark a representative
-100,000-article build and decide whether a later profile uses fewer dimensions or
-a validated quantized encoding. Do not change an existing profile in place;
-publish a new profile id and catalog version.
+Readers open every database read-only and immutable, check the
+`application_id`/`user_version` stamps and the manifest's format version,
+and never migrate: an incompatible catalog stays installed but disabled with
+an actionable reason.
 
 ## Installation and storage lifecycle
 
@@ -431,32 +294,34 @@ pointers; filesystem symlinks are not required on Windows.
 
 ### Placement policy
 
-- A catalog selected from the signed Qualla registry installs machine-wide by
-  default. It is public, immutable, content-addressed, and recoverable from the
-  CDN, so storing a second copy for every account has no privacy benefit.
+- A catalog installed from the gilde catalog (a Bendyline release on Hugging
+  Face) installs machine-wide by default when a machine engine is adopted. It is
+  public, immutable, content-addressed, and recoverable from the Hub, so storing
+  a second copy for every account has no privacy benefit.
 - A locally built/imported catalog, unsigned catalog, arbitrary-URL download,
   private publisher catalog, or catalog with a user credential installs only in
   `~/.gezel/knowledge/`. Untrusted or private bytes are never made readable to
   every local account merely to save disk space.
-- The CLI and advanced UI may let a user force a Qualla catalog into the private
-  tier. They must not offer a generic "make shared" switch for local or
+- The CLI and advanced UI let a user force a catalog install into the private
+  tier (`placement: user`; `gezel knowledge install <id> --private`). They must not offer a generic "make shared" switch for local or
   third-party archives. A future trusted-publisher program can widen the shared
   allowlist deliberately.
 - In development, portable installs, or a degraded packaged install where no
-  writable machine asset service is available, a Qualla install falls back to the
-  user tier and records that actual scope. Search remains functional. A later
+  writable machine asset service is available, a catalog install falls back to
+  the user tier and records that actual scope. Search remains functional. A later
   explicit `Move to shared location` flow may verify and promote it.
 - In remote product mode, "machine" means the shared asset root on the daemon
   host, not the computer displaying the Electron UI.
 
 Installation sequence:
 
-1. Resolve a signed Qualla registry record, explicit URL, or local file and apply
-   the placement policy before any download.
-2. For a shared install, the user daemon sends only an allowlisted publisher
-   coordinate and expected digest to the loopback machine asset surface. The
-   broker independently resolves the signed registry entry. Arbitrary URLs and
-   local paths are rejected by that surface.
+1. Resolve a gilde catalog entry, explicit URL, or local file and apply the
+   placement policy before any download.
+2. For a shared install, the user daemon sends only the trusted coordinate
+   (publisher, id, version, expected digest) to the loopback machine asset
+   surface and follows its progress stream. The broker independently resolves
+   the bytes through its own gilde pin (or a drop directory / optional signed
+   registry). Arbitrary URLs and local paths are rejected by that surface.
 3. Preflight free space for both the archive and expanded size in the selected
    tier.
 4. Stream to a `.partial` file with cancellation, ETag, HTTP Range resume, and a
@@ -509,7 +374,7 @@ not to the broker's runtime credentials or private service state.
 
 ### Ownership, cleanup, and backups
 
-- Qualla/CDN installs are redownloadable machine assets. Each user's backup
+- Catalog (Hugging Face) installs are redownloadable machine assets. Each user's backup
   records the exact id/version/digest reference, enabled state, and project
   selections, not the shared bytes.
 - A locally built or imported catalog may be the user's only copy. It is user
@@ -534,8 +399,9 @@ not to the broker's runtime credentials or private service state.
 
 Installation and use are separate concepts.
 
-- `GezelConfig.knowledge` holds user-global defaults such as exact enabled catalog
-  references, auto-update preference, and the Qualla registry URL.
+- `GezelConfig.knowledge` holds user-global defaults such as the auto-update
+  preference; `registryUrl` is the machine broker's optional signed-registry
+  seam and is ignored by the user daemon.
 - A project inherits the global enabled set by default.
 - `project.json` may override with `knowledgeCatalogs: { mode: "inherit" |
   "selected" | "off", refs?:
@@ -645,10 +511,15 @@ Suggested first-party routes:
 | Route | Purpose |
 | --- | --- |
 | `GET /api/knowledge/catalogs` | This user's catalog refs, storage scope, versions, health, size, enabled state |
-| `GET /api/knowledge/available` | Signed Qualla registry, cached/offline-safe |
-| `GET /api/knowledge/updates` | Installed catalogs with strictly newer versions in the signed registry (shipped; requires `config.knowledge.registryUrl` + a verifying trust anchor, honors `allowAppNetwork`) |
-| `POST /api/knowledge/install` | Add/install for this user; trusted registry ids prefer shared storage |
-| `GET /api/knowledge/jobs/:id` | Progress, phase, bytes, error, cancellation state |
+| `GET /api/knowledge/available` | Every gilde `knowledge-catalog` entry joined with this user's registry, the machine-shared inventory, live installs and partial downloads; offline-safe (gilde is local) |
+| `GET /api/knowledge/updates` | Installed catalogs with a strictly newer version in the shipped gilde content (`source: 'gilde'`; no network) |
+| `POST /api/knowledge/install` | `{ source }` (file, URL, or a gilde `catalog` id) → `{ jobId, alreadyRunning }`; URL and catalog sources 403 `network-blocked` when the security policy turns off app network |
+| `POST /api/knowledge/catalogs/:id/install?version=&placement=` | Install a gilde entry and stream its events as SSE; the job id is the catalog id, so a second request attaches to the running install |
+| `DELETE /api/knowledge/catalogs/:id/install` | Cancel a running catalog install (disconnecting never cancels) |
+| `GET /api/knowledge/active-installs` | Every running install with its latest progress (the polled twin of the SSE) |
+| `GET /api/knowledge/incomplete` / `DELETE /api/knowledge/incomplete/:key` | Partial downloads no job is writing, resumable when the key still matches a gilde pin |
+| `GET /api/knowledge/jobs/:id` | Job snapshot: started, finished, error, latest + terminal events |
+| `GET /api/knowledge/jobs/:id/events` | SSE event stream for any job |
 | `DELETE /api/knowledge/jobs/:id` | Cancel download/install |
 | `PATCH /api/knowledge/catalogs/:id` | Enable, disable, or change auto-update |
 | `DELETE /api/knowledge/catalogs/:id` | Remove this user's ref; reclaim only unreferenced private bytes |
@@ -695,13 +566,15 @@ gezel knowledge init <folder>
 gezel knowledge build <folder> --out <catalog.gezk> [--install]
 gezel knowledge validate <catalog.gezk> [--deep]
 gezel knowledge inspect <catalog.gezk>
-gezel knowledge install <catalog.gezk|url|registry-id> [--sha256 <digest>] [--user]
+gezel knowledge available
+gezel knowledge install <catalog.gezk|url|catalog-id> [--sha256 <digest>] [--version <v>] [--private]
+gezel knowledge export-parquet <catalog.gezk> [--out <dir>]
 gezel knowledge list [--scope user|machine|all]
 gezel knowledge search <query> [--catalog <id>]
 gezel knowledge remove <id>
 ```
 
-A signed Qualla `registry-id` prefers shared machine storage; `--user` forces a
+A gilde `catalog-id` prefers shared machine storage; `--private` forces a
 private copy. Local files and arbitrary URLs are always private even if the caller
 requests otherwise. `build --install` also installs privately because a newly
 authored catalog is not yet a trusted public release. `remove` unregisters the
@@ -743,8 +616,9 @@ Knowledge is a first-level Settings section rather than an AI engine. It shows:
 - **Installed for you**: enabled state, version, source snapshot, size, document
   count, language, license, health, update, Remove, and a `Shared on this device`
   or `Only for you` badge;
-- **Available from Qualla**: domain cards with description, topics, download and
-  expanded sizes, publisher, snapshot date, and Download. A catalog already in the
+- **Download a catalog**: the gilde entries as cards with description, topics,
+  download and expanded sizes, publisher, release date, license, the Hugging
+  Face dataset link, and Download. A catalog already in the
   shared store says `On this device` and can be added without downloading;
 - **Import catalog**: choose a local `.gezk`, review identity/provenance/signature,
   and confirm; and
@@ -882,33 +756,32 @@ profile, rejected articles, and timing. Embedding batches need bounded concurren
 and a persistent content-hash cache so an unchanged article is not re-embedded
 every snapshot.
 
-### CDN contract
+### Distribution contract (Hugging Face)
 
-Suggested public layout:
+Catalogs are published as Hugging Face dataset repositories under the
+`Bendyline` org, one per catalog, with commit-pinned download URLs:
 
 ```text
-https://qualla.com/cdn/gezel/knowledge/v1/index.json
-https://qualla.com/cdn/gezel/knowledge/v1/index.json.sig
-https://qualla.com/cdn/gezel/knowledge/v1/<id>/<version>/<sha256>.gezk
+https://huggingface.co/datasets/Bendyline/<catalogId>/resolve/<commit-sha>/releases/<version>/<catalogId>-<version>.gezk
 ```
 
-Immutable archives get long-lived immutable cache headers. The signed registry
-gets a short TTL/ETag and is uploaded only after every referenced archive is
-present and independently downloadable. Never reuse an archive URL for new bytes.
-Extend Qualla's Azure sync scripts with a dedicated tree (shipped as `_k/`),
-catalog-specific shrink guards, MIME type, and cache policy; do not mix it into
-the multi-million-file media sync.
+A commit sha never changes bytes, so "never reuse an archive URL for new
+bytes" holds without any discipline on the branch. Each repo also carries a
+Parquet companion of the same documents, chunks and embeddings for tools that
+would rather scan tables than open SQLite. The product's trust root is the
+gilde `knowledge-catalog` entry — `sha256`, `archiveBytes` and the pinned
+`{ repo, revision, path }` shipped inside the exact-pinned `@bendyline/gilde`
+package — exactly as chat models are trusted. The Ed25519-signed registry
+(`gezk-registry`) remains supported as an optional artifact for third-party
+publishers; `BUILTIN_KNOWLEDGE_TRUST_ANCHORS` stays empty until one ships.
+The publisher id in manifests and citations is `bendyline`.
 
-Qualla signs the registry and catalog manifests with an offline-controlled Ed25519
-key. Gezel ships only public trust anchors and supports key rotation via
-overlapping key ids in an app release. Community/local catalogs can be unsigned,
-but the import review says so clearly and records their origin.
-
-Source licensing, attribution, redistribution, and notice generation are a release
-gate. Preserve each article's stable source URL and revision metadata, ship
-required notices, expose attribution in the browser and result contract, and
-obtain legal review before the first public Wikipedia catalog. Do not infer
-license obligations from this architecture document.
+Source licensing, attribution, redistribution, and notice generation are a
+release gate. Preserve each article's stable source URL and revision
+metadata, ship required notices (`README.md` and `LICENSES/catalog.txt` are
+required by the format), expose attribution in the browser and result
+contract, and obtain legal review before the first public Wikipedia catalog.
+Do not infer license obligations from this architecture document.
 
 ## Performance and quality gates
 

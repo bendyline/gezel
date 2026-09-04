@@ -59,7 +59,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isNativeDataFile } from './native-file-manifest-lib.mjs';
 import { detectPlatform, platformVariants } from './native-payload.mjs';
 
@@ -75,9 +75,8 @@ const repoRoot = resolve(here, '..');
 // all consume from.
 const buildRoot = join(repoRoot, 'packages', 'app', 'native-bin');
 
-const args = parseArgs(process.argv.slice(2));
-
-async function main() {
+async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
   if (args.help) {
     console.log(HELP);
     return;
@@ -90,10 +89,9 @@ async function main() {
   }
 
   const token = await resolveToken();
-  if (!token) {
-    console.error('error: no GitHub token available.');
+  if (args.run && !token) {
+    console.error('error: --run requires a GitHub token with actions:read.');
     console.error('  Set GEZEL_GITHUB_TOKEN, set GITHUB_TOKEN, or run `gh auth login`.');
-    console.error('  bendyline/gezel is private — fetching releases / artifacts needs auth.');
     process.exit(1);
   }
 
@@ -348,11 +346,7 @@ async function fetchSha256Sums({ token, release }) {
   }
   const res = await fetch(asset.url, {
     redirect: 'follow',
-    headers: {
-      Accept: 'application/octet-stream',
-      Authorization: `token ${token}`,
-      'User-Agent': 'gezel-fetch-native',
-    },
+    headers: githubHeaders({ token, accept: 'application/octet-stream' }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} downloading SHA256SUMS`);
   const sums = new Map();
@@ -427,11 +421,7 @@ async function verifyAgainstManifest({ token, artifacts, artifactName, targetDir
 async function downloadToFile({ token, url, accept, dest }) {
   const res = await fetch(url, {
     redirect: 'follow',
-    headers: {
-      Accept: accept,
-      Authorization: `token ${token}`,
-      'User-Agent': 'gezel-fetch-native',
-    },
+    headers: githubHeaders({ token, accept }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
   mkdirSync(dirname(dest), { recursive: true });
@@ -591,12 +581,7 @@ async function listExtracted(targetDir) {
 async function api(path, token) {
   const url = `https://api.github.com${path}`;
   const res = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `token ${token}`,
-      'User-Agent': 'gezel-fetch-native',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+    headers: githubHeaders({ token, accept: 'application/vnd.github+json', apiVersion: true }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -605,6 +590,16 @@ async function api(path, token) {
     throw err;
   }
   return res.json();
+}
+
+/** Public release endpoints work anonymously; omit auth rather than sending `token null`. */
+export function githubHeaders({ token, accept, apiVersion = false }) {
+  return {
+    Accept: accept,
+    ...(token ? { Authorization: `token ${token}` } : {}),
+    'User-Agent': 'gezel-fetch-native',
+    ...(apiVersion ? { 'X-GitHub-Api-Version': '2022-11-28' } : {}),
+  };
 }
 
 /**
@@ -717,9 +712,13 @@ const HELP = `Usage: node scripts/fetch-native-binaries.mjs [options]
   --list               Show recent releases + assets for this platform.
   -h, --help           Show this help.
 
-Auth: GEZEL_GITHUB_TOKEN, GITHUB_TOKEN env, or \`gh auth token\`.`;
+Auth: Published releases can be fetched anonymously. GEZEL_GITHUB_TOKEN,
+      GITHUB_TOKEN, or \`gh auth token\` raises the API rate limit and is
+      required for --run workflow artifacts (actions:read).`;
 
-main().catch((err) => {
-  console.error(err.stack ?? err.message ?? String(err));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err.stack ?? err.message ?? String(err));
+    process.exit(1);
+  });
+}

@@ -178,6 +178,34 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
+  it('offers one "Show gezel names and poppetjes" toggle driving both display flags', async () => {
+    // Formerly two checkboxes under a "Boring mode" heading; the single
+    // positive switch matches first run (2026-09-02 UX review).
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      roleBasedNameOnlyMode: true,
+      showPoppetjes: false,
+    } as never);
+
+    render(<SettingsView />);
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Show gezel names and poppetjes',
+    });
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByText('Boring mode')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /role-based names only/ })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /Hide poppetjes/ })).toBeNull();
+
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        roleBasedNameOnlyMode: true,
+        showPoppetjes: false,
+      }),
+    );
+  });
+
   it('labels the role-assignment pickers by role-based name in boring mode', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',

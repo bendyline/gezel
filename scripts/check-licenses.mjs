@@ -64,6 +64,8 @@ const ALLOWED = new Set([
   'MIT OR Apache-2.0',
   // sqlite-vec publishes this non-SPDX spelling; both choices are permissive.
   'MIT OR Apache',
+  // IronCalc's wasm package uses a slash for the same permissive dual license.
+  'MIT/Apache-2.0',
 ]);
 
 /**

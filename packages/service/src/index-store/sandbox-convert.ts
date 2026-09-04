@@ -157,6 +157,14 @@ export async function convertInSandbox(
       timeoutMs: 60_000, // a convert taking >60s is pathological
       relaxReads: true, // squisq + deps read from node_modules / brew / icu
       extraReadPaths: roots, // node_modules (incl. pnpm store) + linked workspace pkgs
+      // This is a fixed, shipped worker over the pinned squisq parser graph,
+      // not user- or model-authored code. Windows has no OS deny-network
+      // boundary available to the generic script sandbox, so allow this
+      // trusted-provenance lane to retain the permission-model filesystem
+      // scope, process/worker/addon denial, heap + time bounds, and the JS
+      // network neutralizer there. Without this opt-in every Office/PDF
+      // preview deterministically fell back to a machine-file card on Windows.
+      allowMissingNetBoundary: true,
     });
     if (res.timedOut) return { markdown: null, blocked: 'conversion timed out' };
     if (res.exitCode !== 0) {

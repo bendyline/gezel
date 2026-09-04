@@ -12,7 +12,7 @@ export {
   hitTestIsoBuilding,
   levelsFor,
 } from './geometry.js';
-export { fitToBoundsIso, HZ, LEVEL_H } from './projection.js';
+export { fitToBoundsIso, groundRectInView, HZ, LEVEL_H } from './projection.js';
 export { type LabelEngineState, createLabelEngineState } from './labels.js';
 export type { IsoRenderState } from './state.js';
 

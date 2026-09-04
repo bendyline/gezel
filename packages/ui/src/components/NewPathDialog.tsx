@@ -6,6 +6,11 @@ function stripSuffix(value: string, suffix?: string): string {
   return value.slice(0, -suffix.length);
 }
 
+function joinParentPath(parentPath: string | undefined, name: string): string {
+  const parent = parentPath?.replace(/[\\/]+$/, '');
+  return parent ? `${parent}/${name}` : name;
+}
+
 /**
  * A minimal "enter a path, then Create" modal. Shared by the Documents
  * view toolbar and the sidebar's Documents "+" affordance so both surfaces
@@ -20,6 +25,7 @@ export function NewPathDialog({
   onCancel,
   initialValue = '',
   suffix,
+  parentPath,
   fieldLabel = 'Path',
   error,
 }: {
@@ -34,6 +40,8 @@ export function NewPathDialog({
   initialValue?: string;
   /** Fixed filename suffix shown beside the input and appended on submit. */
   suffix?: string;
+  /** Fixed destination folder. When set, the input accepts a file name only. */
+  parentPath?: string;
   /** Visible field label. Defaults to Path; rename flows use Name. */
   fieldLabel?: string;
   /** Optional inline error while keeping the dialog open for correction. */
@@ -43,10 +51,14 @@ export function NewPathDialog({
   useEffect(() => {
     if (open) setValue(stripSuffix(initialValue, suffix));
   }, [open, initialValue, suffix]);
+  const filenameError =
+    parentPath !== undefined && /[\\/]/.test(value) ? 'Enter a file name without folders.' : null;
+  const visibleError = error ?? filenameError;
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!value.trim()) return;
-    onSubmit(`${stripSuffix(value.trim(), suffix)}${suffix ?? ''}`);
+    if (!value.trim() || filenameError) return;
+    const name = `${stripSuffix(value.trim(), suffix)}${suffix ?? ''}`;
+    onSubmit(joinParentPath(parentPath, name));
   };
   return (
     <Dialog.Root
@@ -77,16 +89,20 @@ export function NewPathDialog({
                 )}
               </span>
             </label>
-            {error && (
+            {visibleError && (
               <p className="gz-dialog-error" role="alert">
-                {error}
+                {visibleError}
               </p>
             )}
             <Dialog.Actions>
               <button type="button" onClick={onCancel}>
                 Cancel
               </button>
-              <button type="submit" className="primary" disabled={!value.trim()}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={!value.trim() || filenameError !== null}
+              >
                 {submitLabel}
               </button>
             </Dialog.Actions>

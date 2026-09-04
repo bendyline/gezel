@@ -22,6 +22,7 @@ import {
   isExistingSourceEditTurn,
   isGateSurgicalEditTurn,
   isImmediateFileWriteTurn,
+  isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,
   isRecoverableImmediateFileWriteError,
   isScenarioFileRepairTurn,
@@ -243,6 +244,42 @@ describe('llama.cpp JSON Schema compatibility', () => {
     await expect(second.sendAndWait('read it again')).resolves.toBe('ok');
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.tools?.[0]?.function.parameters?.properties?.uri?.pattern).toBeUndefined();
+  });
+
+  it('distinguishes a forced-tool-choice rejection from a grammar-parse rejection', () => {
+    // The two recovery paths are mutually exclusive and must stay that way:
+    // the schema ladder can climb out of a grammar-PARSE failure by sending
+    // simpler tools, but the bare `std::exception` form is raised for a
+    // model whose vocabulary the eager `tool_choice: "required"` grammar
+    // cannot be built against — no payload change fixes it, so routing it
+    // into the ladder would burn all four rungs and still fail.
+    const bare = 'Failed to initialize samplers: std::exception';
+    const parse = 'Failed to initialize samplers: failed to parse grammar';
+
+    expect(isLlamaCppForcedToolChoiceError(bare)).toBe(true);
+    expect(isLlamaCppGrammarParseError(bare)).toBe(false);
+
+    expect(isLlamaCppGrammarParseError(parse)).toBe(true);
+    expect(isLlamaCppForcedToolChoiceError(parse)).toBe(false);
+
+    expect(isLlamaCppForcedToolChoiceError('some other 400')).toBe(false);
+  });
+
+  it('stops forcing tool choice engine-wide once the model rejects it', () => {
+    // Wild-caught on Nanbeige4.2-3B: `tool_choice: "required"` 400s for this
+    // model with one tool or forty, under its own template or a generic
+    // ChatML override, while qwen3.5-2b on the same binary accepts it. Since
+    // forcing the call IS the local-model rescue, an unguarded rejection
+    // makes the rescue fail and the turn burn its whole repair allowance.
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    expect(provider.supportsForcedToolChoice).toBe(true);
+
+    provider.noteForcedToolChoiceUnsupported();
+    expect(provider.supportsForcedToolChoice).toBe(false);
+
+    // Monotonic — a later turn never re-enables it and re-pays the 400.
+    provider.noteForcedToolChoiceUnsupported();
+    expect(provider.supportsForcedToolChoice).toBe(false);
   });
 
   it('does not degrade a smaller tool roster because a larger one blew the grammar limit', () => {
@@ -9760,9 +9797,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
 
     expect(await internal.maybeCompactMidLoop({ force: true })).toBe(false);
     expect(compactionCalls).toBe(0);
-    expect(warnings).not.toContain(
-      'Compacted earlier conversation to free up working window for the current turn.',
-    );
+    expect(warnings).toHaveLength(0);
   });
 
   it("condenses THIS turn's older tool results — the blind spot prior-fold cannot reach", async () => {
@@ -9963,11 +9998,11 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect(text).toBe('recovered reply');
     expect(fetchCount).toBe(2); // first 500, then 200 after compaction
     expect(compactionCalls).toBe(1); // forced once on the 500
-    // The "compacted earlier conversation" warning DOES fire (it's
+    // The exact auto-compaction notice DOES fire (it's
     // user-visible feedback that we did some work), but the
     // "session was cut off" warning must NOT — we successfully
     // recovered, the user got their reply.
-    expect(warnings.some((w) => w.includes('Compacted earlier conversation'))).toBe(true);
+    expect(warnings.some((w) => w.includes('Auto-compacted'))).toBe(true);
     expect(warnings.some((w) => w.includes('cut off mid-string'))).toBe(false);
   });
 

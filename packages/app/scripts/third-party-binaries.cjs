@@ -34,32 +34,68 @@
  * notarization, not a choice. See the macOS note in build-native.yml.
  */
 /**
- * Matched against the file's basename, case-insensitively. Anchored so a
- * first-party binary cannot be exempted by having a vendor name inside it.
+ * Matched against a slash-normalized full path, case-insensitively. Each
+ * exemption names both the vendor filename and the only payload subtree in
+ * which that file is expected. A same-named binary elsewhere remains subject
+ * to the first-party signature gate.
+ *
+ * Native releases are assembled under native/build and packaged under
+ * native-bin, so those two roots deliberately share one scoped expression.
  */
 const THIRD_PARTY_PATTERNS = [
   // NVIDIA CUDA redistributables. Distributable under the CUDA EULA's
   // Attachment A; they arrive from developer.download.nvidia.com with no
   // Authenticode signature at all (verified against NVIDIA's own sha256
   // manifest for 12.4.1).
-  { pattern: '^cudart64_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
-  { pattern: '^cublas64_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
-  { pattern: '^cublasLt64_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
-  { pattern: '^nvrtc64_.+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
-  { pattern: '^nvrtc-builtins64_.+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
-  { pattern: '^nvJitLink_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
+  {
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cudart64_\\d+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
+  {
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cublas64_\\d+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
+  {
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cublasLt64_\\d+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
+  {
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/nvrtc64_[^/]+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
+  {
+    pattern:
+      '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/nvrtc-builtins64_[^/]+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
+  {
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/nvJitLink_\\d+\\.dll$',
+    source: 'NVIDIA CUDA Toolkit',
+  },
 
   // Prebuilt vendor binaries we download rather than compile. uv.exe and
   // pnpm's optional fastlist helpers are unsigned as published; node.exe and
   // duckdb.exe carry their vendors' own signatures and must keep them —
   // duckdb.exe is Authenticode-signed by the DuckDB Foundation, so the
   // afterPack sweep must leave it byte-identical to their release.
-  { pattern: '^uv\\.exe$', source: 'Astral uv (prebuilt release)' },
-  { pattern: '^duckdb\\.exe$', source: 'DuckDB Foundation (prebuilt CLI release)' },
-  { pattern: '^node\\.exe$', source: 'OpenJS Node.js (prebuilt release)' },
-  { pattern: '^rg\\.exe$', source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)' },
   {
-    pattern: '^fastlist-[\\w.-]+\\.exe$',
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/uv\\.exe$',
+    source: 'Astral uv (prebuilt release)',
+  },
+  {
+    pattern: '(?:^|/)dist/duckdb-bundle/duckdb\\.exe$',
+    source: 'DuckDB Foundation (prebuilt CLI release)',
+  },
+  {
+    pattern: '(?:^|/)dist/node-bundle/node\\.exe$',
+    source: 'OpenJS Node.js (prebuilt release)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/@vscode/ripgrep(?:-win32-x64)?/(?:[^/]+/)*rg\\.exe$',
+    source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)',
+  },
+  {
+    pattern: '(?:^|/)dist/pnpm-bundle/(?:[^/]+/)*fastlist-[\\w.-]+\\.exe$',
     source: 'pnpm fastlist helper (ordinary pnpm package)',
   },
   // Prebuilt native addons inside the gezeld service bundle. npm ships these
@@ -71,22 +107,38 @@ const THIRD_PARTY_PATTERNS = [
   // node-pty's ConPTY helpers) arrive Microsoft-signed and are preserved by
   // the isValidlySigned check rather than by this list.
   //
-  // Basename matching is safe here: Gezel compiles no .node addons at all, so
-  // there is no first-party binary these names could shadow.
   {
-    pattern: '^resvgjs\\.win32-x64-msvc\\.node$',
+    pattern: '(?:^|/)node_modules/@resvg/resvg-js-win32-x64-msvc/resvgjs\\.win32-x64-msvc\\.node$',
     source: '@resvg/resvg-js (prebuilt napi-rs addon)',
   },
   {
-    pattern: '^keyring\\.win32-x64-msvc\\.node$',
+    pattern: '(?:^|/)node_modules/@napi-rs/keyring-win32-x64-msvc/keyring\\.win32-x64-msvc\\.node$',
     source: '@napi-rs/keyring (prebuilt napi-rs addon)',
   },
-  { pattern: '^vec0\\.dll$', source: 'sqlite-vec (prebuilt extension)' },
-  { pattern: '^pty\\.node$', source: 'node-pty (prebuilt addon)' },
-  { pattern: '^conpty\\.node$', source: 'node-pty (prebuilt addon)' },
-  { pattern: '^conpty_console_list\\.node$', source: 'node-pty (prebuilt addon)' },
-  { pattern: '^winpty\\.dll$', source: 'node-pty (prebuilt winpty backend)' },
-  { pattern: '^winpty-agent\\.exe$', source: 'node-pty (prebuilt winpty backend)' },
+  {
+    pattern: '(?:^|/)node_modules/sqlite-vec-windows-x64/vec0\\.dll$',
+    source: 'sqlite-vec (prebuilt extension)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/node-pty/(?:[^/]+/)*pty\\.node$',
+    source: 'node-pty (prebuilt addon)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/node-pty/(?:[^/]+/)*conpty\\.node$',
+    source: 'node-pty (prebuilt addon)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/node-pty/(?:[^/]+/)*conpty_console_list\\.node$',
+    source: 'node-pty (prebuilt addon)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/node-pty/(?:[^/]+/)*winpty\\.dll$',
+    source: 'node-pty (prebuilt winpty backend)',
+  },
+  {
+    pattern: '(?:^|/)node_modules/node-pty/(?:[^/]+/)*winpty-agent\\.exe$',
+    source: 'node-pty (prebuilt winpty backend)',
+  },
 ];
 
 /** Every Windows executable/loadable format the payload policy must visit. */
@@ -97,22 +149,26 @@ const COMPILED = THIRD_PARTY_PATTERNS.map((entry) => ({
   regex: new RegExp(entry.pattern, 'i'),
 }));
 
-/** True when `filePath`'s basename is a vendor binary we ship verbatim. */
+function normalizedPath(filePath) {
+  return String(filePath).replaceAll('\\', '/');
+}
+
+/** True when `filePath` is a vendor binary in its reviewed payload subtree. */
 function isThirdPartyBinary(filePath) {
-  const base = String(filePath).split(/[\\/]/).pop() ?? '';
-  return COMPILED.some((entry) => entry.regex.test(base));
+  const candidate = normalizedPath(filePath);
+  return COMPILED.some((entry) => entry.regex.test(candidate));
 }
 
 /** The vendor a path belongs to, or null. Used for build-log attribution. */
 function thirdPartySource(filePath) {
-  const base = String(filePath).split(/[\\/]/).pop() ?? '';
-  return COMPILED.find((entry) => entry.regex.test(base))?.source ?? null;
+  const candidate = normalizedPath(filePath);
+  return COMPILED.find((entry) => entry.regex.test(candidate))?.source ?? null;
 }
 
 /** Full reviewed policy record for a vendor path, or null. */
 function thirdPartyMetadata(filePath) {
-  const base = String(filePath).split(/[\\/]/).pop() ?? '';
-  const entry = COMPILED.find((candidate) => candidate.regex.test(base));
+  const candidate = normalizedPath(filePath);
+  const entry = COMPILED.find((item) => item.regex.test(candidate));
   if (!entry) return null;
   const { regex: _regex, ...metadata } = entry;
   return metadata;

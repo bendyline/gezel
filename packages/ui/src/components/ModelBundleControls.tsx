@@ -71,10 +71,14 @@ export function useExportModelBundle(
   error: string | null;
   progress: ModelBundleExportState;
   cancel: () => Promise<void>;
+  /** Absent when the shell has no skip bridge; the browser path never verifies. */
+  skipVerification: (() => Promise<void>) | undefined;
+  skippingVerification: boolean;
   dismissProgress: () => void;
 } {
   const [busy, setBusy] = useState(false);
   const [canceling, setCanceling] = useState(false);
+  const [skippingVerification, setSkippingVerification] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ModelBundleExportState>({ phase: 'idle' });
   const exportIdRef = useRef<string | null>(null);
@@ -110,6 +114,7 @@ export function useExportModelBundle(
     if (busy) return;
     setBusy(true);
     setCanceling(false);
+    setSkippingVerification(false);
     setError(null);
     const filename = `${portableFilename(id)}.gezmodel`;
     try {
@@ -162,6 +167,7 @@ export function useExportModelBundle(
       browserAbortRef.current = null;
       exportIdRef.current = null;
       setCanceling(false);
+      setSkippingVerification(false);
       setBusy(false);
     }
   }, [busy, engine, id]);
@@ -185,11 +191,36 @@ export function useExportModelBundle(
     }
   }, [busy, canceling]);
 
+  const nativeSkip = window.__GEZEL__?.skipModelBundleExportVerification;
+  const skipVerification = useCallback(async () => {
+    if (!nativeSkip || canceling || skippingVerification) return;
+    const exportId = exportIdRef.current;
+    if (!exportId) return;
+    setSkippingVerification(true);
+    try {
+      const result = await nativeSkip(exportId);
+      if (!result.ok) throw new Error(result.error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSkippingVerification(false);
+    }
+  }, [canceling, nativeSkip, skippingVerification]);
+
   const dismissProgress = useCallback(() => {
     setProgress({ phase: 'idle' });
     setError(null);
   }, []);
-  return { run, busy, canceling, error, progress, cancel, dismissProgress };
+  return {
+    run,
+    busy,
+    canceling,
+    error,
+    progress,
+    cancel,
+    skipVerification: nativeSkip ? skipVerification : undefined,
+    skippingVerification,
+    dismissProgress,
+  };
 }
 
 /** Per-installed-model export link with native streaming-save support. */
@@ -200,10 +231,17 @@ export function ExportModelBundleButton({
   engine: GezmodelEngine;
   id: string;
 }) {
-  const { run, busy, canceling, error, progress, cancel, dismissProgress } = useExportModelBundle(
-    engine,
-    id,
-  );
+  const {
+    run,
+    busy,
+    canceling,
+    error,
+    progress,
+    cancel,
+    skipVerification,
+    skippingVerification,
+    dismissProgress,
+  } = useExportModelBundle(engine, id);
 
   return (
     <>
@@ -219,6 +257,8 @@ export function ExportModelBundleButton({
         state={progress}
         canceling={canceling}
         onCancel={cancel}
+        onSkipVerification={skipVerification}
+        skippingVerification={skippingVerification}
         onDismiss={dismissProgress}
       />
     </>
@@ -229,11 +269,15 @@ export function ModelBundleExportProgressDialog({
   state,
   canceling,
   onCancel,
+  onSkipVerification,
+  skippingVerification = false,
   onDismiss,
 }: {
   state: ModelBundleExportState;
   canceling: boolean;
   onCancel: () => Promise<void>;
+  onSkipVerification?: (() => Promise<void>) | undefined;
+  skippingVerification?: boolean;
   onDismiss: () => void;
 }) {
   if (state.phase === 'idle') return null;
@@ -297,6 +341,9 @@ export function ModelBundleExportProgressDialog({
                 <p>
                   The file is written. Gezel is reading it back and checking every file against its
                   SHA-256 checksum.
+                  {onSkipVerification
+                    ? ' Skipping keeps the file — its checksums are checked on import instead.'
+                    : ''}
                 </p>
               )}
               {active && (
@@ -327,9 +374,9 @@ export function ModelBundleExportProgressDialog({
                       ? `Export complete. Gezel wrote ${formatBytes(
                           state.bytesWritten,
                         )} and verified every bundled file.`
-                      : `Export complete. The browser wrote ${formatBytes(
+                      : `Export complete. ${formatBytes(
                           state.bytesWritten,
-                        )}; Gezel will perform full checksum verification when the bundle is imported.`}
+                        )} written without a read-back check; Gezel verifies every file's checksum when the bundle is imported.`}
                   </span>
                 </output>
               )}
@@ -345,6 +392,15 @@ export function ModelBundleExportProgressDialog({
               <button type="button" disabled={canceling} onClick={() => void onCancel()}>
                 {canceling ? 'Canceling…' : 'Cancel'}
               </button>
+              {state.phase === 'verifying' && onSkipVerification && (
+                <button
+                  type="button"
+                  disabled={canceling || skippingVerification}
+                  onClick={() => void onSkipVerification()}
+                >
+                  {skippingVerification ? 'Finishing…' : 'Skip verification'}
+                </button>
+              )}
             </Dialog.Actions>
           ) : (
             <Dialog.Actions>

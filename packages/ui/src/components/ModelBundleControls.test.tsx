@@ -12,6 +12,7 @@ describe('model bundle export progress', () => {
   let finishExport: ((result: NativeExportResult) => void) | undefined;
   let exportModelBundle: ReturnType<typeof vi.fn>;
   let cancelModelBundleExport: ReturnType<typeof vi.fn>;
+  let skipModelBundleExportVerification: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     publishProgress = undefined;
@@ -23,11 +24,15 @@ describe('model bundle export progress', () => {
         }),
     );
     cancelModelBundleExport = vi.fn(async () => ({ ok: true as const }));
+    skipModelBundleExportVerification = vi.fn(async () => ({ ok: true as const }));
     window.__GEZEL__ = {
       token: 'test-token',
       exportModelBundle: exportModelBundle as unknown as NativeExportModelBundle,
       cancelModelBundleExport: cancelModelBundleExport as NonNullable<
         NonNullable<Window['__GEZEL__']>['cancelModelBundleExport']
+      >,
+      skipModelBundleExportVerification: skipModelBundleExportVerification as NonNullable<
+        NonNullable<Window['__GEZEL__']>['skipModelBundleExportVerification']
       >,
       onModelBundleExportProgress: (callback) => {
         publishProgress = callback;
@@ -116,6 +121,74 @@ describe('model bundle export progress', () => {
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled();
+  });
+
+  it('offers skipping only during verification, and keeps the written file', async () => {
+    render(<ExportModelBundleButton engine="llama-cpp" id="large-model" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    await waitFor(() => expect(exportModelBundle).toHaveBeenCalledOnce());
+    const exportId = exportModelBundle.mock.calls[0]?.[2] as string;
+    act(() => {
+      publishProgress?.({
+        exportId,
+        filename: 'large-model.gezmodel',
+        phase: 'writing',
+        bytesCompleted: 40,
+        bytesTotal: 100,
+      });
+    });
+    expect(screen.queryByRole('button', { name: 'Skip verification' })).not.toBeInTheDocument();
+
+    act(() => {
+      publishProgress?.({
+        exportId,
+        filename: 'large-model.gezmodel',
+        phase: 'verifying',
+        bytesCompleted: 5,
+        bytesTotal: 100,
+      });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Skip verification' }));
+    await waitFor(() => expect(skipModelBundleExportVerification).toHaveBeenCalledWith(exportId));
+    expect(cancelModelBundleExport).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Finishing…' })).toBeDisabled();
+
+    act(() => {
+      finishExport?.({
+        ok: true,
+        path: '/exports/large-model.gezmodel',
+        bytesWritten: 120,
+        verified: false,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Model exported' })).toBeVisible();
+    });
+    expect(screen.getByText(/without a read-back check/)).toBeInTheDocument();
+  });
+
+  it('hides the skip button when the shell has no skip bridge', async () => {
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      skipModelBundleExportVerification: undefined,
+    } as Window['__GEZEL__'];
+    render(<ExportModelBundleButton engine="llama-cpp" id="large-model" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    await waitFor(() => expect(exportModelBundle).toHaveBeenCalledOnce());
+    const exportId = exportModelBundle.mock.calls[0]?.[2] as string;
+    act(() => {
+      publishProgress?.({
+        exportId,
+        filename: 'large-model.gezmodel',
+        phase: 'verifying',
+        bytesCompleted: 5,
+        bytesTotal: 100,
+      });
+    });
+    expect(screen.queryByRole('button', { name: 'Skip verification' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
   });
 });
 

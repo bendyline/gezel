@@ -162,6 +162,7 @@ describe('CodexCliSession', () => {
         args: ['/tmp/gezel-mcp.js'],
         env: {
           GEZEL_CRAFTBOOK_ID: 'weekly-review',
+          GEZEL_CRAFTBOOK_STEP_EDITING: '1',
           GEZEL_MCP_LEGACY_TOOLS: '1',
         },
       };

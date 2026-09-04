@@ -178,7 +178,20 @@ Rules:
   `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
   are aliased into the recipe pending markup migration. When touching one of
   those surfaces, move it to the `gz-*` classes and delete its alias.
-- **Keys with a description line** follow the `.gz-key--stacked` shape:
+- **A tray whose latched choice explains itself gets the described-tray
+  connection.** When a paragraph under the tray describes the *currently
+  latched* option (the security posture, AI engagement, tempo), a bare muted
+  `<p>` floats between the tray and whatever follows, attached to neither —
+  "A posture for trusted work" never visibly belonged to the Lockdown key.
+  Add `gz-tray--described` to the tray and `gz-tray-description` to the
+  paragraph: the panel takes the tray's own recessed surface, a short slot
+  in the panel's material (panel fill, panel-border side walls) rises
+  through the tray's bottom edge to meet the latched key, and the
+  copy leads with the latched option's name —
+  `<strong>{label}</strong> — description`. The description is a readout of
+  the tray, so it sits directly beneath with the recipe's 0.5rem gap; don't
+  wedge other content between them. The Security & Compliance posture
+  switch (first run + Settings) is the reference implementation.
   label on top, a smaller muted hint beneath, left-aligned, wrapping
   allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
   recipe styles both, so a new surface never needs its own pair (the
@@ -563,13 +576,38 @@ key out from under the cursor. Being glyph-only, each carries `title` and
 `aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
 announces the pending turn now that "Sending…" is no longer on its face.
 
+**Chat sends on Shift+Enter; the terminal fires on Enter.** The one place
+the two composers part company, and deliberately. A chat draft is prose —
+it holds paragraphs, a pasted brief, a spec — so Enter has to be a new
+line, or writing anything longer than a sentence means dodging the key
+that makes one. A shell command is a line, and a line ends with Enter;
+inverting that would fight thirty years of muscle memory for no gain.
+Each composer says which it is in the primary key's `title`, and the chat
+composer claims Shift+Enter in a capture-phase handler on its own wrapper
+— Squisq's `submitOnEnter` hook is plain-Enter-only and is left unset, so
+Enter reaches the editor as the ordinary paragraph break it should be.
+
+**The draft can take the window.** An icon key immediately left of Send
+toggles the composer between its three-line strip and the top ~80% of the
+chat column, because a brief or a PRD is unreadable through a slot and
+scrolling it inside the slot loses the shape of the thing being written.
+It is a size change, not a mode: the To line, the toolbar, and every key
+stay exactly where they were, the transcript keeps the remaining fifth
+rather than disappearing, and the draft, its attachments, and its autosave
+are untouched by the flip — so the toggle is never a decision, only a
+preference for the next minute. Expanded, the editor *fills* its frame
+instead of growing with the text; an empty box that filled as you typed
+would put the caret somewhere different on every keystroke. The glyph is
+chevrons pushing apart, closing back together once expanded, and carries
+`title` + `aria-label` + `aria-pressed` like every other icon key.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:
 **Nudge** (primary — reuses the Send recipe so terracotta stays on the one
 primary) queues the text for delivery when the turn ends, and **Interrupt**
-(secondary) stops the turn and sends immediately. Enter mid-turn means
-Nudge, Escape means Stop. Queued nudges render in the timeline as the
+(secondary) stops the turn and sends immediately. The send gesture
+mid-turn means Nudge, Escape means Stop. Queued nudges render in the timeline as the
 existing dashed ghost bubbles ("⋯ nudge") with Edit / Discard / Cancel
 current turn actions — editing swaps the preview for an inline textarea in
 the same dashed not-yet-sent vocabulary and never opens a dialog. A user
@@ -809,6 +847,57 @@ rather than `Other`, with a note that it may include retained Gezel models;
 actually observed.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
+
+**A standing status number is a ring, not a strip.** A value that is always
+present and rarely acted on — the provider quota, how full a thread's context
+window is — gets a small **ring meter**: a ~15–22px circular fill, an optional
+short label, and the numbers behind a popover on click. It sits inline in the
+row it belongs to, never as its own full-width band. A strip claims a whole
+band of the frame permanently, and the two the app had spent that band
+restating constants: `139K-token context · Automatic compaction around 70%`
+told the reader the model's capacity and the runtime's policy, and never once
+told them how full the thread actually was. If a strip's copy would be the
+same on the first turn and the fiftieth, it is a ring.
+Reference implementations: the header's `.quota-meter`
+([App.tsx](../packages/ui/src/App.tsx)) and
+[ContextMeter](../packages/ui/src/components/ContextMeter.tsx) beside the
+thread picker. Rules: the ring itself is a sanctioned true circle, but the
+button around it keeps the row's small radius (see
+[keys in trays](#controls-keys-in-trays)); the ring is a *dial*, so it never
+takes a latched state; a reading the app has not measured shows an empty ring
+and the capacity as text rather than an invented zero; and an exceptional
+state (a failed compaction, a quota at 95%) recolors the ring and its label
+rather than growing back into a banner. What a ring counts must be said in
+the popover, because a bare percentage invites the reader to assume it is
+global when it is scoped — the context meter names *this thread* in its
+label, its tooltip, and its popover.
+
+**A ring earns its popover by holding the lever, not just the numbers.** The
+popover a ring opens is the natural home for the one action a reader takes
+after looking at it — the context meter's **Compact now**, which runs the
+same collapse the runtime performs automatically at the threshold. Without
+it, a user watching a thread fill up has no move but to send a throwaway
+message and hope the pressure check fires. Two rules: the action's refusals
+are *sentences*, rendered where the button is (the thread is mid-turn; there
+is nothing older to summarize yet) — never a toast, and never a silent
+no-op; and a number the app has not actually measured says so rather than
+showing a zero. The context meter's "in use" figure is the transcript tally
+until a turn measures the real prompt, and it says `at least` instead of `~`
+for exactly as long as that is true.
+
+**An unsent message is a row in the thread picker.** A prompt someone is
+still writing is a thing they own, not composer scratch, so it survives a
+restart and shows up where they would look for it. A draft addressed to a
+thread that does not exist yet is listed **above** the threads under a
+`Drafts` label, carrying a small `draft` badge so the difference is visible
+before it is committed to; drafts that already belong to a thread live behind
+that thread's `Drafts` key rather than crowding the picker. Two rules keep it
+honest. The picker's `+ New` still mints a thread and `+ Draft` mints only a
+message, because "start a conversation" and "start writing" are different
+intentions and collapsing them is what left empty threads behind. And the
+composer's save state is the toolbar's quiet autosave status — a dot while
+dirty, a word while saving — never a chip and never a banner: a person typing
+should not be told that typing is working.
 
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped
@@ -1109,6 +1198,27 @@ Keep these separate:
 Symbol count becomes facade bays and dormers; churn may add workshop stacks;
 test files read as schoolhouses in every register.
 
+### What a file is for comes first
+
+Before zone and register, a file's **use** decides what kind of place it gets
+(`fileUseOf` in core, path-based so both renderers and every payload agree):
+
+- **data** (JSON, YAML, CSV, XML that hold content) is a **field**: the parcel
+  under crop, furrowed along the ridge axis, a shed in the corner. No walls, no
+  roof, and deliberately no language hue — the crop is the signal. Fields are
+  weight-capped in the layout so a 40k-line fixture is a big field, not the
+  largest thing in town.
+- **config** (package.json, tsconfig, `*.config.*`, rc files, workflows,
+  Dockerfiles) is a **signal tower**: a squat municipal block under a parapet
+  with the glazed control cab on the roof, given at least three storeys so the
+  cab clears the roofline. A config file with a couple of symbols is still a
+  tower, never a campus.
+- **style** (CSS, SCSS, Less) is a **park**: lawn, a gravel cross of paths, a
+  flowerbed in the language hue, and a bandstand, fountain, or obelisk by seed,
+  with trees at street zoom.
+
+Everything else is code and gets the vocabulary below.
+
 ### Vocabulary
 
 A 3×4 grid: four zone families crossed with three urbanity registers, each
@@ -1141,6 +1251,53 @@ pinned by `town-style.golden.test.ts`:
 If the golden test fails, the change moved buildings that already exist on
 users' maps. That is the finding — not a stale fixture.
 
+### Streets carry traffic
+
+Streets are the gaps the packer leaves between parcels and folders, so no
+street *is* an import. What a street can honestly show is how busy it is, and
+the service estimates that per street ([service/filemap/traffic.ts](../packages/service/src/filemap/traffic.ts)):
+the import degree of every parcel fronting it, the roads that travel along it
+between two sibling boxes of its folder, and the traffic leaving the folders it
+bounds. The sum is bucketed into a **road grade** 0..7 on a log scale against
+the map's own busiest streets, nudged by the neighborhood band (a hamlet lane
+stays dirt, a city lane is at least cobbled) and capped by the settlement, so a
+hamlet never grows a trolley line:
+
+| grade | built as |
+|---|---|
+| 0 | narrow dirt track, grass verges |
+| 1 | narrow cobbled lane |
+| 2 | narrow paved lane |
+| 3 | wide dirt road, wheel ruts, the odd cart |
+| 4 | wide paved road with curbs |
+| 5 | wide paved street with sidewalks, gas lamps, people |
+| 6 | broad paved avenue with sidewalks and street trees |
+| 7 | broad avenue with a trolley line: rails, poles, overhead wire, cars |
+
+The right-of-way width is the layout's street **tier** and never changes; the
+grade only varies what is built inside it. A narrow dirt track down a 16-unit
+boulevard reservation reads as a country road with wide verges, which is what
+a boulevard between two sleepy packages is. Same contract as urbanity: the
+renderer maps grade to geometry 1:1 in
+[traffic.ts](../packages/ui/src/components/FileMap/traffic.ts) and never
+re-derives thresholds; both the iso and the plan view read that one struct.
+
+Streets must meet. The packer leaves every folder's inner lanes a pad short
+of the parent's trunk, so each street end reaches across to the nearest
+perpendicular street within twenty units: to the met carriageway's edge at a
+T, and through to its far edge at an L-corner (`joinStreets` in
+[traffic.ts](../packages/ui/src/components/FileMap/traffic.ts)). A road that
+visibly stops a few units short of the road it turns onto is the single most
+artificial thing on the map; never reintroduce one by drawing from the raw
+`street.rect`.
+
+Street life — carts and horses, walkers on the sidewalks, trolley cars, and
+working smoke over the industrial zone — moves on the frame clock at street
+zoom only, honors reduced motion (a still frame at t=0), and stops repainting
+when none of it is on screen, exactly like the rooftop fire. The city overview
+stays a plain carriageway fill per surface, and the age lens suppresses all of
+it.
+
 ### The village file is committed, so it must not churn
 
 Placement memory lives in `.gezel/village.json` — anchors, user overrides, and
@@ -1164,11 +1321,13 @@ recomputed (see [urbanity.ts](../packages/service/src/filemap/urbanity.ts)).
 - **City** stays quiet: flat batched diamonds and landmark beacons. No lots, no
   hedges, no trim, no materials — a 20k-block map has to hold frame rate.
 - **District** is the roof-silhouette tier: all thirteen roof forms, secondary
-  massing, lot boundaries, urbanity street surfaces, and **cornices and string
+  massing, lot boundaries, road grades as fills (carriageway, sidewalks, a
+  single track line), and **cornices and string
   courses** — two 1px lines are most of what makes a core read as masonry at the
   zoom where windows would be sub-pixel mush.
 - **Street** gets everything: windows, shopfronts, cart doors, porticos, roof
-  furniture, yard decor.
+  furniture, yard decor, street furniture and moving traffic, plaza fountains
+  and park trees.
 
 Anything drawing taller than an ordinary roof — a clock tower, a kiln cone —
 must declare `roofFactor`. Culling, hit-testing, and the issue-marker anchor all

@@ -4,15 +4,16 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
-  countCraftbookToolCalls,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
   ungatedBuildStepIds,
 } from './helpers.ts';
 
@@ -160,7 +161,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       if (found.task.status !== 'complete') {
         failures.push(
-          `task ${found.task.ref} (from craftbook "${book.craftbook.id}") has status "${found.task.status}" — drive it to completion`,
+          unfinishedTaskFailure({
+            ref: found.task.ref,
+            status: found.task.status,
+            source: `from craftbook "${book.craftbook.id}"`,
+          }),
         );
       }
     }
@@ -179,19 +184,20 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   const parsed = parseJsonRecords(cleanText, CLEAN_OUTPUT_PATH, 20);
   if (!parsed.ok) failures.push(parsed.reason);
 
+  const anomaliesText = await workspace.read(ANOMALIES_PATH);
+  const reportTextLinear = await workspace.read(REPORT_PATH);
   return finishAuthoringPoll(ctx, {
     scenarioId: authorLinearScenario.id,
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(
-        cleanText,
-        await workspace.read(ANOMALIES_PATH),
-        await workspace.read(REPORT_PATH),
-        book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
-      ) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(
+      cleanText,
+      anomaliesText,
+      reportTextLinear,
+      book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
+    ),
+    deliverableMissing: noDeliverableWritten(cleanText, anomaliesText, reportTextLinear),
     repairPath: 'craftbook: CSV Order Cleanup',
     repairDirective: [
       'CRAFTBOOK_AUTHORING_REPAIR: this eval grades the craftbook catalog and the task graph,',
@@ -214,7 +220,7 @@ export const authorLinearScenario: EvalScenario = {
   evidenceTexts: [AUTHOR_LINEAR_KICKOFF_MESSAGE, AUTHOR_LINEAR_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 80 * 60_000,
   progressTimeoutMs: 10 * 60_000,
   setup,
   successCheck,

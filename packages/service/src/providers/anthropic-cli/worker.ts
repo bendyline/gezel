@@ -1066,6 +1066,7 @@ export class ClaudeWorker {
           name: toolName,
           argKeys: Object.keys(args),
           args,
+          ...(pending ? { startedAtMs: pending.startedAt } : {}),
           durationMs,
           success: !event.isError,
           ...(errorMessage ? { errorMessage } : {}),

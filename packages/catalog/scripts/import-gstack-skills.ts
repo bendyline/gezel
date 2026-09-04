@@ -48,6 +48,7 @@ import {
   parseCraftbookTestSpec,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
+import { applyDefaultCraftbookStepPolicies } from '../src/craftbook-step-policy.js';
 import { gstackAuthoringDir, readGstackWaveConfig } from '../src/gstack-authoring.js';
 import {
   type Overlay,
@@ -185,7 +186,7 @@ async function main(): Promise<void> {
 
     const raw = await readFile(join(snapshotRoot, book.source, 'SKILL.md'), 'utf8');
     const converted = convertSnapshotSkill(book, raw, overlay, wave);
-    const { doc } = converted;
+    const doc = applyDefaultCraftbookStepPolicies(converted.doc);
     const testJson = testBytes.get(book.source)!;
 
     // The same bar craftbook_write holds: the doc must expand into a

@@ -626,3 +626,74 @@ table.trials tr:hover td {
 .chartsection h2 {
   margin-top: 16px;
 }
+
+/* ── Movie / transcript tab ─────────────────────────────────────────── */
+.movie-scenes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+.movie-scene {
+  display: grid;
+  grid-template-columns: 74px 84px 160px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.movie-scene:last-child {
+  border-bottom: none;
+}
+.movie-clock {
+  color: var(--fg-3);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
+.movie-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.movie-kind--delegation,
+.movie-kind--user-prompt {
+  color: var(--accent, #7aa2ff);
+  font-weight: 600;
+}
+.movie-kind--gate-verdict,
+.movie-kind--turn-aborted {
+  color: #e2695f;
+  font-weight: 600;
+}
+.movie-kind--artifact-produced {
+  color: #57c78f;
+  font-weight: 600;
+}
+.movie-actor {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.movie-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.movie-scene--reasoning .movie-body {
+  color: var(--fg-3);
+  font-style: italic;
+}
+.movie-shot {
+  display: block;
+  margin-top: 6px;
+  max-width: 360px;
+}
+.movie-shot img {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

@@ -62,6 +62,7 @@ export interface PublicPackage {
  * electron-builder / the VS Code Marketplace instead.
  */
 const PUBLISHED: ReadonlyArray<{ dir: string; typed: boolean }> = [
+  { dir: 'gezk', typed: true },
   { dir: 'core', typed: true },
   { dir: 'client', typed: true },
   { dir: 'sdk', typed: true },

@@ -5,8 +5,8 @@
  * decision policy, and the release gate that inspects the finished bundle.
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -28,7 +28,7 @@ test('the hook narrows a blanket exemption and leaves everything else alone', ()
   assert.match(decideAtsAction('YES').reason, /^unexpected-value:/);
 });
 
-test('the hook is wired into the afterPack chain for darwin', () => {
+test('the hook is wired into the afterPack chain for both macOS lanes', () => {
   const afterPack = readFileSync(join(root, 'packages/app/scripts/after-pack.cjs'), 'utf8');
   assert.match(afterPack, /require\('\.\/harden-mac-ats\.cjs'\)/);
   assert.match(afterPack, /await hardenMacAts\(context\)/);
@@ -36,8 +36,15 @@ test('the hook is wired into the afterPack chain for darwin', () => {
   const hook = readFileSync(join(root, 'packages/app/scripts/harden-mac-ats.cjs'), 'utf8');
   assert.match(
     hook,
-    /electronPlatformName !== 'darwin'/,
-    'the hook must no-op on non-darwin packs',
+    /MACOS_PLATFORMS\.has\(context\.electronPlatformName\)/,
+    'the hook must no-op on non-macOS packs',
+  );
+  // `mas` is a separate electronPlatformName. Gating on `darwin` alone skipped
+  // the one lane whose Info.plist a reviewer reads.
+  assert.match(
+    hook,
+    /MACOS_PLATFORMS = new Set\(\['darwin', 'mas'\]\)/,
+    'both macOS lanes must reach the ATS narrowing',
   );
   // Surgical replacement, not a parse/serialize round-trip: JSON cannot express
   // plist `data` or `date` values, so a round-trip would silently drop them.
@@ -52,6 +59,24 @@ test('the release job verifies the shipped plist, not just the source config', (
     /node scripts\/verify-macos-ats\.mjs "\$app"/,
     'release-electron.yml no longer asserts the ATS policy on the packaged app',
   );
+});
+
+test('the gate still runs when its script path contains spaces', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel ats runner-'));
+  try {
+    const spacedDir = join(dir, 'path with spaces');
+    const script = join(spacedDir, 'verify-macos-ats.mjs');
+    mkdirSync(spacedDir);
+    copyFileSync(join(root, 'scripts/verify-macos-ats.mjs'), script);
+
+    // No app argument deliberately: reaching main() must produce usage + 1.
+    // The old hand-built file:// comparison skipped main and exited 0 here.
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /usage: verify-macos-ats\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Both the fixture writer and the gate itself shell out to `plutil`, which

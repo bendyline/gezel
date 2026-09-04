@@ -1,38 +1,22 @@
-import type { Rect } from '@bendyline/gezel';
-import type { Camera } from '../camera.js';
+import type { MapPlaza } from '@bendyline/gezel';
+import { hash32, seeded } from '../seed.js';
 import { districtBands } from '../urbanity.js';
-import { isoCorners } from './projection.js';
-import { type IsoRenderState, sp } from './state.js';
+import { pathGroundRect } from './prism.js';
+import { groundRectInView, toIso } from './projection.js';
+import { type IsoRenderState, type ScreenPt, sp } from './state.js';
+import { drawIsoStreets } from './streets.js';
 
 /**
- * The iso ground plane: grass, district paving diamonds, plazas/greens,
- * then the street network as projected parallelograms (tier 0 → 3), curbs on
- * leaf districts, avenue center dashes. Sharp corners throughout — rounded
- * rects become elliptical arcs in iso, and sharp is the SimCity idiom.
+ * The iso ground plane: grass, district ground by register (meadow in the
+ * village band, paving in town, harder grey in the core), plazas and greens
+ * with their fountains and trees, then the street network — see
+ * `streets.ts` for the road grades. Sharp corners throughout — rounded rects
+ * become elliptical arcs in iso, and sharp is the SimCity idiom.
  */
 
-function pathDiamond(ctx: CanvasRenderingContext2D, cam: Camera, r: Rect): void {
-  const c = isoCorners(r);
-  const n = sp(cam, c.n.u, c.n.v);
-  const e = sp(cam, c.e.u, c.e.v);
-  const s = sp(cam, c.s.u, c.s.v);
-  const w = sp(cam, c.w.u, c.w.v);
-  ctx.beginPath();
-  ctx.moveTo(n.x, n.y);
-  ctx.lineTo(e.x, e.y);
-  ctx.lineTo(s.x, s.y);
-  ctx.lineTo(w.x, w.y);
-  ctx.closePath();
-}
-
-/** Cheap iso-AABB cull for ground rects (no height). */
-function groundInView(cam: Camera, r: Rect, viewW: number, viewH: number): boolean {
-  const u0 = (r.x - (r.y + r.h) - cam.offsetX) * cam.scale;
-  const u1 = (r.x + r.w - r.y - cam.offsetX) * cam.scale;
-  const v0 = ((r.x + r.y) / 2 - cam.offsetY) * cam.scale;
-  const v1 = ((r.x + r.w + r.y + r.h) / 2 - cam.offsetY) * cam.scale;
-  return u1 >= 0 && v1 >= 0 && u0 <= viewW && v0 <= viewH;
-}
+/** Below this projected plaza width a fountain is a blob. */
+const MIN_FOUNTAIN_PX = 14;
+const MAX_GREEN_TREES = 6;
 
 export function drawIsoGround(ctx: CanvasRenderingContext2D, s: IsoRenderState): void {
   const { cam, model, palette, viewW, viewH } = s;
@@ -42,115 +26,145 @@ export function drawIsoGround(ctx: CanvasRenderingContext2D, s: IsoRenderState):
 
   const parentIds = new Set<string>();
   for (const d of model.districts) if (d.parentId) parentIds.add(d.parentId);
+  const bands = s.tier === 'city' ? null : districtBands(model);
 
-  // District paving: leaf districts filled, ancestors as faint outlines.
+  // District ground: leaf districts filled, ancestors as faint outlines.
   for (const d of model.districts) {
-    if (!groundInView(cam, d.rect, viewW, viewH)) continue;
+    if (!groundRectInView(cam, d.rect, viewW, viewH)) continue;
     if (parentIds.has(d.id)) {
       ctx.strokeStyle = palette.districtStroke;
       ctx.lineWidth = Math.max(0.5, Math.min(2, 3 - d.depth * 0.4));
-      pathDiamond(ctx, cam, d.rect);
+      pathGroundRect(ctx, cam, d.rect);
       ctx.stroke();
       continue;
     }
+    const band = bands?.get(d.id);
     ctx.globalAlpha = 0.9;
-    ctx.fillStyle = palette.districtFill;
-    pathDiamond(ctx, cam, d.rect);
+    ctx.fillStyle =
+      band === 'village'
+        ? palette.districtFillVillage
+        : band === 'city'
+          ? palette.districtFillCity
+          : palette.districtFill;
+    pathGroundRect(ctx, cam, d.rect);
     ctx.fill();
     ctx.globalAlpha = 1;
     if (s.tier !== 'city') {
       ctx.strokeStyle = palette.curb;
       ctx.lineWidth = 1;
-      pathDiamond(ctx, cam, d.rect);
+      pathGroundRect(ctx, cam, d.rect);
       ctx.stroke();
     }
   }
 
   // Plazas and greens sit on the paving, under the streets' crossings.
   for (const pz of model.plazas ?? []) {
-    if (!groundInView(cam, pz.rect, viewW, viewH)) continue;
+    if (!groundRectInView(cam, pz.rect, viewW, viewH)) continue;
     if (pz.kind === 'plaza') {
       ctx.fillStyle = palette.sidewalk;
-      pathDiamond(ctx, cam, pz.rect);
+      pathGroundRect(ctx, cam, pz.rect);
       ctx.fill();
-      if (s.tier === 'street') {
+      if (s.tier === 'street' && !s.ageLens) {
         ctx.strokeStyle = palette.domeAccent;
         ctx.globalAlpha = 0.55;
         ctx.lineWidth = 1;
-        pathDiamond(ctx, cam, pz.rect);
+        pathGroundRect(ctx, cam, pz.rect);
         ctx.stroke();
         ctx.globalAlpha = 1;
+        drawFountain(ctx, s, pz);
       }
     } else {
-      ctx.fillStyle = palette.dark ? 'hsl(150 12% 15%)' : 'hsl(90 26% 80%)';
-      pathDiamond(ctx, cam, pz.rect);
+      ctx.fillStyle = palette.dark ? 'hsl(130 12% 15%)' : 'hsl(90 26% 80%)';
+      pathGroundRect(ctx, cam, pz.rect);
       ctx.fill();
+      if (s.tier === 'street' && !s.ageLens) drawGreenTrees(ctx, s, pz);
     }
   }
 
-  // Streets, widest tier first so pavement layers read correctly.
-  const streets = model.streets ?? [];
-  if (streets.length > 0) {
-    // Surface by register as well as tier: a village lane is a dirt track, a
-    // town street is cobbled, a city avenue is macadam. Costs nothing per
-    // frame — the same fills, grouped into 12 `fillStyle` changes instead of 4.
-    const bands = s.tier === 'city' ? null : districtBands(model);
-    const pavement = [
-      palette.pavementAvenue,
-      palette.pavementStreet,
-      palette.pavementLane,
-      palette.pavementLane,
-    ];
-    const surfaceFor = (st: { tier: number; districtId: string | null }): string => {
-      if (!bands) return pavement[st.tier]!;
-      const band = st.districtId ? bands.get(st.districtId) : undefined;
-      if (band === 'village') return palette.dirtLane;
-      if (band === 'town') return palette.cobble;
-      return pavement[st.tier]!;
-    };
-    for (let tier = 0; tier < 4; tier++) {
-      if (s.tier === 'city' && tier > 1) break;
-      // Group by resolved surface so the fillStyle churn stays bounded.
-      const bySurface = new Map<string, typeof streets>();
-      for (const st of streets) {
-        if (st.tier !== tier) continue;
-        if (!groundInView(cam, st.rect, viewW, viewH)) continue;
-        const key = surfaceFor(st);
-        const list = bySurface.get(key);
-        if (list) list.push(st);
-        else bySurface.set(key, [st]);
-      }
-      for (const [surface, list] of bySurface) {
-        ctx.fillStyle = surface;
-        for (const st of list) {
-          pathDiamond(ctx, cam, st.rect);
-          ctx.fill();
-        }
-      }
-    }
+  drawIsoStreets(ctx, s);
+}
 
-    // Avenue center dashes along the long axis, projected.
-    if (s.tier !== 'city') {
-      ctx.strokeStyle = palette.avenueDash;
-      ctx.lineWidth = Math.max(1, Math.min(2, 0.8 * cam.scale));
-      ctx.setLineDash([6 * cam.scale, 6 * cam.scale]);
-      ctx.beginPath();
-      for (const st of streets) {
-        if (st.tier !== 0) continue;
-        if (!groundInView(cam, st.rect, viewW, viewH)) continue;
-        const r = st.rect;
-        const horizontal = r.w >= r.h;
-        const a = horizontal ? { x: r.x + 2, y: r.y + r.h / 2 } : { x: r.x + r.w / 2, y: r.y + 2 };
-        const b = horizontal
-          ? { x: r.x + r.w - 2, y: r.y + r.h / 2 }
-          : { x: r.x + r.w / 2, y: r.y + r.h - 2 };
-        const pa = sp(cam, a.x - a.y, (a.x + a.y) / 2);
-        const pb = sp(cam, b.x - b.y, (b.x + b.y) / 2);
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+/**
+ * A fountain at the centre of a landmark's square: an iso basin (a world
+ * circle projects to a 2:1 ellipse), the water, and a jet. The one civic
+ * ornament every 1900s town square had.
+ */
+function drawFountain(ctx: CanvasRenderingContext2D, s: IsoRenderState, pz: MapPlaza): void {
+  const { cam } = s;
+  const r = Math.min(pz.rect.w, pz.rect.h) * 0.22;
+  const rx = r * Math.SQRT2 * cam.scale;
+  if (rx < MIN_FOUNTAIN_PX / 2) return;
+  const c = toIso(pz.rect.x + pz.rect.w / 2, pz.rect.y + pz.rect.h / 2);
+  drawFountainAt(ctx, s, sp(cam, c.u, c.v), rx);
+}
+
+/** The fountain itself, at a screen point with a semi-major axis of `rx` px.
+ *  Shared with the park painter. */
+export function drawFountainAt(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  pt: ScreenPt,
+  rx: number,
+): void {
+  const { cam, palette } = s;
+  const ry = rx / 2;
+  const rim = Math.max(1, 0.28 * cam.scale);
+
+  ctx.fillStyle = palette.street.basin;
+  ctx.beginPath();
+  ctx.ellipse(pt.x, pt.y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = palette.street.water;
+  ctx.beginPath();
+  ctx.ellipse(pt.x, pt.y, rx - rim, ry - rim / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // The jet: a short column with a bright cap, and a ripple ring below it.
+  ctx.strokeStyle = palette.street.water;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = Math.max(0.6, 0.2 * cam.scale);
+  ctx.beginPath();
+  ctx.ellipse(pt.x, pt.y, rx * 0.45, ry * 0.45, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  const jet = Math.max(2, 1.1 * cam.scale);
+  ctx.strokeStyle = palette.sidewalk;
+  ctx.lineWidth = Math.max(0.8, 0.3 * cam.scale);
+  ctx.beginPath();
+  ctx.moveTo(pt.x, pt.y);
+  ctx.lineTo(pt.x, pt.y - jet);
+  ctx.stroke();
+  ctx.fillStyle = palette.sidewalk;
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y - jet, Math.max(0.8, 0.28 * cam.scale), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** A green is a small park: a few trees, seeded by the green's id. */
+function drawGreenTrees(ctx: CanvasRenderingContext2D, s: IsoRenderState, pz: MapPlaza): void {
+  const atlas = s.atlas;
+  if (!atlas) return;
+  const { cam } = s;
+  const area = pz.rect.w * pz.rect.h;
+  const count = Math.max(1, Math.min(MAX_GREEN_TREES, Math.floor(area / 500)));
+  const rng = seeded(hash32(`green:${pz.id}`));
+  for (let i = 0; i < count; i++) {
+    const x = pz.rect.x + 2 + rng() * Math.max(0.5, pz.rect.w - 4);
+    const y = pz.rect.y + 2 + rng() * Math.max(0.5, pz.rect.h - 4);
+    const size = (2 + rng() * 1.2) * cam.scale * 2;
+    const sprite = rng() < 0.7 ? 'tree1' : 'tree3';
+    const iso = toIso(x, y);
+    const pt = sp(cam, iso.u, iso.v);
+    const src = atlas.index[sprite] * atlas.cell;
+    ctx.drawImage(
+      atlas.canvas,
+      src,
+      0,
+      atlas.cell,
+      atlas.cell,
+      pt.x - size / 2,
+      pt.y - size,
+      size,
+      size,
+    );
   }
 }

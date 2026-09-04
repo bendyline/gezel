@@ -142,3 +142,35 @@ describe('ChatModelInstallRegistry', () => {
     expect(registry.get('m')).toMatchObject({ finished: true, error: 'disk exploded' });
   });
 });
+
+describe('ChatModelInstallRegistry — polled views', () => {
+  it('active() lists running installs with their latest progress and describe() adds the events', async () => {
+    const gate = deferred();
+    const registry = new ChatModelInstallRegistry<TestEvent, undefined>({
+      engine: 'test',
+      run: async function* () {
+        yield { type: 'progress' };
+        await gate.promise;
+        yield { type: 'done' };
+      },
+      finishedTtlMs: 50,
+    });
+    registry.start('m', undefined);
+    await tick();
+    expect(registry.active().map((a) => [a.id, a.lastEvent?.type])).toEqual([['m', 'progress']]);
+    const described = registry.describe('m');
+    expect(described?.finished).toBe(false);
+    expect(described?.lastEvent?.type).toBe('progress');
+    expect(described?.terminalEvent).toBeNull();
+
+    gate.resolve();
+    await tick();
+    await tick();
+    expect(registry.active()).toEqual([]);
+    expect(registry.describe('m')?.terminalEvent?.type).toBe('done');
+
+    // The finished entry lingers only for the configured TTL.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(registry.describe('m')).toBeNull();
+  });
+});

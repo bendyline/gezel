@@ -5,6 +5,11 @@ export { CommunitySource } from './community-source.js';
 export { LocalCatalogSource } from './local-source.js';
 export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 export { categorizeToolset } from './categorize.js';
+export {
+  applyDefaultCraftbookStepPolicies,
+  outputMediaForCraftbookBlueprint,
+  outputMediumForCraftbookBlueprint,
+} from './craftbook-step-policy.js';
 export { renderGildeSchemaFiles, renderSchema } from './gilde-schema-export.js';
 export {
   BUILTIN_TOOL_TO_GROUP,

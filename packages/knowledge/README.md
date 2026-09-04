@@ -3,7 +3,7 @@
 The `.gezk` knowledge-catalog toolchain for
 [gezel](https://github.com/bendyline/gezel): a deterministic compiler, a
 verified archive reader, and a read-only catalog handle with two-stage
-`bit384+int8` retrieval. One format and one runtime serve a 200-document
+`bit+int8` retrieval. One format and one runtime serve a 200-document
 personal reference and a 2,000,000-document Wikipedia-class corpus.
 
 ```bash
@@ -12,24 +12,29 @@ npm install @bendyline/gezel-knowledge
 
 ## What a `.gezk` is
 
-A standard ZIP holding `manifest.json`, a `router.db` (topics, document
-directory, brotli bodies, routing centroids), and shard SQLite databases with
-FTS and quantized vectors. Every catalog ships a browsable table of contents.
-The format is frozen — see `docs/gezk-format-v1.md` in the gezel repo.
+An open format (gezk 0.5, preliminary until 1.0): a ZIP whose first entry is
+the stored `mimetype` magic (`application/vnd.gezk+zip`), then
+`manifest.json`, `README.md`, `LICENSES/`, a `router.db` (topics, document
+directory, brotli bodies, routing centroids) and shard SQLite databases with
+FTS5 and quantized vectors in plain BLOB tables. Nothing beyond stock SQLite
+is needed to read one. The format definitions are the separate
+[`@bendyline/gezk`](https://www.npmjs.com/package/@bendyline/gezk) package;
+the specification, JSON Schemas, conformance fixtures and a Python reference
+reader live in [bendyline/gezk](https://github.com/bendyline/gezk).
 
 ## Building a catalog
 
 ```ts
 import {
-  GEZEL_BGE_SMALL_EN_V15_1,
-  GEZEL_MARKDOWN_CHUNKS_2,
+  BGE_SMALL_EN_V15_1,
+  MARKDOWN_CHUNKS_2,
   compileKnowledgeCatalog,
   createProfileEmbedder,
   loadMarkdownCatalog,
 } from '@bendyline/gezel-knowledge';
 
 const source = await loadMarkdownCatalog('./my-notes', { language: 'en' });
-const embedder = await createProfileEmbedder(GEZEL_BGE_SMALL_EN_V15_1);
+const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1);
 await compileKnowledgeCatalog({
   catalog: {
     id: 'my-notes',
@@ -38,25 +43,27 @@ await compileKnowledgeCatalog({
     language: 'en',
     publisher: { id: 'me', name: 'Me' },
     createdAt: new Date().toISOString(),
-    license: { name: 'MIT', attributionRequired: false },
+    license: { name: 'MIT', spdx: 'MIT', attributionRequired: false },
   },
   topics: source.topics,
   documents: (async function* () {
     for (const doc of source.documents) yield doc;
   })(),
   outputPath: './my-notes-1.0.0.gezk',
-  embeddingProfile: GEZEL_BGE_SMALL_EN_V15_1,
-  chunkingProfile: GEZEL_MARKDOWN_CHUNKS_2,
+  embeddingProfile: BGE_SMALL_EN_V15_1,
+  chunkingProfile: MARKDOWN_CHUNKS_2,
   embed: (texts) => embedder.embed(texts),
   countTokens: (text) => embedder.countTokens(text),
   workDir: './.gezk-work',
 });
 ```
 
-Embedding requires `@huggingface/transformers` at runtime; the module is
-imported dynamically so everything else works without it. The `gezel
-knowledge` CLI wraps this same API (`init`, `build`, `validate`, `inspect`,
-`search`), entirely offline — no daemon.
+Every archive ships a `README.md` and `LICENSES/catalog.txt`; the compiler
+generates minimal ones from the catalog block unless you pass richer texts in
+`extraFiles`. Embedding requires `@huggingface/transformers` at runtime; the
+module is imported dynamically so everything else works without it. The
+`gezel knowledge` CLI wraps this same API (`init`, `build`, `validate`,
+`inspect`, `search`), entirely offline — no daemon.
 
 ## Reading a catalog
 
@@ -73,10 +80,14 @@ handle.close();
 Extraction verifies every file against the manifest (both directions —
 undeclared and missing files are equally fatal) and rejects unsafe archive
 entries. Catalog databases are opened strictly read-only and immutable.
+Semantic search loads a shard's sign-bit rows into memory once (9.6 MB for a
+full 200,000-chunk shard) and scans them with a popcount; the int8 rerank
+reads the candidates by rowid.
 
 ## Stability
 
-Published for the gezel toolchain and the Qualla content pipeline. The
+Published for the gezel toolchain and the Bendyline content pipeline. The
 archive format is versioned (`formatVersion` / `indexSchemaVersion`) and
 readers never migrate a catalog — incompatibility is a typed, reported
-state.
+state. While the format is `0.x`, a minor release may break compatibility;
+each reader names the exact versions it supports.

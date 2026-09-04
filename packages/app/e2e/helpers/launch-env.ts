@@ -52,6 +52,17 @@ import { join } from 'node:path';
  */
 const NO_MACHINE_SHARED_ROOT = join(tmpdir(), 'gezel-e2e-absent-machine-shared-root');
 
+/**
+ * Same hermeticity hole one layer down: the supervisor overlays
+ * `GEZEL_SHARED_ASSETS_DIR` from the machine's system assets dir when one
+ * exists, which makes machine-published models (multi-GB llama.cpp installs
+ * from eval runs) visible inside every spec's freshly-made GEZEL_HOME. A
+ * "first run" spec then isn't first-run — the model inventory is non-empty,
+ * so the Home probe tries to stand up a real engine instead of failing fast
+ * into onboarding. CI has no shared assets, so the rot is local-only.
+ */
+const NO_SHARED_ASSETS_DIR = join(tmpdir(), 'gezel-e2e-absent-shared-assets');
+
 export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEnv {
   const { ELECTRON_RUN_AS_NODE: _ern, ELECTRON_NO_ATTACH_CONSOLE: _enac, ...base } = process.env;
   // GEZEL_E2E=1 flips the macOS Electron app into `accessory` activation
@@ -66,6 +77,7 @@ export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEn
     GEZEL_E2E: '1',
     GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL: '1',
     GEZEL_MACHINE_SHARED_HOME: NO_MACHINE_SHARED_ROOT,
+    GEZEL_SHARED_ASSETS_DIR: NO_SHARED_ASSETS_DIR,
     // The embedded service shares Electron's process, whose execPath points
     // at electron.exe rather than Node. Script-backed project pages still
     // need a real development Node binary after provisioning is skipped.

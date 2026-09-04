@@ -4,16 +4,17 @@ import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
   checkGateScriptSubstance,
-  countCraftbookToolCalls,
   craftbookGateScriptRefs,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbook,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
+  noDeliverableWritten,
   parseJsonValue,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -143,7 +144,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       if (found.task.status !== 'complete') {
         failures.push(
-          `task ${found.task.ref} (from craftbook "${book.craftbook.id}") has status "${found.task.status}" — drive it to completion`,
+          unfinishedTaskFailure({
+            ref: found.task.ref,
+            status: found.task.status,
+            source: `from craftbook "${book.craftbook.id}"`,
+          }),
         );
       }
     }
@@ -159,9 +164,10 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     projectId,
     totalChecks: TOTAL_CHECKS,
     failures,
-    bytes:
-      progressBytes(reportText, scriptSource, book ? book.craftbook.id : null) +
-      500 * (await countCraftbookToolCalls(ctx, projectId)),
+    bytes: progressBytes(reportText, scriptSource, book ? book.craftbook.id : null),
+    // `scriptSource` is the gate script embedded in the authored book, not
+    // the workspace deliverable this scenario waits on.
+    deliverableMissing: noDeliverableWritten(reportText),
     repairPath: 'craftbook: inventory report gate script',
     repairDirective: [
       'CRAFTBOOK_GATE_SCRIPT_REPAIR: fix the FIRST failure above with craftbook/task tools.',
@@ -185,7 +191,7 @@ export const gateScriptScenario: EvalScenario = {
   evidenceTexts: [GATE_SCRIPT_KICKOFF_MESSAGE, GATE_SCRIPT_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 120 * 60_000,
   progressTimeoutMs: 10 * 60_000,
   setup,
   successCheck,

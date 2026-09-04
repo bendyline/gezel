@@ -154,6 +154,33 @@ describe('estimateKvReserveBytes', () => {
     expect(estimateKvReserveBytes({ ...dims, kvCacheType: 'f16' })).toBe(40 * 16384 * 8 * 256 * 2);
   });
 
+  it('multiplies KV by num_loops on a looped transformer', () => {
+    // Wild-caught on Nanbeige4.2-3B. It declares block_count 22 / num_loops 2;
+    // llama.cpp unrolls that to n_layer 44 and gives EACH pass its own cache,
+    // which the engine itself confirms:
+    //   llama_kv_cache: size = 1408.00 MiB (8192 cells, 44 layers)
+    // = 180224 B/token, exactly twice the 90112 the logical block count gives.
+    // Pricing the loops away admitted a 256K window as 23.6 GB that then
+    // claimed 47.2 GB (observed peakRss 48861 MB at --ctx-size 262144).
+    const nanbeige = {
+      blockCount: 22,
+      headCountKv: 8,
+      keyLength: 128,
+      valueLength: 128,
+      kvCacheType: 'f16' as const,
+      ctxTokens: 8192,
+    };
+    const perToken = 22 * 8 * (128 + 128) * 2;
+    expect(estimateKvReserveBytes({ ...nanbeige, loopCount: 2 })).toBe(perToken * 2 * 8192);
+    expect(estimateKvReserveBytes({ ...nanbeige, loopCount: 2 })).toBe(1408 * 1024 * 1024);
+
+    // Ordinary models are untouched: absent, 0 and 1 all mean "one pass".
+    const single = estimateKvReserveBytes(nanbeige);
+    expect(single).toBe(perToken * 8192);
+    expect(estimateKvReserveBytes({ ...nanbeige, loopCount: 1 })).toBe(single);
+    expect(estimateKvReserveBytes({ ...nanbeige, loopCount: 0 })).toBe(single);
+  });
+
   it('honors explicit key/value lengths over embd/heads', () => {
     expect(
       estimateKvReserveBytes({ ...dims, keyLength: 192, valueLength: 128, kvCacheType: 'f16' }),

@@ -282,10 +282,12 @@ they compete with text for context and prefill. Measured accounting:
   `list_project_local_gezels` folds into the sectioned `list_project_gezels`, and
   `create_gezel_from_gilde` folds into `create_gezel({ templateId })`. The old handlers
   remain available only with `GEZEL_MCP_LEGACY_TOOLS=1` for compatibility. The
-  structurally large `craftbook_update_step` schema is additionally loaded only in an
-  explicit Craftbook editor session; ordinary sessions keep the focused
-  `set_step_deliverable`. Together those changes remove about **64.2K compact schema
-  characters** from an ordinary coordinator surface without removing a capability.
+  structurally large `craftbook_update_step` schema is registered only for explicit
+  Craftbook editors and task-scoped craftbook runs. The exact active-step allowlist is
+  still its wire gate: an ordinary task turn keeps the focused `set_step_deliverable`,
+  while a plan-authoring step whose own procedure mandates surgical editing receives the
+  larger schema for that step only. Together those changes remove about **64.2K compact
+  schema characters** from an ordinary coordinator surface without removing a capability.
 - The default **Meester roster is 40 tools** (56 with the `delegate_*`/`consult_*` pairs),
   which is below her own diet cap — so a stock Meester is never trimmed, and a
   "tool cap trimmed this session" warning again means an installed toolset pushed her
@@ -319,13 +321,20 @@ they compete with text for context and prefill. Measured accounting:
      present — a session is never trimmed below the ability to finish its step, hand off,
      or ask for the human decision the standing prompt requires. Rides alongside the
      existing `validate` + `delegate_*`/`consult_*` exemptions.
-  2. **Step-completion grant**: a session actively executing a craftbook step
-     (`taskRef` + `stepId`) is granted the task-progression tools regardless of role, and
-     those tools are restored after message-driven file clamps, so a `write_file`-shaped
-     seed cannot hide the `write_task_note` action its procedure requires first. A
-     coordinator assigned a step (whose default kit is `tasks-readonly`) can still record
-     notes and hand off.
-  3. **No incidental survivors.** Slots left over once a role's curated list is
+  2. **Exact-step grant**: a session actively executing a craftbook step (`taskRef` +
+     `stepId`) may borrow its deterministic deliverable kit and canonical tools positively
+     mandated by that step's procedure, regardless of the assignee's ordinary role kit.
+     Every borrowed name must still pass the platform, security, repository, and
+     workspace-write ceiling, and the authored step policy then subtracts anything it
+     explicitly forbids. Task-progression tools are restored after message-driven clamps,
+     so a narrow role can finish the exact assignment without inheriting an implementation
+     workbench for unrelated turns.
+  3. **Gate-required output floor**: core maps trusted standard gate scripts to their
+     structurally required persistence surface. `checkTaskNoteContains` therefore keeps
+     `write_task_note` callable even for an older artifact-only step policy that omitted
+     `additionalOutputMedia: ["task-note"]`; authoring also persists that secondary medium
+     for new craftbooks. A gate can never require a note while its tool policy forbids one.
+  4. **No incidental survivors.** Slots left over once a role's curated list is
      exhausted — and every slot for a role that has no curated list, i.e. any custom role
      at tiny — are filled from `GENERIC_TOOL_CAP_FALLBACK` (a read → search → artifact →
      recall ladder) and then alphabetically. Previously they were filled in `Set`
@@ -363,6 +372,17 @@ post-tier-cap, post-message-clamp built-in tool roster for that turn. The static
 tool-name scan and this exhaustive rendered matrix run in the dedicated
 `model-tool-contracts` quality job and as part of root `pnpm validate` / `pnpm all`.
 They remain outside the faster standalone `pnpm test` and `pnpm lint` commands.
+
+Craftbook procedures have a second, intentionally optional exhaustive sweep:
+`pnpm test:extended:craftbooks` (add `-- --json` for the full machine-readable report).
+It resolves every latest pinned craftbook detail, including spawn children, and crosses
+each applicable step with every tool-capable local model/backend profile in both initial
+and gate-repair phases. The check fails when a procedure names an unavailable or invalid
+canonical tool, a required output drawer has no writer, a step cannot advance, or an
+undeclared output writer survives the step policy. Drift between a published policy and
+the current policy generator is reported separately as migration warnings, so older
+catalog content remains runnable through the compatibility floor without disguising the
+regeneration work still owed in Gilde.
 
 The matrix calls the production `buildInstructions`, `resolveProfile`, and
 `resolveSessionToolSurface` functions. It materializes the roster from a live in-memory

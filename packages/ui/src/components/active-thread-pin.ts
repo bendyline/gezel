@@ -34,11 +34,11 @@ function newestActivityMs<M extends ThreadMessageLike, S>(group: ThreadGroup<M, 
   return newest;
 }
 
-export function pinActiveThreadLast<M extends ThreadMessageLike, S, T, TS>(
-  items: Array<TimelineThreadItem<M, S, T, TS>>,
+export function pinActiveThreadLast<M extends ThreadMessageLike, S, T, TS, I = never>(
+  items: Array<TimelineThreadItem<M, S, T, TS, I>>,
   activeSessionId: string | undefined,
   nowMs: number,
-): Array<TimelineThreadItem<M, S, T, TS>> {
+): Array<TimelineThreadItem<M, S, T, TS, I>> {
   if (!activeSessionId) return items;
 
   let from = -1;

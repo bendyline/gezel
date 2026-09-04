@@ -87,6 +87,15 @@ export function isoCorners(r: Rect): IsoCorners {
   };
 }
 
+/** Cheap iso-AABB cull for a ground rect (no height) against the viewport. */
+export function groundRectInView(cam: Camera, r: Rect, viewW: number, viewH: number): boolean {
+  const u0 = (r.x - (r.y + r.h) - cam.offsetX) * cam.scale;
+  const u1 = (r.x + r.w - r.y - cam.offsetX) * cam.scale;
+  const v0 = ((r.x + r.y) / 2 - cam.offsetY) * cam.scale;
+  const v1 = ((r.x + r.w + r.y + r.h) / 2 - cam.offsetY) * cam.scale;
+  return u1 >= 0 && v1 >= 0 && u0 <= viewW && v0 <= viewH;
+}
+
 /** Iso-plane AABB of a rect extruded by iso height `hIso` (≥ 0). */
 export interface IsoAabb {
   u0: number;

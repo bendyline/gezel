@@ -267,9 +267,50 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
 
-    await waitFor(() => expect(api.clearProjectErrors).toHaveBeenCalledWith('p1'));
+    await waitFor(() =>
+      expect(api.clearProjectErrors).toHaveBeenCalledWith('p1', expect.any(AbortSignal)),
+    );
     expect(api.retryChatSessionTurn).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText(/Last turn failed/)).toBeNull());
+  });
+
+  it('retires a stale alert when another project surface clears it', async () => {
+    renderTimeline();
+    expect(await screen.findByText(/Last turn failed/)).toBeVisible();
+
+    window.dispatchEvent(
+      new CustomEvent('gezel:session-error-cleared', { detail: { projectId: 'p1' } }),
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Last turn failed/)).toBeNull());
+  });
+
+  it('lets the user retry when an acknowledge request stalls', async () => {
+    renderTimeline();
+    const acknowledge = await screen.findByRole('button', { name: 'Acknowledge' });
+    vi.mocked(api.clearProjectErrors).mockImplementation(
+      (_projectId: string, signal?: AbortSignal) =>
+        new Promise<{ cleared: number }>((_resolve, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(acknowledge);
+      expect(screen.getByRole('button', { name: 'Acknowledging…' })).toBeDisabled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+      expect(screen.getByText(/Clearing the alert took too long/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a failed acknowledge visible and explains that the click failed', async () => {

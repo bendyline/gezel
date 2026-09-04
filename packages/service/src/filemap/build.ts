@@ -13,6 +13,7 @@ import {
   type VillageDomainState,
   type VillageJournalNode,
   deriveAnchorsFromPrior,
+  fileUseOf,
   layoutBuildingsInBlock,
   layoutFileMap,
   nowIso,
@@ -32,6 +33,7 @@ import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
+import { computeStreetTraffic } from './traffic.js';
 import { computeUrbanity, settlementFor } from './urbanity.js';
 import type { VillageFileStore } from './village-file.js';
 
@@ -52,8 +54,11 @@ const TOMBSTONE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
  *  v3 = tight free-space bin-packing (replaced the sparse shelf-row packer).
  *  v4 = city layout: tiered streets + varied-aspect lots (parcel rows).
  *  v5 = planned town: compass macro + ladder packing, plates, plazas, and the
- *       durable city file (anchors derived from the v4 layout on migration). */
-const LAYOUT_VERSION = 5;
+ *       durable city file (anchors derived from the v4 layout on migration).
+ *  v6 = data and config files join the map (fields and signal towers): the
+ *       input set changed materially, so the town is re-founded once with its
+ *       anchors kept rather than growing hundreds of appended lots. */
+const LAYOUT_VERSION = 6;
 
 const MAP_WIDTH = 1600;
 const MAP_HEIGHT = 1600;
@@ -413,7 +418,7 @@ async function buildFileMapWithIgnores(
     const syms = provider.symbolsByFile.get(path) ?? [];
     const health = pl.state === 'tombstoned' ? undefined : healthByPath.get(path);
     const isLandmark = pl.state !== 'tombstoned' && landmarks.has(path);
-    const levels =
+    const rawLevels =
       pl.state === 'tombstoned'
         ? undefined
         : computeLevels({
@@ -421,6 +426,13 @@ async function buildFileMapWithIgnores(
             loc: weightByPath.get(path) ?? 0,
             churnCommits: churnOf(path),
           });
+    // Config files are the town's signal towers: small in lines, but the
+    // machinery everything runs on. Three storeys is the floor that keeps the
+    // cab on top of the roofline.
+    const levels =
+      rawLevels !== undefined && fileUseOf(path, m?.lang) === 'config'
+        ? Math.max(3, rawLevels)
+        : rawLevels;
     const lastTouchedAt = gitMeta.get(path)?.[GIT_META_LAST_COMMIT];
     const u = urbanity.byPath.get(path);
     blocks.push({
@@ -450,7 +462,28 @@ async function buildFileMapWithIgnores(
   }
 
   const roads = importRoads(provider.edges);
-  const bounds = computeBounds(blocks, result.streets, result.plazas, MAP_WIDTH, MAP_HEIGHT);
+  const mapSettlement = settlementFor(urbanity.peak);
+  // Traffic is post-roads by necessity: it credits each road's import degree
+  // to the parcels' frontage and each cross-folder road to the streets that
+  // bound the folders it leaves.
+  const trafficByStreet = computeStreetTraffic({
+    blocks: blocks.map((b) => ({
+      id: b.id,
+      districtId: b.districtId,
+      lot: b.lot ?? b.rect,
+      live: b.state !== 'tombstoned' && !b.phantom,
+      urbanity: b.urbanity,
+    })),
+    districts: result.districts,
+    streets: result.streets,
+    roads,
+    settlement: mapSettlement,
+  });
+  const streets: MapStreet[] = result.streets.map((st) => {
+    const t = trafficByStreet.get(st.id);
+    return t ? { ...st, traffic: t.traffic, grade: t.grade } : st;
+  });
+  const bounds = computeBounds(blocks, streets, result.plazas, MAP_WIDTH, MAP_HEIGHT);
 
   return {
     domain,
@@ -462,7 +495,7 @@ async function buildFileMapWithIgnores(
     blocks,
     buildings,
     roads,
-    streets: result.streets,
+    streets,
     plazas: result.plazas,
     urbanity: {
       center: { x: urbanity.downtown.cx, y: urbanity.downtown.cy },
@@ -470,7 +503,7 @@ async function buildFileMapWithIgnores(
       ceiling: urbanity.ceiling,
       peak: urbanity.peak,
       median: urbanity.median,
-      settlement: settlementFor(urbanity.peak),
+      settlement: mapSettlement,
       fileCount: urbanity.fileCount,
     },
     signals: { gitAvailable, churnWindowDays: GIT_CHURN_WINDOW_DAYS },

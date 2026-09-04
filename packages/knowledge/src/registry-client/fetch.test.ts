@@ -1,4 +1,4 @@
-import type { KnowledgeRegistryIndex } from '@bendyline/gezel';
+import type { KnowledgeRegistryIndex } from '@bendyline/gezk';
 import { describe, expect, it } from 'vitest';
 import { generateKnowledgeSigningKeyPair, signRegistryIndex } from '../signatures/signing.js';
 import {
@@ -10,8 +10,8 @@ import {
 } from './fetch.js';
 
 const registryFixture = (): KnowledgeRegistryIndex => ({
-  kind: 'gezel-knowledge-registry',
-  formatVersion: 1,
+  kind: 'gezk-registry',
+  formatVersion: '0.5',
   publisher: { id: 'qualla', name: 'Qualla' },
   generatedAt: '2026-08-25T00:00:00.000Z',
   catalogs: [

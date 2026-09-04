@@ -17,7 +17,6 @@ import {
   type HookSpec,
   type InstalledToolset,
   KeyedLock,
-  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ModelTier,
   NEW_THREAD_TITLE,
   type ProjectFileEntry,
@@ -130,11 +129,7 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import {
-  extractDirectFileWorkTargetPath,
-  extractExplicitFileEditTools,
-  extractSingleFileSourceRepairTargetPath,
-} from '../providers/direct-file-work-prompt.js';
+import { extractDirectFileWorkTargetPath } from '../providers/direct-file-work-prompt.js';
 import { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 import {
   buildLlamaCppProvider,
@@ -171,6 +166,7 @@ import {
   minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
 } from '../providers/native/capacity-broker.js';
+import { engineApiKey } from '../providers/native/engine-api-key.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -271,6 +267,11 @@ export interface WorkspaceFileSource {
 }
 import { extractReferencedTasks } from '../references/task-references.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
+import {
+  CONTEXT_COMPACT_RATIO,
+  type CompactSessionNowResult,
+  ContextCompactor,
+} from './context-compaction.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
 import {
@@ -278,6 +279,12 @@ import {
   isExpectedImageDeliverablePath,
 } from './deliverable-paths.js';
 import type { ChatEventBus, PublishScope } from './events.js';
+import {
+  deriveRepairClampNudge,
+  formatExpectedDeliverableAnnotation,
+  isExpectedDataDeliverablePath,
+  normalizeExpectedDeliverablePath,
+} from './expected-deliverable.js';
 import {
   cleanGenerativePrompt,
   expandVideoPrompt,
@@ -336,6 +343,7 @@ import {
   buildToolCapWarning,
   projectOrchestrationConstraintActive as resolveProjectOrchestrationConstraintActive,
   resolveSessionToolSurface,
+  taskStepContextualBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
 import { repairClampDisabled, stepGateRepairActive } from './step-tool-kit.js';
@@ -511,7 +519,7 @@ function resolveTurnMessageOrigin(
   opts:
     | {
         messageOrigin?: TurnMessageOrigin;
-        from?: { gezelId: string; gezelName: string };
+        from?: NonNullable<ChatMessage['from']>;
         lane?: Lane;
         ambient?: boolean;
         nudge?: boolean;
@@ -632,6 +640,8 @@ export type TaskAdvancerOutcome =
       paused?: boolean;
       /** The gate runtime/configuration failed before judging the deliverable. */
       infrastructureError?: boolean;
+      /** Present when an onExit hook, rather than the declarative gate, held completion. */
+      hook?: 'onExit';
       /** The gate cannot be met under current policy (workspace writes off); paused for a human. */
       unsatisfiable?: boolean;
       /** Gate script diagnostics for durable/user-visible failure reporting. */
@@ -904,7 +914,7 @@ interface PendingSendEntry {
   id: string;
   userText: string;
   enqueuedAt: number;
-  from: { gezelId: string; gezelName: string } | undefined;
+  from: NonNullable<ChatMessage['from']> | undefined;
   coalescable: boolean;
   lane: Lane | undefined;
   /** Ambient housekeeping turn — see `EnqueueRequest.ambient`. */
@@ -923,6 +933,8 @@ interface PendingSendEntry {
    * user message carries `ChatMessage.nudge` for the transcript chip.
    */
   nudge: boolean;
+  /** The prompt draft this send was written in, if any. */
+  draftId: string | undefined;
   waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
 }
 
@@ -1098,6 +1110,11 @@ export {
 export { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 export { buildLlamaCppProvider } from '../providers/llama-cpp/build-provider.js';
 export { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+export {
+  buildDeriveRepairClampNudge,
+  deriveRepairClampEnabled,
+  deriveRepairClampNudge,
+} from './expected-deliverable.js';
 
 function isMachineEngineChatProvider(name: string): name is LocalProviderName {
   return name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
@@ -1255,7 +1272,12 @@ export class ChatManager {
    */
   private readonly inflightFileHandoffs = new Map<
     string,
-    { sessionId: string; toGezelName: string; toGezelId: string }
+    {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    }
   >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
@@ -1275,6 +1297,14 @@ export class ChatManager {
    * closes. Cleared at the start of every turn.
    */
   private readonly currentTurnTools = new Map<string, ChatMessageToolCall[]>();
+  /**
+   * Question raised by `ask_user_question` during the current in-flight
+   * turn, keyed by session id. The assistant message for that turn does not
+   * exist until `sendAndWait` returns, so stamping "the last assistant" at
+   * tool-call time either hits the previous turn or (on a first turn) hits
+   * nothing. Hold the id here and attach it to the message at commit time.
+   */
+  private readonly currentTurnPendingQuestionIds = new Map<string, string>();
   /**
    * Keurmeester supervision engine, setter-injected from service.ts
    * after construction (the manager needs `oneShotCompletion`, so the
@@ -1449,6 +1479,7 @@ export class ChatManager {
   private readonly activeMemoryExtractions = new Map<string, { rerunRequested: boolean }>();
   private readonly store: Store;
   private readonly events: ChatEventBus;
+  private readonly contextCompactor: ContextCompactor;
   private readonly externalConversations: ExternalConversationRecorder;
   private readonly memory: MemoryManager;
   private readonly historyManager?: import('../history/manager.js').HistoryManager;
@@ -1539,6 +1570,18 @@ export class ChatManager {
         this.seededProviders.set(name, provider);
       }
     }
+    this.contextCompactor = new ContextCompactor({
+      store: this.store,
+      events: this.events,
+      getSessionRecord: (sessionId) => this.getSessionRecord(sessionId),
+      getLiveSession: (sessionId) => this.states.get(sessionId)?.session,
+      isSessionTurnPending: (sessionId) => this.isSessionTurnPending(sessionId),
+      resetSession: (sessionId) => this.reset(sessionId),
+      oneShotCompletion: (prompt, timeoutMs, completionOpts) =>
+        this.oneShotCompletion(prompt, timeoutMs, completionOpts),
+      invalidateSessionCache: (sessionId) => this.cacheController?.invalidate(sessionId),
+      ...(this.historyManager ? { history: this.historyManager } : {}),
+    });
     // Seed the engagement-mode cache from disk without blocking the
     // constructor. Tests and the real service can flip it synchronously
     // via setEngagementMode after reading fresh config.
@@ -2042,6 +2085,17 @@ export class ChatManager {
   private draftReader?: import('../diffpack/draft-store.js').DraftOverlayReader;
 
   /**
+   * Prompt drafts. Optional so every test that builds a bare ChatManager
+   * keeps working; the two things it drives — stamping a sent draft with its
+   * message time, and cleaning up after a deleted thread — are both
+   * best-effort bookkeeping, never part of a turn's success.
+   */
+  setPromptDrafts(manager: import('../prompt-drafts/manager.js').PromptDraftManager): void {
+    this.promptDrafts = manager;
+  }
+  private promptDrafts?: import('../prompt-drafts/manager.js').PromptDraftManager;
+
+  /**
    * Fail-fast per-task budget (Theme F, F3.1). Accumulates each task's
    * UNATTENDED token/turn spend across the sessions that serve it; a soft
    * trip queues a converge-now nudge, a hard trip routes to
@@ -2139,6 +2193,7 @@ export class ChatManager {
       paused?: boolean;
       escalationStage?: number;
       infrastructureError?: boolean;
+      hook?: 'onExit';
       unsatisfiable?: boolean;
       scriptRuns?: GateScriptDiagnostic[];
     };
@@ -2220,6 +2275,7 @@ export class ChatManager {
             ...(outcome.infrastructureError !== undefined
               ? { infrastructureError: outcome.infrastructureError }
               : {}),
+            ...(outcome.hook !== undefined ? { hook: outcome.hook } : {}),
             ...(outcome.unsatisfiable !== undefined
               ? { unsatisfiable: outcome.unsatisfiable }
               : {}),
@@ -3025,7 +3081,11 @@ export class ChatManager {
    * merged turn after it. On an idle session with an empty queue this
    * degrades to a plain `send()`.
    */
-  async interruptWithMessage(sessionId: string, userText: string): Promise<ChatMessage> {
+  async interruptWithMessage(
+    sessionId: string,
+    userText: string,
+    opts?: { draftId?: string },
+  ): Promise<ChatMessage> {
     if (this.shuttingDown) {
       throw new Error('service shutting down');
     }
@@ -3034,7 +3094,7 @@ export class ChatManager {
     }
     const queueDepth = this.pendingSends.get(sessionId)?.length ?? 0;
     if (!this.inflight.has(sessionId) && queueDepth === 0) {
-      return this.send(sessionId, userText);
+      return this.send(sessionId, userText, opts?.draftId ? { draftId: opts.draftId } : {});
     }
     return new Promise<ChatMessage>((resolve, reject) => {
       const q = this.pendingSends.get(sessionId) ?? [];
@@ -3050,6 +3110,7 @@ export class ChatManager {
         continuationMaxTokens: undefined,
         hidden: false,
         nudge: false,
+        draftId: opts?.draftId,
         waiters: [{ resolve, reject }],
       };
       q.unshift(entry);
@@ -3609,7 +3670,19 @@ export class ChatManager {
     const active = existing.find((s) => !s.archived && !s.taskRef);
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) return full;
+      if (full) {
+        // Retro-stamp lineage on an already-existing session — without this,
+        // parentSession is only ever set on the CREATE path, and since most
+        // delegations land in a session that already exists, the field was
+        // empirically null across whole eval runs. First-parent-wins: the
+        // containment parent must stay stable or the session tree reshuffles;
+        // later senders are per-message edges (ChatMessage.from), not parents.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          await this.store.writeSession(full);
+        }
+        return full;
+      }
     }
     return this.createSession({
       gezelId: args.gezelId,
@@ -3643,7 +3716,14 @@ export class ChatManager {
     );
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) return full;
+      if (full) {
+        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          await this.store.writeSession(full);
+        }
+        return full;
+      }
     }
     const parsedTaskRef = parseTaskRef(args.taskRef);
     const task = parsedTaskRef
@@ -4152,20 +4232,37 @@ export class ChatManager {
         }
       }
     }
+    const dispatchStep = taskRecord?.craftbook.steps.find((step) => step.id === dispatchStepId);
+    const explicitOutputMedium = dispatchStep?.toolPolicy?.outputMedium;
+    const additionalOutputMedia = dispatchStep?.toolPolicy?.additionalOutputMedia ?? [];
+    const secondaryClause =
+      additionalOutputMedia.length > 0
+        ? ` The procedure also authorizes secondary output in: ${additionalOutputMedia.join(', ')}; those writes do not substitute for the primary result.`
+        : '';
+    const progressClause =
+      explicitOutputMedium === 'workspace'
+        ? ` Persist the primary result to the workspace path named by the procedure.${secondaryClause}`
+        : explicitOutputMedium === 'artifact'
+          ? ` Persist the primary result to the artifacts-drawer path named by the procedure.${secondaryClause}`
+          : explicitOutputMedium === 'task-note'
+            ? ` Persist the primary result with \`write_task_note\`.${secondaryClause}`
+            : explicitOutputMedium === 'none'
+              ? ' This step has no persisted output; inspect or route as instructed without creating a file, artifact, or task note.'
+              : ' Append focused notes with `write_task_note` as you go.';
     const seed =
       args.kind === 'retry'
         ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork} Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause} Call \`advance_task_step\` when the step is done.`
           : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
                     : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -4207,6 +4304,7 @@ export class ChatManager {
     sessionId: string;
     toGezelName: string;
     toGezelId: string;
+    deliveryState: 'parked' | 'dispatched';
     deduplicated?: boolean;
   }> {
     const fromRec = args.fromSessionId
@@ -4346,10 +4444,20 @@ export class ChatManager {
         ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, boring)
         : 'another gezel';
     const fromName = fromDisplay(targetBoring);
-    const result = {
+    // Start conservatively. `dispatchTargetSend` flips this same object when
+    // the recipient actually enters the provider queue. The object is also
+    // held by `inflightFileHandoffs`, so a duplicate arriving after dispatch
+    // observes the current state rather than stale "parked" metadata.
+    const result: {
+      sessionId: string;
+      toGezelName: string;
+      toGezelId: string;
+      deliveryState: 'parked' | 'dispatched';
+    } = {
       sessionId: session.id,
       toGezelName: targetDisplay(senderBoring),
       toGezelId: target.id,
+      deliveryState: 'parked',
     };
     // Re-check after the async session/config reads so simultaneous calls
     // converge on whichever one registered first.
@@ -4412,6 +4520,7 @@ export class ChatManager {
           fromGezelId: args.fromGezelId,
           toGezelId: target.id,
           targetSessionId: session.id,
+          ...(resolvedFromSessionId ? { fromSessionId: resolvedFromSessionId } : {}),
           preview: args.text.slice(0, 80),
         },
       });
@@ -4459,10 +4568,18 @@ export class ChatManager {
     const dispatchTargetSend = () => {
       if (dispatched) return; // once-guard: park-flush AND watchdog can both call this
       dispatched = true;
+      result.deliveryState = 'dispatched';
       if (parkedHandoffId) void this.clearPendingHandoff(parkedHandoffId);
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
       const targetSend = this.sendWithBusyRetry(session.id, seed, {
-        from: { gezelId: args.fromGezelId, gezelName: fromName },
+        // sessionId/kind are the durable per-edge delegation record — see
+        // SessionParentSchema's lineage contract in core.
+        from: {
+          gezelId: args.fromGezelId,
+          gezelName: fromName,
+          ...(resolvedFromSessionId ? { sessionId: resolvedFromSessionId } : {}),
+          kind: 'delegation',
+        },
         ...(args.lane ? { lane: args.lane } : {}),
         ...(args.ambient ? { ambient: true } : {}),
       })
@@ -4561,7 +4678,7 @@ export class ChatManager {
           (t as { unref?: () => void }).unref?.();
         } else {
           log.warn(
-            `[chat] ${htag}: WATCHDOG giving up after ${checks} checks — sender still mid-turn`,
+            `[chat] ${htag}: WATCHDOG observation window ended after ${checks} checks — sender still mid-turn; durable handoff remains parked until sender idle or restart`,
           );
         }
       };
@@ -4783,7 +4900,12 @@ export class ChatManager {
       const seed = `[Question from ${fromName}]: ${args.text}${deliverableAnnotation}`;
       try {
         await this.sendWithBusyRetry(session.id, seed, {
-          from: { gezelId: args.fromGezelId, gezelName: fromName },
+          from: {
+            gezelId: args.fromGezelId,
+            gezelName: fromName,
+            sessionId: args.fromSessionId,
+            kind: 'consultation',
+          },
         });
       } catch (err) {
         return {
@@ -5280,6 +5402,9 @@ export class ChatManager {
           targetSessionId: args.fromSessionId,
           fromGezelId: args.toGezelId,
           fromName: args.toName,
+          // The recipient session that produced this reply — the reverse
+          // edge of the delegation, recorded per-message like the outbound.
+          fromSessionId: args.targetSessionId,
           fromSessionScope: {
             sessionId: args.fromSessionId,
             gezelId: args.fromGezelId,
@@ -5311,6 +5436,8 @@ export class ChatManager {
     targetSessionId: string;
     fromGezelId: string;
     fromName: string;
+    /** Session the reply was produced in — the reverse delegation edge. */
+    fromSessionId?: string;
     fromSessionScope?: PublishScope;
     seed: string;
   }): Promise<void> {
@@ -5319,7 +5446,11 @@ export class ChatManager {
     while (Date.now() < deadlineMs) {
       try {
         await this.sendWithBusyRetry(args.targetSessionId, args.seed, {
-          from: { gezelId: args.fromGezelId, gezelName: args.fromName },
+          from: {
+            gezelId: args.fromGezelId,
+            gezelName: args.fromName,
+            ...(args.fromSessionId ? { sessionId: args.fromSessionId, kind: 'delegation' } : {}),
+          },
         });
         return;
       } catch (err) {
@@ -5414,23 +5545,27 @@ export class ChatManager {
   }
 
   /**
-   * Attach a freshly-created question to the assistant bubble that asked
-   * it, on disk AND on the live turn record.
+   * Attach a freshly-created question to the assistant bubble that asked it.
    *
-   * The disk half alone is not enough for the case it exists for: an
-   * `ask_user_question` tool call happens *mid-turn*, so the record
-   * ChatManager is about to write at turn end is a long-lived in-memory
-   * object that never saw the stamp — its wholesale write erases it, and
-   * the in-chat card silently degrades to dropdown-only. Mirroring onto
-   * the same bubble in the live record keeps the stamp through that
-   * write. Both halves target the last assistant message, which mid-turn
-   * is the same bubble: the in-flight one has not been pushed yet.
+   * During a model turn, that bubble does not exist yet: the durable "last
+   * assistant" belongs to the previous turn (and there is no such message on
+   * turn one). Hold the id in the per-turn buffer for the commit path. The
+   * idle fallback supports direct API/debug calls by stamping the existing
+   * last assistant on both the warm record and disk.
    */
   async stampPendingQuestion(
     gezelId: string,
     sessionId: string,
     questionId: string,
   ): Promise<void> {
+    // `ask_user_question` is normally called from inside the model's active
+    // turn. Its assistant message has not been constructed yet, so the
+    // durable "last assistant" is the wrong bubble (or absent on turn one).
+    // The commit path below consumes this id onto the new assistant message.
+    if (this.inflight.has(sessionId)) {
+      this.currentTurnPendingQuestionIds.set(sessionId, questionId);
+      return;
+    }
     const live = this.states.get(sessionId)?.record;
     if (live) {
       for (let i = live.messages.length - 1; i >= 0; i--) {
@@ -5554,7 +5689,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       coalescable?: boolean;
       lane?: Lane;
       ambient?: boolean;
@@ -5588,6 +5723,13 @@ export class ChatManager {
     primarySessionId: string;
     text: string;
     mentionGezelIds: string[];
+    /**
+     * The prompt draft the user wrote this in. Stamped on the PRIMARY
+     * message only: the fan-out copies are deliveries of that one draft, not
+     * drafts of their own, and pointing several messages at one draft would
+     * make "open the prompt this came from" ambiguous.
+     */
+    draftId?: string;
   }): Promise<{ mentionSessionIds: string[] }> {
     const { primarySessionId, text } = args;
     const primary = await this.getSessionRecord(primarySessionId);
@@ -5625,7 +5767,7 @@ export class ChatManager {
     if (primaryShouldReply) {
       // Fire primary first and await — UI should see the primary turn
       // start before any fan-out shows up.
-      await this.send(primarySessionId, text);
+      await this.send(primarySessionId, text, args.draftId ? { draftId: args.draftId } : {});
     }
     // Note: the silent-primary branch (notifyUserMessage) runs AFTER
     // the fan-out loop below. When the user explicitly addresses
@@ -5694,7 +5836,11 @@ export class ChatManager {
       // — but in practice this keeps the voorman bubble behind the
       // addressed gezel's turn start for the common case.
       await Promise.resolve();
-      await this.notifyUserMessage(primarySessionId, text);
+      await this.notifyUserMessage(
+        primarySessionId,
+        text,
+        args.draftId ? { draftId: args.draftId } : {},
+      );
     }
 
     if (this.historyManager && historyTargets.length > 0) {
@@ -5733,7 +5879,11 @@ export class ChatManager {
    * session bus so any composer streaming indicator clears. On error,
    * the session bus gets `error` + `done` so the composer doesn't hang.
    */
-  async notifyUserMessage(sessionId: string, userText: string): Promise<ChatMessage> {
+  async notifyUserMessage(
+    sessionId: string,
+    userText: string,
+    opts?: { draftId?: string },
+  ): Promise<ChatMessage> {
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('notifyUserMessage error:', message);
@@ -5757,6 +5907,7 @@ export class ChatManager {
       role: 'user',
       content: userText,
       at: nowIso(),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
     };
     record!.messages.push(userMessage);
     // Deliberately DON'T update `record.title` from `userText` here.
@@ -6354,6 +6505,15 @@ export class ChatManager {
     this.rejectQueuedForSession(sessionId, 'session deleted');
     // Drop the cached prompt state — the session no longer exists.
     this.cacheController?.invalidate(sessionId);
+    // Sent drafts describe a conversation that no longer exists, so they go
+    // too; unsent ones are detached instead — the user still has words they
+    // never sent, and losing those to a thread cleanup would be the exact
+    // failure this whole feature exists to prevent.
+    if (this.promptDrafts) {
+      await this.promptDrafts.onSessionDeleted(record.projectId, sessionId).catch((err) => {
+        log.warn(`prompt draft cleanup failed for session ${sessionId}: ${String(err)}`);
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -6377,7 +6537,7 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       /**
        * When true, merge this send into the tail of the session's
        * pending queue IF the tail is also coalescable and shares
@@ -6425,6 +6585,12 @@ export class ChatManager {
        * the message never queued, so it renders as a normal send.
        */
       nudge?: boolean;
+      /**
+       * The prompt draft this user turn was written in. Display-only, and
+       * carried through the queue so a message typed mid-turn still points at
+       * its draft when it finally runs.
+       */
+      draftId?: string;
       /** Strong provenance used by per-turn behavior hooks. */
       messageOrigin?: TurnMessageOrigin;
     },
@@ -6494,6 +6660,7 @@ export class ChatManager {
           continuationMaxTokens: opts?.continuationMaxTokens,
           hidden: opts?.hidden === true,
           nudge: opts?.nudge === true,
+          draftId: opts?.draftId,
           waiters: [{ resolve, reject }],
         };
         q.push(entry);
@@ -6537,17 +6704,22 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
     this.inflight.set(sessionId, inflightTurn);
+    // Claim a clean question slot synchronously with the in-flight lock.
+    // `stampPendingQuestion` can be called as soon as the provider starts
+    // tooling, including while runSend is still in its async setup phase.
+    this.currentTurnPendingQuestionIds.delete(sessionId);
     const tag = sessionId.slice(0, 8);
     const startedAt = Date.now();
     log.debug(`runSend#${tag} ENTRY userTextLen=${userText.length}`);
@@ -6668,12 +6840,13 @@ export class ChatManager {
     // user_message event fires inside runSend right after.
     this.publishQueueRemoved(sessionId, next.id, 'started');
     const runOpts: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     } = {};
     if (next.from) runOpts.from = next.from;
@@ -6682,6 +6855,9 @@ export class ChatManager {
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
     if (next.hidden) runOpts.hidden = true;
     if (next.nudge) runOpts.nudge = true;
+    // Merged nudges keep the FIRST entry's draft: the run is that draft's
+    // turn, and the later nudges are text appended to it.
+    if (next.draftId) runOpts.draftId = next.draftId;
     runOpts.messageOrigin = next.messageOrigin;
     void this.runSendAndDrain(sessionId, next.userText, runOpts)
       .then((msg) => {
@@ -6718,12 +6894,13 @@ export class ChatManager {
     userText: string,
     inflightTurn: InflightTurn,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
@@ -6929,6 +7106,7 @@ export class ChatManager {
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
       ...(opts?.nudge ? { nudge: true } : {}),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
       // A dispatch seed or handoff is a user turn only because that is the
       // role providers accept; mark it so the transcript never attributes
       // the machinery's words to the person.
@@ -6962,6 +7140,13 @@ export class ChatManager {
         'failed to persist user message before send:',
         err instanceof Error ? err.message : err,
       );
+    }
+    if (userMessage.draftId && this.promptDrafts) {
+      void this.promptDrafts
+        .noteSentMessageAt(state.record.projectId, userMessage.draftId, userMessage.at)
+        .catch((err) => {
+          log.warn(`failed to stamp prompt draft ${userMessage.draftId}: ${String(err)}`);
+        });
     }
     // Publish the user message so the project + global timelines render
     // it immediately. The session-scoped composer ignores it — it doesn't
@@ -7784,6 +7969,11 @@ export class ChatManager {
         // A continuation turn (set below) re-initializes the bucket.
         const drained = this.currentTurnTools.get(sessionId) ?? [];
         if (drained.length > 0) assistantMessage.toolCalls = drained;
+        const pendingQuestionId = this.currentTurnPendingQuestionIds.get(sessionId);
+        if (pendingQuestionId) {
+          assistantMessage.pendingQuestionId = pendingQuestionId;
+          this.currentTurnPendingQuestionIds.delete(sessionId);
+        }
         toolsAcrossContinuations.push(...drained);
         this.currentTurnTools.set(sessionId, []);
         // Same pattern for intents. Clamp `afterChars` to the final
@@ -8114,16 +8304,23 @@ export class ChatManager {
           const failedRun = advanceOutcome.gateRejected.scriptRuns?.find(
             (run) => run.error || run.runId,
           );
+          const exitHookFailed = advanceOutcome.gateRejected.hook === 'onExit';
           log.warn(
-            `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" gate paused the task — stopping the repair loop`,
+            `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" ${
+              exitHookFailed ? 'onExit hook failed and' : 'gate'
+            } paused the task — stopping the repair loop`,
           );
-          const gateWarning = advanceOutcome.gateRejected.infrastructureError
-            ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
+          const gateWarning = exitHookFailed
+            ? `The onExit script for ${ref} failed, so the step remained incomplete and the task was paused.${
                 failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
               }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
-            : advanceOutcome.gateRejected.unsatisfiable
-              ? `The step gate for ${ref} requires workspace files, but gezel workspace writes are off for this project — the task was paused for a human decision without counting a deliverable attempt. See the task notes for the fixes.`
-              : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
+            : advanceOutcome.gateRejected.infrastructureError
+              ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
+                  failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
+                }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
+              : advanceOutcome.gateRejected.unsatisfiable
+                ? `The step gate for ${ref} requires workspace files, but gezel workspace writes are off for this project — the task was paused for a human decision without counting a deliverable attempt. See the task notes for the fixes.`
+                : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
           assistantMessage.warnings = [...(assistantMessage.warnings ?? []), gateWarning];
           await this.store.writeSession(state.record);
           this.events.publish(scope, {
@@ -8995,6 +9192,7 @@ export class ChatManager {
       if (this.turnBufferOwner.get(sessionId) === inflightTurn) {
         this.turnBufferOwner.delete(sessionId);
         this.currentTurnTools.delete(sessionId);
+        this.currentTurnPendingQuestionIds.delete(sessionId);
         this.currentTurnIntents.delete(sessionId);
         this.currentTurnWarnings.delete(sessionId);
         this.currentTurnContentChars.delete(sessionId);
@@ -9028,8 +9226,9 @@ export class ChatManager {
     sessionId: string,
     userText: string,
     opts?: {
-      from?: { gezelId: string; gezelName: string };
+      from?: NonNullable<ChatMessage['from']>;
       hidden?: boolean;
+      draftId?: string;
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
@@ -9090,6 +9289,7 @@ export class ChatManager {
       at: nowIso(),
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
       ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     record.messages.push(userMessage);
@@ -9260,12 +9460,15 @@ export class ChatManager {
 
     const drained = this.currentTurnTools.get(sessionId) ?? [];
     this.currentTurnTools.set(sessionId, []);
+    const pendingQuestionId = this.currentTurnPendingQuestionIds.get(sessionId);
+    this.currentTurnPendingQuestionIds.delete(sessionId);
 
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: assistantText,
       at: nowIso(),
       ...(drained.length > 0 ? { toolCalls: drained } : {}),
+      ...(pendingQuestionId ? { pendingQuestionId } : {}),
       ...(success ? {} : { warnings: errorMessage ? [errorMessage] : [`${ff.tool} failed`] }),
     };
     record.messages.push(assistantMessage);
@@ -9649,23 +9852,13 @@ export class ChatManager {
 
   /**
    * Local-provider context-window pressure check. Runs before each turn
-   * (including continuation nudges). Three bands keyed off the
-   * estimated outgoing-prompt tokens vs. `num_ctx`:
-   *
-   *   - `< 75%`  → no-op.
-   *   - Warning band with prior conversation → publish `context_warning`.
-   *     UI surfaces a yellow banner so the user can choose to start fresh.
-   *     A first-turn prompt never gets this warning: its standing system +
-   *     tool prefix cannot be reduced by starting a new session.
-   *   - `≥ 90%`  → run {@link compactInFlight} to collapse the older
-   *     messages into a synthetic compaction-summary bubble, tear
-   *     down the live session so the next acquire rebuilds with the
-   *     compacted history, and publish `context_compacted`. If the
-   *     compaction itself fails, fall back to the warning so the
-   *     user at least sees something — Ollama would silently
-   *     truncate from the front otherwise, which is what the model
-   *     "forgot the user's question" symptom traces back to (see
-   *     ollama.ts header).
+   * (including continuation nudges). It publishes the effective window and
+   * automatic-compaction threshold for user-facing UI, then compacts once the
+   * estimated outgoing prompt crosses that threshold. There is no ordinary
+   * "window nearly full" warning band: the runtime owns this maintenance and
+   * should not ask either the user or model to second-guess it. A warning is
+   * emitted only when compaction was actually needed but could not reduce an
+   * accumulated conversation.
    *
    * Copilot/OpenAI/CLI providers remain no-ops because they manage history
    * outside this process. RemoteGezelProvider is included: its transport is
@@ -9726,26 +9919,28 @@ export class ChatManager {
       record.providerName === 'mlx' || liveSession.model?.startsWith('mlx:')
         ? MLX_CONTEXT_COMPACT_RATIO
         : CONTEXT_COMPACT_RATIO;
-    if (!opts?.force && ratio < CONTEXT_WARN_RATIO) return { rebuilt: false };
-
-    if (!opts?.force && ratio < compactRatio) {
-      log.info(
-        `pressure#${tag} WARN-ONLY tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)} (compact@${compactRatio})`,
-      );
-      if (!hasPriorConversation) {
+    const contextPolicyChanged =
+      record.contextWindow !== numCtx || record.contextAutoCompactRatio !== compactRatio;
+    record.contextWindow = numCtx;
+    record.contextAutoCompactRatio = compactRatio;
+    // The fill rides along on the turn's own session write; it changes every
+    // turn and is not worth a write of its own.
+    record.contextEstimatedTokens = estimatedTokens;
+    if (contextPolicyChanged) {
+      await this.store.writeSession(record).catch((err) => {
         log.warn(
-          `pressure#${tag} FIRST-TURN-PREFIX tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)}; suppressing start-fresh warning because no prior conversation is reducible`,
+          `context-policy writeSession failed for ${tag}: ${err instanceof Error ? err.message : err}`,
         );
-        return { rebuilt: false };
-      }
-      this.events.publish(scope, {
-        type: 'context_warning',
-        estimatedTokens,
-        numCtx,
-        model,
       });
-      return { rebuilt: false };
     }
+    this.events.publish(scope, {
+      type: 'context_window',
+      numCtx,
+      model,
+      autoCompactRatio: compactRatio,
+      estimatedTokens,
+    });
+    if (!opts?.force && ratio < compactRatio) return { rebuilt: false };
     log.info(
       `pressure#${tag} COMPACT-START tokens=${estimatedTokens}/${numCtx} ratio=${ratio.toFixed(2)} ` +
         `msgs=${record.messages.length}`,
@@ -9756,12 +9951,18 @@ export class ChatManager {
     // least gets the yellow banner — Ollama will silently truncate
     // either way, but the user gets a signal.
     const compactT0 = Date.now();
-    const compacted = await this.compactInFlight(record).catch((err) => {
-      log.warn(
-        `compactInFlight threw for session ${tag}: ${err instanceof Error ? err.message : err}`,
-      );
-      return null;
-    });
+    const compacted = await this.contextCompactor
+      .compactInFlight(record, {
+        contextWindow: numCtx,
+        estimatedTokensBefore: estimatedTokens,
+        autoCompactRatio: compactRatio,
+      })
+      .catch((err) => {
+        log.warn(
+          `compactInFlight threw for session ${tag}: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      });
     log.info(
       `pressure#${tag} COMPACT-END afterMs=${Date.now() - compactT0} ` +
         `removed=${compacted?.removedCount ?? 0} ${compacted ? 'ok' : 'nope'}`,
@@ -9774,6 +9975,7 @@ export class ChatManager {
         estimatedTokens,
         numCtx,
         model,
+        reason: 'compaction_failed',
       });
     } else if (!compacted) {
       log.warn(
@@ -9842,120 +10044,44 @@ export class ChatManager {
         type: 'context_compacted',
         removedCount: compacted.removedCount,
         model,
+        numCtx,
+        estimatedTokensBefore: estimatedTokens,
+        autoCompactRatio: compactRatio,
+        compactionCount: compacted.compactionCount,
+        mode: 'between-turn',
+      });
+    }
+    // Republish the window with the reduced fill. Without this the client's
+    // meter sits at the pre-compaction reading until the next turn measures
+    // again — i.e. the one moment the number visibly matters is the one
+    // moment it would be wrong.
+    const reducedEstimator = fresh.estimatePromptChars;
+    if (reducedEstimator) {
+      const reducedTokens = Math.ceil((reducedEstimator.call(fresh) + pendingPrompt.length) / 4);
+      record.contextEstimatedTokens = reducedTokens;
+      this.events.publish(scope, {
+        type: 'context_window',
+        numCtx,
+        model,
+        autoCompactRatio: compactRatio,
+        estimatedTokens: reducedTokens,
       });
     }
     return { rebuilt: true, fresh };
   }
 
   /**
-   * Collapse the older portion of a session's messages into a single
-   * synthetic `compaction-summary` assistant bubble. The newest
-   * {@link COMPACTION_KEEP_TAIL} messages stay verbatim — they're the
-   * conversational "now" the model needs in full fidelity. Everything
-   * before that is fed to a one-shot summarization on the same
-   * provider; the resulting synthesis replaces those messages
-   * in-place. Persisted via `writeSession`. Fully audit-trailed via
-   * a `chat.compacted` history event.
+   * Compact a session on demand, outside any turn. Same collapse the
+   * automatic pressure path runs, reached from the context meter's
+   * "Compact now" so a user who can see the thread filling up doesn't have
+   * to wait for the threshold — or send a throwaway message to trigger it.
    *
-   * Returns `null` when there's nothing to compact (too few messages)
-   * or the summarization failed; caller treats both as "no
-   * compaction happened" and skips the fresh-session rebuild.
+   * Refuses while a turn is pending: compaction rewrites `record.messages`
+   * out from under a live session, which is safe only because the caller
+   * then tears that session down.
    */
-  private async compactInFlight(record: ChatSession): Promise<{ removedCount: number } | null> {
-    if (record.messages.length <= COMPACTION_KEEP_TAIL + 2) {
-      // Two-pair tail + at least 3 to compact = 9. Below that the
-      // synthesis costs more (one-shot LLM call) than it saves.
-      return null;
-    }
-    const splitAt = record.messages.length - COMPACTION_KEEP_TAIL;
-    const toCompact = record.messages.slice(0, splitAt);
-    const tail = record.messages.slice(splitAt);
-    const transcript = renderTranscript(toCompact);
-    if (!transcript.trim()) return null;
-
-    // Attribute the job in the queue UI to the Klerk when one is
-    // configured (compaction is a writerly summary task — the Klerk's
-    // job description) and otherwise to the active session's gezel.
-    // Provider + model stay pinned to the session's so the compacted
-    // summary tokens are compatible with subsequent turns; we don't
-    // pass `useKlerk: true` because that would inject the Klerk's
-    // about.md as the system prompt, which dilutes the very specific
-    // COMPACTION_PROMPT instructions.
-    const compactionConfig = await this.store.readConfig().catch(() => null);
-    const compactionGezelId = compactionConfig?.klerkGezelId ?? record.gezelId;
-    let synthesis: string;
-    try {
-      synthesis = await this.oneShotCompletion(`${COMPACTION_PROMPT}${transcript}`, 60_000, {
-        providerName: record.providerName,
-        ...(record.model ? { model: record.model } : {}),
-        ...(compactionGezelId ? { gezelId: compactionGezelId } : {}),
-        jobLabel: `compaction · ${record.id.slice(0, 8)}`,
-      });
-    } catch (err) {
-      log.warn(
-        `[chat] in-flight compaction failed for session ${record.id.slice(0, 8)}: ${err instanceof Error ? err.message : err}`,
-      );
-      return null;
-    }
-
-    const trimmed = synthesis.trim();
-    if (!trimmed) return null;
-    const synthetic: ChatMessage = {
-      role: 'assistant',
-      content: `[Earlier in this conversation, summarized to fit the model context:\n\n${trimmed}]`,
-      at: nowIso(),
-      synthetic: 'compaction-summary',
-    };
-
-    record.messages = [synthetic, ...tail];
-    record.compactionCount = (record.compactionCount ?? 0) + 1;
-    record.lastCompactedAt = nowIso();
-    // The cached prompt prefix no longer matches the compacted message
-    // list — anything the engine had cached for this session is now
-    // useless. Drop it. Next turn rebuilds the cache against the new
-    // shorter prefix.
-    this.cacheController?.invalidate(record.id);
-    // Reset summarization watermark — `summarizedUpTo` was indexed
-    // into the now-shrunken array. Leave `summarizedAt` as a
-    // tombstone; the next post-session summarizer pass will see
-    // the new shape and proceed normally.
-    if (typeof record.summarizedUpTo === 'number') {
-      record.summarizedUpTo = Math.min(record.summarizedUpTo, record.messages.length);
-    }
-    // Same clamp for the memory-extraction cadence cursor. Without
-    // this, `shouldRunMemoryExtraction` would compute
-    // `messages.length - extractedUpTo` as negative (or a very small
-    // positive), and extraction would stay permanently deferred on
-    // local providers after the first compaction.
-    if (typeof record.extractedUpTo === 'number') {
-      record.extractedUpTo = Math.min(record.extractedUpTo, record.messages.length);
-    }
-    await this.store.writeSession(record);
-
-    void this.historyManager
-      ?.log({
-        kind: 'chat.compacted',
-        projectId: record.projectId,
-        gezelId: record.gezelId,
-        summary: `Compacted ${toCompact.length} message${toCompact.length === 1 ? '' : 's'} → ${trimmed.length} char synthesis (compaction #${record.compactionCount})`,
-        details: {
-          sessionId: record.id,
-          removedCount: toCompact.length,
-          synthesisLength: trimmed.length,
-          compactionCount: record.compactionCount,
-        },
-      })
-      .catch((err) => {
-        log.warn(
-          `history.log for chat.compacted failed: ${err instanceof Error ? err.message : err}`,
-        );
-      });
-
-    log.info(
-      `compacted session ${record.id.slice(0, 8)}: ${toCompact.length} messages → 1 synthesis (${trimmed.length} chars)`,
-    );
-
-    return { removedCount: toCompact.length };
+  async compactSessionNow(sessionId: string): Promise<CompactSessionNowResult> {
+    return this.contextCompactor.compactSessionNow(sessionId);
   }
 
   async history(sessionId: string): Promise<ChatMessage[]> {
@@ -11680,6 +11806,18 @@ export class ChatManager {
       const llamaSlotSavePath = llamaProvider.getSlotSavePath();
       const adapter = new LlamaCppCacheAdapter({
         resolveBaseUrl: async () => llamaProvider.currentBaseUrl(),
+        // `/slots` is an AUTHENTICATED endpoint — only `/health` answers
+        // without the key (see engine-api-key.ts). The provider authenticates
+        // because `build-provider` wraps its fetch in `withEngineApiKey`, but
+        // the adapter is constructed here with a bare `fetch`, so without this
+        // it sent no Authorization header and every call 401'd: the `/slots`
+        // usage poll AND both `?action=save|restore` calls, i.e. the whole
+        // disk KV persistence layer, silently dead. It failed quietly because
+        // each call site degrades on error by design (no cache entry, `disk
+        // save: MISSED`) — the only symptom was cold prefills and a 5-second
+        // drip of `unauthorized: Invalid API Key` in the engine log, ~300 per
+        // trial. Resolved per call, not captured: the key is generated lazily.
+        resolveAuthToken: () => engineApiKey(),
         // The ENGINE slot count (`--parallel N`), not `queue.concurrency`:
         // the queue reserves a background lane above the engine slots, so
         // on a single-slot launch it reads 2 and the adapter would bind
@@ -12884,6 +13022,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -12916,6 +13055,7 @@ export class ChatManager {
           slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
           sharedKvLayers: summary.sharedKvLayers,
+          loopCount: summary.loopCount,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -12955,6 +13095,7 @@ export class ChatManager {
         slidingWindow: summary.slidingWindow,
         slidingWindowPattern: summary.slidingWindowPattern,
         sharedKvLayers: summary.sharedKvLayers,
+        loopCount: summary.loopCount,
         keyLength: summary.keyLength,
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
@@ -13067,6 +13208,7 @@ export class ChatManager {
               slidingWindow: summary.slidingWindow,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13106,6 +13248,7 @@ export class ChatManager {
               headCountKvPerLayer: summary.headCountKvPerLayer,
               slidingWindowPattern: summary.slidingWindowPattern,
               sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
               keyLength: summary.keyLength,
               valueLength: summary.valueLength,
               keyLengthSwa: summary.keyLengthSwa,
@@ -13229,6 +13372,7 @@ export class ChatManager {
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
             sharedKvLayers: summary.sharedKvLayers,
+            loopCount: summary.loopCount,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -15353,6 +15497,7 @@ export class ChatManager {
       return existingSubstantialFileForImmediate;
     };
     const contextualBuiltinTools = [
+      ...taskStepContextualBuiltinTools(record, taskContext?.step),
       ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
@@ -16070,8 +16215,15 @@ export class ChatManager {
       // the extractor is tool-name-keyed and shape-guarded, so foreign
       // structuredContent yields no card rather than a malformed one.
       const card = extractToolCard(info);
+      // Start-of-call timestamp. The fallback is exact for any producer
+      // that computes durationMs at fire time (all current ones do), so
+      // even a producer that never stamps startedAtMs yields a correct
+      // `at` — which is why this line, not the producer stamps, carries
+      // the replay-timeline guarantee.
+      const at = new Date(info.startedAtMs ?? Date.now() - info.durationMs).toISOString();
       const call: ChatMessageToolCall = {
         name: info.name,
+        at,
         durationMs: info.durationMs,
         success: info.success,
         ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
@@ -16100,6 +16252,7 @@ export class ChatManager {
         {
           type: 'tool',
           name: info.name,
+          at,
           durationMs: info.durationMs,
           success: info.success,
           ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
@@ -16234,6 +16387,14 @@ export class ChatManager {
           maxClosingChars: 180,
         };
       }
+      // MCP registration is fixed for the life of the provider session, so
+      // inspect the whole embedded graph rather than only the current step.
+      // The per-turn surface below remains narrower and advertises the large
+      // editor schema only on the step whose procedure actually mandates it.
+      const taskNeedsCraftbookStepEditing =
+        taskContext?.task.craftbook.steps.some(
+          (step) => taskStepContextualBuiltinTools(record, step).length > 0,
+        ) ?? false;
       const mcpEnv: Record<string, string> = {
         GEZEL_BASE_URL: `${scheme}://127.0.0.1:${this.getPort()}`,
         GEZEL_TOKEN: mcpToken,
@@ -16281,6 +16442,14 @@ export class ChatManager {
         // Scope craftbook: the unified craftbook_* tools default their
         // target to this template when editing in the explicit editor.
         ...(record.craftbookRef ? { GEZEL_CRAFTBOOK_ID: record.craftbookRef } : {}),
+        // Register the large surgical step-patch schema only in sessions that
+        // can legitimately edit a craftbook. The resolved per-turn allowlist
+        // remains the exact wire gate, so ordinary task steps do not see it;
+        // a plan-authoring step that mandates it can receive it without
+        // requiring a fresh MCP subprocess when the task advances.
+        ...(record.craftbookRef || taskNeedsCraftbookStepEditing
+          ? { GEZEL_CRAFTBOOK_STEP_EDITING: '1' }
+          : {}),
         // Only projects with a mail-type connector binding expose the email
         // write tools, so a non-mail project's agent never sees
         // draft_email/queue_email/send_email.
@@ -16316,6 +16485,11 @@ export class ChatManager {
         // explicitly or the control arm would still get re-anchored output.
         ...(process.env.GEZEL_DISABLE_EDIT_REANCHOR
           ? { GEZEL_DISABLE_EDIT_REANCHOR: process.env.GEZEL_DISABLE_EDIT_REANCHOR }
+          : {}),
+        // Same reason: unforwarded, the child resolves `standard` and
+        // registers tools this build cannot honor (npm_install).
+        ...(process.env.GEZEL_DISTRIBUTION_PROFILE
+          ? { GEZEL_DISTRIBUTION_PROFILE: process.env.GEZEL_DISTRIBUTION_PROFILE }
           : {}),
       };
       // Diagnostic for the recurring "game tools missing after a model
@@ -16858,6 +17032,25 @@ export class ChatManager {
         log.info(
           `[chat] deterministic mid-loop compaction for session ${sessionRef.id.slice(0, 8)} (${estimatedTokens}/${numCtx} estimated tokens)`,
         );
+        this.events.publish(
+          {
+            sessionId: sessionRef.id,
+            gezelId: sessionRef.gezelId,
+            projectId: sessionRef.projectId,
+            ...(sessionRef.parentSession ? { parentSession: sessionRef.parentSession } : {}),
+            ...(sessionRef.handoffFrom ? { handoffFrom: sessionRef.handoffFrom } : {}),
+            ...(sessionRef.source ? { sessionSource: sessionRef.source } : {}),
+          },
+          {
+            type: 'context_compacted',
+            removedCount: priorMessages.length,
+            model: sessionRef.model ?? sessionRef.providerName,
+            numCtx,
+            estimatedTokensBefore: estimatedTokens,
+            autoCompactRatio: CONTEXT_COMPACT_RATIO,
+            mode: 'mid-turn',
+          },
+        );
         return {
           syntheticContent: `[Earlier in this conversation, condensed to fit the model context:\n\n${condensed}]`,
         };
@@ -17206,82 +17399,6 @@ export function describeDelegateFailureForAsker(
 }
 
 /**
- * Render a brief deliverable-shape annotation for inline injection
- * into a seed message. The asker's `expectedDeliverable` hint becomes
- * a short bracketed line that the recipient model sees alongside the
- * actual message text. Returns the empty string when no hint is set
- * (the default chat-reply path), so callers can append unconditionally.
- *
- * Lives next to the seed-message-construction sites in `messageGezel`
- * and `askGezelAndWait`. The system-prompt consultation-mode addendum
- * is the durable channel (it persists across follow-up turns on a
- * consultation session); this annotation is the per-message
- * reinforcement, sitting in the recency-anchor band where local-model
- * attention is highest.
- */
-function formatExpectedDeliverableAnnotation(
-  deliverable: ExpectedDeliverable | undefined,
-  fileEditsDisabled = false,
-  requestText?: string,
-): string {
-  if (!deliverable || deliverable.kind !== 'file') return '';
-  // On a non-writable project the recipient has no write tools, so don't
-  // tell it to call `write_file`/`generate_image` — that's the instruction
-  // that leads to a stripped-tool call and a hallucinated save. Flag the
-  // block instead; the recipient's system prompt carries the fuller note.
-  if (fileEditsDisabled) {
-    return `\n\n[Note: this recipient's built-in workspace file tools are read-only, so it cannot write this deliverable. Do not call \`write_file\` or claim the file was saved — reply that this session is blocked until "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" is enabled in Project → Settings. Provider-native sessions such as Codex may have separate access.]`;
-  }
-  const path = deliverable.filePath?.trim();
-  const pathClause = path
-    ? `at \`${path}\``
-    : 'at a workspace-relative path (default: `<topic>-analysis.md`)';
-  if (path && isExpectedImageDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`write_file({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
-  }
-  if (path && isExpectedBinaryDocumentDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT OR MEDIA FILE at \`${path}\`. Preserve that exact format — a markdown outline, HTML page, or similarly named text file is not the deliverable. Use the installed DocBlocks production tools/craftbook: author the source as Markdown, call \`convert_document\` for the requested target, visually inspect with \`preview_document\` when layout or frames matter, then persist with \`save_artifact\`. Do NOT hand-build HTML/OOXML or call \`write_file\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
-  }
-  const explicitEditTools = extractExplicitFileEditTools(requestText);
-  if (explicitEditTools.length > 0) {
-    const formattedTools = explicitEditTools.map((tool) => `\`${tool}\``).join(' and ');
-    const appendOnly =
-      explicitEditTools.length === 1 &&
-      explicitEditTools[0] === 'append_to_file' &&
-      isExplicitAppendOnlyRequest(requestText);
-    const editInstruction = appendOnly
-      ? 'This is an append-only update of an existing file. Follow the request exactly: your first file mutation must use `append_to_file`; do not call `write_file`, replace the existing contents, or turn the requested append into a whole-file rewrite.'
-      : `The request explicitly names the existing-file edit surface ${formattedTools}. Follow its stated tool order and fallback rules exactly; do not replace that surgical surface with generic \`write_file\`-first creation guidance.`;
-    return `\n\n[Deliverable expected as a FILE ${pathClause}. ${editInstruction} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-  }
-  if (path && isExpectedDataDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a DERIVED DATA FILE at \`${path}\`. Do not hand-type the rows — compute them: write a small Node script that reads the input files with fs.readFileSync and writes \`${path}\` with fs.writeFileSync, then execute it. Prefer the \`derive_file\` tool ({ script, outputPath: "${path}" }); otherwise write_file the script to scripts/derive.mjs and run it with \`run_nodejs_script\`. Reply in chat with the path + row count — do NOT paste the data into chat.]`;
-  }
-  const repairTarget = extractSingleFileSourceRepairTargetPath(requestText);
-  const focusedExistingRepair =
-    path !== undefined &&
-    repairTarget !== null &&
-    normalizeExpectedDeliverablePath(path) === normalizeExpectedDeliverablePath(repairTarget);
-  if (focusedExistingRepair) {
-    return `\n\n[Deliverable expected as a FILE at \`${path}\`. This is a focused repair of an existing source file, not a fresh-file create. Read \`${path}\` if its current contents are not already in context, then make the smallest concrete edit with \`replace_in_file\` or \`replace_lines\`. Preserve already-working behavior; use \`write_file\` only if a targeted edit is explicitly rejected or the file is missing. Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-  }
-  const singleFileHtmlClause =
-    path && /(?:^|\/)index\.html$/i.test(path)
-      ? ' This is a single-file HTML deliverable: put CSS in `<style>` and JavaScript in one inline `<script>` inside that same HTML file. Do NOT create or rely on `script.js`, `styles.css`, external assets, a build step, or a second source file unless the asker explicitly named one.'
-      : '';
-  return `\n\n[Deliverable expected as a FILE ${pathClause}. Your first assistant action should be the tool call \`write_file({ path, content })\`; draft inside the tool argument, not in chat.${singleFileHtmlClause} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
-}
-
-function normalizeExpectedDeliverablePath(path: string): string {
-  return path
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^workspace\//i, '')
-    .replace(/^\.\//, '')
-    .toLowerCase();
-}
-
-/**
  * Retain a compact, non-secret proof that a successful tool call was aimed at
  * source acquisition. Full arguments already live on the session turn; the
  * history event only needs enough to distinguish an external lookup from a
@@ -17309,19 +17426,6 @@ function researchTargetForToolCall(
     return path ? `script:${path.slice(0, 240)}` : 'scripted-browser-run';
   }
   return undefined;
-}
-
-function isExplicitAppendOnlyRequest(requestText: string | undefined): boolean {
-  const text = (requestText ?? '').trim();
-  return (
-    /\bappend[-\s]?only\b/i.test(text) ||
-    /\b(?:first|next)\s+(?:assistant\s+)?(?:action|tool\s+call|mutation)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?append_to_file`?\b/i.test(
-      text,
-    ) ||
-    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?write_file`?\b/i.test(
-      text,
-    )
-  );
 }
 
 function fixedFunctionImagePath(path: string | null | undefined): string | null {
@@ -17374,57 +17478,6 @@ function extractExplicitGenerateImageCall(text: string): { prompt?: string; save
     ...(prompt ? { prompt } : {}),
     ...(saveAs ? { saveAs } : {}),
   };
-}
-
-/**
- * Derived-data handoffs (csv/tsv/json/ndjson) get the transform-by-
- * execution steer instead of the generic "hand-write it with write_file"
- * instruction — hand-typed derived rows lose data (the DS4 v15 lesson).
- * Keyed on the deliverable's extension, never brief keywords, so a
- * markdown report that merely READS a CSV is untouched.
- */
-function isExpectedDataDeliverablePath(path: string): boolean {
-  return /\.(?:csv|tsv|json|ndjson)$/i.test(path.trim());
-}
-
-/**
- * Enable flag for the GATED derive-repair clamp (L2). Default OFF so the
- * shipped behavior is unchanged and the intervention is cleanly A/B-able;
- * mirrors the kill-switch idiom in step-tool-kit.ts (`GEZEL_DISABLE_*`),
- * inverted to an enable so absence means "off".
- */
-export function deriveRepairClampEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.GEZEL_DERIVE_REPAIR_CLAMP === '1';
-}
-
-/**
- * Strong repair directive for a derived-data deliverable a weak model
- * keeps hand-typing (or re-emitting whole) instead of computing. Leads
- * with the failing verdict so the model fixes the ONE bad field, then
- * points at the compute channel (`derive_file` / `run_nodejs_script`) as
- * the only durable way to produce a data file without dropping rows.
- */
-export function buildDeriveRepairClampNudge(filePath: string, failingVerdict: string): string {
-  return `${failingVerdict}\n\nYou re-emitted the whole file and it STILL fails the same check. Stop hand-typing rows — a hand-typed data file loses or corrupts fields every time. COMPUTE the output instead: call \`derive_file({ script, outputPath: "${filePath}" })\` with a Node script that reads the input files with \`fs.readFileSync\`, applies the fix, and writes \`${filePath}\` with \`fs.writeFileSync\` (or write that script to \`scripts/derive.mjs\` and run it with \`run_nodejs_script\`). Fix the ONE failing field named above — do not regenerate everything, and do not paste the data into chat.`;
-}
-
-/**
- * The derive-repair clamp nudge for a data deliverable stuck at a repair
- * plateau, or null when the intervention shouldn't fire. Fires only when
- * the enable flag is set AND the plateau's output path is a derived-data
- * file (csv/tsv/json/ndjson) — the class where hand-typing loses data.
- * The caller supplies the plateau signal (this is invoked only at a
- * gate-reject re-prompt site); this function owns the flag + path gate so
- * the fires / does-not-fire decision is a single pure, testable unit.
- */
-export function deriveRepairClampNudge(
-  opts: { filePath?: string; failingVerdict: string },
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
-  if (!deriveRepairClampEnabled(env)) return null;
-  const path = opts.filePath?.trim();
-  if (!path || !isExpectedDataDeliverablePath(path)) return null;
-  return buildDeriveRepairClampNudge(path, opts.failingVerdict);
 }
 
 export interface AskGezelArgs {
@@ -18208,19 +18261,13 @@ const READ_ONLY_PROGRESS_NUDGE =
  * the user — narrating "I'll do X later" stalls the whole project.
  */
 /**
- * Pre-turn pressure thresholds for Ollama context-window management
- * (`checkContextPressure`):
- *   - WARN: publish a `context_warning` event so the UI can surface
- *     a banner; user gets a chance to start fresh on their own.
- *   - COMPACT: kick in-flight summarization automatically — collapse
- *     older messages into a synthesized "[Earlier in this conversation:
- *     …]" assistant bubble so the next turn fits.
+ * Pre-turn automatic-compaction threshold for local context-window
+ * management (`checkContextPressure`). Older messages collapse into a
+ * synthesized "[Earlier in this conversation: …]" assistant bubble before
+ * the next turn is sent. Ordinary pressure is maintenance, not a warning;
+ * `context_warning` is reserved for a compaction attempt that failed.
  *
- * The 75/70 split (warn = 0.75, compact = 0.70) is intentionally
- * order-inverted from the prior 75/80 — compaction fires BEFORE the
- * warn signal, because the warn band's UI yellow banner is irrelevant
- * to headless eval sessions where the model is the only consumer. The
- * matrix #3 petshop run hit `On-device model ran out of
+ * The matrix #3 petshop run hit `On-device model ran out of
  * working memory: 67,924/49,152` at iteration depth: compaction at
  * 0.80 was still too late once cumulative tool outputs from
  * read_artifact + list_artifacts + message_gezel handoffs piled up.
@@ -18228,9 +18275,6 @@ const READ_ONLY_PROGRESS_NUDGE =
  * to absorb 1-2 more tool round-trips while the in-flight compaction
  * one-shot synthesizes older history.
  */
-const CONTEXT_WARN_RATIO = 0.75;
-const CONTEXT_COMPACT_RATIO = 0.7;
-
 /**
  * MLX-specific compaction trigger. Phase 0 set this to 0.55 to cap
  * per-turn re-prefill cost (mlx_vlm.server cleared its KV cache after
@@ -18288,14 +18332,6 @@ function memoryExtractionDisabledByEnv(): boolean {
   const raw = process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
   return raw === '1' || raw?.toLowerCase() === 'true';
 }
-
-/**
- * Number of trailing messages to preserve verbatim when compacting.
- * Six covers the last ~3 user/assistant pairs — the conversational
- * "now" the model needs in full fidelity to continue. Older messages
- * get folded into the synthetic compaction-summary message.
- */
-const COMPACTION_KEEP_TAIL = 6;
 
 // Deterministic last-resort context fit. LLM-summary compaction
 // (`compactInFlight`) is preferred but can't always run: it needs enough older
@@ -18366,46 +18402,6 @@ export function fitMessagesToBudget(
  * the turn with a visible bubble so the user can redirect.
  */
 const MAX_COMPACTIONS_PER_SEND = 2;
-
-/**
- * Prompt for in-flight compaction. Distinct from {@link
- * import('../memory/summarizer.js').summarizeSessionForMemory}'s
- * `SUMMARY_PROMPT` — that one distills to durable cross-session
- * memory (file paths to remember, decisions to carry forward); this
- * one preserves actionable in-conversation detail because the gezel
- * will read this synthesis on its very next turn and continue from
- * it.
- */
-const COMPACTION_PROMPT = `You are summarizing the earlier portion of an in-progress conversation between a user and an AI agent. Your output will REPLACE that earlier portion in the agent's context window — the agent must be able to continue correctly using ONLY your summary plus the most recent few turns.
-
-CRITICAL: this conversation is being compacted because the agent ran out of context. Your single most important job is to prevent the agent from re-attempting things that already happened. The agent will read your output and decide what to do next; if the summary doesn't make it crystal clear which directions are exhausted, the agent will loop and re-trigger compaction.
-
-Use these section headings, in this order, omitting any section that has nothing to put in it:
-
-## Decisions made
-- Concrete decisions and the reasoning behind them.
-
-## User intent and constraints
-- What the user is trying to accomplish, and any specific constraints / requirements / preferences they've stated.
-
-## Approaches already tried (do NOT repeat without new information)
-- Each thing the agent attempted, with the outcome. Be explicit about *what was tried* and *why it didn't finish the job* — was the result wrong, did a tool fail, did the user redirect, was the answer rejected? If an approach was already tried and abandoned, list it here so the agent doesn't re-launch it.
-
-## Open work
-- Outstanding tasks the agent committed to but hasn't completed, with enough detail to resume.
-- Open questions awaiting the user.
-
-## Key references
-- Names of files, artifacts, tools, gezels, and tasks that were touched. One bullet each.
-
-## Errors and recoveries
-- Errors encountered, what triggered them, how they were handled.
-
-Drop conversational filler, pleasantries, and verbatim tool outputs (just note "read X, found Y"). Be concrete and specific — vague summaries cause loops. No preamble; start with the first heading.
-
-Earlier conversation:
-
-`;
 
 const VOORMAN_IDLE_NUDGE =
   'Before you finish, make one quick project check: is there concrete work already in flight that this turn should move? ' +

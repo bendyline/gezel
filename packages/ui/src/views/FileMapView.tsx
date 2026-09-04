@@ -92,7 +92,7 @@ const VIBE_LABEL: Record<NonNullable<MapBlock['health']>['vibe'], string> = {
  * Districts are folders, blocks are files (size ∝ LoC), buildings are symbols,
  * and roads are the import graph. Pan/zoom with the mouse; click a block for
  * details. The scope toggle separates test files (their own settlement) from the
- * core code; JSON is always excluded.
+ * core code. Data files are fields, config files signal towers, stylesheets parks.
  */
 const SCOPES: Array<{ value: FileMapScope; label: string }> = [
   { value: 'core', label: 'Code' },

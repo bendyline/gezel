@@ -66,19 +66,33 @@ import { assertKnownFlags, parseArgs } from './args.ts';
  * the models we actually choose between. Expect low absolute numbers there
  * and read them as headroom, not as regressions.
  *
- * Two consequences for whoever runs the sweep, and the first is worse than
- * it looks. The ceiling this function sums is the AUTHORED one, but the
- * runner extends a deadline in 15-minute steps whenever hard progress moved
- * within the last 10 minutes, capped at 2x (`hardCeilingCapMs` in
- * runner.ts). That rule rarely fires on core — trials there pass early or
- * stall outright — and reliably fires on a hard suite, where a model grinds
- * without converging and looks like progress every ten minutes. Budget 2x
- * what `--list` prints for `developer` and `complex-work`.
+ * Three consequences for whoever runs the sweep.
  *
- * And a model far below the new suites' floor will book a long run of zeros
- * — probe with `--suite developer-smoke --count 1` first and skip the full
- * suite for models that score 0/3, recording that as unmeasured rather than
- * paying six hours (or twelve) to confirm it.
+ * **The ceiling this function sums is the AUTHORED one**, and the runner
+ * extends a deadline in 15-minute steps whenever hard progress moved within
+ * the last 10 minutes, capped at 2x (`hardCeilingCapMs` in runner.ts). That
+ * rule rarely fires on core — trials there pass early or stall outright —
+ * and reliably fires on a hard suite, where a model grinds without
+ * converging and looks like progress every ten minutes. Budget 2x what
+ * `--list` prints for `developer` and `complex-work`.
+ *
+ * **The four-suite sweep does not fit the full roster.** At `--count 3` this
+ * is ~109h per model and ~3600h across 33 — over four months of device time,
+ * and that is the authored sum, not the 2x worst case. The two hard suites
+ * are 3315 of those 6555 minutes per model. They exist to rank the top of
+ * the local range, so a model that scores 40% on `core` will book 55 hours
+ * of zeros in them. **Run them against a reduced roster** — the classes that
+ * can plausibly score — and record the rest as `unmeasured` with the reason.
+ * `--models` and the unmeasured column already support that; choosing the
+ * roster is still a hand-maintained judgement.
+ *
+ * **Gate any floor probe on an existing `core` result** rather than running
+ * one blind. Probing 33 models with a `-smoke` subset is itself substantial;
+ * a model's `core` score already says whether the hard suites can tell you
+ * anything about it.
+ *
+ * Expect low absolute numbers in the new suites and read them as headroom,
+ * not as regressions.
  */
 const SCORECARD_SUITES = ['core', 'productivity', 'developer', 'complex-work'] as const;
 

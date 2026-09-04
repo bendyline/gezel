@@ -88,19 +88,64 @@ export async function findMachOBinaries(root) {
 }
 
 /**
- * The Developer ID Application identity in the keychain the release workflow
- * just imported. Read from the keychain rather than a secret so no new
- * repository secret is needed.
+ * The two signing worlds this tree can be prepared for, and everything that
+ * differs between them.
+ *
+ * Direct distribution notarizes: it needs the hardened runtime and a secure
+ * timestamp, and it must leave a vendor's own Developer ID signature alone,
+ * because replacing it would substitute our attestation for theirs and break
+ * the source-pinned reuse that standalone clients rely on.
+ *
+ * The Mac App Store does neither. It is not notarized, hardened runtime is not
+ * how a sandboxed app is signed, and — the important one — a vendor signature
+ * cannot be kept: under the sandbox every child must carry OUR identity and
+ * the inherit entitlements or it will not launch. So the preservation that is
+ * mandatory in one mode is a build failure in the other.
  */
-function findDeveloperIdIdentity() {
+const SIGN_MODES = Object.freeze({
+  'developer-id': {
+    identityPattern: /"(Developer ID Application: [^"]+)"/,
+    identityLabel: 'Developer ID Application',
+    hardenedRuntime: true,
+    preserveVendorSignatures: true,
+  },
+  'apple-distribution': {
+    identityPattern: /"(Apple Distribution: [^"]+)"/,
+    identityLabel: 'Apple Distribution',
+    hardenedRuntime: false,
+    preserveVendorSignatures: false,
+  },
+});
+
+/**
+ * Which mode to sign in. Defaults to `developer-id` so every existing caller —
+ * and every local build — behaves exactly as before.
+ */
+export function resolveSignMode(env = process.env) {
+  const requested = env.GEZEL_MACOS_SIGN_IDENTITY_KIND ?? 'developer-id';
+  const mode = SIGN_MODES[requested];
+  if (!mode) {
+    throw new Error(
+      `unknown GEZEL_MACOS_SIGN_IDENTITY_KIND "${requested}" — ` +
+        `expected one of: ${Object.keys(SIGN_MODES).join(', ')}`,
+    );
+  }
+  return { name: requested, ...mode };
+}
+
+/**
+ * The signing identity in the keychain the release workflow just imported.
+ * Read from the keychain rather than a secret so no new repository secret is
+ * needed.
+ */
+function findSigningIdentity(mode) {
   const out = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
     encoding: 'utf8',
   });
-  const match = out.match(/"(Developer ID Application: [^"]+)"/);
+  const match = out.match(mode.identityPattern);
   if (!match) {
     throw new Error(
-      'no "Developer ID Application" identity in the keychain — ' +
-        'import the Apple certificate before building the service bundle',
+      `no "${mode.identityLabel}" identity in the keychain — import the Apple certificate before building the service bundle`,
     );
   }
   return match[1];
@@ -170,10 +215,32 @@ function hasDistributionReadyDeveloperIdSignature(binary) {
 }
 
 /**
+ * Build the codesign argument list for one binary.
+ *
+ * Split out so the difference between the two modes is one readable function
+ * rather than conditionals threaded through the signing loop, and so a test
+ * can assert the arguments without a keychain or a Mac.
+ */
+export function codesignArgs(identity, binary, mode, entitlements) {
+  const args = ['--force', '--sign', identity];
+  // Notarization requires both; the store rejects neither but wants neither.
+  if (mode.hardenedRuntime) args.push('--options', 'runtime', '--timestamp');
+  // Under the sandbox a child with no entitlements cannot inherit the app's
+  // capabilities, so it launches with none and fails in ways that look like
+  // anything but a signing problem.
+  if (entitlements) args.push('--entitlements', entitlements);
+  args.push(binary);
+  return args;
+}
+
+/**
  * Sign every Mach-O binary under `root`. Returns the number signed.
  *
- * `--options runtime` enables the hardened runtime and `--timestamp` attaches
- * the secure timestamp; the notary service rejects the build without both.
+ * In `developer-id` mode (the default) a vendor's own distribution-ready
+ * signature is preserved; in `apple-distribution` mode every binary is
+ * re-signed, because the App Store sandbox requires one identity across the
+ * whole payload. `GEZEL_MACOS_SIGN_ENTITLEMENTS` supplies the child
+ * entitlements plist when the mode needs one.
  */
 export async function signMachOTree(root) {
   if (process.env.GEZEL_MACOS_SIGN_BUNDLE !== '1') return 0;
@@ -182,6 +249,8 @@ export async function signMachOTree(root) {
     return 0;
   }
 
+  const mode = resolveSignMode();
+  const entitlements = process.env.GEZEL_MACOS_SIGN_ENTITLEMENTS || null;
   const binaries = await findMachOBinaries(root);
   if (binaries.length === 0) {
     throw new Error(`no Mach-O binaries found under ${root} — expected native modules`);
@@ -190,9 +259,12 @@ export async function signMachOTree(root) {
   let identity;
   let signed = 0;
   let preserved = 0;
-  console.log(`[sign-bundle] inspecting ${binaries.length} Mach-O binaries`);
+  console.log(
+    `[sign-bundle] inspecting ${binaries.length} Mach-O binaries (mode=${mode.name}` +
+      `${entitlements ? `, entitlements=${entitlements}` : ''})`,
+  );
   for (const binary of binaries) {
-    if (hasDistributionReadyDeveloperIdSignature(binary)) {
+    if (mode.preserveVendorSignatures && hasDistributionReadyDeveloperIdSignature(binary)) {
       console.log(
         `[sign-bundle] preserved existing Developer ID signature: ${relative(root, binary)}`,
       );
@@ -200,12 +272,10 @@ export async function signMachOTree(root) {
       continue;
     }
 
-    identity ??= findDeveloperIdIdentity();
-    execFileSync(
-      'codesign',
-      ['--force', '--sign', identity, '--options', 'runtime', '--timestamp', binary],
-      { stdio: ['ignore', 'ignore', 'inherit'] },
-    );
+    identity ??= findSigningIdentity(mode);
+    execFileSync('codesign', codesignArgs(identity, binary, mode, entitlements), {
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
     signed += 1;
   }
   console.log(

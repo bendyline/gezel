@@ -24,11 +24,17 @@ import {
 } from '@bendyline/squisq/markdown';
 import { type ContentContainer, MemoryContentContainer } from '@bendyline/squisq/storage';
 
-export const OUTSIDE_IN_FORMATS = ['html', 'docx', 'pdf', 'pptx', 'xlsx'] as const;
+// CSV is a Gezel host extension to Squisq's rendered-document outside-in set:
+// the visible source stays in the file tree, while the Markdown companion uses
+// Squisq's threshold-aware data-container import. Large CSV/XLSX sources spill
+// their original bytes into the companion and render as a virtualized data
+// card instead of expanding thousands of rows into Markdown.
+export const OUTSIDE_IN_FORMATS = ['html', 'docx', 'pdf', 'pptx', 'xlsx', 'csv'] as const;
 export type OutsideInFormat = (typeof OUTSIDE_IN_FORMATS)[number];
 export const OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY = 'squisq-updatefrommarkdown';
 
 const FORMATS = new Set<string>(OUTSIDE_IN_FORMATS);
+const DATA_REFERENCE_EXTENSION_RE = /\.(?:csv|tsv|xlsx|parquet)$/i;
 
 export interface OutsideInLayout {
   targetPath: string;
@@ -55,6 +61,11 @@ function normalizePath(path: string): string {
 
 function join(parent: string, child: string): string {
   return parent ? `${parent}/${child}` : child;
+}
+
+function basename(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash < 0 ? path : path.slice(slash + 1);
 }
 
 function slug(stem: string): string {
@@ -123,11 +134,63 @@ export function chooseOutsideInSource(
 }
 
 export function withOutsideInMetadata(markdown: string, layout: OutsideInLayout): string {
-  return setFrontmatterValues(markdown, {
+  const linked = setFrontmatterValues(markdown, {
     'squisq-outside-in': 1,
     'squisq-output': layout.relativeTargetPath,
     'squisq-output-format': layout.format,
   });
+  return canonicalizeDataReferences(linked, layout.format);
+}
+
+function canonicalDataReferencePath(path: string): string {
+  const unwrapped = path.startsWith('<') && path.endsWith('>') ? path.slice(1, -1) : path;
+  let decoded = unwrapped;
+  try {
+    decoded = decodeURIComponent(unwrapped);
+  } catch {
+    // Keep malformed percent escapes intact; they are not safe to rewrite.
+    return path;
+  }
+  if (!DATA_REFERENCE_EXTENSION_RE.test(decoded) || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(decoded)) {
+    return path;
+  }
+  return decoded
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function canonicalizeDataReferences(markdown: string, format: OutsideInFormat): string {
+  if (format !== 'csv' && format !== 'xlsx') return markdown;
+  try {
+    const document = parseMarkdown(markdown);
+    let changed = false;
+    for (const block of document.children) {
+      const params = block.type === 'heading' ? block.templateAnnotation?.params : undefined;
+      if (params && typeof params.src === 'string') {
+        const current = params.src;
+        const canonical = canonicalDataReferencePath(current);
+        if (canonical !== current) {
+          params.src = canonical;
+          changed = true;
+        }
+      }
+      if (block.type !== 'paragraph') continue;
+      for (const inline of block.children) {
+        if (inline.type !== 'link') continue;
+        const canonical = canonicalDataReferencePath(inline.url);
+        if (canonical !== inline.url) {
+          inline.url = canonical;
+          changed = true;
+        }
+      }
+    }
+    return changed ? stringifyMarkdown(document) : markdown;
+  } catch {
+    // Metadata repair should not make an otherwise readable companion fail.
+    return markdown;
+  }
 }
 
 function rawFrontmatter(source: string): string | null {
@@ -142,6 +205,16 @@ export function isOutsideInMarkdownEditingEnabled(markdown: string): boolean {
   const yaml = rawFrontmatter(markdown);
   const frontmatter = yaml === null ? null : parseFrontmatter(yaml);
   return frontmatter?.[OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY] === true;
+}
+
+/**
+ * CSV sidecars are edited in place by Squisq's data card, while Gezel's
+ * outside-in save path regenerates the user-visible source from Markdown.
+ * Until CSV export materializes `{[dataTable src=...]}` references, enabling
+ * that path could replace the visible CSV with an empty export.
+ */
+export function supportsOutsideInMarkdownEditing(format: OutsideInFormat): boolean {
+  return format !== 'csv';
 }
 
 export function withOutsideInMarkdownEditing(
@@ -169,23 +242,35 @@ export async function importOutsideInDocument(
   if (!definition || (!definition.importContainer && !definition.importDoc)) {
     throw new Error(`${layout.format.toUpperCase()} cannot be imported for editing.`);
   }
+  // The spill-capable importers name both their Markdown document and their
+  // `<doc-slug>_files/data/<source>` sidecar from `sourceName`. Without this,
+  // every workbook became `workbook.md` and every CSV became `data.md`, which
+  // also made multiple companions indistinguishable in the Files panel.
+  const formatOptions =
+    layout.format === 'xlsx' || layout.format === 'csv'
+      ? {
+          ...options.formatOptions,
+          [layout.format]: {
+            ...(options.formatOptions?.[layout.format] ?? {}),
+            sourceName: basename(layout.targetPath),
+          },
+        }
+      : options.formatOptions;
+  const importOptions: ConvertOptions = {
+    ...options,
+    registry,
+    from: layout.format,
+    ...(formatOptions ? { formatOptions } : {}),
+  };
   let container: ContentContainer = new MemoryContentContainer();
   let document: MarkdownDocument | null = null;
   if (definition.importContainer) {
-    container = await definition.importContainer(asArrayBuffer(data), {
-      ...options,
-      registry,
-      from: layout.format,
-    });
+    container = await definition.importContainer(asArrayBuffer(data), importOptions);
     const markdown = await container.readDocument();
     if (markdown !== null) document = parseMarkdown(markdown);
   }
   if (!document && definition.importDoc) {
-    document = await definition.importDoc(asArrayBuffer(data), {
-      ...options,
-      registry,
-      from: layout.format,
-    });
+    document = await definition.importDoc(asArrayBuffer(data), importOptions);
   }
   if (!document)
     throw new Error(`The ${layout.format.toUpperCase()} file has no editable content.`);
@@ -233,6 +318,9 @@ export async function renderOutsideInDocument(
   container: ContentContainer,
   playerScriptPath?: string,
 ): Promise<ConversionResult> {
+  if (!supportsOutsideInMarkdownEditing(layout.format)) {
+    throw new Error('CSV data sidecar previews are read-only.');
+  }
   if (!isOutsideInMarkdownEditingEnabled(markdown)) {
     throw new Error(
       `Outside-in editing is read-only until ${OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY}: true is set.`,

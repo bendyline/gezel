@@ -34,7 +34,12 @@ const log = createLogger('enrich');
 
 const STARTUP_DELAY_MS = 20_000;
 const TICK_INTERVAL_MS = 120_000;
-const OS_IDLE_THRESHOLD_MS = 3 * 60_000;
+// A short coffee break must not wake the AI passes — 3 minutes fired during
+// ordinary pauses at the desk and read as the app churning on its own
+// (2026-09-02 UX review follow-up). 10 minutes means the user has actually
+// stepped away; Night Shift remains the explicit bulk window, so throughput
+// lost to the calmer gate comes back overnight.
+const OS_IDLE_THRESHOLD_MS = 10 * 60_000;
 const BATCH = 5;
 // Night shift is the explicit bulk window: bigger batches, drain project after
 // project until the wall-clock budget for one tick runs out (the interval then

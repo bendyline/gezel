@@ -5,6 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { HealthResponse } from '@bendyline/gezel';
 import {
   GezelClient,
   createTrustingFetch,
@@ -35,7 +36,13 @@ import { LogRotator } from './log-rotator.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
 import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
+import {
+  inBundleServiceTree,
+  resolveRuntimeInPlace,
+  shouldRunRuntimesInPlace,
+} from './run-in-place.js';
 import { resolveSharedServiceTree } from './shared-service-tree.js';
+import { evaluateStoreCompat } from './store-compat.js';
 import {
   type SystemServiceRuntime,
   readSystemServiceRuntime,
@@ -58,6 +65,13 @@ export interface ConnectOptions {
    * exercise the give-up path without waiting out the real budget.
    */
   adoptHealthWaitMs?: number;
+  /**
+   * True in an App Store / Microsoft Store build. Diverts mode resolution onto
+   * the store ladder, which may adopt a direct-download install's daemon but
+   * never manages one. Resolved in main.ts from the build marker — see
+   * src/store-build.ts.
+   */
+  storeProfile?: boolean;
 }
 
 interface LocalAdoptRuntime {
@@ -86,6 +100,8 @@ export type ServiceFallbackCode =
   | 'system-service-version-mismatch'
   | 'adopted-daemon-stale'
   | 'adopted-daemon-unhealthy'
+  | 'store-service-unhealthy'
+  | 'store-service-incompatible'
   | 'packaged-spawn-failed'
   | 'dev-spawn-failed'
   | 'version-mismatch-respawn-failed'
@@ -387,6 +403,9 @@ export class SupervisedService extends EventEmitter {
       case 'remote':
         await this.reconnectRemote();
         return;
+      case 'store-connect':
+        await this.reconnectStoreService();
+        return;
       case 'system-service':
         await this.reconnectSystemService();
         return;
@@ -400,6 +419,30 @@ export class SupervisedService extends EventEmitter {
 
   private async reconnectRemote(): Promise<void> {
     await probeRemote(this._baseUrl, this._token);
+    this.emit('restart');
+  }
+
+  /**
+   * Re-probe the adopted direct-download daemon and re-judge it.
+   *
+   * Re-judged rather than re-probed only, because the reason we are here is
+   * usually that the OTHER install updated itself underneath us — the store
+   * and direct channels ship on different schedules, so a mid-session version
+   * change is expected, and it is the one moment compatibility can flip.
+   *
+   * Never stops or respawns anything: we did not start this daemon. A verdict
+   * that has gone incompatible raises, and the caller's fallback path starts
+   * our own service instead.
+   */
+  private async reconnectStoreService(): Promise<void> {
+    const health = await healthWithTimeout(
+      buildHealthClient(this._baseUrl, this._token, this._cert),
+    );
+    const verdict = evaluateStoreCompat(health);
+    if (!verdict.compatible) {
+      throw new Error(`the installed Gezel service is no longer compatible: ${verdict.reason}`);
+    }
+    this._fallbackReason = null;
     this.emit('restart');
   }
 
@@ -708,10 +751,36 @@ export class SupervisedService extends EventEmitter {
     try {
       const health = await healthWithTimeout(client, HEALTH_REQUEST_TIMEOUT_MS, probe.controller);
       if (generation !== this.healthGeneration) return;
+      const previousVersion = this.lastHealthVersion;
       this.consecutiveHealthFailures = 0;
       this.lastHealthSuccessAt = new Date().toISOString();
       this.lastHealthVersion = health.version;
       this.lastHealthFailure = undefined;
+
+      // The direct-download install can update itself while we are connected —
+      // the two channels ship on different schedules, so this is expected
+      // rather than exceptional. A version move is the one moment the
+      // compatibility answer can change, so re-judge it there and nowhere
+      // else: judging on every tick would spend a verdict on an unchanged
+      // daemon 240 times an hour.
+      if (
+        this._mode === 'store-connect' &&
+        previousVersion !== undefined &&
+        previousVersion !== health.version
+      ) {
+        const verdict = evaluateStoreCompat(health);
+        if (!verdict.compatible) {
+          this.opts.logger?.warn?.(
+            `[supervisor] adopted service updated to ${health.version} and is no longer compatible`,
+          );
+          await this.fallbackToEmbedded({
+            code: 'store-service-incompatible',
+            sourceMode: this._mode,
+            message: `the installed Gezel service was updated and ${verdict.reason}`,
+          });
+          return;
+        }
+      }
       // `machine-service-not-installed` is included deliberately. The installer
       // now records the START outcome rather than the `sc create` result, so a
       // service that was registered but could not come up during install
@@ -745,6 +814,19 @@ export class SupervisedService extends EventEmitter {
       );
       if (this.consecutiveHealthFailures >= HEALTH_FAILURES_BEFORE_RESTART) {
         this.consecutiveHealthFailures = 0;
+        // A store build adopted this daemon; it did not start it. Restarting is
+        // not ours to do — under the macOS sandbox we cannot signal it at all,
+        // and on Windows it would be one product restarting another's service.
+        // Stand up our own instead, which is the same answer the boot path
+        // would have reached had the daemon been down then.
+        if (this._mode === 'store-connect') {
+          await this.fallbackToEmbedded({
+            code: 'store-service-unhealthy',
+            sourceMode: this._mode,
+            message: 'the installed Gezel service stopped responding, so this app started its own',
+          });
+          return;
+        }
         const childDiagnostic = await describeOwnedChildState(this.child);
         this.recordSupervisorDiagnostic(
           'error',
@@ -897,9 +979,49 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // to retain one end-to-end provisioning check.
   const skipBundledRuntimeInstall =
     !opts.packaged && process.env.GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL === '1';
+  // A Mac App Store build runs its bundled runtimes where they shipped rather
+  // than copying them into the home directory first — see run-in-place.ts for
+  // why the copy is both forbidden there and pointless. Windows MSIX keeps the
+  // extract path: full trust, a real user profile, and sharing with an
+  // npm-installed daemon that is worth keeping.
+  const runInPlace = shouldRunRuntimesInPlace({ storeProfile: opts.storeProfile === true });
 
   if (skipBundledRuntimeInstall) {
     opts.logger?.info?.('[supervisor] skipping bundled runtime install in development');
+  } else if (runInPlace) {
+    // Same fail-closed discipline as the extract path below: drop anything
+    // inherited before resolving, and refuse an unverified result.
+    delete process.env.GEZEL_NODE_PATH;
+    delete process.env.GEZEL_PNPM_PATH;
+
+    const node = await resolveRuntimeInPlace({
+      bundleDir: defaultNodeBundleDir(import.meta.url),
+      entry: 'node',
+      logger: opts.logger,
+    });
+    if (node.path && node.verified) {
+      process.env.GEZEL_NODE_PATH = node.path;
+    } else {
+      opts.logger?.warn?.(
+        `[supervisor] bundled node unavailable in place (${node.reason ?? 'unverified'}); Node-backed tools remain disabled`,
+      );
+    }
+
+    const pnpm = await resolveRuntimeInPlace({
+      bundleDir: defaultPnpmBundleDir(import.meta.url),
+      entry: join('bin', 'pnpm.mjs'),
+      // The entry is a shim that loads the real CLI; verifying only the shim
+      // would leave the code that does the work unchecked.
+      manifestFiles: ['bin/pnpm.mjs', 'dist/pnpm.mjs'],
+      logger: opts.logger,
+    });
+    if (pnpm.path && pnpm.verified) {
+      process.env.GEZEL_PNPM_PATH = pnpm.path;
+    } else {
+      opts.logger?.warn?.(
+        `[supervisor] bundled pnpm unavailable in place (${pnpm.reason ?? 'unverified'}); package workflows remain disabled`,
+      );
+    }
   } else {
     // Install Node first: the bundled pnpm package is a JavaScript CLI and
     // every packaged platform launches it with this runtime. The sandbox
@@ -1136,16 +1258,36 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // version-keyed directory the service's engine resolver also uses means a
     // machine with both the desktop app and an npm `gezeld` shares one copy.
     try {
-      const installed = await installDuckdbIfNeeded({
-        home: opts.home,
-        bundleDir: defaultDuckdbBundleDir(import.meta.url),
-        ...(opts.logger ? { logger: opts.logger } : {}),
-      });
-      if (installed.binaryPath) {
-        process.env.GEZEL_DUCKDB_BIN = installed.binaryPath;
-        opts.logger?.info?.(
-          `[supervisor] bundled duckdb v${installed.version} (${installed.action}): ${installed.binaryPath}`,
-        );
+      if (runInPlace) {
+        // No copy into the home, for the same reason node and pnpm skip it —
+        // and DuckDB has a second reason: it ships vendor-signed and is
+        // re-signed with our identity by the MAS lane, so the bytes here are
+        // already the ones the sandbox will accept. A copy would only be a
+        // second place for that to go wrong.
+        const duckdb = await resolveRuntimeInPlace({
+          bundleDir: defaultDuckdbBundleDir(import.meta.url),
+          entry: 'duckdb',
+          logger: opts.logger,
+        });
+        if (duckdb.path && duckdb.verified) {
+          process.env.GEZEL_DUCKDB_BIN = duckdb.path;
+        } else {
+          opts.logger?.warn?.(
+            `[supervisor] bundled duckdb unavailable in place (${duckdb.reason ?? 'unverified'}); data features report the engine as unavailable`,
+          );
+        }
+      } else {
+        const installed = await installDuckdbIfNeeded({
+          home: opts.home,
+          bundleDir: defaultDuckdbBundleDir(import.meta.url),
+          ...(opts.logger ? { logger: opts.logger } : {}),
+        });
+        if (installed.binaryPath) {
+          process.env.GEZEL_DUCKDB_BIN = installed.binaryPath;
+          opts.logger?.info?.(
+            `[supervisor] bundled duckdb v${installed.version} (${installed.action}): ${installed.binaryPath}`,
+          );
+        }
       }
     } catch (err) {
       // Never fatal: the daemon boots and the data features report the engine
@@ -1161,6 +1303,7 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     devSpawn: opts.devSpawn,
     forceEmbedded: opts.forceEmbedded,
     logger: opts.logger,
+    ...(opts.storeProfile ? { storeProfile: true } : {}),
   });
 
   return connectResolved(opts, mode, { inheritedReason: null, allowMachineRecheck: true });
@@ -1185,6 +1328,10 @@ async function connectResolved(
   if (mode.kind === 'remote') {
     await probeRemote(mode.baseUrl, mode.token);
     return new SupervisedService('remote', mode.baseUrl, mode.token, mode.cert, opts);
+  }
+
+  if (mode.kind === 'store-connect') {
+    return connectStoreService(opts, mode);
   }
 
   if (mode.kind === 'system-service') {
@@ -1852,6 +1999,59 @@ async function respawnPackagedAfterMismatch(opts: ConnectOptions): Promise<Super
   }
 }
 
+/**
+ * Connect a store build to the daemon a direct-download install is running,
+ * or start our own when that daemon cannot be adopted.
+ *
+ * Shaped after the `remote` branch — probe only, never manage — rather than
+ * after `local-adopt`, which stops and respawns a version-mismatched daemon.
+ * That behavior is right for a daemon the same install spawned and wrong for
+ * another product's service: a store build cannot signal one under the macOS
+ * sandbox, and should not on Windows either.
+ *
+ * Every failure here lands in the same place: our own embedded service. That
+ * is a complete product, not a degraded one — the only thing lost is sharing a
+ * single daemon (and its resident models) with the other install, which is
+ * what the notice explains.
+ */
+async function connectStoreService(
+  opts: ConnectOptions,
+  mode: Extract<Mode, { kind: 'store-connect' }>,
+): Promise<SupervisedService> {
+  const client = buildHealthClient(mode.baseUrl, mode.token, mode.cert);
+  let health: HealthResponse;
+  try {
+    health = await healthWithTimeout(client);
+  } catch (error) {
+    // Rendezvous files outlive the daemon that wrote them — it may have been
+    // stopped or have crashed. Nothing to clean up: they are the other
+    // install's to manage, and it rewrites them on its next start.
+    opts.logger?.info?.(
+      `[supervisor] installed Gezel service did not answer (${(error as Error).message}); starting our own`,
+    );
+    return buildEmbedded(opts, {
+      code: 'store-service-unhealthy',
+      sourceMode: 'store-connect',
+      message: 'the installed Gezel service is not responding, so this app started its own',
+    });
+  }
+
+  const verdict = evaluateStoreCompat(health);
+  if (!verdict.compatible) {
+    opts.logger?.info?.(`[supervisor] declining the installed Gezel service: ${verdict.reason}`);
+    return buildEmbedded(opts, {
+      code: 'store-service-incompatible',
+      sourceMode: 'store-connect',
+      message: `This app started its own Gezel service because ${verdict.reason}.`,
+    });
+  }
+
+  opts.logger?.info?.(
+    `[supervisor] adopted the installed Gezel service ${health.version} at ${mode.baseUrl}`,
+  );
+  return new SupervisedService('store-connect', mode.baseUrl, mode.token, mode.cert, opts);
+}
+
 async function buildEmbedded(
   opts: ConnectOptions,
   fallbackReason: ServiceFallbackReason | null = null,
@@ -2027,6 +2227,27 @@ async function probeRemote(baseUrl: string, token: string): Promise<void> {
  * the answer is sometimes not that path.
  */
 async function preparePackagedInstall(opts: ConnectOptions): Promise<string> {
+  // The store lane on macOS ships the service tree unpacked and imports it
+  // where it sits. Extracting a second copy of executable code into the
+  // container is what guideline 2.4.5 describes, and the tarball's reason for
+  // existing — Defender scanning every one of ~100k extracted files — is a
+  // Windows problem that does not apply here.
+  if (shouldRunRuntimesInPlace({ storeProfile: opts.storeProfile === true })) {
+    const tree = inBundleServiceTree(import.meta.url);
+    if (tree) {
+      opts.logger?.info?.(`[supervisor] using the in-bundle service tree: ${tree}`);
+      return tree;
+    }
+    // Falling through would extract into the container — correct bytes, wrong
+    // shape for this channel. Fail loudly instead: a MAS build without its
+    // unpacked tree is a packaging bug, and it is far better caught here than
+    // discovered by a reviewer.
+    throw new Error(
+      'store build is missing its in-bundle service tree (dist/service-bundle); ' +
+        'the MAS packaging lane must ship it unpacked',
+    );
+  }
+
   const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
   const shared = await resolveSharedServiceTree({
     metaPath,

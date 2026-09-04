@@ -523,34 +523,11 @@
   }
 }
 
-.home-intro {
-  background: var(--surface);
-  border: none;
-  border-radius: 0;
-  box-shadow: var(--surface-shadow);
-  padding: 1rem 1.25rem;
-}
-
-/* Intro is the "brand card" — always sage regardless of theme, with the
-   cream titlebar ink as the foreground color so it reads as the same
-   material as the window chrome. */
-.home-intro {
-  background: var(--titlebar);
-  color: var(--titlebar-ink);
-  display: flex;
-  align-items: flex-start;
-  gap: 1.25rem;
-  padding: 1.25rem 1.5rem;
-}
-
-.home-intro-body {
-  flex: 1;
-  min-width: 0;
-}
-
-/* The intro body is the "What is gezel?" Handboek article embedded as a
-   live page: a row of controls (Open in Handboek + the Read/Watch
-   tray), then the page itself — a cream sheet resting on the sage card. */
+/* The intro is the "What is gezel?" Handboek article embedded as a live
+   page: a row of controls (Open in Handboek + the Read/Watch tray on the
+   toggle variant), then the page itself — a cream sheet. Hosted by the
+   workshop greeting's tour tab and the first-run tutorial column; the old
+   sage "brand card" band it once sat in is gone. */
 .home-intro-article-controls {
   display: flex;
   justify-content: space-between;
@@ -565,6 +542,16 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--surface-shadow);
   overflow: hidden;
+}
+
+/* The readable page's frame matches the article's own paper
+   (--chat-bubble-bg is the token GEZEL_LIGHT_SURFACE is pinned to, and it
+   remaps with the theme), so the sheet reads as one surface bounded by a
+   gentle border instead of sitting in tan gutters. The player keeps the
+   plain surface frame — a video box has its own edges. */
+.home-intro-page:not(.home-intro-page-player) {
+  background: var(--chat-bubble-bg);
+  border: 1px solid var(--border);
 }
 
 .home-intro-doc {
@@ -619,108 +606,6 @@
   margin-inline: auto;
 }
 
-.home-intro h2 {
-  /* Lighten the sentence weight so the handdrawn wordmark reads as the
-     emphasis anchor instead of the heading's bold type. */
-  font-weight: 400;
-  font-size: 1.05rem;
-}
-
-.home-intro-logotype {
-  /* Sit the handdrawn wordmark inline with the heading text so it reads
-     as a natural stand-in for the word "gezel". Negative vertical-align
-     drops the glyph so its baseline lines up with the sentence baseline
-     (the PNG has descender whitespace baked in). */
-  height: 1.1em;
-  width: auto;
-  display: inline-block;
-  vertical-align: -0.3em;
-  margin-right: 0.35em;
-  user-select: none;
-  -webkit-user-drag: none;
-  pointer-events: none;
-}
-
-.home-intro header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 0.4rem;
-}
-
-.home-intro h2 {
-  margin: 0;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-/* Scoped to the card's own prose (the setup call-to-action under the
-   embedded page) — the embedded Handboek article inside
-   .home-intro-page styles its own text via the squisq theme. */
-.home-intro-body > p {
-  margin: 0.9rem 0;
-  color: var(--titlebar-ink);
-  max-width: 800px;
-  text-align: justify;
-  hyphens: auto;
-}
-
-.home-intro-body > p strong {
-  /* Keep emphasis visible on the sage field without blaring. */
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.home-intro .gz-link-button {
-  /* The Hide link needs to ride on sage; pin it to the cream ink. */
-  color: var(--titlebar-ink);
-  opacity: 0.85;
-}
-
-.home-intro .gz-link-button:hover {
-  opacity: 1;
-}
-
-.home-intro-toggle {
-  background: transparent;
-  border: none;
-  color: var(--titlebar-ink);
-  opacity: 0.75;
-  cursor: pointer;
-  padding: 0.15rem 0.45rem;
-  border-radius: 4px;
-  font-size: 1rem;
-  line-height: 1;
-  transition: opacity 0.12s ease, background 0.12s ease;
-}
-
-.home-intro-toggle:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.home-intro code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
-  padding: 0.05rem 0.3rem;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-}
-
-.home-intro-compact {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 1rem;
-  font-size: 0.85rem;
-  /* Inherit cream ink from the parent .home-intro instead of overriding
-     to --muted (a dark grey in light mode that vanishes against the sage
-     titlebar). The toggle below already keys to --titlebar-ink for the
-     same reason. */
-  color: var(--titlebar-ink);
-}
-
 /* First-run setup: the "First run setup" heading + its slightly-indented
    body, so the setup steps (chat model, media, experience, security) read as
    one grouped block nested under the heading. */
@@ -728,24 +613,85 @@
   font-size: 1.6rem;
   margin: 1.25rem 0 0.5rem;
 }
-/* Setup now leads the first-run page, so the heading usually sits directly
-   under the view's own padding — drop the leading margin there. It keeps the
-   1.25rem only when something (the update banner) is stacked above it. */
-.home-view > .home-firstrun-heading:first-child {
+
+/* First run is two columns when the window affords it: setup on the left,
+   the "What is gezel?" tutorial (player + article, stacked) riding beside
+   it. The tutorial column is sticky with its own natural scrollbar so a
+   long article never pushes setup around; on narrower windows it stacks
+   beneath setup instead. */
+.home-firstrun-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem 2.5rem;
+  align-items: start;
+}
+.home-firstrun-main > .home-firstrun-heading {
   margin-top: 0;
 }
+.home-firstrun-tutorial {
+  min-width: 0;
+}
+@media (min-width: 78rem) {
+  .home-firstrun-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(24rem, 32rem);
+    column-gap: 1.75rem;
+  }
+  .home-firstrun-tutorial {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - 4.5rem);
+    overflow-y: auto;
+    /* A gentle dashed seam between setup and the tutorial, spaced evenly
+       on both sides (column-gap left of the line, padding right of it). */
+    border-left: 1px dashed var(--border);
+    padding-left: 1.75rem;
+  }
+}
+/* Inside the tutorial column the aside's own scrollbar is the only one —
+   the article page must not open a second, nested scroll region — and the
+   player sits above the article with a small gap at a height that suits
+   the narrower column. */
+.home-firstrun-tutorial .home-intro-doc {
+  max-height: none;
+  overflow-y: visible;
+}
+/* The video directly above opens on the same "What is gezel?" title card
+   and bench artwork, so the article repeating both a few lines later reads
+   as a stutter. Hide the article's title (its one h1 — sections are h2s)
+   and the bench-mark figure in the tutorial column only; the Handboek and
+   the tour tab's Read view keep them. */
+.home-firstrun-tutorial .home-intro-doc h1,
+.home-firstrun-tutorial .home-intro-doc img[alt="gezel-mark"],
+.home-firstrun-tutorial
+  .home-intro-doc
+  :is(figure, .squisq-page-media, .squisq-page-media-frame):has(img[alt="gezel-mark"]) {
+  display: none;
+}
+.home-firstrun-tutorial .home-intro-page-player {
+  margin-bottom: 0.75rem;
+}
+.home-firstrun-tutorial .home-intro-player {
+  height: 18rem;
+}
 .home-firstrun-lede {
-  margin: 0 0 0.9rem;
+  margin: 0 0 0.5rem;
   padding-left: 1.25rem;
   font-size: 0.9rem;
 }
 .home-firstrun-body {
   padding-left: 1.25rem;
 }
+/* The lede hands straight into the download banner — the banner's default
+   0.75rem top margin (file-browser.css) collapsed with the lede's bottom
+   margin into a gap that separated the instruction from the thing it
+   points at. The lede's own 0.5rem is the whole gap here. */
+.home-firstrun-body > .first-run-banner {
+  margin-top: 0;
+}
 /* Indent the content under each first-run section's <h3>: pad the section, then
    pull the heading back to the section's left edge — so the heading stays put
    and its body reads as nested beneath it. Sections without a heading (e.g. the
-   "Manage Chat AI Models" link) are left flush with the headings. */
+   "Manage AI models in Settings" link) are left flush with the headings. */
 .home-firstrun-body .setup-section:has(> h3) {
   padding-left: 1rem;
 }
@@ -758,23 +704,36 @@
 .home-firstrun-body .engagement-mode-description {
   min-height: 6rem;
 }
+/* Tuck the posture tray up under its question. The default paragraph +
+   tray margins left the keys floating between the two text blocks, reading
+   as attached to neither; with the intro's bottom margin at 0.5rem the
+   collapsed gap lands at 0.5rem on both sides of the tray. */
+.home-firstrun-body .engagement-mode-switch {
+  margin-top: 0.4rem;
+}
 
-/* Line the "Manage Chat AI Models" link (and its blurb) up with the install
-   banner's text above it, which is inset by the banner's border + padding. */
+/* Line the "Manage AI models in Settings" link (and its blurb) up with the
+   install banner's text above it, which is inset by the banner's border +
+   padding. */
 .home-firstrun-body .home-ondevice-link {
   padding-left: 1rem;
 }
 
 /* Extra breathing room above the media section so it reads as separate from
-   the more important chat-model setup above it. */
+   the more important chat-model setup above it; same 1rem inset as the
+   Settings link so the two quiet links line up. */
 .home-media-section {
   --home-media-control-width: 30rem;
   padding-top: 10px;
+  padding-left: 1rem;
 }
 
-/* First-run "on-device media" download list (RecommendedMediaDownloads).
-   Indented slightly so the per-modality picks read as children of the
-   size-aware download-plan button above them. */
+/* First-run "on-device media" section (RecommendedMediaDownloads).
+   Deliberately quiet: one desaturated link opens the plan dialog, and this
+   list carries only live install status (progress / done / error) —
+   never idle download buttons, which out-shouted the required chat-model
+   CTA above. Indented slightly so status rows read as children of the
+   plan link. */
 .home-media-downloads {
   display: flex;
   flex-direction: column;
@@ -791,9 +750,15 @@
   flex-wrap: wrap;
   width: 100%;
 }
-.home-media-row > .home-media-btn {
-  width: 100%;
-  text-align: left;
+/* The single plan entry point stays desaturated — a muted link, not a
+   control with fill. gz-link-button supplies the link shape; this only
+   swaps the accent ink for the muted one. */
+.home-media-plan-link {
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+.home-media-plan-link:hover {
+  color: var(--text);
 }
 
 /* Per-modality install progress — same green bar as the chat model banner
@@ -816,32 +781,6 @@
   font-size: var(--text-xs);
 }
 
-/* Media download buttons — "Download all" and each per-modality pick share
-   one lighter look: a soft accent tint + accent outline (overrides the
-   accent-filled base `button` rule), which reads much lighter in dark mode. */
-.home-media-btn {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-.home-media-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-.home-media-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.home-media-btn-primary {
-  padding: 0.5rem 0.9rem;
-  background: var(--accent);
-  color: var(--accent-selection-ink);
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--accent-selection-ink));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(60, 30, 10, 0.2);
-  font-weight: 600;
-}
-.home-media-btn-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 88%, var(--titlebar-ink));
-}
 .home-media-plan-hint {
   max-width: var(--home-media-control-width);
   margin: 0.4rem 0 0;

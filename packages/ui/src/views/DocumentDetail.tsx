@@ -5,14 +5,19 @@ import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   createDocumentLinkProvider,
+  createDocumentMediaProvider,
   createDocumentsContentContainer,
+  createVersionCompatibleContentContainer,
   deriveContainerScope,
+  documentVersionBasename,
   gezelProofingIgnoreStore,
   resolveOutsideInLayout,
   useProofingCapability,
 } from '../components/SquisqIntegration/index.js';
+import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
@@ -41,10 +46,9 @@ interface DocumentDetailProps {
  * sibling-document link picker, and a DocBlocks-style Export menu
  * for PDF / DOCX / PPTX / HTML / Markdown / video output.
  *
- * The editor talks to disk through a `ContentContainer` adapter scoped
- * to the document's parent directory. So a doc at `notes/diary.md` can
- * embed `![](hero.jpg)` which resolves to `notes/hero.jpg` server-side.
- * Versions ride along under the same directory's `.versions/` sidecar.
+ * The editor keeps side files in a dedicated sibling companion. A document
+ * at `notes/diary.md` owns `notes/diary_files/`; portable Markdown references,
+ * uploads, and `.versions/` snapshots all remain isolated there.
  */
 export function DocumentDetail({ path }: DocumentDetailProps) {
   const outsideInLayout = useMemo(() => resolveOutsideInLayout(path), [path]);
@@ -63,7 +67,13 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const saveDocument = useCallback((source: string) => api.writeDocument(path, source), [path]);
+  const saveDocument = useCallback(
+    async (source: string) => {
+      await api.writeDocument(path, source);
+      recordDocumentUsed(path);
+    },
+    [path],
+  );
   const autosave = useSerializedAutosave({
     resourceKey: `document:${path}`,
     initialValue: content ?? '',
@@ -73,15 +83,59 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   // Container + link provider are stable for the life of one open doc;
   // remounting on `path` change is the parent's responsibility (see
   // `DocumentsView`'s `key={selectedPath}` + `TabContent`'s per-tab key).
-  const { root, primaryDocumentFilename } = useMemo(() => deriveContainerScope(path), [path]);
+  const { root, parentDirectory, companionName, primaryDocumentFilename } = useMemo(
+    () => deriveContainerScope(path),
+    [path],
+  );
+  // Side files belong to the document, not to its parent folder. Keeping the
+  // editor container at `<stem>_files/` isolates its Files panel, uploads, and
+  // version snapshots from every sibling document.
   const container = useMemo(
-    () => createDocumentsContentContainer({ root, client: api, primaryDocumentFilename }),
-    [root, primaryDocumentFilename],
+    () =>
+      createDocumentsContentContainer({
+        root,
+        client: api,
+        referencePrefix: companionName,
+      }),
+    [companionName, root],
+  );
+  // Exporters resolve the portable `<stem>_files/...` references relative to
+  // the visible document, so they retain a read-only view of its parent.
+  const exportContainer = useMemo(
+    () =>
+      createDocumentsContentContainer({
+        root: parentDirectory,
+        client: api,
+        primaryDocumentFilename,
+      }),
+    [parentDirectory, primaryDocumentFilename],
+  );
+  const mediaProvider = useMemo(
+    () => createDocumentMediaProvider(container, companionName, exportContainer),
+    [companionName, container, exportContainer],
+  );
+  const versionBasename = useMemo(() => documentVersionBasename(path), [path]);
+  const versionContainer = useMemo(
+    () =>
+      createVersionCompatibleContentContainer(
+        container,
+        versionBasename,
+        [
+          {
+            container: exportContainer,
+            basenames: [primaryDocumentFilename, versionBasename],
+          },
+        ],
+        exportContainer,
+      ),
+    [container, exportContainer, primaryDocumentFilename, versionBasename],
   );
   const documentLinkProvider = useMemo(
     () => createDocumentLinkProvider({ client: api, currentDocumentPath: path }),
     [path],
   );
+
+  useEffect(() => () => mediaProvider.dispose(), [mediaProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,12 +207,14 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
           height="100%"
           colorScheme={editorTheme}
           fullWidth
-          workspaceContainer={markdown ? container : null}
+          workspaceContainer={markdown ? versionContainer : null}
+          mediaProvider={markdown ? mediaProvider : null}
           documentLinkProvider={markdown ? documentLinkProvider : null}
+          calcEngineFactory={markdown ? ironCalcEngineFactory : undefined}
           proofing={markdown ? proofing : null}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={markdown}
-          versionBasename={primaryDocumentFilename}
+          versionBasename={versionBasename}
           toolbarSlotAfterActions={
             markdown ? (
               <>
@@ -171,7 +227,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
             markdown ? (
               <ExportToolbarControls
                 selectedFile={path}
-                mediaContainer={container}
+                mediaContainer={exportContainer}
                 mediaSource={{ kind: 'documents' }}
               />
             ) : undefined

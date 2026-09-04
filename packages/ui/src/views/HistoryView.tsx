@@ -38,6 +38,9 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'klerk.changed', label: 'Klerk changed' },
   { value: 'boekwachter.changed', label: 'Boekwachter changed' },
   { value: 'keurmeester.changed', label: 'Keurmeester changed' },
+  { value: 'knowledge.catalog.installed', label: 'Knowledge catalog installed' },
+  { value: 'knowledge.catalog.updated', label: 'Knowledge catalog updated' },
+  { value: 'knowledge.catalog.removed', label: 'Knowledge catalog removed' },
   { value: 'gilde.updated', label: 'Catalog content updated' },
   { value: 'task.created', label: 'Task created' },
   { value: 'task.updated', label: 'Task updated' },
@@ -884,6 +887,12 @@ const KIND_LABELS: Record<string, string> = {
   'boekwachter.changed': 'Boekwachter changed',
   'keurmeester.changed': 'Keurmeester changed',
   'gilde.updated': 'Catalog content updated',
+  'knowledge.catalog.installed': 'Knowledge catalog installed',
+  'knowledge.catalog.updated': 'Knowledge catalog updated',
+  'knowledge.catalog.enabled': 'Knowledge catalog enabled',
+  'knowledge.catalog.disabled': 'Knowledge catalog disabled',
+  'knowledge.catalog.removed': 'Knowledge catalog removed',
+  'knowledge.catalog.install_failed': 'Knowledge catalog install failed',
   'v1.chat.completion': 'App chat',
 };
 

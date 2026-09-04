@@ -300,44 +300,26 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
   body.chat_template_kwargs = { [key]: value };
 }
 
-function expectedDeliverableIsFile(value: unknown): boolean {
-  let deliverable = value;
-  if (typeof deliverable === 'string') {
-    const trimmed = deliverable.trim();
-    if (!trimmed.startsWith('{')) return false;
-    try {
-      deliverable = JSON.parse(trimmed);
-    } catch {
-      return false;
-    }
-  }
-  if (!deliverable || typeof deliverable !== 'object') return false;
-  return (deliverable as { kind?: unknown }).kind === 'file';
-}
-
 /**
- * A successful async file handoff is the terminal action for this sender.
+ * A successful async handoff is the terminal action for this sender.
  * Role-typed `delegate_*` tools share `message_gezel`'s parked-delivery
  * contract: the recipient cannot start until this provider turn releases the
- * session. Continuing the inner MLX tool loop after either call both delays the
- * assignee and invites duplicate handoffs from the model.
+ * session. The provider executes the whole emitted tool-call batch before
+ * checking this predicate, so one response can still fan out to several
+ * recipients. Continuing with another model generation after that batch both
+ * delays every assignee and invites duplicate handoffs from the model.
  */
-export function isSuccessfulAsyncFileHandoff(
-  toolName: string,
-  args: Record<string, unknown>,
-  output: string,
-): boolean {
+export function isSuccessfulAsyncHandoff(toolName: string, output: string): boolean {
   return (
     !output.startsWith('ERROR:') &&
-    (toolName === 'message_gezel' || toolName.startsWith('delegate_')) &&
-    expectedDeliverableIsFile(args.expectedDeliverable)
+    (toolName === 'message_gezel' || toolName.startsWith('delegate_'))
   );
 }
 
-function asyncFileHandoffClosing(count: number): string {
+function asyncHandoffClosing(count: number): string {
   return count === 1
-    ? 'I sent the file handoff. The specialist has the project context and should write the deliverable to disk.'
-    : `I sent ${count} file handoffs. The specialists have the project context and should write the deliverables to disk.`;
+    ? 'I sent the handoff and ended my turn so the recipient can use the provider queue. Their reply will arrive asynchronously.'
+    : `I sent ${count} handoffs and ended my turn so the recipients can use the provider queue. Their replies will arrive asynchronously.`;
 }
 
 function immediateFileWriteClosing(paths: string[]): string {
@@ -1273,7 +1255,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       `mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
     );
     this.emitWarning(
-      'Compacted earlier conversation to free up working window for the current turn.',
+      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
     );
   }
 
@@ -3485,7 +3467,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           sourceFailureKind?: 'truncated' | 'not-persisted';
           transportFailure?: boolean;
         } | null = null;
-        let asyncFileHandoffCount = 0;
+        let asyncHandoffCount = 0;
         let terminalActionClosing: string | null = null;
         const immediateFileWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
@@ -3557,8 +3539,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             if (call.function.name === 'ask_user_question' && !output.startsWith('ERROR:')) {
               askedQuestionThisTurn = true;
             }
-            if (isSuccessfulAsyncFileHandoff(call.function.name, args, output)) {
-              asyncFileHandoffCount++;
+            if (isSuccessfulAsyncHandoff(call.function.name, output)) {
+              asyncHandoffCount++;
             }
             if (
               (immediateFileWriteTurn || writeContinuationActive) &&
@@ -3713,13 +3695,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           return fullText;
         }
-        if (asyncFileHandoffCount > 0) {
-          const closingText = asyncFileHandoffClosing(asyncFileHandoffCount);
+        if (asyncHandoffCount > 0) {
+          const closingText = asyncHandoffClosing(asyncHandoffCount);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
           log.info(
-            `turn#${seq} END async-file-handoff-bail afterMs=${Date.now() - start} ` +
-              `handoffs=${asyncFileHandoffCount} loopTurns=${turn + 1}`,
+            `turn#${seq} END async-handoff-bail afterMs=${Date.now() - start} ` +
+              `handoffs=${asyncHandoffCount} loopTurns=${turn + 1}`,
           );
           return fullText;
         }

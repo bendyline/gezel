@@ -1,9 +1,15 @@
 /**
  * Knowledge catalogs (docs/knowledge-catalogs.md route table):
  *
- *   GET    /api/knowledge/catalogs                     installed refs + health + enabled state
- *   GET    /api/knowledge/updates                      newer versions in the signed registry
- *   POST   /api/knowledge/install                      { source } → { jobId }
+ *   GET    /api/knowledge/catalogs                     installed refs + health + enabled state + update flags
+ *   GET    /api/knowledge/available                    gilde entries joined with this user's state
+ *   GET    /api/knowledge/updates                      installed catalogs with a newer gilde version
+ *   POST   /api/knowledge/install                      { source } → { jobId, alreadyRunning }
+ *   POST   /api/knowledge/catalogs/:id/install         install a gilde entry, events as SSE
+ *   DELETE /api/knowledge/catalogs/:id/install         cancel that install
+ *   GET    /api/knowledge/active-installs              running installs with their latest progress
+ *   GET    /api/knowledge/incomplete                   partial downloads no job is writing
+ *   DELETE /api/knowledge/incomplete/:key              delete one
  *   GET    /api/knowledge/jobs/:jobId                  job snapshot
  *   GET    /api/knowledge/jobs/:jobId/events           SSE progress stream
  *   DELETE /api/knowledge/jobs/:jobId                  cancel
@@ -14,25 +20,33 @@
  *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=
  *   GET    /api/knowledge/catalogs/:catalogId/document?id=<docId>   body + metadata
  *
+ * Installs run as background jobs owned by the KnowledgeManager's registry;
+ * the SSE routes are subscribers, so a client disconnect detaches the
+ * consumer without abandoning the download. Cancel is the explicit DELETE.
  * Catalog ids resolve against THIS user's registry — never against request-
  * supplied paths. The document read uses a query param because document ids
  * legitimately contain slashes.
  */
 
-import type { KnowledgeUpdateCandidate, KnowledgeUpdatesResponse } from '@bendyline/gezel';
+import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
 import {
   KnowledgeInstallRequestSchema,
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
-import { fetchKnowledgeRegistry, newerRegistryEntries } from '@bendyline/gezel-knowledge';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { KnowledgeNotFoundError } from '../../knowledge/manager.js';
-import { loadKnowledgeTrustAnchors } from '../../knowledge/trust-anchors.js';
 import { embedQuery } from '../../memory/embeddings.js';
 import type { ServiceContext } from '../context.js';
+import { subscribeToInstallSse } from './install-sse.js';
+
+const NETWORK_BLOCKED = {
+  error: 'network-blocked',
+  message:
+    'Downloading knowledge catalogs needs app network access, which the security policy turns off.',
+} as const;
 
 export function knowledgeRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -40,6 +54,8 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     if (!ctx.knowledge) throw new KnowledgeNotFoundError('knowledge subsystem not available');
     return ctx.knowledge;
   };
+  const networkBlocked = async () =>
+    !resolveSecurityPolicy(await ctx.store.readConfig()).allowAppNetwork;
 
   app.onError((err, c) => {
     if (err instanceof KnowledgeNotFoundError) return c.json({ error: err.message }, 404);
@@ -48,66 +64,41 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
 
   app.get('/catalogs', async (c) => c.json({ catalogs: await manager().list() }));
 
+  app.get('/available', async (c) => c.json({ catalogs: await manager().available() }));
+
   /**
-   * Compare installed catalogs against the publisher's SIGNED registry and
-   * report strictly-newer versions. Read-only: nothing installs from here —
-   * the response carries exactly the coordinates (url + contentDigest) the
-   * hardened install endpoint requires. Honors `allowAppNetwork` like every
-   * other registry check, and refuses to consult an unverifiable registry.
+   * Installed catalogs for which the shipped gilde content carries a newer
+   * version. Read-only and offline: the answer comes from the pinned content,
+   * and installing an update is `POST /catalogs/:id/install`.
    */
   app.get('/updates', async (c) => {
-    const respond = (body: KnowledgeUpdatesResponse) => c.json(body);
-    const config = await ctx.store.readConfig();
-    const registryUrl = config.knowledge?.registryUrl?.trim();
-    if (!registryUrl) return respond({ available: false, reason: 'no-registry-url' });
-    if (!resolveSecurityPolicy(config).allowAppNetwork) {
-      return respond({ available: false, reason: 'network-blocked' });
-    }
-    const anchors = loadKnowledgeTrustAnchors();
-    if (anchors.length === 0) return respond({ available: false, reason: 'no-trust-anchors' });
-    let registry: Awaited<ReturnType<typeof fetchKnowledgeRegistry>>['registry'];
-    try {
-      registry = (await fetchKnowledgeRegistry(registryUrl, { anchors })).registry;
-    } catch (err) {
-      return respond({
-        available: false,
-        reason: 'fetch-failed',
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-    const updates: KnowledgeUpdateCandidate[] = [];
-    for (const installed of await manager().list()) {
-      if (installed.ref.publisherId !== registry.publisher.id) continue;
-      const newer = newerRegistryEntries(registry, {
-        catalogId: installed.ref.catalogId,
-        version: installed.ref.version,
-      });
-      const best = newer[0];
-      if (!best) continue;
-      updates.push({
-        publisherId: registry.publisher.id,
-        catalogId: best.catalogId,
-        name: best.name,
-        installedVersion: installed.ref.version,
-        availableVersion: best.version,
-        archiveBytes: best.archiveBytes,
-        contentDigest: best.contentDigest,
-        url: best.url,
-      });
-    }
-    return respond({
-      available: true,
-      registryUrl,
-      publisher: { id: registry.publisher.id, name: registry.publisher.name },
+    const body: KnowledgeUpdatesResponse = {
+      source: 'gilde',
       checkedAt: new Date().toISOString(),
-      updates,
-    });
+      updates: await manager().updates(),
+    };
+    return c.json(body);
+  });
+
+  app.get('/active-installs', (c) => c.json({ installs: manager().activeInstalls() }));
+
+  app.get('/incomplete', async (c) =>
+    c.json({ incomplete: await manager().listIncompleteDownloads() }),
+  );
+
+  app.delete('/incomplete/:key', async (c) => {
+    const removed = await manager().deleteIncompleteDownload(c.req.param('key'));
+    if (!removed) return c.json({ error: 'no such download' }, 404);
+    return c.json({ ok: true });
   });
 
   app.post('/install', async (c) => {
     const body = KnowledgeInstallRequestSchema.parse(await c.req.json());
-    const { jobId } = manager().startInstall(body.source);
-    return c.json({ jobId }, 202);
+    if (body.source.kind !== 'file' && (await networkBlocked())) {
+      return c.json(NETWORK_BLOCKED, 403);
+    }
+    const { jobId, alreadyRunning } = manager().startInstall(body.source);
+    return c.json({ jobId, alreadyRunning }, 202);
   });
 
   app.get('/jobs/:jobId', (c) => {
@@ -120,42 +111,46 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     const jobId = c.req.param('jobId');
     const knowledge = manager();
     if (!knowledge.getJob(jobId)) return c.json({ error: 'job not found' }, 404);
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      const unsubscribe = knowledge.subscribeJob(jobId, (event) => {
-        void stream
-          .writeSSE({ data: JSON.stringify(event) })
-          .then(() => {
-            if (event.type === 'done' || event.type === 'error') closed = true;
-          })
-          .catch(() => {
-            closed = true;
-          });
-      });
-      if (!unsubscribe) {
-        closed = true;
-        return;
-      }
-      stream.onAbort(() => {
-        closed = true;
-        unsubscribe();
-      });
-      while (!closed) {
-        await stream.sleep(1000);
-        try {
-          await stream.writeSSE({ event: 'ping', data: '' });
-        } catch {
-          closed = true;
-        }
-      }
-      unsubscribe();
-    });
+    return streamSSE(c, (stream) =>
+      subscribeToInstallSse(knowledge.installRegistry, jobId, stream),
+    );
   });
 
   app.delete('/jobs/:jobId', (c) => {
     const cancelled = manager().cancelJob(c.req.param('jobId'));
     return c.json({ cancelled });
   });
+
+  /**
+   * Install a gilde `knowledge-catalog` entry. The job id is the catalog id,
+   * so a second POST for a running id attaches to the in-flight install
+   * rather than starting a parallel one; the auto-updater lands on the same
+   * job. `?version=` pins an older release; `?placement=user` keeps the
+   * bytes private even when a machine-shared store is available.
+   */
+  app.post('/catalogs/:catalogId/install', async (c) => {
+    if (await networkBlocked()) return c.json(NETWORK_BLOCKED, 403);
+    const version = c.req.query('version');
+    const placement = c.req.query('placement');
+    const { source } = KnowledgeInstallRequestSchema.parse({
+      source: {
+        kind: 'catalog',
+        id: c.req.param('catalogId'),
+        ...(version ? { version } : {}),
+        ...(placement ? { placement } : {}),
+      },
+    });
+    const knowledge = manager();
+    const { jobId } = knowledge.startInstall(source);
+    return streamSSE(c, (stream) =>
+      subscribeToInstallSse(knowledge.installRegistry, jobId, stream),
+    );
+  });
+
+  /** Explicitly cancel an in-flight catalog install. Disconnect alone does not cancel. */
+  app.delete('/catalogs/:catalogId/install', (c) =>
+    c.json({ aborted: manager().cancelJob(c.req.param('catalogId')) }),
+  );
 
   app.patch('/catalogs/:catalogId', async (c) => {
     const catalogId = c.req.param('catalogId');

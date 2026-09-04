@@ -1,4 +1,4 @@
-import { type TaskNoteAuthor, createLogger } from '@bendyline/gezel';
+import { type Task, type TaskNoteAuthor, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 
@@ -21,10 +21,33 @@ export const INDEXING_JOB_ID = 'boekwachter-indexing';
 const STEP_ID = 'index';
 const PAUSE_CACHE_MS = 15_000;
 
+/**
+ * Where the job task lives, and the installed task if it exists. New
+ * installs home it in the shared library project — the boekwachter is that
+ * project's resident gezel, and a brand-new Default project's task list must
+ * not lead with a system job (2026-09-02 UX review). Installs that already
+ * carry the task in `default` keep it there: honoring it in place beats a
+ * migration that renumbers a task the user may have paused or annotated.
+ * With no shared project (machine-engine role, tests), `default` remains
+ * the home so the control surface always exists somewhere.
+ */
+async function resolveJobHome(
+  store: Store,
+): Promise<{ homeId: string; installed: { projectId: string; task: Task } | null }> {
+  const shared = await store.sharedProjectId().catch(() => null);
+  const candidates = shared && shared !== 'default' ? [shared, 'default'] : ['default'];
+  for (const projectId of candidates) {
+    const tasks = await store.listProjectTasks(projectId).catch(() => []);
+    const task = tasks.find((t) => t.title === INDEXING_JOB_TITLE);
+    if (task) return { homeId: shared ?? 'default', installed: { projectId, task } };
+  }
+  return { homeId: shared ?? 'default', installed: null };
+}
+
 export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): Promise<void> {
-  const existing = await store.listProjectTasks('default').catch(() => []);
+  const { homeId, installed: found } = await resolveJobHome(store);
   const configuredId = (await store.readConfig().catch(() => null))?.boekwachterGezelId;
-  const installed = existing.find((task) => task.title === INDEXING_JOB_TITLE);
+  const installed = found?.task;
   if (installed) {
     const origin = {
       kind: 'system-job' as const,
@@ -50,7 +73,7 @@ export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): P
   }
   try {
     await tasks.create(
-      'default',
+      homeId,
       {
         title: INDEXING_JOB_TITLE,
         description:
@@ -97,9 +120,8 @@ export class IndexingJobControl {
   async isPaused(): Promise<boolean> {
     const now = Date.now();
     if (now - this.cachedAt < PAUSE_CACHE_MS) return this.cachedPaused;
-    const tasks = await this.store.listProjectTasks('default').catch(() => []);
-    const job = tasks.find((t) => t.title === INDEXING_JOB_TITLE);
-    this.cachedPaused = job?.status === 'paused';
+    const { installed } = await resolveJobHome(this.store);
+    this.cachedPaused = installed?.task.status === 'paused';
     this.cachedAt = now;
     return this.cachedPaused;
   }
@@ -113,11 +135,10 @@ export class IndexingJobControl {
   async note(text: string): Promise<void> {
     if (!this.tasks) return;
     try {
-      const tasks = await this.store.listProjectTasks('default');
-      const job = tasks.find((t) => t.title === INDEXING_JOB_TITLE);
-      if (!job) return;
+      const { installed } = await resolveJobHome(this.store);
+      if (!installed) return;
       const author = await this.noteAuthor();
-      await this.tasks.appendNote('default', job.num, {
+      await this.tasks.appendNote(installed.projectId, installed.task.num, {
         text,
         author,
         stepId: STEP_ID,
