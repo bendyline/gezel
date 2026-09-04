@@ -23,9 +23,17 @@ import {
   KnowledgeRegistryIndexSchema,
   SourceNoticesSchema,
 } from '../src/index.js';
-import { requireGezkCheckout } from './gezk-checkout.js';
+import { requireGezkCheckout, resolveSiteCheckout } from './gezk-checkout.js';
 
-const SCHEMA_ID_BASE = 'https://bendyline.github.io/gezk/schemas';
+/**
+ * A schema's `$id` is a public contract the moment it is served: catalogs
+ * published under 0.5 point at it forever, and 0.x may change the format
+ * incompatibly (spec §1). So the path carries the format version, and the
+ * site mirror is derived from the same constant — a schema always lands at
+ * exactly the address it claims.
+ */
+const SCHEMA_ID_PATH = `gezk/${GEZK_FORMAT_VERSION}/schemas`;
+const SCHEMA_ID_BASE = `https://bendyline.com/${SCHEMA_ID_PATH}`;
 
 export const GEZK_SCHEMA_EXPORTS: ReadonlyArray<[filename: string, schema: z.ZodType]> = [
   ['catalog-manifest.schema.json', KnowledgeCatalogManifestSchema],
@@ -58,6 +66,14 @@ do not edit by hand. Refinements that JSON Schema cannot express (the
 Windows reserved-name rule on versions, NFC normalization of document ids)
 are enforced by conforming readers on top of these schemas.
 
+Each file's \`$id\` is its address on bendyline.com, which serves the same
+bytes:
+
+<${SCHEMA_ID_BASE}/>
+
+The path carries the format version, so a later line never overwrites the
+schemas that catalogs published under ${GEZK_FORMAT_VERSION} point at.
+
 | File | Validates |
 | --- | --- |
 | \`catalog-manifest.schema.json\` | \`manifest.json\` inside a \`.gezk\` |
@@ -69,15 +85,31 @@ are enforced by conforming readers on top of these schemas.
 `;
 
 function main(): void {
-  const root = requireGezkCheckout();
-  const outDir = join(root, 'schemas');
+  const rendered = GEZK_SCHEMA_EXPORTS.map(
+    ([filename, schema]) => [filename, renderSchema(filename, schema)] as const,
+  );
+
+  const outDir = join(requireGezkCheckout(), 'schemas');
   mkdirSync(outDir, { recursive: true });
-  for (const [filename, schema] of GEZK_SCHEMA_EXPORTS) {
-    writeFileSync(join(outDir, filename), renderSchema(filename, schema));
+  for (const [filename, body] of rendered) {
+    writeFileSync(join(outDir, filename), body);
     console.log(`[schemas] wrote ${filename}`);
   }
   writeFileSync(join(outDir, 'README.md'), README);
-  console.log(`[schemas] ${GEZK_SCHEMA_EXPORTS.length} schemas written to ${outDir}`);
+  console.log(`[schemas] ${rendered.length} schemas written to ${outDir}`);
+
+  // The $id of every schema is a bendyline.com URL, so the site checkout holds
+  // the copy those URLs actually resolve to. Mirroring here keeps a published
+  // schema from drifting behind the Zod definition it was generated from.
+  const site = resolveSiteCheckout();
+  if (!site) {
+    console.log('[schemas] no bendyline.github.io checkout found; $id URLs not refreshed');
+    return;
+  }
+  const siteDir = join(site, ...SCHEMA_ID_PATH.split('/'));
+  mkdirSync(siteDir, { recursive: true });
+  for (const [filename, body] of rendered) writeFileSync(join(siteDir, filename), body);
+  console.log(`[schemas] mirrored ${rendered.length} schemas to ${siteDir}`);
 }
 
 main();
