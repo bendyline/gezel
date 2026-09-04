@@ -281,11 +281,13 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     modelFacing: false,
   },
   // The large surgical-step schema is useful in the explicit craftbook
-  // editor, but wasteful on every ordinary coordinator turn. `*` means any
-  // non-empty GEZEL_CRAFTBOOK_ID enables it.
+  // editor and in task-scoped plan authoring, but wasteful on every ordinary
+  // coordinator turn. The chat manager enables this MCP-side registration
+  // for those session types; its exact per-turn allowlist still decides
+  // whether the schema reaches the model.
   craftbook_update_step: {
-    envVar: 'GEZEL_CRAFTBOOK_ID',
-    envValue: '*',
+    envVar: 'GEZEL_CRAFTBOOK_STEP_EDITING',
+    envValue: '1',
     modelFacing: true,
   },
   request_tool_permission: {

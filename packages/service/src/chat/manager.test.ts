@@ -1223,6 +1223,36 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain(`Task artifact folder: \`tasks/${task.num}/\``);
   });
 
+  it('pre-registers step surgery for a task graph but advertises it only on the mandating step', async () => {
+    const { TaskManager } = await import('../tasks/manager.js');
+    const taskMgr = new TaskManager(store);
+    const task = await taskMgr.create('default', {
+      title: 'Author a plan',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        { id: 'frame', name: 'Frame', prompt: 'Call `set_outcomes`, then advance.' },
+        {
+          id: 'outline',
+          name: 'Outline',
+          prompt: 'Call `craftbook_update_step` on the embedded draft step.',
+        },
+      ],
+    });
+
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: 'frame',
+    });
+    mock.script('ok');
+    await manager.send(session.id, 'start');
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create?.opts?.mcpServer?.env.GEZEL_CRAFTBOOK_STEP_EDITING).toBe('1');
+    expect(create?.opts?.toolAllowlist?.has('craftbook_update_step')).toBe(false);
+  });
+
   it('injects predecessor-step notes into a newly created successor session', async () => {
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);

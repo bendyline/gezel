@@ -128,4 +128,15 @@ describe('structured step tool policy', () => {
       }),
     ]).toEqual(['task-note']);
   });
+
+  it('recovers secondary output implied by a procedure from an older generated policy', () => {
+    expect([
+      ...outputMediaForStep({
+        name: 'Fix',
+        prompt: 'Edit the source, then record the result in the task notes.',
+        advanceWhen: { file: 'src/fix.ts' },
+        toolPolicy: { outputMedium: 'workspace' },
+      }),
+    ]).toEqual(['workspace', 'task-note']);
+  });
 });

@@ -7,6 +7,7 @@ export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 export { categorizeToolset } from './categorize.js';
 export {
   applyDefaultCraftbookStepPolicies,
+  outputMediaForCraftbookBlueprint,
   outputMediumForCraftbookBlueprint,
 } from './craftbook-step-policy.js';
 export { renderGildeSchemaFiles, renderSchema } from './gilde-schema-export.js';

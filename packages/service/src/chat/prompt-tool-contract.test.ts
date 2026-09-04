@@ -3,6 +3,7 @@ import {
   capabilitySafeCorrectivePrompt,
   filterPromptToolDirectives,
   lintPromptToolContract,
+  promptConditionallyReferencedTools,
   promptMandatedTools,
 } from './prompt-tool-contract.js';
 
@@ -20,6 +21,14 @@ describe('promptMandatedTools', () => {
     ).toEqual(new Set());
     expect(
       promptMandatedTools('If `run_nodejs_script` is available, use it for the conversion.'),
+    ).toEqual(new Set());
+    expect(
+      promptMandatedTools(
+        'Add the choice only when `draft_post` and `queue_post` are in your function schema.',
+      ),
+    ).toEqual(new Set());
+    expect(
+      promptMandatedTools('Use `web_search` when registered, otherwise continue offline.'),
     ).toEqual(new Set());
     expect([
       ...promptMandatedTools('Use `read_file`, not `read_artifact`, for workspace paths.'),
@@ -43,6 +52,16 @@ describe('promptMandatedTools', () => {
     ]).toEqual(['copy_artifact_to_workspace']);
   });
 
+  it('excludes external research tools when the procedure explicitly permits an offline path', () => {
+    const prompt = [
+      'Call `wikipedia_read` only when you need the complete article.',
+      'Use `fetch_url` for a non-Wikipedia source.',
+      'You may proceed without external research when external tools are unavailable; record why.',
+    ].join('\n');
+
+    expect(promptMandatedTools(prompt)).toEqual(new Set());
+  });
+
   it('still drops a negation that governs the mention', () => {
     // Before the mention.
     expect(promptMandatedTools('Never call `write_file` during review.')).toEqual(new Set());
@@ -54,6 +73,22 @@ describe('promptMandatedTools', () => {
       new Set(),
     );
     expect(promptMandatedTools('Call `apply_patch`, which is unavailable on this roster.')).toEqual(
+      new Set(),
+    );
+  });
+});
+
+describe('promptConditionallyReferencedTools', () => {
+  it('collects only model-facing contextual tools under availability guards', () => {
+    expect(
+      promptConditionallyReferencedTools(
+        'When `draft_post` and `queue_post` are in your function schema, offer the queue choice. Use `read_file` when available.',
+      ),
+    ).toEqual(new Set(['draft_post', 'queue_post']));
+  });
+
+  it('does not turn an unconditional contextual directive into a conditional reference', () => {
+    expect(promptConditionallyReferencedTools('Call `draft_post`, then `queue_post`.')).toEqual(
       new Set(),
     );
   });
@@ -171,6 +206,21 @@ describe('lintPromptToolContract', () => {
       prompt: [
         'Do not call `write_file`; it is not on your tool list.',
         'When `read_file` is available, use it for workspace files.',
+        'Add an option only when `draft_post` and `queue_post` are in your function schema.',
+        'Use `web_search` when registered; otherwise continue offline.',
+      ].join('\n'),
+      availableTools: [],
+    });
+
+    expect(report).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('accepts an explicit offline fallback for optional external research tools', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call `wikipedia_read` only when you need the complete article.',
+        'Use `fetch_url` for a non-Wikipedia source.',
+        'You may proceed without external research when external tools are unavailable; record why.',
       ].join('\n'),
       availableTools: [],
     });

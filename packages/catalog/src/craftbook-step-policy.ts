@@ -87,6 +87,22 @@ export function outputMediumForCraftbookBlueprint(
   return TASK_NOTE_OUTPUT_SIGNAL.test(text) ? 'task-note' : 'none';
 }
 
+/**
+ * Every output surface the authored step procedure requires after applying
+ * the same inference used to persist generated policies. Runtime consumers
+ * use this as a compatibility floor for tasks embedded from an older catalog
+ * whose generated `additionalOutputMedia` predates the current detector.
+ */
+export function outputMediaForCraftbookBlueprint(
+  step: NewCraftbookStep,
+): ReadonlySet<CraftbookStepWritableOutputMedium> {
+  const primary = outputMediumForCraftbookBlueprint(step);
+  return new Set([
+    ...(primary === 'none' ? [] : [primary]),
+    ...additionalOutputMediaForStep(step, primary),
+  ] as CraftbookStepWritableOutputMedium[]);
+}
+
 function additionalOutputMediaForStep(
   step: NewCraftbookStep,
   primary: CraftbookStepOutputMedium,

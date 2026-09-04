@@ -560,10 +560,13 @@ if (process.env.GEZEL_MCP_LEGACY_TOOLS !== '1') {
   }
 }
 // `craftbook_update_step` carries the full gate/branch unions (~18K compact
-// schema chars). Load it only for the explicit Craftbook editor; ordinary
-// task/project sessions use craftbook_read + craftbook_write for structural
-// edits and the focused set_step_deliverable tool for gate repairs.
-if (!sessionCraftbookId) excludedToolNames.add('craftbook_update_step');
+// schema chars). Register it only for explicit template editors and
+// task-scoped craftbook authoring. The service's exact per-turn allowlist is
+// the second gate: registration makes the capability reachable when a step
+// mandates it without advertising the schema on unrelated task turns.
+if (process.env.GEZEL_CRAFTBOOK_STEP_EDITING !== '1') {
+  excludedToolNames.add('craftbook_update_step');
+}
 const allowEnv = process.env.GEZEL_MCP_ALLOW;
 const allowedToolNames =
   allowEnv === undefined

@@ -1,9 +1,11 @@
 import type {
   CraftbookStepOutputMedium,
   CraftbookToolsetNeed,
+  NewCraftbookStep,
   TaskCraftbookStep,
 } from '@bendyline/gezel';
 import { requiredOutputMediaForGate } from '@bendyline/gezel';
+import { outputMediaForCraftbookBlueprint } from '@bendyline/gezel-catalog';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -79,17 +81,37 @@ export function outputMediumForStep(
 
 /** Primary plus explicitly-authorized secondary result surfaces. */
 export function outputMediaForStep(
-  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate'> | undefined,
+  step:
+    | Partial<
+        Pick<
+          TaskCraftbookStep,
+          | 'name'
+          | 'description'
+          | 'prompt'
+          | 'suggestedRole'
+          | 'toolPolicy'
+          | 'advanceWhen'
+          | 'gate'
+          | 'consumes'
+          | 'onExit'
+        >
+      >
+    | undefined,
 ): ReadonlySet<CraftbookStepOutputMedium> {
   const primary = outputMediumForStep(step);
-  if (!primary) return new Set();
+  const procedureMedia = step?.name
+    ? outputMediaForCraftbookBlueprint(step as NewCraftbookStep)
+    : new Set<CraftbookStepOutputMedium>();
+  if (!primary) return procedureMedia;
   const gateRequiredMedia = requiredOutputMediaForGate(step?.gate);
   if (primary === 'none') {
-    return gateRequiredMedia.size > 0 ? gateRequiredMedia : new Set(['none']);
+    const required = new Set([...procedureMedia, ...gateRequiredMedia]);
+    return required.size > 0 ? required : new Set(['none']);
   }
   return new Set([
     primary,
     ...(step?.toolPolicy?.additionalOutputMedia ?? []),
+    ...procedureMedia,
     ...gateRequiredMedia,
   ]);
 }

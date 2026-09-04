@@ -54,6 +54,8 @@
     "test:stability:tui:unleased": "pnpm --filter @bendyline/gezel-cli exec vitest run src/tui/App.test.tsx",
     "test:extended": "node scripts/run-with-dependency-lease.mjs test:extended:unleased",
     "test:extended:unleased": "pnpm --filter @bendyline/gezel-service exec tsx src/chat/prompt-tool-contract-matrix.ts",
+    "test:extended:craftbooks": "node scripts/run-with-dependency-lease.mjs test:extended:craftbooks:unleased",
+    "test:extended:craftbooks:unleased": "pnpm --filter @bendyline/gezel-service exec tsx src/chat/craftbook-tool-contract-matrix.ts",
     "test:surface": "node scripts/run-with-dependency-lease.mjs test:surface:unleased",
     "test:surface:unleased": "node --test scripts/check-test-surface.test.mjs && node scripts/check-test-surface.mjs --json artifacts/test-surface-coverage.json",
     "test:coverage": "node scripts/run-with-dependency-lease.mjs test:coverage:unleased",

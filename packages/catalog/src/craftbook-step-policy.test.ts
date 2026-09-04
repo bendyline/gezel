@@ -2,6 +2,7 @@ import type { CraftbookDoc } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   applyDefaultCraftbookStepPolicies,
+  outputMediaForCraftbookBlueprint,
   outputMediumForCraftbookBlueprint,
 } from './craftbook-step-policy.js';
 
@@ -143,5 +144,6 @@ describe('craftbook step policy defaults', () => {
 
     const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
     expect(step.toolPolicy?.additionalOutputMedia).toEqual(['task-note']);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['artifact', 'task-note']);
   });
 });

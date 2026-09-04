@@ -114,7 +114,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     }
     for (const [name, gate] of Object.entries(CONDITIONALLY_REGISTERED_TOOLS)) {
       const value = this.deps.mcpServer.env[gate.envVar];
-      if (!value || (gate.envValue !== '*' && value !== gate.envValue)) continue;
+      if (!value || (String(gate.envValue) !== '*' && value !== gate.envValue)) continue;
       if (excluded.has(name)) continue;
       if (allow && !allow.has(name)) continue;
       out.push(`mcp__gezel__${name}`);

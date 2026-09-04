@@ -343,6 +343,7 @@ import {
   buildToolCapWarning,
   projectOrchestrationConstraintActive as resolveProjectOrchestrationConstraintActive,
   resolveSessionToolSurface,
+  taskStepContextualBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
 import { repairClampDisabled, stepGateRepairActive } from './step-tool-kit.js';
@@ -15485,6 +15486,7 @@ export class ChatManager {
       return existingSubstantialFileForImmediate;
     };
     const contextualBuiltinTools = [
+      ...taskStepContextualBuiltinTools(record, taskContext?.step),
       ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
@@ -16374,6 +16376,14 @@ export class ChatManager {
           maxClosingChars: 180,
         };
       }
+      // MCP registration is fixed for the life of the provider session, so
+      // inspect the whole embedded graph rather than only the current step.
+      // The per-turn surface below remains narrower and advertises the large
+      // editor schema only on the step whose procedure actually mandates it.
+      const taskNeedsCraftbookStepEditing =
+        taskContext?.task.craftbook.steps.some(
+          (step) => taskStepContextualBuiltinTools(record, step).length > 0,
+        ) ?? false;
       const mcpEnv: Record<string, string> = {
         GEZEL_BASE_URL: `${scheme}://127.0.0.1:${this.getPort()}`,
         GEZEL_TOKEN: mcpToken,
@@ -16421,6 +16431,14 @@ export class ChatManager {
         // Scope craftbook: the unified craftbook_* tools default their
         // target to this template when editing in the explicit editor.
         ...(record.craftbookRef ? { GEZEL_CRAFTBOOK_ID: record.craftbookRef } : {}),
+        // Register the large surgical step-patch schema only in sessions that
+        // can legitimately edit a craftbook. The resolved per-turn allowlist
+        // remains the exact wire gate, so ordinary task steps do not see it;
+        // a plan-authoring step that mandates it can receive it without
+        // requiring a fresh MCP subprocess when the task advances.
+        ...(record.craftbookRef || taskNeedsCraftbookStepEditing
+          ? { GEZEL_CRAFTBOOK_STEP_EDITING: '1' }
+          : {}),
         // Only projects with a mail-type connector binding expose the email
         // write tools, so a non-mail project's agent never sees
         // draft_email/queue_email/send_email.

@@ -16,7 +16,7 @@ import {
   outputMediaForStep,
 } from '../craftbook/step-toolsets.js';
 import type { LocalModelTier } from './local-model-tier.js';
-import { promptMandatedTools } from './prompt-tool-contract.js';
+import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
 import {
   EXTERNAL_SERVICE_TOOLS,
   MEESTER_STRIPPED_CRAFTBOOK_TOOLS,
@@ -63,6 +63,21 @@ function stepMandatedTools(step: { prompt?: string } | undefined): ReadonlySet<s
   }
   MANDATED_TOOL_CACHE.set(prompt, resolved);
   return resolved;
+}
+
+/**
+ * Conditional built-ins whose registration is authorized by the active task
+ * step itself. Keep this derivation shared by the resolver and prompt-roster
+ * predictor so a tool cannot be callable yet omitted from the advertised
+ * surface (or advertised without the matching exact-step grant).
+ */
+export function taskStepContextualBuiltinTools(
+  session: Pick<ChatSession, 'taskRef'>,
+  step: { prompt?: string } | undefined,
+): string[] {
+  if (!session.taskRef) return [];
+  const mandated = stepMandatedTools(step);
+  return mandated.has('craftbook_update_step') ? ['craftbook_update_step'] : [];
 }
 
 export type SessionToolSurface = 'prompt' | 'bridge';
@@ -132,19 +147,23 @@ export interface ResolveSessionToolSurfaceOptions {
    * surface narrows to what this step's class + gate checks need) and
    * the gate-repair clamp derivation. Absent → no kit narrowing.
    */
-  activeStep?: Pick<
-    TaskCraftbookStep,
-    | 'advanceWhen'
-    | 'gate'
-    | 'onExit'
-    | 'completedAt'
-    | 'gateAttempts'
-    | 'lastGateReject'
-    | 'gateAttemptHistory'
-    | 'suggestedRole'
-    | 'prompt'
-    | 'consumes'
-    | 'toolPolicy'
+  activeStep?: Partial<
+    Pick<
+      TaskCraftbookStep,
+      | 'name'
+      | 'description'
+      | 'advanceWhen'
+      | 'gate'
+      | 'onExit'
+      | 'completedAt'
+      | 'gateAttempts'
+      | 'lastGateReject'
+      | 'gateAttemptHistory'
+      | 'suggestedRole'
+      | 'prompt'
+      | 'consumes'
+      | 'toolPolicy'
+    >
   >;
   /**
    * Deterministic tool invoked by a fixed-function session. Keep it through
@@ -275,6 +294,10 @@ export async function resolveSessionToolSurface(
   opts: ResolveSessionToolSurfaceOptions,
 ): Promise<ResolvedSessionToolSurface> {
   const hasToolsetOverride = opts.toolsetsGroupOverride.length > 0;
+  const mandatedStepTools = stepMandatedTools(opts.activeStep);
+  const conditionallyReferencedStepTools = promptConditionallyReferencedTools(
+    opts.activeStep?.prompt ?? '',
+  );
   let rawAllowlist = computeToolAllowlist({
     role: opts.role,
     mode: opts.mode,
@@ -297,10 +320,24 @@ export async function resolveSessionToolSurface(
   // clamps below still apply to them. The security posture stays a hard
   // ceiling: a grant never re-adds an external-service tool the policy
   // stripped inside computeToolAllowlist.
-  if (rawAllowlist && opts.contextualBuiltinTools?.length) {
+  const contextualBuiltinTools = new Set(opts.contextualBuiltinTools ?? []);
+  // A task-scoped plan step may surgically edit its embedded craftbook. The
+  // MCP process pre-registers this one large schema for task sessions, while
+  // this exact procedure mention is what admits it to the current turn.
+  for (const name of taskStepContextualBuiltinTools(opts.session, opts.activeStep)) {
+    contextualBuiltinTools.add(name);
+  }
+  if (rawAllowlist && contextualBuiltinTools.size > 0) {
     rawAllowlist = new Set(rawAllowlist);
     const stripExternalServices = opts.securityPolicy?.allowExternalServices === false;
-    for (const name of opts.contextualBuiltinTools) {
+    for (const name of contextualBuiltinTools) {
+      if (
+        opts.activeStep &&
+        !mandatedStepTools.has(name) &&
+        !conditionallyReferencedStepTools.has(name)
+      ) {
+        continue;
+      }
       if (stripExternalServices && EXTERNAL_SERVICE_TOOLS.has(name)) continue;
       const entry = TOOL_REGISTRY[name as keyof typeof TOOL_REGISTRY];
       if (entry?.registration === 'conditional' && entry.modelFacing) rawAllowlist.add(name);
@@ -379,17 +416,21 @@ export async function resolveSessionToolSurface(
   const researchIntent =
     resolveRoleId(opts.role) === 'researcher' ||
     resolveRoleId(opts.activeStep?.suggestedRole) === 'researcher';
-  // Planner is a pure-delegation role in ordinary chat, but many authored
-  // craftbooks deliberately assign it a planning document (`notes/*.md`,
-  // an outline, a brief). In a real step-scoped session that assignment is
-  // the authority to produce the Markdown deliverable. Grant only the
-  // active Markdown kit, and only where the mode=`never` surface says each
-  // tool survives the install's security + workspace-write ceilings.
+  // A persisted step assignment is authority to execute THAT step, even when
+  // the assignee's ordinary role kit is narrower. Grant only the deterministic
+  // deliverable kit plus canonical tools the procedure positively mandates,
+  // and only through the mode=`never` hard ceiling (security, platform,
+  // repository, and workspace-write restrictions still win). The authored
+  // step policy runs immediately afterward and remains the final subtractive
+  // ceiling, so this makes assignments completable without broadening them
+  // beyond their exact procedure.
   if (
     rawAllowlist &&
-    kit &&
-    resolveRoleId(opts.role) === 'planner' &&
-    (kit.kind === 'markdown-doc' || kit.kind === 'markdown-report' || kit.kind === 'markdown-notes')
+    opts.activeStep &&
+    opts.session.taskRef &&
+    opts.session.stepId &&
+    opts.mode !== 'never' &&
+    !hasToolsetOverride
   ) {
     const hardCeiling = computeToolAllowlist({
       role: opts.role,
@@ -405,11 +446,11 @@ export async function resolveSessionToolSurface(
         ? { workspaceWritable: opts.workspaceWritable }
         : {}),
     });
-    const withPlannerDeliverable = new Set(rawAllowlist);
-    for (const name of kit.tools) {
-      if (hardCeiling === null || hardCeiling.has(name)) withPlannerDeliverable.add(name);
+    const withExactStepGrant = new Set(rawAllowlist);
+    for (const name of [...(kit?.tools ?? []), ...mandatedStepTools]) {
+      if (hardCeiling === null || hardCeiling.has(name)) withExactStepGrant.add(name);
     }
-    rawAllowlist = withPlannerDeliverable;
+    rawAllowlist = withExactStepGrant;
   }
   if (rawAllowlist && kit) {
     const keep = new Set<string>([
@@ -422,10 +463,11 @@ export async function resolveSessionToolSurface(
       // that a PR-review step must first call `github_pr_diff` or that a
       // deploy step needs `run_git`. Whatever the step's own procedure
       // positively instructs stays callable. Widening is safe here by
-      // construction: this is an intersection over a surface the role,
-      // security, consent, and workspace-write filters already produced —
-      // a tool those layers removed cannot come back.
-      ...stepMandatedTools(opts.activeStep),
+      // construction: the exact grant above first passed these names through
+      // the hard security/repository/workspace ceiling, and contextual tools
+      // were admitted only by an active session gate.
+      ...mandatedStepTools,
+      ...conditionallyReferencedStepTools,
       'ask_user_question',
     ]);
     rawAllowlist = new Set([...rawAllowlist].filter((name) => keep.has(name)));
@@ -442,7 +484,7 @@ export async function resolveSessionToolSurface(
     mode: opts.mode,
     ...(kit ? { deliverableKind: kit.kind } : {}),
     ...(researchIntent ? { researchIntent: true } : {}),
-    stepMandatedTools: stepMandatedTools(opts.activeStep),
+    stepMandatedTools: new Set([...mandatedStepTools, ...conditionallyReferencedStepTools]),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
@@ -596,6 +638,8 @@ export async function resolveSessionToolSurface(
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
       ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
+      ...mandatedStepTools,
+      ...conditionallyReferencedStepTools,
       'ask_user_question',
       ...(opts.activeStep && normalizeScriptRefs(opts.activeStep.onExit).length > 0
         ? ['run_installed_script']

@@ -79,7 +79,22 @@ const SOFT_DIRECTIVE =
 const NEGATIVE_CONTEXT =
   /\b(?:do not|don't|never|cannot|can't|isn't|aren't|is not|are not|not available|unavailable|removed|no access|not on (?:your|the) (?:roster|tool list)|lack(?:s|ing)?|without)\b/i;
 const CONDITIONAL_CONTEXT =
-  /\b(?:if|when|unless)\b.{0,100}\b(?:available|wired|present|on (?:your|the) (?:roster|tool list))\b/i;
+  /\b(?:if|when|unless)\b.{0,140}\b(?:available|wired|present|registered|enabled|configured|in (?:your|the) function schema|on (?:your|the) (?:roster|tool list))\b/i;
+const OPTIONAL_EXTERNAL_RESEARCH_TOOLS = new Set([
+  'web_search',
+  'wikipedia_search',
+  'wikipedia_read',
+  'fetch_url',
+  'run_playwright_script',
+]);
+const OPTIONAL_EXTERNAL_RESEARCH_FALLBACK =
+  /\b(?:may|can)\s+(?:still\s+)?(?:proceed|continue)\s+without\s+external\s+(?:research|tools?)\b[\s\S]{0,180}\b(?:unavailable|offline|denied|missing)\b|\b(?:if|when)\s+external\s+(?:research|tools?)\s+(?:is|are)\s+(?:unavailable|offline|denied|missing)\b[\s\S]{0,180}\b(?:proceed|continue)\s+without\b/i;
+
+function toolHasExplicitGlobalFallback(prompt: string, tool: string): boolean {
+  return (
+    OPTIONAL_EXTERNAL_RESEARCH_TOOLS.has(tool) && OPTIONAL_EXTERNAL_RESEARCH_FALLBACK.test(prompt)
+  );
+}
 
 function excerpt(line: string): string {
   const compact = line.trim().replace(/\s+/g, ' ');
@@ -300,6 +315,7 @@ export function promptMandatedTools(prompt: string): Set<string> {
       if (mandated.has(tool)) continue;
       if (!CANONICAL_TOOL_NAME_SET.has(tool)) continue;
       if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
+      if (toolHasExplicitGlobalFallback(prompt, tool)) continue;
       const clause = clauseAround(line, candidate.index);
       // Positional for the negation, whole-clause for the conditional: an
       // availability conditional ("if `x` is wired") governs the whole
@@ -315,6 +331,26 @@ export function promptMandatedTools(prompt: string): Set<string> {
     }
   }
   return mandated;
+}
+
+/**
+ * Conditional model-facing built-ins a prompt explicitly branches on (for
+ * example, "when `draft_post` is in your function schema"). Callers use this
+ * to keep an enabled contextual capability on precisely the step that names
+ * it without treating the unavailable fallback path as an error.
+ */
+export function promptConditionallyReferencedTools(prompt: string): Set<string> {
+  const referenced = new Set<string>();
+  for (const line of prompt.split('\n')) {
+    for (const candidate of explicitToolCandidates(line)) {
+      const entry = TOOL_REGISTRY[candidate.tool as keyof typeof TOOL_REGISTRY];
+      if (entry?.registration !== 'conditional' || !entry.modelFacing) continue;
+      if (CONDITIONAL_CONTEXT.test(clauseAround(line, candidate.index))) {
+        referenced.add(entry.canonicalName);
+      }
+    }
+  }
+  return referenced;
 }
 
 /**
@@ -475,6 +511,7 @@ export function lintPromptToolContract(args: {
       if (LEGACY_TOOL_REPLACEMENTS[tool] || REMOVED_TOOL_NAMES[tool]) continue;
       if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
       if (available.has(tool)) continue;
+      if (toolHasExplicitGlobalFallback(args.prompt, tool)) continue;
       const mentionPrefix = line.slice(Math.max(0, mention.index - 48), mention.index);
       // A tool can be named as provenance or contrast inside a directive
       // aimed at a DIFFERENT tool: "use read_artifact only for

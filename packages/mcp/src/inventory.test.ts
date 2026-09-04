@@ -405,7 +405,7 @@ describe('MCP conditional tool registration', () => {
       expect(Object.keys(off._registeredTools)).not.toContain(name);
 
       const on = await loadServer({
-        [gate.envVar]: gate.envValue === '*' ? 'test-context' : gate.envValue,
+        [gate.envVar]: String(gate.envValue) === '*' ? 'test-context' : gate.envValue,
       });
       expect(Object.keys(on._registeredTools)).toContain(name);
     });
@@ -458,6 +458,19 @@ describe('MCP tool exclusion', () => {
     expect(registered.has('read_task_notes')).toBe(true);
     expect(registered.has('write_file')).toBe(false);
     expect(registered.has('ask_specialist')).toBe(false);
+  });
+
+  it('registers craftbook_update_step only in craftbook-editing session types', async () => {
+    const ordinary = await loadServer({
+      GEZEL_MCP_ALLOW: 'craftbook_update_step',
+    });
+    const taskEditor = await loadServer({
+      GEZEL_MCP_ALLOW: 'craftbook_update_step',
+      GEZEL_CRAFTBOOK_STEP_EDITING: '1',
+    });
+
+    expect(ordinary._registeredTools).not.toHaveProperty('craftbook_update_step');
+    expect(taskEditor._registeredTools).toHaveProperty('craftbook_update_step');
   });
 
   it('GEZEL_MCP_EXCLUDE wins over GEZEL_MCP_ALLOW', async () => {

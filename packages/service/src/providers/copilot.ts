@@ -813,7 +813,7 @@ function registeredToolNames(opts: SessionOpts): string[] {
   }
   for (const [name, gate] of Object.entries(CONDITIONALLY_REGISTERED_TOOLS)) {
     const value = opts.mcpServer.env[gate.envVar];
-    if (!value || (gate.envValue !== '*' && value !== gate.envValue)) continue;
+    if (!value || (String(gate.envValue) !== '*' && value !== gate.envValue)) continue;
     if (allow && !allow.has(name)) continue;
     out.push(name);
   }
