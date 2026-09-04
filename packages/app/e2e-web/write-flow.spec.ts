@@ -17,10 +17,9 @@ test.describe('write flow', () => {
     await expect(composer).toBeVisible();
 
     const editor = composer.locator('.squisq-wysiwyg-editor').first();
-    await editor.click();
     const msg = 'Ping from the write-flow spec';
-    await page.keyboard.type(msg);
-    await page.keyboard.press('Enter');
+    await editor.fill(msg);
+    await editor.press('Shift+Enter');
 
     // The mock provider echoes "Mock reply: <prompt>".
     await expect(

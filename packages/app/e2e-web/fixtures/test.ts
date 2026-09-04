@@ -75,6 +75,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       // Some subsystems read GEZEL_HOME from env rather than the passed option;
       // keep them aligned with the per-worker temp home.
       process.env.GEZEL_HOME = home;
+      // Keep an installed machine broker and its shared roster out of this
+      // supposedly fresh world. Without both overrides, a local smoke run can
+      // mount real machine-shared projects and start unrelated background work.
+      process.env.GEZEL_DISABLE_MACHINE_ENGINE = '1';
+      process.env.GEZEL_MACHINE_SHARED_HOME = join(home, 'machine-shared');
       const unexpectedHttpErrors: UnexpectedHttpErrorEvent[] = [];
       let svc: RunningService | undefined;
       try {
