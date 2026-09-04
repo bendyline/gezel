@@ -646,15 +646,17 @@ export type TaskNeedsHelpReason =
   | 'gate_plateau'
   | 'gate_unsatisfiable'
   | 'gate_infrastructure'
+  | 'step_exit_infrastructure'
   | 'step_stalled'
   | 'budget_exhausted';
 
 /**
  * Fired when a task PAUSES FOR HELP — a gate budget spent, a plateau, an
- * unsatisfiable-by-policy gate, a stalled assignee. Settle hooks only
- * cover complete/canceled, so without this a background task that hit a
- * wall paused silently: a note on the task and a history row, nothing
- * pushed to the user. `detail` is a one-line human summary of why.
+ * unsatisfiable-by-policy gate, a lifecycle-script failure, or a stalled
+ * assignee. Settle hooks only cover complete/canceled, so without this a
+ * background task that hit a wall paused silently: a note on the task and
+ * a history row, nothing pushed to the user. `detail` is a one-line human
+ * summary of why.
  */
 export type TaskNeedsHelpHook = (ctx: {
   projectId: string;
@@ -744,6 +746,11 @@ export interface GateHoldInfo {
   unsatisfiable?: true;
   /** Script-run identifiers and redacted log tails for gate infrastructure failures. */
   scriptRuns?: StepGateOutcome['runs'];
+  /**
+   * Present when completion was held by a lifecycle hook rather than the
+   * step's declarative completion gate. Omission means the gate.
+   */
+  hook?: 'onExit';
   /** Per-check structured outcomes from the gate's declarative floor. */
   checkResults?: GateCheckOutcome[];
   /**
@@ -776,13 +783,15 @@ function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
     .join('\n');
 }
 
-/** Thrown by the legacy `completeStep` wrapper when a gate holds the step. */
+/** Thrown by the legacy `completeStep` wrapper when completion is held. */
 export class GateRejectionError extends Error {
   constructor(
     readonly gate: GateHoldInfo,
     readonly task: Task,
   ) {
-    super(`step completion held by gate: ${gate.message.split('\n')[0] ?? ''}`);
+    super(
+      `step completion held by ${gate.hook === 'onExit' ? 'onExit script failure' : 'gate'}: ${gate.message.split('\n')[0] ?? ''}`,
+    );
     this.name = 'GateRejectionError';
   }
 }
@@ -2543,7 +2552,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
   /**
    * Edge resolution order, in priority:
-   *   1. explicit `next` arg ("jump" — user/model agency wins)
+   *   1. explicit `next` arg ("jump" — user/model agency wins after all
+   *      onExit scripts succeed)
    *   2. an approving completion-gate script's `goto`
    *   3. the completion gate's `onApprove`
    *   4. `step.terminal === true` → no further activation; mark complete
@@ -2556,7 +2566,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
    * this: a reject returns `held` without stamping `completedAt` — the
    * step stays active and the prescriptive message flows back to the
    * caller. `onExit` is the step's `finally`: it runs on every approved
-   * completion (including jumps and terminal), never on a reject.
+   * completion (including jumps and terminal), never on a reject. A missing,
+   * thrown, or non-OK exit script holds the step incomplete and pauses the
+   * task before any edge is resolved.
    */
   private async completeStepInternal(
     projectId: string,
@@ -2618,24 +2630,41 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       }
     }
 
+    // ── onExit: the step's `finally` ──────────────────────────────────
+    // Runs on every approved completion — jumps and terminal steps
+    // included — in declared order. Every ref must succeed before the
+    // transition is constructed; the LAST ref's output feeds the legacy
+    // branch predicates below.
+    let exitRun: ScriptRun | null = null;
+    for (const ref of normalizeScriptRefs(completedStep.onExit)) {
+      try {
+        exitRun = await this.runStepScript(projectId, task, completedStep, 'exit', ref);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return this.holdForStepExitFailure(projectId, task, completedStep, ref, detail);
+      }
+      if (!exitRun) {
+        return this.holdForStepExitFailure(
+          projectId,
+          task,
+          completedStep,
+          ref,
+          'The script runner is unavailable or current engagement policy does not allow this script.',
+        );
+      }
+      if (exitRun.status !== 'ok') {
+        const detail = exitRun.error ?? `The script finished with status "${exitRun.status}".`;
+        return this.holdForStepExitFailure(projectId, task, completedStep, ref, detail, exitRun);
+      }
+    }
+
+    // Build completion state only after every exit hook succeeds. Keeping
+    // this below the hook loop makes it structurally impossible for a
+    // failed hook to stamp completion or activate an explicit jump target.
     const completedAt = nowIso();
     const updatedSteps = task.craftbook.steps.map((s, i) =>
       i === idx ? { ...s, completedAt } : s,
     );
-
-    // ── onExit: the step's `finally` ──────────────────────────────────
-    // Runs on every approved completion — jumps and terminal steps
-    // included — in declared order. The LAST ref's output feeds the
-    // legacy branch predicates below.
-    let exitRun: ScriptRun | null = null;
-    for (const ref of normalizeScriptRefs(completedStep.onExit)) {
-      exitRun = await this.runStepScript(projectId, task, completedStep, 'exit', ref).catch(
-        (err) => {
-          log.error('[tasks] step onExit script failed:', err);
-          return null;
-        },
-      );
-    }
 
     // Decide next active step.
     let newActive: string | undefined = task.activeStepId;
@@ -4096,8 +4125,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
   /**
    * Execute a step-attached script with the right trigger metadata.
-   * Returns `null` when the runner isn't wired or engagement mode is
-   * off — callers treat null as "no script ran".
+   * Returns `null` when the runner isn't wired or engagement mode is off.
+   * Lifecycle callers treat that as an infrastructure failure and pause the
+   * task; a declared hook is never silently skipped.
    */
   private async runStepScript(
     projectId: string,
@@ -4123,6 +4153,72 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       inputs: ref.inputs,
       trigger: { kind: 'step', taskRef: task.ref, stepId: step.id, moment },
     });
+  }
+
+  /**
+   * Hold a completion whose `onExit` lifecycle script could not finish.
+   * This deliberately uses the existing structured completion-hold envelope
+   * so older clients also fail closed; `hook: 'onExit'` lets current callers
+   * report the lifecycle failure instead of mislabelling it as a bad gate.
+   */
+  private async holdForStepExitFailure(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    ref: ScriptRef,
+    detail: string,
+    run?: ScriptRun,
+  ): Promise<Extract<CompleteStepOutcome, { status: 'held' }>> {
+    const logs = run?.logs.trim() ?? '';
+    const logsTail = logs.length > 1_500 ? logs.slice(-1_500) : logs;
+    const diagnostic = {
+      scriptName: ref.name,
+      ...(run?.id ? { runId: run.id } : {}),
+      error: run?.error ?? detail,
+      ...(logsTail ? { logsTail } : {}),
+    };
+    log.error(
+      `[tasks] step onExit script failed for ${task.ref}/${step.id} (${ref.name}): ${detail}`,
+    );
+
+    const current = await this.requireTask(projectId, task.num);
+    const heldTask =
+      current.status === 'active' && current.activeStepId === step.id
+        ? await this.setStatus(projectId, task.num, 'paused')
+        : current;
+    const paused = heldTask.status === 'paused';
+    const message = `The onExit script "${ref.name}" could not complete step "${step.name}" (${step.id}). The step was not marked complete and no successor was activated.${paused ? ' The task is paused for help.' : ''}`;
+    const diagnostics = formatGateScriptDiagnostics([diagnostic]);
+    await this.appendNote(projectId, task.num, {
+      text: `# Step completion script failed — task paused\n\nThe \`onExit\` script \`${ref.name}\` could not finish step "${step.name}" (\`${step.id}\`). The step remains incomplete and no successor was activated, including any explicit jump requested by the caller.\n\n${detail}${diagnostics ? `\n\n## Script diagnostics\n\n${diagnostics}` : ''}\n\nFix the script/runtime problem, set the task active again, then retry the step completion. If this step declares multiple \`onExit\` scripts, earlier scripts may already have run and must be safe to retry.`,
+      author: { kind: 'user' },
+      stepId: step.id,
+    }).catch(() => {});
+    if (paused) {
+      await this.emitNeedsHelp({
+        projectId,
+        task: heldTask,
+        stepId: step.id,
+        reason: 'step_exit_infrastructure',
+        detail: `The onExit script "${ref.name}" failed before step "${step.name}" could complete.`,
+      });
+    }
+
+    return {
+      status: 'held',
+      task: heldTask,
+      gate: {
+        message,
+        messageFingerprint: gateMessageFingerprint(message),
+        attempt: 0,
+        maxAttempts: 1,
+        paused,
+        cached: false,
+        infrastructureError: true,
+        hook: 'onExit',
+        scriptRuns: [diagnostic],
+      },
+    };
   }
 
   /**

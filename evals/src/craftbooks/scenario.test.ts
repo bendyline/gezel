@@ -13,6 +13,7 @@ import type { CraftbookEvalSpec } from './types.ts';
 function directWorkerSpec(): CraftbookEvalSpec {
   return {
     craftbookId: 'sample-book',
+    mode: 'artifact-task',
     scenarioId: 'craftbook-sample-book',
     title: 'Sample craftbook',
     objective: 'Exercise the generic adapter direct-worker path.',
@@ -142,7 +143,7 @@ describe('craftbook generic scenario adapter', () => {
     const logs: string[] = [];
     const spec: CraftbookEvalSpec = {
       ...directWorkerSpec(),
-      runAsCraftbookTask: true,
+      mode: 'workflow',
       setup: {
         ...directWorkerSpec().setup!,
         craftbookParams: { language: 'Nederlands' },
@@ -180,7 +181,7 @@ describe('craftbook generic scenario adapter', () => {
     });
     // The runtime drives the steps — no freehand worker kickoff.
     expect(client.sendChatMessage).not.toHaveBeenCalled();
-    expect(logs.some((line) => line.includes('created + dispatched fanout craftbook task'))).toBe(
+    expect(logs.some((line) => line.includes('created + dispatched workflow craftbook task'))).toBe(
       true,
     );
   });
@@ -202,7 +203,7 @@ describe('craftbook generic scenario adapter', () => {
     };
     const spec: CraftbookEvalSpec = {
       ...directWorkerSpec(),
-      runAsCraftbookTask: true,
+      mode: 'workflow',
       setup: { projectName: 'Sample Project' },
     };
     const scenario = craftbookScenarioFromSpec(spec);
@@ -971,9 +972,9 @@ describe('craftbook generic scenario adapter', () => {
     };
     const scenario = craftbookScenarioFromSpec({
       ...directWorkerSpec(),
+      mode: 'workflow',
       success: {
         summary: 'The real workflow reaches its terminal step.',
-        taskGraph: { requireCraftbookTask: true, requireTerminalStep: true },
       },
     });
 
@@ -987,8 +988,107 @@ describe('craftbook generic scenario adapter', () => {
     ).resolves.toEqual({
       done: true,
       success: true,
-      reason: 'craftbook-sample-book passed 3 deterministic craftbook checks',
+      reason: 'craftbook-sample-book passed 2 deterministic craftbook checks',
     });
+  });
+
+  it('does not pass workflow mode without an attributed craftbook task', async () => {
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({
+        tasks: [
+          {
+            projectId: 'project-1',
+            num: 1,
+            ref: 'T-1',
+            title: 'Unrelated task',
+            status: 'complete',
+            craftbook: {
+              id: 'other-book',
+              steps: [{ id: 'finish', name: 'Finish', terminal: true }],
+            },
+          },
+        ],
+      }),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      mode: 'workflow',
+      success: { summary: 'The real workflow completes.' },
+    });
+
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext),
+    ).resolves.toEqual({ done: false });
+  });
+
+  it('does not pass workflow mode while its attributed task is non-terminal', async () => {
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({
+        tasks: [
+          {
+            projectId: 'project-1',
+            num: 1,
+            ref: 'T-1',
+            title: 'Run workflow',
+            status: 'active',
+            assignee: { kind: 'gezel', gezelId: 'runner-1' },
+            activeStepId: 'build',
+            craftbook: {
+              id: 'sample-book',
+              steps: [
+                { id: 'build', name: 'Build' },
+                { id: 'finish', name: 'Finish', terminal: true },
+              ],
+            },
+            sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+          },
+        ],
+      }),
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [
+          {
+            id: 'session-runner',
+            gezelId: 'runner-1',
+            projectId: 'project-1',
+            lastActivityAt: '2026-09-04T05:00:00Z',
+          },
+        ],
+      }),
+      listGezels: vi.fn().mockResolvedValue({
+        gezels: [{ id: 'runner-1', role: 'Workflow Operator' }],
+      }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      mode: 'workflow',
+      success: { summary: 'The real workflow completes.' },
+    });
+
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext),
+    ).resolves.toEqual({ done: false });
+    const repair = client.messageGezel.mock.calls[0]![1].text as string;
+    expect(repair).toContain('Continue the real craftbook task `T-1`');
+    expect(repair).toContain('advance_task_step');
+    expect(repair).not.toContain('draft task');
   });
 
   it('rejects a seeded workspace fixture whose bytes changed', async () => {

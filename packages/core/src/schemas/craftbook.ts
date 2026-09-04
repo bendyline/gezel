@@ -58,7 +58,8 @@ export {
  * work.
  *
  * Edge resolution at completion of a step (in order):
- *   1. explicit `next` arg from the caller (a "jump")
+ *   1. explicit `next` arg from the caller (a "jump", considered only
+ *      after every `onExit` script succeeds)
  *   2. `step.terminal === true` → no further edges; complete the task
  *   3. `step.branches`: evaluate each predicate against the step's
  *      `onExit` script output; first match wins (`goto`)
@@ -303,8 +304,10 @@ export const CraftbookStepSchema = z.object({
   onEnter: ScriptRefListSchema.optional(),
   /**
    * Cleanup scripts — the `finally` of the step. Run in order AFTER the
-   * gate (if any) approves; never on a gate reject. Branch predicates
-   * read the LAST ref's output (legacy routing; prefer gate routing).
+   * gate (if any) approves; never on a gate reject. Every script must
+   * succeed or the step remains incomplete and the task pauses. Branch
+   * predicates read the LAST ref's output (legacy routing; prefer gate
+   * routing).
    */
   onExit: ScriptRefListSchema.optional(),
   /** Required file inputs for this step, in the order they should be opened. */

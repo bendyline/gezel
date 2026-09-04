@@ -5,6 +5,7 @@ import type {
   CraftbookAuditResult,
   CraftbookCoverageSummary,
   CraftbookEvalCoverageStatus,
+  CraftbookEvalMode,
   CraftbookEvalSpec,
   CraftbookEvalValidationScope,
   CraftbookTemplateStepSummary,
@@ -50,6 +51,7 @@ export function auditCraftbookTemplate(
   validationScope: CraftbookEvalValidationScope = evalStatus === 'validated'
     ? 'artifact-only'
     : 'none',
+  evalMode: CraftbookEvalMode | 'none' = 'none',
 ): CraftbookAuditResult {
   const issues: CraftbookAuditIssue[] = [];
   const steps = template.steps;
@@ -296,6 +298,7 @@ export function auditCraftbookTemplate(
     band,
     hasEvalSpec: evalStatus !== 'missing',
     evalStatus,
+    evalMode,
     validationScope,
     issues,
   };
@@ -323,6 +326,8 @@ export function summarizeCraftbookAudits(audits: CraftbookAuditResult[]): Craftb
     evalSpecs: audits.filter((audit) => audit.hasEvalSpec).length,
     implementedSpecs: audits.filter((audit) => audit.evalStatus === 'implemented').length,
     validatedSpecs: audits.filter((audit) => audit.evalStatus === 'validated').length,
+    artifactTaskSpecs: audits.filter((audit) => audit.evalMode === 'artifact-task').length,
+    workflowSpecs: audits.filter((audit) => audit.evalMode === 'workflow').length,
     artifactOnlyValidatedSpecs: audits.filter((audit) => audit.validationScope === 'artifact-only')
       .length,
     workflowValidatedSpecs: audits.filter((audit) => audit.validationScope === 'workflow').length,
@@ -340,7 +345,7 @@ export function auditCraftbookTemplates(templates: CraftbookTemplateSummary[]): 
   const audits = templates.map((template) => {
     const spec = specMap.get(template.id);
     const status = spec?.coverage.status ?? 'missing';
-    return auditCraftbookTemplate(template, status, validationScopeForSpec(spec));
+    return auditCraftbookTemplate(template, status, validationScopeForSpec(spec), spec?.mode);
   });
   return { audits, summary: summarizeCraftbookAudits(audits) };
 }
@@ -349,18 +354,9 @@ export function validationScopeForSpec(
   spec: CraftbookEvalSpec | undefined,
 ): CraftbookEvalValidationScope {
   if (!spec || spec.coverage.status !== 'validated') return 'none';
-  const hasRuntimeHistory = (spec.success.history ?? []).some((expectation) =>
-    ['tool.gated', 'task.step.gated', 'task.step.activated', 'task.entry.dispatched'].includes(
-      expectation.kind,
-    ),
-  );
-  const hasTerminalProof = spec.success.taskGraph?.requireTerminalStep === true;
-  const hasDraftWorkflowProof =
-    spec.success.taskGraph?.requireDraftRef === true && spec.success.taskGraph.draft !== undefined;
-  if (hasRuntimeHistory || hasTerminalProof || hasDraftWorkflowProof) {
-    return 'workflow';
-  }
-  return 'artifact-only';
+  return spec.mode === 'workflow' && spec.coverage.validatedMode === 'workflow'
+    ? 'workflow'
+    : 'artifact-only';
 }
 
 export function validateCraftbookEvalSpecs(templates: CraftbookTemplateSummary[]): string[] {
@@ -377,6 +373,21 @@ export function validateCraftbookEvalSpecs(templates: CraftbookTemplateSummary[]
     scenarioIds.add(spec.scenarioId);
     if (spec.coverage.status !== 'planned' && !spec.existingScenarioId && !spec.prompt) {
       errors.push(`implemented generic spec "${spec.scenarioId}" needs a prompt`);
+    }
+    if (spec.mode === 'workflow' && spec.existingScenarioId) {
+      errors.push(
+        `workflow spec "${spec.scenarioId}" cannot link a custom scenario that bypasses the generic workflow proof rail`,
+      );
+    }
+    if (spec.coverage.validatedMode && spec.coverage.status !== 'validated') {
+      errors.push(
+        `spec "${spec.scenarioId}" records validatedMode without validated coverage status`,
+      );
+    }
+    if (spec.coverage.validatedMode === 'workflow' && spec.mode !== 'workflow') {
+      errors.push(
+        `spec "${spec.scenarioId}" records workflow validation but currently runs in ${spec.mode} mode`,
+      );
     }
   }
   return errors;
