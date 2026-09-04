@@ -576,6 +576,20 @@ key out from under the cursor. Being glyph-only, each carries `title` and
 `aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
 announces the pending turn now that "Sending…" is no longer on its face.
 
+**The draft can take the window.** An icon key immediately left of Send
+toggles the composer between its three-line strip and the top ~80% of the
+chat column, because a brief or a PRD is unreadable through a slot and
+scrolling it inside the slot loses the shape of the thing being written.
+It is a size change, not a mode: the To line, the toolbar, and every key
+stay exactly where they were, the transcript keeps the remaining fifth
+rather than disappearing, and the draft, its attachments, and its autosave
+are untouched by the flip — so the toggle is never a decision, only a
+preference for the next minute. Expanded, the editor *fills* its frame
+instead of growing with the text; an empty box that filled as you typed
+would put the caret somewhere different on every keystroke. The glyph is
+chevrons pushing apart, closing back together once expanded, and carries
+`title` + `aria-label` + `aria-pressed` like every other icon key.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:

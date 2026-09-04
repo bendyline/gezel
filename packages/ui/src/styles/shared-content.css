@@ -1134,6 +1134,32 @@
      content panes, not this host wrapper. */
 }
 
+/* ── Expanded draft ──────────────────────────────────────────────────
+   The toolbar's expand key hands the composer the top ~80% of the chat
+   column and leaves the transcript the rest, so a brief or a PRD can be
+   written where it will be sent. Height only reaches the editor if every
+   box between the column and it stops sizing to content, which is what
+   these rules spend it on — the timeline is already shrinkable
+   (`.chat-timeline-viewport .chat-timeline`), so it gives the room up
+   without a floor override. */
+.chat-composer[data-composer-expanded="true"] {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 80%;
+  min-height: 0;
+}
+
+.chat-composer[data-composer-expanded="true"] .chat-editor-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Icon key for the expand toggle. Sits immediately left of the primary
+   key so the pair reads as one cluster at the toolbar's right edge. */
+.chat-composer-expand-btn > svg {
+  display: block;
+}
+
 /* Local `/open` command suggestions. The tray sits inside the compose frame
    and follows the editor's width instead of using a body portal, so it remains
    anchored in compact/embedded chat hosts as well as the desktop project view. */

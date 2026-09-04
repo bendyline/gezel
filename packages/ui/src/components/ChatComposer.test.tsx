@@ -64,12 +64,16 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       toolbarSlotRight,
       onChange,
       submitOnEnter,
+      minHeight,
+      maxHeight,
     }: {
       initialMarkdown?: string;
       placeholder?: string;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
       submitOnEnter?: () => void;
+      minHeight?: string;
+      maxHeight?: string;
     }) => {
       // Match Squisq's mount-time-only placeholder configuration so this
       // mock catches regressions where a recipient change merely updates a
@@ -89,6 +93,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
               }}
             />
             <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
+            <span data-testid="editor-heights">{`${minHeight ?? ''}/${maxHeight ?? ''}`}</span>
             <span data-testid="editor-draft">{draft}</span>
             <button
               type="button"
@@ -1050,5 +1055,48 @@ describe('ChatComposer transport resilience', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('ChatComposer expand toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+  });
+
+  it('hands the draft the chat window and gives it back', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    const composer = screen.getByTestId('chat-composer');
+    const toggle = screen.getByTestId('chat-composer-expand');
+    expect(composer.getAttribute('data-composer-expanded')).toBeNull();
+    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(toggle);
+
+    expect(composer.getAttribute('data-composer-expanded')).toBe('true');
+    // Expanded, the shell fills its frame rather than growing with the text.
+    expect(screen.getByTestId('editor-heights').textContent).toBe('100%/100%');
+    expect(screen.getByTestId('chat-composer-expand')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByTestId('chat-composer-expand'));
+
+    expect(composer.getAttribute('data-composer-expanded')).toBeNull();
+    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+  });
+
+  it('stays reachable while a turn is running', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.click(screen.getByTestId('chat-composer-expand'));
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    expect(screen.getByTestId('chat-composer').getAttribute('data-composer-expanded')).toBe('true');
+    expect(screen.getByTestId('chat-composer-expand')).toBeTruthy();
   });
 });

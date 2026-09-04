@@ -113,14 +113,13 @@ const Select = {
             </option>
           )}
           {options.map((o, i) => (
-            // eslint-disable-next-line react/no-array-index-key
             <option key={`${o.value}-${i}`} value={o.value}>
               {typeof o.label === 'string' ? o.label : nodeText(o.label)}
             </option>
           ))}
         </select>
         {trailing.map((node, i) => (
-          // eslint-disable-next-line react/no-array-index-key
+          // biome-ignore lint/suspicious/noArrayIndexKey: trailing nodes are collected in child order by the walk above and never reorder.
           <span key={`trailing-${i}`}>{node}</span>
         ))}
       </>

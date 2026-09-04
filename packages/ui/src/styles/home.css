@@ -395,6 +395,19 @@
   flex-shrink: 0;
 }
 
+/* The one row that is an act rather than a thing. Its circled plus is the
+   only true circle in the menu, and the accent ink is what carries it —
+   nothing here is a key or a chip, so it must not read as one. */
+.session-row-action {
+  gap: 0.4rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.session-row-action svg {
+  flex-shrink: 0;
+}
+
 /* Per-row remove control in the thread picker. Quiet until the row is under
    the pointer or the keyboard cursor: it throws a message away and there is
    no undo, so it must not be something you can hit blind. Sits outside the
@@ -409,7 +422,8 @@
   min-width: 0;
 }
 
-.session-row-delete {
+.session-row-delete,
+.session-row-archive {
   flex-shrink: 0;
   margin-left: 0.5rem;
   padding: 0 0.3rem;
@@ -423,15 +437,22 @@
   opacity: 0;
 }
 
-.gz-select-item:hover .session-row-delete,
-.gz-select-item[data-highlighted] .session-row-delete,
-.session-row-delete:focus-visible {
+.gz-select-item:hover :is(.session-row-delete, .session-row-archive),
+.gz-select-item[data-highlighted] :is(.session-row-delete, .session-row-archive),
+.session-row-delete:focus-visible,
+.session-row-archive:focus-visible {
   opacity: 0.65;
 }
 
-.session-row-delete:hover:not([disabled]) {
+:is(.session-row-delete, .session-row-archive):hover:not([disabled]) {
   opacity: 1;
   background: rgba(0, 0, 0, 0.12);
+}
+
+/* Words, not a glyph — see the button's own comment. */
+.session-row-archive {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
 }
 
 /* Context meter — how full the ACTIVE thread's token window is, sat between

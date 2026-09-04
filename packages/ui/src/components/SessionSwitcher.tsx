@@ -99,11 +99,11 @@ const DRAFT_VALUE_PREFIX = 'draft:';
  * "start a new one" is a destination like any thread in the list — and the
  * moment the user types, that fresh thread earns a name of its own (a draft
  * row, then a thread row) and this row is free again for the next one. The
- * angle brackets keep it apart from a real, still-untitled thread, whose
- * row also reads "New thread".
+ * circled plus is what separates it from a thread that happens to have no
+ * name yet: this row is the act, not one of the things listed.
  */
 const NEW_THREAD_VALUE = '__NEW__';
-const NEW_THREAD_LABEL = '<New thread>';
+const NEW_THREAD_LABEL = 'New thread';
 
 /** Value for the disabled "nothing here yet" row. Never selectable, and
  *  deliberately not the unselected value — that one is the empty string, the
@@ -112,6 +112,36 @@ const EMPTY_ROW_VALUE = '__EMPTY__';
 
 /** A draft whose first line is still empty (it opens with an image, say). */
 const UNTITLED_DRAFT_LABEL = 'Untitled draft';
+
+/** A plus set in a circle: the one true circle in this menu, and an act
+ *  rather than a thing, which is what tells it apart from the rows. */
+function NewThreadIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="7" cy="7" r="5.9" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M7 4.4v5.2M4.4 7h5.2"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+const newThreadLabel = (
+  <span className="session-row session-row-action">
+    <NewThreadIcon />
+    <span className="session-row-title">{NEW_THREAD_LABEL}</span>
+  </span>
+);
 
 /** Recently sent messages offered for reuse under the open thread. */
 const RECENT_SENT_LIMIT = 5;
@@ -530,17 +560,25 @@ export function SessionSwitcher({
   // item this replaces — but the control only appears on the row under the
   // pointer, so it cannot be hit blind.
   const deleteDraft = useCallback(
-    async (draftId: string) => {
+    // `emptiesThread` names the thread this was the last unsent message in.
+    // Nothing was ever sent there, so what is left behind is a nameless empty
+    // row the user cannot use and did not ask for; it goes with the message.
+    async (draftId: string, emptiesThread?: string) => {
       setBusy(true);
       try {
         await api.deletePromptDraft(projectId, draftId);
         if (draftId === activeDraftId) onDraftSelect?.(undefined);
+        if (emptiesThread) {
+          await api.archiveChatSession(emptiesThread);
+          if (emptiesThread === sessionId) onSessionIdChange(undefined);
+          await refresh();
+        }
         await refreshDrafts();
       } finally {
         setBusy(false);
       }
     },
-    [projectId, activeDraftId, onDraftSelect, refreshDrafts],
+    [projectId, activeDraftId, sessionId, onDraftSelect, onSessionIdChange, refresh, refreshDrafts],
   );
 
   // Sent drafts are a recovery affordance, not something worth a request on
@@ -578,18 +616,27 @@ export function SessionSwitcher({
     [projectId, sessionId, onDraftSelect, refreshDrafts],
   );
 
-  const archiveCurrent = useCallback(async () => {
-    if (!sessionId) return;
-    setBusy(true);
-    try {
-      await api.archiveChatSession(sessionId);
-      const remaining = await refresh();
-      onDraftSelect?.(undefined);
-      onSessionIdChange(remaining[0]?.id);
-    } finally {
-      setBusy(false);
-    }
-  }, [sessionId, refresh, onSessionIdChange, onDraftSelect]);
+  // Archiving acts on the row, not on "the current thread": the picker is
+  // where you look at every thread, so it is where you put one away. Only
+  // archiving the one you are IN moves the composer, and then to whatever is
+  // newest — the thread you just left is gone from the list.
+  const archiveThread = useCallback(
+    async (id: string) => {
+      setBusy(true);
+      try {
+        await api.archiveChatSession(id);
+        const remaining = await refresh();
+        if (id === sessionId) {
+          onDraftSelect?.(undefined);
+          onSessionIdChange(remaining[0]?.id);
+        }
+        await refreshDrafts();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [sessionId, refresh, refreshDrafts, onSessionIdChange, onDraftSelect],
+  );
 
   // The draft the composer is writing has no name until its first autosave,
   // and this list is deliberately NOT refetched on our own edits (that would
@@ -651,7 +698,31 @@ export function SessionSwitcher({
   ].sort(newestFirst);
   const sentThreads = threadRows.filter((r) => !r.unsent).sort(newestFirst);
 
-  const removeDraftButton = (draftId: string, label: string) => (
+  /**
+   * Put a conversation away. Spelled out rather than glyphed: the row next to
+   * it carries a × that destroys a message, and these must not be mistaken
+   * for one another — archiving keeps everything, on disk and reversible.
+   */
+  const archiveButton = (s: ChatSessionSummary, namer?: PromptDraftSummary) => (
+    <button
+      type="button"
+      className="session-row-archive"
+      aria-label={`Archive thread ${rowTitle(s, namer)}`}
+      title="Hide this thread from the list. It stays on disk."
+      disabled={busy}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void archiveThread(s.id);
+      }}
+    >
+      Archive
+    </button>
+  );
+
+  const removeDraftButton = (draftId: string, label: string, emptiesThread?: string) => (
     <button
       type="button"
       className="session-row-delete"
@@ -665,7 +736,7 @@ export function SessionSwitcher({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        void deleteDraft(draftId);
+        void deleteDraft(draftId, emptiesThread);
       }}
     >
       ×
@@ -673,7 +744,7 @@ export function SessionSwitcher({
   );
 
   /** One draft row, wherever it sits: a starter, or filed under a thread. */
-  const draftItem = (d: PromptDraftSummary, opts?: { child?: boolean }) => (
+  const draftItem = (d: PromptDraftSummary, opts?: { child?: boolean; mark?: boolean }) => (
     <Select.Item
       key={d.id}
       value={`${DRAFT_VALUE_PREFIX}${d.id}`}
@@ -687,13 +758,31 @@ export function SessionSwitcher({
   /** A thread row plus the drafts filed under it, minus the one naming it. */
   const renderThread = ({ s, drafts, namer, unsent }: (typeof threadRows)[number]) => (
     <Fragment key={s.id}>
-      <Select.Item value={s.id} textValue={rowTextValue(s, engineLabel, namer, unsent)}>
+      <Select.Item
+        value={s.id}
+        textValue={rowTextValue(s, engineLabel, namer, unsent)}
+        // A row wearing a draft's name is showing an unsent message, and it
+        // reads exactly like the draft rows around it — so it throws that
+        // message away like they do. A thread with history keeps Archive:
+        // there the row stands for a conversation, not a message.
+        trailing={
+          namer
+            ? removeDraftButton(
+                namer.id,
+                namer.title || UNTITLED_DRAFT_LABEL,
+                drafts.length <= 1 ? s.id : undefined,
+              )
+            : archiveButton(s, namer)
+        }
+      >
         {renderRow(s, engineLabel, namer, unsent)}
       </Select.Item>
       {/* The other messages started inside this thread, listed under it
           rather than in a drawer of their own, so one place answers "where
           does the next message go, and which one am I writing". */}
-      {drafts.filter((d) => d.id !== namer?.id).map((d) => draftItem(d, { child: true }))}
+      {drafts
+        .filter((d) => d.id !== namer?.id)
+        .map((d) => draftItem(d, { child: true, mark: !unsent }))}
     </Fragment>
   );
   // Between "the composer filed a draft" and its first autosave we know the
@@ -788,13 +877,11 @@ export function SessionSwitcher({
               the user just chose, or the resting state with auto-pick off.
               The trigger names that destination rather than sitting blank
               and reading as a control they forgot to set. */}
-          <Select.Value placeholder={hasSessions ? NEW_THREAD_LABEL : emptyLabel} />
+          <Select.Value placeholder={hasSessions ? newThreadLabel : emptyLabel} />
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu">
           <Select.Item value={NEW_THREAD_VALUE} textValue={NEW_THREAD_LABEL}>
-            <span className="session-row">
-              <span className="session-row-title">{NEW_THREAD_LABEL}</span>
-            </span>
+            {newThreadLabel}
           </Select.Item>
           {(showUnsent || hasSent) && <Select.Separator />}
           {showUnsent && (
@@ -808,18 +895,20 @@ export function SessionSwitcher({
                 >
                   <span className="session-row">
                     <span className="session-row-title">{pendingDraftLabel}</span>
-                    <span className="session-row-draft-mark">draft</span>
                   </span>
                 </Select.Item>
               )}
               {unsentRows.map((row) =>
-                row.kind === 'draft' ? draftItem(row.draft) : renderThread(row),
+                row.kind === 'draft' ? draftItem(row.draft, { mark: false }) : renderThread(row),
               )}
             </Select.Group>
           )}
           {showUnsent && hasSent && <Select.Separator />}
           {hasSent ? (
-            sentThreads.map(renderThread)
+            <Select.Group>
+              <Select.Label>Threads</Select.Label>
+              {sentThreads.map(renderThread)}
+            </Select.Group>
           ) : showUnsent ? (
             <Select.Item value={EMPTY_ROW_VALUE} disabled>
               {emptyMenuLabel}
@@ -868,15 +957,6 @@ export function SessionSwitcher({
           + Draft
         </button>
       )}
-      <button
-        type="button"
-        className="gezel-chat-session-btn"
-        onClick={() => void archiveCurrent()}
-        disabled={!sessionId || busy}
-        title="Archive this thread (remains on disk; hidden from the list)"
-      >
-        Archive
-      </button>
     </div>
   );
 }
@@ -950,9 +1030,6 @@ function renderRow(
   return (
     <span className="session-row">
       <span className="session-row-title">{renderTitleWithMentions(rowTitle(s, namer))}</span>
-      {/* Named by an unsent message, so the row says so — the same badge its
-          own draft rows carry. */}
-      {namer && <span className="session-row-draft-mark">draft</span>}
       <span className="session-row-meta" title={formatAbsoluteTime(at)}>
         {meta}
       </span>
@@ -966,7 +1043,7 @@ function rowTextValue(
   namer?: PromptDraftSummary,
   unsent?: boolean,
 ): string {
-  const head = `${plainTitle(rowTitle(s, namer))}${namer ? ' · draft' : ''} · ${formatRelativeTime(rowActivityAt(s, namer))}`;
+  const head = `${plainTitle(rowTitle(s, namer))} · ${formatRelativeTime(rowActivityAt(s, namer))}`;
   return unsent ? head : `${head} · ${engineSuffix(s, engineLabel)}`;
 }
 
@@ -975,11 +1052,20 @@ function rowTextValue(
  * from the user's side it is the same thing, one step earlier — with a badge
  * so the difference is visible before they commit to it.
  */
-function renderDraftRow(d: PromptDraftSummary, opts?: { child?: boolean }): ReactNode {
+/**
+ * `mark` is off inside the unsent section: the section heading already says
+ * these have gone nowhere, and a badge on every row is noise. It stays on a
+ * draft filed under a thread with history, where the row genuinely could be
+ * read as a conversation of its own.
+ */
+function renderDraftRow(
+  d: PromptDraftSummary,
+  opts?: { child?: boolean; mark?: boolean },
+): ReactNode {
   return (
     <span className={opts?.child ? 'session-row session-row-child' : 'session-row'}>
       <span className="session-row-title">{d.title || UNTITLED_DRAFT_LABEL}</span>
-      <span className="session-row-draft-mark">draft</span>
+      {opts?.mark !== false && <span className="session-row-draft-mark">draft</span>}
       <span className="session-row-meta" title={formatAbsoluteTime(d.updatedAt)}>
         {` · ${formatRelativeTime(d.updatedAt)}`}
       </span>

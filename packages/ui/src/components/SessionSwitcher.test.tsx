@@ -182,7 +182,7 @@ describe('SessionSwitcher', () => {
     // A blank trigger reads as a control the user forgot to set. The picker
     // has to say where the next message goes.
     await waitFor(() => {
-      expect(screen.getAllByText('<New thread>').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('New thread').length).toBeGreaterThan(0);
     });
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
   });
@@ -817,11 +817,10 @@ describe('SessionSwitcher prompt drafts', () => {
     // that is not open, which is the whole point of telling them apart.
     const named = await screen.findByRole('option', { name: /Pricing for the new tier/ });
     expect(named).toHaveValue('s-1');
-    expect(named.textContent).toContain('draft');
     expect(screen.getByRole('option', { name: /Onboarding copy rework/ })).toHaveValue('s-2');
     // The borrowed name replaces the sentinel rather than sitting beside it.
-    // (The picker's own "<New thread>" row is a different string.)
-    expect(screen.queryByRole('option', { name: 'New thread' })).toBeNull();
+    // The only "New thread" left is the picker's own action row.
+    expect(screen.getAllByRole('option', { name: 'New thread' })).toHaveLength(1);
   });
 
   it('floats the thread you are writing into to the top', async () => {
@@ -1103,6 +1102,118 @@ describe('SessionSwitcher prompt drafts', () => {
       }),
     );
     expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0062');
+  });
+
+  it('throws away an unsent thread with the message that named it', async () => {
+    // The row wears its draft's name and reads exactly like the draft rows
+    // around it, so it has to behave like them.
+    mockSessions([
+      {
+        id: 's-unsent',
+        gezelId: 'g1',
+        title: 'New session',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      onThread: [draft({ id: '2026-09-03-0071', sessionId: 's-unsent', title: 'Thread Charlie' })],
+    });
+    vi.mocked(api.deletePromptDraft).mockResolvedValue({ ok: true, deleted: true } as never);
+    vi.mocked(api.archiveChatSession).mockResolvedValue({ ok: true } as never);
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete draft Thread Charlie' }));
+
+    await waitFor(() =>
+      expect(api.deletePromptDraft).toHaveBeenCalledWith('p1', '2026-09-03-0071'),
+    );
+    // That was the thread's last unsent message and nothing was ever sent
+    // there, so the nameless empty row goes with it rather than being left
+    // behind for the user to puzzle over.
+    expect(api.archiveChatSession).toHaveBeenCalledWith('s-unsent');
+  });
+
+  it('keeps a thread with history when one of its drafts is removed', async () => {
+    mockSessions([
+      {
+        id: 's-sent',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      onThread: [draft({ id: '2026-09-03-0081', sessionId: 's-sent', title: 'reply in progress' })],
+    });
+    vi.mocked(api.deletePromptDraft).mockResolvedValue({ ok: true, deleted: true } as never);
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-sent"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete draft reply in progress' }));
+
+    await waitFor(() =>
+      expect(api.deletePromptDraft).toHaveBeenCalledWith('p1', '2026-09-03-0081'),
+    );
+    // The conversation is not the message. Archiving it is a separate act.
+    expect(api.archiveChatSession).not.toHaveBeenCalled();
+  });
+
+  it('archives from the row, moving the composer only off the thread it is in', async () => {
+    mockSessions([
+      {
+        id: 's-open',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+      {
+        id: 's-other',
+        gezelId: 'g1',
+        title: 'Hi there',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({});
+    vi.mocked(api.archiveChatSession).mockResolvedValue({ ok: true } as never);
+    const onSessionIdChange = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-open"
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive thread Hi there' }));
+
+    await waitFor(() => expect(api.archiveChatSession).toHaveBeenCalledWith('s-other'));
+    // Putting away a thread you are not in must not move the composer.
+    expect(onSessionIdChange).not.toHaveBeenCalled();
   });
 
   it('leaves the drafts group out entirely when there are none', async () => {

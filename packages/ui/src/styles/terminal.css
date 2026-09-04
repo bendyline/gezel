@@ -578,6 +578,20 @@
   --compose-entry-height: 120px;
 }
 
+/* An expanded draft claims the column's share through the frame, not
+   through the composer: the shell is the flex item the chat column
+   actually sizes, and the composer inside it is a row of that frame.
+   Without this the 80% would be taken twice — once by the shell's
+   content height, once again inside it. */
+.project-chat-compose-shell:has(.chat-composer[data-composer-expanded="true"]) {
+  flex: 0 0 80%;
+  min-height: 0;
+}
+
+.project-chat-compose-main .chat-composer[data-composer-expanded="true"] {
+  flex: 1 1 auto;
+}
+
 .project-chat-compose-main {
   flex: 1;
   min-width: 0;

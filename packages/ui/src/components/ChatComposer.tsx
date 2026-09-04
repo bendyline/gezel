@@ -53,6 +53,36 @@ interface ComposerDraftSnapshot {
   editVersion: number;
 }
 
+/** Chevrons pushing apart — the draft is about to take the window. */
+function ExpandDraftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 6.4 8 3.4l3 3M11 9.6l-3 3-3-3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The same chevrons closing back toward the bottom strip. */
+function CollapseDraftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 3.4l3 3 3-3M11 12.6l-3-3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function newlineShortcutLabel(): string {
   const platform =
     window.__GEZEL__?.platform ??
@@ -312,6 +342,13 @@ export function ChatComposer({
     roleBasedNameOnlyMode,
   );
   const [streaming, setStreaming] = useState(false);
+  /**
+   * Whether the draft surface has taken the top of the chat window. A
+   * prompt long enough to want the room — a brief, a PRD, a spec being
+   * pasted in — is unreadable through a three-line slot, and scrolling
+   * it inside the slot loses the shape of the thing being written.
+   */
+  const [expanded, setExpanded] = useState(false);
   // The local SSE is only one view of a turn. Navigation, remounts, and a
   // renderer reconnect can drop it while the service keeps generating.
   // Track the service's authoritative in-flight state separately so the
@@ -1306,7 +1343,12 @@ export function ChatComposer({
         : () => void send();
 
   return (
-    <div ref={composerRef} className="chat-composer" data-testid="chat-composer">
+    <div
+      ref={composerRef}
+      className="chat-composer"
+      data-testid="chat-composer"
+      data-composer-expanded={expanded ? 'true' : undefined}
+    >
       {engagementOff && (
         <div className="chat-composer-disabled-banner" role="alert">
           <span>AI disabled in Settings → General. Chat is paused.</span>
@@ -1486,8 +1528,12 @@ export function ChatComposer({
           {...(placeholder ? { placeholder } : {})}
           imageDisplayMode="thumbnail"
           onChange={handleDraftChange}
-          minHeight="120px"
-          maxHeight="50vh"
+          // Expanded, the shell fills the frame the CSS handed it rather
+          // than growing with the text: a tall empty box that only fills
+          // as you type would put the caret somewhere different on every
+          // keystroke. Collapsed, it auto-grows from three lines.
+          minHeight={expanded ? '100%' : '120px'}
+          maxHeight={expanded ? '100%' : '50vh'}
           colorScheme={editorTheme}
           uxFont="var(--font-ui)"
           showPlayTab={false}
@@ -1512,6 +1558,22 @@ export function ChatComposer({
                 onAppendTranscript={appendNarratedText}
                 onError={setError}
               />
+              <button
+                type="button"
+                className="squisq-toolbar-button chat-composer-expand-btn"
+                data-testid="chat-composer-expand"
+                onClick={() => setExpanded((current) => !current)}
+                aria-pressed={expanded}
+                aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
+                title={
+                  expanded
+                    ? 'Collapse the draft back to a few lines'
+                    : 'Expand the draft to fill the chat window'
+                }
+                data-tooltip={expanded ? 'Collapse the draft' : 'Expand the draft'}
+              >
+                {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
+              </button>
               {openCommandQuery !== null ? (
                 <button
                   type="button"
