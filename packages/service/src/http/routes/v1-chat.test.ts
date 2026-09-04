@@ -14,9 +14,15 @@ let httpFetch: typeof fetch;
 let mockCopilot: MockProvider;
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
+const priorMemoryExtractionFlag = process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
 
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
+  // This suite scripts caller-owned /v1 replies on the shared mock provider.
+  // External-conversation memory extraction is intentionally asynchronous and
+  // would otherwise race those scripts by consuming the next queued response.
+  // Memory extraction has dedicated coverage; keep this route fixture isolated.
+  process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = '1';
   home = await mkdtemp(join(tmpdir(), 'gezel-v1-chat-'));
   svc = await startService({ home });
   const scheme = svc.cert ? 'https' : 'http';
@@ -33,14 +39,14 @@ afterAll(async () => {
   await rm(home, { recursive: true, force: true }).catch(() => {});
   if (priorMockFlag === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
   else process.env.GEZEL_MOCK_PROVIDER = priorMockFlag;
+  if (priorMemoryExtractionFlag === undefined) delete process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
+  else process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = priorMemoryExtractionFlag;
 }, 30_000);
 
 /**
  * The `send` carrying `prompt` — not merely the first one recorded since the
- * request began. A completed turn kicks off background memory extraction on
- * the same provider, and that one-shot lands its own `send` (lane
- * `background`, job `memory · external`) whenever it gets there, which is
- * routinely inside the *next* test's window.
+ * request began. This keeps assertions tied to the route call they initiated
+ * even when the service records unrelated provider activity.
  */
 function sendFor(calls: MockProvider['calls'], prompt: string) {
   return calls.find((call) => call.kind === 'send' && (call.prompt ?? '').includes(prompt));

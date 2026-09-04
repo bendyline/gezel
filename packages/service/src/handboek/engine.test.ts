@@ -218,7 +218,9 @@ describe('handboek engine', () => {
   });
 });
 
-describe('no surviving directives (content lint)', () => {
+// These exhaustive corpus lints render every article in every mode. Their
+// runtime grows with authored content and slows under full-suite IO contention.
+describe('no surviving directives (content lint)', { timeout: 15_000 }, () => {
   it('every article in every mode expands cleanly', async () => {
     const engine = makeEngine();
     const toc = await engine.toc();
