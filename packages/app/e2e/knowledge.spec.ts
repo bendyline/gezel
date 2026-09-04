@@ -24,6 +24,8 @@ import { captureScreenshot } from './helpers/screenshot.js';
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
 const appRoot = join(_dirname, '..');
+const UI_LOAD_TIMEOUT_MS = 60_000;
+const HOOK_TIMEOUT_MS = UI_LOAD_TIMEOUT_MS + 60_000;
 const GILDE_REVISION = 'a'.repeat(40);
 const GILDE_REPO = 'Bendyline/shop-notes';
 const GILDE_PATH = 'releases/1.0.0/shop-notes-1.0.0.gezk';
@@ -209,6 +211,10 @@ test.describe('Knowledge catalogs', () => {
   let page: Page;
 
   test.beforeAll(async () => {
+    // The hook builds a real .gezk plus a gilde data dir before it ever
+    // launches Electron, so the suite-wide 30s default is not a lifecycle
+    // budget — it is barely the archive.
+    test.setTimeout(HOOK_TIMEOUT_MS);
     home = await mkdtemp(join(tmpdir(), 'gezel-knowledge-e2e-'));
     assets = await mkdtemp(join(tmpdir(), 'gezel-knowledge-e2e-assets-'));
     archivePath = join(assets, 'shop-notes-1.0.0.gezk');
@@ -228,7 +234,9 @@ test.describe('Knowledge catalogs', () => {
     });
     page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.getByTestId('sidebar-area-settings')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('sidebar-area-settings')).toBeVisible({
+      timeout: UI_LOAD_TIMEOUT_MS,
+    });
   });
 
   test.afterAll(async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,16 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
 
 const DRAFT_TEXT = 'a prompt I want to finish tomorrow';
 
+const promptsDir = () => join(gezelHome, 'projects', 'default', 'artifacts', 'prompts');
+
+/** The text of the single draft on disk, or '' while none has been written. */
+async function draftText(): Promise<string> {
+  const folders = await readdir(promptsDir()).catch(() => [] as string[]);
+  const folder = folders[0];
+  if (!folder) return '';
+  return await readFile(join(promptsDir(), folder, 'message.md'), 'utf8').catch(() => '');
+}
+
 test('prompt drafts — an unsent message survives closing the app', async () => {
   // Two full Electron lifecycles, like the sessions spec.
   test.setTimeout(150_000);
@@ -57,20 +67,20 @@ test('prompt drafts — an unsent message survives closing the app', async () =>
       const editor = page.locator('.squisq-wysiwyg-editor').first();
       await editor.click();
       await page.keyboard.type(DRAFT_TEXT);
-      // Wait for the composer to say the words are safe rather than guessing
-      // at the debounce.
-      await expect(page.locator('.autosave-status-saved')).toBeVisible({ timeout: 20_000 });
+      // The composer's autosave status is failures-only by design, so there
+      // is nothing on screen to wait for. Wait on the file instead — it is
+      // what the feature promises, and it outlives the window.
+      await expect.poll(() => draftText(), { timeout: 20_000 }).toContain(DRAFT_TEXT);
     } finally {
       await closeApp(app);
     }
   }
 
   // The draft is a real file, not just something the renderer remembered.
-  const promptsDir = join(gezelHome, 'projects', 'default', 'artifacts', 'prompts');
-  const draftFolders = await readdir(promptsDir);
+  const draftFolders = await readdir(promptsDir());
   expect(draftFolders.length).toBeGreaterThan(0);
   expect(draftFolders[0]).toMatch(/^\d{4}-\d{2}-\d{2}-\d{4}$/);
-  expect(await readdir(join(promptsDir, draftFolders[0] as string))).toEqual(
+  expect(await readdir(join(promptsDir(), draftFolders[0] as string))).toEqual(
     expect.arrayContaining(['draft.json', 'message.md', 'message_files']),
   );
 
