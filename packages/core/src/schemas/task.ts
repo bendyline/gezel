@@ -739,9 +739,10 @@ export const CompleteStepRequestSchema = z.object({
 export type CompleteStepRequest = z.infer<typeof CompleteStepRequestSchema>;
 
 /**
- * Result of a gated completion attempt. When the gate rejects, `task` is
- * the (unchanged-active-step) task and `gate` carries the prescriptive
- * rejection for the caller to surface.
+ * Result of a held completion attempt. When the gate rejects or an `onExit`
+ * hook fails, `task` retains the active step and `gate` carries the
+ * prescriptive failure for the caller to surface. The field remains named
+ * `gate` for wire compatibility with older clients.
  */
 export const CompleteStepGateInfoSchema = z.object({
   decision: z.literal('reject'),
@@ -751,6 +752,8 @@ export const CompleteStepGateInfoSchema = z.object({
   maxAttempts: z.number().int().positive(),
   paused: z.boolean(),
   infrastructureError: z.boolean().optional(),
+  /** Present when an onExit hook, rather than the declarative gate, held completion. */
+  hook: z.literal('onExit').optional(),
   scriptRuns: z
     .array(
       z.object({

@@ -640,6 +640,8 @@ export type TaskAdvancerOutcome =
       paused?: boolean;
       /** The gate runtime/configuration failed before judging the deliverable. */
       infrastructureError?: boolean;
+      /** Present when an onExit hook, rather than the declarative gate, held completion. */
+      hook?: 'onExit';
       /** The gate cannot be met under current policy (workspace writes off); paused for a human. */
       unsatisfiable?: boolean;
       /** Gate script diagnostics for durable/user-visible failure reporting. */
@@ -2191,6 +2193,7 @@ export class ChatManager {
       paused?: boolean;
       escalationStage?: number;
       infrastructureError?: boolean;
+      hook?: 'onExit';
       unsatisfiable?: boolean;
       scriptRuns?: GateScriptDiagnostic[];
     };
@@ -2272,6 +2275,7 @@ export class ChatManager {
             ...(outcome.infrastructureError !== undefined
               ? { infrastructureError: outcome.infrastructureError }
               : {}),
+            ...(outcome.hook !== undefined ? { hook: outcome.hook } : {}),
             ...(outcome.unsatisfiable !== undefined
               ? { unsatisfiable: outcome.unsatisfiable }
               : {}),
@@ -8300,16 +8304,23 @@ export class ChatManager {
           const failedRun = advanceOutcome.gateRejected.scriptRuns?.find(
             (run) => run.error || run.runId,
           );
+          const exitHookFailed = advanceOutcome.gateRejected.hook === 'onExit';
           log.warn(
-            `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" gate paused the task — stopping the repair loop`,
+            `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" ${
+              exitHookFailed ? 'onExit hook failed and' : 'gate'
+            } paused the task — stopping the repair loop`,
           );
-          const gateWarning = advanceOutcome.gateRejected.infrastructureError
-            ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
+          const gateWarning = exitHookFailed
+            ? `The onExit script for ${ref} failed, so the step remained incomplete and the task was paused.${
                 failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
               }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
-            : advanceOutcome.gateRejected.unsatisfiable
-              ? `The step gate for ${ref} requires workspace files, but gezel workspace writes are off for this project — the task was paused for a human decision without counting a deliverable attempt. See the task notes for the fixes.`
-              : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
+            : advanceOutcome.gateRejected.infrastructureError
+              ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
+                  failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
+                }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
+              : advanceOutcome.gateRejected.unsatisfiable
+                ? `The step gate for ${ref} requires workspace files, but gezel workspace writes are off for this project — the task was paused for a human decision without counting a deliverable attempt. See the task notes for the fixes.`
+                : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
           assistantMessage.warnings = [...(assistantMessage.warnings ?? []), gateWarning];
           await this.store.writeSession(state.record);
           this.events.publish(scope, {

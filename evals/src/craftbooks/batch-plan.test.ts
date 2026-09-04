@@ -17,4 +17,18 @@ describe('craftbook batch plan', () => {
     expect(plan.harnessCounts['hook-runtime']).toBeGreaterThan(0);
     expect(plan.items.some((item) => item.simulatorIds.length > 0)).toBe(true);
   });
+
+  it('can produce a workflow-only matrix plan', async () => {
+    const templates = await loadCraftbookTemplates();
+    const { audits } = auditCraftbookTemplates(templates);
+    const plan = buildCraftbookBatchPlan({ templates, audits, target: 50, mode: 'workflow' });
+
+    expect(plan.mode).toBe('workflow');
+    expect(plan.items.length).toBeGreaterThan(0);
+    expect(plan.items.length).toBeLessThanOrEqual(50);
+    expect(plan.items.every((item) => item.evalMode === 'workflow')).toBe(true);
+    expect(plan.runnableNow).toEqual(
+      expect.arrayContaining(plan.items.map((item) => item.craftbookId)),
+    );
+  });
 });

@@ -22,6 +22,8 @@ describe('craftbook eval audit', () => {
     expect(audits).toHaveLength(templates.length);
     expect(summary.totalTemplates).toBeGreaterThan(100);
     expect(summary.evalSpecs).toBe(CRAFTBOOK_EVAL_SPECS.length);
+    expect(summary.workflowSpecs + summary.artifactTaskSpecs).toBe(summary.evalSpecs);
+    expect(summary.workflowSpecs).toBeGreaterThan(0);
     expect(summary.byEvalStatus.missing).toBe(summary.totalTemplates - summary.evalSpecs);
     expect(summary.artifactOnlyValidatedSpecs).toBeGreaterThan(0);
     expect(summary.workflowValidatedSpecs + summary.artifactOnlyValidatedSpecs).toBe(
@@ -29,24 +31,32 @@ describe('craftbook eval audit', () => {
     );
   });
 
-  it('does not call task existence workflow proof without terminal or runtime evidence', () => {
+  it('does not let ignored spawn metadata turn a linked custom scenario into workflow proof', () => {
+    const linked = CRAFTBOOK_EVAL_SPECS.find((spec) => spec.craftbookId === 'pull-request-review');
+    expect(linked?.existingScenarioId).toBe('large-pr-review');
+    expect(linked?.mode).toBe('artifact-task');
+  });
+
+  it('ties validation proof to the explicit eval mode', () => {
     const spec: CraftbookEvalSpec = {
       craftbookId: 'sample',
+      mode: 'artifact-task',
       scenarioId: 'craftbook-sample',
       title: 'Sample',
       objective: 'Exercise a real workflow.',
       prompt: 'Run it.',
-      runAsCraftbookTask: true,
       setup: { projectName: 'Sample' },
       success: {
         summary: 'The output exists.',
-        taskGraph: { requireCraftbookTask: true },
+        taskGraph: { requireCraftbookTask: true, requireTerminalStep: true },
       },
       coverage: { status: 'validated' },
       qualityFocus: [],
     };
     expect(validationScopeForSpec(spec)).toBe('artifact-only');
-    spec.success.taskGraph!.requireTerminalStep = true;
+    spec.mode = 'workflow';
+    expect(validationScopeForSpec(spec)).toBe('artifact-only');
+    spec.coverage.validatedMode = 'workflow';
     expect(validationScopeForSpec(spec)).toBe('workflow');
   });
 

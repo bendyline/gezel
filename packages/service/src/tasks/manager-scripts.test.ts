@@ -283,12 +283,10 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
     },
   );
 
-  it.runIf(process.platform === 'darwin')(
-    'runs onExit of the completed phase (but does not block transition)',
-    async () => {
-      await writeScript(
-        'write-note',
-        `
+  it.runIf(process.platform === 'darwin')('advances after a successful onExit script', async () => {
+    await writeScript(
+      'write-note',
+      `
         import { gezel, defineScript } from '@bendyline/gezel-sdk';
         export const meta = defineScript({
           name: 'write-note',
@@ -297,25 +295,221 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
         });
         await gezel.artifacts.write('onExit.marker', 'done');
       `,
-      );
+    );
 
-      const task = await tasks.create('default', {
-        title: 'Exit writes a marker',
-        description: 'exercises onExit script-side-effect without blocking the advance.',
-        assignee: { kind: 'user' },
-        steps: [
-          {
-            name: 'A',
-            assignee: { kind: 'user' },
-            onExit: { name: 'write-note' },
-          },
-          { name: 'B', assignee: { kind: 'user' } },
-        ],
-      });
+    const task = await tasks.create('default', {
+      title: 'Exit writes a marker',
+      description: 'exercises onExit script-side-effect without blocking the advance.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'A',
+          assignee: { kind: 'user' },
+          onExit: { name: 'write-note' },
+        },
+        { name: 'B', assignee: { kind: 'user' } },
+      ],
+    });
 
-      await tasks.completeStep('default', task.num, task.craftbook.steps[0]!.id);
-      const marker = await store.readProjectArtifact('default', 'onExit.marker');
-      expect(marker).toBe('done');
-    },
-  );
+    await tasks.completeStep('default', task.num, task.craftbook.steps[0]!.id);
+    const marker = await store.readProjectArtifact('default', 'onExit.marker');
+    expect(marker).toBe('done');
+  });
+
+  it('holds the current step when onExit throws, even with an explicit jump', async () => {
+    const run = vi.fn(async () => {
+      throw new Error('exit runner exploded');
+    });
+    tasks.setScriptRunner({ run } as unknown as ScriptRunner);
+    const needsHelp = vi.fn();
+    tasks.setTaskNeedsHelpHook(needsHelp);
+
+    const task = await tasks.create('default', {
+      title: 'Thrown exit hook',
+      description: 'A failed exit hook must leave the current step incomplete and active.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'build', name: 'Build', assignee: { kind: 'user' }, onExit: { name: 'verify' } },
+        { id: 'review', name: 'Review', assignee: { kind: 'user' } },
+        { id: 'ship', name: 'Ship', assignee: { kind: 'user' } },
+      ],
+    });
+    const handoff = vi.fn(async () => {});
+    tasks.setStepActivatedHook(handoff);
+
+    const outcome = await tasks.completeStepChecked('default', task.num, 'build', 'ship');
+
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate).toMatchObject({
+      infrastructureError: true,
+      hook: 'onExit',
+      attempt: 0,
+      paused: true,
+    });
+    expect(outcome.gate.scriptRuns).toEqual([
+      expect.objectContaining({ scriptName: 'verify', error: 'exit runner exploded' }),
+    ]);
+    expect(outcome.task).toMatchObject({ status: 'paused', activeStepId: 'build' });
+    expect(
+      outcome.task.craftbook.steps.find((step) => step.id === 'build')?.completedAt,
+    ).toBeUndefined();
+    expect(
+      outcome.task.craftbook.steps.find((step) => step.id === 'ship')?.lastActivatedAt,
+    ).toBeUndefined();
+    expect(handoff).not.toHaveBeenCalled();
+    expect(needsHelp).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'step_exit_infrastructure', stepId: 'build' }),
+    );
+    const notes = await tasks.listNotes('default', task.num);
+    expect(notes.at(-1)?.text).toContain('# Step completion script failed — task paused');
+    expect(notes.at(-1)?.text).toContain('no successor was activated');
+    expect(notes.at(-1)?.text).toContain('exit runner exploded');
+  });
+
+  it('holds the current step when the onExit runner is unavailable', async () => {
+    const task = await tasks.create('default', {
+      title: 'Unavailable exit runner',
+      description: 'A declared exit hook must never be silently skipped when no runner is wired.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'build', name: 'Build', assignee: { kind: 'user' }, onExit: { name: 'verify' } },
+        { id: 'done', name: 'Done', assignee: { kind: 'user' } },
+      ],
+    });
+    const unwiredTasks = new TaskManager(store);
+
+    const outcome = await unwiredTasks.completeStepChecked('default', task.num, 'build');
+
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate).toMatchObject({ infrastructureError: true, hook: 'onExit' });
+    expect(outcome.gate.message).toContain('onExit script "verify"');
+    expect(outcome.task).toMatchObject({ status: 'paused', activeStepId: 'build' });
+    expect(outcome.task.craftbook.steps[0]?.completedAt).toBeUndefined();
+  });
+
+  it('holds the current step and preserves diagnostics when onExit returns non-OK', async () => {
+    tasks.setScriptRunner({
+      run: async () => ({
+        id: 'failed-exit-run',
+        projectId: 'default',
+        scriptName: 'verify',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        status: 'error' as const,
+        trigger: { kind: 'manual' as const, userInitiated: true as const },
+        inputs: {},
+        calls: [],
+        logs: 'compiler output: missing generated index',
+        error: 'verification script failed',
+      }),
+    } as unknown as ScriptRunner);
+    const task = await tasks.create('default', {
+      title: 'Non-OK exit hook',
+      description: 'A completed script run with an error status must block the transition.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'build', name: 'Build', assignee: { kind: 'user' }, onExit: { name: 'verify' } },
+        { id: 'done', name: 'Done', assignee: { kind: 'user' } },
+      ],
+    });
+
+    const outcome = await tasks.completeStepChecked('default', task.num, 'build');
+
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.scriptRuns).toEqual([
+      {
+        scriptName: 'verify',
+        runId: 'failed-exit-run',
+        error: 'verification script failed',
+        logsTail: 'compiler output: missing generated index',
+      },
+    ]);
+    const notes = await tasks.listNotes('default', task.num);
+    expect(notes.at(-1)?.text).toContain('failed-exit-run');
+    expect(notes.at(-1)?.text).toContain('compiler output: missing generated index');
+  });
+
+  it('stops an onExit list at the first failed script and does not advance', async () => {
+    const run = vi.fn(async ({ scriptName }: { scriptName: string }) => ({
+      id: `run-${scriptName}`,
+      projectId: 'default',
+      scriptName,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: scriptName === 'second' ? ('error' as const) : ('ok' as const),
+      trigger: { kind: 'manual' as const, userInitiated: true as const },
+      inputs: {},
+      output: { ok: true },
+      calls: [],
+      logs: '',
+      ...(scriptName === 'second' ? { error: 'second failed' } : {}),
+    }));
+    tasks.setScriptRunner({ run } as unknown as ScriptRunner);
+    const task = await tasks.create('default', {
+      title: 'Ordered exit hooks',
+      description: 'Exit scripts run in order and stop before later scripts after a failure.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          id: 'build',
+          name: 'Build',
+          assignee: { kind: 'user' },
+          onExit: [{ name: 'first' }, { name: 'second' }, { name: 'third' }],
+        },
+        { id: 'done', name: 'Done', assignee: { kind: 'user' } },
+      ],
+    });
+
+    const outcome = await tasks.completeStepChecked('default', task.num, 'build');
+
+    expect(outcome.status).toBe('held');
+    expect(run.mock.calls.map(([input]) => input.scriptName)).toEqual(['first', 'second']);
+    expect(outcome.task).toMatchObject({ status: 'paused', activeStepId: 'build' });
+    expect(outcome.task.craftbook.steps[0]?.completedAt).toBeUndefined();
+  });
+
+  it('routes from the last onExit output after every script succeeds', async () => {
+    const run = vi.fn(async ({ scriptName }: { scriptName: string }) => ({
+      id: `run-${scriptName}`,
+      projectId: 'default',
+      scriptName,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'ok' as const,
+      trigger: { kind: 'manual' as const, userInitiated: true as const },
+      inputs: {},
+      output: scriptName === 'route' ? { destination: 'passed' } : { destination: 'ignored' },
+      calls: [],
+      logs: '',
+    }));
+    tasks.setScriptRunner({ run } as unknown as ScriptRunner);
+    const task = await tasks.create('default', {
+      title: 'Exit output routing',
+      description: 'Successful exit scripts preserve legacy last-output branch routing.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          id: 'build',
+          name: 'Build',
+          assignee: { kind: 'user' },
+          onExit: [{ name: 'prepare' }, { name: 'route' }],
+          branches: [
+            { when: { op: 'equals', field: 'destination', value: 'passed' }, goto: 'passed' },
+          ],
+          next: 'fallback',
+        },
+        { id: 'fallback', name: 'Fallback', assignee: { kind: 'user' } },
+        { id: 'passed', name: 'Passed', assignee: { kind: 'user' } },
+      ],
+    });
+
+    const outcome = await tasks.completeStepChecked('default', task.num, 'build');
+
+    expect(outcome.status).toBe('advanced');
+    expect(outcome.task.activeStepId).toBe('passed');
+    expect(run.mock.calls.map(([input]) => input.scriptName)).toEqual(['prepare', 'route']);
+  });
 });

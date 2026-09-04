@@ -9612,24 +9612,34 @@ server.tool(
     }
     const { task, gate } = advanced;
     if (gate) {
-      // The step's completion gate judged the work and rejected it. The
-      // message is prescriptive — surfacing it as the tool result lets
-      // the model fix exactly what's named, in this same turn.
-      const pausedNote = gate.infrastructureError
-        ? ' The gate itself could not run, so the task is PAUSED and no deliverable attempt was consumed. Do not rewrite the deliverable; report the gate/runtime problem.'
-        : gate.paused
-          ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
-          : ' Address these specifically, then call `advance_task_step` again.';
+      // A declarative gate can reject the work, or an onExit lifecycle
+      // script can fail after gate approval. Both use the same compatible
+      // wire envelope, but a hook failure is infrastructure—not a defect
+      // the model should try to repair in the deliverable.
+      const exitHookFailed = gate.hook === 'onExit';
+      const pausedNote = exitHookFailed
+        ? ' The lifecycle script could not finish, so the task is PAUSED and the step remains incomplete. Do not retry or rewrite the deliverable; report the script/runtime problem.'
+        : gate.infrastructureError
+          ? ' The gate itself could not run, so the task is PAUSED and no deliverable attempt was consumed. Do not rewrite the deliverable; report the gate/runtime problem.'
+          : gate.paused
+            ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
+            : ' Address these specifically, then call `advance_task_step` again.';
       const failedRun = gate.scriptRuns?.find((run) => run.error || run.runId);
       const diagnosticNote = failedRun
         ? `\nScript diagnostic: ${failedRun.scriptName}${failedRun.runId ? ` (run ${failedRun.runId})` : ''}${failedRun.error ? ` — ${failedRun.error}` : ''}. Full redacted logs are in the task note.`
         : '';
       return errorResult(
-        gate.infrastructureError
-          ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
-          : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
+        exitHookFailed
+          ? `Step "${stepId}" on ${ref} was NOT completed because its onExit script failed:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
+          : gate.infrastructureError
+            ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
+            : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
         {
-          code: gate.infrastructureError ? 'gate_infrastructure_error' : 'gate_rejected',
+          code: exitHookFailed
+            ? 'step_exit_script_failed'
+            : gate.infrastructureError
+              ? 'gate_infrastructure_error'
+              : 'gate_rejected',
           retryable: !gate.paused && !gate.infrastructureError,
         },
       );

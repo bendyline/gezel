@@ -297,6 +297,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
           maxAttempts: outcome.gate.maxAttempts,
           paused: outcome.gate.paused,
           ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
+          ...(outcome.gate.hook ? { hook: outcome.gate.hook } : {}),
           ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
         },
       });

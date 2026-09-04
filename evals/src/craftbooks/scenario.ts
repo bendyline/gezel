@@ -566,7 +566,7 @@ async function installMockMcpToolsets(
 async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<string | null> {
   const worker =
     spec.setup?.worker ??
-    (spec.runAsCraftbookTask
+    (spec.mode === 'workflow'
       ? {
           name: 'Craftbook Runner',
           role: 'Workflow Operator',
@@ -603,14 +603,9 @@ function craftbookTaskDescription(spec: CraftbookEvalSpec): string {
 }
 
 /**
- * Run a declarative-fanout book as a real craftbook TASK: create the task
- * from the catalog craftbook (the runtime derives the spawn host from the
- * book's `spawn` block) and dispatch its entry step, so the runtime drives
- * the step chain — scope -> draft (fanout) -> collect -> ... — and spawns
- * one child per item itself. The worker is the task assignee; each step's
- * suggestedRole resolves to a role-matched gezel at activation. This replaces
- * the freehand direct-worker kickoff for spawn books so the craftbook's
- * step/gate/fanout machinery actually executes.
+ * Run workflow mode as a real craftbook task: create it from the catalog
+ * craftbook and dispatch its entry step so the runtime, rather than a freehand
+ * kickoff prompt, drives the step/gate chain and any declarative fanout.
  */
 async function dispatchCraftbookTask(
   ctx: EvalContext,
@@ -633,7 +628,7 @@ async function dispatchCraftbookTask(
     dispatchEntry: true,
   });
   ctx.log(
-    `[craftbook:${spec.craftbookId}] created + dispatched fanout craftbook task ${task.ref} in project ${projectId}`,
+    `[craftbook:${spec.craftbookId}] created + dispatched workflow craftbook task ${task.ref} in project ${projectId}`,
   );
 }
 
@@ -803,12 +798,16 @@ async function taskGraphTextForSpec(
   const listed = await client.listProjectTasks(projectId);
   const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
   const failures: string[] = [];
-  if (spec.success.taskGraph?.requireCraftbookTask && matching.length === 0) {
+  const requireCraftbookTask =
+    spec.mode === 'workflow' || spec.success.taskGraph?.requireCraftbookTask === true;
+  const requireTerminalStep =
+    spec.mode === 'workflow' || spec.success.taskGraph?.requireTerminalStep === true;
+  if (requireCraftbookTask && matching.length === 0) {
     failures.push(
       `no task sourced from craftbook ${spec.craftbookId}; saw ${listed.tasks.length} task(s)`,
     );
   }
-  if (spec.success.taskGraph?.requireTerminalStep && matching.length > 0) {
+  if (requireTerminalStep && matching.length > 0) {
     const reachedTerminal = matching.some((task) => {
       if (task.status === 'complete') return true;
       const active = task.craftbook.steps.find((step) => step.id === task.activeStepId);
@@ -1396,11 +1395,12 @@ function repairVirtualTargetForFailures(
       return { path: 'task-notes.md', failures: taskNoteFailures };
     }
   }
-  if (!spec.success.taskGraph) return undefined;
+  if (spec.mode !== 'workflow' && !spec.success.taskGraph) return undefined;
   const taskGraphFailures = prioritized.filter(
     (failure) =>
       failureMentionsPath(failure, 'task-graph.md') ||
       failure.startsWith('no task sourced from craftbook') ||
+      failure.startsWith('task sourced from craftbook') ||
       failure.startsWith('no draftRef') ||
       failure.startsWith('no draft task') ||
       failure.startsWith('draft ') ||
@@ -1411,7 +1411,21 @@ function repairVirtualTargetForFailures(
     : undefined;
 }
 
-function taskGraphRepairDirective(taskGraph: { text: string } | undefined): string {
+function taskGraphRepairDirective(
+  spec: CraftbookEvalSpec,
+  taskGraph: { text: string } | undefined,
+): string {
+  const authoringRef = taskGraph?.text.match(/Authoring task:\s*Task\s+([^:\n]+):/)?.[1];
+  if (spec.mode === 'workflow' && spec.success.taskGraph?.draft === undefined) {
+    return [
+      'TASK_GRAPH_REPAIR: `task-graph.md` is a virtual grader view of the task graph; do not write, patch, or create a file named `task-graph.md`.',
+      authoringRef
+        ? `Continue the real craftbook task \`${authoringRef}\` through its active steps and gates.`
+        : 'Create or resume the requested craftbook task; an unrelated task does not satisfy this workflow eval.',
+      'Use the task tools to inspect the active step, satisfy its real gate, and call `advance_task_step` until a terminal step is active or the task is complete.',
+      'Do not replace the craftbook workflow with an ad-hoc file task or a prose-only answer.',
+    ].join(' ');
+  }
   const draftRef = taskGraph?.text.match(/Draft task:\s*Task\s+([^:\n]+):/)?.[1];
   const draftArg = draftRef ? JSON.stringify(draftRef) : '"<draftRef>"';
   return [
@@ -1654,14 +1668,14 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     // and the trial runs unwinnable-by-design while the failure books as
     // "model" (wild-caught: page-spread, tileset-batch, 2026-07-24 matrix).
     ...(directWorkerNeedsImageToolset(spec) ? { defaultImageModelId: 'sdxl-lightning-4step' } : {}),
-    skipInitialPrompt: !!spec.setup?.worker || !!spec.runAsCraftbookTask,
+    skipInitialPrompt: !!spec.setup?.worker || spec.mode === 'workflow',
     async setup(ctx) {
       const projectId = await ensureProject(ctx, spec);
       if (projectId) await writeFixtureFiles(ctx, projectId, spec);
       if (projectId && ctx.mocks) await setupMockServices(ctx, projectId, spec);
       if (projectId && ctx.mocks) await installMockMcpToolsets(ctx, spec, projectId);
       if (projectId) await applyProjectWritePolicy(ctx, projectId, spec);
-      if (projectId && (spec.setup?.worker || spec.runAsCraftbookTask)) {
+      if (projectId && (spec.setup?.worker || spec.mode === 'workflow')) {
         const workerId = await ensureWorker(ctx, spec);
         if (!workerId) return;
         if (directWorkerNeedsWorkspaceToolsets(spec)) {
@@ -1675,7 +1689,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         // inherits its role's tasks/artifacts groups. A real craftbook task
         // needs both surfaces: task notes/advancement plus intermediate
         // artifact handoffs between specialist phases.
-        if (spec.runAsCraftbookTask) {
+        if (spec.mode === 'workflow') {
           await ensureCraftbookTaskToolsetsForWorker(ctx.client, workerId);
           ctx.log(
             `[craftbook:${spec.craftbookId}] installed task + artifact eval toolsets for ${workerId}`,
@@ -1706,10 +1720,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         ctx.log(
           `[craftbook:${spec.craftbookId}] joined worker ${workerId} to project ${projectId}`,
         );
-        // Spawn/fanout books run as a real craftbook task so the runtime
-        // drives the steps + declarative fanout; every other book keeps the
-        // freehand direct-worker kickoff.
-        if (spec.runAsCraftbookTask) {
+        // Workflow mode runs a real craftbook task so the runtime drives the
+        // steps, gates, and declarative fanout. Artifact-task mode keeps the
+        // bounded direct-worker kickoff and makes no workflow claim.
+        if (spec.mode === 'workflow') {
           await dispatchCraftbookTask(ctx, spec, projectId, workerId);
         } else {
           const primaryDeliverablePath = spec.success.deliverables?.[0]?.path;
@@ -1771,7 +1785,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         taskNotes = await taskNotesTextForSpec(ctx.client, projectId, spec);
         virtualFiles.set('task-notes.md', taskNotes.text);
       }
-      if (spec.success.taskGraph) {
+      if (spec.mode === 'workflow' || spec.success.taskGraph) {
         taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec);
         virtualFiles.set('task-graph.md', taskGraph.text);
       }
@@ -1829,8 +1843,8 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       }
       const repairFailures = prioritizeRepairFailures(failures);
       const taskGraphRequirementCount =
-        Number(spec.success.taskGraph?.requireCraftbookTask === true) +
-        Number(spec.success.taskGraph?.requireTerminalStep === true) +
+        Number(spec.mode === 'workflow' || spec.success.taskGraph?.requireCraftbookTask === true) +
+        Number(spec.mode === 'workflow' || spec.success.taskGraph?.requireTerminalStep === true) +
         Number(spec.success.taskGraph?.requireDraftRef === true) +
         Object.values(spec.success.taskGraph?.draft ?? {}).filter((value) => value !== undefined)
           .length;
@@ -1915,7 +1929,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
                 : undefined,
             repairDirective:
               virtualRepairTarget.path === 'task-graph.md'
-                ? taskGraphRepairDirective(taskGraph)
+                ? taskGraphRepairDirective(spec, taskGraph)
                 : undefined,
             expectedDeliverable:
               virtualRepairTarget.path === 'task-notes.md'

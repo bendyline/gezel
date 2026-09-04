@@ -310,15 +310,17 @@ export type NightShiftReviewIntent = z.infer<typeof NightShiftReviewIntentSchema
 
 /**
  * Why a task paused for help. `gate_unsatisfiable` and
- * `gate_infrastructure` pause without consuming a deliverable attempt
- * (policy / runtime problems, not failed work); the others are spent
- * budgets. Mirrors `TaskNeedsHelpReason` in the service task manager.
+ * `gate_infrastructure` and `step_exit_infrastructure` pause without
+ * consuming a deliverable attempt (policy / runtime problems, not failed
+ * work); the others are spent budgets. Mirrors `TaskNeedsHelpReason` in the
+ * service task manager.
  */
 export const TaskPausedReasonSchema = z.enum([
   'gate_exhausted',
   'gate_plateau',
   'gate_unsatisfiable',
   'gate_infrastructure',
+  'step_exit_infrastructure',
   'step_stalled',
   'budget_exhausted',
 ]);
