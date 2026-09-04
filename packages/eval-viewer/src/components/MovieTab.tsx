@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Trial } from '../types.js';
+import {
+  type Recording,
+  type RecordingActor,
+  type RecordingScene,
+  formatMovieBytes,
+  formatMovieOffset,
+  formatToolCallScene,
+  sceneActorLabel,
+  sceneKindLabel,
+} from './movie.js';
 
 /**
  * Transcript view over a trial's `recording/transcript.json` (the
@@ -12,67 +22,6 @@ import type { Trial } from '../types.js';
  * sub-mode; this chronological list is the debugging bedrock and works
  * for every recording, always.
  */
-
-interface RecordingActor {
-  id: string;
-  name?: string;
-  role?: string;
-  kind?: string;
-  meester?: boolean;
-}
-
-interface RecordingScene {
-  kind: string;
-  at: string;
-  actorId?: string;
-  sessionId?: string;
-  taskRef?: string;
-  excerpt?: string;
-  // tool-call
-  name?: string;
-  argsSummary?: string;
-  success?: boolean;
-  durationMs?: number;
-  count?: number;
-  path?: string;
-  diffStats?: { addedLines?: number; removedLines?: number };
-  // delegation
-  toActorId?: string;
-  delegationKind?: string;
-  // step / gate
-  stepId?: string;
-  stepName?: string;
-  phase?: string;
-  verdict?: string;
-  attempt?: number;
-  // artifact
-  store?: string;
-  bytes?: number;
-  screenshotRef?: string;
-  reason?: string;
-  state?: string;
-}
-
-interface Recording {
-  trial?: { startedAt?: string; success?: boolean; reason?: string; durationMs?: number };
-  actors?: RecordingActor[];
-  scenes?: RecordingScene[];
-  budget?: { droppedScenes?: number; truncatedExcerpts?: number };
-}
-
-const KIND_LABEL: Record<string, string> = {
-  'user-prompt': 'prompt',
-  reasoning: 'thinking',
-  'tool-call': 'tool',
-  reply: 'reply',
-  delegation: 'handoff',
-  'step-transition': 'step',
-  'gate-verdict': 'gate',
-  'artifact-produced': 'artifact',
-  question: 'question',
-  'turn-aborted': 'aborted',
-  note: 'note',
-};
 
 export function MovieTab({ trial }: { trial: Trial }) {
   const [recording, setRecording] = useState<Recording | null>(null);
@@ -142,9 +91,9 @@ export function MovieTab({ trial }: { trial: Trial }) {
             key={`${scene.at}|${scene.kind}|${index}`}
             className={`movie-scene movie-scene--${scene.kind}`}
           >
-            <span className="movie-clock">{formatOffset(Date.parse(scene.at) - startMs)}</span>
+            <span className="movie-clock">{formatMovieOffset(Date.parse(scene.at) - startMs)}</span>
             <span className={`movie-kind movie-kind--${scene.kind}`}>
-              {KIND_LABEL[scene.kind] ?? scene.kind}
+              {sceneKindLabel(scene.kind)}
             </span>
             <span className="movie-actor">{sceneActorLabel(scene, nameOf)}</span>
             <span className="movie-body">{sceneBody(scene, trial)}</span>
@@ -155,32 +104,10 @@ export function MovieTab({ trial }: { trial: Trial }) {
   );
 }
 
-function sceneActorLabel(
-  scene: RecordingScene,
-  nameOf: (id: string | undefined) => string,
-): string {
-  if (scene.kind === 'delegation') {
-    const arrow = scene.delegationKind === 'consultation' ? '⇢' : '→';
-    return `${nameOf(scene.actorId)} ${arrow} ${nameOf(scene.toActorId)}`;
-  }
-  return nameOf(scene.actorId);
-}
-
 function sceneBody(scene: RecordingScene, trial: Trial) {
   switch (scene.kind) {
-    case 'tool-call': {
-      const bits = [
-        `${scene.name ?? '?'}${scene.count && scene.count > 1 ? ` ×${scene.count}` : ''}`,
-        scene.success === false ? 'FAILED' : null,
-        scene.path ?? null,
-        scene.argsSummary ?? null,
-        scene.diffStats
-          ? `+${scene.diffStats.addedLines ?? 0} −${scene.diffStats.removedLines ?? 0}`
-          : null,
-        scene.durationMs !== undefined ? `${Math.round(scene.durationMs)}ms` : null,
-      ].filter((bit): bit is string => bit !== null);
-      return <code>{bits.join('  ·  ')}</code>;
-    }
+    case 'tool-call':
+      return <code>{formatToolCallScene(scene)}</code>;
     case 'step-transition':
       return (
         <span>
@@ -200,7 +127,7 @@ function sceneBody(scene: RecordingScene, trial: Trial) {
       return (
         <span>
           <code>{scene.path}</code>
-          {scene.bytes ? ` (${formatBytes(scene.bytes)})` : ''}
+          {scene.bytes ? ` (${formatMovieBytes(scene.bytes)})` : ''}
           {scene.screenshotRef ? (
             <a
               className="movie-shot"
@@ -222,18 +149,4 @@ function sceneBody(scene: RecordingScene, trial: Trial) {
     default:
       return <span>{scene.excerpt ?? ''}</span>;
   }
-}
-
-function formatOffset(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  if (m === 0) return `t+${s}s`;
-  return `t+${m}m${String(s % 60).padStart(2, '0')}s`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
