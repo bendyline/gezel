@@ -196,17 +196,44 @@ describe('knowledge routes', () => {
 
     // Sends are fire-and-forget (`accepted: true`); wait for the assistant
     // turn to land before reading the audit log.
+    //
+    // A reply appearing is NOT the end of the turn: the prose-deliverable
+    // detector re-prompts this send, so one message yields a second
+    // assistant bubble, persisted after the first. Returning on the first
+    // one leaves that continuation in flight, and it then satisfies the
+    // NEXT send's wait before that send has retrieved anything — the whole
+    // point of the second half of this test. So wait for the reply, then
+    // for the transcript to go quiet.
+    const assistantCount = async (): Promise<number> =>
+      (await client.chatHistory(gezelId, 'default')).messages.filter((m) => m.role === 'assistant')
+        .length;
+    // Poll cadence and the quiet window that has to elapse after the last
+    // new message before the turn counts as settled. A continuation is
+    // dispatched from inside the same send loop, so this only has to cover
+    // one detector pass plus one MockProvider round trip.
+    const POLL_MS = 200;
+    const QUIET_POLLS = 8;
+    const MAX_POLLS = 100;
     const sendAndWait = async (message: string): Promise<void> => {
-      const before = (await client.chatHistory(gezelId, 'default')).messages.filter(
-        (m) => m.role === 'assistant',
-      ).length;
+      const before = await assistantCount();
       await client.sendChatMessage(gezelId, { message, projectId: 'default' });
-      for (let i = 0; i < 100; i++) {
-        const hist = await client.chatHistory(gezelId, 'default');
-        if (hist.messages.filter((m) => m.role === 'assistant').length > before) return;
-        await new Promise((r) => setTimeout(r, 200));
+      let replied = false;
+      let last = before;
+      let quiet = 0;
+      for (let i = 0; i < MAX_POLLS; i++) {
+        const now = await assistantCount();
+        if (now > before) replied = true;
+        if (now === last) quiet++;
+        else quiet = 0;
+        last = now;
+        if (replied && quiet >= QUIET_POLLS) return;
+        await new Promise((r) => setTimeout(r, POLL_MS));
       }
-      throw new Error('assistant turn never completed');
+      throw new Error(
+        replied
+          ? 'assistant turn never settled (continuations still arriving)'
+          : 'assistant turn never completed',
+      );
     };
 
     await sendAndWait('How do dovetail joints hold together without glue in fine woodworking?');
@@ -242,7 +269,13 @@ describe('knowledge routes', () => {
       (e): e is Extract<typeof e, { details?: Record<string, unknown> }> =>
         'details' in e && !injected.entries.some((p) => p.id === e.id),
     );
-    expect(newest.length).toBeGreaterThan(0);
+    // Retrieval always leaves a trace: hits above the floor log the
+    // injection, and nothing above the floor logs the zero-injection probe.
+    // No event at all means the turn under test never ran retrieval.
+    expect(
+      newest.length,
+      'the second turn logged no retrieval event — it never ran retrieval',
+    ).toBeGreaterThan(0);
     for (const entry of newest) {
       const hits = (entry.details as { hits?: Array<{ source?: string }> })?.hits ?? [];
       expect(hits.every((h) => h.source !== 'knowledge')).toBe(true);
