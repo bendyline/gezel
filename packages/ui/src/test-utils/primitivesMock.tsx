@@ -19,6 +19,8 @@ interface SelectRootProps {
   onValueChange?: (v: string) => void;
   children?: ReactNode;
   disabled?: boolean;
+  /** Radix fires this when the menu opens; focus stands in for that here. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface SelectItemProps {
@@ -41,11 +43,27 @@ function nodeText(n: ReactNode): string {
 }
 
 const Select = {
-  Root: ({ value, defaultValue, onValueChange, children, disabled }: SelectRootProps) => {
+  Root: ({
+    value,
+    defaultValue,
+    onValueChange,
+    children,
+    disabled,
+    onOpenChange,
+  }: SelectRootProps) => {
     // Walk children to collect items. The tests don't need positioned
     // popovers — render every Item as a real <option> so the user can
     // pick by visible text via fireEvent.change.
     const options: Array<{ value: string; label: ReactNode }> = [];
+    // Per-row actions live outside the option element in the real primitive
+    // (Radix portals an item's text into the trigger, so a control there
+    // would be duplicated into it). A native <select> cannot hold them
+    // either, so they render beside it — enough for a test to click one.
+    const trailing: ReactNode[] = [];
+    // Radix shows the trigger's placeholder only while the value is the
+    // empty string; any other value renders the matching item's text, and
+    // renders nothing at all when no item carries it.
+    let placeholder: ReactNode = null;
     const walk = (n: ReactNode): void => {
       if (n == null || typeof n === 'boolean') return;
       if (Array.isArray(n)) {
@@ -54,8 +72,18 @@ const Select = {
       }
       if (typeof n === 'object' && 'props' in n) {
         const props = (
-          n as { props?: { value?: string; children?: ReactNode; textValue?: string } }
+          n as {
+            props?: {
+              value?: string;
+              children?: ReactNode;
+              textValue?: string;
+              placeholder?: ReactNode;
+              trailing?: ReactNode;
+            };
+          }
         ).props;
+        if (props?.placeholder != null) placeholder = props.placeholder;
+        if (props?.trailing != null) trailing.push(props.trailing);
         if (props && typeof props.value === 'string') {
           // Prefer Radix's `textValue` for rich rows — same plain-text
           // channel the real Select uses for typeahead.
@@ -68,20 +96,34 @@ const Select = {
       }
     };
     walk(children);
+    const current = value ?? defaultValue ?? '';
     return (
-      <select
-        data-testid="mock-select"
-        value={value ?? defaultValue ?? ''}
-        disabled={disabled}
-        onChange={(e) => onValueChange?.(e.currentTarget.value)}
-      >
-        {options.map((o, i) => (
+      <>
+        <select
+          data-testid="mock-select"
+          value={current}
+          disabled={disabled}
+          onChange={(e) => onValueChange?.(e.currentTarget.value)}
+          onFocus={() => onOpenChange?.(true)}
+          onBlur={() => onOpenChange?.(false)}
+        >
+          {current === '' && placeholder != null && (
+            <option value="">
+              {typeof placeholder === 'string' ? placeholder : nodeText(placeholder)}
+            </option>
+          )}
+          {options.map((o, i) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <option key={`${o.value}-${i}`} value={o.value}>
+              {typeof o.label === 'string' ? o.label : nodeText(o.label)}
+            </option>
+          ))}
+        </select>
+        {trailing.map((node, i) => (
           // eslint-disable-next-line react/no-array-index-key
-          <option key={`${o.value}-${i}`} value={o.value}>
-            {typeof o.label === 'string' ? o.label : nodeText(o.label)}
-          </option>
+          <span key={`trailing-${i}`}>{node}</span>
         ))}
-      </select>
+      </>
     );
   },
   Trigger: ({ children }: { children?: ReactNode }) => <>{children}</>,

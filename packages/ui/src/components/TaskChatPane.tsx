@@ -93,7 +93,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
             projectId={task.projectId}
             sessionId={sessionId || undefined}
             onSessionIdChange={(next) => setSessionId(next ?? '')}
-            onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
+            onFreshThread={() => setComposerFocusRequestKey((key) => key + 1)}
             refreshKey={sessionRefreshKey}
             taskRef={task.ref}
             {...(task.activeStepId ? { stepId: task.activeStepId } : {})}

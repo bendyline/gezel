@@ -396,6 +396,40 @@ describe('drafts and threads', () => {
     expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
   });
 
+  it('starts clean when the picker takes the draft away', async () => {
+    const flush = async () => {
+      await act(async () => {
+        for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      });
+    };
+    const props = {
+      gezelId: 'tomas',
+      gezelName: 'Tomas',
+      projectId: 'default',
+      sessionId: undefined,
+      draftScope: 'meester',
+    } as const;
+    const { rerender } = render(<ChatComposer {...props} draftId={undefined} />);
+    type('half a thought');
+    await flush();
+
+    // The composer filed a draft and told the parent, which passes it back.
+    rerender(<ChatComposer {...props} draftId="2026-09-03-0001" />);
+    await flush();
+    expect(editorValue()).toBe('half a thought');
+
+    // The picker's fresh-thread row hands back undefined. This surface is
+    // still the "no thread yet" one, so the draft it remembers is the one
+    // just deselected — it must not answer for a blank sheet.
+    rerender(<ChatComposer {...props} draftId={undefined} />);
+    await flush();
+
+    expect(editorValue()).toBe('');
+    // The words are not lost — they stay on disk as a thread starter, which
+    // is why this is a deselect and not a delete.
+    expect(api.deletePromptDraft).not.toHaveBeenCalled();
+  });
+
   it('adopts a thread that appears under a draft born without one', async () => {
     const { rerender } = render(
       <ChatComposer

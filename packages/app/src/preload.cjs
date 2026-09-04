@@ -145,6 +145,8 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     ipcRenderer.invoke('gezel:export-model-bundle', { engine, id, exportId }),
   cancelModelBundleExport: (exportId) =>
     ipcRenderer.invoke('gezel:cancel-model-bundle-export', exportId),
+  skipModelBundleExportVerification: (exportId) =>
+    ipcRenderer.invoke('gezel:skip-model-bundle-export-verification', exportId),
   onModelBundleExportProgress: (callback) => {
     modelBundleExportProgressCallbacks.add(callback);
     return () => modelBundleExportProgressCallbacks.delete(callback);

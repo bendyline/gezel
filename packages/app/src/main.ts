@@ -34,7 +34,6 @@ import {
   modelBytesFromResponse,
   portableGezmodelFilename,
   streamAllChatEvents,
-  verifyModelBundleArchive,
   writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
 import { ambientDir } from '@bendyline/gezel/paths';
@@ -63,6 +62,7 @@ import {
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
+import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
@@ -125,7 +125,15 @@ let trayActivityAbort: AbortController | null = null;
 let apiClient: GezelClient | null = null;
 const activeModelBundleExports = new Map<
   string,
-  { controller: AbortController; webContentsId: number }
+  {
+    controller: AbortController;
+    // Skipping verification must keep the written bytes, so it aborts only the
+    // read-back pass — never the export's own controller, whose abort path
+    // deletes the unpublished partial file.
+    verifyController: AbortController;
+    verificationSkipped: boolean;
+    webContentsId: number;
+  }
 >();
 const activeModelBundleImports = new Map<
   string,
@@ -1422,7 +1430,7 @@ ipcMain.handle(
     },
   ): Promise<
     | { ok: true; canceled: true }
-    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: true }
+    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: boolean }
     | { ok: false; error: string }
   > => {
     const engines = new Set(['llama-cpp', 'mlx', 'ds4']);
@@ -1442,7 +1450,12 @@ ipcMain.handle(
       return { ok: false, error: 'model export request is already active' };
     }
     const controller = new AbortController();
-    const activeExport = { controller, webContentsId: event.sender.id };
+    const activeExport = {
+      controller,
+      verifyController: new AbortController(),
+      verificationSkipped: false,
+      webContentsId: event.sender.id,
+    };
     activeModelBundleExports.set(args.exportId, activeExport);
     const abortOnRendererClose = () => controller.abort();
     event.sender.once('destroyed', abortOnRendererClose);
@@ -1513,14 +1526,15 @@ ipcMain.handle(
         true,
       );
       let latestVerified = { bytesCompleted: 0, bytesTotal: modelBytes };
-      await verifyModelBundleArchive(
-        partial,
-        (progress) => {
+      const verified = await verifyUnlessSkipped({
+        path: partial,
+        active: activeExport,
+        signal: controller.signal,
+        onProgress: (progress) => {
           latestVerified = progress;
           publishProgress({ phase: 'verifying', filename, ...progress });
         },
-        controller.signal,
-      );
+      });
       publishProgress({ phase: 'verifying', filename, ...latestVerified }, true);
 
       // Keep an existing export recoverable until the verified replacement is
@@ -1536,13 +1550,13 @@ ipcMain.handle(
       if (backedUp) await rename(picked.filePath, backup);
       try {
         controller.signal.throwIfAborted();
-        await rename(partial, picked.filePath);
+        await publishExportedBundle(partial, picked.filePath);
       } catch (error) {
         if (backedUp) await rename(backup, picked.filePath).catch(() => {});
         throw error;
       }
       if (backedUp) await rm(backup, { force: true }).catch(() => {});
-      return { ok: true, path: picked.filePath, bytesWritten, verified: true };
+      return { ok: true, path: picked.filePath, bytesWritten, verified };
     } catch (err) {
       if (partial) await rm(partial, { force: true }).catch(() => {});
       if (controller.signal.aborted) return { ok: true, canceled: true };
@@ -1564,6 +1578,21 @@ ipcMain.handle(
     }
     const active = activeModelBundleExports.get(exportId);
     if (active?.webContentsId === event.sender.id) active.controller.abort();
+    return { ok: true };
+  },
+);
+
+ipcMain.handle(
+  'gezel:skip-model-bundle-export-verification',
+  (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
+    if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
+      return { ok: false, error: 'invalid model export verification skip request' };
+    }
+    const active = activeModelBundleExports.get(exportId);
+    if (active?.webContentsId === event.sender.id) {
+      active.verificationSkipped = true;
+      active.verifyController.abort();
+    }
     return { ok: true };
   },
 );

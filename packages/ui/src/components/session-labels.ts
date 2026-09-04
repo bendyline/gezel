@@ -31,3 +31,13 @@ export function plainTitle(title: string): string {
 export function displayThreadTitle(title: string): string {
   return title === NEW_THREAD_TITLE ? 'New thread' : title;
 }
+
+/**
+ * A thread that has no name yet. The service only derives one on the first
+ * SEND, so a thread you have started writing into but not sent keeps the
+ * sentinel — which is why a surface listing several of them shows a column of
+ * identical "New thread" rows. Callers name those from their open draft.
+ */
+export function isUnnamedThread(title: string): boolean {
+  return !title || title === NEW_THREAD_TITLE;
+}

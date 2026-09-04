@@ -1,6 +1,6 @@
 import type { ChatEventEnvelope } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import * as primitivesMock from '../test-utils/primitivesMock.js';
@@ -48,6 +48,7 @@ vi.mock('../shared-chat-events.js', () => ({
 }));
 
 const { SessionSwitcher } = await import('./SessionSwitcher.js');
+const { resetComposerDrafts, writeDraftText } = await import('./composer-drafts.js');
 const { api } = await import('../api.js');
 
 function mockSessions(sessions: unknown[]) {
@@ -155,6 +156,66 @@ describe('SessionSwitcher', () => {
       expect(screen.getByText(/Landing page plan/)).toBeInTheDocument();
     });
     expect(onSessionIdChange).not.toHaveBeenCalled();
+  });
+
+  it('names the destination when nothing is picked but threads exist', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        gezelName="Ada Lovelace"
+        autoPickNewest={false}
+        onSessionIdChange={vi.fn()}
+      />,
+    );
+    // A blank trigger reads as a control the user forgot to set. The picker
+    // has to say where the next message goes.
+    await waitFor(() => {
+      expect(screen.getAllByText('<New thread>').length).toBeGreaterThan(0);
+    });
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('offers a new-thread row alongside existing threads', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    const onSessionIdChange = vi.fn();
+    const onDraftSelect = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-old"
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+    await screen.findByRole('option', { name: /Landing page plan/ });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__NEW__' } });
+
+    // Leaving a thread for a fresh one clears both the thread and any draft
+    // the composer had open.
+    expect(onSessionIdChange).toHaveBeenCalledWith(undefined);
+    expect(onDraftSelect).toHaveBeenCalledWith(undefined);
   });
 
   it('keeps task and night-shift sessions out of ordinary chat', async () => {
@@ -368,28 +429,38 @@ describe('SessionSwitcher', () => {
     expect(onSessionIdChange).not.toHaveBeenCalled();
   });
 
-  it('requests composer focus after creating and selecting a fresh thread', async () => {
-    mockSessions([]);
-    vi.mocked(api.createChatSession).mockResolvedValue({ id: 's-new' } as never);
+  it('requests composer focus when the user picks a fresh thread', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
     const onSessionIdChange = vi.fn();
-    const onNewSessionCreated = vi.fn();
+    const onFreshThread = vi.fn();
 
     render(
       <SessionSwitcher
         gezelId="g1"
         projectId="p1"
-        sessionId={undefined}
+        sessionId="s-old"
         onSessionIdChange={onSessionIdChange}
-        onNewSessionCreated={onNewSessionCreated}
+        onFreshThread={onFreshThread}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+    await screen.findByRole('option', { name: /Landing page plan/ });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__NEW__' } });
 
-    await waitFor(() => {
-      expect(onSessionIdChange).toHaveBeenCalledWith('s-new');
-      expect(onNewSessionCreated).toHaveBeenCalledWith('s-new');
-    });
+    // No session is minted for a thread nobody has written into yet — the
+    // composer's own send does that — so the cursor is all this hands back.
+    expect(onSessionIdChange).toHaveBeenCalledWith(undefined);
+    expect(onFreshThread).toHaveBeenCalled();
+    expect(api.createChatSession).not.toHaveBeenCalled();
   });
 
   it('meters the active thread against its own context window', async () => {
@@ -547,13 +618,16 @@ describe('SessionSwitcher prompt drafts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stream.reset();
+    resetComposerDrafts();
   });
 
+  // The picker reads every open draft for the gezel in one call and sorts
+  // them by what they are addressed to, so the fixture hands back both kinds
+  // together — thread starters carry `sessionId: null`.
   function mockDrafts(byScope: { fresh?: unknown[]; onThread?: unknown[] }) {
-    vi.mocked(api.listPromptDrafts).mockImplementation(async (_projectId, filter) => {
-      if (filter?.sessionId === null) return { drafts: byScope.fresh ?? [] } as never;
-      return { drafts: byScope.onThread ?? [] } as never;
-    });
+    vi.mocked(api.listPromptDrafts).mockResolvedValue({
+      drafts: [...(byScope.fresh ?? []), ...(byScope.onThread ?? [])],
+    } as never);
   }
 
   const draft = (over: Record<string, unknown> = {}) => ({
@@ -614,6 +688,421 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(onSessionIdChange.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
       onDraftSelect.mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it('names the draft the composer is writing before the list has it', async () => {
+    mockSessions([]);
+    // The list is deliberately not refetched while the user types, so the
+    // draft they just started is not in it yet.
+    mockDrafts({});
+    writeDraftText('2026-09-03-0002', 'Rework the onboarding copy');
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        activeDraftId="2026-09-03-0002"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    // Blank is what the trigger showed before: the picker held a value no row
+    // carried, and Radix renders the matching row's text.
+    const option = await screen.findByRole('option', { name: /Rework the onboarding copy/ });
+    expect(option).toHaveValue('draft:2026-09-03-0002');
+
+    // And it keeps up as the draft grows, off the same autosave that stores it.
+    act(() => {
+      writeDraftText('2026-09-03-0002', 'Rework the onboarding copy for new crews');
+    });
+    await screen.findByRole('option', { name: /for new crews/ });
+  });
+
+  it('follows the live text on a draft the list already knows', async () => {
+    mockSessions([]);
+    mockDrafts({ fresh: [draft()] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        activeDraftId="2026-09-03-0001"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('option', { name: /The PRD/ });
+    act(() => {
+      writeDraftText('2026-09-03-0001', 'The PRD, second pass');
+    });
+    // The filed title is a snapshot; the editor is the live one.
+    await screen.findByRole('option', { name: /The PRD, second pass/ });
+  });
+
+  it('lists a thread\u2019s own drafts under it, and keeps the thread when one is picked', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      onThread: [draft({ id: '2026-09-03-0009', sessionId: 's-1', title: 'One more question' })],
+    });
+    const onSessionIdChange = vi.fn();
+    const onDraftSelect = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+    const row = await screen.findByRole('option', { name: /One more question/ });
+    // Tagged, so a message inside a thread never reads as a thread of its own.
+    expect(row.textContent).toContain('draft');
+
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'draft:2026-09-03-0009' },
+    });
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0009');
+    // The address is the thread; the draft is which message inside it.
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+  });
+
+  it('names an unsent thread by its draft instead of a column of "New thread"', async () => {
+    // The service only derives a thread title on the first SEND, so three
+    // threads started from "+ New" all carry the same sentinel.
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'New session',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+      {
+        id: 's-2',
+        gezelId: 'g1',
+        title: 'New session',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      onThread: [
+        draft({ id: '2026-09-03-0011', sessionId: 's-1', title: 'Pricing for the new tier' }),
+        draft({ id: '2026-09-03-0012', sessionId: 's-2', title: 'Onboarding copy rework' }),
+      ],
+    });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+
+    // Each unsent thread wears its own draft's first line — including the one
+    // that is not open, which is the whole point of telling them apart.
+    const named = await screen.findByRole('option', { name: /Pricing for the new tier/ });
+    expect(named).toHaveValue('s-1');
+    expect(named.textContent).toContain('draft');
+    expect(screen.getByRole('option', { name: /Onboarding copy rework/ })).toHaveValue('s-2');
+    // The borrowed name replaces the sentinel rather than sitting beside it.
+    // (The picker's own "<New thread>" row is a different string.)
+    expect(screen.queryByRole('option', { name: 'New thread' })).toBeNull();
+  });
+
+  it('floats the thread you are writing into to the top', async () => {
+    // Writing a draft does not move a thread's lastActivityAt — nothing was
+    // sent — so without this the thread you just typed into sits below older
+    // ones under an identical name, which reads as "it is gone".
+    mockSessions([
+      {
+        id: 's-recent',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+      {
+        id: 's-older',
+        gezelId: 'g1',
+        title: 'New session',
+        lastActivityAt: new Date(Date.now() - 29 * 60_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      onThread: [
+        draft({
+          id: '2026-09-03-0021',
+          sessionId: 's-older',
+          title: 'Ask about the invoice',
+          updatedAt: new Date().toISOString(),
+        }),
+      ],
+    });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-older"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('option', { name: /Ask about the invoice/ });
+    const threads = screen
+      .getAllByRole('option')
+      .map((o) => (o as HTMLOptionElement).value)
+      .filter((v) => v.startsWith('s-'));
+    expect(threads).toEqual(['s-older', 's-recent']);
+  });
+
+  it('files a thread nothing was sent to with the drafts, and claims no engine', async () => {
+    // Whether a thread starter went through "+ New" (which mints a session up
+    // front) or plain typing (which does not) is an implementation detail the
+    // user never chose. Both leave them holding an unsent message, so both
+    // belong on the same side of the line.
+    mockSessions([
+      {
+        id: 's-unsent',
+        gezelId: 'g1',
+        title: 'New session',
+        lastActivityAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        providerName: 'mlx',
+        model: 'qwen3.8-27b-q4',
+        archived: false,
+      },
+      {
+        id: 's-sent',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+        providerName: 'mlx',
+        model: 'qwen3.8-27b-q4',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      fresh: [draft({ id: '2026-09-03-0031', title: 'zxcz' })],
+      onThread: [draft({ id: '2026-09-03-0032', sessionId: 's-unsent', title: 'Thread Charlie' })],
+    });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+
+    const charlie = await screen.findByRole('option', { name: /Thread Charlie/ });
+    // A session record carries a provider and model from creation, but this
+    // thread has not run anything — saying which engine would be a guess
+    // dressed as history.
+    expect(charlie.textContent).not.toContain('qwen3.8-27b-q4');
+    expect(screen.getByRole('option', { name: /Delivery failure planning/ }).textContent).toContain(
+      'qwen3.8-27b-q4',
+    );
+
+    // Unsent things share one section, ordered together by when they were
+    // last touched — the starter and the unsent thread sit side by side.
+    const values = screen.getAllByRole('option').map((o) => (o as HTMLOptionElement).value);
+    expect(values.indexOf('s-unsent')).toBeLessThan(values.indexOf('s-sent'));
+    expect(values.indexOf('draft:2026-09-03-0031')).toBeLessThan(values.indexOf('s-sent'));
+  });
+
+  it('files "+ Draft" under the open thread, not as a new thread starter', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({});
+    vi.mocked(api.createPromptDraft).mockResolvedValue(
+      draft({
+        id: '2026-09-03-0041',
+        sessionId: 's-1',
+        title: 'reply to delivery failure',
+        content: 'reply to delivery failure',
+      }) as never,
+    );
+    const onSessionIdChange = vi.fn();
+    const onDraftSelect = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '+ Draft' }));
+
+    // A second message in the conversation you are already in. Filing it as a
+    // thread starter loses the address the user chose.
+    await waitFor(() =>
+      expect(api.createPromptDraft).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ sessionId: 's-1' }),
+      ),
+    );
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0041');
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+    // And it shows up where it belongs — under its thread.
+    expect(await screen.findByRole('option', { name: /reply to delivery failure/ })).toHaveValue(
+      'draft:2026-09-03-0041',
+    );
+  });
+
+  it('offers "+ Draft" only on a thread, where it means something different', async () => {
+    mockSessions([]);
+    mockDrafts({});
+    const { rerender } = render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    // Off a thread it would mean what the picker's fresh-thread row means.
+    expect(screen.queryByRole('button', { name: '+ Draft' })).toBeNull();
+
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    rerender(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '+ Draft' })).toBeInTheDocument();
+  });
+
+  it('removes a draft from its own row, wherever that row sits', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({
+      fresh: [draft({ id: '2026-09-03-0051', title: 'sdvs' })],
+      onThread: [
+        draft({ id: '2026-09-03-0052', sessionId: 's-1', title: 'reply to delivery failure' }),
+      ],
+    });
+    vi.mocked(api.deletePromptDraft).mockResolvedValue({ ok: true, deleted: true } as never);
+    const onDraftSelect = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        activeDraftId="2026-09-03-0052"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+
+    // A starter and a reply filed under a thread both carry the control.
+    await screen.findByRole('button', { name: 'Delete draft sdvs' });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete draft reply to delivery failure' }));
+
+    await waitFor(() =>
+      expect(api.deletePromptDraft).toHaveBeenCalledWith('p1', '2026-09-03-0052'),
+    );
+    // The composer was writing it, so it is handed back an empty sheet.
+    expect(onDraftSelect).toHaveBeenCalledWith(undefined);
+  });
+
+  it('offers a recently sent message for reuse on the open thread', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    vi.mocked(api.listPromptDrafts).mockImplementation(async (_projectId, filter) => {
+      if (filter?.status === 'sent') {
+        return {
+          drafts: [draft({ id: '2026-09-03-0061', sessionId: 's-1', title: 'the weekly ask' })],
+        } as never;
+      }
+      return { drafts: [] } as never;
+    });
+    vi.mocked(api.duplicatePromptDraft).mockResolvedValue(
+      draft({ id: '2026-09-03-0062', sessionId: 's-1', title: 'the weekly ask' }) as never,
+    );
+    const onDraftSelect = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-1"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={onDraftSelect}
+      />,
+    );
+
+    // Sent drafts are read when the menu opens, not on every thread switch.
+    await screen.findByRole('option', { name: /Delivery failure planning/ });
+    fireEvent.focusIn(screen.getByRole('combobox'));
+    const row = await screen.findByRole('option', { name: /the weekly ask/ });
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: row.getAttribute('value') },
+    });
+
+    // Reuse copies rather than reopening: the sent one is history.
+    await waitFor(() =>
+      expect(api.duplicatePromptDraft).toHaveBeenCalledWith('p1', '2026-09-03-0061', {
+        sessionId: 's-1',
+      }),
+    );
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0062');
   });
 
   it('leaves the drafts group out entirely when there are none', async () => {

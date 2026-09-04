@@ -4415,6 +4415,14 @@ button.timeline-session-divider-child::before {
   min-height: 20rem;
 }
 
+/* The Monaco source viewer brings its own frame — a gutter on the left and
+   a status bar along the bottom — so the body's padding only paints a band
+   of page background around three sides of it. The top gap stays: that one
+   separates the editor from the header row above. */
+.chat-rail-viewer-body:has(> .chat-rail-viewer-source) {
+  padding: 0.4rem 0 0 0;
+}
+
 .chat-rail-audio-preview {
   min-height: 8rem;
   align-items: center;

@@ -393,6 +393,13 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     const sessionAppeared = prevSessionIdRef.current === undefined && sessionId !== undefined;
     const selectionChanged = prevSelectedRef.current !== selectedDraftId;
     const first = !initializedRef.current;
+    // The parent took the draft away rather than swapping it: "+ New", the
+    // picker's fresh-thread row. That is a request for a blank sheet, and it
+    // is the one case where this slot's remembered draft must not answer for
+    // it. Distinct from arriving at a surface with nothing selected, where
+    // reopening what you were writing is the whole point.
+    const deselected =
+      !first && prevSelectedRef.current !== undefined && selectedDraftId === undefined;
 
     slotKeyRef.current = slotKey;
     prevSlotKeyRef.current = slotKey;
@@ -444,6 +451,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     if (!first && !selectionChanged && previousSlot === slotKey) return;
 
     // Resolve which draft this slot should show.
+    if (deselected) writeActiveDraftId(slotKey, undefined);
     const resolved = selectedDraftId ?? readActiveDraftId(slotKey);
 
     // Already showing it. This is the composer being told the id of the draft

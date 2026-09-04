@@ -23,6 +23,15 @@ import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
 /**
+ * Which composer surface this project's drafts are filed under. The composer
+ * stamps it on every draft it creates and the picker filters on it, so the
+ * two must be the same string: a picker asking for a scope nobody writes
+ * lists no drafts at all, and the only visible symptom is a Drafts section
+ * that is always empty.
+ */
+const DRAFT_SCOPE = 'project';
+
+/**
  * Is this thread one the user is still in the middle of? Past the shared
  * freshness window the conversation is not one the user is still having,
  * so the default reverts to the voorman on a blank thread; the older thread
@@ -663,7 +672,7 @@ function ProjectChatBody({
                   recentReferences={recentReferences}
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
-                  draftScope="project"
+                  draftScope={DRAFT_SCOPE}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus
@@ -710,10 +719,11 @@ function ProjectChatBody({
                       {...(activeTask ? { taskRef: activeTask.ref } : {})}
                       {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
-                      onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
+                      onFreshThread={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
                       activeDraftId={draftId || undefined}
                       onDraftSelect={(next) => setDraftId(next ?? '')}
+                      draftScope={DRAFT_SCOPE}
                       // A task scope is always an explicit navigation, so it
                       // keeps the ordinary newest-thread pick.
                       autoPickNewest={!startFreshThread || Boolean(activeTask)}

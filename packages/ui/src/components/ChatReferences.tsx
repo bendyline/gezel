@@ -1625,7 +1625,7 @@ function ReferenceViewer({
 function ReferenceCodePreview({ path, content }: { path: string; content: string }) {
   const editorTheme = useEffectiveTheme();
   return (
-    <div className="chat-rail-viewer-code">
+    <div className="chat-rail-viewer-code chat-rail-viewer-source">
       <EditorShell
         key={path}
         initialMarkdown={content}

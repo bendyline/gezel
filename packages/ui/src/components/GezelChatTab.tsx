@@ -427,7 +427,7 @@ function GezelChatBody({
                 sessionId={sessionId || undefined}
                 onSessionIdChange={(next) => setSessionId(next ?? '')}
                 onActiveSessionChange={(session) => setActiveSource(session?.source ?? null)}
-                onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
+                onFreshThread={() => setComposerFocusRequestKey((key) => key + 1)}
                 refreshKey={sessionRefreshKey}
                 engineLabel={engineLabel}
               />
@@ -462,7 +462,7 @@ function GezelChatBody({
                   sessionId={sessionId || undefined}
                   onSessionIdChange={(next) => setSessionId(next ?? '')}
                   onActiveSessionChange={(session) => setActiveSource(session?.source ?? null)}
-                  onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
+                  onFreshThread={() => setComposerFocusRequestKey((key) => key + 1)}
                   refreshKey={sessionRefreshKey}
                   engineLabel={engineLabel}
                   activeDraftId={draftId || undefined}

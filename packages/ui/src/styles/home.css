@@ -300,8 +300,37 @@
   white-space: nowrap;
 }
 
+/* One row, three parts, and only two of them may give ground. The badge says
+   what the row IS, so it never shrinks; the trailing meta (when, which engine)
+   is the least load-bearing and is weighted to truncate first; the title goes
+   last. Before this the row was inline text and the trigger simply clipped
+   whatever ran past its edge — which was the badge, the one part that had to
+   survive. */
+.session-row {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.session-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-row-meta {
   color: var(--text-muted);
+  /* Shrinks four times as readily as the title, and keeps its leading
+     separator: a flex item drops a leading space, and " · 3w ago" hugging the
+     title reads as one word. */
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
 }
 
 .gezel-chat-session-menu .gz-select-item[data-highlighted] {
@@ -339,6 +368,17 @@
   color: var(--text-muted);
 }
 
+/* A draft filed under the thread above it. The indent is the whole signal:
+   these rows are messages inside that conversation, not conversations of
+   their own, and the shared DRAFT badge says what they are. */
+.session-row-child {
+  padding-left: 1.1rem;
+}
+
+.session-row-child .session-row-title {
+  color: var(--text-muted);
+}
+
 /* A thread starter that has not been sent yet. Same badge recipe as the
    transcript's nudge chip: it marks what a row IS, so it is a badge and never
    a control. Neutral rather than terracotta — an unsent message is a state,
@@ -355,17 +395,43 @@
   flex-shrink: 0;
 }
 
-/* Two-line menu rows: the draft's first line over when it was last touched. */
-.prompt-drafts-menu .app-nav-menu-item {
+/* Per-row remove control in the thread picker. Quiet until the row is under
+   the pointer or the keyboard cursor: it throws a message away and there is
+   no undo, so it must not be something you can hit blind. Sits outside the
+   item's ItemText, which is what keeps it out of the trigger. */
+.gezel-chat-session-menu .gz-select-item {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
+  align-items: center;
 }
 
-.prompt-drafts-menu .app-nav-menu-item small {
-  color: var(--text-muted);
-  font-size: var(--text-2xs);
+.gezel-chat-session-menu .gz-select-item > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-row-delete {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  padding: 0 0.3rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.gz-select-item:hover .session-row-delete,
+.gz-select-item[data-highlighted] .session-row-delete,
+.session-row-delete:focus-visible {
+  opacity: 0.65;
+}
+
+.session-row-delete:hover:not([disabled]) {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.12);
 }
 
 /* Context meter — how full the ACTIVE thread's token window is, sat between

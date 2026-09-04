@@ -1505,7 +1505,7 @@ export function ChatComposer({
           }
           toolbarSlotRight={
             <>
-              <AutosaveStatus autosave={draft.autosave} />
+              <AutosaveStatus autosave={draft.autosave} failuresOnly />
               <ComposerNarrateButton
                 projectId={projectId}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}

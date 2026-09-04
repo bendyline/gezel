@@ -86,6 +86,25 @@ export function writeActiveDraftId(slotKey: string, draftId: string | undefined)
   }
 }
 
+/**
+ * Readers that want to follow the text as it is typed — the thread picker
+ * names the draft the composer is writing, and the draft has no name until
+ * this cache has its first autosave. Notified on every write, which is the
+ * autosave cadence (about once a second), not the keystroke one.
+ */
+const textListeners = new Set<() => void>();
+
+export function subscribeDraftText(listener: () => void): () => void {
+  textListeners.add(listener);
+  return () => {
+    textListeners.delete(listener);
+  };
+}
+
+function notifyDraftText(): void {
+  for (const listener of textListeners) listener();
+}
+
 export function readDraftText(draftId: string): string | undefined {
   return draftText.get(draftId);
 }
@@ -98,6 +117,7 @@ export function writeDraftText(draftId: string, source: string): void {
     if (oldest.done) break;
     draftText.delete(oldest.value);
   }
+  notifyDraftText();
 }
 
 /** Drop a draft's text and every slot still pointing at it. */
@@ -106,6 +126,7 @@ export function forgetDraft(draftId: string): void {
   for (const [slotKey, id] of activeDrafts) {
     if (id === draftId) activeDrafts.delete(slotKey);
   }
+  notifyDraftText();
 }
 
 /** Re-point a slot's draft — used when an address moves under a live composer. */
@@ -123,4 +144,5 @@ export function moveActiveDraftId(
 export function resetComposerDrafts(): void {
   activeDrafts.clear();
   draftText.clear();
+  notifyDraftText();
 }
