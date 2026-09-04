@@ -29,7 +29,6 @@ import { formatContextWindow } from './model-context.js';
 // [chat-theme.ts](./chat-theme.ts).
 const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
-import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
 import {
@@ -59,6 +58,7 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
+import { markdownToChatDoc } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
@@ -3745,7 +3745,7 @@ export function RenderedMarkdown({
       )
         ? parseMarkdown(toHtmlCodeFence(markdown))
         : mdDoc;
-      return markdownToDoc(source, { articleId: 'gezel-chat' });
+      return markdownToChatDoc(source, { articleId: 'gezel-chat' });
     } catch {
       return null;
     }

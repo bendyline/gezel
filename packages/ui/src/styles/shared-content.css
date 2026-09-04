@@ -534,10 +534,15 @@
 }
 
 /* `thinMargins` removes horizontal page padding but retains 1.5rem above
-   and below every page section. That document rhythm is too loose inside
-   a bubble; the bubble itself already supplies the needed inset. */
+   and below every page section. Chat needs a tighter editorial rhythm, but
+   not a collapsed one: every heading gets a clear breath before it while
+   the bubble itself still supplies the outer inset. */
 .msg-body-rendered .squisq-page--thin .squisq-page-section {
-  padding-block: 0.15rem;
+  padding-block: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page--thin .squisq-page-section + .squisq-page-section {
+  padding-top: 1.1rem;
 }
 
 /* Chat replies are a conversation, not a centered document: Squisq's
