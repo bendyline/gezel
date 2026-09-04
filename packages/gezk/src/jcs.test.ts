@@ -14,8 +14,21 @@ describe('RFC 8785 canonical JSON', () => {
     );
   });
 
+  it('honours toJSON so a Date carries its ISO identity, not `{}`', () => {
+    const iso = '2026-01-02T03:04:05.000Z';
+    expect(canonicalizeJson({ at: new Date(iso) })).toBe(`{"at":"${iso}"}`);
+    expect(canonicalizeJson({ at: new Date(iso) })).toBe(canonicalizeJson({ at: iso }));
+    expect(canonicalizeJson([new Date(iso)])).toBe(`["${iso}"]`);
+  });
+
   it('rejects values without a JSON identity', () => {
     expect(() => canonicalizeJson({ n: Number.NaN })).toThrow(/non-finite/);
     expect(() => canonicalizeJson({ f: () => 1 })).toThrow(/no JSON identity/);
+    expect(() => canonicalizeJson({ n: 1n })).toThrow(/no JSON identity/);
+  });
+
+  it('refuses a toJSON() chain that never terminates', () => {
+    const looping = { toJSON: (): unknown => looping };
+    expect(() => canonicalizeJson(looping)).toThrow(/does not terminate/);
   });
 });

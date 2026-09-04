@@ -350,15 +350,16 @@ not obvious:
    # No semantic-release run means no prepareCmd, so stamp GEZEL_VERSION by
    # hand — otherwise the bootstrap ships packages that report 0.0.0.
    (cd packages/core && node ../../scripts/prepare-package.mjs 0.1.0)
-   for d in core client sdk app-sdk plugin-sdk catalog connectors-spectral \
-            script-stdlib mcp service cli; do
+   for d in gezk core client sdk app-sdk plugin-sdk catalog knowledge \
+            connectors-spectral script-stdlib mcp service cli; do
      (cd "packages/$d" && pnpm publish --access public --no-provenance --no-git-checks)
    done
    ```
    Order matters for installability, not for correctness of the manifests:
    `pnpm publish` rewrites `workspace:*` from the sibling's version **on disk**,
    so every package must already carry the bootstrap version before the first
-   `publish` runs.
+   `publish` runs. `gezk` leads because `core` depends on it — it is the one
+   published package with no workspace dependency of its own.
 2. On npmjs.com, register a trusted publisher per package — npm's bulk
    trusted-publisher configuration makes thirteen manageable:
    - repository: `bendyline/gezel`
@@ -369,6 +370,32 @@ not obvious:
 4. Confirm `@semantic-release/git` can push to `main`. `.releaserc.json` commits
    `CHANGELOG.md` and `package.json` back, and branch protection that rejects a
    `GITHUB_TOKEN` push fails the release *after* the packages are on npm.
+
+### A package added after the bootstrap
+
+A new published package is bootstrapped the same way, alone, and the rules above
+still hold — `--no-provenance`, and a version below the `1.0.0` that
+multi-semantic-release computes for a package with no git tag. `0.1.0` on the
+manifest in the checkout is that version; leave it there and publish from the
+package directory:
+
+```bash
+pnpm build
+(cd packages/<new> && pnpm publish --access public --no-provenance --no-git-checks)
+```
+
+Two things decide whether that is the whole job:
+
+- **Does it depend on a sibling?** If so, publish it after that sibling's
+  current version is on npm — `pnpm publish` resolves `workspace:*` from the
+  sibling's version **on disk**, which is `0.0.0` in a fresh checkout unless a
+  release stamped it. `gezk` needed none of this: `zod` is its only dependency.
+- **Does it import `GEZEL_VERSION`?** Only packages that do need
+  `prepare-package.mjs` run by hand first, and only via `packages/core`.
+
+Then register its trusted publisher on npmjs.com exactly as in step 2, and add
+it to `PUBLISHED` in `tests/published/_packages.ts` so the shape gates cover it.
+Its first CI release will be `1.0.0`, independent of where the other lines are.
 
 ### `ENONPMTOKEN` is not a missing secret
 

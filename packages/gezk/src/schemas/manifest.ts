@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GEZK_FORMAT_VERSION, GEZK_INDEX_SCHEMA_VERSION } from '../format/constants.js';
 import {
   KnowledgeDocumentIdSchema,
   KnowledgeIdSchema,
@@ -33,8 +34,8 @@ export type KnowledgeSignature = z.infer<typeof KnowledgeSignatureSchema>;
 
 export const KnowledgeCatalogManifestSchema = z.object({
   kind: z.literal(GEZK_MANIFEST_KIND),
-  formatVersion: z.literal('0.5'),
-  indexSchemaVersion: z.literal(2),
+  formatVersion: z.literal(GEZK_FORMAT_VERSION),
+  indexSchemaVersion: z.literal(GEZK_INDEX_SCHEMA_VERSION),
   id: KnowledgeIdSchema,
   version: KnowledgeVersionSchema,
   name: z.string().min(1),
@@ -88,7 +89,7 @@ export const KnowledgeCatalogManifestSchema = z.object({
   files: z.array(KnowledgeManifestFileSchema).min(1),
   /** What a reader must implement to open this catalog. */
   requires: z.object({
-    formatVersion: z.literal('0.5'),
+    formatVersion: z.literal(GEZK_FORMAT_VERSION),
     features: z.array(z.string()).optional(),
   }),
   smokeQueries: z

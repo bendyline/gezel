@@ -5,13 +5,20 @@
  * serialization; canonicalization adds only (a) object keys sorted by UTF-16
  * code units and (b) a hard rejection of anything without a JSON identity
  * (undefined, functions, non-finite numbers, BigInt).
+ *
+ * `toJSON()` is honoured exactly as JSON.stringify honours it, so a value
+ * carrying a JSON identity of its own — a Date, most notably — canonicalizes
+ * to that identity. Without it a Date serializes as `{}`, which is how a
+ * signer holding a Date and a verifier holding its ISO string would agree on
+ * a signature over two different documents.
  */
 
 export function canonicalizeJson(value: unknown): string {
   return serialize(value, '$');
 }
 
-function serialize(value: unknown, path: string): string {
+function serialize(input: unknown, path: string): string {
+  const value = unwrapToJson(input, path);
   if (value === null) return 'null';
   switch (typeof value) {
     case 'boolean':
@@ -35,6 +42,21 @@ function serialize(value: unknown, path: string): string {
   return `{${entries
     .map(([k, v]) => `${JSON.stringify(k)}:${serialize(v, `${path}.${k}`)}`)
     .join(',')}}`;
+}
+
+/**
+ * JSON.stringify calls `toJSON()` on any value that has one before it inspects
+ * the value's type, and chains when the result has one too.
+ */
+function unwrapToJson(value: unknown, path: string): unknown {
+  let current = value;
+  for (let depth = 0; depth < 8; depth++) {
+    if (current === null || typeof current !== 'object') return current;
+    const toJson = (current as { toJSON?: unknown }).toJSON;
+    if (typeof toJson !== 'function') return current;
+    current = (toJson as () => unknown).call(current);
+  }
+  throw new Error(`toJSON() chain at ${path} does not terminate`);
 }
 
 /** RFC 8785 §3.2.3: sort keys by UTF-16 code units. */
