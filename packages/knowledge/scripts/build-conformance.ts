@@ -268,7 +268,6 @@ the generator; it proves signature handling, never provenance.
       rmSync(out, { recursive: true, force: true });
       mkdirSync(join(out, 'fixtures'), { recursive: true });
       cpSync(archivePath, join(out, 'fixtures', FIXTURE_NAME));
-      writeFileSync(join(out, 'fixtures', 'test-signing-key.pub.pem'), TEST_PUBLIC_KEY_PEM);
       writeFileSync(join(out, 'vectors.json'), `${JSON.stringify(vectors, null, 2)}\n`);
       writeFileSync(join(out, 'README.md'), readme);
       console.log(`[conformance] wrote ${out}`);

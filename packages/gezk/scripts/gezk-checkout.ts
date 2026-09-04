@@ -27,3 +27,18 @@ export function requireGezkCheckout(): string {
   }
   return root;
 }
+
+/**
+ * Locate the sibling bendyline.github.io working tree — the source of
+ * bendyline.com, which serves the JSON Schemas at their `$id` URLs. Optional
+ * where the gezk checkout is required: absent simply means "not this machine",
+ * and the exporter skips the mirror rather than failing.
+ */
+export function resolveSiteCheckout(): string | null {
+  const override = process.env.BENDYLINE_SITE_DIR?.trim();
+  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const root = override
+    ? resolve(override)
+    : resolve(scriptsDir, '..', '..', '..', '..', 'bendyline.github.io');
+  return existsSync(resolve(root, '.git')) ? root : null;
+}

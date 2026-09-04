@@ -383,11 +383,25 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     });
   const maxDurationMs = Math.max(requestedMaxDurationMs, llamaEvalLaunch?.minTrialTimeoutMs ?? 0);
   // `scenario.progressTimeoutMs`, when set, acts as the HARD timeout
-  // override (real-progress watchdog). Soft timeout stays at the
-  // default unless we add a separate override later.
+  // override (real-progress watchdog).
+  //
+  // `GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS` puts a FLOOR under that window,
+  // mirroring the soft watchdog's env override below. Scenarios author these
+  // windows (10-15 min) against hardware where a turn's prefill costs
+  // seconds. The digest this watchdog reads — turns, tools, slot, stream —
+  // is structurally frozen for the whole of a prefill, so on a slow device
+  // healthy work is indistinguishable from a hang and the window expires
+  // mid-turn. Wild-caught on an Apple M2 at ~80 t/s prefill: schema-migration
+  // died at 901s of its authored 900s window while llama-server logged
+  // `prompt processing, progress = 0.36`, and symptom-debug at 603s of 600s;
+  // the same model+engine scored 10/11 on a fast box and 8/11 here, inverting
+  // capability into a hardware artifact. Same failure shape as the MLX
+  // soft-window lift below, and the same proper long-term fix: make the
+  // watchdog streaming-aware rather than time-only.
   const hardProgressTimeoutMs = Math.max(
     scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
     llamaEvalLaunch?.hardProgressTimeoutMs ?? 0,
+    envHardProgressFloorMs(),
   );
   // Soft progress watchdog: fires when the daemon shows no activity
   // across our fingerprint signals (turns, tools, slot updates, stream
@@ -1257,6 +1271,25 @@ const WRITE_CAPABLE_ROLES = /^(builder|developer|implementer|engineer)$/i;
  * and `DEFAULT_MAX_DURATION_MS` (8 h) is the runaway backstop.
  */
 const DEFAULT_HARD_PROGRESS_TIMEOUT_MS = 45 * 60 * 1000;
+
+/**
+ * Operator floor for the hard-progress window, in milliseconds, from
+ * `GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS`. Returns 0 when unset or unparseable
+ * so it contributes nothing to the surrounding `Math.max`.
+ *
+ * This raises a floor rather than replacing the window: a scenario that
+ * already asks for longer than the operator's value keeps its own, and the
+ * large-model launch override still wins where it is higher. Set it on a
+ * device whose prefill is slow enough that a single healthy turn outlasts the
+ * authored windows — see the call site for the M2 case that motivated it.
+ */
+export function envHardProgressFloorMs(): number {
+  const raw = process.env.GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS;
+  if (!raw) return 0;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 const MAX_ACTIVE_TRIAL_SESSIONS = 64;
 
 /**

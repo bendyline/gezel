@@ -144,17 +144,22 @@ test('sessions — send a message, it persists, shows up after restart', async (
   }
 });
 
-test('sessions — + New session starts a fresh thread', async () => {
+test("sessions — the picker's New thread row starts a fresh thread", async () => {
+  // A full Electron launch sits inside this test, and the launch helper
+  // alone can spend 40s waiting on the window. The suite default is 30s.
+  test.setTimeout(90_000);
+
   const { app, page } = await launch();
   try {
     // Snapshot the current session trigger text so we can confirm it changes.
     const sessionTrigger = page.locator('.gezel-chat-session-select').first();
     const before = (await sessionTrigger.textContent()) ?? '';
 
-    // Scope the click to the SessionSwitcher's own button — other views
-    // expose "+ New …" labels (gezel/project/task creators), and a more
-    // specific locator is more robust against future tab additions.
-    await page.locator('.gezel-chat-session-btn', { hasText: '+ New' }).click();
+    // A fresh thread is a destination in the picker, not a button — the
+    // toolbar's own button drafts a second message inside the open thread.
+    // Scope to the menu: the trigger renders the same row as its placeholder.
+    await sessionTrigger.click();
+    await page.locator('.gezel-chat-session-menu .session-row-action').click();
     await expect(sessionTrigger).not.toHaveText(before, { timeout: 10_000 });
     await captureScreenshot(page, {
       path: join(screenshotDir, 'sessions-05-new-session.png'),

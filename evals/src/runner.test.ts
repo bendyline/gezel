@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { repoRoot } from './native-bin.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
@@ -17,6 +17,7 @@ import {
   describeSendFailure,
   ds4EvalLaunchOverridesForModel,
   ds4EvalShouldUseSsdStreaming,
+  envHardProgressFloorMs,
   evalDaemonEnvForTrial,
   hardStallShape,
   incompleteTranscripts,
@@ -1423,6 +1424,35 @@ describe('localEvalDeviceSafetyConfig', () => {
       deviceSafety: { mode: 'guard', onTelemetryFailure: 'block' },
       providerConcurrency: { mlx: 1 },
     });
+  });
+});
+
+describe('envHardProgressFloorMs', () => {
+  const KEY = 'GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS';
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it('contributes nothing when unset, so authored windows stand', () => {
+    delete process.env[KEY];
+    expect(envHardProgressFloorMs()).toBe(0);
+  });
+
+  it('reads a positive millisecond floor', () => {
+    process.env[KEY] = String(45 * 60 * 1000);
+    expect(envHardProgressFloorMs()).toBe(45 * 60 * 1000);
+  });
+
+  // A malformed or non-positive value must not silently disable the watchdog;
+  // falling back to 0 leaves the scenario's own window in force.
+  it('ignores unparseable and non-positive values', () => {
+    for (const bad of ['', 'soon', '0', '-1']) {
+      process.env[KEY] = bad;
+      expect(envHardProgressFloorMs()).toBe(0);
+    }
   });
 });
 
