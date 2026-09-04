@@ -87,4 +87,61 @@ describe('craftbook step policy defaults', () => {
     expect(step.toolPolicy?.additionalOutputMedia).toEqual(['workspace']);
     expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('workspace-fs-write');
   });
+
+  it('declares a task note as secondary output when an artifact step requires one', () => {
+    const doc: CraftbookDoc = {
+      name: 'Scope review',
+      steps: [
+        {
+          name: 'Scope',
+          prompt: 'Summarize the scope, then advance.',
+          advanceWhen: { file: 'review/batches.json', artifact: true },
+          gate: {
+            at: 'completion',
+            scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+          },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.outputMedium).toBe('artifact');
+    expect(step.toolPolicy?.additionalOutputMedia).toEqual(['task-note']);
+  });
+
+  it('turns a contradictory none policy into the output required by its gate', () => {
+    const doc: CraftbookDoc = {
+      name: 'Approval',
+      steps: [
+        {
+          name: 'Approve',
+          toolPolicy: { outputMedium: 'none' },
+          gate: {
+            at: 'completion',
+            scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+          },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.outputMedium).toBe('task-note');
+    expect(step.toolPolicy?.additionalOutputMedia).toBeUndefined();
+  });
+
+  it('uses the same natural-language task-note signal for secondary output', () => {
+    const doc: CraftbookDoc = {
+      name: 'Scope review',
+      steps: [
+        {
+          name: 'Scope',
+          prompt: 'Record the result in the task notes, then advance.',
+          advanceWhen: { file: 'review/batches.json', artifact: true },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.additionalOutputMedia).toEqual(['task-note']);
+  });
 });

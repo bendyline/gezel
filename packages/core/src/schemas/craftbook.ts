@@ -161,6 +161,33 @@ export const CraftbookStepOutputMediumSchema = z.enum([
 export type CraftbookStepOutputMedium = z.infer<typeof CraftbookStepOutputMediumSchema>;
 
 /**
+ * Standard gate scripts whose exit criterion can only be satisfied by
+ * writing to a particular persistence surface. Keep this mapping structural:
+ * a gate requirement must not depend on whether its neighboring prose happens
+ * to spell the corresponding tool name exactly.
+ */
+const REQUIRED_OUTPUT_MEDIA_BY_STANDARD_GATE_SCRIPT: Readonly<
+  Record<string, readonly CraftbookStepWritableOutputMedium[]>
+> = {
+  checkTaskNoteContains: ['task-note'],
+};
+
+/** Output surfaces required by the scripts attached to a step gate. */
+export function requiredOutputMediaForGate(
+  gate: StepGateUnion | null | undefined,
+): ReadonlySet<CraftbookStepWritableOutputMedium> {
+  const media = new Set<CraftbookStepWritableOutputMedium>();
+  if (!gate) return media;
+  for (const ref of normalizeStepGate(gate).scripts) {
+    if (ref.scope !== 'standard') continue;
+    for (const medium of REQUIRED_OUTPUT_MEDIA_BY_STANDARD_GATE_SCRIPT[ref.name] ?? []) {
+      media.add(medium);
+    }
+  }
+  return media;
+}
+
+/**
  * Subtractive per-step tool policy. A craftbook never has to enumerate the
  * complete positive tool roster: the role, install, security policy, and
  * model tier still establish that roster, then this policy removes what the

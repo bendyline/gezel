@@ -8,6 +8,7 @@ import {
   isLegacyGateSpec,
   normalizeStepGate,
   removeStepAndCleanEdges,
+  requiredOutputMediaForGate,
   validateCraftbookGraph,
 } from './index.js';
 
@@ -59,6 +60,37 @@ describe('GateCheckSchema — connector coverage', () => {
     expect(
       GateCheckSchema.parse({ kind: 'nodeRuns', file: 'test.mjs', artifact: true }),
     ).not.toHaveProperty('artifact');
+  });
+});
+
+describe('requiredOutputMediaForGate', () => {
+  it('derives task-note output from the gate script that inspects task notes', () => {
+    expect([
+      ...requiredOutputMediaForGate({
+        at: 'completion',
+        scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+      }),
+    ]).toEqual(['task-note']);
+  });
+
+  it('does not infer an output surface from unrelated, project-local, or legacy gates', () => {
+    expect([
+      ...requiredOutputMediaForGate({
+        at: 'completion',
+        scripts: [{ name: 'checkJsonShape', scope: 'standard' }],
+      }),
+    ]).toEqual([]);
+    expect([
+      ...requiredOutputMediaForGate({
+        at: 'completion',
+        scripts: [{ name: 'checkTaskNoteContains', scope: 'project' }],
+      }),
+    ]).toEqual([]);
+    expect([
+      ...requiredOutputMediaForGate({
+        checks: [{ kind: 'minBytes', file: 'report.md', bytes: 10 }],
+      }),
+    ]).toEqual([]);
   });
 });
 

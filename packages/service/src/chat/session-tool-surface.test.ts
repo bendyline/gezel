@@ -567,6 +567,28 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('write_task_note')).toBe(false);
   });
 
+  it('keeps task-note writes required by a gate on a legacy artifact-only policy', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'gezel/74', stepId: 'scope' }),
+      tier: 'medium',
+      activeStep: {
+        advanceWhen: { file: 'tasks/74/pr-review/batches.json', artifact: true },
+        gate: {
+          at: 'completion',
+          scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+        },
+        toolPolicy: { outputMedium: 'artifact' },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
   it('structured built-in disallows remain a hard ceiling over a gezel override', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
