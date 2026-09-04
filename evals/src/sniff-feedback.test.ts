@@ -1900,6 +1900,69 @@ describe('postMissingDeliverableFeedback', () => {
       'Do not end your turn until `copy_artifact_to_workspace` or `write_file`',
     );
   });
+
+  it('names the SURFACE when an artifact deliverable was written to the workspace', async () => {
+    // The mirror of the case above, and the one that was missing. All four
+    // codemod-sweep deliverables are artifact:true at {{task.dir}}; both local
+    // models wrote review.md to the workspace, and the harness answered
+    // "0 bytes" and "not found" about a file on disk at 1856 B. Feedback a
+    // model can check and find false is worse than no feedback.
+    const client = makeClient({
+      sessions: [
+        {
+          id: 's-dev',
+          gezelId: 'dev-1',
+          projectId: 'profile-cards',
+          lastActivityAt: '2026-09-02T05:00:00Z',
+        },
+      ],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'tasks/1/review.md', {
+      minPolls: 1,
+      projectId: 'profile-cards',
+      expectedSurface: 'artifact',
+      nearMiss: {
+        path: 'tasks/1/review.md',
+        location: 'workspace/tasks/1/review.md',
+        bytes: 1856,
+      },
+    });
+
+    const [, body] = client.messageGezel.mock.calls[0]!;
+    expect(body.text).toContain('in the WORKSPACE');
+    expect(body.text).toContain('write_artifact({ path: "tasks/1/review.md"');
+    expect(body.text).toContain('1856 bytes');
+    expect(body.text).not.toContain('wrong deliverable path or location');
+  });
+
+  it('keeps the original wording for a genuinely workspace-side deliverable', async () => {
+    const client = makeClient({
+      sessions: [
+        {
+          id: 's-dev2',
+          gezelId: 'dev-2',
+          projectId: 'profile-cards',
+          lastActivityAt: '2026-09-02T05:00:00Z',
+        },
+      ],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'tasks/1/review.md', {
+      minPolls: 1,
+      projectId: 'profile-cards',
+      nearMiss: {
+        path: 'tasks/1/review.md',
+        location: 'workspace/tasks/1/review.md',
+        bytes: 1856,
+      },
+    });
+
+    const [, body] = client.messageGezel.mock.calls[0]!;
+    expect(body.text).not.toContain('in the WORKSPACE');
+  });
 });
 
 describe('sniff escalation ladder', () => {

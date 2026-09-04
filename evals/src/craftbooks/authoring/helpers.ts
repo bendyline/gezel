@@ -462,6 +462,31 @@ export function noDeliverableWritten(...texts: Array<string | null | undefined>)
   return texts.every((text) => !text || text.length === 0);
 }
 
+/**
+ * The "your task is not finished" failure line, for a task that exists and
+ * has not reached a terminal step.
+ *
+ * It forbids re-invocation explicitly, because that is what models actually
+ * do when told only that the task is unfinished. On the 2026-09-02 sweep
+ * `craftbook-author-gate-script` received **24** nudges reading *"task
+ * inventory-health-check/1 has status active — drive it to completion"* and
+ * responded by minting `/2` and then `/3` from the same craftbook — one
+ * `craftbook.created` event, three task refs. Each re-invocation resets the
+ * work and changes the failing detail, so the score sits frozen while the
+ * text churns; `craftbook-export-generalize` failed the same way the same
+ * night. "Drive it to completion" names the goal and not the move, and the
+ * move a model reaches for is to start over.
+ */
+export function unfinishedTaskFailure(args: {
+  ref: string;
+  status: string;
+  /** Parenthetical provenance, e.g. `from craftbook "csv-order-cleanup"`. */
+  source?: string;
+}): string {
+  const source = args.source ? ` (${args.source})` : '';
+  return `task ${args.ref}${source} has status "${args.status}" — advance THIS task to a terminal step with advance_task_step/set_task_status. Do NOT invoke the recipe again or create a second task: a new task starts the work over and does not count.`;
+}
+
 /** Sum of text lengths — a cheap monotonic-ish progress proxy. */
 export function progressBytes(...parts: Array<string | null | undefined>): number {
   return parts.reduce((acc, part) => acc + (part?.length ?? 0), 0);

@@ -10,6 +10,7 @@ import {
   finishAuthoringPoll,
   progressBytes,
   sendMeesterKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -210,7 +211,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     gradeProjectId = found.projectId;
     if (found.task.status !== 'complete') {
       failures.push(
-        `task ${found.task.ref} (from "${PRESS_RELEASE_CRAFTBOOK_ID}") has status "${found.task.status}" — drive it to completion`,
+        unfinishedTaskFailure({
+          ref: found.task.ref,
+          status: found.task.status,
+          source: `from "${PRESS_RELEASE_CRAFTBOOK_ID}"`,
+        }),
       );
     }
   }

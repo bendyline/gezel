@@ -1159,6 +1159,19 @@ export interface MissingDeliverableFeedbackOptions {
   targetGracePolls?: number;
   projectId?: string;
   repairDirective?: string;
+  /**
+   * Surface the deliverable is graded on. Defaults to `'workspace'`, which
+   * is what every message below assumes — they prescribe `write_file` and
+   * `copy_artifact_to_workspace`.
+   *
+   * Pass `'artifact'` for a deliverable declared `artifact: true`, so a
+   * near-miss found in the WORKSPACE is answered with the move that actually
+   * fixes it. Without this the wording inverts: a model that wrote
+   * `tasks/1/review.md` to the workspace is told to "create or replace the
+   * exact file `tasks/1/review.md`" — which it just did — because the path is
+   * identical and only the drawer is wrong.
+   */
+  expectedSurface?: 'workspace' | 'artifact';
 }
 
 /**
@@ -1262,6 +1275,7 @@ export async function postMissingDeliverableFeedback(
       urgentWrongSurfaceNearMiss ||
       (!specialist && minimumScore != null && state.absentPolls >= coordinatorFallbackAfterPolls),
     repairDirective: opts.repairDirective,
+    expectedSurface: opts.expectedSurface,
   });
   let attemptedTargetId = specialist?.gezelId;
   try {
@@ -1388,7 +1402,11 @@ function normalizeDeliverablePath(path: string): string {
 function formatMissingDeliverableNudge(
   filePath: string,
   nearMiss?: MissingDeliverableNearMiss,
-  opts: { coordinatorFallback?: boolean; repairDirective?: string } = {},
+  opts: {
+    coordinatorFallback?: boolean;
+    repairDirective?: string;
+    expectedSurface?: 'workspace' | 'artifact';
+  } = {},
 ): string {
   const isHtml = /\.html?$/i.test(filePath);
   const isBinaryDocument = isBinaryDocumentDeliverablePath(filePath);
@@ -1413,14 +1431,28 @@ function formatMissingDeliverableNudge(
     : artifactCopySource
       ? '`copy_artifact_to_workspace` or `write_file`'
       : '`write_file`';
+  // Same path, wrong drawer. Saying "create the exact file X" here is advice
+  // the model has already followed, so name the SURFACE and the one call that
+  // moves it.
+  const wrongSurfaceOnly =
+    opts.expectedSurface === 'artifact' &&
+    nearMiss !== undefined &&
+    normalizeDeliverablePath(nearMiss.location) ===
+      `workspace/${normalizeDeliverablePath(filePath)}`;
   const nearMissLines = nearMiss
-    ? [
-        `[scenario check] I did find \`${nearMiss.path}\` at \`${nearMiss.location}\`${nearMiss.bytes == null ? '' : ` (${nearMiss.bytes} bytes)`}, but that is the wrong deliverable path or location. A plan, notes file, artifact/library-only file, draft, or alternate filename does not count.`,
-        isBinaryDocument
-          ? `Resume the DocBlocks save/copy sequence now so the real binary lands at \`${filePath}\`; do not rewrite \`${nearMiss.path}\` as text.`
-          : `Your next tool call must create or replace the exact file \`${filePath}\`. Do not keep expanding \`${nearMiss.path}\` unless you first move or rewrite it as \`${filePath}\`.`,
-        '',
-      ]
+    ? wrongSurfaceOnly
+      ? [
+          `[scenario check] I did find \`${nearMiss.path}\`${nearMiss.bytes == null ? '' : ` (${nearMiss.bytes} bytes)`}, but in the WORKSPACE — this deliverable is graded in the artifacts drawer. The path is right; the surface is wrong.`,
+          `Write it to the drawer with \`write_artifact({ path: "${filePath}", content: <the full deliverable contents> })\`. \`write_file\` puts it back in the workspace, where it will not count.`,
+          '',
+        ]
+      : [
+          `[scenario check] I did find \`${nearMiss.path}\` at \`${nearMiss.location}\`${nearMiss.bytes == null ? '' : ` (${nearMiss.bytes} bytes)`}, but that is the wrong deliverable path or location. A plan, notes file, artifact/library-only file, draft, or alternate filename does not count.`,
+          isBinaryDocument
+            ? `Resume the DocBlocks save/copy sequence now so the real binary lands at \`${filePath}\`; do not rewrite \`${nearMiss.path}\` as text.`
+            : `Your next tool call must create or replace the exact file \`${filePath}\`. Do not keep expanding \`${nearMiss.path}\` unless you first move or rewrite it as \`${filePath}\`.`,
+          '',
+        ]
     : [];
   const coordinatorLines = opts.coordinatorFallback
     ? isBinaryDocument

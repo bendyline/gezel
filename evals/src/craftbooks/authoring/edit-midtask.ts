@@ -7,6 +7,7 @@ import {
   finishAuthoringPoll,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -190,7 +191,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     );
   }
   if (task.status !== 'complete') {
-    failures.push(`task ${task.ref} has status "${task.status}" — drive it to completion`);
+    failures.push(unfinishedTaskFailure({ ref: task.ref, status: task.status }));
   }
 
   const workspace = workspaceFromClient(ctx.client, projectId);

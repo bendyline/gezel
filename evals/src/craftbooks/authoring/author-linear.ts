@@ -13,6 +13,7 @@ import {
   parseJsonRecords,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
   ungatedBuildStepIds,
 } from './helpers.ts';
 
@@ -160,7 +161,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       if (found.task.status !== 'complete') {
         failures.push(
-          `task ${found.task.ref} (from craftbook "${book.craftbook.id}") has status "${found.task.status}" — drive it to completion`,
+          unfinishedTaskFailure({
+            ref: found.task.ref,
+            status: found.task.status,
+            source: `from craftbook "${book.craftbook.id}"`,
+          }),
         );
       }
     }
@@ -215,7 +220,7 @@ export const authorLinearScenario: EvalScenario = {
   evidenceTexts: [AUTHOR_LINEAR_KICKOFF_MESSAGE, AUTHOR_LINEAR_MISSION_OBJECTIVES],
   suggestedTrials: 1,
   skipInitialPrompt: true,
-  timeoutMs: 45 * 60_000,
+  timeoutMs: 80 * 60_000,
   progressTimeoutMs: 10 * 60_000,
   setup,
   successCheck,

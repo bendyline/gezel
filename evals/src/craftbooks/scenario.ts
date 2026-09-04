@@ -723,8 +723,40 @@ async function wrongSurfaceNearMiss(
 ): Promise<MissingDeliverableNearMiss | undefined> {
   return (
     (await documentNearMiss(client, filePath)) ??
-    (await artifactNearMiss(client, projectId, filePath))
+    (await artifactNearMiss(client, projectId, filePath)) ??
+    (await workspaceNearMiss(client, projectId, filePath))
   );
+}
+
+/**
+ * The mirror of {@link artifactNearMiss}: an ARTIFACT deliverable the model
+ * wrote to the workspace instead.
+ *
+ * Its absence was the asymmetry that made three trials unrecoverable on the
+ * 2026-09-02 sweep. `codemod-sweep` declares all four deliverables
+ * `artifact: true` at `{{task.dir}}`; both models placed the earlier ones in
+ * the drawer and wrote `review.md` to the workspace, and the harness answered
+ * with "tasks/1/review.md is 0 bytes" and "not found" while the file sat on
+ * disk at 1856 B one surface over. Feedback a model can check and find false
+ * is worse than none: it teaches it to distrust the channel, and it cannot
+ * suggest the one-token fix (`write_artifact`, not `write_file`).
+ *
+ * Cheap because it only runs once the deliverable has already been read as
+ * missing on its declared surface.
+ */
+async function workspaceNearMiss(
+  client: GezelClient,
+  projectId: string,
+  filePath: string,
+): Promise<MissingDeliverableNearMiss | undefined> {
+  try {
+    const blob = await client.fetchProjectWorkspaceBlob(projectId, filePath);
+    const text = await blob.text();
+    if (!text) return undefined;
+    return { path: filePath, location: `workspace/${filePath}`, bytes: text.length };
+  } catch {
+    return undefined;
+  }
 }
 
 async function taskNotesTextForSpec(
@@ -1112,11 +1144,22 @@ async function evaluateUnchangedFixtures(
     const expected = fixtures.get(path);
     const actual = await workspace.read(path);
     if (expected === undefined) {
+      // An authoring error, not a model one — no remedy to offer the model.
       failures.push(`unchanged fixture ${path} is not defined in setup.files`);
     } else if (actual === null) {
-      failures.push(`unchanged fixture ${path} was deleted`);
+      failures.push(
+        `unchanged fixture ${path} was deleted — restore it byte-for-byte. This scenario grades a REVIEW: the seeded sources must end exactly as they started.`,
+      );
     } else if (actual !== expected) {
-      failures.push(`unchanged fixture ${path} differs from its seeded content`);
+      // Name the remedy, not just the breach. `large-pr-review` has said
+      // "restore all seeded source files byte-for-byte" all along and its
+      // models do not trip this; the craftbook members said only that the
+      // file "differs", and qwen3.8-27b-q4 failed craftbook-code-review twice
+      // by editing src/payment.js — then spent the rest of the trial being
+      // told a fact it already knew, with no instruction to undo it.
+      failures.push(
+        `unchanged fixture ${path} differs from its seeded content — revert it byte-for-byte. This scenario grades a REVIEW: report the defect in your findings, do not fix it in the source.`,
+      );
     }
   }
   return failures;
@@ -1974,6 +2017,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           await postMissingDeliverableFeedback(ctx, repairDeliverable.path, {
             projectId,
             nearMiss,
+            expectedSurface: repairDeliverable.artifact ? 'artifact' : 'workspace',
             repairDirective: craftbookMissingDeliverableRepairDirective(spec, failures),
           });
           return { done: false };

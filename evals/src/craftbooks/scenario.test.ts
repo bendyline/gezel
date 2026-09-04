@@ -1124,7 +1124,12 @@ describe('craftbook generic scenario adapter', () => {
     ).resolves.toEqual({ done: false });
     expect(recordSniff).toHaveBeenCalledWith(
       expect.objectContaining({
-        failReason: 'unchanged fixture source/original.md differs from its seeded content',
+        // The remedy clause is load-bearing: naming only the breach left
+        // qwen3.8-27b-q4 re-told a fact it already knew for the rest of a
+        // craftbook-code-review trial it had already lost by editing a fixture.
+        failReason: expect.stringContaining(
+          'unchanged fixture source/original.md differs from its seeded content — revert it byte-for-byte',
+        ),
       }),
     );
   });

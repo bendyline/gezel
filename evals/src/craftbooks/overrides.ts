@@ -250,13 +250,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'bug-fix-tdd': {
     mode: 'workflow',
-    timeoutMs: 105 * 60_000,
+    timeoutMs: 150 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'validated',
       validatedMode: 'workflow',
       notes:
-        '2026-09-01 count=1: qwen3.8-27b-q4 PASS 28/28 in 67.2m; gemma4-31b-q4 FAIL at its 2x cap (83.4m) with hard progress 5s before the end. Ceiling raised 40m -> 105m.',
+        '2026-09-01 count=1: qwen3.8-27b-q4 PASS 28/28 in 67.2m; gemma4-31b-q4 FAIL at its 2x cap (83.4m) with hard progress 5s before the end — ceiling raised 40m -> 105m on that. Raised again 105m -> 150m after the 2026-09-02 re-run, where qwen PASSED at 125.1m: the first raise still left the pass riding the 2x extension, which is the state that makes a pass one slow turn from a timeout booked as a model failure.',
     },
     gaps: ['Re-run gemma4-31b-q4 at the raised ceiling.'],
   },

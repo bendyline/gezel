@@ -14,6 +14,7 @@ import {
   parseJsonValue,
   progressBytes,
   sendWorkerKickoff,
+  unfinishedTaskFailure,
 } from './helpers.ts';
 
 /**
@@ -143,7 +144,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       if (found.task.status !== 'complete') {
         failures.push(
-          `task ${found.task.ref} (from craftbook "${book.craftbook.id}") has status "${found.task.status}" — drive it to completion`,
+          unfinishedTaskFailure({
+            ref: found.task.ref,
+            status: found.task.status,
+            source: `from craftbook "${book.craftbook.id}"`,
+          }),
         );
       }
     }

@@ -269,7 +269,7 @@ export const SUITES: Record<string, EvalSuite> = {
   developer: {
     id: 'developer',
     description:
-      'Engineering scorecard (10 scenarios, <=9h15m at --count 1), deliberately hard: craftbook ' +
+      'Engineering scorecard (10 scenarios, <=10h at --count 1), deliberately hard: craftbook ' +
       'routing under near-neighbour ambiguity, defect identification graded on precision as ' +
       'well as recall, and code change proven by execution receipts. Fully hermetic. Not ' +
       'expected to pass 100% — it exists to rank models that saturate core.',
@@ -282,8 +282,8 @@ export const SUITES: Record<string, EvalSuite> = {
       'craftbook-deep-security-review', // 40m — seeded source-to-sink vulns, structured findings
       'large-pr-review', // 60m — 120-file corpus, planted defect AND planted false-positive trap
       'craftbook-codemod-sweep', // 90m — 9-file rename with a deliberate CHANGELOG exception
-      'craftbook-bug-fix-tdd', // 105m — red-then-green receipts plus a mutant oracle
       'craftbook-refactor-module', // 120m — behavior-equivalence matrix + duplication oracle
+      'craftbook-bug-fix-tdd', // 150m — red-then-green receipts plus a mutant oracle
     ],
   },
 
@@ -333,15 +333,15 @@ export const SUITES: Record<string, EvalSuite> = {
   'complex-work': {
     id: 'complex-work',
     description:
-      'Complex-workflow scorecard (9 scenarios, <=10h50m at --count 1), deliberately hard: ' +
+      'Complex-workflow scorecard (9 scenarios, <=11h25m at --count 1), deliberately hard: ' +
       'selecting and executing multi-phase recipes, and AUTHORING new ones — parameterized, ' +
       'fanned-out, self-gating, and repaired mid-flight. Six of nine members grade the craftbook ' +
       'the model wrote. Fully hermetic. Not expected to pass 100%.',
     scenarios: [
       'craftbook-find-vs-create', // 20m — find the library recipe instead of authoring one
-      'craftbook-author-linear', // 45m — the authoring anchor: three gated steps, run to completion
       'craftbook-edit-midtask', // 45m — diagnose an unwinnable gate and repair the live book
       'craftbook-invoice-run', // 50m — declarative fanout execution, non-code
+      'craftbook-author-linear', // 80m — the authoring anchor: three gated steps, run to completion
       'craftbook-route-multi', // 80m — route AND execute: the selection-to-delivery handoff
       'craftbook-export-generalize', // 80m — generalize finished one-off work into a reusable recipe
       'craftbook-author-params', // 90m — a recipe reusable across two inputs, not hardcoded to one
@@ -367,13 +367,13 @@ export const SUITES: Record<string, EvalSuite> = {
   'complex-work-smoke': {
     id: 'complex-work-smoke',
     description:
-      'Fast complex-workflow pulse check (3 scenarios, <=1h55m): recipe selection, baseline ' +
+      'Fast complex-workflow pulse check (3 scenarios, <=2h30m): recipe selection, baseline ' +
       'craftbook authoring, and declarative-fanout execution — one per kind of work the suite ' +
       'grades. Not a scorecard — use complex-work for that.',
     scenarios: [
       'craftbook-find-vs-create', // 20m
-      'craftbook-author-linear', // 45m
       'craftbook-invoice-run', // 50m
+      'craftbook-author-linear', // 80m
     ],
   },
 

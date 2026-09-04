@@ -48,15 +48,15 @@ const DEVELOPER_SCENARIO_IDS = [
   'craftbook-deep-security-review',
   'large-pr-review',
   'craftbook-codemod-sweep',
-  'craftbook-bug-fix-tdd',
   'craftbook-refactor-module',
+  'craftbook-bug-fix-tdd',
 ] as const;
 
 const COMPLEX_WORK_SCENARIO_IDS = [
   'craftbook-find-vs-create',
-  'craftbook-author-linear',
   'craftbook-edit-midtask',
   'craftbook-invoice-run',
+  'craftbook-author-linear',
   'craftbook-route-multi',
   'craftbook-export-generalize',
   'craftbook-author-params',
@@ -135,8 +135,8 @@ const CEILINGED_SUITE_IDS = [
  * real worst case remains 2x these numbers, and whoever plans a sweep
  * budgets from the note on `SCORECARD_SUITES` in bin/scorecard.ts.
  */
-const MAX_SUITE_SCENARIO_MS = 120 * 60_000;
-const MAX_SUITE_TOTAL_MS = 11 * 60 * 60_000;
+const MAX_SUITE_SCENARIO_MS = 150 * 60_000;
+const MAX_SUITE_TOTAL_MS = 12 * 60 * 60_000;
 
 describe('eval suites', () => {
   it('every suite scenario id resolves in the main registry', () => {

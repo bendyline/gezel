@@ -25,7 +25,7 @@ export const GRANDFATHERED = new Map([
   ['packages/core/src/schemas/api.ts', 7_046],
   ['packages/service/src/chat/manager.test.ts', 7_045],
   ['packages/ui/src/views/SettingsView.tsx', 4_505],
-  ['packages/service/src/tasks/manager.ts', 4_518],
+  ['packages/service/src/tasks/manager.ts', 4_429],
   ['packages/ui/src/views/ProjectsView.tsx', 4_114],
   ['packages/ui/src/components/ChatTimelineView.tsx', 4_102],
   ['packages/ui/src/components/chat-bubbles.tsx', 3_802],
