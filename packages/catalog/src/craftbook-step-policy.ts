@@ -4,7 +4,7 @@ import type {
   CraftbookStepWritableOutputMedium,
   NewCraftbookStep,
 } from '@bendyline/gezel';
-import { deliverableKindForStep } from '@bendyline/gezel';
+import { deliverableKindForStep, requiredOutputMediaForGate } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from './builtin-toolsets.js';
 
 const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((group) => [group.id, group]));
@@ -40,6 +40,9 @@ const DECLARED_TOOLSET_SIGNALS: Readonly<Record<string, RegExp>> = {
   'microsoft-playwright-mcp': /\b(?:playwright|browser_|browser automation|headless browser)\b/i,
 };
 
+const TASK_NOTE_OUTPUT_SIGNAL =
+  /\bwrite_task_note\b|\b(?:write|record|append|summarize)[^.!?\n]{0,100}\b(?:task\s+)?notes?\b|\bwrite\s+PASS\s*\/\s*FAIL\b/i;
+
 function procedureText(step: NewCraftbookStep): string {
   return [step.name, step.description, step.prompt, step.suggestedRole].filter(Boolean).join('\n');
 }
@@ -55,13 +58,23 @@ function gateChecks(step: NewCraftbookStep): Array<Record<string, unknown>> {
 export function outputMediumForCraftbookBlueprint(
   step: NewCraftbookStep,
 ): CraftbookStepOutputMedium {
-  if (step.toolPolicy?.outputMedium) return step.toolPolicy.outputMedium;
+  const gateRequiredMedia = [...requiredOutputMediaForGate(step.gate)];
+  if (step.toolPolicy?.outputMedium) {
+    // A gate is an executable exit contract. It outranks a contradictory
+    // `none` annotation, which would otherwise author a step that cannot
+    // produce the state its own gate inspects.
+    if (step.toolPolicy.outputMedium === 'none' && gateRequiredMedia[0]) {
+      return gateRequiredMedia[0];
+    }
+    return step.toolPolicy.outputMedium;
+  }
   if (step.deliverable?.path) return step.deliverable.artifact ? 'artifact' : 'workspace';
   if (step.advanceWhen?.file) return step.advanceWhen.artifact ? 'artifact' : 'workspace';
   const fileCheck = gateChecks(step).find(
     (check) => typeof check.file === 'string' && check.file.length > 0,
   );
   if (fileCheck) return fileCheck.artifact === true ? 'artifact' : 'workspace';
+  if (gateRequiredMedia[0]) return gateRequiredMedia[0];
   const text = procedureText(step);
   if (
     /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b/i.test(
@@ -71,11 +84,7 @@ export function outputMediumForCraftbookBlueprint(
     return 'workspace';
   }
   if (/\bwrite_artifact\b/i.test(text)) return 'artifact';
-  return /\bwrite_task_note\b|\b(?:write|record|append|summarize)[^.!?\n]{0,100}\b(?:task\s+)?notes?\b|\bwrite\s+PASS\s*\/\s*FAIL\b/i.test(
-    text,
-  )
-    ? 'task-note'
-    : 'none';
+  return TASK_NOTE_OUTPUT_SIGNAL.test(text) ? 'task-note' : 'none';
 }
 
 function additionalOutputMediaForStep(
@@ -85,6 +94,7 @@ function additionalOutputMediaForStep(
   if (primary === 'none') return [];
   const text = procedureText(step);
   const out = new Set(step.toolPolicy?.additionalOutputMedia ?? []);
+  for (const medium of requiredOutputMediaForGate(step.gate)) out.add(medium);
   if (
     /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b|\b(?:edit|change|patch|fix)\b[^.!?\n]{0,80}\b(?:actual|workspace|source|project)\s+files?\b/i.test(
       text,
@@ -93,7 +103,7 @@ function additionalOutputMediaForStep(
     out.add('workspace');
   }
   if (/\bwrite_artifact\b/i.test(text)) out.add('artifact');
-  if (/\bwrite_task_note\b/i.test(text)) out.add('task-note');
+  if (TASK_NOTE_OUTPUT_SIGNAL.test(text)) out.add('task-note');
   out.delete(primary as CraftbookStepWritableOutputMedium);
   return [...out].sort();
 }

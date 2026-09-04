@@ -116,4 +116,16 @@ describe('structured step tool policy', () => {
       }),
     ]).toEqual(['artifact', 'workspace', 'task-note']);
   });
+
+  it('lets a gate-required surface override a contradictory legacy none policy', () => {
+    expect([
+      ...outputMediaForStep({
+        toolPolicy: { outputMedium: 'none' },
+        gate: {
+          at: 'completion',
+          scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+        },
+      }),
+    ]).toEqual(['task-note']);
+  });
 });

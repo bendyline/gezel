@@ -3,6 +3,7 @@ import type {
   CraftbookToolsetNeed,
   TaskCraftbookStep,
 } from '@bendyline/gezel';
+import { requiredOutputMediaForGate } from '@bendyline/gezel';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -82,6 +83,13 @@ export function outputMediaForStep(
 ): ReadonlySet<CraftbookStepOutputMedium> {
   const primary = outputMediumForStep(step);
   if (!primary) return new Set();
-  if (primary === 'none') return new Set(['none']);
-  return new Set([primary, ...(step?.toolPolicy?.additionalOutputMedia ?? [])]);
+  const gateRequiredMedia = requiredOutputMediaForGate(step?.gate);
+  if (primary === 'none') {
+    return gateRequiredMedia.size > 0 ? gateRequiredMedia : new Set(['none']);
+  }
+  return new Set([
+    primary,
+    ...(step?.toolPolicy?.additionalOutputMedia ?? []),
+    ...gateRequiredMedia,
+  ]);
 }

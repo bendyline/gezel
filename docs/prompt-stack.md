@@ -325,7 +325,12 @@ they compete with text for context and prefill. Measured accounting:
      seed cannot hide the `write_task_note` action its procedure requires first. A
      coordinator assigned a step (whose default kit is `tasks-readonly`) can still record
      notes and hand off.
-  3. **No incidental survivors.** Slots left over once a role's curated list is
+  3. **Gate-required output floor**: core maps trusted standard gate scripts to their
+     structurally required persistence surface. `checkTaskNoteContains` therefore keeps
+     `write_task_note` callable even for an older artifact-only step policy that omitted
+     `additionalOutputMedia: ["task-note"]`; authoring also persists that secondary medium
+     for new craftbooks. A gate can never require a note while its tool policy forbids one.
+  4. **No incidental survivors.** Slots left over once a role's curated list is
      exhausted — and every slot for a role that has no curated list, i.e. any custom role
      at tiny — are filled from `GENERIC_TOOL_CAP_FALLBACK` (a read → search → artifact →
      recall ladder) and then alphabetically. Previously they were filled in `Set`
