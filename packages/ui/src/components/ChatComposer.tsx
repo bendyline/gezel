@@ -83,13 +83,6 @@ function CollapseDraftIcon() {
   );
 }
 
-function newlineShortcutLabel(): string {
-  const platform =
-    window.__GEZEL__?.platform ??
-    (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
-  return platform === 'darwin' || /Mac/i.test(platform) ? '⌘⏎' : 'Ctrl+Enter';
-}
-
 export interface ChatComposerProps {
   gezelId: string;
   /** The primary recipient's friendly name. */
@@ -1329,10 +1322,10 @@ export function ChatComposer({
     draft,
   ]);
 
-  // Enter routing. Squisq reads `submitOnEnter` when the editor mounts;
-  // the mid-turn/idle decision must be made at keypress time, not
-  // capture time, so the stable closure dereferences this ref. Mid-turn
-  // Enter queues a nudge — previously it silently did nothing.
+  // Submit routing. The mid-turn/idle decision must be made at keypress
+  // time, not at handler-install time, so the stable handler below
+  // dereferences this ref. Mid-turn the shortcut queues a nudge —
+  // previously it silently did nothing.
   const submitRef = useRef<() => void>(() => {});
   submitRef.current = draftSubmissionPending
     ? () => {}
@@ -1342,12 +1335,41 @@ export function ChatComposer({
         ? () => void queueNudge()
         : () => void send();
 
+  /**
+   * Shift+Enter sends; Enter opens a new line, because a chat composer
+   * that also drafts a brief has to let people write paragraphs without
+   * firing one off per line break.
+   *
+   * Squisq's `submitOnEnter` hook is the opposite arrangement and takes
+   * no modifier option, so the composer does not pass it at all — Enter
+   * then falls through to the editor's own paragraph break — and this
+   * handler claims Shift+Enter on the way down, before ProseMirror can
+   * turn it into a soft break. Capture on the wrapper is what puts us
+   * ahead of the contenteditable's own listener; stopping propagation
+   * there is what keeps the editor from seeing the key at all.
+   */
+  const handleSubmitShortcut = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || !event.shiftKey) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // Only from inside the typing surface. A Shift+Enter aimed at a
+    // focused toolbar key belongs to that key, not to the draft.
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target?.closest('.squisq-wysiwyg-editor, .squisq-raw-editor-container')) return;
+    // The mention picker owns Enter for as long as it is open.
+    const popover = event.currentTarget.querySelector<HTMLElement>('.squisq-mention-popover');
+    if (popover && popover.style.display !== 'none') return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitRef.current();
+  }, []);
+
   return (
     <div
       ref={composerRef}
       className="chat-composer"
       data-testid="chat-composer"
       data-composer-expanded={expanded ? 'true' : undefined}
+      onKeyDownCapture={handleSubmitShortcut}
     >
       {engagementOff && (
         <div className="chat-composer-disabled-banner" role="alert">
@@ -1545,7 +1567,6 @@ export function ChatComposer({
           {...CHAT_ACCESSORY_BIN_PROPS}
           fullWidth
           thinMargins
-          submitOnEnter={() => submitRef.current()}
           toolbarSlotAfterActions={
             <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
           }
@@ -1581,7 +1602,7 @@ export function ChatComposer({
                   data-testid="chat-open"
                   onClick={() => void executeOpenTarget()}
                   disabled={draftSubmissionPending}
-                  title="Open this folder or recent file (Enter)"
+                  title="Open this folder or recent file (Shift+Enter)"
                 >
                   {draftSubmissionPending ? 'Opening…' : 'Open'}
                 </button>
@@ -1595,7 +1616,7 @@ export function ChatComposer({
                         data-testid="chat-nudge"
                         onClick={() => void queueNudge()}
                         disabled={draftSubmissionPending}
-                        title="Queue for after this turn (Enter)"
+                        title="Queue for after this turn (Shift+Enter)"
                       >
                         Nudge
                       </button>
@@ -1636,7 +1657,7 @@ export function ChatComposer({
                   title={
                     engagementOff
                       ? 'AI is disabled in Settings → General'
-                      : `Enter to send, ${newlineShortcutLabel()} for newline`
+                      : 'Shift+Enter to send, Enter for newline'
                   }
                 >
                   <SubmitArrow />

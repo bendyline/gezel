@@ -85,7 +85,7 @@ test('01 - home workshop renders and a chat turn round-trips', async () => {
   await expect(editor).toBeVisible({ timeout: 20_000 });
   await editor.click();
   await page.keyboard.type('Hello! What can you help me with around here?');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Enter');
 
   const reply = page
     .locator('.msg-from-gezel, .msg-assistant')

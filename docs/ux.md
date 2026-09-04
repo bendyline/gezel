@@ -576,6 +576,17 @@ key out from under the cursor. Being glyph-only, each carries `title` and
 `aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
 announces the pending turn now that "Sending…" is no longer on its face.
 
+**Chat sends on Shift+Enter; the terminal fires on Enter.** The one place
+the two composers part company, and deliberately. A chat draft is prose —
+it holds paragraphs, a pasted brief, a spec — so Enter has to be a new
+line, or writing anything longer than a sentence means dodging the key
+that makes one. A shell command is a line, and a line ends with Enter;
+inverting that would fight thirty years of muscle memory for no gain.
+Each composer says which it is in the primary key's `title`, and the chat
+composer claims Shift+Enter in a capture-phase handler on its own wrapper
+— Squisq's `submitOnEnter` hook is plain-Enter-only and is left unset, so
+Enter reaches the editor as the ordinary paragraph break it should be.
+
 **The draft can take the window.** An icon key immediately left of Send
 toggles the composer between its three-line strip and the top ~80% of the
 chat column, because a brief or a PRD is unreadable through a slot and
@@ -595,8 +606,8 @@ accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:
 **Nudge** (primary — reuses the Send recipe so terracotta stays on the one
 primary) queues the text for delivery when the turn ends, and **Interrupt**
-(secondary) stops the turn and sends immediately. Enter mid-turn means
-Nudge, Escape means Stop. Queued nudges render in the timeline as the
+(secondary) stops the turn and sends immediately. The send gesture
+mid-turn means Nudge, Escape means Stop. Queued nudges render in the timeline as the
 existing dashed ghost bubbles ("⋯ nudge") with Edit / Discard / Cancel
 current turn actions — editing swaps the preview for an inline textarea in
 the same dashed not-yet-sent vocabulary and never opens a dialog. A user

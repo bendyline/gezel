@@ -1720,7 +1720,10 @@ button.danger {
 }
 
 .timeline-session-error-action:disabled {
-  cursor: wait;
+  /* macOS renders `wait` as the system beachball, which makes this small
+     network action look like the whole app has frozen. The changing label is
+     already the progress cue; keep the ordinary disabled pointer. */
+  cursor: default;
   opacity: 0.6;
 }
 

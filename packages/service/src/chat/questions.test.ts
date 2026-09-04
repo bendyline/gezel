@@ -167,6 +167,39 @@ describe('Store — question persistence', () => {
     expect(stamped).toHaveLength(1);
   });
 
+  it('attaches a first-turn question to the assistant message that asked it', async () => {
+    // There is no previous assistant on a session's first turn. A direct
+    // last-message stamp therefore no-ops while the provider is running;
+    // ChatManager must carry the question id until it constructs the
+    // assistant message at turn end.
+    const session = await manager.createSession({ gezelId: 'leo' });
+    mock.script('');
+
+    const turn = manager.send(session.id, 'help me choose');
+    await manager.stampPendingQuestion('leo', session.id, 'q-first-turn');
+    await turn;
+
+    const after = await store.getSession('leo', session.id);
+    const assistant = (after?.messages ?? []).find((m) => m.role === 'assistant');
+    expect(assistant?.pendingQuestionId).toBe('q-first-turn');
+  });
+
+  it('attaches a mid-turn question to the current assistant, not the prior reply', async () => {
+    const session = await manager.createSession({ gezelId: 'leo' });
+    mock.script('First reply');
+    await manager.send(session.id, 'first');
+
+    mock.script('');
+    const turn = manager.send(session.id, 'second');
+    await manager.stampPendingQuestion('leo', session.id, 'q-current-turn');
+    await turn;
+
+    const after = await store.getSession('leo', session.id);
+    const assistants = (after?.messages ?? []).filter((m) => m.role === 'assistant');
+    expect(assistants[0]?.pendingQuestionId).toBeUndefined();
+    expect(assistants[1]?.pendingQuestionId).toBe('q-current-turn');
+  });
+
   it('end-of-turn stamps mid-turn approval questions onto the just-committed bubble', async () => {
     // Mid-turn approval intents (npm-install / command / tool-permission /
     // image-generation) are synthesized server-side BEFORE the in-flight

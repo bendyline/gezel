@@ -1,6 +1,7 @@
 import { stripMcpPrefix } from '@bendyline/gezel';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
+import { toolArgsDisplaySummary } from './tool-display.js';
 
 /**
  * Resolve file-oriented tool names to the References viewer's three roots.
@@ -46,7 +47,7 @@ export function ToolArgsSummary({
   tool: ToolActivity;
   onOpenReference?: (reference: OpenChatReference) => void;
 }) {
-  const summary = tool.argsSummary ?? tool.path;
+  const summary = tool.argsSummary ? toolArgsDisplaySummary(tool.argsSummary) : tool.path;
   if (!summary) return null;
 
   const kind = tool.success ? toolReferenceKind(tool.name) : null;

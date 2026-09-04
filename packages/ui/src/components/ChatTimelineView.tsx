@@ -17,6 +17,7 @@ import {
   displayName,
   resolveGezelFontFamily,
   resolveGezelFontScale,
+  stripMcpPrefix,
 } from '@bendyline/gezel';
 import type { SseStreamOptions } from '@bendyline/gezel-client';
 import {
@@ -129,6 +130,18 @@ const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
  * the conversation they annotate.
  */
 const MAX_QUEUED_TASK_CARDS = 4;
+/** A local metadata reset should settle promptly, even if an HTTP socket stalls. */
+const FAILED_TURN_ACTION_TIMEOUT_MS = 10_000;
+
+function messageAskedUserQuestion(message: TimelineMessage): boolean {
+  return (
+    message.role === 'assistant' &&
+    message.toolCalls?.some(
+      (call) =>
+        call.success && stripMcpPrefix(call.name).replace(/^gezel-/, '') === 'ask_user_question',
+    ) === true
+  );
+}
 
 /**
  * Human labels for the llama-cpp `engine_phase` event. Used by the
@@ -538,6 +551,12 @@ export function ChatTimelineView({
   const [sessionErrorActions, setSessionErrorActions] = useState<
     Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
   >(new Map());
+  // A timeline fetch already in flight when Acknowledge completes can still
+  // return the pre-clear row. Suppress that stale snapshot until a genuinely
+  // new error event arrives (or this scope remounts).
+  const [acknowledgedErrorProjects, setAcknowledgedErrorProjects] = useState<Set<string>>(
+    new Set(),
+  );
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
   const gezelsRef = useRef(gezels);
   gezelsRef.current = gezels;
@@ -549,6 +568,9 @@ export function ChatTimelineView({
    * across all messages so a single fetch covers cross-project surfaces.
    */
   const [questionsById, setQuestionsById] = useState<Map<string, Question>>(new Map());
+  const fullyLoadedQuestionProjectsRef = useRef<Set<string>>(new Set());
+  const questionLookupScopeRef = useRef(scopeKey);
+  questionLookupScopeRef.current = scopeKey;
   const liveStoreRef = useRef<FrameCoalescedStore<LiveSlot> | null>(null);
   if (!liveStoreRef.current) liveStoreRef.current = new FrameCoalescedStore<LiveSlot>();
   const liveStore = liveStoreRef.current;
@@ -568,6 +590,54 @@ export function ChatTimelineView({
     terminalLiveStoreRef.current = new FrameCoalescedStore<TerminalLiveSlot>();
   }
   const terminalLiveStore = terminalLiveStoreRef.current;
+
+  // The project menu can clear these flags without going through this
+  // component. Retire both persisted and live error shells in every mounted
+  // timeline when that project-wide reset is acknowledged, otherwise an old
+  // in-memory row can keep advertising an error that no longer exists on disk.
+  useEffect(() => {
+    const onSessionErrorCleared = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: unknown }>).detail?.projectId;
+      if (typeof projectId !== 'string' || projectId.length === 0) return;
+
+      setAcknowledgedErrorProjects((prev) => {
+        const next = new Set(prev);
+        next.add(projectId);
+        return next;
+      });
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.projectId === projectId
+            ? {
+                ...message,
+                sessionLastTurnError: undefined,
+                sessionLastTurnErrorDetail: undefined,
+              }
+            : message,
+        ),
+      );
+
+      let retiredLiveError = false;
+      for (const [sessionId, slot] of liveRef.current) {
+        if (slot.projectId !== projectId || !slot.error) continue;
+        liveRef.current.delete(sessionId);
+        retiredLiveError = true;
+      }
+      if (retiredLiveError) liveStore.markStructureChanged();
+
+      setSessionErrorActions((prev) => {
+        const next = new Map(prev);
+        for (const message of messagesRef.current) {
+          if (message.projectId === projectId) next.delete(message.sessionId);
+        }
+        return next;
+      });
+    };
+
+    window.addEventListener('gezel:session-error-cleared', onSessionErrorCleared);
+    return () => window.removeEventListener('gezel:session-error-cleared', onSessionErrorCleared);
+  }, [liveStore]);
   const terminalLiveRef = useRef(terminalLiveStore.items);
   const terminalLiveStructureVersion = useSyncExternalStore(
     terminalLiveStore.subscribeStructure,
@@ -695,7 +765,9 @@ export function ChatTimelineView({
     setIndexingReceipts(readIndexingReceipts(scopeKey));
     setHasMore(false);
     setOldestAt(undefined);
+    setAcknowledgedErrorProjects(new Set());
     registeredFileSightingsRef.current.clear();
+    fullyLoadedQuestionProjectsRef.current.clear();
     liveRef.current.clear();
     liveStore.markStructureChanged();
     terminalLiveRef.current.clear();
@@ -1034,6 +1106,41 @@ export function ChatTimelineView({
   useEffect(() => {
     void refreshQuestions();
   }, [scopeKey, refreshQuestions]);
+
+  // Pending questions arrive from the cheap global lookup above. Once a
+  // transcript references a question (or contains a legacy ask tool call
+  // that predates the durable id stamp), load that project's full question
+  // file as well. This keeps answered cards collapsed in place after submit
+  // and after reload instead of reverting to a raw tool-only summary.
+  useEffect(() => {
+    const projectIds = new Set<string>();
+    for (const message of messages) {
+      if (!message.pendingQuestionId && !messageAskedUserQuestion(message)) continue;
+      if (fullyLoadedQuestionProjectsRef.current.has(message.projectId)) continue;
+      projectIds.add(message.projectId);
+    }
+    if (projectIds.size === 0) return;
+
+    const requested = [...projectIds];
+    const requestedScope = scopeKey;
+    for (const projectId of requested) fullyLoadedQuestionProjectsRef.current.add(projectId);
+    void Promise.allSettled(requested.map((projectId) => api.listQuestions({ projectId }))).then(
+      (results) => {
+        if (questionLookupScopeRef.current !== requestedScope) return;
+        const loaded: Question[] = [];
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') loaded.push(...result.value.questions);
+          else fullyLoadedQuestionProjectsRef.current.delete(requested[index]!);
+        });
+        if (loaded.length === 0) return;
+        setQuestionsById((prev) => {
+          const next = new Map(prev);
+          for (const question of loaded) next.set(question.id, question);
+          return next;
+        });
+      },
+    );
+  }, [messages, scopeKey]);
 
   // Live SSE — open one connection per scope, abort on scope change /
   // unmount. Updates the mutable live store; each affected session publishes
@@ -1917,6 +2024,12 @@ export function ChatTimelineView({
           });
         }
       } else if (event.type === 'error') {
+        setAcknowledgedErrorProjects((prev) => {
+          if (!prev.has(projectId)) return prev;
+          const next = new Set(prev);
+          next.delete(projectId);
+          return next;
+        });
         setMessages((prev) =>
           prev.map((message) =>
             message.sessionId === sessionId
@@ -3048,46 +3161,21 @@ export function ChatTimelineView({
 
   const acknowledgeFailedTurn = async (sessionId: string, projectId: string) => {
     setSessionAction(sessionId, { busy: 'acknowledge' });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), FAILED_TURN_ACTION_TIMEOUT_MS);
     try {
-      await api.clearProjectErrors(projectId);
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.projectId === projectId
-            ? {
-                ...message,
-                sessionLastTurnError: undefined,
-                sessionLastTurnErrorDetail: undefined,
-              }
-            : message,
-        ),
-      );
-      // The live failed bubble preserves partial streamed content. Its
-      // synthetic persisted twin already carries that content, so retire the
-      // red live shell and reconcile the durable row when the alert is acked.
-      let retiredLiveError = false;
-      for (const [liveSessionId, slot] of liveRef.current) {
-        if (slot.projectId !== projectId || !slot.error) continue;
-        liveRef.current.delete(liveSessionId);
-        retiredLiveError = true;
-      }
-      if (retiredLiveError) {
-        liveStore.markStructureChanged();
-        void refreshLatest();
-      }
-      setSessionErrorActions((prev) => {
-        const next = new Map(prev);
-        for (const message of messagesRef.current) {
-          if (message.projectId === projectId) next.delete(message.sessionId);
-        }
-        return next;
-      });
+      await api.clearProjectErrors(projectId, controller.signal);
       window.dispatchEvent(
         new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
       );
     } catch {
       setSessionAction(sessionId, {
-        error: 'Could not clear the alert. Check the connection and try again.',
+        error: controller.signal.aborted
+          ? 'Clearing the alert took too long. Check the connection and try again.'
+          : 'Could not clear the alert. Check the connection and try again.',
       });
+    } finally {
+      window.clearTimeout(timeout);
     }
   };
 
@@ -3240,25 +3328,42 @@ export function ChatTimelineView({
   // attaches the question id to the now-persisted assistant message
   // and the regular `MessageBubble` slot takes over rendering.
   //
-  // Build a per-session lookup once: most-recent unanswered question
-  // per session id. Tiny Map walk; bounded by total pending questions
-  // (typically ≤ a handful). Skip ids already claimed by a persisted
-  // message — `ask_user_question` stamps the prior assistant bubble
-  // synchronously, so without this exclusion the same card would
-  // render twice (once on the stamped bubble, once on the streaming
-  // bubble of the in-flight follow-up turn).
+  // Build a per-session lookup once. Skip ids already claimed by a
+  // persisted message; the remainder either belongs to a legacy unlinked
+  // ask turn or, when still unanswered, to the live streaming bubble.
   const claimedQuestionIds = new Set<string>();
   for (const m of messages) {
     if (m.pendingQuestionId) claimedQuestionIds.add(m.pendingQuestionId);
   }
-  const liveQuestionsBySession = new Map<string, Question>();
+  const unclaimedQuestionsBySession = new Map<string, Question>();
   for (const q of questionsById.values()) {
-    if (q.answer) continue;
     if (claimedQuestionIds.has(q.id)) continue;
-    const existing = liveQuestionsBySession.get(q.sessionId);
+    const existing = unclaimedQuestionsBySession.get(q.sessionId);
     if (!existing || q.createdAt > existing.createdAt) {
-      liveQuestionsBySession.set(q.sessionId, q);
+      unclaimedQuestionsBySession.set(q.sessionId, q);
     }
+  }
+  // Backward-compatible correlation for turns written before the service
+  // could stamp a first-turn question at commit time. The tool call itself
+  // is durable evidence of which assistant message asked; attach the newest
+  // unclaimed question for that session to its newest successful ask call.
+  // Questions with no persisted asking turn still belong on the live bubble.
+  const fallbackAskMessageBySession = new Map<string, { key: string; at: string }>();
+  for (const m of messages) {
+    if (m.role !== 'assistant' || m.pendingQuestionId || !messageAskedUserQuestion(m)) {
+      continue;
+    }
+    const key = `${m.sessionId}\u0000${m.at}\u0000${m.role}`;
+    const existing = fallbackAskMessageBySession.get(m.sessionId);
+    if (!existing || m.at > existing.at)
+      fallbackAskMessageBySession.set(m.sessionId, { key, at: m.at });
+  }
+  const fallbackQuestionsByMessage = new Map<string, Question>();
+  const liveQuestionsBySession = new Map<string, Question>();
+  for (const [sessionId, question] of unclaimedQuestionsBySession) {
+    const askingMessage = fallbackAskMessageBySession.get(sessionId);
+    if (askingMessage) fallbackQuestionsByMessage.set(askingMessage.key, question);
+    else if (!question.answer) liveQuestionsBySession.set(sessionId, question);
   }
   const els: React.ReactNode[] = [];
   const emitSessionErrorBanner = (
@@ -3330,6 +3435,12 @@ export function ChatTimelineView({
     // Resolved once: the legacy widening allocates, and a fresh array per
     // render would defeat the bubble's linkify memo.
     const files = referencedFilesOf(m);
+    const explicitQuestion = m.pendingQuestionId
+      ? questionsById.get(m.pendingQuestionId)
+      : undefined;
+    const attachedQuestion =
+      explicitQuestion ??
+      fallbackQuestionsByMessage.get(`${m.sessionId}\u0000${m.at}\u0000${m.role}`);
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3394,9 +3505,9 @@ export function ChatTimelineView({
         {...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {})}
         {...(m.synthetic ? { synthetic: m.synthetic } : {})}
         {...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {})}
-        {...(m.pendingQuestionId && questionsById.get(m.pendingQuestionId)
+        {...(attachedQuestion
           ? {
-              question: questionsById.get(m.pendingQuestionId)!,
+              question: attachedQuestion,
               onQuestionAnswered: (q) =>
                 setQuestionsById((prev) => {
                   const next = new Map(prev);
@@ -3749,7 +3860,12 @@ export function ChatTimelineView({
     // Session-level error metadata rides on every message row of the
     // session, so the first message row in the group is as good as any.
     const errorSource = item.root ?? item.replies.find((r) => r.kind === 'message');
-    if (errorSource && errorSource.kind === 'message' && errorSource.msg.sessionLastTurnError) {
+    if (
+      errorSource &&
+      errorSource.kind === 'message' &&
+      errorSource.msg.sessionLastTurnError &&
+      !acknowledgedErrorProjects.has(errorSource.msg.projectId)
+    ) {
       prevSessionError = errorSource.msg.sessionLastTurnError;
       prevSessionErrorDetail = errorSource.msg.sessionLastTurnErrorDetail;
       prevSessionProjectId = errorSource.msg.projectId;

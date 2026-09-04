@@ -63,7 +63,6 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder,
       toolbarSlotRight,
       onChange,
-      submitOnEnter,
       minHeight,
       maxHeight,
     }: {
@@ -71,7 +70,6 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder?: string;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
-      submitOnEnter?: () => void;
       minHeight?: string;
       maxHeight?: string;
     }) => {
@@ -104,9 +102,6 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             >
               Fill draft
             </button>
-            <button type="button" onClick={() => submitOnEnter?.()}>
-              Press Enter
-            </button>
             {toolbarSlotRight}
           </div>
         </EditorTestContext.Provider>
@@ -115,32 +110,63 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
   };
 });
 
+/**
+ * The send gesture, fired the way a person makes it. Enter alone is a
+ * newline now, so nothing here may go through a shim: the composer's own
+ * capture handler is the thing under test.
+ */
+function pressSendShortcut() {
+  fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter', shiftKey: true });
+}
+
 describe('ChatComposer keyboard hints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
   });
 
-  it('uses the native modifier name for Windows and macOS', () => {
-    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'win32' };
-    const { rerender } = render(
+  it('names the send gesture on the primary key', () => {
+    render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
 
     expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
       'title',
-      'Enter to send, Ctrl+Enter for newline',
+      'Shift+Enter to send, Enter for newline',
     );
+  });
 
-    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
-    rerender(
+  it('sends on Shift+Enter and leaves a bare Enter to the editor', async () => {
+    vi.mocked(api.sendToChatSession).mockResolvedValue(undefined as never);
+    render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
 
-    expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
-      'title',
-      'Enter to send, ⌘⏎ for newline',
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    // A bare Enter is a new line: the composer must not claim it, and the
+    // editor must still see it.
+    const bareEnter = fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' });
+    expect(bareEnter).toBe(true);
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+
+    pressSendShortcut();
+
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+  });
+
+  it('leaves Shift+Enter alone outside the typing surface', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: /^send$/i }), {
+      key: 'Enter',
+      shiftKey: true,
+    });
+
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
   });
 
   it('focuses the editor when its focus request key changes', async () => {
@@ -250,7 +276,7 @@ describe('ChatComposer /open command', () => {
         target: { value: `/open ${folder}` },
       });
       expect(screen.getByRole('menuitem', { name: `Open ${folder} folder` })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+      pressSendShortcut();
 
       await waitFor(() => expect(api.revealProject).toHaveBeenCalledWith('project-1', folder));
       expect(api.sendToChatSession).not.toHaveBeenCalled();
@@ -298,7 +324,7 @@ describe('ChatComposer /open command', () => {
     );
 
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: '/open missing.md' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+    pressSendShortcut();
 
     expect(await screen.findByText(/no recent file matches/i)).toBeTruthy();
     expect(screen.getByTestId('editor-draft')).toHaveTextContent('/open missing.md');
@@ -686,7 +712,7 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
 
     await screen.findByRole('button', { name: /stop/i });
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+    pressSendShortcut();
 
     await waitFor(() => {
       expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {

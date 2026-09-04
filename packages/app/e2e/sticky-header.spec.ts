@@ -61,7 +61,7 @@ async function sendAndWaitForReply(
 
   await editor.click();
   await editor.fill(message);
-  await editor.press('Enter');
+  await editor.press('Shift+Enter');
   const reply = timeline
     .locator('.msg-from-gezel, .msg-assistant')
     .filter({ hasText: 'Mock reply:' })

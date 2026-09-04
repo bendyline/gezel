@@ -49,6 +49,23 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient project error reset', () => {
+  it('forwards cancellation to the clear-errors request', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/projects/project-1/clear-errors');
+      expect(init?.method).toBe('POST');
+      expect(init?.signal).toBe(controller.signal);
+      return Response.json({ cleared: 1 });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(client.clearProjectErrors('project-1', controller.signal)).resolves.toEqual({
+      cleared: 1,
+    });
+  });
+});
+
 describe('GezelClient authenticated file blobs', () => {
   it.each([
     ['document', (client: GezelClient) => client.fetchDocumentBlob('missing.png')],

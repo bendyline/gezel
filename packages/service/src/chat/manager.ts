@@ -1295,6 +1295,14 @@ export class ChatManager {
    */
   private readonly currentTurnTools = new Map<string, ChatMessageToolCall[]>();
   /**
+   * Question raised by `ask_user_question` during the current in-flight
+   * turn, keyed by session id. The assistant message for that turn does not
+   * exist until `sendAndWait` returns, so stamping "the last assistant" at
+   * tool-call time either hits the previous turn or (on a first turn) hits
+   * nothing. Hold the id here and attach it to the message at commit time.
+   */
+  private readonly currentTurnPendingQuestionIds = new Map<string, string>();
+  /**
    * Keurmeester supervision engine, setter-injected from service.ts
    * after construction (the manager needs `oneShotCompletion`, so the
    * dependency points both ways — same wiring shape as
@@ -5532,23 +5540,27 @@ export class ChatManager {
   }
 
   /**
-   * Attach a freshly-created question to the assistant bubble that asked
-   * it, on disk AND on the live turn record.
+   * Attach a freshly-created question to the assistant bubble that asked it.
    *
-   * The disk half alone is not enough for the case it exists for: an
-   * `ask_user_question` tool call happens *mid-turn*, so the record
-   * ChatManager is about to write at turn end is a long-lived in-memory
-   * object that never saw the stamp — its wholesale write erases it, and
-   * the in-chat card silently degrades to dropdown-only. Mirroring onto
-   * the same bubble in the live record keeps the stamp through that
-   * write. Both halves target the last assistant message, which mid-turn
-   * is the same bubble: the in-flight one has not been pushed yet.
+   * During a model turn, that bubble does not exist yet: the durable "last
+   * assistant" belongs to the previous turn (and there is no such message on
+   * turn one). Hold the id in the per-turn buffer for the commit path. The
+   * idle fallback supports direct API/debug calls by stamping the existing
+   * last assistant on both the warm record and disk.
    */
   async stampPendingQuestion(
     gezelId: string,
     sessionId: string,
     questionId: string,
   ): Promise<void> {
+    // `ask_user_question` is normally called from inside the model's active
+    // turn. Its assistant message has not been constructed yet, so the
+    // durable "last assistant" is the wrong bubble (or absent on turn one).
+    // The commit path below consumes this id onto the new assistant message.
+    if (this.inflight.has(sessionId)) {
+      this.currentTurnPendingQuestionIds.set(sessionId, questionId);
+      return;
+    }
     const live = this.states.get(sessionId)?.record;
     if (live) {
       for (let i = live.messages.length - 1; i >= 0; i--) {
@@ -6699,6 +6711,10 @@ export class ChatManager {
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
     this.inflight.set(sessionId, inflightTurn);
+    // Claim a clean question slot synchronously with the in-flight lock.
+    // `stampPendingQuestion` can be called as soon as the provider starts
+    // tooling, including while runSend is still in its async setup phase.
+    this.currentTurnPendingQuestionIds.delete(sessionId);
     const tag = sessionId.slice(0, 8);
     const startedAt = Date.now();
     log.debug(`runSend#${tag} ENTRY userTextLen=${userText.length}`);
@@ -7948,6 +7964,11 @@ export class ChatManager {
         // A continuation turn (set below) re-initializes the bucket.
         const drained = this.currentTurnTools.get(sessionId) ?? [];
         if (drained.length > 0) assistantMessage.toolCalls = drained;
+        const pendingQuestionId = this.currentTurnPendingQuestionIds.get(sessionId);
+        if (pendingQuestionId) {
+          assistantMessage.pendingQuestionId = pendingQuestionId;
+          this.currentTurnPendingQuestionIds.delete(sessionId);
+        }
         toolsAcrossContinuations.push(...drained);
         this.currentTurnTools.set(sessionId, []);
         // Same pattern for intents. Clamp `afterChars` to the final
@@ -9159,6 +9180,7 @@ export class ChatManager {
       if (this.turnBufferOwner.get(sessionId) === inflightTurn) {
         this.turnBufferOwner.delete(sessionId);
         this.currentTurnTools.delete(sessionId);
+        this.currentTurnPendingQuestionIds.delete(sessionId);
         this.currentTurnIntents.delete(sessionId);
         this.currentTurnWarnings.delete(sessionId);
         this.currentTurnContentChars.delete(sessionId);
@@ -9426,12 +9448,15 @@ export class ChatManager {
 
     const drained = this.currentTurnTools.get(sessionId) ?? [];
     this.currentTurnTools.set(sessionId, []);
+    const pendingQuestionId = this.currentTurnPendingQuestionIds.get(sessionId);
+    this.currentTurnPendingQuestionIds.delete(sessionId);
 
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: assistantText,
       at: nowIso(),
       ...(drained.length > 0 ? { toolCalls: drained } : {}),
+      ...(pendingQuestionId ? { pendingQuestionId } : {}),
       ...(success ? {} : { warnings: errorMessage ? [errorMessage] : [`${ff.tool} failed`] }),
     };
     record.messages.push(assistantMessage);

@@ -5181,8 +5181,14 @@ export class GezelClient {
    * so a project-wide reset is what gets the project working again. Returns
    * the number of sessions cleared.
    */
-  clearProjectErrors(projectId: string): Promise<{ cleared: number }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/clear-errors`);
+  clearProjectErrors(projectId: string, signal?: AbortSignal): Promise<{ cleared: number }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/clear-errors`,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   /**

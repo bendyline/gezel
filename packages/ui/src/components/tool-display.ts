@@ -397,6 +397,24 @@ export function toolActivityPhrase(name: string): string {
   return capitalizeFirst(gerund(label.slice(0, space))) + label.slice(space);
 }
 
+/**
+ * Turn JSON-string fragments in a persisted argument summary back into
+ * ordinary display text. The summary builder quotes string values with
+ * `JSON.stringify`, which is correct for storage but otherwise exposes
+ * escapes such as `\"dsaav\"` in chat. Parse only complete quoted tokens;
+ * malformed or truncated fragments stay untouched rather than guessing.
+ */
+export function toolArgsDisplaySummary(summary: string): string {
+  return summary.replace(/"(?:\\.|[^"\\])*"/g, (token) => {
+    try {
+      const parsed: unknown = JSON.parse(token);
+      return typeof parsed === 'string' ? parsed : token;
+    } catch {
+      return token;
+    }
+  });
+}
+
 /** Cap for {@link toolErrorSummary} — long enough for a gate's first
  *  rejected criterion, short enough that a failed row stays one glance. */
 export const TOOL_ERROR_SUMMARY_MAX = 250;

@@ -57,7 +57,11 @@ export function mergeTimelineMessages(
   });
   const seen = new Set<string>();
   const merged: TimelineMessage[] = [];
-  for (const message of [...withoutReconciledOptimistic, ...snapshot]) {
+  // The snapshot is canonical for rows it contains. Put it first so a
+  // refreshed row can clear optional session metadata (notably a dismissed
+  // `sessionLastTurnError`) instead of the older in-memory copy winning the
+  // duplicate check forever. Existing rows outside the newest page remain.
+  for (const message of [...snapshot, ...withoutReconciledOptimistic]) {
     const key = `${message.sessionId}:${message.at}:${message.role}`;
     if (seen.has(key)) continue;
     seen.add(key);
