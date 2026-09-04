@@ -4,6 +4,7 @@
  *
  *   pnpm eval:scorecard --count 3
  *   pnpm eval:scorecard --count 3 --models gemma4-e4b-q4,qwen3.6-27b-q8
+ *   pnpm eval:scorecard --count 3 --suites core,productivity
  *   pnpm eval:scorecard --ingest-only          # rebuild the dataset from disk
  *   pnpm eval:scorecard --list                 # what would run, and for how long
  *
@@ -56,9 +57,18 @@ import {
 import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
 import { assertKnownFlags, parseArgs } from './args.ts';
+import { resolveSuitesFlag, suitesFlagFragment } from './scorecard-args.ts';
 
 /**
- * The suites a scorecard always covers. Not configurable on purpose.
+ * The suites a scorecard covers by default.
+ *
+ * `--suites core,productivity` narrows it. The narrowing exists because the
+ * two hard suites only rank models that already saturate `core`, and the
+ * roster choice this file's own guidance calls for ("run them against a
+ * reduced roster") had no way to be expressed: a small-model sweep booked
+ * 55 hours of zeros or nothing at all. A narrowed run records the suites it
+ * actually measured in its provenance, so the published table never implies
+ * a cell that was never attempted.
  *
  * Four, not two, since `developer` and `complex-work` landed. The two new
  * suites are deliberately hard — they exist because the 27b/31b/35b class
@@ -178,6 +188,7 @@ function main(): void {
     'note',
     'run-id',
     'started-at',
+    'suites',
     'verify',
   ]);
   const verify = Boolean(args.flags.verify);
@@ -188,6 +199,13 @@ function main(): void {
     console.error('--count must be a positive integer (3 is the floor for quoting a rate)');
     process.exit(2);
   }
+
+  const requestedSuites = resolveSuitesFlag(args.flags.suites, SCORECARD_SUITES);
+  if (!requestedSuites.suites) {
+    console.error(`[scorecard] ${requestedSuites.error}`);
+    process.exit(2);
+  }
+  const suites = verify ? [VERIFY_SUITE] : requestedSuites.suites;
 
   const forced = typeof args.flags.provider === 'string' ? args.flags.provider : undefined;
   const preferred = defaultProvider();
@@ -226,7 +244,6 @@ function main(): void {
   }
 
   const device = captureDevice();
-  const suites = verify ? [VERIFY_SUITE] : [...SCORECARD_SUITES];
   const datasetPath = verify
     ? join(repoRoot, 'evals/runs/scorecard-verify/dataset.json')
     : publishedDatasetPath;
@@ -284,7 +301,7 @@ function main(): void {
         'inside them. Run it in sittings and keep the SAME run id so every model lands in one',
         'comparable table:',
         '',
-        `  pnpm eval:scorecard --count ${count} --run-id ${runId} --models ${models[0]?.id ?? '<id>'}`,
+        `  pnpm eval:scorecard --count ${count}${suitesFlagFragment(suites, SCORECARD_SUITES)} --run-id ${runId} --models ${models[0]?.id ?? '<id>'}`,
       ].join('\n'),
     );
     return;
@@ -482,7 +499,7 @@ function main(): void {
     }
     const ids = [...new Set(unmeasured.map((cell) => cell.modelId))].join(',');
     console.error(
-      `  retry: pnpm eval:scorecard --count ${count} --run-id ${runId} --models ${ids}\n`,
+      `  retry: pnpm eval:scorecard --count ${count}${suitesFlagFragment(suites, SCORECARD_SUITES)} --run-id ${runId} --models ${ids}\n`,
     );
   }
 
