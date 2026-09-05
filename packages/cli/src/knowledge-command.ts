@@ -132,6 +132,8 @@ export async function runKnowledgeBuild(
   );
   const source = await loadMarkdownCatalog(hasContentDir ? contentDir : root, {
     language: config.language,
+    uri: { publisherId: config.publisher.id, catalogId: config.id },
+    onWarning: (message) => console.warn(`warning: ${message}`),
   });
   const profileId = config.profile ?? 'bge-small-en-v1.5@1';
   const profile = knowledgeEmbeddingProfile(profileId);
@@ -141,7 +143,7 @@ export async function runKnowledgeBuild(
     );
   }
   console.log(
-    `Building ${config.id}@${config.version}: ${source.documents.length} documents, profile ${profileId}`,
+    `Building ${config.id}@${config.version}: ${source.documents.length} documents, ${source.assets.length} assets, profile ${profileId}`,
   );
   console.log('Loading the embedding model (first run downloads it)…');
   const embedder = await (deps.createEmbedder ?? defaultCreateEmbedder)(profileId);
@@ -172,6 +174,7 @@ export async function runKnowledgeBuild(
       embed: (texts) => embedder.embed(texts),
       countTokens: (text) => embedder.countTokens(text),
       workDir,
+      assets: source.assets,
       ...(signKeyPem ? { finalizeManifest: (manifest) => signManifest(manifest, signKeyPem) } : {}),
       onProgress: ({ done, total }) => {
         if (!process.stderr.isTTY || total === 0) return;

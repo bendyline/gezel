@@ -14,7 +14,7 @@ import { GezelClient, type KnowledgeInstallEvent } from '@bendyline/gezel-client
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { knowledgeDownloadsDir } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildTestCatalog } from '../../knowledge/test-catalog-fixture.js';
+import { TEST_PNG, buildTestCatalog } from '../../knowledge/test-catalog-fixture.js';
 import { type RunningService, startService } from '../../service.js';
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
@@ -313,4 +313,84 @@ describe('knowledge routes', () => {
       await client.deleteIncompleteKnowledgeDownload('0'.repeat(16)).catch((e) => e),
     ).toBeInstanceOf(Error);
   }, 30_000);
+});
+
+describe('knowledge 0.6 browse surface', () => {
+  it('rolls nested topics up, orders by ordinal, echoes metadata, and serves assets', async () => {
+    const richPath = join(dir, 'rich-notes-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: richPath,
+      workDir: join(dir, 'work-rich'),
+      id: 'rich-notes',
+      withExtras: true,
+    });
+    const { jobId } = await client.installKnowledgeCatalog({
+      source: { kind: 'file', path: richPath },
+    });
+    expect((await waitForJob(jobId)).error).toBeUndefined();
+
+    const { topics } = await client.knowledgeCatalogTopics('rich-notes');
+    const joinery = topics.find((t) => t.id === 'joinery');
+    const variants = topics.find((t) => t.id === 'joinery-variants');
+    expect(variants?.parentId).toBe('joinery');
+    expect(variants?.documentCount).toBe(1);
+    expect(joinery?.documentCount).toBe(1);
+    expect(joinery?.totalDocumentCount).toBe(2);
+
+    const rolled = await client.knowledgeCatalogDocuments('rich-notes', { topicId: 'joinery' });
+    expect(rolled.total).toBe(2);
+    expect(rolled.documents.map((d) => d.id)).toEqual(['half-blind', 'dovetails']);
+    const direct = await client.knowledgeCatalogDocuments('rich-notes', {
+      topicId: 'joinery',
+      descendants: false,
+    });
+    expect(direct.total).toBe(1);
+    expect(direct.documents[0]?.id).toBe('dovetails');
+
+    const doc = await client.readKnowledgeDocument('rich-notes', 'dovetails');
+    expect(doc.ordinal).toBe(2);
+    expect(doc.meta).toEqual({ area: 'joinery', order: 2 });
+    expect(doc.markdown).toContain('](assets/mark.png)');
+    expect((await client.readKnowledgeDocument('rich-notes', 'shellac')).meta).toBeNull();
+
+    const { assets } = await client.knowledgeCatalogAssets('rich-notes');
+    expect(assets.map((a) => a.path)).toEqual(['assets/mark.png']);
+    const blob = await client.fetchKnowledgeAsset('rich-notes', 'assets/mark.png', {
+      version: '1.0.0',
+    });
+    expect(blob.type).toBe('image/png');
+    expect(blob.size).toBe(TEST_PNG.byteLength);
+
+    const baseUrl = `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}`;
+    const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+    const headers = { Authorization: `Bearer ${svc.context.token}` };
+    const assetUrl = `${baseUrl}/api/knowledge/catalogs/rich-notes/assets/mark.png`;
+    const first = await httpFetch(`${assetUrl}?v=1.0.0`, { headers });
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(first.headers.get('cache-control')).toContain('immutable');
+    expect(first.headers.get('etag')).toBe(`"${assets[0]?.sha256}"`);
+    const again = await httpFetch(`${assetUrl}?v=1.0.0`, {
+      headers: { ...headers, 'If-None-Match': first.headers.get('etag') ?? '' },
+    });
+    expect(again.status).toBe(304);
+    const unpinned = await httpFetch(assetUrl, { headers });
+    expect(unpinned.status).toBe(200);
+    expect(unpinned.headers.get('cache-control')).toContain('no-cache');
+    expect((await httpFetch(`${assetUrl}?v=9.9.9`, { headers })).status).toBe(404);
+    expect(
+      (
+        await httpFetch(`${baseUrl}/api/knowledge/catalogs/rich-notes/assets/missing.png`, {
+          headers,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await httpFetch(`${baseUrl}/api/knowledge/catalogs/rich-notes/assets/notes.txt`, {
+          headers,
+        })
+      ).status,
+    ).toBe(400);
+  }, 60_000);
 });
