@@ -1084,6 +1084,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('task-notes.md'),
       expectedDeliverable: { kind: 'file', filePath: 'task-notes.md' },
+      fileTurnIntent: { kind: 'repair-file', path: 'task-notes.md' },
       projectId: 'project-1',
     });
     expect(client.messageGezel.mock.calls[0]![1].text).not.toContain('brief.md is');
@@ -1596,6 +1597,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
+      fileTurnIntent: { kind: 'repair-file', path: 'data/audit.json' },
       projectId: 'project-1',
     });
   });
@@ -1667,6 +1669,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
+      fileTurnIntent: { kind: 'repair-file', path: 'data/audit.json' },
       projectId: 'project-1',
     });
     const messageText = client.messageGezel.mock.calls[0]![1].text;
@@ -1757,6 +1760,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs is 0 bytes, need ≥ 2200'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
     expect(client.messageGezel.mock.calls[0]![1].text).not.toContain('SOURCE_READ_REQUIRED');
@@ -1835,6 +1839,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('contract-test.mjs did not pass when run with node'),
       expectedDeliverable: { kind: 'file', filePath: 'contract-test.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'contract-test.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1916,6 +1921,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1989,6 +1995,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('Created book title mismatch'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -2065,6 +2072,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -2137,6 +2145,7 @@ ${'Detailed supporting analysis.\n'.repeat(22)}`;
       suppressReply: true,
       text: expect.stringContaining('Specific failure: audit.md is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'audit.md' },
+      fileTurnIntent: { kind: 'repair-file', path: 'audit.md' },
       projectId: 'project-1',
     });
     const messageText = client.messageGezel.mock.calls[0]![1].text;
