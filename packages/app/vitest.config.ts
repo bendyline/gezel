@@ -2,10 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // Playwright's e2e suites use Playwright's `test.beforeAll` etc., which
-    // look like Vitest calls but aren't. Keep them isolated — `pnpm test:e2e`
-    // (Electron) and `pnpm test:e2e:web` (browser) drive those via Playwright's
-    // own runner.
-    exclude: ['node_modules', 'dist', 'e2e/**', 'e2e-web/**'],
+    // Unit tests live under src. Keep Playwright's Electron, web, and visual
+    // suites with their own runner, including any future e2e directories.
+    include: ['src/**/*.test.ts'],
   },
 });

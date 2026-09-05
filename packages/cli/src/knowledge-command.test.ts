@@ -158,3 +158,55 @@ describe('gezel knowledge (offline)', () => {
     ).toEqual({ ok: true, keyId: keys.keyId });
   });
 });
+
+describe('gezel knowledge build reads the outline a documentation tree already has', () => {
+  let projectDir: string;
+
+  beforeAll(async () => {
+    projectDir = join(dir, 'mkdocs-site');
+    await mkdir(join(projectDir, 'docs', 'guide'), { recursive: true });
+    await writeFile(
+      join(projectDir, 'catalog.json'),
+      JSON.stringify({
+        id: 'mkdocs-site',
+        version: '1.0.0',
+        name: 'MkDocs Site',
+        language: 'en',
+        publisher: { id: 'gezel-tests', name: 'Gezel Tests' },
+        license: { name: 'MIT', attributionRequired: false },
+      }),
+    );
+    await writeFile(
+      join(projectDir, 'mkdocs.yml'),
+      [
+        'site_name: Site',
+        'nav:',
+        '  - Home: index.md',
+        '  - User Guide:',
+        '      - guide/writing.md',
+        '      - Styling: guide/styling.md',
+        'markdown_extensions:',
+        '  - pymdownx.superfences:',
+        '      custom_fences:',
+        '        - name: mermaid',
+        '          format: !!python/name:pymdownx.superfences.fence_code_format',
+        '',
+      ].join('\n'),
+    );
+    await writeFile(join(projectDir, 'docs', 'index.md'), '# Welcome\n\nThe front page.\n');
+    await writeFile(
+      join(projectDir, 'docs', 'guide', 'writing.md'),
+      '# Writing\n\nHow to write.\n',
+    );
+    await writeFile(join(projectDir, 'docs', 'guide', 'styling.md'), '# Styles\n\nHow to style.\n');
+    await runKnowledgeBuild(projectDir, {}, deps);
+  });
+
+  it('finds docs_dir and files pages by the mkdocs nav without configuration', async () => {
+    const manifest = await readGezkManifest(join(projectDir, 'mkdocs-site-1.0.0.gezk'));
+    expect(manifest.counts.documents).toBe(3);
+    expect(manifest.topics.map((t) => t.name).sort()).toEqual(['General', 'User Guide']);
+    const guide = manifest.topics.find((t) => t.name === 'User Guide');
+    expect(guide?.sortKey).toBe('2147483649');
+  });
+});

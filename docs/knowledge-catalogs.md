@@ -597,15 +597,32 @@ rejects altered downloads before extraction. Without a pin, it still hashes the
 archive for immutable local identity, validates the archive and extracted files,
 and keeps the catalog in the private, untrusted tier.
 
-`knowledge init` writes a `knowledge.json` descriptor. For Markdown input:
+`knowledge init` writes a `catalog.json` descriptor next to a `content/`
+folder. For Markdown input:
 
-- document id comes from frontmatter `id` or the normalized relative path;
-- title comes from frontmatter, the first H1, or filename;
-- folders become default topic paths;
-- source URL, revision, authorship, language, and license can come from
-  frontmatter or catalog defaults; and
-- hidden files, generated output, symlinks, and the destination archive are
-  excluded by default.
+- document id comes from front matter `id` or the normalized relative path;
+- title comes from front matter, the first H1, or the filename; `summary`,
+  `aliases` and `order` (the listing position) are read too, and any other
+  front matter key lands in the document's opaque `meta`;
+- folders become the table of contents, title-cased (`getting-started` is
+  "Getting Started"); a `_topic.yaml` sidecar sets a folder's `name`,
+  `order` and `description`, and a `subcategory {id, title, order}` block
+  files a page on a shelf beneath its folder;
+- a tree that already carries an outline keeps it, detected from the tree or
+  named in `catalog.json` as `"toc": {"format": …, "path"?: …}`: GitBook's
+  `SUMMARY.md` (parts, nesting, a page with sub-pages leads its section),
+  an `mkdocs.yml` `nav` (sections and titled pages, `docs_dir` honored),
+  Jupyter Book's `_toc.yml` (`jb-book` parts, chapters and sections,
+  `jb-article`, globs; notebooks are skipped), and Hugo's conventions
+  (`_index.md` section pages name and describe their folder and list
+  first, `weight` orders, `draft` and `headless` pages are left out). A
+  page the outline omits stays in its folder, with a warning;
+- `catalog.json` may also set `content` (the content root, otherwise
+  `content/`, an MkDocs project's `docs_dir`, or the folder itself) and
+  `ignore` (content-relative files to leave out);
+- relative image links become catalog assets and relative links to other
+  pages become `knowledge://` references; and
+- hidden files and `node_modules` are excluded.
 
 Builds are deterministic: sorted inputs, normalized paths/newlines, stable chunk
 ids, pinned compiler/profile versions, normalized ZIP timestamps, and no

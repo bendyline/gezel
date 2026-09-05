@@ -5,6 +5,12 @@
  * become assets. A flat corpus — files at the root with no subfolders —
  * gets the single root topic the compiler demands.
  *
+ * A tree that already carries an outline keeps it: GitBook's `SUMMARY.md`,
+ * an `mkdocs.yml` nav and Jupyter Book's `_toc.yml` are read into the same
+ * topic tree (`outline.ts`), and Hugo's conventions — `_index.md` section
+ * pages, `weight`, `draft` — are honored on top of the folders. A file an
+ * outline omits stays in its folder, with a warning, so nothing is lost.
+ *
  * Front matter carries what a documentation tree knows about itself: the
  * title and summary, an explicit `id`, an `order` (the listing ordinal), a
  * `subcategory` shelf below the folder topic, and anything else as opaque
@@ -15,7 +21,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, posix, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import type { CatalogDocument } from '@bendyline/gezk';
 import {
   CatalogDocumentSchema,
@@ -27,13 +33,25 @@ import {
 } from '@bendyline/gezk';
 import type { CompileAsset, CompileTopic } from '../compiler/compile.js';
 import { documentSlug } from '../format/ids.js';
-import { parseMarkdownFrontMatter } from './frontmatter.js';
+import { OUTLINE_MAX_BYTES, parseMarkdownFrontMatter, parseYaml } from './frontmatter.js';
+import {
+  type Outline,
+  type OutlineEntry,
+  type OutlineTopic,
+  type TableOfContentsFormat,
+  parseGitbookSummary,
+  parseJupyterBookToc,
+  parseMkdocsNav,
+  titleFromFolderName,
+} from './outline.js';
 
 export interface MarkdownCatalogSource {
   topics: CompileTopic[];
   documents: CatalogDocument[];
   /** Images referenced by the bodies, resolved to files under the root. */
   assets: CompileAsset[];
+  /** The outline that shaped the topics, with its file when it came from one. */
+  toc: { format: TableOfContentsFormat; path?: string };
 }
 
 export interface TopicOverride {
@@ -41,6 +59,16 @@ export interface TopicOverride {
   /** Listing position among sibling topics; encoded into the sort key. */
   order?: number;
   description?: string;
+}
+
+export interface TableOfContentsOptions {
+  format: TableOfContentsFormat;
+  /**
+   * The outline file for `gitbook` (`SUMMARY.md`), `mkdocs` (`mkdocs.yml`)
+   * and `jupyter-book` (`_toc.yml`), absolute or relative to the root. By
+   * default the root is searched, and for mkdocs its parent as well.
+   */
+  path?: string;
 }
 
 export interface LoadMarkdownCatalogOptions {
@@ -55,6 +83,8 @@ export interface LoadMarkdownCatalogOptions {
   topics?: Record<string, TopicOverride>;
   /** Root-relative files (POSIX) to leave out, e.g. `['README.md']`. */
   ignore?: string[];
+  /** Where the table of contents comes from (default: the folders). */
+  toc?: TableOfContentsOptions;
   /**
    * When set, relative links to other Markdown files in the tree are
    * rewritten to `knowledge://` references so a viewer can follow them.
@@ -68,6 +98,13 @@ export interface LoadMarkdownCatalogOptions {
 const ROOT_TOPIC_ID = 'general';
 const SUMMARY_MAX_CHARS = 280;
 const TOPIC_SIDECAR = '_topic.yaml';
+const HUGO_SECTION_PAGE = '_index';
+/**
+ * A Hugo section page (`_index.md`) is the landing page of its folder and
+ * lists before every sibling, whatever their weights: the smallest int32
+ * ordinal, which no `weight` can undercut.
+ */
+const SECTION_PAGE_ORDINAL = -2147483648;
 
 interface Subcategory {
   id: string;
@@ -82,13 +119,19 @@ interface FrontMatter {
   id?: string;
   order?: number;
   subcategory?: Subcategory;
+  /** Hugo: `weight` above zero, the listing position. */
+  weight?: number;
+  /** Hugo: `description`, the summary a section or page declares. */
+  description?: string;
+  /** Hugo: `draft: true` or `headless: true` pages are never published. */
+  unpublished?: 'draft' | 'headless';
   meta: Record<string, unknown>;
   body: string;
 }
 
 const RESERVED_KEYS = new Set(['title', 'summary', 'aliases', 'id', 'order', 'subcategory']);
 
-function readFrontMatter(raw: string, file: string): FrontMatter {
+function readFrontMatter(raw: string, file: string, hugo: boolean): FrontMatter {
   let data: Record<string, unknown>;
   let body: string;
   try {
@@ -150,6 +193,17 @@ function readFrontMatter(raw: string, file: string): FrontMatter {
     }
     out.subcategory = subcategory;
   }
+  if (hugo) {
+    if (data.draft === true) out.unpublished = 'draft';
+    else if (data.headless === true) out.unpublished = 'headless';
+    if (data.weight !== undefined && data.weight !== null) {
+      const weight = KnowledgeOrdinalSchema.safeParse(data.weight);
+      if (!weight.success) throw new Error(`${file}: front matter 'weight' must be an int32`);
+      // Hugo treats weight 0 as unweighted: such pages list after weighted ones.
+      if (weight.data > 0) out.weight = weight.data;
+    }
+    out.description = str('description');
+  }
   for (const [key, value] of Object.entries(data)) {
     if (RESERVED_KEYS.has(key) || value === undefined) continue;
     out.meta[key] = value;
@@ -200,11 +254,17 @@ async function walkMarkdownFiles(root: string): Promise<string[]> {
   return out;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function readTopicSidecar(dir: string): Promise<TopicOverride | undefined> {
   const path = join(dir, TOPIC_SIDECAR);
   if (!existsSync(path)) return undefined;
   const raw = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '');
-  const { data } = parseMarkdownFrontMatter(`---\n${raw}\n---\n`);
+  const data = parseYaml(raw, { what: path });
+  if (data === null || data === undefined) return {};
+  if (!isRecord(data)) throw new Error(`${path}: must be a mapping`);
   const out: TopicOverride = {};
   if (typeof data.name === 'string' && data.name.trim()) out.name = data.name.trim();
   if (typeof data.description === 'string' && data.description.trim()) {
@@ -218,12 +278,135 @@ async function readTopicSidecar(dir: string): Promise<TopicOverride | undefined>
   return out;
 }
 
-function applyOverride(topic: CompileTopic, override: TopicOverride | undefined): void {
-  if (!override) return;
+function applyOverride(topic: CompileTopic | undefined, override: TopicOverride | undefined): void {
+  if (!topic || !override) return;
   if (override.name) topic.name = override.name;
   if (override.description) topic.description = override.description;
   if (override.order !== undefined) topic.sortKey = topicSortKeyForOrder(override.order);
 }
+
+// ── outlines ────────────────────────────────────────────────────────────────
+
+/** `abs` as a root-relative POSIX path (`''` for the root itself), or null when it lies outside. */
+function insideRoot(rootDir: string, abs: string): string | null {
+  const rel = relative(rootDir, abs).split(sep).join('/');
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return null;
+  return rel;
+}
+
+function firstExisting(candidates: string[]): string | undefined {
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+/** The docs directory an `mkdocs.yml` names (`docs_dir`, default `docs`), absolute. */
+export async function readMkdocsDocsDir(mkdocsPath: string): Promise<string> {
+  const config = parseYaml((await readFile(mkdocsPath, 'utf8')).replace(/^\uFEFF/, ''), {
+    what: basename(mkdocsPath),
+    maxBytes: OUTLINE_MAX_BYTES,
+    tolerateUnknownTags: true,
+    maxAliasCount: 100,
+  });
+  const docsDir =
+    isRecord(config) && typeof config.docs_dir === 'string' ? config.docs_dir : 'docs';
+  return resolve(dirname(mkdocsPath), docsDir);
+}
+
+/**
+ * Which outline a tree carries: GitBook's `SUMMARY.md` or Jupyter Book's
+ * `_toc.yml` at the root, an `mkdocs.yml` at the root, the project folder
+ * or the root's parent, Hugo's `_index.md` section pages anywhere in the
+ * tree — else the folders themselves.
+ */
+export async function detectTableOfContents(
+  rootDir: string,
+  projectDir = rootDir,
+): Promise<TableOfContentsOptions> {
+  const summary = join(rootDir, 'SUMMARY.md');
+  if (existsSync(summary)) return { format: 'gitbook', path: summary };
+  const jupyter = firstExisting([join(rootDir, '_toc.yml'), join(rootDir, '_toc.yaml')]);
+  if (jupyter) return { format: 'jupyter-book', path: jupyter };
+  const mkdocs = firstExisting(
+    [rootDir, projectDir, dirname(rootDir)].flatMap((dir) => [
+      join(dir, 'mkdocs.yml'),
+      join(dir, 'mkdocs.yaml'),
+    ]),
+  );
+  if (mkdocs) return { format: 'mkdocs', path: mkdocs };
+  const files = await walkMarkdownFiles(rootDir);
+  if (files.some((file) => basename(file).replace(/\.(md|markdown)$/i, '') === HUGO_SECTION_PAGE)) {
+    return { format: 'hugo' };
+  }
+  return { format: 'folders' };
+}
+
+async function readOutlineText(path: string): Promise<string> {
+  const text = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '');
+  if (Buffer.byteLength(text, 'utf8') > OUTLINE_MAX_BYTES) {
+    throw new Error(`${basename(path)} exceeds ${OUTLINE_MAX_BYTES} bytes`);
+  }
+  return text;
+}
+
+async function loadOutline(
+  rootDir: string,
+  toc: TableOfContentsOptions,
+  files: readonly string[],
+): Promise<{ outline: Outline | null; path?: string }> {
+  if (toc.format === 'folders' || toc.format === 'hugo') return { outline: null };
+  const explicit = toc.path
+    ? isAbsolute(toc.path)
+      ? toc.path
+      : join(rootDir, toc.path)
+    : undefined;
+  if (explicit && !existsSync(explicit)) {
+    throw new Error(`${toc.format} table of contents not found: ${explicit}`);
+  }
+  if (toc.format === 'gitbook') {
+    const path = explicit ?? join(rootDir, 'SUMMARY.md');
+    const rel = insideRoot(rootDir, path);
+    if (!existsSync(path)) throw new Error(`gitbook table of contents not found: ${path}`);
+    if (rel === null)
+      throw new Error(`${basename(path)} must live inside the content root ${rootDir}`);
+    return { outline: parseGitbookSummary(await readOutlineText(path), rel), path };
+  }
+  if (toc.format === 'mkdocs') {
+    const path =
+      explicit ??
+      firstExisting(
+        [rootDir, dirname(rootDir)].flatMap((dir) => [
+          join(dir, 'mkdocs.yml'),
+          join(dir, 'mkdocs.yaml'),
+        ]),
+      );
+    if (!path) throw new Error(`mkdocs.yml not found in ${rootDir} or its parent`);
+    const config = parseYaml(await readOutlineText(path), {
+      what: basename(path),
+      maxBytes: OUTLINE_MAX_BYTES,
+      tolerateUnknownTags: true,
+      maxAliasCount: 100,
+    });
+    const docsDir = await readMkdocsDocsDir(path);
+    const docsRel = insideRoot(rootDir, docsDir);
+    if (docsRel === null) {
+      throw new Error(
+        `${basename(path)}: docs_dir ${docsDir} is outside the content root ${rootDir}`,
+      );
+    }
+    return { outline: parseMkdocsNav(config, docsRel, basename(path)), path };
+  }
+  const path = explicit ?? firstExisting([join(rootDir, '_toc.yml'), join(rootDir, '_toc.yaml')]);
+  if (!path) throw new Error(`_toc.yml not found in ${rootDir}`);
+  const tocDir = insideRoot(rootDir, dirname(path));
+  if (tocDir === null)
+    throw new Error(`${basename(path)} must live inside the content root ${rootDir}`);
+  const doc = parseYaml(await readOutlineText(path), {
+    what: basename(path),
+    maxBytes: OUTLINE_MAX_BYTES,
+  });
+  return { outline: parseJupyterBookToc(doc, tocDir, files, basename(path)), path };
+}
+
+// ── links ───────────────────────────────────────────────────────────────────
 
 const INLINE_LINK = /(!?)\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]+)((?:\s+"[^"]*")?)\s*\)/g;
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -333,23 +516,33 @@ function rewriteLinks(ctx: LinkRewriteContext, markdown: string): string {
     .join('\n');
 }
 
+// ── loading ─────────────────────────────────────────────────────────────────
+
 /**
  * Load a folder of Markdown into compiler inputs. Directory chain → topic
- * chain; the relative path (without extension, `/`-separated) is the stable
- * document id unless the front matter names one.
+ * chain unless an outline places the file; the relative path (without
+ * extension, `/`-separated) is the stable document id unless the front
+ * matter names one.
  */
 export async function loadMarkdownCatalog(
   rootDir: string,
   opts: LoadMarkdownCatalogOptions,
 ): Promise<MarkdownCatalogSource> {
+  const warn = opts.onWarning ?? (() => {});
+  const toc: TableOfContentsOptions = opts.toc ?? { format: 'folders' };
+  const hugo = toc.format === 'hugo';
   const ignore = new Set(opts.ignore ?? []);
-  const files = (await walkMarkdownFiles(rootDir)).filter(
-    (abs) => !ignore.has(relative(rootDir, abs).split(sep).join('/')),
-  );
+  const relOf = (abs: string): string => relative(rootDir, abs).split(sep).join('/');
+  let files = (await walkMarkdownFiles(rootDir)).filter((abs) => !ignore.has(relOf(abs)));
+  const { outline, path: outlinePath } = await loadOutline(rootDir, toc, files.map(relOf));
+  for (const message of outline?.warnings ?? []) warn(message);
+  if (outline) {
+    const consumed = new Set(outline.consumed.map((file) => file.normalize('NFC')));
+    files = files.filter((abs) => !consumed.has(relOf(abs).normalize('NFC')));
+  }
   if (files.length === 0) {
     throw new Error(`no Markdown files found under ${rootDir}`);
   }
-  const warn = opts.onWarning ?? (() => {});
 
   const takenTopicIds = new Set<string>();
   /** dir-relative-path → topic id, built parent-first so chains resolve. */
@@ -358,6 +551,7 @@ export async function loadMarkdownCatalog(
   const topicById = new Map<string, CompileTopic>();
   const rootTopicId = opts.rootTopicId ?? ROOT_TOPIC_ID;
   let rootTopicUsed = false;
+  let rootOverride: TopicOverride | undefined;
 
   const addTopic = (topic: CompileTopic): CompileTopic => {
     topics.push(topic);
@@ -381,7 +575,7 @@ export async function loadMarkdownCatalog(
         topicIdByDir.set(prefix, id);
         const topic = addTopic({
           id,
-          name: segment,
+          name: titleFromFolderName(segment),
           ...(path.length > 0 ? { parentId: path[path.length - 1] as string } : {}),
         });
         applyOverride(topic, await readTopicSidecar(join(rootDir, ...prefix.split('/'))));
@@ -390,6 +584,54 @@ export async function loadMarkdownCatalog(
       path.push(id);
     }
     return path;
+  };
+
+  /** Where the outline files each Markdown file (root-relative, NFC). */
+  interface Placement {
+    chain: OutlineTopic[];
+    entry: OutlineEntry;
+  }
+  const placements = new Map<string, Placement>();
+  if (outline) {
+    const walk = (topic: OutlineTopic, chain: OutlineTopic[]): void => {
+      for (const entry of topic.entries) {
+        const key = entry.file.normalize('NFC');
+        if (placements.has(key)) {
+          warn(
+            `${entry.file}: listed more than once in the table of contents; the first place wins`,
+          );
+        } else {
+          placements.set(key, { chain, entry });
+        }
+      }
+      for (const child of topic.children) walk(child, [...chain, child]);
+    };
+    walk(outline.root, []);
+  }
+  const outlineTopicIds = new Map<OutlineTopic, string>();
+  const ensureOutlineChain = (chain: OutlineTopic[]): string[] => {
+    if (chain.length === 0) {
+      rootTopicUsed = true;
+      return [rootTopicId];
+    }
+    const ids: string[] = [];
+    for (const node of chain) {
+      let id = outlineTopicIds.get(node);
+      if (!id) {
+        id = topicIdFor(node.name, takenTopicIds);
+        outlineTopicIds.set(node, id);
+        const topic: CompileTopic = {
+          id,
+          name: node.name,
+          ...(ids.length > 0 ? { parentId: ids[ids.length - 1] as string } : {}),
+        };
+        if (node.description) topic.description = node.description;
+        if (node.order !== undefined) topic.sortKey = topicSortKeyForOrder(node.order);
+        addTopic(topic);
+      }
+      ids.push(id);
+    }
+    return ids;
   };
 
   /** `<parent topic id>/<subcategory id>` → topic id, with its declared shape. */
@@ -425,12 +667,18 @@ export async function loadMarkdownCatalog(
   const loaded: Loaded[] = [];
   const fileById = new Map<string, string>();
   const idByRel = new Map<string, string>();
+  const seenRel = new Set<string>();
   for (const abs of files) {
-    const rel = relative(rootDir, abs).split(sep).join('/');
+    const rel = relOf(abs);
     const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
     const relNoExt = rel.replace(/\.(md|markdown)$/i, '').normalize('NFC');
     const raw = (await readFile(abs, 'utf8')).replace(/^\uFEFF/, '');
-    const fm = readFrontMatter(raw, rel);
+    const fm = readFrontMatter(raw, rel, hugo);
+    if (fm.unpublished) {
+      warn(`${rel}: skipped, ${fm.unpublished} page`);
+      continue;
+    }
+    seenRel.add(rel.normalize('NFC'));
     const id = fm.id ?? relNoExt;
     const idCheck = KnowledgeDocumentIdSchema.safeParse(id);
     if (!idCheck.success) throw new Error(`${rel}: front matter 'id' is not a valid document id`);
@@ -439,14 +687,44 @@ export async function loadMarkdownCatalog(
     fileById.set(id, rel);
     idByRel.set(relNoExt, id);
 
-    let topicPath = await ensureTopicChain(relDir);
+    const stem = rel.slice(rel.lastIndexOf('/') + 1).replace(/\.(md|markdown)$/i, '');
+    let title = fm.title ?? firstHeading(fm.body) ?? stem;
+    let ordinal = fm.order;
+    let topicPath: string[];
+    const placement = placements.get(rel.normalize('NFC'));
+    if (placement) {
+      topicPath = ensureOutlineChain(placement.chain);
+      if (placement.entry.title) title = placement.entry.title;
+      if (placement.entry.order !== undefined) ordinal = placement.entry.order;
+    } else {
+      if (outline)
+        warn(`${rel}: not in the ${outline.format} table of contents; filed under its folder`);
+      topicPath = await ensureTopicChain(relDir);
+      if (hugo && ordinal === undefined) ordinal = fm.weight;
+    }
+    if (hugo && stem === HUGO_SECTION_PAGE) {
+      // The section page describes its folder: title, description and weight
+      // belong to the topic. Explicit overrides keep the last word.
+      const override: TopicOverride = {
+        ...(fm.title ? { name: fm.title } : {}),
+        ...((fm.description ?? fm.summary) ? { description: fm.description ?? fm.summary } : {}),
+        ...(fm.weight !== undefined ? { order: fm.weight } : {}),
+      };
+      if (relDir === '') {
+        rootOverride = override;
+      } else {
+        const leaf = topicById.get(topicPath[topicPath.length - 1] as string);
+        applyOverride(leaf, override);
+        applyOverride(leaf, opts.topics?.[relDir]);
+      }
+      if (!fm.body.trim()) continue;
+      ordinal = SECTION_PAGE_ORDINAL;
+    }
     if (fm.subcategory) {
       const parentId = topicPath[topicPath.length - 1] as string;
       topicPath = [...topicPath, ensureShelf(parentId, fm.subcategory, rel)];
     }
-    const stem = rel.slice(rel.lastIndexOf('/') + 1).replace(/\.(md|markdown)$/i, '');
-    const title = fm.title ?? firstHeading(fm.body) ?? stem;
-    const summary = fm.summary ?? firstParagraph(fm.body);
+    const summary = fm.summary ?? (hugo ? fm.description : undefined) ?? firstParagraph(fm.body);
     loaded.push({
       rel,
       file: rel,
@@ -459,10 +737,35 @@ export async function loadMarkdownCatalog(
         topicPath,
         markdown: fm.body,
         ...(fm.aliases && fm.aliases.length > 0 ? { aliases: fm.aliases } : {}),
-        ...(fm.order !== undefined ? { ordinal: fm.order } : {}),
+        ...(ordinal !== undefined ? { ordinal } : {}),
         ...(Object.keys(fm.meta).length > 0 ? { meta: fm.meta } : {}),
       },
     });
+  }
+
+  if (outline) {
+    const titleByRel = new Map(
+      loaded.map((entry) => [entry.rel.normalize('NFC'), entry.doc.title]),
+    );
+    const nameFromPages = (topic: OutlineTopic): void => {
+      for (const child of topic.children) {
+        const id = outlineTopicIds.get(child);
+        const title = child.titleFromFile
+          ? titleByRel.get(child.titleFromFile.normalize('NFC'))
+          : undefined;
+        const compiled = id ? topicById.get(id) : undefined;
+        if (compiled && title) compiled.name = title;
+        nameFromPages(child);
+      }
+    };
+    nameFromPages(outline.root);
+    for (const [file, placement] of placements) {
+      if (!seenRel.has(file)) {
+        warn(
+          `${placement.entry.file}: named by the table of contents but not found among the Markdown files`,
+        );
+      }
+    }
   }
 
   if (rootTopicUsed) {
@@ -474,6 +777,7 @@ export async function loadMarkdownCatalog(
     }
     const root: CompileTopic = { id: rootTopicId, name: opts.rootTopicName ?? 'General' };
     applyOverride(root, await readTopicSidecar(rootDir));
+    applyOverride(root, rootOverride);
     applyOverride(root, opts.topics?.['']);
     topics.unshift(root);
     topicById.set(root.id, root);
@@ -505,5 +809,6 @@ export async function loadMarkdownCatalog(
     topics,
     documents,
     assets: [...assets.values()].sort((a, b) => (a.path < b.path ? -1 : 1)),
+    toc: { format: toc.format, ...(outlinePath ? { path: outlinePath } : {}) },
   };
 }
