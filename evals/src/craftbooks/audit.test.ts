@@ -175,6 +175,74 @@ describe('craftbook eval audit', () => {
     );
   });
 
+  describe('reviewer.safe-loop', () => {
+    function bookWithEvaluate(gate: Record<string, unknown> | undefined): CraftbookTemplateSummary {
+      return {
+        id: 'sample',
+        name: 'Sample',
+        version: '1.0.0',
+        triggers: ['do the thing'],
+        entryStepId: 'fix',
+        steps: [
+          { id: 'fix', name: 'Fix', suggestedRole: 'engineer', next: 'evaluate' },
+          {
+            id: 'evaluate',
+            name: 'Evaluate',
+            suggestedRole: 'reviewer',
+            prompt: 'Grade it. On PASS, advance_task_step to finish.',
+            next: 'finish',
+            ...(gate ? { gate } : {}),
+          },
+          { id: 'finish', name: 'Finish', suggestedRole: 'lead', terminal: true },
+        ],
+      };
+    }
+
+    const codes = (t: CraftbookTemplateSummary) =>
+      auditCraftbookTemplate(t, 'implemented').issues.map((i) => i.code);
+
+    it('flags an evaluate step that falls straight through to finish', () => {
+      expect(codes(bookWithEvaluate(undefined))).toContain('reviewer.safe-loop');
+    });
+
+    it('clears it when a gate script routes a rejection back to another step', () => {
+      // checkFixReview emits `goto` at runtime, so the repair edge exists
+      // nowhere in `next`. These books have the strongest loop in the library
+      // — the runtime routes REVISE whatever the model does — and used to be
+      // penalized for it.
+      const gate = {
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'review.md', bytes: 400 }],
+        scripts: [
+          { name: 'checkFixReview', inputs: { reviewPath: 'review.md', fixStepId: 'fix' } },
+        ],
+        onReject: 'evaluate',
+        maxAttempts: 4,
+      };
+      expect(codes(bookWithEvaluate(gate))).not.toContain('reviewer.safe-loop');
+    });
+
+    it('still flags when the gate script names no step in this book', () => {
+      const gate = {
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'review.md', bytes: 400 }],
+        scripts: [{ name: 'checkContains', inputs: { needle: 'Verdict' } }],
+        onReject: 'evaluate',
+        maxAttempts: 4,
+      };
+      expect(codes(bookWithEvaluate(gate))).toContain('reviewer.safe-loop');
+    });
+
+    it('no longer reports the bundled fix-review books as loopless', async () => {
+      const templates = await loadCraftbookTemplates();
+      const { audits } = auditCraftbookTemplates(templates);
+      const byId = new Map(audits.map((a) => [a.craftbookId, a]));
+      for (const id of ['accessibility-retrofit', 'ci-pipeline', 'hotfix-flow']) {
+        expect(byId.get(id)?.issues.map((i) => i.code) ?? []).not.toContain('reviewer.safe-loop');
+      }
+    });
+  });
+
   it('has at least one generic craftbook scenario available to evals', () => {
     expect(runnableGenericCraftbookSpecs().map((spec) => spec.scenarioId)).toContain(
       'craftbook-form-wizard',

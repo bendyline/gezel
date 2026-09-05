@@ -2173,6 +2173,75 @@ describe('sniff escalation ladder', () => {
     );
   });
 
+  it('resets the ladder when a virtual target advances, and still exhausts when it freezes', async () => {
+    // Wild-caught on craftbook-accessibility-retrofit: the workflow-mode
+    // check target `task-graph.md` is a rendered view, not a file the model
+    // writes, and "the task has not reached a terminal step" cannot clear
+    // until the run is nearly over. The default ladder counted each of the
+    // model's real step writes as a failed repair of that view and killed the
+    // trial four seconds after the task advanced to its next step.
+    const logs: string[] = [];
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'runner-1', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    const ctx = {
+      ...makeCtx(client),
+      log: (message: string) => logs.push(message),
+      requestTerminalFailure,
+      // Every poll reports a completed post-nudge mutation — the shape that
+      // used to drive the counter. With a progress signal it must not.
+      snapshotRepairActions: async () => ({ completedMutationTurns: 99, inflight: false }),
+    };
+    const sniff = failingSniff({
+      failReason: 'task sourced from craftbook x has not reached a terminal step',
+      missingRequiredSignals: ['task sourced from craftbook x has not reached a terminal step'],
+    });
+
+    // Six polls, each with the task on a further step. Never exhausts.
+    for (const step of ['audit', 'fix', 'fix2', 'validate', 'evaluate', 'review']) {
+      await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+        projectId: 'p1',
+        expectedDeliverable: null,
+        progressSourceText: `p/1|active|${step}`,
+      });
+    }
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+
+    // Now the task freezes on one step: the honest failed attempts accrue and
+    // the ladder still terminates.
+    const statuses: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+        projectId: 'p1',
+        expectedDeliverable: null,
+        progressSourceText: 'p/1|active|review',
+      });
+      statuses.push(r.status);
+    }
+    expect(statuses).toContain('exhausted');
+    expect(logs.join('\n')).toContain('the watched state did not advance');
+  });
+
+  it('does not treat the first observation of a progress signal as movement', async () => {
+    const logs: string[] = [];
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'runner-1', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    const ctx = { ...makeCtx(client), log: (m: string) => logs.push(m) };
+    const sniff = failingSniff();
+    await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+      projectId: 'p1',
+      expectedDeliverable: null,
+      progressSourceText: 'p/1|active|audit',
+    });
+    expect(logs.join('\n')).not.toContain('ladder reset');
+  });
+
   it('defers exhaustion while the repair target is still mid-turn', async () => {
     const logs: string[] = [];
     const inflight: Array<{

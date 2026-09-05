@@ -45,6 +45,37 @@ function evaluateStep(
   return template.steps.find((step) => step.id === 'evaluate');
 }
 
+/**
+ * Does this step's gate route a rejection back into the book at RUNTIME?
+ *
+ * A gate script may emit `goto` — `checkFixReview` sends a well-formed
+ * `Verdict: REVISE` back to the step named by its `fixStepId` input — and that
+ * edge exists nowhere in the declarative graph. Reading only `step.next` therefore
+ * reports the twenty books carrying an enforceable review script as having "no
+ * repair loop", when they have the STRONGEST one in the library: the others rely
+ * on the model choosing to jump, these are routed by the runtime whatever the
+ * model does. Penalizing them inverted the ranking the audit exists to produce.
+ *
+ * Evidence, not a script-name allowlist: a gate script input whose value is
+ * another step's id in this same book is a repair edge, whatever the script is
+ * called.
+ */
+function gateScriptRoutesToAnotherStep(
+  step: CraftbookTemplateStepSummary,
+  template: CraftbookTemplateSummary,
+): boolean {
+  const gate = parseGate(step);
+  if (!gate) return false;
+  const stepIds = new Set(template.steps.map((s) => s.id));
+  for (const script of normalizeStepGate(gate).scripts) {
+    const inputs = (script as { inputs?: Record<string, unknown> }).inputs ?? {};
+    for (const value of Object.values(inputs)) {
+      if (typeof value === 'string' && value !== step.id && stepIds.has(value)) return true;
+    }
+  }
+  return false;
+}
+
 export function auditCraftbookTemplate(
   template: CraftbookTemplateSummary,
   evalStatus: CraftbookEvalCoverageStatus = 'missing',
@@ -194,7 +225,7 @@ export function auditCraftbookTemplate(
         ),
       );
     }
-    if (evaluator.next === 'finish') {
+    if (evaluator.next === 'finish' && !gateScriptRoutesToAnotherStep(evaluator, template)) {
       issues.push(
         issue(
           'warn',
