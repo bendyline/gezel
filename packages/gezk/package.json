@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "The gezk knowledge-catalog format: manifest and registry schemas, id grammars, knowledge:// references, vector quantization, SQLite DDL, canonical JSON, and Ed25519 manifest signatures.",
   "license": "MIT",
   "keywords": ["gezk", "knowledge", "rag", "embeddings", "sqlite", "file-format", "zod"],
