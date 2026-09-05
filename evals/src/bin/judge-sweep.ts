@@ -5,6 +5,10 @@
  *   pnpm eval:judge-sweep --run-id 2026-08-09-m4max-llamacpp
  *   pnpm eval:judge-sweep --run-id <id> --dry-run
  *
+ * Then, to get the scores into the dataset:
+ *
+ *   pnpm eval:scorecard --ingest-only --run-id <id>
+ *
  * Why post-hoc rather than inline (`eval:all --llm-judge`):
  *
  *  1. **One judge for the whole sweep.** A 30-hour sweep judged inline is
@@ -15,15 +19,16 @@
  *  2. **It can be re-run.** The artifacts are on disk, so a better judge,
  *     a fixed rubric, or a second opinion costs no GPU time.
  *  3. **It cannot change pass/fail.** The judge writes `llm-judge.json`
- *     beside each trial and a roll-up beside the sweep; it never touches
- *     the scorecard dataset. Deterministic gates decide the score, and the
- *     handboek articles quote only those — see the scorecard schema's note
- *     on judge drift.
+ *     beside each trial and a roll-up beside the sweep; it never writes the
+ *     scorecard dataset itself. Deterministic gates decide the score, and
+ *     the handboek articles quote only those.
  *
- * Judging is serial on purpose. The CLI backend spawns a process per call
- * and a sweep has hundreds of artifacts; running them concurrently while
- * an eval sweep holds the GPU is how you turn an advisory pass into an
- * interference source.
+ * The roll-up DOES reach the dataset, but only as the advisory `judge`
+ * field and only through the scorecard's own ingest, which reads
+ * `judge-report.json` via `readJudgeSummary`. That makes ORDER load-bearing:
+ * a sweep ingested before this pass ran carries `judge: null` until it is
+ * re-ingested. This command prints that follow-up on completion; keep it.
+ *
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -206,9 +211,17 @@ async function main(): Promise<void> {
       `  ${cell.modelId!.padEnd(20)} ${cell.suiteId!.padEnd(14)} ${cell.rubric!.padEnd(13)} mean ${cell.meanScore} (n=${cell.trials})`,
     );
   }
-  console.log(
-    '\nAdvisory only — these never enter the scorecard dataset or the handboek articles.',
-  );
+  // The scores are on disk but NOT yet in the dataset: `readJudgeSummary`
+  // is called by the SCORECARD INGEST, so a sweep that ingested before this
+  // pass ran carries `judge: null` on every row and nothing says so. Naming
+  // the one command that fixes it is the guard against running these two
+  // steps in the wrong order (wild-caught: the 2026-09-04 qwen3.5 sweep
+  // shipped judged artifacts and a judge-less dataset).
+  console.log('\nAdvisory only: the judge never changes pass/fail, and the handboek');
+  console.log('quotes the deterministic rates only.');
+  console.log('\nNOT IN THE DATASET YET. The scorecard ingest rolls these into each');
+  console.log("row's `judge` field. Run it now (safe to repeat, no other flags needed):");
+  console.log(`\n  pnpm eval:scorecard --ingest-only --run-id ${runId}\n`);
 }
 
 void main();

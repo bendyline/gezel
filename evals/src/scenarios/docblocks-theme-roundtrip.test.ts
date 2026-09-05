@@ -92,6 +92,52 @@ describe('docblocks theme report grader', () => {
     expect(result.missingRequiredSignals).toContain('recommendation');
   });
 
+  it('accepts H1 sections — heading depth is presentation, not capability', () => {
+    // The exact report shape qwen3.5-4b-q4 produced in all three trials of
+    // the 2026-09-04 sweep: every value cited correctly, sections named and
+    // ordered, but opened with `#` instead of `##`. It scored 0/3 while
+    // terser H2 reports from the 9B and 27B passed.
+    const h1 = validReport().replace(/^## /gm, '# ');
+    const result = checkThemeReport(h1);
+    expect(result.ok).toBe(true);
+    expect(result.score).toBe(result.scoreMax);
+  });
+
+  it('accepts a document title above the first section', () => {
+    // An H1 title plus H2 sections is the most natural markdown shape, and
+    // relaxing the depth must not make the title shadow the section it
+    // precedes: order is still checked across the four sections.
+    const result = checkThemeReport(validReport());
+    expect(result.ok).toBe(true);
+  });
+
+  it('still rejects sections that are out of order', () => {
+    // The relaxation is about depth only. Reordering must remain terminal,
+    // or the gate stops expressing "in order" at all.
+    const swapped = validReport().replace(
+      /## Page count([\s\S]*?)## Style conflicts/,
+      '## Style conflicts$1## Page count',
+    );
+    const result = checkThemeReport(swapped);
+    expect(result.ok).toBe(false);
+    expect(result.missingRequiredSignals).toContain('ordered-sections');
+  });
+
+  it('still rejects a missing section at any depth', () => {
+    const dropped = validReport().replace(/## Style conflicts/, '## Notes');
+    const result = checkThemeReport(dropped);
+    expect(result.ok).toBe(false);
+    expect(result.missingRequiredSignals).toContain('ordered-sections');
+  });
+
+  it('rejects an empty Recommendation written as H1', () => {
+    const result = checkThemeReport(
+      validReport().replace(/## Recommendation[\s\S]*$/, '# Recommendation\n'),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.missingRequiredSignals).toContain('recommendation');
+  });
+
   it('keeps every gated value out of the seeded workspace', () => {
     // If a theme fact leaked into a seed file the model could copy it
     // without ever calling a tool, and the grounding gates would be

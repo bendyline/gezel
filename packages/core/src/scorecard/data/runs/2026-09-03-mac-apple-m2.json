@@ -1,0 +1,724 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-09-03-mac-apple-m2",
+      "provenance": {
+        "startedAt": "2026-09-03T20:21:54.000Z",
+        "device": {
+          "label": "Mac · Apple M2",
+          "platform": "darwin",
+          "arch": "arm64",
+          "memoryGb": 16,
+          "osRelease": "darwin 25.6.0",
+          "cpuModel": "Apple M2",
+          "gpuModel": "Apple M2 (integrated GPU)"
+        },
+        "harnessCommit": "a06b1070",
+        "gildeVersion": "0.1.52",
+        "count": 1,
+        "judgeModelId": "claude-sonnet-4-6",
+        "engineBuilds": {
+          "llama-cpp": "native 0.1.38 · v0.3.0 (build 10621, c1d0e7a) · Metal"
+        }
+      },
+      "suites": [
+        "core",
+        "productivity"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-research-to-document",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief"
+        ]
+      },
+      "note": "Three-model Apple M2 (16 GB) round using native binaries 0.1.38 on Metal. Count 1; core and productivity only — developer and complex-work were not run. Judged post-hoc with the Claude CLI (Sonnet 4.6). qwen3.8-27b-q2 is NOT measurable on this device: weights ~12.6 GB + KV ~2.1 GB at the required 32,768-token working window exceed the ~11.1 GB available, and raising GEZEL_CAPACITY_BUDGET_GB to 14 did not help because the binding constraint is physical RAM. qwen3.8-27b-iq1-s admits (weights ~8.9 GB, context clamped to 57,344 tokens/turn) but was excluded by preflight twice — 2.76 gen tok/s against the floor of 3, then a soft-progress stall — so no 27B cell is recorded. Trials ran with GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS=2700000: at ~80-150 tok/s prefill a single healthy turn outlasts the 10-15 min progress windows most scenarios author, and the watchdog was terminating trials mid-prefill (gemma4-12b-q4 read 8/11 before the floor, 10/11 after). Not comparable to rounds measured without that floor."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 100,
+        "decodeTokensPerSec": 13.7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 150528,
+        "peakMemoryMb": 10327,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.6,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 331555
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 924099
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 858783
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2762511
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1561155
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1148258
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3145060
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 727026
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 883851
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 204387
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1307602
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-9b-q4",
+      "label": "ornith1.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 154,
+        "decodeTokensPerSec": 9.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 135168,
+        "peakMemoryMb": 10320,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.5,
+        "artifacts": 1,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 974781
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 644135
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1431233
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1199393
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 401337
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 634718
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 703777
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1143736
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 515130
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 381396
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3940198
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "qwen3.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 121,
+        "decodeTokensPerSec": 9.2,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 129024,
+        "peakMemoryMb": 11055,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 3.8,
+        "artifacts": 1,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1282995
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 672881
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1735932
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 734443
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1697423
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 380664
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2273415
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1098848
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1606249
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 555553
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 904598
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 100,
+        "decodeTokensPerSec": 13.7,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 150528,
+        "peakMemoryMb": 10279,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 240533
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1076725
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1031737
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 263476
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 201903
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 208537
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1093474
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 892231
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1554341
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 183658
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 500625
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2546817
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1203170
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-9b-q4",
+      "label": "ornith1.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 154,
+        "decodeTokensPerSec": 9.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 135168,
+        "peakMemoryMb": 10266,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 198604
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1239845
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 621363
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 388577
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 171323
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 285480
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 795971
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 489808
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1037896
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 171758
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 191642
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3359374
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 599793
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "qwen3.5-9b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "runId": "2026-09-03-mac-apple-m2",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 121,
+        "decodeTokensPerSec": 9.2,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 129024,
+        "peakMemoryMb": 11040,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.3,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 534642
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 969649
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 808803
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 414994
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 406272
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 390097
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 344952
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 562459
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2455685
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 399135
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 494951
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 5319352
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 823420
+        }
+      ]
+    }
+  ]
+}

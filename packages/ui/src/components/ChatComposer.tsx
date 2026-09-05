@@ -1499,6 +1499,21 @@ export function ChatComposer({
           />
         )}
         {addressLineTrailing}
+        <button
+          type="button"
+          className="chat-composer-expand-btn"
+          data-testid="chat-composer-expand"
+          onClick={() => setExpanded((current) => !current)}
+          aria-pressed={expanded}
+          aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
+          title={
+            expanded
+              ? 'Collapse the draft back to a few lines'
+              : 'Expand the draft to fill the chat window'
+          }
+        >
+          {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
+        </button>
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">
@@ -1579,22 +1594,6 @@ export function ChatComposer({
                 onAppendTranscript={appendNarratedText}
                 onError={setError}
               />
-              <button
-                type="button"
-                className="squisq-toolbar-button chat-composer-expand-btn"
-                data-testid="chat-composer-expand"
-                onClick={() => setExpanded((current) => !current)}
-                aria-pressed={expanded}
-                aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
-                title={
-                  expanded
-                    ? 'Collapse the draft back to a few lines'
-                    : 'Expand the draft to fill the chat window'
-                }
-                data-tooltip={expanded ? 'Collapse the draft' : 'Expand the draft'}
-              >
-                {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
-              </button>
               {openCommandQuery !== null ? (
                 <button
                   type="button"
