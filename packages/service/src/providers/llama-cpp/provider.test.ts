@@ -1,6 +1,7 @@
 import { turnCancelledMessage } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lookupBehavior } from '../../model-profile/registry.js';
+import { buildStageOneNudge } from '../../tasks/gate-escalation.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
@@ -2031,9 +2032,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(toolResultMessage).toContain('set_task_status');
   });
 
-  it('gate feedback uses the common observed-file repair surface', async () => {
-    // Internal feedback follows the same repair contract as an ordinary
-    // failed-check report, including access to current source before editing.
+  it.each([false, true])('selects gate repair tools (targeted=%s)', async (targeted) => {
+    // Ordinary gate feedback permits reads; an explicit stage-1 escalation
+    // uses the content already in context and asks for a targeted patch.
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
@@ -2080,20 +2081,32 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       })),
     });
     await session.sendAndWait(
-      'GATE_TARGETED_EDIT: Continue. Your last edits did not move the gate — the same checks fail after each attempt. The file `index.html` EXISTS but fails exactly these checks:\n\n- index.html failed the html-game check\n\nFix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.',
+      targeted
+        ? buildStageOneNudge({
+            file: 'index.html',
+            failingBullets: '- index.html failed the html-game check',
+            frozen: false,
+          })
+        : 'The acceptance checks for `index.html` failed. Correct the existing file.',
     );
 
     expect(bodies).toHaveLength(1);
     const body = bodies[0]!;
     expect(body.temperature).toBe(0.2);
     expect(body.top_p).toBe(0.8);
-    expect(body.max_tokens).toBe(4096);
+    expect(body.max_tokens).toBe(targeted ? 2048 : 4096);
     const toolNames = (body.tools as Array<{ function?: { name?: string } }>).map(
       (t) => t.function?.name,
     );
-    expect(toolNames.sort()).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'validate']);
+    expect(toolNames.sort()).toEqual(
+      targeted
+        ? ['replace_in_file', 'replace_lines']
+        : ['read_file', 'replace_in_file', 'replace_lines', 'validate'],
+    );
     const messages = body.messages as Array<{ role: string; content: string }>;
-    expect(messages.at(-1)?.content).toContain('[Local-model repair mode:');
+    expect(messages.at(-1)?.content).toContain(
+      targeted ? '[Local-model gate patch mode:' : '[Local-model repair mode:',
+    );
   });
 
   it('uses DeepSeek thinking-off fields for ds4-shaped constrained turns', async () => {
