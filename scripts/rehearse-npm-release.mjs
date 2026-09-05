@@ -27,32 +27,14 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
+import { publishedPackageNames } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputFlag = process.argv.indexOf('--output');
 const suppliedOutput = outputFlag === -1 ? null : process.argv[outputFlag + 1];
 if (outputFlag !== -1 && !suppliedOutput) throw new Error('--output requires a directory path');
 
-const packageDirs = [
-  'core',
-  'client',
-  'sdk',
-  'app-sdk',
-  'plugin-sdk',
-  'catalog',
-  'knowledge',
-  'mcp',
-  'service',
-  'connectors-spectral',
-  'script-stdlib',
-  'cli',
-];
-const packageNames = packageDirs.map((dir) => {
-  const manifest = JSON.parse(
-    readFileSync(resolve(repoRoot, 'packages', dir, 'package.json'), 'utf8'),
-  );
-  return manifest.name;
-});
+const packageNames = publishedPackageNames(repoRoot);
 const coreVersion = JSON.parse(
   readFileSync(resolve(repoRoot, 'packages/core/package.json'), 'utf8'),
 ).version;
@@ -67,7 +49,56 @@ if (existsSync(outputDir) && readdirSync(outputDir).some((file) => file.endsWith
 mkdirSync(outputDir, { recursive: true });
 
 const sourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
+
+/**
+ * The development values of the two constants `prepare-package.mjs` stamps.
+ * A checkout must carry these before the rehearsal begins and must carry them
+ * again after it ends.
+ */
+const DEVELOPMENT_STAMP = {
+  GEZEL_VERSION: '0.0.0',
+  GEZEL_CONTENT_COMPAT: '0.0.0',
+};
+
+/** Read the stamped constants out of core's source. */
+function readStamp(source) {
+  return Object.fromEntries(
+    Object.keys(DEVELOPMENT_STAMP).map((name) => [
+      name,
+      new RegExp(`export const ${name} = '([^']*)';`).exec(source)?.[1] ?? null,
+    ]),
+  );
+}
+
+function describeStamp(stamp) {
+  return Object.entries(stamp)
+    .map(([name, value]) => `${name} = ${value === null ? '(not found)' : `'${value}'`}`)
+    .join(', ');
+}
+
+function isDevelopmentStamp(stamp) {
+  return Object.entries(DEVELOPMENT_STAMP).every(([name, value]) => stamp[name] === value);
+}
+
+// The restore below cannot be "write back whatever was there at start-up".
+// This script stamps a release version into a source constant that must never
+// reach a commit, and an earlier interrupted run — or a manual
+// `prepare-package.mjs` — leaves that constant already stamped. Trusting the
+// start-up read then faithfully restores the stamped value and the rehearsal
+// reports success while leaving a non-0.0.0 GEZEL_VERSION in the working
+// tree. Refuse to start from anything but the development baseline, and the
+// text captured here is known-good by construction.
 const originalSource = readFileSync(sourcePath, 'utf8');
+const originalStamp = readStamp(originalSource);
+if (!isDevelopmentStamp(originalStamp)) {
+  throw new Error(
+    [
+      `packages/core/src/index.ts is not at its development baseline (${describeStamp(originalStamp)}).`,
+      'A previous release or rehearsal left it stamped. Restore it before rehearsing:',
+      '  git checkout -- packages/core/src/index.ts && pnpm --filter @bendyline/gezel run build',
+    ].join('\n'),
+  );
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -138,6 +169,15 @@ try {
   console.error(err.message);
 } finally {
   writeFileSync(sourcePath, originalSource, 'utf8');
+  // Prove it rather than assume it: this constant reaching a commit is the
+  // one outcome the whole guard exists to prevent.
+  const restoredStamp = readStamp(readFileSync(sourcePath, 'utf8'));
+  if (!isDevelopmentStamp(restoredStamp)) {
+    failed = true;
+    console.error(
+      `rehearsal: packages/core/src/index.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/index.ts\` before committing`,
+    );
+  }
   let restore;
   let restoreError;
   try {

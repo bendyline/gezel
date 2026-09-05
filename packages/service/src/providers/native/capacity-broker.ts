@@ -34,6 +34,7 @@ import {
   autoAllowRamSpillover,
   computeCapacityBudget,
   fastMemoryBudgetBytes,
+  getDetectedGpuVramBytes,
 } from './capacity-budget.js';
 import type { LocalProviderName } from './engine-key.js';
 
@@ -313,12 +314,55 @@ export class CapacityBroker {
     this.applyBudget();
   }
 
+  /**
+   * The broker is built once and lives for the whole process, so the host
+   * shape it was handed at construction is the one every later admission is
+   * priced against. `gpuVramBytes: null` there means "the boot probe reported
+   * no accelerator" — which is also exactly what a probe that TIMED OUT
+   * reports, and `nvidia-smi` on a laptop dGPU parked in a low-power state
+   * routinely loses its 2s race. Pinning that answer turns one slow probe
+   * into a RAM-only budget for the life of the daemon.
+   *
+   * So a card measured SINCE construction wins, by deferring the whole host
+   * shape — VRAM and the unified flag together — to the published probe. A
+   * host that genuinely has no accelerator publishes `null` too, and nothing
+   * changes for it.
+   */
   private autoBudget(): CapacityBudget {
+    const measuredSince =
+      (this.gpuVramBytes === undefined || this.gpuVramBytes === null) &&
+      getDetectedGpuVramBytes() !== null;
     return computeCapacityBudget({
       systemRamBytes: this.systemRamBytes,
-      ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
-      ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+      ...(measuredSince
+        ? {}
+        : {
+            ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
+            ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+          }),
     });
+  }
+
+  /**
+   * Re-derive the auto budget when the host measurement moved under it.
+   *
+   * {@link autoBudget} recomputes per call, but `budgetBytes` — the number
+   * admission actually gates on — is assigned once by {@link applyBudget}.
+   * Without this, a card measured after construction would show up in
+   * `pools` and in `fastBudgetBytes()` while the enforced ceiling stayed on
+   * the RAM-only curve, which is the half of the figure that denies models.
+   *
+   * Called from every public read; an explicit budget is the operator's
+   * number and is never re-derived.
+   */
+  private refreshAutoBudget(): void {
+    if (this.explicitBudgetBytes !== null) return;
+    const auto = this.autoBudget().budgetBytes;
+    if (auto === this.budgetBytes) return;
+    log.info(
+      `auto budget re-derived ${this.budgetBytes} → ${auto} (host memory measured after start)`,
+    );
+    this.budgetBytes = auto;
   }
 
   private applyBudget(): void {
@@ -389,6 +433,7 @@ export class CapacityBroker {
    * unloadable and quietly shrunk the catalog to what fits in VRAM.
    */
   coResidencyBytes(): number {
+    this.refreshAutoBudget();
     if (this.ramSpilloverAllowed()) return this.budgetBytes;
     return Math.min(this.budgetBytes, this.fastBudgetBytes());
   }
@@ -407,6 +452,7 @@ export class CapacityBroker {
    * it is not an obstacle to itself.
    */
   shortfallFor(bytes: number, priorBytes = 0): number {
+    this.refreshAutoBudget();
     if (!this.enforced) return 0;
     const others = Math.max(0, this.committedBytes() - priorBytes);
     const budgetShort = others + bytes - this.budgetBytes;
@@ -489,6 +535,7 @@ export class CapacityBroker {
 
   /** Fast (on-accelerator) memory for this host — see {@link CapacityBudget.fastBytes}. */
   fastBudgetBytes(): number {
+    this.refreshAutoBudget();
     const auto = this.autoBudget();
     // An explicit budget can only lower what we'll put on the accelerator,
     // never raise the card's capacity.
@@ -497,6 +544,7 @@ export class CapacityBroker {
 
   /** Snapshot used by the UX status endpoint and tests. */
   committed(): CapacityCommitted {
+    this.refreshAutoBudget();
     const auto = this.autoBudget();
     return {
       budgetBytes: this.budgetBytes,

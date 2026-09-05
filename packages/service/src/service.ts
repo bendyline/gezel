@@ -191,7 +191,7 @@ import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
-import { detectMemoryProfile } from './system/memory.js';
+import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
@@ -409,6 +409,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     );
   });
   discoverManagedScriptRuntimes(home);
+  // Publish the accelerator probe as early as possible. `computeCapacityBudget()`
+  // with no arguments is a synchronous read of a module-level figure that stays
+  // `null` until this runs, and the callers that cannot await it — slot ceilings,
+  // KV caps — then size a discrete-GPU host off system RAM alone. Deliberately
+  // not awaited: it shells out to `nvidia-smi` and must not sit in front of the
+  // listener. Async admission paths measure for themselves (measured-budget.ts),
+  // so this closes the gap for the synchronous ones rather than being relied on.
+  void detectMemoryProfileCached().catch(() => {});
   // Make sure shell-shim child processes can find `node` on PATH (see
   // helper above). Has to run before anything spawns a child — the
   // first-run bootstrap downstream of `startService` is the most

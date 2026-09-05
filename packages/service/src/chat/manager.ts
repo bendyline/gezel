@@ -12552,12 +12552,16 @@ export class ChatManager {
     freeSystemRamBytes?: number;
   }> {
     const { computeCapacityBudget } = await import('../providers/native/capacity-broker.js');
+    const { measuredCapacityBudget } = await import('../providers/native/measured-budget.js');
     const router = this.engineRouter ?? this.engineRouterCache;
     const snapshot = router?.broker.committed();
     // An unenforced budget carries no usable numbers — fall back wholesale
     // rather than per-field, so a snapshot never contributes half a picture.
     const enforced = snapshot?.enforced ? snapshot : undefined;
-    const live = computeCapacityBudget();
+    // No broker yet means no engine has ever been placed in this process, so
+    // the ambient GPU probe may still be unpublished — measure rather than
+    // read it. See measured-budget.ts for what a missing card costs here.
+    const live = enforced ? computeCapacityBudget() : await measuredCapacityBudget();
     const committedOtherBytes = this.committedOtherBytesFor(snapshot, provider, modelId);
     return {
       budgetBytes: enforced?.budgetBytes ?? live.budgetBytes,

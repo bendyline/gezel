@@ -258,6 +258,42 @@ describe('discoverOrSpawn', () => {
     expect(spawnFn).not.toHaveBeenCalled();
   });
 
+  it('allows a healthy existing daemon more than one second to respond by default', async () => {
+    vi.useFakeTimers();
+    try {
+      const spawnFn = vi.fn(() => makeFakeChild());
+      const clientFactory = () =>
+        new GezelClient({
+          baseUrl: 'http://127.0.0.1:0',
+          token: 'x',
+          fetch: (() =>
+            new Promise<Response>((resolve) => {
+              setTimeout(() => {
+                resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+              }, 1500);
+            })) as typeof fetch,
+        });
+
+      const adoption = discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        timeoutMs: 5000,
+        spawnFn,
+        readRuntimeFn: async () => sampleRuntime,
+        isProcessAliveFn: () => true,
+        clientFactory,
+      });
+
+      await vi.advanceTimersByTimeAsync(1500);
+      await expect(adoption).resolves.toMatchObject({
+        outcome: 'adopted',
+        pid: sampleRuntime.pid,
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('spawns when no runtime files exist, then adopts after health succeeds', async () => {
     const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
     let reads = 0;

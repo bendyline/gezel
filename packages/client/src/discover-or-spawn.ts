@@ -88,8 +88,13 @@ export interface DiscoverOrSpawnOptions {
   timeoutMs?: number;
   /**
    * Maximum time for one `/api/health` request. Defaults to the smaller of
-   * 1000 ms and `timeoutMs`. A health request is part of the overall startup
+   * 5000 ms and `timeoutMs`. A health request is part of the overall startup
    * deadline; it can never extend that deadline.
+   *
+   * Loopback requests normally return immediately, but the daemon and caller
+   * can both be briefly descheduled while the host is under load. One second
+   * produced false "live but unhealthy" results for otherwise responsive
+   * daemons, especially when several package test workers were active.
    */
   healthTimeoutMs?: number;
   /** Poll interval for runtime-file + health check. Default 100 ms. */
@@ -151,7 +156,7 @@ export async function discoverOrSpawn(
     stdio = detached ? 'ignore' : 'pipe',
     timeoutMs = 5000,
     pollIntervalMs = 100,
-    healthTimeoutMs = Math.min(1000, timeoutMs),
+    healthTimeoutMs = Math.min(5000, timeoutMs),
     forceSpawn = false,
     home,
     spawnIfMissing = true,

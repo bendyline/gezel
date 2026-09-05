@@ -307,6 +307,60 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     }
   }, 90_000);
 
+  /**
+   * The warm path, and the one that used to deadlock. Any command that starts
+   * a daemon — `gezel start`, or a read-only `gezel agent list` — leaves one
+   * running, and `run` then has to adopt it. It used to open a Connected Apps
+   * consent handshake instead and block for the full five-minute approval
+   * timeout on a code that can only be typed into the desktop app, which an
+   * npm-only install does not have. The cold-path case above cannot see that:
+   * `run` only owns an in-process service when nothing is already running.
+   */
+  it('adopts an already-running daemon for run instead of asking for desktop approval', async () => {
+    const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-adopt-'));
+    const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-adopt-workspace-'));
+    const prompt = 'Reply exactly with: cli-adopted-daemon';
+    const env = childEnv({
+      GEZEL_HOME: runHome,
+      GEZEL_MOCK_PROVIDER: '1',
+      GEZEL_DISABLE_MACHINE_ENGINE: '1',
+      GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+      GEZEL_SECRETS_BACKEND: 'file',
+      GEZEL_LOG_LEVEL: 'warn',
+    });
+    try {
+      // Arm the trap exactly as a person does: an ordinary read-only command.
+      await execFileAsync(
+        process.execPath,
+        [cliEntry, '--home', runHome, '--standalone', 'agent', 'list'],
+        { cwd: runCwd, env, timeout: 40_000 },
+      );
+      const runtime = await readRuntime(runHome);
+      expect(runtime && isProcessAlive(runtime.pid)).toBe(true);
+
+      const result = await execFileAsync(
+        process.execPath,
+        [cliEntry, '--home', runHome, '--standalone', 'run', prompt],
+        // Well under the 300s approval timeout: a regression must fail here
+        // rather than quietly spend five minutes waiting for a human.
+        { cwd: runCwd, env, timeout: 60_000 },
+      );
+
+      expect(result.stdout).toBe(`Mock reply: ${prompt}\n`);
+      expect(result.stderr).not.toContain('Open the Gezel app');
+      expect(result.stderr).not.toContain('Waiting for approval');
+      // Adopted, not replaced: the daemon `agent list` started is still the
+      // one serving, and `run` left it alone.
+      const after = await readRuntime(runHome);
+      expect(after?.pid).toBe(runtime?.pid);
+    } finally {
+      const runtime = await readRuntime(runHome).catch(() => null);
+      if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
+      await rm(runHome, { recursive: true, force: true });
+      await rm(runCwd, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('starts a craftbook from the do subcommand', async () => {
     const result = await runCli('do', 'security-architecture-review');
     expect(result.stderr).toBe('');

@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
+import { PUBLISHED_PACKAGE_DIRS, publishedPackageNames } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 validateArgs(process.argv.slice(2));
@@ -69,28 +70,8 @@ function validateArgs(args) {
   }
 }
 
-/** Mirrors tests/published/_packages.ts. Keep the two in step. */
-const PUBLISHED = [
-  'gezk',
-  'core',
-  'client',
-  'sdk',
-  'app-sdk',
-  'plugin-sdk',
-  'catalog',
-  'knowledge',
-  'mcp',
-  'service',
-  'connectors-spectral',
-  'script-stdlib',
-  'cli',
-];
-const PUBLISHED_NAMES = PUBLISHED.map((dir) => {
-  const manifest = JSON.parse(
-    readFileSync(resolve(repoRoot, 'packages', dir, 'package.json'), 'utf8'),
-  );
-  return manifest.name;
-});
+const PUBLISHED = PUBLISHED_PACKAGE_DIRS;
+const PUBLISHED_NAMES = publishedPackageNames(repoRoot);
 const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
 
 /**
@@ -348,6 +329,31 @@ try {
   if (!coreVersion) fail('could not determine installed @bendyline/gezel version');
   else ok(`all internal runtime pins match the ${coreVersion} release set`);
 
+  // Every published package must come from a candidate tarball, never from
+  // the registry. Version pins cannot tell the two apart — a candidate and
+  // its already-published namesake carry the same version — so read npm's
+  // own record of where each tree came from. This is the failure mode that
+  // hid behind the rehearsal's missing `gezk`: with one tarball absent, npm
+  // silently satisfied that dependency from registry.npmjs.org and every
+  // later check validated the published package instead of the build.
+  const lockPath = join(consumer, 'package-lock.json');
+  if (!existsSync(lockPath)) {
+    fail('npm wrote no package-lock.json, so tarball provenance cannot be verified');
+  } else {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    const fromRegistry = PUBLISHED_NAMES.filter((name) => {
+      const entry = lock.packages?.[`node_modules/${name}`];
+      return !entry || !String(entry.resolved ?? '').startsWith('file:');
+    });
+    if (fromRegistry.length > 0) {
+      fail(
+        `installed from the registry instead of a candidate tarball: ${fromRegistry.join(', ')}`,
+      );
+    } else {
+      ok(`all ${PUBLISHED_NAMES.length} packages resolved from candidate tarballs`);
+    }
+  }
+
   for (const name of PUBLISHED_NAMES) {
     auditInstalledPackage(join(consumer, 'node_modules', ...name.split('/')), name);
   }
@@ -588,6 +594,62 @@ try {
     }
   } finally {
     rmSync(cliRunHome, { recursive: true, force: true });
+  }
+
+  // The warm path, and the one an npm-only user actually hits. Any command
+  // that starts a daemon — `gezel start`, or a read-only `gezel agent list` —
+  // leaves one running, and `run` must then adopt it with the same-user
+  // runtime credential. It used to open a Connected Apps consent handshake
+  // and block for five minutes on a code that can only be typed into the
+  // desktop app, which this install does not have. The cold case above cannot
+  // see that: `run` only owns an in-process service when nothing is running.
+  const cliWarmHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-warm-'));
+  const cliWarmPrompt = 'Reply exactly with: packed-cli-adopted-daemon';
+  const cliWarmEnv = {
+    ...process.env,
+    GEZEL_HOME: cliWarmHome,
+    GEZEL_MOCK_PROVIDER: '1',
+    GEZEL_DISABLE_MACHINE_ENGINE: '1',
+    GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+    GEZEL_SECRETS_BACKEND: 'file',
+    GEZEL_LOG_LEVEL: 'warn',
+  };
+  try {
+    const armed = run(
+      process.execPath,
+      [bin, '--home', cliWarmHome, '--standalone', 'agent', 'list'],
+      { cwd: consumer, env: cliWarmEnv, timeout: 60_000 },
+    );
+    if (armed.status !== 0) {
+      fail(`gezel agent list failed\nstdout: ${armed.stdout}\nstderr: ${armed.stderr}`);
+    } else {
+      const result = run(
+        process.execPath,
+        [bin, '--home', cliWarmHome, '--standalone', 'run', cliWarmPrompt],
+        // Well under the CLI's 300s approval timeout, so a regression fails
+        // here instead of quietly waiting five minutes for a human.
+        { cwd: consumer, env: cliWarmEnv, timeout: 90_000 },
+      );
+      const expectedWarm = `Mock reply: ${cliWarmPrompt}\n`;
+      if (result.status !== 0 || /Open the Gezel app|Waiting for approval/.test(result.stderr)) {
+        fail(
+          `gezel run against a running daemon asked for desktop approval\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+        );
+      } else if (result.stdout !== expectedWarm) {
+        fail(
+          `gezel run against a running daemon polluted stdout\nexpected: ${JSON.stringify(expectedWarm)}\nactual:   ${JSON.stringify(result.stdout)}\nstderr: ${result.stderr}`,
+        );
+      } else {
+        ok('gezel run adopts an already-running daemon without desktop approval');
+      }
+    }
+  } finally {
+    run(process.execPath, [bin, '--home', cliWarmHome, '--standalone', 'stop', '--daemon'], {
+      cwd: consumer,
+      env: cliWarmEnv,
+      timeout: 60_000,
+    });
+    rmSync(cliWarmHome, { recursive: true, force: true });
   }
 
   // ── 6. Default install: boot without the optional PTY peer ─────────────

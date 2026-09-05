@@ -20,6 +20,15 @@ vi.mock('../providers/native/capacity-broker.js', async (importOriginal) => {
   return { ...actual, availableSystemRamBytes: availableSystemRamBytesMock };
 });
 
+// The auto-budget fallback (no broker snapshot) measures the host rather than
+// reading the ambient GPU probe. Pin the measurement so the budget under test
+// is the fixture's host, not whatever card the suite happens to run on.
+const detectMemoryProfileCachedMock = vi.hoisted(() => vi.fn());
+vi.mock('../system/memory.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../system/memory.js')>();
+  return { ...actual, detectMemoryProfileCached: detectMemoryProfileCachedMock };
+});
+
 const noopMemory = {
   save: async () => {},
   search: async () => [],
@@ -286,5 +295,69 @@ describe('previewLocalEnginePlan — RAM-spillover models on a discrete GPU', ()
     const plan = await manager.previewLocalEnginePlan('llama-cpp', 'local-moe');
 
     expect(plan.contextWindow).toBeGreaterThanOrEqual(65_536);
+  });
+});
+
+describe('previewLocalEnginePlan — before an engine router exists', () => {
+  /**
+   * A daemon that has not built its engine router yet has no broker snapshot,
+   * so the preview falls back to the auto budget. That fallback used to read
+   * `computeCapacityBudget()` with no arguments, whose GPU figure is the
+   * ambient probe — `null` until `detectMemoryProfile` has run somewhere in
+   * the process. Nothing on this path ever ran it, so the very first
+   * `/v1/remote/admit` a machine engine served priced a discrete-GPU host as
+   * RAM-only: the card vanished from both the budget and the live-RAM cap,
+   * and a 12B model's weights alone overran free RAM minus the OS reserve.
+   * Wild-caught 2026-09-04 — Gemma 4 12B refused on a 32 GB/12 GB-VRAM host
+   * against "budget 18.7 GB", the RAM share alone, while the same preview
+   * granted 157k tokens once anything else had published the probe.
+   */
+  const useCard = (present: boolean) => {
+    detectMemoryProfileCachedMock.mockResolvedValue({
+      platform: 'win32',
+      totalRamBytes: 31 * GIB,
+      gpuVramBytes: present ? 12 * GIB : null,
+      gpuMemoryKind: present ? 'discrete' : 'none',
+      source: present ? 'gpu-nvidia' : 'system-ram-fallback',
+      usableBytes: present ? DISCRETE_VRAM_BYTES : Math.floor(15 * GIB),
+      budgetBytes: present ? DISCRETE_BUDGET_BYTES : Math.floor(18 * GIB),
+    });
+    Object.defineProperty(manager, 'llamaCppModels', {
+      configurable: true,
+      value: {
+        resolveModel: async () => ({
+          id: 'local-12b',
+          name: 'Local 12B',
+          approxSizeBytes: 7 * GIB,
+          contextWindow: 262_144,
+          weightsPath: ggufPath,
+          architecture: 'qwen3moe',
+        }),
+      },
+    });
+    // Enough to hold the weights only once the card is counted too.
+    availableSystemRamBytesMock.mockReturnValue(9 * GIB);
+  };
+
+  it('measures the accelerator instead of reading an unpublished probe', async () => {
+    useCard(true);
+
+    await expect(
+      manager.previewContextWindowForModel('llama-cpp', 'local-12b', {
+        liveSystemPressure: true,
+      }),
+    ).resolves.toBeGreaterThanOrEqual(65_536);
+  });
+
+  it('still denies on the same host with no accelerator at all', async () => {
+    // The other half: the fix must not turn admission off for a CPU-only
+    // host, where weights really do overrun what free RAM can back.
+    useCard(false);
+
+    await expect(
+      manager.previewContextWindowForModel('llama-cpp', 'local-12b', {
+        liveSystemPressure: true,
+      }),
+    ).rejects.toThrow(/Not enough memory/);
   });
 });

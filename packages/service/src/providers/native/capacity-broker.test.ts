@@ -805,6 +805,62 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     expect(b.fastBudgetBytes()).toBe(snap.pools.vramBytes);
   });
 
+  it('picks up a card measured after it was built', () => {
+    // The broker is built once per process from whatever `detectMemoryProfile`
+    // reported at the time, and `gpuVramBytes: null` is what a probe that
+    // TIMED OUT reports as well as one that genuinely found nothing —
+    // `nvidia-smi` on a laptop dGPU parked in a low-power state routinely
+    // loses its 2s race. Pinning that answer made one slow probe a RAM-only
+    // budget for the life of the daemon.
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: null,
+    });
+    expect(b.committed().pools.kind).toBe('system-ram');
+
+    setDetectedGpuVramBytes(VRAM, false);
+    try {
+      const snap = b.committed();
+      expect(snap.pools.kind).toBe('discrete-gpu');
+      expect(snap.pools.vramBytes).toBe(Math.floor(VRAM * 0.95));
+      expect(snap.budgetBytes).toBe(snap.pools.vramBytes + snap.pools.ramShareBytes);
+    } finally {
+      setDetectedGpuVramBytes(null);
+    }
+  });
+
+  it('leaves a host that really has no card on the RAM-only curve', () => {
+    // The other half: the fallback must not invent an accelerator. An
+    // unpublished probe reads the same as a probe that found nothing.
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: null,
+    });
+    const snap = b.committed();
+    expect(snap.pools.kind).toBe('system-ram');
+    expect(snap.pools.vramBytes).toBe(0);
+    expect(snap.budgetBytes).toBe(Math.floor(RAM * 0.6));
+  });
+
+  it('keeps a measured card out of an explicitly described host', () => {
+    // A caller that stated the shape — every test, and the router when its
+    // boot probe DID answer — is not second-guessed.
+    setDetectedGpuVramBytes(VRAM, false);
+    try {
+      const b = new CapacityBroker({
+        systemRamBytes: () => RAM,
+        unifiedMemory: true,
+        gpuVramBytes: 8 * GB,
+      });
+      expect(b.committed().pools.vramBytes).toBe(0);
+      expect(b.committed().pools.kind).toBe('unified');
+    } finally {
+      setDetectedGpuVramBytes(null);
+    }
+  });
+
   it('an explicit budget lowers the fast ceiling but never raises the card', () => {
     const b = new CapacityBroker({
       systemRamBytes: () => RAM,

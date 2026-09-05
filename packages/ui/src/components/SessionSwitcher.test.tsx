@@ -665,13 +665,22 @@ describe('SessionSwitcher prompt drafts', () => {
   it('clears the thread before handing the draft over, never both at once', async () => {
     const onSessionIdChange = vi.fn();
     const onDraftSelect = vi.fn();
-    mockSessions([]);
+    mockSessions([
+      {
+        id: 's-current',
+        gezelId: 'g1',
+        title: 'Current thread',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
     mockDrafts({ fresh: [draft()] });
     render(
       <SessionSwitcher
         gezelId="g1"
         projectId="p1"
-        sessionId={undefined}
+        sessionId="s-current"
         onSessionIdChange={onSessionIdChange}
         onDraftSelect={onDraftSelect}
       />,
