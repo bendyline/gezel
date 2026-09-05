@@ -700,6 +700,231 @@ describe('craftbook generic scenario adapter', () => {
     });
   });
 
+  it('does not hand the worker a workspace file contract for an artifact deliverable', async () => {
+    // expectedDeliverable is workspace-relative, and the MCP server redirects
+    // write_artifact at that exact path into the workspace. Declaring it for
+    // an artifact deliverable makes the drawer unreachable.
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      updateProject: vi.fn().mockResolvedValue({}),
+      writeProjectWorkspaceFile: vi.fn().mockResolvedValue({}),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      addGezelToProject: vi.fn().mockResolvedValue({ added: true }),
+      installToolset: vi.fn().mockResolvedValue({}),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const base = {
+      ...directWorkerSpec(),
+      setup: { projectName: 'Sample Project', worker: { name: 'Ada', role: 'Reviewer' } },
+    };
+
+    await craftbookScenarioFromSpec({
+      ...base,
+      success: {
+        summary: 'The audit lands in the drawer.',
+        deliverables: [{ path: 'tasks/eval/audit.md', kind: 'markdown-notes', artifact: true }],
+      },
+    }).setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+    expect(client.sendChatMessage.mock.calls.at(-1)?.[1]).not.toHaveProperty('expectedDeliverable');
+
+    // A spec that grades an artifact FIRST and a workspace file second still
+    // gets the contract for the workspace file.
+    await craftbookScenarioFromSpec({
+      ...base,
+      success: {
+        summary: 'Audit note plus the rewritten doc.',
+        deliverables: [
+          { path: 'tasks/eval/audit.md', kind: 'markdown-notes', artifact: true },
+          { path: 'rewritten-doc.md', kind: 'markdown-report' },
+        ],
+      },
+    }).setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+    expect(client.sendChatMessage.mock.calls.at(-1)?.[1].expectedDeliverable).toEqual({
+      kind: 'file',
+      filePath: 'rewritten-doc.md',
+    });
+
+    // A workspace deliverable still gets the contract.
+    await craftbookScenarioFromSpec({
+      ...base,
+      success: {
+        summary: 'index.html exists.',
+        deliverables: [{ path: 'index.html', kind: 'html-page' }],
+      },
+    }).setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+    expect(client.sendChatMessage.mock.calls.at(-1)?.[1].expectedDeliverable).toEqual({
+      kind: 'file',
+      filePath: 'index.html',
+    });
+  });
+
+  it('installs the artifacts toolset when an artifact-task spec grades an artifact', async () => {
+    // Installing workspace tools overrides the worker's role kit, so without
+    // this the worker has no write_artifact and an artifact deliverable is
+    // unwinnable. Same trap as the images / code-execution installs.
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      updateProject: vi.fn().mockResolvedValue({}),
+      writeProjectWorkspaceFile: vi.fn().mockResolvedValue({}),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      addGezelToProject: vi.fn().mockResolvedValue({ added: true }),
+      installToolset: vi.fn().mockResolvedValue({}),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      setup: {
+        projectName: 'Sample Project',
+        worker: { name: 'Ada', role: 'Reviewer' },
+        files: [{ path: 'src/App.tsx', content: 'export const App = () => null;\n' }],
+      },
+      success: {
+        summary: 'The audit lands in the drawer.',
+        deliverables: [{ path: 'tasks/eval/audit.md', kind: 'markdown-notes', artifact: true }],
+      },
+    });
+
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    const installed = client.installToolset.mock.calls.map((c) => c[0]);
+    expect(installed).toContain('builtin.artifacts');
+  });
+
+  it('does not install the artifacts toolset for a workspace-only spec', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      updateProject: vi.fn().mockResolvedValue({}),
+      writeProjectWorkspaceFile: vi.fn().mockResolvedValue({}),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      addGezelToProject: vi.fn().mockResolvedValue({ added: true }),
+      installToolset: vi.fn().mockResolvedValue({}),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      setup: {
+        projectName: 'Sample Project',
+        worker: { name: 'Ada', role: 'Developer' },
+        files: [{ path: 'src/App.tsx', content: 'export const App = () => null;\n' }],
+      },
+      success: {
+        summary: 'index.html exists.',
+        deliverables: [{ path: 'index.html', kind: 'html-page' }],
+      },
+    });
+
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    expect(client.installToolset.mock.calls.map((c) => c[0])).not.toContain('builtin.artifacts');
+  });
+
+  it('resolves {{task.dir}} in deliverable paths, not just in gate checks', async () => {
+    // The fix-review family declares `{{task.dir}}/audit.md`. The gate checks
+    // were interpolated; the deliverables were not, so the harness read a path
+    // with braces in it: `bytes` stayed 0 for the whole run while the
+    // interpolated checks passed, and the repair nudge told the model to
+    // read_file a literal `{{task.dir}}/audit.md`.
+    const readArtifact = vi.fn(async (path: string) =>
+      path === 'tasks/7/audit.md' ? '# Audit\n\nFindings for `src/App.tsx`.\n' : null,
+    );
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({
+        tasks: [
+          {
+            projectId: 'project-1',
+            num: 7,
+            ref: 'project-1/7',
+            status: 'active',
+            activeStepId: 'audit',
+            craftbook: { id: 'sample-book', steps: [{ id: 'audit' }] },
+            sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+          },
+        ],
+      }),
+      readProjectArtifact: vi.fn(async (_p: string, file: string) => {
+        const content = await readArtifact(file);
+        if (content === null) throw new Error('not found');
+        return { content };
+      }),
+      listProjectArtifacts: vi.fn().mockResolvedValue({ files: [] }),
+      listProjectWorkspace: vi.fn().mockResolvedValue({ files: [] }),
+    };
+    const recordSniff = vi.fn();
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      success: {
+        summary: 'The audit deliverable exists.',
+        deliverables: [
+          {
+            path: '{{task.dir}}/audit.md',
+            kind: 'markdown-notes',
+            artifact: true,
+            minBytes: 10,
+            checks: [
+              {
+                kind: 'contains',
+                file: '{{task.dir}}/audit.md',
+                pattern: 'Findings',
+                artifact: true,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await scenario.successCheck({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+      recordSniff,
+    } as unknown as EvalContext);
+
+    expect(result).toMatchObject({ done: true, success: true });
+    // The read went to the resolved path...
+    expect(readArtifact).toHaveBeenCalledWith('tasks/7/audit.md');
+    // ...and the sniff saw real bytes rather than a missing brace-path.
+    expect(recordSniff).toHaveBeenCalledWith(
+      expect.objectContaining({ bytes: expect.any(Number) }),
+    );
+    expect(recordSniff.mock.calls.at(-1)?.[0].bytes).toBeGreaterThan(0);
+  });
+
   it('can grade task-note craftbook outputs from the invoked task', async () => {
     const client = {
       listProjects: vi
@@ -859,6 +1084,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('task-notes.md'),
       expectedDeliverable: { kind: 'file', filePath: 'task-notes.md' },
+      fileTurnIntent: { kind: 'repair-file', path: 'task-notes.md' },
       projectId: 'project-1',
     });
     expect(client.messageGezel.mock.calls[0]![1].text).not.toContain('brief.md is');
@@ -1371,6 +1597,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
+      fileTurnIntent: { kind: 'repair-file', path: 'data/audit.json' },
       projectId: 'project-1',
     });
   });
@@ -1442,6 +1669,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
+      fileTurnIntent: { kind: 'repair-file', path: 'data/audit.json' },
       projectId: 'project-1',
     });
     const messageText = client.messageGezel.mock.calls[0]![1].text;
@@ -1532,6 +1760,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs is 0 bytes, need ≥ 2200'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
     expect(client.messageGezel.mock.calls[0]![1].text).not.toContain('SOURCE_READ_REQUIRED');
@@ -1610,6 +1839,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('contract-test.mjs did not pass when run with node'),
       expectedDeliverable: { kind: 'file', filePath: 'contract-test.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'contract-test.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1691,6 +1921,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1764,6 +1995,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('Created book title mismatch'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1840,6 +2072,7 @@ describe('craftbook generic scenario adapter', () => {
       suppressReply: true,
       text: expect.stringContaining('server.mjs'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
+      fileTurnIntent: { kind: 'repair-file', path: 'server.mjs' },
       projectId: 'project-1',
     });
   });
@@ -1912,6 +2145,7 @@ ${'Detailed supporting analysis.\n'.repeat(22)}`;
       suppressReply: true,
       text: expect.stringContaining('Specific failure: audit.md is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'audit.md' },
+      fileTurnIntent: { kind: 'repair-file', path: 'audit.md' },
       projectId: 'project-1',
     });
     const messageText = client.messageGezel.mock.calls[0]![1].text;
@@ -2365,5 +2599,36 @@ describe('repairDeliverableForFailures', () => {
       repairDeliverableForFailures(spec, ['could not parse reviews/rev-eval-1/findings.json'])
         ?.path,
     ).toBe('reviews/rev-eval-1/findings.json');
+  });
+});
+
+describe('virtual repair target does not starve deliverables', () => {
+  /**
+   * The plateau rule as a pure predicate. `repairVirtualTargetForFailures`
+   * matches "task sourced from craftbook …", i.e. the not-yet-terminal
+   * failure, which holds for nearly a whole trial. Before this, that one
+   * message owned the repair channel start to finish: on the 2026-09-04 smoke
+   * run codemod-sweep's review.md and invoice-run's report.md each had a
+   * concrete, correctable error and each received ZERO repair nudges.
+   */
+  const holdsChannel = (pollsAtSameScore: number, limit = 12) => pollsAtSameScore < limit;
+
+  it('keeps the channel while the score is still moving', () => {
+    expect(holdsChannel(0)).toBe(true);
+    expect(holdsChannel(11)).toBe(true);
+  });
+
+  it('yields the channel once the score has plateaued', () => {
+    expect(holdsChannel(12)).toBe(false);
+    expect(holdsChannel(30)).toBe(false);
+  });
+
+  it('a score change resets the hold', () => {
+    // The driver rebuilds { score, polls: 0 } whenever `passed` changes, so a
+    // scenario that is genuinely advancing never reaches the limit.
+    let state = { score: 7, polls: 11 };
+    const passed = 8;
+    if (state.score !== passed) state = { score: passed, polls: 0 };
+    expect(holdsChannel(state.polls)).toBe(true);
   });
 });

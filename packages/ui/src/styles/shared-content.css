@@ -892,6 +892,7 @@
 
 .chat-composer-recipient-trigger,
 .chat-composer-recipient-remove,
+.chat-composer-expand-btn,
 .chat-recipient-add {
   display: inline-grid;
   place-items: center;
@@ -1159,10 +1160,32 @@
   min-height: 0;
 }
 
-/* Icon key for the expand toggle. Sits immediately left of the primary
-   key so the pair reads as one cluster at the toolbar's right edge. */
+/* Icon key for the expand toggle. It rides the far right of the To line,
+   past the recipient picker and the compose-mode tabs, so the size control
+   sits with the other frame-level keys instead of crowding Send. */
+.chat-composer-expand-btn {
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  transform: translateY(-2px);
+}
+
 .chat-composer-expand-btn > svg {
   display: block;
+}
+
+.chat-composer-expand-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The recipient picker's `margin-left: auto` normally opens the gap that
+   pushes the tail of the To line right, and the tabs and this key ride it.
+   With neither present there is nothing to do that, so the key claims the
+   free space itself. */
+.chat-composer-to:not(:has(.chat-composer-recipient-trigger)):not(:has(.compose-mode-tabs))
+  .chat-composer-expand-btn {
+  margin-left: auto;
 }
 
 /* Local `/open` command suggestions. The tray sits inside the compose frame

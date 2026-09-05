@@ -232,15 +232,24 @@ export function checkThemeReport(markdown: string): ThemeReportResult {
   const check = (signal: string, ok: boolean, reason: string) =>
     outcomes.push({ signal, ok, reason });
 
+  // Any heading depth, not just H2. What this gate exists to express is
+  // "four labelled sections, in order, each with content", and a report that
+  // opens `# Theme applied` satisfies that exactly as well as one that opens
+  // `## Theme applied`. Pinning the depth made a one-character presentational
+  // choice terminal: qwen3.5-4b-q4 used H1 in all three trials of the
+  // 2026-09-04 sweep and scored 0/3 on reports that cited every value
+  // correctly and read better than the 27B's passing ones — while the repair
+  // feedback could only restate a requirement the report already met by name
+  // and by order, so four attempts changed nothing.
   const sectionNames = ['Theme applied', 'Page count', 'Style conflicts', 'Recommendation'];
   const positions = sectionNames.map((name) =>
-    markdown.search(new RegExp(`^##\\s+${name}\\s*$`, 'im')),
+    markdown.search(new RegExp(`^#{1,3}\\s+${name}\\s*$`, 'im')),
   );
   check(
     'ordered-sections',
     positions.every((position) => position >= 0) &&
       positions.every((p, i) => i === 0 || p > positions[i - 1]!),
-    `theme report needs ordered H2 sections: ${sectionNames.join(', ')}`,
+    `theme report needs these sections as headings, in order: ${sectionNames.join(', ')}`,
   );
 
   check(
@@ -293,7 +302,7 @@ export function checkThemeReport(markdown: string): ThemeReportResult {
 
   check(
     'recommendation',
-    /^##\s+Recommendation\s*$[\s\S]{40,}/im.test(markdown),
+    /^#{1,3}\s+Recommendation\s*$[\s\S]{40,}/im.test(markdown),
     'the Recommendation section needs an actual recommendation, not a heading',
   );
 
@@ -431,19 +440,42 @@ export const docblocksThemeRoundtripScenario: EvalScenario = {
   progressTimeoutMs: 15 * 60_000,
   setup,
   skipInitialPrompt: true,
+  // The judge sees the rubric, the brief, the kickoff and the report — never
+  // the tool transcript. So an axis is only worth carrying if it is decidable
+  // from the report itself against facts stated here. Both original grounding
+  // and auditability failed that test in the 2026-09-04 sweep, scoring 0.75
+  // and 0.67 as means across 12 trials, and auditability never once exceeded
+  // 1 for any model: a model that followed the brief perfectly was capped at
+  // ~2/10, so the axis measured the rubric's own reach, not the work.
   judge: {
     artifactBasename: THEME_REPORT_PATH,
     artifactKind: 'markdown',
-    contextNote:
-      'Every theme value in this report should be traceable to a DocBlocks tool response. Reward a report that makes the provenance auditable and states the unresolved style plainly.',
+    // The expected values are stated outright because they are fixed
+    // constants of the fixture, and without them "matches what the tools
+    // returned" is undecidable — the judge was being asked to verify against
+    // evidence it is never given.
+    contextNote: [
+      'The DocBlocks tools returned exactly these values:',
+      `theme id ${THEME_FACTS.themeId}; heading font ${THEME_FACTS.headingFont};`,
+      `body font ${THEME_FACTS.bodyFont}; accent ${THEME_FACTS.accentHex};`,
+      `background ${THEME_FACTS.backgroundHex}; ${THEME_FACTS.pagesBefore} pages before and`,
+      `${THEME_FACTS.pagesAfter} after; and one style that would not transfer,`,
+      `"${THEME_FACTS.conflictStyle}".`,
+      'A deterministic gate already checks that each of these appears, so judge',
+      'what it cannot: whether the report adds detail the tools never returned,',
+      'states the unresolved style plainly, and ends somewhere useful.',
+      'Do not mark a report down for lacking per-fact tool attribution — the',
+      'brief does not ask for it.',
+    ].join(' '),
     axes: [
       {
+        // Narrowed to the half the gate cannot check. The gate proves each
+        // required value is PRESENT; only a reader can catch a confident
+        // sentence about something no tool ever said.
         name: 'grounding',
-        description: 'Cited theme values match what the tools returned, with no invented detail.',
-      },
-      {
-        name: 'auditability',
-        description: 'A reader can tell which tool produced each reported fact.',
+        description:
+          'No invented detail: every specific claim is one of the values listed above, or is ' +
+          'plainly hedged. Numbers, fonts, or colors beyond that list are fabrication.',
       },
       {
         name: 'candor',

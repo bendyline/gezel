@@ -149,7 +149,7 @@ The script exists because a published comparison has properties a hand-run `eval
 - **Failure attribution.** Only `failureClass: 'model'` trials count. Infra/operator/grader failures are recorded in a visible "not measured" column and removed from both sides of the ratio, so a wedged engine never books as a model weakness.
 - **No silent merging.** Results carry their `runId`. A model measured under different provenance renders in a separate table with the differences named (`different gezel build`, `different catalog version`). Adding a model to an existing sweep means passing the same `--run-id`; anything else starts a new round, which is the honest thing to do once the device or build has moved.
 
-The dataset lives at [packages/core/src/scorecard/data/scorecard.json](../packages/core/src/scorecard/data/scorecard.json) and is checked in — that file IS the published record. The articles hold no numbers of their own.
+The dataset lives in [packages/core/src/scorecard/data/runs/](../packages/core/src/scorecard/data/runs/), with one checked-in `<run-id>.json` file per sweep. Those files are the published record. The articles hold no numbers of their own.
 
 **On judge drift.** `--llm-judge` axis scores are recorded with the judge model id and are only ever compared inside one run. The deterministic pass/fail is the longitudinal signal; the judge is colour. This is why the shipped articles quote pass counts and never a judge score.
 

@@ -4,6 +4,7 @@
  */
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
+import { expectHandboekArticle } from './helpers/handboek.js';
 import { gotoHome, openArea, openProject } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
@@ -34,6 +35,7 @@ test.describe('audit extras', () => {
   test('handboek home', async ({ page }) => {
     await gotoHome(page);
     await openArea(page, 'handboek');
+    await expectHandboekArticle(page);
     await shot(page, 'home', { area: 'handboek', description: 'Handboek — in-app manual home' });
   });
 });

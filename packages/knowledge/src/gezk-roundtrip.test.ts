@@ -11,7 +11,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GEZK_MIME_TYPE } from '@bendyline/gezk';
+import { GEZK_FORMAT_VERSION, GEZK_INDEX_SCHEMA_VERSION, GEZK_MIME_TYPE } from '@bendyline/gezk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   GezkArchiveError,
@@ -30,11 +30,16 @@ import {
   verifyManifestSignature,
 } from './signatures/signing.js';
 import {
+  FIXTURE_ASSETS,
+  FIXTURE_ASSET_DOCUMENT_ID,
+  FIXTURE_ASSET_PATH,
   FIXTURE_CHUNKING_PROFILE,
   FIXTURE_EMBEDDING_PROFILE,
+  FIXTURE_PNG,
   FIXTURE_TOPICS,
   fakeCountTokens,
   fakeEmbed,
+  fixtureMeta,
   generateFixtureCorpus,
 } from './test/fixture.js';
 
@@ -69,6 +74,7 @@ async function build(outputPath: string, workDir: string): Promise<CompileReport
     countTokens: fakeCountTokens,
     workDir,
     extraFiles: { 'README.md': '# Fixture Catalog\nSynthetic corpus.\n' },
+    assets: FIXTURE_ASSETS,
   });
 }
 
@@ -109,7 +115,8 @@ describe('archive + manifest', () => {
     const manifest = await readGezkManifest(archivePath);
     expect(manifest.id).toBe('fixture-en');
     expect(manifest.kind).toBe('gezk-catalog');
-    expect(manifest.formatVersion).toBe('0.5');
+    expect(manifest.formatVersion).toBe(GEZK_FORMAT_VERSION);
+    expect(manifest.indexSchemaVersion).toBe(GEZK_INDEX_SCHEMA_VERSION);
     expect(manifest.embedding.id).toBe(FIXTURE_EMBEDDING_PROFILE.id);
     expect(manifest.topics.length).toBeGreaterThanOrEqual(1);
     expect(manifest.license.noticePath).toBe('LICENSES/catalog.txt');
@@ -324,6 +331,7 @@ describe('signed build', () => {
         embed: fakeEmbed,
         countTokens: fakeCountTokens,
         workDir: join(dir, 'work-signed'),
+        assets: FIXTURE_ASSETS,
         finalizeManifest: (manifest) => signManifest(manifest, keys.privateKeyPem),
       });
       const manifest = await readGezkManifest(signedPath);
@@ -340,4 +348,77 @@ describe('signed build', () => {
       ).toBe(false);
     },
   );
+});
+
+describe('gezk 0.6: leaf filing, ordering, metadata, assets', () => {
+  it('files documents at the leaf and rolls descendants up at read time', () => {
+    expect(handle.schemaVersion).toBe(3);
+    const topics = handle.topics();
+    const craft = topics.find((t) => t.id === 'craft');
+    const metals = topics.find((t) => t.id === 'metals');
+    const nature = topics.find((t) => t.id === 'nature');
+    expect(metals?.parentId).toBe('craft');
+    expect(metals?.documentCount).toBeGreaterThan(0);
+    expect(topics.reduce((sum, t) => sum + t.documentCount, 0)).toBe(250);
+    expect(craft?.totalDocumentCount).toBe(
+      (craft?.documentCount ?? 0) + (metals?.documentCount ?? 0),
+    );
+    expect(nature?.totalDocumentCount).toBe(nature?.documentCount);
+    expect(topics.map((t) => t.id)).toEqual(['craft', 'metals', 'nature']);
+
+    const rolled = handle.documentsPage({ topicId: 'craft', limit: 200 });
+    expect(rolled.total).toBe(craft?.totalDocumentCount);
+    expect(rolled.documents.some((d) => d.topicId === 'metals')).toBe(true);
+    const direct = handle.documentsPage({ topicId: 'craft', limit: 200, descendants: false });
+    expect(direct.total).toBe(craft?.documentCount);
+    expect(direct.documents.every((d) => d.topicId === 'craft')).toBe(true);
+    expect(report.manifest.topics.find((t) => t.id === 'metals')).toEqual({
+      id: 'metals',
+      name: 'Metals',
+      parentId: 'craft',
+      sortKey: '00-craft/00-metals',
+    });
+  });
+
+  it('lists ordered documents first, by ordinal, then the rest by slug', () => {
+    const page = handle.documentsPage({ topicId: 'nature', limit: 200 });
+    const ordered = page.documents.filter((d) => d.ordinal !== null);
+    const unordered = page.documents.filter((d) => d.ordinal === null);
+    expect(ordered.length).toBeGreaterThan(0);
+    expect(page.documents.slice(0, ordered.length)).toEqual(ordered);
+    const ordinals = ordered.map((d) => d.ordinal as number);
+    expect([...ordinals].sort((a, b) => a - b)).toEqual(ordinals);
+    const slugs = unordered.map((d) => d.slug);
+    expect([...slugs].sort()).toEqual(slugs);
+  });
+
+  it('round-trips metadata canonically and reports it on reads', () => {
+    const doc = handle.getDocument('doc-0007');
+    expect(doc?.meta).toEqual(fixtureMeta(7));
+    expect(handle.getDocument('doc-0008')?.meta).toBeNull();
+    expect(
+      handle.documentsPage({ limit: 200 }).documents.find((d) => d.id === 'doc-0007')?.meta,
+    ).toEqual(fixtureMeta(7));
+  });
+
+  it('ships the asset, declares it, and serves it by archive path', () => {
+    expect(report.manifest.counts.assets).toBe(1);
+    const declared = report.manifest.files.find((f) => f.path === FIXTURE_ASSET_PATH);
+    expect(declared?.sizeBytes).toBe(FIXTURE_PNG.byteLength);
+    expect(handle.assets()).toEqual([
+      {
+        path: FIXTURE_ASSET_PATH,
+        contentType: 'image/png',
+        sizeBytes: FIXTURE_PNG.byteLength,
+        sha256: declared?.sha256,
+      },
+    ]);
+    const asset = handle.readAsset(FIXTURE_ASSET_PATH);
+    expect(asset?.contentType).toBe('image/png');
+    expect(Buffer.from(asset?.bytes ?? [])).toEqual(FIXTURE_PNG);
+    expect(handle.readAsset('assets/nope.png')).toBeNull();
+    expect(handle.getDocument(FIXTURE_ASSET_DOCUMENT_ID)?.markdown).toContain(
+      `](${FIXTURE_ASSET_PATH})`,
+    );
+  });
 });

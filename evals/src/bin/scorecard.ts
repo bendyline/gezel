@@ -31,12 +31,19 @@
  * the build has moved on.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ScorecardDatasetSchema, buildSuiteScoreboard, describeProvenance } from '@bendyline/gezel';
+import {
+  ScorecardDatasetSchema,
+  buildSuiteScoreboard,
+  describeProvenance,
+  mergeShards,
+  shardFileName,
+  splitIntoShards,
+} from '@bendyline/gezel';
 import type { ScorecardDataset, ScorecardModelResult, ScorecardRun } from '@bendyline/gezel';
 import { classifyEvalModelTier, modelBillionsForEval } from '../model-tier.ts';
 import { defaultProvider } from '../providers.ts';
@@ -57,7 +64,7 @@ import {
 import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
 import { assertKnownFlags, parseArgs } from './args.ts';
-import { resolveSuitesFlag, suitesFlagFragment } from './scorecard-args.ts';
+import { resolveSuitesForRun, suitesFlagFragment } from './scorecard-args.ts';
 
 /**
  * The suites a scorecard covers by default.
@@ -132,41 +139,85 @@ const VERIFY_SCENARIOS = [
 const VERIFY_SUITE = 'productivity';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const publishedDatasetPath = join(repoRoot, 'packages/core/src/scorecard/data/scorecard.json');
+const publishedDatasetDir = join(repoRoot, 'packages/core/src/scorecard/data/runs');
+const EMPTY_DATASET = ScorecardDatasetSchema.parse({ schemaVersion: 1, runs: [], results: [] });
 
-function writeDataset(path: string, dataset: ScorecardDataset): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(dataset, null, 2)}\n`);
-
-  // The published dataset is committed, so its generator must leave it in
-  // the same shape enforced by `pnpm lint`. JSON.stringify expands every
-  // array, while Biome keeps short arrays such as `suites` on one line.
-  // Scratch verify datasets live under ignored run output and need no pass.
-  if (path !== publishedDatasetPath) return;
-
+function formatWithBiome(paths: string[]): void {
+  if (paths.length === 0) return;
+  // Committed data must land in the shape `pnpm lint` enforces:
+  // JSON.stringify expands every array, while Biome keeps short ones such as
+  // `suites` on a single line. Scratch verify datasets live under ignored run
+  // output and need no pass.
   const biomeCli = createRequire(import.meta.url).resolve('@biomejs/biome/bin/biome');
   const formatted = spawnSync(
     process.execPath,
-    [biomeCli, 'format', '--write', '--config-path', repoRoot, path],
-    {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    },
+    [biomeCli, 'format', '--write', '--config-path', repoRoot, ...paths],
+    { cwd: repoRoot, encoding: 'utf8' },
   );
   if (formatted.error) {
-    throw new Error(`[scorecard] failed to run Biome for ${path}: ${formatted.error.message}`);
+    throw new Error(`[scorecard] failed to run Biome: ${formatted.error.message}`);
   }
   if (formatted.status !== 0) {
     const detail = formatted.stderr.trim() || formatted.stdout.trim();
-    throw new Error(`[scorecard] Biome could not format ${path}${detail ? `:\n${detail}` : ''}`);
+    throw new Error(`[scorecard] Biome could not format${detail ? `:\n${detail}` : ''}`);
   }
 }
 
-function readDataset(path: string): ScorecardDataset {
-  if (!existsSync(path)) {
-    return ScorecardDatasetSchema.parse({ schemaVersion: 1, runs: [], results: [] });
+function writeDataset(target: string, dataset: ScorecardDataset): void {
+  if (target !== publishedDatasetDir) {
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `${JSON.stringify(dataset, null, 2)}\n`);
+    return;
   }
-  return ScorecardDatasetSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+
+  // One file per sweep. Only shards whose bytes actually changed are
+  // rewritten: an ingest that re-reads fourteen sweeps to correct one must
+  // not show up as fourteen modified files in the diff, which is most of
+  // what sharding bought.
+  mkdirSync(target, { recursive: true });
+  const touched: string[] = [];
+  for (const shard of splitIntoShards(dataset)) {
+    const runId = shard.runs[0]?.id;
+    if (!runId) continue;
+    const path = join(target, shardFileName(runId));
+    const next = `${JSON.stringify(shard, null, 2)}\n`;
+    const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
+    if (current === next) continue;
+    writeFileSync(path, next);
+    touched.push(path);
+  }
+  formatWithBiome(touched);
+
+  // The barrel is what core actually imports (ESM cannot glob), so a new
+  // shard that never reaches it is a sweep silently missing from the
+  // published table. Regenerated on every write rather than left to memory.
+  const barrel = spawnSync(process.execPath, [join(repoRoot, 'scripts/gen-scorecard-barrel.mjs')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (barrel.status !== 0) {
+    const detail = barrel.stderr.trim() || barrel.stdout.trim();
+    throw new Error(
+      `[scorecard] could not regenerate the shard barrel${detail ? `:\n${detail}` : ''}`,
+    );
+  }
+}
+
+function readDataset(target: string): ScorecardDataset {
+  // The published scorecard is a DIRECTORY of one-file-per-sweep shards; a
+  // verify run still writes a single scratch file. Both read back as one
+  // dataset so every caller below is unaware of the difference.
+  if (target === publishedDatasetDir) {
+    if (!existsSync(target)) return EMPTY_DATASET;
+    const shards = readdirSync(target)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) =>
+        ScorecardDatasetSchema.parse(JSON.parse(readFileSync(join(target, name), 'utf8'))),
+      );
+    return mergeShards(shards);
+  }
+  if (!existsSync(target)) return EMPTY_DATASET;
+  return ScorecardDatasetSchema.parse(JSON.parse(readFileSync(target, 'utf8')));
 }
 
 function suiteBudgetMinutes(suiteId: string): number {
@@ -199,13 +250,6 @@ function main(): void {
     console.error('--count must be a positive integer (3 is the floor for quoting a rate)');
     process.exit(2);
   }
-
-  const requestedSuites = resolveSuitesFlag(args.flags.suites, SCORECARD_SUITES);
-  if (!requestedSuites.suites) {
-    console.error(`[scorecard] ${requestedSuites.error}`);
-    process.exit(2);
-  }
-  const suites = verify ? [VERIFY_SUITE] : requestedSuites.suites;
 
   const forced = typeof args.flags.provider === 'string' ? args.flags.provider : undefined;
   const preferred = defaultProvider();
@@ -246,7 +290,7 @@ function main(): void {
   const device = captureDevice();
   const datasetPath = verify
     ? join(repoRoot, 'evals/runs/scorecard-verify/dataset.json')
-    : publishedDatasetPath;
+    : publishedDatasetDir;
 
   const explicitRunId = args.flags['run-id'] ? String(args.flags['run-id']) : undefined;
   const { startedAt, reusedFromRun } = resolveScorecardStartedAt({
@@ -259,6 +303,23 @@ function main(): void {
     console.log(`[scorecard] reusing recorded start ${startedAt} for run ${explicitRunId}`);
   }
   const runId = explicitRunId ?? runIdFor(startedAt, device);
+
+  // Resolved here, not earlier, because a re-ingest inherits the scope the
+  // run was actually measured with -- see resolveSuitesForRun.
+  const priorRun = readDataset(datasetPath).runs.find((entry) => entry.id === runId);
+  const requestedSuites = resolveSuitesForRun(
+    args.flags.suites,
+    SCORECARD_SUITES,
+    priorRun?.suites,
+  );
+  if (!requestedSuites.suites) {
+    console.error(`[scorecard] ${requestedSuites.error}`);
+    process.exit(2);
+  }
+  const suites = verify ? [VERIFY_SUITE] : requestedSuites.suites;
+  if (requestedSuites.inherited) {
+    console.log(`[scorecard] reusing recorded suites ${suites.join(', ')} for run ${runId}`);
+  }
   const perModelMinutes = verify
     ? VERIFY_SCENARIOS.reduce((sum, id) => {
         const scenario = suiteScenarios(VERIFY_SUITE).find((entry) => entry.id === id);

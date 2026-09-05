@@ -19,25 +19,35 @@ import { z } from 'zod';
 // bundle's top-level exports (the format names then resolve to undefined in
 // every consumer). knowledge-reexports.test.ts keeps this list complete.
 export {
+  ASSETS_PREFIX,
   ArtifactDigestSchema,
   CatalogDocumentSchema,
   DEFAULT_EMBEDDING_ONNX_FILE,
   DEFAULT_EMBEDDING_TOKENIZER_FILE,
   GEZK_APPLICATION_ID,
+  GEZK_FORMAT_GENERATIONS,
   GEZK_FORMAT_VERSION,
   GEZK_INDEX_SCHEMA_VERSION,
   GEZK_MANIFEST_KIND,
   GEZK_MIME_TYPE,
   GEZK_REGISTRY_KIND,
+  GEZK_SUPPORTED_FORMAT_VERSIONS,
+  GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS,
+  KNOWLEDGE_ASSET_PATH_PATTERN,
+  KNOWLEDGE_ASSET_TYPES,
   KNOWLEDGE_ID_PATTERN,
+  KNOWLEDGE_MANIFEST_INDEX_SCHEMA_VERSIONS,
   KNOWLEDGE_VERSION_PATTERN,
+  KnowledgeAssetPathSchema,
   KnowledgeCatalogManifestSchema,
   KnowledgeChunkUidSchema,
   KnowledgeChunkingProfileSchema,
   KnowledgeDocumentIdSchema,
+  KnowledgeDocumentMetaSchema,
   KnowledgeEmbeddingProfileSchema,
   KnowledgeIdSchema,
   KnowledgeManifestFileSchema,
+  KnowledgeOrdinalSchema,
   KnowledgeRegistryEntrySchema,
   KnowledgeRegistryIndexSchema,
   KnowledgeSignatureSchema,
@@ -52,15 +62,27 @@ export {
   SOURCE_NOTICES_PATH,
   Sha256HexSchema,
   SourceNoticesSchema,
+  assetContentType,
+  assetExtension,
+  assetKindForExtension,
   embeddingProfileArtifacts,
   formatKnowledgeUri,
+  isKnowledgeAssetPath,
+  isSupportedFormatVersion,
+  isSupportedIndexSchemaVersion,
   parseKnowledgeUri,
   sameVectorSpace,
+  topicSortKeyForOrder,
 } from '@bendyline/gezk';
 export type {
   CatalogDocument,
+  GezkFormatVersion,
+  GezkIndexSchemaVersion,
+  KnowledgeAssetExtension,
+  KnowledgeAssetKind,
   KnowledgeCatalogManifest,
   KnowledgeChunkingProfile,
+  KnowledgeDocumentMeta,
   KnowledgeEmbeddingProfile,
   KnowledgeRegistryEntry,
   KnowledgeRegistryIndex,
@@ -254,7 +276,14 @@ export const KnowledgeAvailableCatalogSchema = z.object({
   documents: z.number().int().nonnegative(),
   chunks: z.number().int().nonnegative(),
   embeddingProfile: z.object({ id: z.string(), modelRepo: z.string() }),
-  topics: z.array(z.object({ id: z.string(), name: z.string() })),
+  topics: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      parentId: z.string().optional(),
+      sortKey: z.string().optional(),
+    }),
+  ),
   minGezelVersion: z.string().optional(),
   /** Present when this user's registry holds a version of the catalog. */
   installed: z
@@ -379,6 +408,59 @@ export const UpdateKnowledgeCatalogRequestSchema = z.object({
   autoUpdate: z.boolean().optional(),
 });
 export type UpdateKnowledgeCatalogRequest = z.infer<typeof UpdateKnowledgeCatalogRequestSchema>;
+
+// ── catalog browsing responses ──────────────────────────────────────────────
+
+/** One topic of a mounted catalog's shipped table of contents. */
+export const KnowledgeTopicNodeSchema = z.object({
+  id: KnowledgeIdSchema,
+  parentId: KnowledgeIdSchema.nullable(),
+  name: z.string(),
+  description: z.string().nullable(),
+  sortKey: z.string(),
+  /** Documents filed directly at this topic. */
+  documentCount: z.number().int().nonnegative(),
+  /** Direct plus every descendant topic's documents. */
+  totalDocumentCount: z.number().int().nonnegative(),
+});
+export type KnowledgeTopicNode = z.infer<typeof KnowledgeTopicNodeSchema>;
+
+/** A document as listed or read from a mounted catalog (body excluded). */
+export const KnowledgeDocumentSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  summary: z.string().nullable(),
+  language: z.string(),
+  topicId: z.string(),
+  ordinal: z.number().int().nullable(),
+  sourceUrl: z.string().nullable(),
+  sourceRevision: z.string().nullable(),
+  sourceUpdatedAt: z.string().nullable(),
+  attribution: z.record(z.string(), z.string()).nullable(),
+  meta: z.record(z.string(), z.unknown()).nullable(),
+});
+export type KnowledgeDocumentSummary = z.infer<typeof KnowledgeDocumentSummarySchema>;
+
+export const KnowledgeDocumentPageSchema = z.object({
+  documents: z.array(KnowledgeDocumentSummarySchema),
+  total: z.number().int().nonnegative(),
+});
+export type KnowledgeDocumentPage = z.infer<typeof KnowledgeDocumentPageSchema>;
+
+export const KnowledgeDocumentReadSchema = KnowledgeDocumentSummarySchema.extend({
+  markdown: z.string(),
+});
+export type KnowledgeDocumentRead = z.infer<typeof KnowledgeDocumentReadSchema>;
+
+/** One declared image asset of a mounted catalog. */
+export const KnowledgeAssetInfoSchema = z.object({
+  path: z.string(),
+  contentType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  sha256: Sha256HexSchema,
+});
+export type KnowledgeAssetInfo = z.infer<typeof KnowledgeAssetInfoSchema>;
 
 export const KnowledgeSearchRequestSchema = z.object({
   query: z.string().min(1),

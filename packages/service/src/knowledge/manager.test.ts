@@ -5,7 +5,7 @@ import { knowledgeCatalogVersionDir } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createInProcessCatalogHost } from './catalog-host.js';
 import type { KnowledgeInstallEvent } from './install.js';
-import { KnowledgeManager } from './manager.js';
+import { KnowledgeManager, KnowledgeNotFoundError } from './manager.js';
 import { buildTestCatalog, testHashVector } from './test-catalog-fixture.js';
 
 let dir: string;
@@ -284,5 +284,24 @@ describe('KnowledgeManager with a registered profile id whose pins differ', () =
     const results = await pinManager.searchUnified('dovetail', { vector: null, maxResults: 5 });
     expect(embedded).toEqual([]);
     expect(results.some((r) => r.documentId === 'dovetails')).toBe(true);
+  });
+});
+
+describe('KnowledgeManager asset access', () => {
+  beforeAll(async () => {
+    // The first describe removed the catalog; mount it again for this one.
+    await runInstall(manager, archivePath);
+  });
+
+  it('refuses assets of catalogs that are not mounted', async () => {
+    await expect(manager.readAsset('nope', 'assets/mark.png')).rejects.toBeInstanceOf(
+      KnowledgeNotFoundError,
+    );
+    await expect(manager.assets('nope')).rejects.toBeInstanceOf(KnowledgeNotFoundError);
+  });
+
+  it('reports no assets for a catalog that ships none', async () => {
+    expect(await manager.assets('test-notes')).toEqual([]);
+    expect(await manager.readAsset('test-notes', 'assets/mark.png')).toBeNull();
   });
 });

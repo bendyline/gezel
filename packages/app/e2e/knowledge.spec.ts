@@ -29,6 +29,11 @@ const HOOK_TIMEOUT_MS = UI_LOAD_TIMEOUT_MS + 60_000;
 const GILDE_REVISION = 'a'.repeat(40);
 const GILDE_REPO = 'Bendyline/shop-notes';
 const GILDE_PATH = 'releases/1.0.0/shop-notes-1.0.0.gezk';
+/** A 1x1 transparent PNG: enough for the asset route and a real `<img>`. */
+const TEST_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+);
 
 /**
  * A gilde data dir for the driven app: the pinned content plus one
@@ -74,13 +79,13 @@ async function buildGildeData(root: string, archivePath: string): Promise<void> 
       schemaVersion: 1,
       version: '1.0.0',
       releasedAt: '2026-09-01T00:00:00.000Z',
-      formatVersion: '0.5',
+      formatVersion: '0.6',
       huggingface: { repo: GILDE_REPO, revision: GILDE_REVISION, path: GILDE_PATH },
       sha256: createHash('sha256').update(bytes).digest('hex'),
       archiveBytes: bytes.length,
       uncompressedBytes: bytes.length * 2,
-      documents: 2,
-      chunks: 2,
+      documents: 3,
+      chunks: 3,
       embeddingProfile: { id: 'bge-small-en-v1.5@1', modelRepo: 'Xenova/bge-small-en-v1.5' },
       topics: [
         { id: 'joinery', name: 'Joinery' },
@@ -147,6 +152,7 @@ async function buildCatalog(outputPath: string, workDir: string): Promise<void> 
     },
     topics: [
       { id: 'joinery', name: 'Joinery' },
+      { id: 'joinery-variants', name: 'Variants', parentId: 'joinery' },
       { id: 'finishing', name: 'Finishing' },
     ],
     documents: (async function* () {
@@ -157,7 +163,20 @@ async function buildCatalog(outputPath: string, workDir: string): Promise<void> 
         summary: 'Interlocking corner joinery.',
         language: 'en',
         topicPath: ['joinery'],
-        markdown: '# Dovetail Joints\n\nTails and pins interlock for a strong corner.\n',
+        ordinal: 2,
+        markdown:
+          '# Dovetail Joints\n\nTails and pins interlock for a strong corner.\n\n![Shop mark](assets/mark.png)\n',
+      };
+      yield {
+        id: 'half-blind',
+        title: 'Half-Blind Dovetails',
+        slug: 'half-blind',
+        summary: 'Tails hidden from the front.',
+        language: 'en',
+        topicPath: ['joinery', 'joinery-variants'],
+        ordinal: 1,
+        markdown:
+          '# Half-Blind Dovetails\n\nThe tails stop short of the face so the front stays clean.\n',
       };
       yield {
         id: 'shellac',
@@ -169,6 +188,7 @@ async function buildCatalog(outputPath: string, workDir: string): Promise<void> 
         markdown: '# Shellac\n\nShellac dries fast and repairs easily.\n',
       };
     })(),
+    assets: [{ path: 'assets/mark.png', content: TEST_PNG }],
     outputPath,
     embeddingProfile: {
       id: 'test-hash-embed@1',
@@ -276,9 +296,22 @@ test.describe('Knowledge catalogs', () => {
     // Browse: TOC → topic → document → provenance actions.
     await page.getByTestId('sidebar-area-knowledge').click();
     await expect(page.getByTestId('knowledge-view')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('button', { name: /Joinery/ })).toBeVisible();
+    // gezk 0.6: the Joinery row rolls its nested Variants shelf up (two
+    // documents, not one), the listing puts ordered documents first, and the
+    // body's asset paints from a blob: URL fetched through the client.
+    const joinery = page.getByRole('button', { name: /Joinery/ });
+    await expect(joinery).toBeVisible();
+    await expect(joinery.locator('.knowledge-topic-count')).toHaveText('2');
+    await joinery.click();
+    await expect(page.locator('.knowledge-doc-row .knowledge-doc-title')).toHaveText([
+      'Half-Blind Dovetails',
+      'Dovetail Joints',
+    ]);
     await page.getByRole('button', { name: /Dovetail Joints/ }).click();
     await expect(page.locator('.knowledge-reader-header h2')).toHaveText('Dovetail Joints', {
+      timeout: 10_000,
+    });
+    await expect(page.locator('.knowledge-reader-body img[src^="blob:"]')).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByRole('button', { name: 'Copy citation' })).toBeVisible();

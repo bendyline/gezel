@@ -24,7 +24,7 @@ export type ShotScope = 'page' | 'element';
 export type ShotTheme = 'light' | 'dark';
 
 export interface ShotEntry {
-  /** Stable, AI-addressable key: `${area}/${name}` (+ `-dark` for the dark twin). */
+  /** Stable key: area/name, with theme and non-default viewport suffixes. */
   key: string;
   name: string;
   area: string;
@@ -36,6 +36,8 @@ export interface ShotEntry {
   selector?: string;
   theme: ShotTheme;
   viewport: string;
+  /** True when the frame passed the visual suite's baseline assertion. */
+  regression?: boolean;
   /** Selector strings of regions painted over before capture. */
   masked: string[];
   /** Source spec file, for provenance. */
@@ -120,7 +122,12 @@ function renderIndex(entries: ShotEntry[]): string {
   for (const area of [...byArea.keys()].sort()) {
     lines.push(`## ${area}`, '');
     for (const e of byArea.get(area)!) {
-      const badges = [e.scope, e.theme, e.viewport].join(' · ');
+      const badges = [
+        e.scope,
+        e.theme,
+        e.viewport,
+        e.regression ? 'visual gate' : 'gallery only',
+      ].join(' · ');
       lines.push(`### \`${e.key}\` · ${badges}`);
       lines.push(`![${e.key}](${e.relativePath})`);
       lines.push('');

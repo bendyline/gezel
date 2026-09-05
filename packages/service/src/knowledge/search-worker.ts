@@ -29,6 +29,8 @@ export interface KnowledgeWorkerRequest {
     | 'topics'
     | 'documentsPage'
     | 'getDocument'
+    | 'assets'
+    | 'readAsset'
     | 'search'
     | 'dispose';
   args: unknown[];

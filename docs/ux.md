@@ -587,7 +587,9 @@ composer claims Shift+Enter in a capture-phase handler on its own wrapper
 — Squisq's `submitOnEnter` hook is plain-Enter-only and is left unset, so
 Enter reaches the editor as the ordinary paragraph break it should be.
 
-**The draft can take the window.** An icon key immediately left of Send
+**The draft can take the window.** An icon key at the right end of the To
+line — past the recipient picker and the compose-mode tabs, so the frame's
+size control sits with the frame's other keys rather than crowding Send —
 toggles the composer between its three-line strip and the top ~80% of the
 chat column, because a brief or a PRD is unreadable through a slot and
 scrolling it inside the slot loses the shape of the thing being written.

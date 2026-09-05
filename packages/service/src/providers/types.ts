@@ -641,6 +641,8 @@ export interface ImageAttachment {
 import type { ProviderQueue } from './queue.js';
 
 export interface SendAndWaitOpts {
+  /** Structured intent from a caller that knows whether a file exists or failed checks. */
+  fileTurnIntent?: import('@bendyline/gezel').FileTurnIntent;
   timeoutMs?: number;
   attachments?: ImageAttachment[];
   /**

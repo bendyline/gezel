@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
@@ -15,7 +15,7 @@ import { invalidateModelsCache } from './models.js';
  *
  * Mounted under `/api/llama-cpp` from `http/server.ts`.
  */
-export function llamaCppRoutes(ctx: ServiceContext): Hono {
+export function llamaCppRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/llama-cpp', '/v1/remote/manage/llama-cpp'));
 
@@ -120,7 +120,7 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
 
   /**
    * Install a chat-model entry's llama.cpp source. The install itself runs
-   * as a background job owned by {@link ServiceContext.chatInstalls} — this
+   * as a background job owned by {@link EngineContext.chatInstalls} — this
    * SSE is just a subscriber, so a client disconnect detaches the consumer
    * without abandoning the download. Idempotent: a second `POST` for a
    * running id attaches to the in-flight install rather than starting (or

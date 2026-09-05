@@ -130,6 +130,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
         model: 'copilot:mock-fast', // mock provider is seeded under 'copilot'
         systemMessage: 'You are a test.',
         prompt: 'hello',
+        fileTurnIntent: { kind: 'repair-file', path: 'lib/decoder.rs' },
         priorMessages: [],
         queue: { lane: 'interactive', affinity: true, sessionId: 's1', gezelId: 'g1' },
       }),
@@ -141,6 +142,10 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text).toContain('"type":"reasoning_delta"');
     expect(text).toContain('"type":"done"');
     expect(text).not.toContain('"type":"error"');
+    expect(provider.calls.find((call) => call.kind === 'send')?.sendOpts?.fileTurnIntent).toEqual({
+      kind: 'repair-file',
+      path: 'lib/decoder.rs',
+    });
     expect(text.indexOf('"type":"reasoning_delta"')).toBeLessThan(text.indexOf('"type":"done"'));
   });
 

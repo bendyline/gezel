@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SHARED_PROJECT_ID, isSharedLibraryProject } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectDeleteError, Store } from './store.js';
 
 let home: string;
@@ -15,6 +15,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(home, { recursive: true, force: true });
 });
 
@@ -72,6 +73,21 @@ describe('ensureSharedProject', () => {
     // The redirect is remembered, so the next boot resolves the same project.
     expect((await store.readConfig()).sharedProjectId).toBe(id);
     expect((await store.ensureSharedProject()).id).toBe(id);
+  });
+
+  it('preserves settings changed while it creates the library after an id collision', async () => {
+    await store.createProject({ name: 'Shared' }, { id: SHARED_PROJECT_ID });
+    await store.writeConfig({ debugMode: false });
+    const readConfig = store.readConfig.bind(store);
+    vi.spyOn(store, 'readConfig').mockImplementationOnce(async () => {
+      const snapshot = await readConfig();
+      await store.writeConfig({ debugMode: true });
+      return snapshot;
+    });
+
+    const { id } = await store.ensureSharedProject();
+
+    expect(await store.readConfig()).toEqual({ debugMode: true, sharedProjectId: id });
   });
 
   it('claims a fresh id rather than returning a foreign project at the configured id', async () => {

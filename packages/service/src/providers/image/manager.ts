@@ -15,12 +15,12 @@
  */
 
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
-import type { Store } from '../../fs/store.js';
+import type { ConfigStore } from '../../fs/config-store.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
+import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
-import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createImageProvider } from './factory.js';
 import { RemoteImageProvider } from './remote-image.js';
 
@@ -29,8 +29,8 @@ import type { ImageProvider } from './types.js';
 
 export interface ImageProviderManagerOptions {
   home: string;
-  store: Store;
-  secrets: SecretStore;
+  store: Pick<ConfigStore, 'readConfig'>;
+  secrets?: SecretStore;
   /** Ignore cloud provider config; used by the machine-only engine broker. */
   localOnly?: boolean;
   /** Override env for tests. */
@@ -46,18 +46,13 @@ export interface ImageProviderManagerOptions {
 
 export class ImageProviderManager {
   private readonly home: string;
-  private readonly store: Store;
-  private readonly secrets: SecretStore;
+  private readonly store: Pick<ConfigStore, 'readConfig'>;
+  private readonly secrets: SecretStore | undefined;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly arbiter: GpuArbiter | undefined;
   private readonly localOnly: boolean;
 
-  private current_: ImageProvider | null = null;
-  private currentView_: ImageProvider | null = null;
-  private retiring_: ImageProvider | null = null;
-  private buildPromise: Promise<ImageProvider> | null = null;
-  private machineRetirement: Promise<void> | null = null;
-  private readonly activity = new ProviderRetirementGate();
+  private readonly local = new ProviderLifecycle<ImageProvider>(new Set(['generate']));
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -66,6 +61,8 @@ export class ImageProviderManager {
   >();
 
   constructor(opts: ImageProviderManagerOptions) {
+    if (!opts.localOnly && !opts.secrets)
+      throw new Error('Product image providers require a credential store');
     this.home = opts.home;
     this.store = opts.store;
     this.secrets = opts.secrets;
@@ -139,75 +136,40 @@ export class ImageProviderManager {
    * a leaked provider that never gets `shutdown()`.
    */
   async current(): Promise<ImageProvider> {
-    if (this.buildPromise) return this.buildPromise;
-    this.buildPromise = (async () => {
-      const config = await this.store.readConfig();
-      const machineRemoteId = this.machineEngineRemoteId?.();
-      if (machineRemoteId && isMachineImageProvider(config, this.env ?? process.env)) {
-        const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
-        if (target) return this.providerForRemoteTarget(target);
-      }
-      if (this.current_) return this.currentView_ ?? this.current_;
-      const provider = await createImageProvider({
-        home: this.home,
-        ...(this.env ? { env: this.env } : {}),
-        config,
-        secrets: this.secrets,
-        localOnly: this.localOnly,
-        ...(this.arbiter ? { arbiter: this.arbiter } : {}),
-      });
-      this.current_ = provider;
-      this.currentView_ = isMachineImageProvider(config, this.env ?? process.env)
-        ? trackProviderOperations(provider, this.activity, new Set(['generate']))
-        : provider;
-      return this.currentView_;
-    })().finally(() => {
-      this.buildPromise = null;
-    });
-    return this.buildPromise;
+    const config = await this.store.readConfig();
+    const machineRemoteId = this.machineEngineRemoteId?.();
+    if (machineRemoteId && isMachineImageProvider(config, this.env ?? process.env)) {
+      const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
+      if (target) return this.providerForRemoteTarget(target);
+    }
+    return this.local.current(
+      async () => {
+        return createImageProvider({
+          home: this.home,
+          ...(this.env ? { env: this.env } : {}),
+          config,
+          ...(this.secrets ? { secrets: this.secrets } : {}),
+          localOnly: this.localOnly,
+          ...(this.arbiter ? { arbiter: this.arbiter } : {}),
+        });
+      },
+      isMachineImageProvider(config, this.env ?? process.env),
+    );
   }
 
-  /**
-   * Tear down the cached provider so the next `current()` rebuilds.
-   * Called when image-related config or credentials change.
-   */
   async reset(): Promise<void> {
-    const prev = this.current_;
-    this.current_ = null;
-    this.currentView_ = null;
-    if (prev?.shutdown) {
-      await prev.shutdown().catch((err: unknown) => {
-        log.warn(
-          '[image-provider] shutdown during reset failed:',
-          err instanceof Error ? err.message : String(err),
-        );
-      });
-    }
+    await this.local.reset().catch((err: unknown) => {
+      log.warn(
+        '[image-provider] shutdown during reset failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    });
   }
 
-  /** Drain and retire only the native sd-cpp provider. User-owned cloud
-   * providers remain live in this daemon and retain their secret-store scope. */
   async retireLocalForMachineBroker(): Promise<void> {
-    if (this.machineRetirement) return this.machineRetirement;
-    const run = (async () => {
-      const config = await this.store.readConfig();
-      if (!isMachineImageProvider(config, this.env ?? process.env)) return;
-      this.activity.beginRetirement();
-      await this.buildPromise;
-      this.retiring_ ??= this.current_;
-      this.current_ = null;
-      this.currentView_ = null;
-      await this.activity.waitForIdle();
-      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
-      this.retiring_ = null;
-    })();
-    this.machineRetirement = run;
-    try {
-      await run;
-    } catch (error) {
-      if (this.machineRetirement === run) this.machineRetirement = null;
-      throw error;
-    }
+    const config = await this.store.readConfig();
+    if (isMachineImageProvider(config, this.env ?? process.env))
+      await this.local.retireForMachineBroker();
   }
 
   async shutdown(): Promise<void> {

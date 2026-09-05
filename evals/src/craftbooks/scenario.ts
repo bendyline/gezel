@@ -156,6 +156,29 @@ function directWorkerNeedsImageToolset(spec: CraftbookEvalSpec): boolean {
   return fileCountNeedsRaster || deliverableIsRaster;
 }
 
+/**
+ * A spec that GRADES an artifact-drawer file can only pass when the worker can
+ * call `write_artifact` / `read_artifact`.
+ *
+ * This is the third instance of the same trap the `images` and cli-shim
+ * `code-execution` installs above already document: installing any per-gezel
+ * builtin group creates an override that REPLACES the worker's role kit, so a
+ * worker outfitted with workspace tools silently loses `artifacts`. It stayed
+ * latent only because artifact-task specs almost never graded an artifact —
+ * they graded a workspace path even when the book itself writes to the drawer
+ * and forbids workspace writes. Repointing those specs at the drawer (which is
+ * what makes them measure the craftbook at all) makes this reachable, so the
+ * install has to stop being conditional on `mode === 'workflow'`.
+ */
+function directWorkerNeedsArtifactToolset(spec: CraftbookEvalSpec): boolean {
+  if ((spec.success.deliverables ?? []).some((deliverable) => deliverable.artifact)) return true;
+  const checks: CraftbookEvalGateCheck[] = [
+    ...(spec.success.checks ?? []),
+    ...(spec.success.deliverables ?? []).flatMap((deliverable) => deliverable.checks ?? []),
+  ];
+  return checks.some((check) => (check as { artifact?: boolean }).artifact === true);
+}
+
 interface ToolCallLike {
   name?: string;
   success?: boolean;
@@ -816,12 +839,35 @@ function taskAssigneeGezelId(task: Task): string | undefined {
   return assignee?.kind === 'gezel' ? assignee.gezelId : undefined;
 }
 
+/**
+ * A fingerprint of how far the craftbook task has WALKED, distinct from the
+ * rendered `task-graph.md` view the grader reads.
+ *
+ * The rendered view lists the step definitions, which never change, so it is
+ * byte-identical from the first poll to the last even while the task advances
+ * through five steps. Anything that needs to ask "did this move?" — the
+ * escalation ladder above all — has to read the live position instead: the
+ * task's status, its active step, and each step's attempt count.
+ */
+function taskProgressFingerprint(tasks: Task[]): string {
+  return tasks
+    .map((task) => {
+      const steps = task.craftbook.steps
+        .map((step) => `${step.id}:${(step as { attemptCount?: number }).attemptCount ?? 0}`)
+        .join(',');
+      return `${task.ref}|${task.status}|${task.activeStepId ?? '-'}|${steps}`;
+    })
+    .sort()
+    .join('\n');
+}
+
 async function taskGraphTextForSpec(
   client: GezelClient,
   projectId: string,
   spec: CraftbookEvalSpec,
 ): Promise<{
   text: string;
+  progress: string;
   failures: string[];
   taskCount: number;
   matchingCraftbookTaskCount: number;
@@ -932,6 +978,10 @@ async function taskGraphTextForSpec(
       authoringTask ? `Authoring task:\n${taskSummary(authoringTask)}` : 'Authoring task: (none)',
       draftTask ? `Draft task:\n${taskSummary(draftTask)}` : 'Draft task: (none)',
     ].join('\n\n'),
+    progress: taskProgressFingerprint([
+      ...matching,
+      ...(draftTask && !matching.includes(draftTask) ? [draftTask] : []),
+    ]),
     failures,
     taskCount: listed.tasks.length,
     matchingCraftbookTaskCount: matching.length,
@@ -1425,6 +1475,19 @@ function executableFailureDependencyDeliverable(
   );
 }
 
+/**
+ * Polls the virtual repair target may hold the channel at an unchanged sniff
+ * score before the deliverable branch gets a turn.
+ *
+ * Deliberately small. The virtual target's message ("drive the task to a
+ * terminal step") is the right FIRST instruction and usually the right one for
+ * a while — this only fires once it has demonstrably stopped moving the score,
+ * at which point a deliverable with a concrete error is the better use of the
+ * channel. Both are still reported in `failures`; this only decides which one
+ * the repair nudge is addressed to.
+ */
+const VIRTUAL_TARGET_PLATEAU_LIMIT = 12;
+
 function repairVirtualTargetForFailures(
   spec: CraftbookEvalSpec,
   failures: readonly string[],
@@ -1683,6 +1746,11 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
   }
   const prompt = craftbookEvalKickoffPrompt(spec);
   let noWriteRepairState: NoWriteRepairState | null = null;
+  /**
+   * How many consecutive polls the virtual repair target has held the channel
+   * with the sniff score unmoved. See {@link VIRTUAL_TARGET_PLATEAU_LIMIT}.
+   */
+  let virtualTargetPlateau = { score: -1, polls: 0 };
   // Advisory judge wiring from the book's test.json rubric: --llm-judge
   // scores these axes against the primary artifact. Never affects
   // pass/fail — deterministic checks alone decide that.
@@ -1737,6 +1805,13 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           ctx.log(
             `[craftbook:${spec.craftbookId}] installed task + artifact eval toolsets for ${workerId}`,
           );
+        } else if (directWorkerNeedsArtifactToolset(spec)) {
+          await ctx.client.installToolset('builtin.artifacts', {
+            scope: { kind: 'gezel', gezelId: workerId },
+          });
+          ctx.log(
+            `[craftbook:${spec.craftbookId}] installed artifacts eval toolset for ${workerId} (graded artifact deliverable)`,
+          );
         }
         // A cli-shim mock is USED via `run_script` — that tool lives in
         // the code-execution builtin toolset, which the workspace set
@@ -1769,15 +1844,30 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         if (spec.mode === 'workflow') {
           await dispatchCraftbookTask(ctx, spec, projectId, workerId);
         } else {
-          const primaryDeliverablePath = spec.success.deliverables?.[0]?.path;
+          // `expectedDeliverable` is a WORKSPACE contract by definition
+          // (`ExpectedDeliverableSchema.filePath` is workspace-root-relative),
+          // and the MCP server acts on it: `write_artifact` to that exact path
+          // is redirected into the workspace with "use write_file next time".
+          // Declaring it for a deliverable graded in the ARTIFACTS drawer
+          // therefore makes the eval unwinnable — the model calls
+          // `write_artifact`, is told it succeeded, and the drawer stays
+          // empty. Wild-caught on craftbook-a11y-audit, whose book forbids
+          // workspace writes outright.
+          // Take the first WORKSPACE deliverable rather than deliverables[0]:
+          // a book like doc-rewrite grades an artifact audit note first and the
+          // rewritten workspace file second, and that file still wants the
+          // contract.
+          const workspaceContractPath = (spec.success.deliverables ?? []).find(
+            (deliverable) => !deliverable.artifact,
+          )?.path;
           await ctx.client.sendChatMessage(workerId, {
             message: ctx.mocks ? ctx.mocks.substitute(prompt) : prompt,
             projectId,
-            ...(primaryDeliverablePath
+            ...(workspaceContractPath
               ? {
                   expectedDeliverable: {
                     kind: 'file' as const,
-                    filePath: primaryDeliverablePath,
+                    filePath: workspaceContractPath,
                   },
                 }
               : {}),
@@ -1798,8 +1888,23 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       const taskTokens = await resolveTaskTokens(ctx.client, projectId, spec);
       const rawChecks = successChecksForSpec(spec);
       const checks = taskTokens ? interpolateTaskTokens(rawChecks, taskTokens) : rawChecks;
+      /**
+       * The GATE checks were interpolated above; the DELIVERABLES were not, and
+       * every consumer of a deliverable path downstream is a real read or a real
+       * instruction to the model. Left raw, a book whose deliverable is
+       * `{{task.dir}}/audit.md` (the whole fix-review family — the most
+       * carefully built books in the library) reads a path that cannot exist,
+       * so `bytes` stays 0 for the entire run while the interpolated checks
+       * pass, the repair router never matches a failure to its deliverable,
+       * and the nudge tells the model to `read_file({ path:
+       * "{{task.dir}}/audit.md" })` — a path with braces in it.
+       * Wild-caught on craftbook-accessibility-retrofit: `bytes=0 checks=20/27`.
+       */
+      const resolvedSpec: CraftbookEvalSpec = taskTokens
+        ? { ...spec, success: interpolateTaskTokens(spec.success, taskTokens) }
+        : spec;
       const workspace = workspaceFromClient(ctx.client, projectId);
-      const primaryDeliverable = spec.success.deliverables?.[0];
+      const primaryDeliverable = resolvedSpec.success.deliverables?.[0];
       const primaryText = primaryDeliverable
         ? await readDeliverable(workspace, primaryDeliverable)
         : null;
@@ -1809,6 +1914,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       let taskGraph:
         | {
             text: string;
+            progress: string;
             failures: string[];
             taskCount: number;
             matchingCraftbookTaskCount: number;
@@ -1925,7 +2031,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       const hasConcreteDeliverableFailures = failures.some(
         (failure) =>
           !failure.startsWith('seeded workspace input') &&
-          (spec.success.deliverables ?? []).some((deliverable) =>
+          (resolvedSpec.success.deliverables ?? []).some((deliverable) =>
             failureReferencesPath(failure, deliverable.path),
           ),
       );
@@ -1951,8 +2057,32 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         return { done: false };
       }
 
-      const virtualRepairTarget = repairVirtualTargetForFailures(spec, failures);
-      if (virtualRepairTarget) {
+      // The virtual target keeps the repair channel only while it is EARNING
+      // it. `repairVirtualTargetForFailures` matches `task sourced from
+      // craftbook …`, which is the "has not reached a terminal step" failure —
+      // a condition that holds for nearly a whole trial. Returning early on it
+      // unconditionally meant one message owned the channel start to finish
+      // and every deliverable went unrepaired.
+      //
+      // Wild-caught on the 2026-09-04 smoke run, in BOTH of its failures:
+      // codemod-sweep's `review.md` sat in the workspace, absent from the
+      // artifacts drawer it is graded on, and invoice-run's `report.md` was
+      // 685 bytes against an 800-byte floor with a named-client check unmet.
+      // Each had a concrete, correctable error. Each received ZERO repair
+      // nudges; codemod-sweep then exhausted all four attempts on
+      // task-graph.md and died "missing signals stayed unchanged".
+      //
+      // So: hold the channel while the score moves, and hand it to the
+      // deliverable once it demonstrably is not.
+      const virtualRepairTarget = repairVirtualTargetForFailures(resolvedSpec, failures);
+      if (virtualTargetPlateau.score !== passed) {
+        virtualTargetPlateau = { score: passed, polls: 0 };
+      }
+      const virtualTargetStarving =
+        virtualRepairTarget !== undefined &&
+        virtualTargetPlateau.polls >= VIRTUAL_TARGET_PLATEAU_LIMIT;
+      if (virtualRepairTarget && !virtualTargetStarving) {
+        virtualTargetPlateau.polls += 1;
         noWriteRepairState = null;
         await postSniffFeedback(
           ctx,
@@ -1974,6 +2104,14 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
               virtualRepairTarget.path === 'task-graph.md'
                 ? taskGraphRepairDirective(spec, taskGraph)
                 : undefined,
+            // The rendered task graph IS the progress signal for this virtual
+            // target: it carries the active step and each step's attempt count,
+            // so it moves whenever the craftbook advances. Without it the
+            // ladder charges the model's real step work as failed repairs of a
+            // view it never wrote — see `progressSourceText`.
+            ...(virtualRepairTarget.path === 'task-graph.md' && taskGraph
+              ? { progressSourceText: taskGraph.progress }
+              : {}),
             expectedDeliverable:
               virtualRepairTarget.path === 'task-notes.md'
                 ? { kind: 'file', filePath: 'task-notes.md' }
@@ -1983,7 +2121,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         return { done: false };
       }
 
-      const repairTarget = repairTargetForFailures(spec, failures);
+      const repairTarget = repairTargetForFailures(resolvedSpec, failures);
       const repairDeliverable = repairTarget.deliverable;
       const repairFeedbackFailures = repairTarget.failures;
       const repairDeliverablePath = repairDeliverable?.path ?? 'workspace output';
@@ -2025,7 +2163,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       }
       await postSniffFeedback(
         ctx,
-        spec.success.taskNotes && !spec.success.deliverables?.[0]
+        resolvedSpec.success.taskNotes && !resolvedSpec.success.deliverables?.[0]
           ? 'task-notes.md'
           : repairDeliverablePath,
         {
@@ -2044,9 +2182,12 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
                 repairDeliverable.path,
               )
             : undefined,
-          expectedDeliverable: repairDeliverable
-            ? { kind: 'file', filePath: repairDeliverable.path }
-            : null,
+          // Same workspace-only contract as the kickoff: naming an artifact
+          // path here would redirect the repair write out of the drawer.
+          expectedDeliverable:
+            repairDeliverable && !repairDeliverable.artifact
+              ? { kind: 'file', filePath: repairDeliverable.path }
+              : null,
         },
       );
       if (

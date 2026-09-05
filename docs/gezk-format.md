@@ -2,13 +2,22 @@
 
 The `.gezk` knowledge-catalog format is an **open format** specified outside
 this repository: [bendyline/gezk](https://github.com/bendyline/gezk) holds
-the specification (`spec/gezk-0.5.md`, CC BY 4.0), the JSON Schemas, the
-conformance kit and a Python reference reader. Gezel is its reference
+the specification (`spec/gezk-0.6.md`, CC BY 4.0; `spec/gezk-0.5.md` stays
+as published), the JSON Schemas per version, the conformance kit and a
+Python reference reader. Gezel is its reference
 TypeScript implementation and the decision that opened it is
 [ADR 0012](decisions/0012-gezk-open-format.md).
 
-Current version: **0.5** (preliminary — a minor may break compatibility
-until 1.0; readers support exactly the versions they name).
+Current version: **0.6** (preliminary — a minor may break compatibility
+until 1.0; readers support exactly the versions they name). This
+implementation writes 0.6 (index schema 3) and reads 0.5 (schema 2) as well.
+0.6 is additive over 0.5: documents are filed at the leaf of their topic
+path and readers roll descendants up at read time (0.5 filed everything at
+a root, which left nested topics empty), `documents.ordinal` orders a
+topic's documents, `documents.meta_json` carries opaque producer metadata,
+manifest topics may carry `parentId`/`sortKey`/`description`, and images
+ship under `assets/`. `GEZK_FORMAT_GENERATIONS` in `packages/gezk` is the
+version set every gate reads.
 
 ## Where things live here
 
@@ -26,13 +35,17 @@ Both are generated, never hand-edited, and written into the sibling
 `../gezk` checkout (`GEZK_DIR` overrides):
 
 ```bash
-pnpm --filter @bendyline/gezk export-schemas              # schemas/*.schema.json from the Zod definitions
+pnpm --filter @bendyline/gezk export-schemas              # schemas/<version>/*.schema.json from the Zod definitions
 pnpm --filter @bendyline/gezel-knowledge build-conformance # conformance/ (fixture + vectors), also vendored into packages/knowledge/conformance/
 ```
 
 `packages/knowledge/src/conformance.test.ts` holds this implementation to
 the vendored kit; the gezk repository's CI holds the Python reader to the
 same files. Regenerate both whenever the format changes, and bump the spec.
+The conformance generator never wipes the kit: the previous generation's
+fixture stays under `fixtures/` and its facts move to `vectors.legacy[]`,
+so both readers keep proving they open it. The schemas of an earlier line
+are frozen in their own directory; only the current version's is rewritten.
 
 ## Gezel-specific runtime notes (not part of the format)
 

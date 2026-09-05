@@ -18,6 +18,14 @@ const TOOLCHAIN_ONLY = new Set([
   'documentSlug',
   'BODY_CODEC_MIN_BYTES',
   'MAX_KNOWLEDGE_DOCUMENT_BYTES',
+  'MAX_KNOWLEDGE_DOCUMENT_META_BYTES',
+  'MAX_KNOWLEDGE_TOPIC_DEPTH',
+  'MAX_KNOWLEDGE_ASSET_BYTES',
+  'MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES',
+  'MAX_KNOWLEDGE_ASSET_COUNT',
+  'MAX_KNOWLEDGE_ASSET_PATH_LENGTH',
+  'sniffAssetType',
+  'svgInertnessProblem',
   'ZIP_FIXED_MTIME',
 ]);
 
@@ -32,6 +40,6 @@ describe('core forwards the gezk format surface', () => {
   it('forwards live bindings, not undefined placeholders', () => {
     expect(typeof core.parseKnowledgeUri).toBe('function');
     expect(typeof core.KnowledgeCatalogManifestSchema.safeParse).toBe('function');
-    expect(core.GEZK_FORMAT_VERSION).toBe('0.5');
+    expect(core.GEZK_FORMAT_VERSION).toBe('0.6');
   });
 });

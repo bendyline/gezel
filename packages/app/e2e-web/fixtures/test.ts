@@ -72,6 +72,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
 
       const home = await mkdtemp(join(tmpdir(), `gezel-web-e2e-w${workerInfo.workerIndex}-`));
+      // Keep scheduled/background work from changing the seeded world mid-capture.
+      await writeFile(
+        join(home, 'config.json'),
+        JSON.stringify({
+          aiEngagementMode: 'reactive',
+          nightShift: { enabled: false },
+        }),
+      );
       // Some subsystems read GEZEL_HOME from env rather than the passed option;
       // keep them aligned with the per-worker temp home.
       process.env.GEZEL_HOME = home;

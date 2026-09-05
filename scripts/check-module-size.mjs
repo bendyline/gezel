@@ -16,7 +16,7 @@ export const FLAT_THRESHOLD = 3_000;
 export const HEADROOM_MULTIPLIER = 1.05;
 
 export const GRANDFATHERED = new Map([
-  ['packages/service/src/chat/manager.ts', 17_956],
+  ['packages/service/src/chat/manager.ts', 16_898],
   ['packages/mcp/src/server.ts', 12_293],
   ['packages/service/src/providers/llama-cpp/provider.test.ts', 10_290],
   ['packages/client/src/client.ts', 8_172],
@@ -32,7 +32,7 @@ export const GRANDFATHERED = new Map([
   ['packages/service/src/providers/mlx/provider.ts', 3_795],
   ['packages/service/src/providers/local-tool-call-salvage.ts', 3_643],
   ['packages/service/src/index-store/index-store.ts', 3_473],
-  ['packages/service/src/service.ts', 3_459],
+  ['packages/service/src/product-service.ts', 3_044],
   ['packages/app/src/main.ts', 3_188],
 ]);
 

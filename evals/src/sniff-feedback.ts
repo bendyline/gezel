@@ -117,6 +117,12 @@ interface SniffEscalationState {
     projectId?: string;
     completedMutationTurns: number;
   };
+  /**
+   * Last observed progress fingerprint for a virtual target (see
+   * `progressSourceText`). Undefined on the first observation, so the first
+   * poll never reads as movement.
+   */
+  lastProgressToken?: string;
   /** Stage-3 suppression log emitted once. */
   suppressionLogged: boolean;
 }
@@ -180,7 +186,39 @@ async function advanceEscalationState(
   revisionKey: string,
   filePath: string,
   ladder: 'signature' | 'plateau',
-): Promise<void> {
+  progressToken?: string,
+): Promise<{ reset: boolean }> {
+  if (progressToken !== undefined) {
+    const moved =
+      state.lastProgressToken !== undefined && progressToken !== state.lastProgressToken;
+    state.lastProgressToken = progressToken;
+    if (moved) {
+      // Forward progress on the watched state. Start a fresh ladder rather
+      // than escalating: the check this ladder guards ("has not reached a
+      // terminal step") cannot clear until the run is nearly over, so
+      // escalating through it terminates trials that are still working.
+      if (state.attempts > 1) {
+        ctx.log(
+          `[sniff-feedback] ${ladder} ladder reset for ${filePath}: watched state advanced (was attempt ${state.attempts})`,
+        );
+      }
+      state.attempts = 1;
+      state.sentSinceLastCount = false;
+      state.pendingRepairAction = undefined;
+      state.lastRevisionKey = revisionKey;
+      return { reset: true };
+    }
+    if (state.sentSinceLastCount) {
+      state.attempts += 1;
+      state.sentSinceLastCount = false;
+      state.pendingRepairAction = undefined;
+      ctx.log(
+        `[sniff-feedback] ${ladder} attempt ${state.attempts} for ${filePath}: nudge delivered and the watched state did not advance`,
+      );
+    }
+    state.lastRevisionKey = revisionKey;
+    return { reset: false };
+  }
   let completedPostNudgeRepair = false;
   if (state.sentSinceLastCount && state.pendingRepairAction && ctx.snapshotRepairActions) {
     const checkpoint = state.pendingRepairAction;
@@ -214,6 +252,7 @@ async function advanceEscalationState(
   } else if (revisionChanged) {
     state.lastRevisionKey = revisionKey;
   }
+  return { reset: false };
 }
 
 /**
@@ -319,6 +358,27 @@ export interface SniffFeedbackOptions {
    * escalation stage should pass `dedupeToken`.
    */
   sourceText?: string;
+  /**
+   * Progress fingerprint for a VIRTUAL check target — one whose "content" is a
+   * rendered view of live state (`task-graph.md`, `task-notes.md`) rather than
+   * a file the model writes.
+   *
+   * The default ladder counts a completed post-nudge file mutation as one
+   * failed attempt, because for a real deliverable a byte-identical rewrite is
+   * still a failed repair. For a virtual target that inference inverts: the
+   * model's file writes are its REAL WORK on other files, and counting them
+   * charges the craftbook for executing its own steps. Wild-caught on
+   * `craftbook-accessibility-retrofit`, where four legitimate `fix`-step writes
+   * logged "counted completed post-nudge file mutation for task-graph.md
+   * despite byte-identical checked content" and exhausted the ladder four
+   * seconds after the task advanced to its next step.
+   *
+   * When set, this replaces that inference entirely: a CHANGE means the target
+   * moved forward and resets the ladder; an UNCHANGED value after a delivered
+   * nudge is the honest failed attempt, so a genuinely frozen workflow still
+   * exhausts.
+   */
+  progressSourceText?: string;
   /**
    * Also send a copy to the Meester. Use for coordination-sensitive
    * multimodal scenarios where the direct implementer may be in a long
@@ -483,8 +543,19 @@ export async function postSniffFeedback(
   }
   const coarseKey = coarseSniffSignature(filePath, sniff);
   const revisionKey = `${exactKey}::rev:${contentRevisionToken(opts.sourceText ?? '')}`;
+  const progressToken =
+    opts.progressSourceText !== undefined
+      ? contentRevisionToken(opts.progressSourceText)
+      : undefined;
   const state = ensureEscalationState(escalation, coarseKey, revisionKey);
-  await advanceEscalationState(ctx, state, revisionKey, filePath, 'signature');
+  const signatureAdvance = await advanceEscalationState(
+    ctx,
+    state,
+    revisionKey,
+    filePath,
+    'signature',
+    progressToken,
+  );
 
   // Scenario-level score-plateau counter. Keyed on the score alone — the
   // one thing stable across a progressive failure — so churn in the
@@ -496,7 +567,14 @@ export async function postSniffFeedback(
   let plateauState: SniffEscalationState | undefined;
   if (plateauKey) {
     plateauState = ensureEscalationState(escalation, plateauKey, revisionKey);
-    await advanceEscalationState(ctx, plateauState, revisionKey, filePath, 'plateau');
+    await advanceEscalationState(
+      ctx,
+      plateauState,
+      revisionKey,
+      filePath,
+      'plateau',
+      progressToken,
+    );
   }
   // A write_file clamp is the wrong order when the fix needs a non-write
   // tool first. Plain expectedDeliverable-null flows stay surgical; an
@@ -509,7 +587,30 @@ export async function postSniffFeedback(
   // The plateau ladder only ever RAISES the stage — a frozen signature
   // repeating is always at least as damning as a churning one.
   const plateauDriven = plateauStage > signatureStage;
-  const stage = plateauDriven ? plateauStage : signatureStage;
+  // The TERMINAL rung asks a question about the scenario, not about one
+  // signature: is this trial stuck? A frozen sub-failure beside a climbing
+  // score is not — it is a scenario making progress on everything else while
+  // one gate stays shut.
+  //
+  // `craftbook-codemod-sweep` on the 2026-09-05 smoke run rose 9 -> 25 of 32,
+  // gaining its last point at 03:07:38, and was terminated 15 seconds later
+  // at 03:07:53 with 51 minutes still unused on its 90-minute ceiling —
+  // because `task-graph.md`'s signature ("has not reached a terminal step")
+  // had repeated four times. Same family as the ceiling deaths this suite
+  // has already produced: killed while demonstrably advancing.
+  //
+  // The plateau key is `__plateau__::score:N`, so a rising score mints a
+  // fresh state at attempts 0 and a returning score resumes its own count —
+  // which makes this robust to the 22 -> 21 -> 22 oscillation in that same
+  // timeline. Holding at stage 2 still posts the escalated nudge once and
+  // then dedupes, so a model that is climbing is not spammed either.
+  const scoreStillClimbing =
+    plateauState !== undefined && stageForSniffPlateau(plateauState.attempts) < 2;
+  const stage = plateauDriven
+    ? plateauStage
+    : signatureStage === 3 && scoreStillClimbing
+      ? 2
+      : signatureStage;
   const stagedAttempts = plateauDriven ? plateauState!.attempts : state.attempts;
   const drivingState = plateauDriven ? plateauState! : state;
 
@@ -517,6 +618,14 @@ export async function postSniffFeedback(
   // actually sends even when every other hash input is frozen; identical
   // repeats WITHIN a stage still dedup.
   const key = `${exactKey}::stage:${stage}`;
+  // A progress reset is not a stale repeat: the watched state moved, so the
+  // rung this signature already sent is spent and the ladder must be able to
+  // speak again if the task later freezes. Without this the reset is a
+  // one-way door — attempts stay at 1, stage stays 0, the stage-0 key is
+  // already posted, and nothing is ever delivered or counted again.
+  if (signatureAdvance.reset) {
+    for (let s = 0; s <= 3; s++) posted.delete(`${exactKey}::stage:${s}`);
+  }
   if (stage < 3 && posted.has(key)) return { status: 'deduped' };
 
   let target: TargetGezel | null = null;
@@ -625,6 +734,11 @@ export async function postSniffFeedback(
   }
   try {
     const delivered = await ctx.client.messageGezel(target.gezelId, {
+      fileTurnIntent: {
+        kind: 'repair-file',
+        path: filePath,
+        ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
+      },
       fromGezelId: ctx.meesterId,
       text,
       suppressReply: true,
@@ -1291,6 +1405,7 @@ export async function postMissingDeliverableFeedback(
         return;
       }
       await ctx.client.messageGezel(specialist.gezelId, {
+        fileTurnIntent: { kind: 'create-file', path: filePath },
         fromGezelId: ctx.meesterId,
         text,
         suppressReply: true,

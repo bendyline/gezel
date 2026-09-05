@@ -114,6 +114,7 @@ import { CraftbookSuggestionSchema } from './craftbook.js';
 import { DiffpackSummarySchema } from './diffpack.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
+import { FileTurnIntentSchema } from './file-turn-intent.js';
 import {
   ChatMessageSchema,
   GezelDetailSchema,
@@ -3328,6 +3329,7 @@ export const ChatHistoryResponseSchema = z.object({
 export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;
 
 export const SendChatRequestSchema = z.object({
+  fileTurnIntent: FileTurnIntentSchema.optional(),
   message: z.string().min(1),
   /**
    * Optional project scope. When set, the message lands in (or
@@ -3356,6 +3358,7 @@ export type SendChatResponse = z.infer<typeof SendChatResponseSchema>;
  * sender's inbox. `projectId` defaults to the sender's project.
  */
 export const MessageGezelRequestSchema = z.object({
+  fileTurnIntent: FileTurnIntentSchema.optional(),
   fromGezelId: z.string().min(1),
   fromSessionId: z.string().optional(),
   projectId: z.string().optional(),

@@ -14,10 +14,18 @@
  * and tests call it directly.
  */
 
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { brotliDecompressSync } from 'node:zlib';
 import {
+  type GezkIndexSchemaVersion,
+  MAX_KNOWLEDGE_ASSET_BYTES,
+  assetContentType,
+  isKnowledgeAssetPath,
+} from '@bendyline/gezk';
+import {
+  MANIFEST_PATH,
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
   RERANK_FINAL_K,
   ROUTER_DB_PATH,
@@ -35,7 +43,10 @@ export interface CatalogTopic {
   name: string;
   description: string | null;
   sortKey: string;
+  /** Documents filed directly at this topic (`topics.document_count`). */
   documentCount: number;
+  /** Direct plus every descendant topic's documents (computed at read time). */
+  totalDocumentCount: number;
 }
 
 export interface CatalogDocumentMeta {
@@ -44,12 +55,35 @@ export interface CatalogDocumentMeta {
   slug: string;
   summary: string | null;
   language: string;
+  /** The topic the document is filed at — the leaf of its path on 0.6, the root on 0.5. */
   topicId: string;
+  /** Listing position among the documents of its topic; null when unordered. */
+  ordinal: number | null;
   sourceUrl: string | null;
   sourceRevision: string | null;
   sourceUpdatedAt: string | null;
   attribution: Record<string, string> | null;
+  /** Producer-defined metadata (`meta_json`), opaque to the reader. */
+  meta: Record<string, unknown> | null;
 }
+
+export interface CatalogAssetInfo {
+  /** Archive path under `assets/`. */
+  path: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface CatalogAssetRead extends CatalogAssetInfo {
+  bytes: Uint8Array;
+}
+
+/**
+ * Descendant walks are bounded so a hostile `parent_id` cycle terminates;
+ * the validator refuses cycles and depth beyond MAX_KNOWLEDGE_TOPIC_DEPTH.
+ */
+const TOPIC_WALK_MAX_DEPTH = 32;
 
 export interface CatalogChunkHit {
   chunkUid: string;
@@ -77,13 +111,17 @@ const BIT_INDEX_BUDGET_BYTES = 256 * 1024 * 1024;
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
   private readonly bitIndexes = new Map<string, ShardBitIndex>();
+  private assetsByPath: Map<string, CatalogAssetInfo> | null = null;
   readonly meta: Record<string, string>;
   readonly shards: ShardInfo[];
+  /** The router's `PRAGMA user_version` generation; decides which columns exist. */
+  readonly schemaVersion: GezkIndexSchemaVersion;
 
   private constructor(
     readonly rootDir: string,
     private readonly router: CatalogDb,
   ) {
+    this.schemaVersion = router.schemaVersion;
     this.meta = {};
     for (const row of router.db.prepare('SELECT key, value FROM meta').all() as Array<{
       key: string;
@@ -226,11 +264,45 @@ export class CatalogHandle {
 
   // ── browsing (the shipped table of contents) ──────────────────────────────
 
+  /** The format version the router was written with (`meta.format_version`). */
+  get formatVersion(): string {
+    return this.meta.format_version ?? '';
+  }
+
+  private documentColumns(): string {
+    const base =
+      'id, title, slug, summary, language, topic_id, source_url, source_revision, source_updated_at, attribution_json';
+    return this.schemaVersion >= 3 ? `${base}, ordinal, meta_json` : base;
+  }
+
+  private documentOrder(): string {
+    return this.schemaVersion >= 3
+      ? 'ORDER BY (ordinal IS NULL), ordinal, slug, id'
+      : 'ORDER BY slug, id';
+  }
+
+  /**
+   * Every topic with its direct count and a rollup over its subtree. On a
+   * 0.5 catalog every document sits at a root, so both counts agree there.
+   */
   topics(): CatalogTopic[] {
     return (
       this.router.db
         .prepare(
-          'SELECT id, parent_id, name, description, sort_key, document_count FROM topics ORDER BY sort_key',
+          `WITH RECURSIVE sub(root, id, depth) AS (
+             SELECT id, id, 0 FROM topics
+             UNION ALL
+             SELECT sub.root, t.id, sub.depth + 1 FROM topics t JOIN sub ON t.parent_id = sub.id
+             WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}
+           ),
+           rollup AS (
+             SELECT sub.root AS id, SUM(t.document_count) AS total
+             FROM sub JOIN topics t ON t.id = sub.id GROUP BY sub.root
+           )
+           SELECT t.id, t.parent_id, t.name, t.description, t.sort_key, t.document_count,
+                  rollup.total AS total_document_count
+           FROM topics t JOIN rollup ON rollup.id = t.id
+           ORDER BY t.sort_key, t.id`,
         )
         .all() as Array<{
         id: string;
@@ -239,6 +311,7 @@ export class CatalogHandle {
         description: string | null;
         sort_key: string;
         document_count: number | bigint;
+        total_document_count: number | bigint;
       }>
     ).map((r) => ({
       id: r.id,
@@ -247,30 +320,51 @@ export class CatalogHandle {
       description: r.description,
       sortKey: r.sort_key,
       documentCount: Number(r.document_count),
+      totalDocumentCount: Number(r.total_document_count),
     }));
   }
 
-  documentsPage(opts: { topicId?: string; offset?: number; limit?: number } = {}): {
+  /**
+   * A page of documents, by default including those filed under the topic's
+   * descendants (`descendants: false` lists only the topic's own).
+   */
+  documentsPage(
+    opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean } = {},
+  ): {
     documents: CatalogDocumentMeta[];
     total: number;
   } {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
     const offset = Math.max(0, opts.offset ?? 0);
-    const where = opts.topicId ? 'WHERE topic_id = ?' : '';
-    const params: unknown[] = opts.topicId ? [opts.topicId] : [];
+    const descendants = opts.descendants ?? true;
+    let scope = '';
+    let where = '';
+    const params: unknown[] = [];
+    if (opts.topicId && descendants) {
+      scope = `WITH RECURSIVE sub(id, depth) AS (
+                 SELECT ?, 0
+                 UNION ALL
+                 SELECT t.id, sub.depth + 1 FROM topics t JOIN sub ON t.parent_id = sub.id
+                 WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}
+               )`;
+      where = 'WHERE topic_id IN (SELECT id FROM sub)';
+      params.push(opts.topicId);
+    } else if (opts.topicId) {
+      where = 'WHERE topic_id = ?';
+      params.push(opts.topicId);
+    }
     const total = Number(
       (
         this.router.db
-          .prepare(`SELECT COUNT(*) AS n FROM documents ${where}`)
+          .prepare(`${scope} SELECT COUNT(*) AS n FROM documents ${where}`)
           .get(...(params as [])) as { n: number | bigint }
       ).n,
     );
     const documents = (
       this.router.db
         .prepare(
-          `SELECT id, title, slug, summary, language, topic_id, source_url, source_revision,
-                  source_updated_at, attribution_json
-           FROM documents ${where} ORDER BY slug, id LIMIT ? OFFSET ?`,
+          `${scope} SELECT ${this.documentColumns()}
+           FROM documents ${where} ${this.documentOrder()} LIMIT ? OFFSET ?`,
         )
         .all(...(params as []), limit, offset) as Array<Record<string, unknown>>
     ).map(rowToDocumentMeta);
@@ -280,12 +374,61 @@ export class CatalogHandle {
   getDocument(id: string): (CatalogDocumentMeta & { markdown: string }) | null {
     const row = this.router.db
       .prepare(
-        `SELECT id, title, slug, summary, language, topic_id, source_url, source_revision,
-                source_updated_at, attribution_json, body_codec, body_blob
+        `SELECT ${this.documentColumns()}, body_codec, body_blob
          FROM documents WHERE id = ?`,
       )
       .get(id) as Record<string, unknown> | undefined;
     if (!row) return null;
+    return { ...rowToDocumentMeta(row), markdown: this.decodeBody(id, row) };
+  }
+
+  /** Documents whose `topic_id` names no declared topic (a validator check). */
+  documentsWithUndeclaredTopic(): number {
+    return Number(
+      (
+        this.router.db
+          .prepare(
+            'SELECT COUNT(*) AS n FROM documents d LEFT JOIN topics t ON t.id = d.topic_id WHERE t.id IS NULL',
+          )
+          .get() as { n: number | bigint }
+      ).n,
+    );
+  }
+
+  /**
+   * Validator support: every `meta_json` must be a JSON object within the
+   * byte limit. Returns the offending ids (capped) rather than throwing.
+   */
+  checkDocumentMeta(maxBytes: number, cap = 5): { invalid: string[]; oversize: string[] } {
+    const invalid: string[] = [];
+    const oversize: string[] = [];
+    if (this.schemaVersion < 3) return { invalid, oversize };
+    const rows = this.router.db
+      .prepare('SELECT id, meta_json FROM documents WHERE meta_json IS NOT NULL')
+      .iterate() as Iterable<{ id: string; meta_json: string }>;
+    for (const row of rows) {
+      if (invalid.length >= cap && oversize.length >= cap) break;
+      if (Buffer.byteLength(row.meta_json, 'utf8') > maxBytes) {
+        if (oversize.length < cap) oversize.push(row.id);
+        continue;
+      }
+      if (parseJsonObject(row.meta_json) === null && invalid.length < cap) invalid.push(row.id);
+    }
+    return { invalid, oversize };
+  }
+
+  /** Validator support: decoded bodies, streamed one at a time. */
+  *documentBodies(): IterableIterator<{ id: string; markdown: string }> {
+    const rows = this.router.db
+      .prepare('SELECT id, body_codec, body_blob FROM documents ORDER BY id')
+      .iterate() as Iterable<Record<string, unknown>>;
+    for (const row of rows) {
+      const id = row.id as string;
+      yield { id, markdown: this.decodeBody(id, row) };
+    }
+  }
+
+  private decodeBody(id: string, row: Record<string, unknown>): string {
     const blob = row.body_blob as Uint8Array;
     if (blob.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES + 1024) {
       throw new CatalogOpenError(`document body exceeds the stored-size limit: ${id}`, 'corrupt');
@@ -308,8 +451,73 @@ export class CatalogHandle {
     } else {
       throw new CatalogOpenError(`unknown document body codec for ${id}`, 'corrupt');
     }
-    const markdown = body.toString('utf8');
-    return { ...rowToDocumentMeta(row), markdown };
+    return body.toString('utf8');
+  }
+
+  // ── assets ────────────────────────────────────────────────────────────────
+
+  /**
+   * The manifest's `files` entries under `assets/`, read lazily: the
+   * declaration in the manifest is what authorizes serving a file, since
+   * extraction reconciled and hashed every declared entry.
+   */
+  private assetIndex(): Map<string, CatalogAssetInfo> {
+    if (this.assetsByPath) return this.assetsByPath;
+    const index = new Map<string, CatalogAssetInfo>();
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(join(this.rootDir, MANIFEST_PATH), 'utf8'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.assetsByPath = index;
+        return index;
+      }
+      throw new CatalogOpenError(
+        `cannot read ${MANIFEST_PATH}: ${error instanceof Error ? error.message : String(error)}`,
+        'corrupt',
+      );
+    }
+    const files = (raw as { files?: unknown } | null)?.files;
+    if (Array.isArray(files)) {
+      for (const file of files as Array<Record<string, unknown>>) {
+        const path = file?.path;
+        if (typeof path !== 'string' || !isKnowledgeAssetPath(path)) continue;
+        const contentType = assetContentType(path);
+        if (!contentType || typeof file.sizeBytes !== 'number' || typeof file.sha256 !== 'string') {
+          continue;
+        }
+        index.set(path, { path, contentType, sizeBytes: file.sizeBytes, sha256: file.sha256 });
+      }
+    }
+    this.assetsByPath = index;
+    return index;
+  }
+
+  /** Declared assets, sorted by path. */
+  assets(): CatalogAssetInfo[] {
+    return [...this.assetIndex().values()].sort((a, b) => (a.path < b.path ? -1 : 1));
+  }
+
+  /** One declared asset's bytes, or null when the catalog declares no such asset. */
+  readAsset(path: string): CatalogAssetRead | null {
+    const info = this.assetIndex().get(path);
+    if (!info) return null;
+    if (info.sizeBytes > MAX_KNOWLEDGE_ASSET_BYTES) {
+      throw new CatalogOpenError(`asset exceeds the size limit: ${path}`, 'corrupt');
+    }
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(this.resolveCatalogPath(path));
+    } catch (error) {
+      throw new CatalogOpenError(
+        `cannot read asset ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        'corrupt',
+      );
+    }
+    if (bytes.byteLength !== info.sizeBytes) {
+      throw new CatalogOpenError(`asset size differs from the manifest: ${path}`, 'corrupt');
+    }
+    return { ...info, bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) };
   }
 
   // ── search ────────────────────────────────────────────────────────────────
@@ -503,15 +711,20 @@ export class CatalogHandle {
   }
 }
 
-function rowToDocumentMeta(row: Record<string, unknown>): CatalogDocumentMeta {
-  let attribution: Record<string, string> | null = null;
-  if (typeof row.attribution_json === 'string') {
-    try {
-      attribution = JSON.parse(row.attribution_json) as Record<string, string>;
-    } catch {
-      attribution = null;
-    }
+function parseJsonObject<T>(raw: unknown): T | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as T)
+      : null;
+  } catch {
+    return null;
   }
+}
+
+function rowToDocumentMeta(row: Record<string, unknown>): CatalogDocumentMeta {
+  const ordinal = row.ordinal;
   return {
     id: row.id as string,
     title: row.title as string,
@@ -519,10 +732,12 @@ function rowToDocumentMeta(row: Record<string, unknown>): CatalogDocumentMeta {
     summary: (row.summary as string | null) ?? null,
     language: row.language as string,
     topicId: row.topic_id as string,
+    ordinal: typeof ordinal === 'number' || typeof ordinal === 'bigint' ? Number(ordinal) : null,
     sourceUrl: (row.source_url as string | null) ?? null,
     sourceRevision: (row.source_revision as string | null) ?? null,
     sourceUpdatedAt: (row.source_updated_at as string | null) ?? null,
-    attribution,
+    attribution: parseJsonObject<Record<string, string>>(row.attribution_json),
+    meta: parseJsonObject<Record<string, unknown>>(row.meta_json),
   };
 }
 

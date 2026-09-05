@@ -86,6 +86,35 @@ describe('ModelFitnessManager', () => {
     expect(events).toEqual(['start:a', 'end:a', 'start:b', 'end:b']);
   });
 
+  it('shutdown discards an active probe result and prevents queued or later probes', async () => {
+    let started!: () => void;
+    let release!: () => void;
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runs: string[] = [];
+    const mgr = makeManager({
+      runProbe: async (args) => {
+        runs.push(args.modelId);
+        started();
+        await gate;
+        return record({ modelId: args.modelId });
+      },
+    });
+    mgr.scheduleProbe('llama-cpp', 'a', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'b', { trigger: 'manual' });
+    await begun;
+    mgr.stop();
+    mgr.scheduleProbe('llama-cpp', 'c', { trigger: 'manual' });
+    release();
+    await drained(mgr);
+    expect(runs).toEqual(['a']);
+    expect(await store.readConfig()).toEqual({});
+  });
+
   it('dedupe: scheduling an already-pending key joins instead of re-running', async () => {
     let runs = 0;
     let release: () => void = () => {};

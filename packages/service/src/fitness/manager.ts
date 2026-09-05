@@ -21,6 +21,7 @@
  *   and skip invalid ones — a mangled record never breaks the list.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import type { GezelConfig, ModelFitnessRecord, ModelFitnessTrigger } from '@bendyline/gezel';
 import { ModelFitnessRecordSchema, createLogger, modelFitnessKey } from '@bendyline/gezel';
 import { CapacityBroker } from '../providers/native/capacity-broker.js';
@@ -64,12 +65,19 @@ export class ModelFitnessManager {
   private readonly opts: ModelFitnessManagerOptions;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  private readonly stopping = new AbortController();
+  stop(): void {
+    this.stopping.abort();
+  }
+
   private chain: Promise<void> = Promise.resolve();
   private readonly pending = new Set<string>();
 
   constructor(opts: ModelFitnessManagerOptions) {
     this.opts = opts;
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.sleep =
+      opts.sleep ??
+      ((ms) => delay(ms, undefined, { signal: this.stopping.signal }).catch(() => {}));
     this.now = opts.now ?? Date.now;
   }
 
@@ -88,6 +96,7 @@ export class ModelFitnessManager {
     modelId: string,
     opts: { trigger: ModelFitnessTrigger },
   ): void {
+    if (this.stopping.signal.aborted) return;
     const key = modelFitnessKey(provider, modelId);
     if (this.pending.has(key)) {
       log.debug(`proeve ${key} already pending — joining`);
@@ -113,6 +122,7 @@ export class ModelFitnessManager {
     modelId: string,
     trigger: ModelFitnessTrigger,
   ): Promise<void> {
+    if (this.stopping.signal.aborted) return;
     if (trigger === 'install') {
       const ok = await this.waitForHeadroom(provider, modelId);
       if (!ok) {
@@ -123,6 +133,7 @@ export class ModelFitnessManager {
         return;
       }
     }
+    if (this.stopping.signal.aborted) return;
     const record = await this.opts.runProbe({ provider, modelId, trigger });
     await this.persist(record);
   }
@@ -148,11 +159,12 @@ export class ModelFitnessManager {
     const retryMs = this.opts.deferRetryMs ?? DEFER_RETRY_MS;
     const budgetMs = this.opts.deferBudgetMs ?? DEFER_BUDGET_MS;
     const start = this.now();
-    while (true) {
+    while (!this.stopping.signal.aborted) {
       if (await this.headroomAvailable(provider, modelId)) return true;
       if (this.now() - start >= budgetMs) return false;
       await this.sleep(retryMs);
     }
+    return false;
   }
 
   private async buildDeferredRecord(
@@ -192,7 +204,9 @@ export class ModelFitnessManager {
   }
 
   private async persist(record: ModelFitnessRecord): Promise<void> {
+    if (this.stopping.signal.aborted) return;
     const config = await this.opts.store.readConfig();
+    if (this.stopping.signal.aborted) return;
     const map: Record<string, unknown> = { ...(config.modelFitness ?? {}) };
     map[modelFitnessKey(record.provider, record.modelId)] = record;
     await this.opts.store.writeConfig({ modelFitness: map });

@@ -3,7 +3,7 @@ import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import { bearerAuth, requireScope } from './auth.js';
-import type { ServiceContext } from './context.js';
+import type { EngineContext } from './engine-context.js';
 import { hostGuard } from './host-guard.js';
 import { v1AppsRoutes } from './routes/v1-apps.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
@@ -22,7 +22,7 @@ export function isRemoteServingRoute(method: string, path: string): boolean {
   return path === '/v1/remote' || path.startsWith('/v1/remote/');
 }
 
-export function buildRemoteApp(ctx: ServiceContext): Hono {
+export function buildRemoteApp(ctx: EngineContext): Hono {
   const app = new Hono();
   const log = createLogger('remote-http');
 

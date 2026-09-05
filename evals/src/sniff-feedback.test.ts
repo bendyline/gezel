@@ -7,6 +7,8 @@ import {
   lastDeliveredHarnessIntervention,
   postMissingDeliverableFeedback,
   postSniffFeedback,
+  stageForSniffAttempts,
+  stageForSniffPlateau,
   structuralOrderRepairLine,
 } from './sniff-feedback.ts';
 import type { SniffResult } from './success-check.ts';
@@ -2171,6 +2173,75 @@ describe('sniff escalation ladder', () => {
     );
   });
 
+  it('resets the ladder when a virtual target advances, and still exhausts when it freezes', async () => {
+    // Wild-caught on craftbook-accessibility-retrofit: the workflow-mode
+    // check target `task-graph.md` is a rendered view, not a file the model
+    // writes, and "the task has not reached a terminal step" cannot clear
+    // until the run is nearly over. The default ladder counted each of the
+    // model's real step writes as a failed repair of that view and killed the
+    // trial four seconds after the task advanced to its next step.
+    const logs: string[] = [];
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'runner-1', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    const ctx = {
+      ...makeCtx(client),
+      log: (message: string) => logs.push(message),
+      requestTerminalFailure,
+      // Every poll reports a completed post-nudge mutation — the shape that
+      // used to drive the counter. With a progress signal it must not.
+      snapshotRepairActions: async () => ({ completedMutationTurns: 99, inflight: false }),
+    };
+    const sniff = failingSniff({
+      failReason: 'task sourced from craftbook x has not reached a terminal step',
+      missingRequiredSignals: ['task sourced from craftbook x has not reached a terminal step'],
+    });
+
+    // Six polls, each with the task on a further step. Never exhausts.
+    for (const step of ['audit', 'fix', 'fix2', 'validate', 'evaluate', 'review']) {
+      await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+        projectId: 'p1',
+        expectedDeliverable: null,
+        progressSourceText: `p/1|active|${step}`,
+      });
+    }
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+
+    // Now the task freezes on one step: the honest failed attempts accrue and
+    // the ladder still terminates.
+    const statuses: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+        projectId: 'p1',
+        expectedDeliverable: null,
+        progressSourceText: 'p/1|active|review',
+      });
+      statuses.push(r.status);
+    }
+    expect(statuses).toContain('exhausted');
+    expect(logs.join('\n')).toContain('the watched state did not advance');
+  });
+
+  it('does not treat the first observation of a progress signal as movement', async () => {
+    const logs: string[] = [];
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'runner-1', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    const ctx = { ...makeCtx(client), log: (m: string) => logs.push(m) };
+    const sniff = failingSniff();
+    await postSniffFeedback(ctx, 'task-graph.md', sniff, {
+      projectId: 'p1',
+      expectedDeliverable: null,
+      progressSourceText: 'p/1|active|audit',
+    });
+    expect(logs.join('\n')).not.toContain('ladder reset');
+  });
+
   it('defers exhaustion while the repair target is still mid-turn', async () => {
     const logs: string[] = [];
     const inflight: Array<{
@@ -2681,5 +2752,49 @@ describe('score-plateau escalation (progressive failures)', () => {
     expect(texts.length).toBe(2);
     expect(texts[1]).toContain('REPEAT MISS — attempt 2');
     expect(texts[1]).not.toContain('SCORE PLATEAU');
+  });
+});
+
+describe('terminal rung requires the SCENARIO to be stuck, not one signature', () => {
+  /**
+   * craftbook-codemod-sweep, 2026-09-05: score climbed 9 -> 25 of 32, gained
+   * its last point at 03:07:38, and was terminated 15s later at 03:07:53 with
+   * 51 of its 90 minutes unused — because task-graph.md's signature had
+   * repeated four times. The signature ladder was right that THAT gate was
+   * stuck; it was wrong that the trial was.
+   */
+  const resolveStage = (signatureAttempts: number, scorePlateauAttempts: number | null) => {
+    const signatureStage = stageForSniffAttempts(signatureAttempts);
+    const plateauStage =
+      scorePlateauAttempts === null ? 0 : stageForSniffPlateau(scorePlateauAttempts);
+    if (plateauStage > signatureStage) return plateauStage;
+    const climbing = scorePlateauAttempts !== null && plateauStage < 2;
+    return signatureStage === 3 && climbing ? 2 : signatureStage;
+  };
+
+  it('holds the terminal rung while the score is still climbing', () => {
+    // 4 repeats of one signature, but the score just moved (fresh plateau key).
+    expect(resolveStage(4, 0)).toBe(2);
+    expect(resolveStage(9, 1)).toBe(2);
+  });
+
+  it('fires the terminal rung once the score has also stopped moving', () => {
+    expect(resolveStage(4, 4)).toBe(3);
+    expect(resolveStage(4, 6)).toBe(3);
+  });
+
+  it('leaves the score-plateau ladder able to terminate on its own', () => {
+    // Signature churning (attempts 1) but score frozen 6 polls: plateau wins.
+    expect(resolveStage(1, 6)).toBe(3);
+  });
+
+  it('does not hold the rung when there is no score to plateau on', () => {
+    // score 0/absent => no plateau key => nothing to say the trial is moving.
+    expect(resolveStage(4, null)).toBe(3);
+  });
+
+  it('leaves sub-terminal stages untouched', () => {
+    expect(resolveStage(2, 0)).toBe(1);
+    expect(resolveStage(3, 0)).toBe(2);
   });
 });

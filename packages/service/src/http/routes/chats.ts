@@ -37,7 +37,11 @@ export function chatRoutes(ctx: ServiceContext): Hono {
       projectId,
       ...(body.expectedDeliverable ? { expectedDeliverable: body.expectedDeliverable } : {}),
     });
-    ctx.chat.trackBackground(ctx.chat.send(session.id, body.message).catch(() => {}));
+    ctx.chat.trackBackground(
+      ctx.chat
+        .send(session.id, body.message, { fileTurnIntent: body.fileTurnIntent })
+        .catch(() => {}),
+    );
     return c.json({ accepted: true, gezelId: id, projectId, sessionId: session.id }, 202);
   });
 

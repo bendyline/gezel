@@ -12,62 +12,8 @@
  */
 
 import type { GezelClient } from '@bendyline/gezel-client';
-import type { ContentContainer, ContentEntry } from '@bendyline/squisq/storage';
-import { isContentNotFound } from './container-errors.js';
-
-const EXTENSION_MIME: Record<string, string> = {
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  txt: 'text/plain',
-  json: 'application/json',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  bmp: 'image/bmp',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  css: 'text/css',
-  html: 'text/html',
-  js: 'application/javascript',
-  pdf: 'application/pdf',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-};
-
-function guessMime(path: string): string {
-  const dot = path.lastIndexOf('.');
-  if (dot === -1) return 'application/octet-stream';
-  const ext = path.slice(dot + 1).toLowerCase();
-  return EXTENSION_MIME[ext] ?? 'application/octet-stream';
-}
-
-function isTextMime(mime: string): boolean {
-  return (
-    mime === 'text/markdown' ||
-    mime === 'text/plain' ||
-    mime === 'application/json' ||
-    mime === 'text/css' ||
-    mime === 'text/html' ||
-    mime === 'application/javascript' ||
-    mime === 'image/svg+xml'
-  );
-}
-
-function joinRoot(root: string, relative: string): string {
-  if (!root) return relative;
-  if (!relative) return root;
-  const r = root.replace(/\/+$/, '');
-  const p = relative.replace(/^\/+/, '');
-  return `${r}/${p}`;
-}
+import type { ContentContainer } from '@bendyline/squisq/storage';
+import { type ContentStorage, createContentContainer } from './content-container.js';
 
 export interface ArtifactsContentContainerOptions {
   /** Project id whose `artifacts/` tree this container wraps. */
@@ -91,137 +37,30 @@ export interface ArtifactsContentContainerOptions {
 export function createProjectContentContainer(
   options: ArtifactsContentContainerOptions,
 ): ContentContainer {
-  const {
-    projectId,
-    root,
-    client,
-    primaryDocumentFilename,
-    referencePrefix,
-    source = 'artifacts',
-  } = options;
-
-  const relativePath = (path: string): string => {
-    const normalized = path.replace(/^\.\//, '').replace(/^\/+/, '');
-    if (!referencePrefix) return normalized;
-    const prefix = referencePrefix.replace(/^\/+|\/+$/g, '');
-    return normalized.startsWith(`${prefix}/`) ? normalized.slice(prefix.length + 1) : normalized;
-  };
-
-  return {
-    async readFile(path: string): Promise<ArrayBuffer | null> {
-      const relative = relativePath(path);
-      const full = joinRoot(root, relative);
-      const mime = guessMime(relative);
-      try {
-        if (isTextMime(mime)) {
-          const res =
-            source === 'workspace'
-              ? await client.readProjectWorkspaceFile(projectId, full)
-              : await client.readProjectArtifact(projectId, full);
-          return new TextEncoder().encode(res.content).buffer as ArrayBuffer;
+  const { client, projectId, source = 'artifacts' } = options;
+  // Workspace operations retain their workspace authority gate, including raw writes.
+  const storage: ContentStorage =
+    source === 'workspace'
+      ? {
+          readText: (path) => client.readProjectWorkspaceFile(projectId, path),
+          readBlob: (path) => client.fetchProjectWorkspaceBlob(projectId, path),
+          writeText: (path, content) =>
+            client.writeProjectWorkspaceFile(projectId, { path, content }),
+          writeBinary: (path, data, mime) =>
+            client.writeProjectWorkspaceBinary(projectId, path, data, mime),
+          remove: (path) => client.rmProjectWorkspacePath(projectId, path, { recursive: true }),
+          list: (path) => client.listProjectWorkspace(projectId, path, true),
         }
-        const blob =
-          source === 'workspace'
-            ? await client.fetchProjectWorkspaceBlob(projectId, full)
-            : await client.fetchProjectArtifactBlob(projectId, full);
-        return await blob.arrayBuffer();
-      } catch (error) {
-        if (isContentNotFound(error)) return null;
-        throw error;
-      }
-    },
-
-    async writeFile(
-      path: string,
-      data: ArrayBuffer | Uint8Array,
-      mimeType?: string,
-    ): Promise<void> {
-      const relative = relativePath(path);
-      const full = joinRoot(root, relative);
-      const mime = mimeType ?? guessMime(relative);
-      if (isTextMime(mime)) {
-        const text = new TextDecoder().decode(data);
-        if (source === 'workspace') {
-          await client.writeProjectWorkspaceFile(projectId, { path: full, content: text });
-        } else {
-          await client.writeProjectArtifact(projectId, full, text);
-        }
-        return;
-      }
-      if (source === 'workspace') {
-        await client.writeProjectWorkspaceBinary(projectId, full, data, mime);
-      } else {
-        await client.writeProjectArtifactBinary(projectId, full, data, mime);
-      }
-    },
-
-    async removeFile(path: string): Promise<void> {
-      const full = joinRoot(root, relativePath(path));
-      try {
-        if (source === 'workspace') {
-          await client.rmProjectWorkspacePath(projectId, full, { recursive: true });
-        } else {
-          await client.deleteProjectArtifact(projectId, full);
-        }
-      } catch (error) {
-        if (!isContentNotFound(error)) throw error;
-      }
-    },
-
-    async listFiles(prefix?: string): Promise<ContentEntry[]> {
-      const relativePrefix = prefix ? relativePath(prefix) : '';
-      const subpath = relativePrefix ? joinRoot(root, relativePrefix) : root || undefined;
-      const res =
-        source === 'workspace'
-          ? await client.listProjectWorkspace(projectId, subpath, true)
-          : await client.listProjectArtifacts(projectId, subpath, true);
-      const out: ContentEntry[] = [];
-      const rootPrefix = root ? `${root.replace(/\/+$/, '')}/` : '';
-      for (const f of res.files) {
-        if (f.isDirectory) continue;
-        if (rootPrefix && !f.path.startsWith(rootPrefix)) continue;
-        const relative =
-          rootPrefix && f.path.startsWith(rootPrefix) ? f.path.slice(rootPrefix.length) : f.path;
-        out.push({
-          path: relative,
-          mimeType: guessMime(relative),
-          size: 0,
-        });
-      }
-      return out;
-    },
-
-    async exists(path: string): Promise<boolean> {
-      const buf = await this.readFile(path);
-      return buf !== null;
-    },
-
-    async getDocumentPath(): Promise<string | null> {
-      if (primaryDocumentFilename) return primaryDocumentFilename;
-      const entries = await this.listFiles();
-      const rootFiles = entries.filter((e) => !e.path.includes('/'));
-      const priority = ['index.md', 'doc.md', 'document.md'];
-      for (const name of priority) {
-        const hit = rootFiles.find((e) => e.path.toLowerCase() === name);
-        if (hit) return hit.path;
-      }
-      return rootFiles.find((e) => e.path.toLowerCase().endsWith('.md'))?.path ?? null;
-    },
-
-    async readDocument(): Promise<string | null> {
-      const docPath = await this.getDocumentPath();
-      if (!docPath) return null;
-      const buf = await this.readFile(docPath);
-      if (!buf) return null;
-      return new TextDecoder().decode(buf);
-    },
-
-    async writeDocument(markdown: string, filename?: string): Promise<void> {
-      const name = filename ?? primaryDocumentFilename ?? 'index.md';
-      const data = new TextEncoder().encode(markdown);
-      await this.writeFile(name, data, 'text/markdown');
-    },
-  };
+      : {
+          readText: (path) => client.readProjectArtifact(projectId, path),
+          readBlob: (path) => client.fetchProjectArtifactBlob(projectId, path),
+          writeText: (path, content) => client.writeProjectArtifact(projectId, path, content),
+          writeBinary: (path, data, mime) =>
+            client.writeProjectArtifactBinary(projectId, path, data, mime),
+          remove: (path) => client.deleteProjectArtifact(projectId, path),
+          list: (path) => client.listProjectArtifacts(projectId, path, true),
+        };
+  return createContentContainer(options, storage);
 }
 
 export function createArtifactsContentContainer(

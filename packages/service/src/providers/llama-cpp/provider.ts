@@ -25,7 +25,6 @@
 import * as os from 'node:os';
 import {
   AwakeBudget,
-  WORKSPACE_READ_MAX_FILES,
   createAwakeTimeout,
   createLogger,
   leaksUntaggedReasoning,
@@ -55,7 +54,6 @@ import {
   findLoosePathArg,
   firstExistingIndex,
   hasSalvageableImmediateFileWriteContent,
-  immediateFileWritePathFromPrompt,
   looksLikeLooseSingleFileHtml,
   looseUnescapeToolArgumentText,
   salvageImmediateFileWriteArgs,
@@ -140,6 +138,50 @@ import {
   stripJsonSchemaPatternsForLlamaCpp,
 } from './tool-grammar.js';
 
+import {
+  FILE_REPAIR_MUTATION_TOOLS as SCENARIO_FILE_REPAIR_MUTATION_TOOL_NAMES,
+  FILE_REPAIR_READ_TOOLS as SCENARIO_FILE_REPAIR_READ_ONLY_TOOL_NAMES,
+  FILE_REPAIR_TOOLS as SCENARIO_FILE_REPAIR_TOOL_NAMES,
+  chatCompletionToolName,
+  hasWriteFileTool,
+  isFileRepairPrompt as isScenarioFileRepairPrompt,
+  isSourceFileRepairPrompt as isSourceFileScenarioRepairPrompt,
+  readFileOnlyTools,
+  fileRepairTargetPath as scenarioRepairTargetPath,
+  writeFileOnlyTools,
+} from '../constrained-turn.js';
+import {
+  buildImmediateFileWriteNoMutationNudge,
+  buildPrerequisiteRepairReadNudge,
+  buildScenarioRepairNoMutationNudge,
+  completeWorkspaceReadPaths,
+  extractPrerequisiteRepairReadPaths,
+  normalizeWorkspacePathForCompare,
+  remainingPrerequisiteRepairReadPaths,
+} from '../file-repair-policy.js';
+import {
+  buildUnknownToolNudge,
+  findUnrecognizedFunctionMarkup,
+} from '../local-tool-call-salvage.js';
+import {
+  LOCAL_TURN_LIMITS,
+  LocalTurnPolicy,
+  compactLocalTurn,
+  mutationOnlyRepairTools as mutationOnlyScenarioRepairTools,
+  patchOnlyRepairTools as patchOnlyExistingSourceEditTools,
+  planFileTurn,
+  sourceRepairTools as sourceFileScenarioRepairTools,
+  turnCheckpoint,
+} from '../local-turn-policy.js';
+export {
+  completeWorkspaceReadPaths,
+  extractPrerequisiteRepairReadPaths,
+} from '../file-repair-policy.js';
+export {
+  isImmediateFileWriteTurn,
+  isFileRepairTurn as isScenarioFileRepairTurn,
+} from '../constrained-turn.js';
+
 const log = createLogger('llama-cpp');
 
 export class NativeEngineCrashedError extends Error {
@@ -206,7 +248,7 @@ function isGemmaChannelProfile(profile: ResolvedModelProfile | undefined): boole
  * cap — real exploration flows chain dozens of reads; 96 leaves room
  * for the long tail without letting a runaway model spin forever.
  */
-const MAX_TOOL_LOOP_TURNS = 96;
+const MAX_TOOL_LOOP_TURNS = LOCAL_TURN_LIMITS.iterations;
 
 /**
  * Default total wall-clock budget for one `sendAndWait` call. Callers
@@ -230,7 +272,7 @@ const IMMEDIATE_FILE_WRITE_MIN_TOKENS = 4_096;
 // on EOS-flush of a write_file larger than the per-turn token cap, we
 // surface append_to_file and loop until the tail lands or we hit this cap,
 // instead of bailing on an incomplete file the weak model never finished.
-const MAX_IMMEDIATE_WRITE_CONTINUATIONS = 6;
+const MAX_IMMEDIATE_WRITE_CONTINUATIONS = LOCAL_TURN_LIMITS.writeContinuations;
 // Minimal append_to_file surfaced ONLY during a write-continuation (the
 // base immediate-write surface is write_file-only). Lets the model emit a
 // truncated file's tail rather than re-writing the whole file.
@@ -268,11 +310,11 @@ const SCENARIO_FILE_REPAIR_TEXT_ABORT_CHARS = 2_048;
 // write_file; the extended cap keeps the anti-poisoning bound.
 const SCENARIO_FILE_REPAIR_PAYLOAD_TEXT_ABORT_CHARS = 8_192;
 const SCENARIO_FILE_REPAIR_PROMPT_SUFFIX =
-  '\n\n[Local-model repair mode: your next output must start with one tool call, not planning prose. Follow the concrete tool instruction in the scenario-check message: if it names `append_to_file`, call `append_to_file`; if it names `replace_in_file`, call `replace_in_file`; if it names `write_file({ path: "...", content: ... })`, call `write_file` for that named path with the corrected complete content. For non-source documents, expand or patch the named document file; do not fall back to `index.html`. Do not reply with verification prose.]';
+  '\n\n[Local-model repair mode: your next output must start with one tool call, not planning prose. Follow the concrete tool instruction in the repair request: if it names `append_to_file`, call `append_to_file`; if it names `replace_in_file`, call `replace_in_file`; if it names `write_file({ path: "...", content: ... })`, call `write_file` for that named path with the corrected complete content. Expand or patch the named file and preserve unrelated files. Do not reply with verification prose.]';
 const PREREQUISITE_REPAIR_READ_PROMPT_SUFFIX =
   '\n\n[Local-model provenance-read mode: this repair explicitly requires successful reads before any final claim mutation. While the read-only tool surface is active, call `read_file` for one of the remaining allowed source paths immediately. Do not plan, summarize, or edit early. After every required source read succeeds, the tool surface will switch to file mutations for the grounded repair.]';
 const SCENARIO_SOURCE_REPAIR_PROMPT_SUFFIX =
-  '\n\n[Local-model source repair mode: the source file already exists. Preserve passing behavior and fix only the newest named failing check. Treat `Signals that did not fire` / `missing=[...]` as the to-do list; signals that fired are already passing and should not be renamed, recased, or polished. Repair compiler or syntax errors before behavioral failures so the next check sees a valid program. A duplicate-identifier error means delete one duplicate declaration; for example, an object literal must not contain both a data property and a getter with the same name. If a failure list names a missing field or behavior, implement that named requirement now. Use `read_file` if you need current snippets or line numbers, then patch with `replace_in_file` or `replace_lines` for the smallest relevant snippet/range. Do not re-emit the whole file with `write_file` unless the check explicitly requires a complete rewrite or the runtime escalates after repeated repair failures.]';
+  '\n\n[Local-model source repair mode: the source file already exists. Preserve passing behavior and fix only the newest named failing check. Address failing requirements and preserve behavior that already passes. Repair compiler or syntax errors before behavioral failures so the next check sees a valid program. A duplicate-identifier error means delete one duplicate declaration; for example, an object literal must not contain both a data property and a getter with the same name. If a failure list names a missing field or behavior, implement that named requirement now. Use `read_file` if you need current snippets or line numbers, then patch with `replace_in_file` or `replace_lines` for the smallest relevant snippet/range. Do not re-emit the whole file with `write_file` unless the check explicitly requires a complete rewrite or the runtime escalates after repeated repair failures.]';
 const SCENARIO_SOURCE_REPAIR_PATCH_PROMPT_SUFFIX =
   '\n\n[Local-model source patch mode: you already read the current source this repair turn. Your next output must start with `replace_in_file` or `replace_lines` for the smallest snippet/range that satisfies the newest missing signal or failing check. If the check reports a compiler or syntax error, fix that error first. For a duplicate identifier, remove one duplicate declaration instead of rewriting the surrounding behavior; an object literal cannot keep both a data property and a getter with the same name. Do not edit signals listed as fired; do not rename, recase, or polish already-passing controls while the missing signal remains absent.]';
 const CROSS_FILE_COMPILER_DEPENDENCY_READ_PROMPT_SUFFIX =
@@ -353,40 +395,6 @@ const DOM_NULL_REPAIR_PROMPT_SUFFIX =
 const GATE_SURGICAL_EDIT_MAX_TOKENS = 2_048;
 const GATE_SURGICAL_EDIT_PROMPT_SUFFIX =
   '\n\n[Local-model gate patch mode: the deliverable exists and failed named checks. Your next output must start with `replace_in_file` (or `replace_lines`) making the smallest edit that clears the FIRST failing check. Copy the `find` text from the file content you already produced this session. Do not re-emit the whole file, do not read, do not reply in prose.]';
-const SCENARIO_FILE_REPAIR_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'read_file',
-  'read_files',
-  'list_dir',
-  'stat',
-  'validate',
-  'replace_in_file',
-  'replace_lines',
-  'write_file',
-  'append_to_file',
-]);
-const SCENARIO_FILE_REPAIR_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'read_file',
-  'read_files',
-  'list_dir',
-  'stat',
-  'validate',
-]);
-const SCENARIO_FILE_REPAIR_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'replace_in_file',
-  'replace_lines',
-  'write_file',
-  'append_to_file',
-]);
-const EXISTING_SOURCE_EDIT_PATCH_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'replace_in_file',
-  'replace_lines',
-]);
-const SCENARIO_SOURCE_REPAIR_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'read_file',
-  'validate',
-  'replace_in_file',
-  'replace_lines',
-]);
 const DIRECT_FILE_WORK_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read_file',
   'read_files',
@@ -416,7 +424,7 @@ const DIRECT_FILE_WORK_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 const SCRIPTED_DIRECT_FILE_WORK_PROMPT_RE =
   /\b(?:write|create|generate|use|run)\s+(?:a\s+)?(?:node(?:\.js)?\s+)?script\b|\bnode\s+script\b|\bscript\s+and\s+run\b/i;
-const SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT = 2;
+const SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT = LOCAL_TURN_LIMITS.noProgress;
 
 /**
  * Default context window (tokens) for sessions handed out by this
@@ -579,119 +587,6 @@ function applyToolGrammarFallback(
   }));
 }
 
-function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
-  return tool.function.name;
-}
-
-function hasWriteFileTool(tools: ChatCompletionTool[] | undefined): boolean {
-  return tools?.some((tool) => chatCompletionToolName(tool) === 'write_file') ?? false;
-}
-
-function writeFileOnlyTools(tools: ChatCompletionTool[] | undefined): ChatCompletionTool[] {
-  const writeFile = tools?.find((tool) => chatCompletionToolName(tool) === 'write_file');
-  return writeFile ? [writeFile] : [];
-}
-
-function readFileOnlyTools(tools: ChatCompletionTool[] | undefined): ChatCompletionTool[] {
-  const readFile = tools?.find((tool) => chatCompletionToolName(tool) === 'read_file');
-  return readFile ? [readFile] : [];
-}
-
-/**
- * Paths whose complete contents reached the model in one workspace-read call.
- * `read_files` status rows are emitted in request order, so map by index rather
- * than parsing an unescaped path back out of model-facing prose. A bridge-level
- * truncation invalidates the whole batch: later file bodies may not have reached
- * the model even when their source-side status row said `complete`.
- */
-export function completeWorkspaceReadPaths(
-  toolName: string,
-  args: Record<string, unknown>,
-  output: string,
-): string[] {
-  if (output.startsWith('ERROR:') || output.includes('…[tool output truncated:')) return [];
-  if (toolName === 'read_file') {
-    if (typeof args.path !== 'string') return [];
-    const ranged = args.startLine !== undefined || args.endLine !== undefined;
-    if (ranged && !/^\[read_file [^\n]* complete\]/.test(output)) return [];
-    return [normalizeWorkspacePathForCompare(args.path)];
-  }
-  if (toolName !== 'read_files') return [];
-
-  const requested: Array<string | undefined> = Array.isArray(args.paths)
-    ? args.paths.map((path) => (typeof path === 'string' ? path : undefined))
-    : Array.isArray(args.files)
-      ? args.files.map((item) =>
-          item &&
-          typeof item === 'object' &&
-          !Array.isArray(item) &&
-          typeof (item as Record<string, unknown>).path === 'string'
-            ? ((item as Record<string, unknown>).path as string)
-            : undefined,
-        )
-      : [];
-  const statusLines = (output.split('\n\n', 1)[0] ?? '').split('\n').slice(1);
-  return requested.slice(0, WORKSPACE_READ_MAX_FILES).flatMap((path, index) => {
-    if (!path) return [];
-    const statusPrefix = `${index + 1} OK `;
-    const line = statusLines.find((candidate) => candidate.indexOf(statusPrefix) === 0);
-    const complete =
-      line?.match(
-        /\slines=(?:none|\d+-\d+)\s+totalLines=(?:\?|\d+)(\s+complete)?(?:\s+nextStartLine=\d+)?$/,
-      )?.[1] !== undefined;
-    return complete ? [normalizeWorkspacePathForCompare(path)] : [];
-  });
-}
-
-function isImmediateFileWritePrompt(
-  prompt: string,
-  context: { toolSurfaceIsWriteFileOnly: boolean },
-): boolean {
-  const urgentWriteNow =
-    prompt.includes('There is still **no `index.html`** in the workspace') ||
-    prompt.includes('Stop reading/planning and write the file now:') ||
-    prompt.includes('Do not end your turn until `write_file`') ||
-    prompt.includes('First move: create the workspace deliverable') ||
-    isDirectCreateSourceWritePrompt(prompt) ||
-    prompt.includes('workspace/index.html');
-  const explicitDeliverableRecovery =
-    /\bnext\s+tool\s+call\s+should\s+(?:write|repair|write\s+or\s+repair)\b[\s\S]{0,180}\bworkspace\s+deliverable\b/i.test(
-      prompt,
-    ) ||
-    (/\bprevious\s+turn\s+aborted\b/i.test(prompt) &&
-      /\bworkspace\s+deliverable\b/i.test(prompt) &&
-      /\bwrite_file\b/.test(prompt));
-  if (urgentWriteNow) return true;
-  if (explicitDeliverableRecovery) return true;
-  return (
-    context.toolSurfaceIsWriteFileOnly &&
-    /\[Deliverable expected as a FILE at `[^`]+`/i.test(prompt)
-  );
-}
-
-export function isImmediateFileWriteTurn(
-  prompt: string,
-  tools: ChatCompletionTool[] | undefined,
-): boolean {
-  if (!hasWriteFileTool(tools)) return false;
-  if (isScenarioFileRepairPrompt(prompt)) return false;
-  return isImmediateFileWritePrompt(prompt, { toolSurfaceIsWriteFileOnly: tools?.length === 1 });
-}
-
-export function isScenarioFileRepairTurn(
-  prompt: string,
-  tools: ChatCompletionTool[] | undefined,
-): boolean {
-  if (!tools || tools.length === 0) return false;
-  const names = tools
-    .map((tool) => chatCompletionToolName(tool))
-    .filter((name): name is string => !!name);
-  if (!isScenarioFileRepairPrompt(prompt)) return false;
-  return (
-    names.includes('write_file') && names.some((name) => SCENARIO_FILE_REPAIR_TOOL_NAMES.has(name))
-  );
-}
-
 export function isExistingSourceEditTurn(
   prompt: string,
   tools: ChatCompletionTool[] | undefined,
@@ -770,178 +665,14 @@ export function isDirectFileWorkTurn(
   return hasDirectFileWorkToolSurface(tools) && hasDirectFileDeliverableWording(prompt);
 }
 
-function isScenarioFileRepairPrompt(prompt: string): boolean {
-  return (
-    /\[runtime check(?:\s+[^\]]+)?\]\s+I\s+(?:opened|re-opened)\s+`[^`]+`\s+(?:in\s+a\s+headless\s+browser|after\s+your\s+latest\s+edit)\./i.test(
-      prompt,
-    ) ||
-    /\[runtime check(?:\s+[^\]]+)?\]\s+You've now rewritten\s+`[^`]+`\s+\d+\s+time\(s\)/i.test(
-      prompt,
-    ) ||
-    /\[scenario check\]\s+I looked at\s+`[^`]+`\s+and\s+the\s+success\s+criteria\s+aren't\s+met\s+yet\./i.test(
-      prompt,
-    )
-  );
-}
-
-const MAX_PREREQUISITE_REPAIR_READ_PATHS = 8;
 const PREREQUISITE_REPAIR_NO_PROGRESS_LIMIT = 2;
 
-/**
- * Extract a bounded source-read contract from an explicit read-before-edit
- * scenario repair. The clause must order named reads before a later mutation;
- * ordinary repair prompts that merely mention `read_file` do not qualify.
- */
-export function extractPrerequisiteRepairReadPaths(prompt: string): string[] {
-  if (!isScenarioFileRepairPrompt(prompt)) return [];
-  const orderedClause =
-    /\bfirst\s+(?:(?:call|use)\s+`?read_file`?\s+(?:on\s+)?|(?:re-)?read\s+)([\s\S]{1,700}?)(?:[.,;]\s*then\s+(?:patch|edit|revise|rewrite|update|write|record|replace|append)|\s+before\s+(?:patching|editing|revising|rewriting|updating|writing|recording|replacing|appending))\b/i.exec(
-      prompt,
-    )?.[1] ??
-    /\bbefore\s+(?:patching|editing|revising|rewriting|updating|writing|recording|replacing|appending)\b[\s,:-]+([\s\S]{1,700}?)(?=[.;]\s*(?:then\s+)?(?:patch|edit|revise|rewrite|update|write|record|replace|append)\b)/i.exec(
-      prompt,
-    )?.[1];
-  if (!orderedClause) return [];
-
-  const paths =
-    orderedClause.match(
-      /(?:[\w.-]+\/)*[\w.-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md|csv|tsv|txt|ya?ml)\b/gi,
-    ) ?? [];
-  const unique: string[] = [];
-  const seen = new Set<string>();
-  for (const path of paths) {
-    const normalized = normalizeWorkspacePathForCompare(path).toLowerCase();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    unique.push(normalizeWorkspacePathForCompare(path));
-  }
-  return unique.length > 0 && unique.length <= MAX_PREREQUISITE_REPAIR_READ_PATHS ? unique : [];
-}
-
-function remainingPrerequisiteRepairReadPaths(
-  requiredPaths: readonly string[],
-  readPaths: readonly string[],
-): string[] {
-  const read = new Set(
-    readPaths.map((path) => normalizeWorkspacePathForCompare(path).toLowerCase()),
-  );
-  return requiredPaths.filter(
-    (path) => !read.has(normalizeWorkspacePathForCompare(path).toLowerCase()),
-  );
-}
-
-function isSourceFileScenarioRepairPrompt(prompt: string): boolean {
-  if (!isScenarioFileRepairPrompt(prompt)) return false;
-  const target = scenarioRepairTargetPath(prompt);
-  if (target) return /\.(?:html?|css|mjs|cjs|jsx?|tsx?)$/i.test(target);
-  return /`?[\w./-]+\.(?:html?|css|mjs|cjs|jsx?|tsx?)(?=`|\b)/i.test(prompt);
-}
-
-function scenarioRepairTargetPath(prompt: string): string | null {
-  return (
-    /\[scenario check\]\s+I looked at\s+`([^`]+)`\s+and\s+the\s+success\s+criteria\s+aren't\s+met\s+yet\./i.exec(
-      prompt,
-    )?.[1] ??
-    /\[runtime check(?:\s+[^\]]+)?\]\s+I\s+(?:opened|re-opened)\s+`([^`]+)`\s+(?:in\s+a\s+headless\s+browser|after\s+your\s+latest\s+edit)\./i.exec(
-      prompt,
-    )?.[1] ??
-    /\[runtime check(?:\s+[^\]]+)?\]\s+You've now rewritten\s+`([^`]+)`\s+\d+\s+time\(s\)/i.exec(
-      prompt,
-    )?.[1] ??
-    null
-  );
-}
-
 function scenarioRepairPostReadMutationTargetPath(prompt: string): string | null {
-  return (
-    /POST_READ_MUTATION_TARGET:[\s\S]{0,500}?\bmutate exactly\s+`([^`]+)`/i.exec(prompt)?.[1] ??
-    null
-  );
+  return /\bmutate exactly\s+`([^`]+)`/i.exec(prompt)?.[1] ?? null;
 }
 
 function isDomNullRuntimeRepairPrompt(prompt: string): boolean {
   return /Cannot\s+(?:read|set)\s+propert(?:y|ies)\s+of\s+null/i.test(prompt);
-}
-
-function buildScenarioRepairNoMutationNudge(
-  knownToolNames: ReadonlySet<string>,
-  context: {
-    readOnlyCalls: number;
-    readFilePaths: readonly string[];
-    failedMutationCalls?: number;
-    noMutationNudges?: number;
-  } = {
-    readOnlyCalls: 0,
-    readFilePaths: [],
-  },
-): string {
-  const mutationTools = [...SCENARIO_FILE_REPAIR_MUTATION_TOOL_NAMES].filter((name) =>
-    knownToolNames.has(name),
-  );
-  const menu =
-    mutationTools.length > 0
-      ? mutationTools.map((name) => `\`${name}\``).join(', ')
-      : '`write_file`';
-  if (context.readOnlyCalls > 0) {
-    const readPathText =
-      context.readFilePaths.length > 0
-        ? ` You already read ${context.readFilePaths.map((path) => `\`${path}\``).join(', ')}.`
-        : '';
-    const failedMutationCalls =
-      'failedMutationCalls' in context && typeof context.failedMutationCalls === 'number'
-        ? context.failedMutationCalls
-        : 0;
-    const noMutationNudges =
-      'noMutationNudges' in context && typeof context.noMutationNudges === 'number'
-        ? context.noMutationNudges
-        : 0;
-    const mustMutateNow =
-      failedMutationCalls > 0 || context.readOnlyCalls >= 2 || noMutationNudges >= 2;
-    if (mustMutateNow) {
-      let writeInstruction: string;
-      if ((failedMutationCalls > 0 || noMutationNudges >= 2) && knownToolNames.has('write_file')) {
-        writeInstruction =
-          'Your next response must START with `write_file` for the relevant source file with the complete corrected file contents.';
-      } else if (knownToolNames.has('replace_lines')) {
-        writeInstruction =
-          'Your next response must START with `replace_lines` for the smallest relevant line range in the source file.';
-      } else if (knownToolNames.has('replace_in_file')) {
-        writeInstruction =
-          'Your next response must START with `replace_in_file` for the smallest unique source snippet that needs changing.';
-      } else if (knownToolNames.has('write_file')) {
-        writeInstruction =
-          'Your next response must START with `write_file` for the relevant source file with the complete corrected file contents.';
-      } else {
-        writeInstruction = `Your next response must START with one mutation tool call (${menu}) for the relevant source file.`;
-      }
-      const failedText =
-        failedMutationCalls > 0
-          ? ' A previous surgical edit failed, so another guessed patch is unlikely to land.'
-          : '';
-      return `[system] Your repair turn ended after diagnostic reads/prose but no workspace file changed.${readPathText}${failedText} Do not read again. ${writeInstruction} Do not describe the fix until after that tool succeeds.`;
-    }
-    const canRead = [...SCENARIO_FILE_REPAIR_READ_ONLY_TOOL_NAMES].some((name) =>
-      knownToolNames.has(name),
-    );
-    const diagnosticAllowance = canRead
-      ? ' If those reads did not show the cause, make exactly one more targeted read of the directly related source file that owns the failing behavior, then mutate.'
-      : '';
-    return `[system] Your repair turn ended after diagnostic reads/prose but no workspace file changed.${readPathText}${diagnosticAllowance} If you already know the cause, your next response must START with one mutation tool call (${menu}) for the relevant source file. Do not describe the fix until after that tool succeeds.`;
-  }
-  return `[system] Your repair turn ended without changing any workspace file. Read/validate/prose did not fix the failing check. Your next response must START with one mutation tool call (${menu}) for the relevant source file. Do not describe the fix until after that tool succeeds.`;
-}
-
-function buildPrerequisiteRepairReadNudge(context: {
-  remainingPaths: readonly string[];
-  noProgressNudges: number;
-}): string {
-  const nextPath = context.remainingPaths[0];
-  const remaining = context.remainingPaths.map((path) => `\`${path}\``).join(', ');
-  const retry =
-    context.noProgressNudges >= PREREQUISITE_REPAIR_NO_PROGRESS_LIMIT
-      ? 'This is the final automatic source-read retry.'
-      : 'Continue the bounded source-gathering phase now.';
-  return `[system] This repair explicitly requires successful source reads before any file mutation. Remaining required source(s): ${remaining}. ${retry} Your next response must START with \`read_file({ path: "${nextPath}" })\`. Do not plan, summarize, or edit the deliverable until every listed read succeeds; after the last required read, the tool surface will switch to file mutations.`;
 }
 
 function buildDirectFileWorkPrerequisiteReadNudge(context: {
@@ -955,20 +686,6 @@ function buildDirectFileWorkPrerequisiteReadNudge(context: {
       ? 'This is the final automatic source-read retry.'
       : 'Continue the bounded source-gathering phase now.';
   return `[system] This file deliverable explicitly requires successful source reads before writing. Remaining required source(s): ${remaining}. ${retry} Your next response must START with \`read_file({ path: "${nextPath}" })\`. Do not plan, summarize, or write the output until every listed read succeeds; after the last required read, the tool surface will switch to file mutations.`;
-}
-
-function buildImmediateFileWriteNoMutationNudge(context: {
-  targetPath: string | null;
-  noMutationNudges?: number;
-}): string {
-  const target = context.targetPath
-    ? ` The required output file is \`${context.targetPath}\`.`
-    : '';
-  const retryText =
-    (context.noMutationNudges ?? 0) > 1
-      ? 'This is the final automatic retry.'
-      : 'Retry immediately.';
-  return `[system] Your required file-write turn produced no \`write_file\` tool call.${target} ${retryText} Your next response must START with \`write_file\` for the required file, with the complete file contents in the \`content\` argument. Do not describe the result until after that tool succeeds.`;
 }
 
 function buildDirectFileWorkNoMutationNudge(
@@ -1388,14 +1105,6 @@ function compactToolsForConstrainedLocalTurn(
   return tools?.map((tool) => compactToolForConstrainedLocalTurn(tool, context));
 }
 
-function normalizeWorkspacePathForCompare(path: string): string {
-  return path
-    .replace(/\\/g, '/')
-    .replace(/^\.\/+/, '')
-    .replace(/^workspace\//i, '')
-    .replace(/^\.\/+/, '');
-}
-
 function directFileWorkMutationSatisfiesTarget(
   toolName: string,
   args: Record<string, unknown>,
@@ -1449,49 +1158,6 @@ function mutationToolOutputSucceeded(output: string): boolean {
   return !output.startsWith('ERROR:') && !output.startsWith('✗ ');
 }
 
-function mutationOnlyScenarioRepairTools(
-  tools: ChatCompletionTool[] | undefined,
-): ChatCompletionTool[] | undefined {
-  if (!tools) return undefined;
-  const mutationTools = tools.filter((tool) => {
-    const name = chatCompletionToolName(tool);
-    return !!name && SCENARIO_FILE_REPAIR_MUTATION_TOOL_NAMES.has(name);
-  });
-  return mutationTools.length > 0 ? mutationTools : tools;
-}
-
-function sourceFileScenarioRepairTools(
-  tools: ChatCompletionTool[] | undefined,
-): ChatCompletionTool[] | undefined {
-  if (!tools) return undefined;
-  const sourceRepairTools = tools.filter((tool) => {
-    const name = chatCompletionToolName(tool);
-    return !!name && SCENARIO_SOURCE_REPAIR_TOOL_NAMES.has(name);
-  });
-  const canPatch = sourceRepairTools.some((tool) => {
-    const name = chatCompletionToolName(tool);
-    return name === 'replace_lines' || name === 'replace_in_file';
-  });
-  return canPatch ? sourceRepairTools : tools;
-}
-
-function patchOnlyExistingSourceEditTools(
-  tools: ChatCompletionTool[] | undefined,
-): ChatCompletionTool[] | undefined {
-  if (!tools) return undefined;
-  const replaceInFile = tools.find((tool) => chatCompletionToolName(tool) === 'replace_in_file');
-  const replaceLines = tools.find((tool) => chatCompletionToolName(tool) === 'replace_lines');
-  const preferredPatchTools = [replaceInFile, replaceLines].filter(
-    (tool): tool is ChatCompletionTool => !!tool,
-  );
-  if (preferredPatchTools.length > 0) return preferredPatchTools;
-  const patchTools = tools.filter((tool) => {
-    const name = chatCompletionToolName(tool);
-    return !!name && EXISTING_SOURCE_EDIT_PATCH_TOOL_NAMES.has(name);
-  });
-  return patchTools.length > 0 ? patchTools : tools;
-}
-
 function appendScenarioRepairFailedMutationHint(
   output: string,
   toolName: string,
@@ -1513,27 +1179,6 @@ function appendScenarioRepairFailedMutationHint(
       ? `Your next mutation tool call should be \`write_file\`${pathText} with the complete corrected source file, not another guessed \`${toolName}\` patch.`
       : `If you already read the relevant file, use \`write_file\`${pathText} with the complete corrected source file instead of guessing another \`${toolName}\` snippet.`;
   return `${output}\n\n[runtime] This repair edit did not change the workspace. ${nextMove} If you have not read the exact current file yet, read it once, then write the full corrected file. Only call \`${toolName}\` again if you copy the \`find\` text exactly from a fresh read.`;
-}
-
-function isDirectCreateSourceWritePrompt(prompt: string): boolean {
-  if (!/\bwrite_file\b/i.test(prompt)) return false;
-  if (!/`?[\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md)`?/i.test(prompt)) {
-    return false;
-  }
-  if (
-    /\b(?:modify|repair|fix|debug|patch|refactor|continue evolving|existing codebase)\b/i.test(
-      prompt,
-    )
-  ) {
-    return false;
-  }
-  if (/\bpreserve\b/i.test(prompt) && !/\bfirst (?:version|pass)\b/i.test(prompt)) return false;
-  return (
-    /\b(?:build|create|make|implement|scaffold|write|produce)\b/i.test(prompt) &&
-    /\b(?:first version|first pass|initial version|new|from scratch|at\s+`?[\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md)`?)/i.test(
-      prompt,
-    )
-  );
 }
 
 function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
@@ -2768,14 +2413,13 @@ interface LlamaCppSessionDeps {
  * where the next tool result tips us over the slot ctx mid-args
  * serialization (the parse-error 500 failure mode).
  */
-const MID_LOOP_COMPACT_RATIO = 0.7;
+const MID_LOOP_COMPACT_RATIO = LOCAL_TURN_LIMITS.compactRatio;
 /**
  * Minimum prior-message count required to bother running a one-shot
  * compaction. Below this the synthesis cost (a full LLM call on the
  * same model) outweighs the freed tokens. Aligned with the manager-
  * side check (`COMPACTION_KEEP_TAIL + 2` floor in compactInFlight).
  */
-const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
 class LlamaCppSession extends StreamingSessionBase implements LLMSession {
   private readonly messages: ChatMessage[];
@@ -2823,7 +2467,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * doesn't free enough tokens (the manager-side `MAX_COMPACTIONS_PER_SEND`
    * is the cross-turn equivalent). Reset on each `sendAndWait` entry.
    */
-  private compactedThisTurn = false;
+  private turnPolicy = new LocalTurnPolicy();
   /**
    * Aggregated `<think>` / `<reasoning>` text captured this turn,
    * across every iteration of the tool loop. Reset at the top of
@@ -3101,100 +2745,27 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     if (opts?.queue?.bypassQueue) return this.sendAndWaitInner(prompt, opts);
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
   }
-
-  /**
-   * Mid-tool-loop pressure check. Called between iterations after a
-   * tool result has been pushed; if the in-memory transcript is over
-   * {@link MID_LOOP_COMPACT_RATIO} of `numCtx`, asks the manager
-   * (via {@link LlamaCppSessionDeps.requestCompaction}) to synthesize
-   * the prior history into a single bubble and swap it in. Bounded
-   * to one compaction per `sendAndWait` to avoid runaway loops.
-   *
-   * Best-effort: any failure is logged + swallowed and the turn
-   * continues with the un-compacted transcript. The downstream
-   * recovery paths (server-side `exceed_context_size_error`,
-   * `Failed to parse tool call arguments` 500) catch the cases
-   * where compaction didn't help OR wasn't attempted.
-   *
-   * Returns `true` when a synthesis was actually swapped in, `false`
-   * otherwise (below threshold, no callback wired, callback returned
-   * null/threw, insufficient prior, already compacted this turn).
-   * The boolean lets reactive callers — see the parse-error 500
-   * branch, where `force` skips the ratio gate — distinguish "we
-   * shrunk the transcript, retry the request" from "no luck, fall
-   * through to the warning".
-   */
   private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
-    if (this.compactedThisTurn) return false;
-    if (!this.deps.requestCompaction) return false;
-    const estimatedChars = this.estimatePromptChars();
-    const estimatedTokens = Math.ceil(estimatedChars / 4);
-    const ratio = estimatedTokens / this.deps.numCtx;
-    // `force` is the reactive-recovery path: a server-side parse
-    // error already proved we're over the line, so skip the ratio
-    // gate. The proactive iteration-2 hook leaves `force` unset.
-    if (!opts?.force && ratio < MID_LOOP_COMPACT_RATIO) return false;
-    // Slice prior = conversational messages after ALL leading system bands
-    // and before the current turn's user msg. Layered prefix caching seeds a
-    // stable + volatile system pair; treating the volatile band as prior
-    // conversation made a recalled first turn appear to have two old messages
-    // and emitted a bogus compaction warning on `hello`.
-    let priorStartIdx = 0;
-    while (
-      priorStartIdx < this.currentTurnStartIdx &&
-      this.messages[priorStartIdx]?.role === 'system'
-    ) {
-      priorStartIdx++;
-    }
-    const prior: Array<{ role: string; content: string }> = [];
-    for (let i = priorStartIdx; i < this.currentTurnStartIdx; i++) {
-      const m = this.messages[i]!;
-      if (
-        (m.role === 'user' || m.role === 'assistant') &&
-        typeof m.content === 'string' &&
-        m.content.length > 0
-      ) {
-        prior.push({ role: m.role, content: m.content });
-      }
-    }
-    if (prior.length < MID_LOOP_COMPACT_MIN_PRIOR) return false;
-    let result: { syntheticContent: string } | null = null;
-    try {
-      result = await this.deps.requestCompaction({
-        priorMessages: prior,
-        estimatedTokens,
+    return compactLocalTurn(
+      this.turnPolicy,
+      {
+        messages: this.messages,
+        turnStart: this.currentTurnStartIdx,
+        estimatedTokens: Math.ceil(this.estimatePromptChars() / 4),
         numCtx: this.deps.numCtx,
-      });
-    } catch (err) {
-      log.warn(
-        `[llama-cpp] mid-loop compaction request failed (continuing un-compacted): ${err instanceof Error ? err.message : String(err)}`,
-      );
-      // Mark compacted so we don't retry every iteration on a broken
-      // callback; the next user-message boundary check picks it up.
-      this.compactedThisTurn = true;
-      return false;
-    }
-    if (!result) {
-      this.compactedThisTurn = true;
-      return false;
-    }
-    // Replace the prior conversation with one synthesis assistant message,
-    // preserving every leading system band verbatim. Splice keeps the array
-    // reference stable (other parts may iterate over it; we mutate in place).
-    const removed = this.currentTurnStartIdx - priorStartIdx;
-    this.messages.splice(priorStartIdx, removed, {
-      role: 'assistant',
-      content: result.syntheticContent,
-    });
-    this.currentTurnStartIdx = priorStartIdx + 1;
-    this.compactedThisTurn = true;
-    log.info(
-      `[llama-cpp] mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)${opts?.force ? ' (reactive recovery)' : ''}`,
+        request: this.deps.requestCompaction,
+        replace: (start, count, content) => {
+          this.messages.splice(start, count, { role: 'assistant', content });
+          this.currentTurnStartIdx = start + 1;
+        },
+        warn: (error) => log.warn('Mid-loop compaction failed', { error: String(error) }),
+        completed: (removed) =>
+          this.emitWarning(
+            `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
+          ),
+      },
+      opts?.force,
     );
-    this.emitWarning(
-      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
-    );
-    return true;
   }
 
   /**
@@ -3305,7 +2876,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // (this turn's user msg + tool loop). Index captured BEFORE the
     // push so `currentTurnStartIdx` points at the user message itself.
     this.currentTurnStartIdx = this.messages.length;
-    this.compactedThisTurn = false;
+    this.turnPolicy = new LocalTurnPolicy(
+      turnCheckpoint(opts?.queue?.signal, () => budget.expired(), turnTimeoutError),
+    );
+    this.turnPolicy.checkpoint();
     // Reset captured reasoning at the top of each turn — manager
     // reads `getLastTurnReasoning()` after this resolves.
     this.lastTurnReasoning = '';
@@ -3377,7 +2951,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // Per-turn same-(name, args) repeat tracker. Catches the
     // narrative-spinning loop. See ToolRepeatTracker docstring.
     const repeatTracker = new ToolRepeatTracker();
-    const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(prompt);
+    const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(
+      prompt,
+      opts?.fileTurnIntent,
+    );
     // Per-turn ask_user_question dedup + post-question prose-fold
     // signal. See the matching block in MlxSession for the rationale.
     let askedQuestionThisTurn = false;
@@ -3419,7 +2996,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let directFileWorkMutationSucceeded = false;
     let scenarioRepairNoMutationNudges = 0;
     let scenarioRepairReadOnlyCalls = 0;
-    const prerequisiteRepairReadPaths = extractPrerequisiteRepairReadPaths(prompt);
+    const prerequisiteRepairReadPaths =
+      opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
+        ? opts.fileTurnIntent.readPaths.map(normalizeWorkspacePathForCompare)
+        : extractPrerequisiteRepairReadPaths(prompt);
     let prerequisiteRepairNoProgressNudges = 0;
     let scenarioRepairFailedMutationCalls = 0;
     let scenarioRepairDiagnosticReadRetryPending = false;
@@ -3468,6 +3048,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+        this.turnPolicy.checkpoint();
         if (budget.expired()) throw turnTimeoutError();
 
         // Check every iteration, including the first. Tool schemas can fill
@@ -3574,9 +3155,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
-        const immediateFileWriteTurn = isImmediateFileWriteTurn(prompt, tools);
+        const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
+        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
         const immediateFileWriteTarget = immediateFileWriteTurn
-          ? extractDirectFileWorkTargetPath(prompt)
+          ? (opts?.fileTurnIntent?.path ?? extractDirectFileWorkTargetPath(prompt))
           : null;
         const inferredDirectFileWorkTarget =
           extractDirectFileWorkTargetPath(prompt) ?? this.deps.directFileWorkTargetPath ?? null;
@@ -3591,9 +3173,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           hasWriteFileTool(tools) &&
           (tools?.some((tool) => chatCompletionToolName(tool) === 'run_nodejs_script') ?? false);
         const scenarioFileRepairTurn =
-          !scriptedDataFileWorkTurn && isScenarioFileRepairTurn(prompt, tools);
+          !scriptedDataFileWorkTurn && fileTurnPlan.kind === 'repair-file';
         const existingSourceEditTurn =
-          !scriptedDataFileWorkTurn && isExistingSourceEditTurn(prompt, tools);
+          !scriptedDataFileWorkTurn &&
+          fileTurnPlan.kind === 'ordinary' &&
+          isExistingSourceEditTurn(prompt, tools);
         // Stage-1 gate-escalation turns: marker-gated, so immediate-write
         // can't co-fire (stage-1 text carries no trigger phrase), but the
         // explicit guards document the intended precedence — every existing
@@ -3624,7 +3208,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           (directFileWorkReadOnlyCalls > 0 ||
             shouldStartScriptedDataFileWork(prompt, directFileWorkTarget));
         const sourceFileScenarioRepairTurn =
-          scenarioFileRepairTurn && isSourceFileScenarioRepairPrompt(prompt);
+          scenarioFileRepairTurn && isSourceFileScenarioRepairPrompt(prompt, opts?.fileTurnIntent);
         const crossFileCompilerRepairTurn =
           sourceFileScenarioRepairTurn &&
           /(?:cannot find name|does not exist on type|is not assignable to type)/i.test(prompt);
@@ -3667,7 +3251,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         const explicitFullRewriteScenarioRepairTurn =
           scenarioFileRepairTurn &&
           !prerequisiteRepairReadsPending &&
-          hasExplicitFullFileRewriteWording(prompt);
+          (opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.strategy
+            ? opts.fileTurnIntent.strategy === 'rewrite'
+            : hasExplicitFullFileRewriteWording(prompt));
         const fullRewriteScenarioRepairTurn =
           sourceFileScenarioRepairTurn && explicitFullRewriteScenarioRepairTurn;
         const sourceRewriteFallback =
@@ -3681,13 +3267,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // the bounded mutation target explicitly. Other scenario repairs may
         // legitimately fix a dependency rather than the checked entry point,
         // so they retain the older pin only for whole-file rewrite fallbacks.
-        const postReadMutationTarget = scenarioRepairPostReadMutationTargetPath(prompt);
+        const postReadMutationTarget =
+          opts?.fileTurnIntent?.kind === 'repair-file'
+            ? (opts.fileTurnIntent.mutationPath ?? null)
+            : scenarioRepairPostReadMutationTargetPath(prompt);
         const scenarioRepairWriteTarget =
           scenarioFileRepairTurn && postReadMutationTarget
             ? postReadMutationTarget
             : scenarioFileRepairTurn &&
                 (explicitFullRewriteScenarioRepairTurn || sourceRewriteFallback)
-              ? (scenarioRepairTargetPath(prompt) ?? scenarioRepairReadFilePaths.at(-1) ?? null)
+              ? (scenarioRepairTargetPath(prompt, opts?.fileTurnIntent) ??
+                scenarioRepairReadFilePaths.at(-1) ??
+                null)
               : null;
         const sourceRewriteRefreshReadPending =
           sourceRewriteFallback &&
@@ -3736,12 +3327,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                       ? 'scenario-repair'
                       : null;
         const pushImmediateFileWriteNoMutationCorrective = () => {
-          immediateFileWriteNoMutationNudges += 1;
-          if (immediateFileWriteNoMutationNudges > SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT) {
-            throw new Error(
-              `[llama-cpp] immediate file-write turn ended without a write_file call after ${SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT} corrective nudge(s). The latest request still requires writing the deliverable file.`,
-            );
-          }
+          immediateFileWriteNoMutationNudges = this.turnPolicy.requireProgressRetry();
           const nudge = buildImmediateFileWriteNoMutationNudge({
             targetPath: immediateFileWriteTarget,
             noMutationNudges: immediateFileWriteNoMutationNudges,
@@ -3752,12 +3338,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           this.messages.push({ role: 'user', content: nudge });
         };
         const pushDirectFileWorkNoMutationCorrective = () => {
-          directFileWorkNoMutationNudges += 1;
-          if (directFileWorkNoMutationNudges > SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT) {
-            throw new Error(
-              `[llama-cpp] direct file-work turn ended without a successful workspace mutation after ${SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT} corrective nudge(s). The latest request still requires writing the deliverable file.`,
-            );
-          }
+          directFileWorkNoMutationNudges = this.turnPolicy.requireProgressRetry();
           const nudge = directFileWorkScriptHelperFailure
             ? buildDirectFileWorkScriptFailureNudge(
                 directFileWorkTarget,
@@ -5407,7 +4988,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   immediateFileWriteTurn &&
                   knownToolNames.has('write_file')
                 ) {
-                  const salvaged = salvageImmediateFileWriteArgs(turnContent, prompt);
+                  const salvaged = salvageImmediateFileWriteArgs(
+                    turnContent,
+                    prompt,
+                    opts?.fileTurnIntent?.path,
+                  );
                   if (salvaged) {
                     codeBlockRepaired = [
                       {
@@ -5634,6 +5219,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             );
           }
         }
+        this.turnPolicy.checkpoint();
+        let unknownCall: { wanted: string; suggestion: string | null } | null = null;
         let malformedStructuredCallIds = new Set<string>();
         let malformedStructuredCallPaths = new Map<string, string>();
         if (toolCalls.length > 0) {
@@ -5880,8 +5467,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           // wired in) will retry; surfacing the failed first attempt
           // as raw JSON in the user's view is just noise.
           if (toolCalls.length === 0 && !envelopeTruncated) {
-            const miss = findUnrecognizedToolEnvelope(turnContent, knownToolNames);
-            if (miss) {
+            const miss =
+              findUnrecognizedToolEnvelope(turnContent, knownToolNames) ??
+              findUnrecognizedFunctionMarkup(turnContent, knownToolNames);
+            unknownCall = miss;
+            if (
+              miss &&
+              'matchStart' in miss &&
+              typeof miss.matchStart === 'number' &&
+              'matchEnd' in miss &&
+              typeof miss.matchEnd === 'number'
+            ) {
               turnContent = stripJsonEnvelopesFromText(turnContent, [
                 { matchStart: miss.matchStart, matchEnd: miss.matchEnd },
               ]);
@@ -5936,6 +5532,24 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               );
             }
           }
+        }
+        if (toolCalls.length === 0 && unknownCall) {
+          if (this.turnPolicy.retry('malformed', `u:${unknownCall.wanted.toLowerCase()}`)) {
+            this.messages.push({
+              role: 'user',
+              content: buildUnknownToolNudge(
+                unknownCall.wanted,
+                unknownCall.suggestion,
+                collectKnownToolNames(),
+                new Map(),
+              ),
+            });
+            continue;
+          }
+          this.emitWarning(
+            'The model could not call an available tool after bounded recovery. No tool ran.',
+          );
+          return fullText;
         }
         // Every markup salvage format above is a flat KEY→text map, so a
         // parameter declared `object`/`array` arrives as a string. Repair
@@ -6084,9 +5698,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           !existingSourceEditMutationSucceeded &&
           !askedQuestionThisTurn
         ) {
-          const noMutationNudges = scenarioFileRepairTurn
-            ? ++scenarioRepairNoMutationNudges
-            : ++existingSourceEditNoMutationNudges;
+          const noMutationNudges = this.turnPolicy.requireProgressRetry();
+          if (scenarioFileRepairTurn) scenarioRepairNoMutationNudges = noMutationNudges;
+          else existingSourceEditNoMutationNudges = noMutationNudges;
           if (
             scenarioFileRepairTurn &&
             noMutationNudges === 1 &&
@@ -6094,11 +5708,6 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             !isGemmaChannelProfile(this.deps.profile)
           ) {
             scenarioRepairDiagnosticReadRetryPending = true;
-          }
-          if (noMutationNudges > SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT) {
-            throw new Error(
-              `[llama-cpp] source edit turn ended without a successful workspace mutation after ${SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT} corrective nudge(s). The latest request still requires a file patch; retry with a smaller targeted edit or rewrite the relevant source file with write_file after reading the current source.`,
-            );
           }
           const readOnlyCallsForNudge = scenarioFileRepairTurn
             ? scenarioRepairReadOnlyCalls
@@ -6275,6 +5884,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           scenarioRepairDiagnosticReadRetryPending = false;
         }
         for (const call of toolCalls) {
+          this.turnPolicy.checkpoint();
+          this.turnPolicy.checkpoint();
           if (terminalActionClosing) {
             this.messages.push({
               role: 'tool',
@@ -6327,6 +5938,16 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             output =
               "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
           } else if (malformedStructuredCallIds.has(call.id)) {
+            if (
+              !this.turnPolicy.retry(
+                'malformed',
+                `args:${call.function.name}:${call.function.arguments}`,
+              )
+            ) {
+              throw new Error(
+                'Malformed tool-call recovery budget exhausted; no tool was executed.',
+              );
+            }
             output = `ERROR: \`${call.function.name}\` was not executed because the model emitted malformed JSON arguments. Emit one new compact call with valid JSON and every required field. Do not claim the tool succeeded.`;
           } else if (
             (call.function.name === 'start_project' || call.function.name === 'start_job') &&
@@ -6824,7 +6445,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           // turn alive (append_to_file is now surfaced) instead of bailing
           // on a partial file. The tool result already carries the
           // "append the rest" hint.
-          if (immediateWriteTruncated && writeContinuations < MAX_IMMEDIATE_WRITE_CONTINUATIONS) {
+          if (immediateWriteTruncated && this.turnPolicy.retry('writeContinuations')) {
             writeContinuationActive = true;
             writeContinuations++;
             log.info(

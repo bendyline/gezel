@@ -10,11 +10,23 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
-import { KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
+import {
+  KnowledgeCatalogManifestSchema,
+  MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
+  MAX_KNOWLEDGE_ASSET_BYTES,
+  MAX_KNOWLEDGE_ASSET_COUNT,
+  assetExtension,
+  assetKindForExtension,
+  isKnowledgeAssetPath,
+  sniffAssetType,
+  svgInertnessProblem,
+} from '@bendyline/gezk';
 import { GEZK_ARCHIVE_LIMITS } from '../archive/read.js';
 import {
   MANIFEST_PATH,
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
+  MAX_KNOWLEDGE_DOCUMENT_META_BYTES,
+  MAX_KNOWLEDGE_TOPIC_DEPTH,
   ROUTER_DB_PATH,
 } from '../format/constants.js';
 import { hashFileStreaming } from '../format/file-hash.js';
@@ -115,10 +127,48 @@ export async function validateExtractedCatalog(
       handle.meta.embedding_profile_id === manifest.embedding.id,
       `router meta profile ${handle.meta.embedding_profile_id}`,
     );
+    check(
+      'meta-format',
+      handle.formatVersion === manifest.formatVersion &&
+        handle.schemaVersion === manifest.indexSchemaVersion,
+      `router says format ${handle.formatVersion} / schema ${handle.schemaVersion}, manifest says ${manifest.formatVersion} / ${manifest.indexSchemaVersion}`,
+    );
 
     // counts
     const topics = handle.topics();
     check('toc-present', topics.length >= 1, `${topics.length} topics`);
+    check('topics-tree', ...topicTreeProblem(topics));
+    const undeclared = handle.documentsWithUndeclaredTopic();
+    check(
+      'documents-topic-declared',
+      undeclared === 0,
+      `${undeclared} documents are filed under a topic the router does not declare`,
+    );
+    const assetFiles = manifest.files.filter((f) => f.path.startsWith('assets/'));
+    if (manifest.formatVersion === '0.5') {
+      check(
+        'assets-not-in-0.5',
+        assetFiles.length === 0,
+        `${assetFiles.length} assets/ entries in a 0.5 catalog`,
+      );
+    } else {
+      const badPaths = assetFiles.filter((f) => !isKnowledgeAssetPath(f.path)).map((f) => f.path);
+      check('assets-paths', badPaths.length === 0, `invalid asset paths: ${badPaths.join(', ')}`);
+      const oversize = assetFiles.filter((f) => f.sizeBytes > MAX_KNOWLEDGE_ASSET_BYTES);
+      const totalBytes = assetFiles.reduce((sum, f) => sum + f.sizeBytes, 0);
+      check(
+        'assets-limits',
+        assetFiles.length <= MAX_KNOWLEDGE_ASSET_COUNT &&
+          oversize.length === 0 &&
+          totalBytes <= MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
+        `${assetFiles.length} assets, ${totalBytes} bytes, ${oversize.length} over the per-asset limit`,
+      );
+      check(
+        'counts-assets',
+        (manifest.counts.assets ?? 0) === assetFiles.length,
+        `manifest counts ${manifest.counts.assets ?? 0} assets, files declare ${assetFiles.length}`,
+      );
+    }
     check(
       'license-notice',
       manifest.files.some((f) => f.path === manifest.license.noticePath),
@@ -231,6 +281,46 @@ export async function validateExtractedCatalog(
         check(`self-knn:${shard.id}`, handle.selfKnnSmoke(shard.id));
       }
 
+      if (handle.schemaVersion >= 3) {
+        const meta = handle.checkDocumentMeta(MAX_KNOWLEDGE_DOCUMENT_META_BYTES);
+        check(
+          'document-meta-json',
+          meta.invalid.length === 0 && meta.oversize.length === 0,
+          `${meta.invalid.length > 0 ? `not a JSON object: ${meta.invalid.join(', ')}` : ''}${meta.oversize.length > 0 ? ` over ${MAX_KNOWLEDGE_DOCUMENT_META_BYTES} bytes: ${meta.oversize.join(', ')}` : ''}`.trim(),
+        );
+        const declared = new Set(assetFiles.map((f) => f.path));
+        for (const file of assetFiles) {
+          const ext = assetExtension(file.path);
+          if (!ext) continue;
+          const bytes = await readFile(join(rootDir, file.path));
+          const kind = sniffAssetType(bytes);
+          check(
+            `asset-type:${file.path}`,
+            kind === assetKindForExtension(ext),
+            `leading bytes say ${kind ?? 'unknown'}, the extension says ${assetKindForExtension(ext)}`,
+          );
+          if (ext === 'svg') {
+            const problem = svgInertnessProblem(bytes);
+            check(`asset-svg-inert:${file.path}`, problem === null, problem ?? undefined);
+          }
+        }
+        if (declared.size > 0) {
+          const missing: string[] = [];
+          for (const doc of handle.documentBodies()) {
+            for (const target of assetReferences(doc.markdown)) {
+              if (!declared.has(target)) missing.push(`${doc.id} → ${target}`);
+              if (missing.length >= 5) break;
+            }
+            if (missing.length >= 5) break;
+          }
+          check(
+            'document-asset-refs',
+            missing.length === 0,
+            `undeclared asset references: ${missing.join('; ')}`,
+          );
+        }
+      }
+
       for (const smoke of manifest.smokeQueries ?? []) {
         const hits = handle
           .searchDocumentsFts(smoke.query, SMOKE_QUERY_TOP_N)
@@ -250,4 +340,46 @@ export async function validateExtractedCatalog(
   }
 
   return report(manifest);
+}
+
+/** `[…](assets/…)` and `![…](assets/…)` targets in a body, deduplicated. */
+export function assetReferences(markdown: string): string[] {
+  const found = new Set<string>();
+  for (const match of markdown.matchAll(/\]\(\s*<?(assets\/[^)\s>]+)/g)) {
+    const target = match[1];
+    if (target) found.add(target);
+  }
+  return [...found];
+}
+
+/**
+ * The topic forest must be acyclic, every parent declared, and no deeper
+ * than MAX_KNOWLEDGE_TOPIC_DEPTH. Returns `[ok, detail]` for `check`.
+ */
+function topicTreeProblem(
+  topics: Array<{ id: string; parentId: string | null }>,
+): [boolean, string | undefined] {
+  const byId = new Map(topics.map((t) => [t.id, t]));
+  for (const topic of topics) {
+    if (topic.parentId !== null && !byId.has(topic.parentId)) {
+      return [false, `topic '${topic.id}' names an undeclared parent '${topic.parentId}'`];
+    }
+  }
+  const depthOf = new Map<string, number>();
+  for (const topic of topics) {
+    const seen = new Set<string>();
+    let depth = 0;
+    let current: { id: string; parentId: string | null } | undefined = topic;
+    while (current) {
+      if (seen.has(current.id)) return [false, `topic '${topic.id}' sits in a parent cycle`];
+      seen.add(current.id);
+      depth += 1;
+      if (depth > MAX_KNOWLEDGE_TOPIC_DEPTH) {
+        return [false, `topic '${topic.id}' is deeper than ${MAX_KNOWLEDGE_TOPIC_DEPTH}`];
+      }
+      current = current.parentId === null ? undefined : byId.get(current.parentId);
+    }
+    depthOf.set(topic.id, depth);
+  }
+  return [true, `${topics.length} topics, max depth ${Math.max(0, ...depthOf.values())}`];
 }

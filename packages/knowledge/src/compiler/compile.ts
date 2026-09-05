@@ -1,5 +1,5 @@
 /**
- * `.gezk` compiler (gezk 0.5; spec in bendyline/gezk). One owner of normalization, chunk
+ * `.gezk` compiler (gezk 0.6; spec in bendyline/gezk). One owner of normalization, chunk
  * ids, embedding-profile conformance, SQLite schema, shard assignment,
  * centroid routing, and deterministic archive layout — the CLI's Markdown
  * adapter and Qualla's Wikipedia adapter both feed this API.
@@ -18,7 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
@@ -28,7 +28,19 @@ import type {
   KnowledgeChunkingProfile,
   KnowledgeEmbeddingProfile,
 } from '@bendyline/gezk';
-import { GEZK_MANIFEST_KIND, KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
+import {
+  GEZK_MANIFEST_KIND,
+  KnowledgeAssetPathSchema,
+  KnowledgeCatalogManifestSchema,
+  MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
+  MAX_KNOWLEDGE_ASSET_BYTES,
+  MAX_KNOWLEDGE_ASSET_COUNT,
+  assetExtension,
+  assetKindForExtension,
+  canonicalizeJson,
+  sniffAssetType,
+  svgInertnessProblem,
+} from '@bendyline/gezk';
 import { writeGezkArchive } from '../archive/write.js';
 import { type MarkdownChunk, chunkMarkdownProfile } from '../chunking/markdown-chunker.js';
 import {
@@ -43,6 +55,8 @@ import {
   LICENSE_NOTICE_PATH,
   MANIFEST_PATH,
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
+  MAX_KNOWLEDGE_DOCUMENT_META_BYTES,
+  MAX_KNOWLEDGE_TOPIC_DEPTH,
   README_PATH,
   ROUTER_DB_PATH,
   SHARD_TARGET_CHUNKS,
@@ -61,6 +75,14 @@ export interface CompileTopic {
   parentId?: string;
   description?: string;
   sortKey?: string;
+}
+
+export interface CompileAsset {
+  /** Archive path, `assets/…`, matching the format's asset path grammar. */
+  path: string;
+  /** Exactly one of `absPath` / `content`. */
+  absPath?: string;
+  content?: Buffer;
 }
 
 export interface CompileKnowledgeCatalogOptions {
@@ -114,9 +136,17 @@ export interface CompileKnowledgeCatalogOptions {
   /**
    * Extra archive files (path → utf8 content). `README.md` and
    * `LICENSES/catalog.txt` are always shipped: minimal ones are generated
-   * from the catalog block unless supplied here.
+   * from the catalog block unless supplied here. Paths under `assets/` are
+   * refused here — images go through `assets`.
    */
   extraFiles?: Record<string, string>;
+  /**
+   * Images shipped under `assets/` for document bodies to reference by
+   * archive path. Each is validated against the format's asset rules
+   * (path grammar, size, leading bytes matching the extension, inert SVG)
+   * and declared in `manifest.files` like every other entry.
+   */
+  assets?: CompileAsset[];
   /**
    * Last touch before the manifest is archived — the signing seam
    * (signatures/signing.ts `signManifest`). Must only add/replace the
@@ -146,6 +176,9 @@ export interface CompileReport {
 interface PreparedDocument {
   doc: CatalogDocument;
   topicPathKey: string;
+  /** The topic the document is filed at: the last segment of its path. */
+  leafTopicId: string;
+  metaJson: string | null;
   chunks: MarkdownChunk[];
 }
 
@@ -157,7 +190,8 @@ export async function compileKnowledgeCatalog(
       'a catalog must ship a table of contents: provide at least one topic (a flat corpus gets a single root topic)',
     );
   }
-  const topicIds = new Set(opts.topics.map((t) => t.id));
+  const topicById = assertTopicForest(opts.topics);
+  const preparedAssets = prepareAssets(opts.assets ?? [], opts.extraFiles ?? {});
   const profile = opts.embeddingProfile;
   const chunkerOpts = {
     unit: opts.chunkingProfile.unit,
@@ -172,13 +206,11 @@ export async function compileKnowledgeCatalog(
   for await (const doc of opts.documents) {
     if (seenIds.has(doc.id)) throw new Error(`duplicate document id: ${doc.id}`);
     seenIds.add(doc.id);
-    const rootTopic = doc.topicPath[0];
-    if (!rootTopic || !topicIds.has(rootTopic)) {
-      throw new Error(`document ${doc.id} names unknown topic '${rootTopic ?? ''}'`);
-    }
     prepared.push({
       doc,
       topicPathKey: doc.topicPath.join('/'),
+      leafTopicId: assertTopicPath(topicById, doc.id, doc.topicPath),
+      metaJson: encodeDocumentMeta(doc),
       chunks: chunkMarkdownProfile(normalizeMarkdown(doc.markdown), chunkerOpts),
     });
   }
@@ -269,8 +301,7 @@ export async function compileKnowledgeCatalog(
     // topics (document_count filled below)
     const topicDocCount = new Map<string, number>();
     for (const p of prepared) {
-      const t = p.doc.topicPath[0] as string;
-      topicDocCount.set(t, (topicDocCount.get(t) ?? 0) + 1);
+      topicDocCount.set(p.leafTopicId, (topicDocCount.get(p.leafTopicId) ?? 0) + 1);
     }
     {
       const stmt = router.prepare(
@@ -291,9 +322,10 @@ export async function compileKnowledgeCatalog(
     // documents + aliases + doc-FTS
     {
       const insertDoc = router.prepare(
-        `INSERT INTO documents (id, title, slug, summary, language, topic_id, shard_id, chunk_count,
-        source_url, source_revision, source_updated_at, attribution_json, body_codec, body_blob)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, title, slug, summary, language, topic_id, ordinal, shard_id,
+        chunk_count, source_url, source_revision, source_updated_at, attribution_json, meta_json,
+        body_codec, body_blob)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const insertAlias = router.prepare(
         'INSERT OR IGNORE INTO aliases (alias, document_id) VALUES (?, ?)',
@@ -323,13 +355,15 @@ export async function compileKnowledgeCatalog(
           p.doc.slug || documentSlug(p.doc.title),
           p.doc.summary ?? null,
           p.doc.language,
-          p.doc.topicPath[0] as string,
+          p.leafTopicId,
+          p.doc.ordinal === undefined ? null : BigInt(p.doc.ordinal),
           BigInt(shardOf.get(p.doc.id) as number),
           BigInt(p.chunks.length),
           p.doc.sourceUrl ?? null,
           p.doc.sourceRevision ?? null,
           p.doc.sourceUpdatedAt ?? null,
           p.doc.attribution ? JSON.stringify(p.doc.attribution) : null,
+          p.metaJson,
           useBrotli ? 'br' : 'none',
           blob,
         );
@@ -418,7 +452,7 @@ export async function compileKnowledgeCatalog(
       const db = shardDb(shardId);
       shardDocCounts.set(shardId, (shardDocCounts.get(shardId) ?? 0) + 1);
       const topics = shardTopicIds.get(shardId) ?? new Set<string>();
-      topics.add(p.doc.topicPath[0] as string);
+      topics.add(p.leafTopicId);
       shardTopicIds.set(shardId, topics);
 
       const insertChunk = db.prepare(
@@ -606,6 +640,10 @@ export async function compileKnowledgeCatalog(
         sha256: createHash('sha256').update(bytes).digest('hex'),
       });
     }
+    for (const asset of preparedAssets) {
+      files.push({ path: asset.path, sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
+    }
+    assertAssetReferencesDeclared(prepared, preparedAssets);
 
     const unsignedManifest: KnowledgeCatalogManifest = KnowledgeCatalogManifestSchema.parse({
       kind: GEZK_MANIFEST_KIND,
@@ -625,13 +663,24 @@ export async function compileKnowledgeCatalog(
       },
       embedding: profile,
       chunking: opts.chunkingProfile,
-      topics: opts.topics.map((t) => ({ id: t.id, name: t.name })),
+      topics: opts.topics.map((t) => ({
+        id: t.id,
+        name: t.name,
+        ...(t.parentId ? { parentId: t.parentId } : {}),
+        sortKey: t.sortKey ?? t.name.toLowerCase(),
+        ...(t.description ? { description: t.description } : {}),
+      })),
       router: {
         shardTargetChunks: shardTarget,
         shards: routerShardStats.sort((a, b) => a.id - b.id),
         totalCentroids: routerShardStats.reduce((sum, s) => sum + s.centroids, 0),
       },
-      counts: { documents: prepared.length, chunks: totalChunks, shards: shardCount },
+      counts: {
+        documents: prepared.length,
+        chunks: totalChunks,
+        shards: shardCount,
+        assets: preparedAssets.length,
+      },
       files: [...files].sort((a, b) => (a.path < b.path ? -1 : 1)),
       requires: { formatVersion: GEZK_FORMAT_VERSION, features: [] },
       ...(smokeQueries && smokeQueries.length > 0 ? { smokeQueries } : {}),
@@ -651,6 +700,7 @@ export async function compileKnowledgeCatalog(
         path,
         content: Buffer.from(content, 'utf8'),
       })),
+      ...preparedAssets.map((asset) => ({ path: asset.path, content: asset.bytes })),
     ];
     await writeGezkArchive(opts.outputPath, archiveEntries);
     const archiveBytes = (await stat(opts.outputPath)).size;
@@ -669,6 +719,164 @@ export async function compileKnowledgeCatalog(
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * The topic list must be a forest: unique ids, every parent declared, no
+ * cycles, no branch deeper than MAX_KNOWLEDGE_TOPIC_DEPTH.
+ */
+function assertTopicForest(topics: CompileTopic[]): Map<string, CompileTopic> {
+  const byId = new Map<string, CompileTopic>();
+  for (const topic of topics) {
+    if (byId.has(topic.id)) throw new Error(`duplicate topic id: ${topic.id}`);
+    byId.set(topic.id, topic);
+  }
+  for (const topic of topics) {
+    const seen = new Set<string>();
+    let depth = 0;
+    let current: CompileTopic | undefined = topic;
+    while (current) {
+      if (seen.has(current.id)) throw new Error(`topic '${topic.id}' sits in a parent cycle`);
+      seen.add(current.id);
+      depth += 1;
+      if (depth > MAX_KNOWLEDGE_TOPIC_DEPTH) {
+        throw new Error(`topic '${topic.id}' is deeper than ${MAX_KNOWLEDGE_TOPIC_DEPTH}`);
+      }
+      if (current.parentId === undefined) break;
+      const parent = byId.get(current.parentId);
+      if (!parent) {
+        throw new Error(`topic '${current.id}' names an undeclared parent '${current.parentId}'`);
+      }
+      current = parent;
+    }
+  }
+  return byId;
+}
+
+/** Every segment must be declared and each must be the parent of the next; returns the leaf. */
+function assertTopicPath(
+  topicById: Map<string, CompileTopic>,
+  docId: string,
+  path: string[],
+): string {
+  for (let i = 0; i < path.length; i++) {
+    const id = path[i] as string;
+    const topic = topicById.get(id);
+    if (!topic) {
+      throw new Error(
+        `document ${docId} names unknown topic '${id}' (segment ${i} of ${path.join('/')})`,
+      );
+    }
+    const expectedParent = i === 0 ? undefined : path[i - 1];
+    if (topic.parentId !== expectedParent) {
+      throw new Error(
+        `document ${docId}: topic path ${path.join('/')} does not follow the declared tree at '${id}' (its parent is '${topic.parentId ?? '(root)'}')`,
+      );
+    }
+  }
+  return path[path.length - 1] as string;
+}
+
+/** Canonical `meta_json`, or null when the document carries no metadata. */
+function encodeDocumentMeta(doc: CatalogDocument): string | null {
+  if (!doc.meta || Object.keys(doc.meta).length === 0) return null;
+  let json: string;
+  try {
+    json = canonicalizeJson(doc.meta);
+  } catch (error) {
+    throw new Error(
+      `document ${doc.id} has metadata that cannot be serialized: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const bytes = Buffer.byteLength(json, 'utf8');
+  if (bytes > MAX_KNOWLEDGE_DOCUMENT_META_BYTES) {
+    throw new Error(
+      `document ${doc.id} has ${bytes} bytes of metadata; the limit is ${MAX_KNOWLEDGE_DOCUMENT_META_BYTES}`,
+    );
+  }
+  return json;
+}
+
+interface PreparedAsset {
+  path: string;
+  bytes: Buffer;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/** Validate and load every asset up front so a bad image fails before any embedding runs. */
+function prepareAssets(
+  assets: CompileAsset[],
+  extraFiles: Record<string, string>,
+): PreparedAsset[] {
+  for (const path of Object.keys(extraFiles)) {
+    if (path.startsWith('assets/')) {
+      throw new Error(`extraFiles cannot carry '${path}': files under assets/ go through 'assets'`);
+    }
+  }
+  if (assets.length > MAX_KNOWLEDGE_ASSET_COUNT) {
+    throw new Error(`${assets.length} assets exceed the limit of ${MAX_KNOWLEDGE_ASSET_COUNT}`);
+  }
+  const seen = new Set<string>();
+  const prepared: PreparedAsset[] = [];
+  let total = 0;
+  for (const asset of assets) {
+    const parsed = KnowledgeAssetPathSchema.safeParse(asset.path);
+    if (!parsed.success) throw new Error(`invalid asset path: ${asset.path}`);
+    const key = asset.path.toLowerCase();
+    if (seen.has(key)) throw new Error(`duplicate asset path (case-insensitive): ${asset.path}`);
+    seen.add(key);
+    if ((asset.content === undefined) === (asset.absPath === undefined)) {
+      throw new Error(`asset ${asset.path} must supply exactly one of content / absPath`);
+    }
+    const bytes = asset.content ?? readFileSync(asset.absPath as string);
+    if (bytes.byteLength > MAX_KNOWLEDGE_ASSET_BYTES) {
+      throw new Error(
+        `asset ${asset.path} is ${bytes.byteLength} bytes; the limit is ${MAX_KNOWLEDGE_ASSET_BYTES}`,
+      );
+    }
+    total += bytes.byteLength;
+    if (total > MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES) {
+      throw new Error(`assets exceed ${MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES} bytes in total`);
+    }
+    const ext = assetExtension(asset.path);
+    const expected = ext ? assetKindForExtension(ext) : null;
+    const actual = sniffAssetType(bytes);
+    if (expected === null || actual !== expected) {
+      throw new Error(
+        `asset ${asset.path}: the leading bytes say ${actual ?? 'unknown'}, the extension says ${expected ?? 'unknown'}`,
+      );
+    }
+    if (ext === 'svg') {
+      const problem = svgInertnessProblem(bytes);
+      if (problem) throw new Error(`asset ${asset.path} is not an inert SVG: it ${problem}`);
+    }
+    prepared.push({
+      path: asset.path,
+      bytes,
+      sizeBytes: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+  }
+  return prepared.sort((a, b) => (a.path < b.path ? -1 : 1));
+}
+
+/** A body may only reference assets the archive ships. */
+function assertAssetReferencesDeclared(
+  prepared: PreparedDocument[],
+  assets: PreparedAsset[],
+): void {
+  const declared = new Set(assets.map((a) => a.path));
+  for (const p of prepared) {
+    for (const match of p.doc.markdown.matchAll(/\]\(\s*<?(assets\/[^)\s>]+)/g)) {
+      const target = match[1] as string;
+      if (!declared.has(target)) {
+        throw new Error(
+          `document ${p.doc.id} references '${target}', which is not among the catalog's assets`,
+        );
+      }
+    }
+  }
+}
 
 function createCatalogDb(absPath: string): DatabaseSync {
   const db = new DatabaseSync(absPath);

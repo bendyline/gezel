@@ -9,8 +9,13 @@ vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 // (catalog roster, topic tree, doc list, search, provenance) is the target.
 vi.mock('@bendyline/squisq-react', () => ({
   LinearDocView: ({ doc }: { doc: unknown }) => (
-    <div data-testid="linear-doc-view">{doc ? 'doc' : 'no-doc'}</div>
+    <div data-testid="linear-doc-view">
+      {doc ? 'doc' : 'no-doc'}
+      <a href="knowledge://gezel-tests/shop-notes/shellac">See shellac</a>
+      <a href="https://example.test/outside">Outside</a>
+    </div>
   ),
+  MediaContext: { Provider: ({ children }: { children: unknown }) => <>{children}</> },
 }));
 
 const { KnowledgeView } = await import('./KnowledgeView.js');
@@ -41,7 +46,8 @@ const TOPICS = [
     name: 'Joinery',
     description: null,
     sortKey: 'joinery',
-    documentCount: 2,
+    documentCount: 1,
+    totalDocumentCount: 2,
   },
   {
     id: 'dovetail-work',
@@ -50,6 +56,7 @@ const TOPICS = [
     description: null,
     sortKey: 'dovetail',
     documentCount: 1,
+    totalDocumentCount: 1,
   },
 ];
 
@@ -64,6 +71,8 @@ const DOC_META = {
   sourceRevision: null,
   sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
   attribution: null,
+  ordinal: null,
+  meta: null,
 };
 
 beforeEach(() => {
@@ -120,6 +129,28 @@ describe('KnowledgeView', () => {
     expect(await screen.findByText('Search results')).toBeInTheDocument();
     await waitFor(() => expect(api.searchKnowledge).toHaveBeenCalled());
     expect(await screen.findByText('Tails and pins interlock…')).toBeInTheDocument();
+  });
+
+  it('shows subtree totals on topic rows', async () => {
+    render(<KnowledgeView />);
+    const joinery = (await screen.findByText('Joinery')).closest('button');
+    expect(joinery).toHaveTextContent('2');
+    const shelf = (await screen.findByText('Dovetail work')).closest('button');
+    expect(shelf).toHaveTextContent('1');
+  });
+
+  it('follows a knowledge:// link inside a document and leaves other links alone', async () => {
+    render(<KnowledgeView />);
+    fireEvent.click(await screen.findByText('Dovetail Joints'));
+    expect(await screen.findByTestId('linear-doc-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('See shellac'));
+    await waitFor(() =>
+      expect(api.readKnowledgeDocument).toHaveBeenCalledWith('shop-notes', 'shellac'),
+    );
+    const outside = screen.getByText('Outside');
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    outside.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('shows the install pointer when no catalog is registered', async () => {

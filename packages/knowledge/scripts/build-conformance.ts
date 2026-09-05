@@ -14,7 +14,15 @@
  */
 
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,11 +42,15 @@ import { compileKnowledgeCatalog } from '../src/compiler/compile.js';
 import { type ShardBitIndex, hammingTopK } from '../src/reader/bit-scan.js';
 import { CatalogHandle } from '../src/reader/catalog-handle.js';
 import {
+  FIXTURE_ASSETS,
+  FIXTURE_ASSET_DOCUMENT_ID,
+  FIXTURE_ASSET_PATH,
   FIXTURE_CHUNKING_PROFILE,
   FIXTURE_EMBEDDING_PROFILE,
   FIXTURE_TOPICS,
   fakeCountTokens,
   fakeEmbed,
+  fixtureMeta,
   generateFixtureCorpus,
 } from '../src/test/fixture.js';
 
@@ -55,6 +67,35 @@ MCowBQYDK2VwAyEAjEGBSH8XNNyYVwtWJ8NaHPkmQ0tlJdpl8BwgtIlxsc4=
 const FIXTURE_NAME = `conformance-${GEZK_FORMAT_VERSION}.gezk`;
 const DOCS = generateFixtureCorpus(40, 7);
 
+interface LegacyFixture {
+  formatVersion: string;
+  [key: string]: unknown;
+}
+
+/**
+ * The previous kit's fixture block becomes a legacy entry when the format
+ * version moved; entries already carried stay as they are. Without this,
+ * regenerating the kit would erase the only proof that older catalogs open.
+ */
+function carryLegacy(previousVectorsPath: string): LegacyFixture[] {
+  if (!existsSync(previousVectorsPath)) return [];
+  const previous = JSON.parse(readFileSync(previousVectorsPath, 'utf8')) as {
+    formatVersion?: string;
+    fixture?: Record<string, unknown>;
+    legacy?: LegacyFixture[];
+  };
+  const carried = [...(previous.legacy ?? [])];
+  if (
+    previous.formatVersion &&
+    previous.formatVersion !== GEZK_FORMAT_VERSION &&
+    previous.fixture &&
+    !carried.some((entry) => entry.formatVersion === previous.formatVersion)
+  ) {
+    carried.push({ formatVersion: previous.formatVersion, ...previous.fixture });
+  }
+  return carried.sort((a, b) => (a.formatVersion < b.formatVersion ? -1 : 1));
+}
+
 async function main(): Promise<void> {
   const gezkRoot = requireGezkCheckout();
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -64,7 +105,7 @@ async function main(): Promise<void> {
     const report = await compileKnowledgeCatalog({
       catalog: {
         id: 'conformance',
-        version: '0.5.0',
+        version: `${GEZK_FORMAT_VERSION}.0`,
         name: 'gezk conformance fixture',
         description: 'A tiny synthetic corpus every gezk implementation must read identically.',
         language: 'en',
@@ -82,6 +123,7 @@ async function main(): Promise<void> {
       embed: fakeEmbed,
       countTokens: fakeCountTokens,
       workDir: join(work, 'build'),
+      assets: FIXTURE_ASSETS,
       smokeQueries: DOCS.slice(0, 6).map((doc) => ({
         query: doc.title,
         expectedDocumentIds: [doc.id],
@@ -94,6 +136,9 @@ async function main(): Promise<void> {
     await extractGezkVerified(archivePath, extracted);
     const handle = CatalogHandle.open(extracted);
     let probe: { chunkUid: string; embedInput: string; documentId: string };
+    let topicsSnapshot: ReturnType<CatalogHandle['topics']> = [];
+    let orderedListing: string[] = [];
+    let assetsSnapshot: ReturnType<CatalogHandle['assets']> = [];
     try {
       const doc = DOCS[3];
       if (!doc) throw new Error('fixture corpus too small');
@@ -104,6 +149,11 @@ async function main(): Promise<void> {
           ? `${hit.title}\n${hit.headingPath.join(' > ')}\n`
           : `${hit.title}\n`;
       probe = { chunkUid: hit.chunkUid, embedInput: `${header}${hit.text}`, documentId: doc.id };
+      topicsSnapshot = handle.topics();
+      orderedListing = handle
+        .documentsPage({ topicId: 'nature', limit: 5 })
+        .documents.map((d) => d.id);
+      assetsSnapshot = handle.assets();
     } finally {
       handle.close();
     }
@@ -237,7 +287,32 @@ async function main(): Promise<void> {
             )
             .digest('hex'),
         },
+        // 0.6: leaf filing with reader rollup, ordinals, metadata, assets.
+        nestedTopic: (() => {
+          const metals = topicsSnapshot.find((t) => t.id === 'metals');
+          const craft = topicsSnapshot.find((t) => t.id === 'craft');
+          if (!metals || !craft) throw new Error('fixture topics missing');
+          return {
+            id: metals.id,
+            parentId: metals.parentId,
+            directDocuments: metals.documentCount,
+            parentDirectDocuments: craft.documentCount,
+            parentTotalDocuments: craft.totalDocumentCount,
+          };
+        })(),
+        orderedListing: { topicId: 'nature', firstDocumentIds: orderedListing },
+        metaSample: { documentId: 'doc-0007', meta: fixtureMeta(7) },
+        assets: assetsSnapshot.map((a) => ({
+          path: a.path,
+          contentType: a.contentType,
+          sizeBytes: a.sizeBytes,
+          sha256: a.sha256,
+        })),
+        assetDocument: { documentId: FIXTURE_ASSET_DOCUMENT_ID, path: FIXTURE_ASSET_PATH },
       },
+      // Earlier generations' fixtures and their expectations, carried forward
+      // from the previous kit so a reader proves it still opens them.
+      legacy: carryLegacy(join(packageRoot, 'conformance', 'vectors.json')),
     };
 
     const readme = `# gezk ${GEZK_FORMAT_VERSION} conformance kit
@@ -256,8 +331,12 @@ edit by hand. An implementation conforms when it reproduces every entry in
 - \`signature\` — the fixture manifest verifies under the TEST public key and
   fails once the named field is tampered with.
 - \`fixture\` — archive digest, counts, full-text queries, a document body
-  round trip, and a two-stage semantic probe embedded with the documented
-  hash embedder.
+  round trip, a two-stage semantic probe embedded with the documented hash
+  embedder, and (0.6) the nested topic's rollup, an ordinal-first listing,
+  a metadata sample, and the shipped asset.
+- \`legacy\` — the same fixture facts for every earlier generation whose
+  archive still ships under \`fixtures/\`; a reader for this version reads
+  those too.
 
 The fixture is signed with a TEST key whose private half is published in
 the generator; it proves signature handling, never provenance.
@@ -265,7 +344,7 @@ the generator; it proves signature handling, never provenance.
 
     const outputs = [join(gezkRoot, 'conformance'), join(packageRoot, 'conformance')];
     for (const out of outputs) {
-      rmSync(out, { recursive: true, force: true });
+      // Never wipe: earlier generations' fixtures stay beside the current one.
       mkdirSync(join(out, 'fixtures'), { recursive: true });
       cpSync(archivePath, join(out, 'fixtures', FIXTURE_NAME));
       writeFileSync(join(out, 'vectors.json'), `${JSON.stringify(vectors, null, 2)}\n`);

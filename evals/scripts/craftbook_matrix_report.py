@@ -27,6 +27,15 @@ first-pass category  <- failureClass / rule
   EVAL        <- grader                                               (grader was wrong)
   RERUN       <- operator                                            (interrupted; not a result)
   NEEDS-DIAGNOSIS <- model (the default bucket)                       (human four-way call)
+
+It also reports DRIVE-THROUGH, which changes how a PASS should be read. A
+`craftbook-<id>` scenario in artifact-task mode sends a freehand kickoff prompt
+and grades the file that appears; nothing on that path requires the book to be
+invoked. `drove` = a task sourced from the book existed, so the trial exercised
+the RECIPE. `artifact-only` = it did not, so the trial measured only whether the
+model can produce that deliverable freehand — a PASS there is not evidence the
+craftbook works. Derived from the trial's own state.json + recording/task-history
+(see evals/src/craftbook-drove.ts, which also stamps it into facts.json).
 """
 import os, sys, json, glob
 from collections import defaultdict, Counter
@@ -43,6 +52,75 @@ FRAMEWORK_RULES = {
     "chat-template-500", "scheduler-voorman-deadlock", "render-killed",
 }
 ENVIRONMENT_RULES = {"capacity-denial", "context-overflow"}
+
+
+def _read_json(path):
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _tasks_in(run_dir):
+    """Live tasks (state.json) plus completed ones (recording/task-history/).
+
+    A book that ran to its terminal step is exactly the case that LEAVES live
+    state, so reading state.json alone would report the best outcome as
+    "never ran".
+    """
+    tasks = []
+    state = _read_json(os.path.join(run_dir, "state.json"))
+    if state is not None:
+        raw = state.get("tasks")
+        if isinstance(raw, dict):
+            raw = raw.get("tasks")
+        if isinstance(raw, list):
+            tasks.extend(raw)
+    hist = os.path.join(run_dir, "recording", "task-history")
+    if os.path.isdir(hist):
+        for name in sorted(os.listdir(hist)):
+            if not name.endswith(".json"):
+                continue
+            parsed = _read_json(os.path.join(hist, name))
+            if isinstance(parsed, list):
+                tasks.extend(parsed)
+            elif isinstance(parsed, dict):
+                tasks.append(parsed)
+    return tasks, state is not None
+
+
+# The `craftbook-*` scenarios that grade a book the model AUTHORED, repaired,
+# or chose rather than one it ran from the library. No task sourced from a
+# bundled book is expected, so drive-through says nothing about them.
+# Mirrored in evals/src/craftbook-drove.ts.
+AUTHORING_SCENARIOS = {
+    "craftbook-author-fanout", "craftbook-author-gate-script",
+    "craftbook-author-linear", "craftbook-author-params",
+    "craftbook-edit-midtask", "craftbook-export-generalize",
+    "craftbook-find-vs-create", "craftbook-route-multi",
+}
+
+
+def drive_through(scenario, run_dir):
+    """'drove' | 'artifact-only' | 'unknown' | '' (not a library-book trial)."""
+    if not scenario or not scenario.startswith("craftbook-"):
+        return ""
+    if scenario in AUTHORING_SCENARIOS:
+        return ""
+    book = scenario[len("craftbook-"):]
+    tasks, had_state = _tasks_in(run_dir)
+    if not had_state:
+        return "unknown"
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        cb = t.get("craftbook") or {}
+        if cb.get("id") == book:
+            return "drove"
+        for src in (t.get("sourceCraftbookIds") or []):
+            if isinstance(src, dict) and src.get("catalogId") == book:
+                return "drove"
+    return "artifact-only"
 
 
 def category(row):
@@ -84,6 +162,7 @@ def load(d):
             "sec": round((r.get("durationMs") or 0) / 1000),
             "trialdir": os.path.basename(os.path.dirname(p)),
             "runDir": os.path.dirname(p),
+            "drive": drive_through(r.get("scenarioId"), os.path.dirname(p)),
         })
     return rows
 
@@ -108,6 +187,16 @@ def report(cell, title, md=False, failures_only=False):
     print(f"\n=== {title} ===")
     print(f"cells: {len(cell)}  pass: {npass}  fail: {len(fails)}  rate: {100 * npass / total:.1f}%")
     print("failure first-pass categories: " + (", ".join(f"{k}={v}" for k, v in cats.most_common()) or "none"))
+
+    drives = Counter(r["drive"] for r in cell.values() if r["drive"])
+    if drives:
+        hollow = [r for r in cell.values() if r["ok"] and r["drive"] == "artifact-only"]
+        print("drive-through: " + ", ".join(f"{k}={v}" for k, v in drives.most_common()))
+        print(f"  {len(hollow)} PASSing cell(s) never invoked the craftbook — those measure the "
+              "model's freehand output, not the recipe")
+        if hollow:
+            for r in sorted(hollow, key=lambda r: (r["scenario"], r["model"]))[:200]:
+                print(f"    artifact-only PASS  {r['scenario']:<40} {r['model']}")
 
     if not failures_only and len(models) > 1:
         print("\nmatrix (book \\ model): P=pass  .=fail  (blank=not run)")
@@ -134,19 +223,20 @@ def report(cell, title, md=False, failures_only=False):
             for r in group:
                 detail = r["failReason"] or r["reason"]
                 print(f"    {r['scenario']:<28} {r['model']:<18} {r['tier']:<7} "
-                      f"{r['failureClass']}/{r['failureClassRule'] or '-'}  :: {detail}")
+                      f"{r['failureClass']}/{r['failureClassRule'] or '-'}"
+                      f"{'  [' + r['drive'] + ']' if r['drive'] else ''}  :: {detail}")
                 print(f"        {r['runDir']}")
 
     if md:
         print("\n<!-- markdown -->")
         print(f"\n**{title}** — {npass}/{len(cell)} pass ({100 * npass / total:.1f}%). "
               + (", ".join(f"{k} {v}" for k, v in cats.most_common()) or "no failures"))
-        print("\n| Book | Model | Tier | First-pass | failureClass/rule | Detail |")
-        print("|---|---|---|---|---|---|")
+        print("\n| Book | Model | Tier | First-pass | failureClass/rule | Drive-through | Detail |")
+        print("|---|---|---|---|---|---|---|")
         for r in sorted(fails, key=lambda r: (category(r), r["scenario"], r["model"])):
             detail = (r["failReason"] or r["reason"]).replace("|", "\\|")
             print(f"| {r['scenario']} | {r['model']} | {r['tier']} | {category(r)} | "
-                  f"{r['failureClass']}/{r['failureClassRule'] or '-'} | {detail} |")
+                  f"{r['failureClass']}/{r['failureClassRule'] or '-'} | {r['drive'] or '-'} | {detail} |")
 
 
 def main():

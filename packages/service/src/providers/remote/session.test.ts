@@ -132,7 +132,9 @@ describe('RemoteSession', () => {
     });
     session.onDelta((d) => deltas.push(d));
 
+    const fileTurnIntent = { kind: 'repair-file' as const, path: 'a.txt' };
     const text = await session.sendAndWait('read a.txt', {
+      fileTurnIntent,
       queue: {
         lane: 'interactive',
         affinity: true,
@@ -143,6 +145,7 @@ describe('RemoteSession', () => {
     });
 
     expect(text).toBe('Let me read it. The file says hello.');
+    expect(calls.map((call) => call.fileTurnIntent)).toEqual([fileTurnIntent, undefined]);
     expect(deltas.join('')).toBe('Let me read it. The file says hello.');
     expect(toolRanWithPath).toBe('a.txt');
 
