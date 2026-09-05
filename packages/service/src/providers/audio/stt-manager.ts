@@ -5,10 +5,10 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
-import type { Store } from '../../fs/store.js';
+import type { ConfigStore } from '../../fs/config-store.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
+import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
-import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { RemoteSttProvider } from './remote-stt.js';
 import { createSpeechToTextProvider } from './stt-factory.js';
 import type { SpeechToTextProvider } from './types.js';
@@ -23,20 +23,15 @@ export interface SpeechToTextManagerOptions {
    * `defaultSttModel`. Optional: tests and the machine-engine broker build a
    * manager with no store and get the first-installed fallback.
    */
-  store?: Store;
+  store?: Pick<ConfigStore, 'readConfig'>;
 }
 
 export class SpeechToTextProviderManager {
   private readonly home: string;
   private readonly env: NodeJS.ProcessEnv | undefined;
-  private readonly store: Store | undefined;
+  private readonly store: Pick<ConfigStore, 'readConfig'> | undefined;
 
-  private current_: SpeechToTextProvider | null = null;
-  private currentView_: SpeechToTextProvider | null = null;
-  private retiring_: SpeechToTextProvider | null = null;
-  private buildPromise: Promise<SpeechToTextProvider> | null = null;
-  private machineRetirement: Promise<void> | null = null;
-  private readonly activity = new ProviderRetirementGate();
+  private readonly local = new ProviderLifecycle<SpeechToTextProvider>(new Set(['transcribe']));
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -91,60 +86,29 @@ export class SpeechToTextProviderManager {
       const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
       if (target) return this.providerForRemoteTarget(target);
     }
-    if (this.current_) return this.currentView_ ?? this.current_;
-    if (this.buildPromise) return this.buildPromise;
-    this.buildPromise = (async () => {
+    return this.local.current(async () => {
       const defaultModelId = this.store
         ? (await this.store.readConfig()).defaultSttModel
         : undefined;
-      const provider = await createSpeechToTextProvider({
+      return createSpeechToTextProvider({
         home: this.home,
         ...(this.env ? { env: this.env } : {}),
         ...(defaultModelId ? { defaultModelId } : {}),
       });
-      this.current_ = provider;
-      this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['transcribe']));
-      return this.currentView_;
-    })().finally(() => {
-      this.buildPromise = null;
     });
-    return this.buildPromise;
   }
 
   async reset(): Promise<void> {
-    const prev = this.current_;
-    this.current_ = null;
-    this.currentView_ = null;
-    if (prev?.shutdown) {
-      await prev.shutdown().catch((err: unknown) => {
-        log.warn(
-          '[stt-provider] shutdown during reset failed:',
-          err instanceof Error ? err.message : String(err),
-        );
-      });
-    }
+    await this.local.reset().catch((err: unknown) => {
+      log.warn(
+        '[stt-provider] shutdown during reset failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    });
   }
 
   async retireLocalForMachineBroker(): Promise<void> {
-    if (this.machineRetirement) return this.machineRetirement;
-    const run = (async () => {
-      if (!usesMachineSpeechToText(this.env ?? process.env)) return;
-      this.activity.beginRetirement();
-      await this.buildPromise;
-      this.retiring_ ??= this.current_;
-      this.current_ = null;
-      this.currentView_ = null;
-      await this.activity.waitForIdle();
-      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
-      this.retiring_ = null;
-    })();
-    this.machineRetirement = run;
-    try {
-      await run;
-    } catch (error) {
-      if (this.machineRetirement === run) this.machineRetirement = null;
-      throw error;
-    }
+    if (usesMachineSpeechToText(this.env ?? process.env)) await this.local.retireForMachineBroker();
   }
 
   async shutdown(): Promise<void> {

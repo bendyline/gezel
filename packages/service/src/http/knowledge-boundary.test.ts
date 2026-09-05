@@ -15,7 +15,7 @@ import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildTestCatalog } from '../knowledge/test-catalog-fixture.js';
 import { sharedKnowledgeVersionDir } from '../machine-engine/knowledge-assets.js';
-import { type RunningService, startService } from '../service.js';
+import { type RunningEngineService, type RunningService, startService } from '../service.js';
 
 const priorEnv = {
   mock: process.env.GEZEL_MOCK_PROVIDER,
@@ -26,7 +26,7 @@ const priorEnv = {
 
 let dir: string;
 let sharedAssets: string;
-let machine: RunningService;
+let machine: RunningEngineService;
 let machineBase: string;
 let machineFetch: typeof fetch;
 let archiveDigest: string;

@@ -2371,6 +2371,17 @@
   .gz-ntd-detail-project {
     display: none;
   }
+
+  /* The two-step picker has no properties pane to reserve 38vh for. */
+  .gz-npd-step-pick .gz-npd-body {
+    overflow: hidden;
+  }
+
+  .gz-npd-step-pick .gz-npd-gallery {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
 }
 
 @media (max-width: 560px) {

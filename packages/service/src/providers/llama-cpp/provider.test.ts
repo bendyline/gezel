@@ -2031,11 +2031,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(toolResultMessage).toContain('set_task_status');
   });
 
-  it('gate-surgical-edit turns get a low-temp patch-only surface on the first move', async () => {
-    // The gate-escalation stage-1 nudge (GATE_TARGETED_EDIT marker) must
-    // reshape the turn immediately — no read precondition — to the
-    // surgical pair at repair sampling. Before this mode the nudge ran as
-    // a plain chat turn (the B2 gap).
+  it('gate feedback uses the common observed-file repair surface', async () => {
+    // Internal feedback follows the same repair contract as an ordinary
+    // failed-check report, including access to current source before editing.
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
@@ -2089,13 +2087,13 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const body = bodies[0]!;
     expect(body.temperature).toBe(0.2);
     expect(body.top_p).toBe(0.8);
-    expect(body.max_tokens).toBe(2048);
+    expect(body.max_tokens).toBe(4096);
     const toolNames = (body.tools as Array<{ function?: { name?: string } }>).map(
       (t) => t.function?.name,
     );
-    expect(toolNames.sort()).toEqual(['replace_in_file', 'replace_lines']);
+    expect(toolNames.sort()).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'validate']);
     const messages = body.messages as Array<{ role: string; content: string }>;
-    expect(messages.at(-1)?.content).toContain('[Local-model gate patch mode:');
+    expect(messages.at(-1)?.content).toContain('[Local-model repair mode:');
   });
 
   it('uses DeepSeek thinking-off fields for ds4-shaped constrained turns', async () => {
@@ -6808,7 +6806,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           'replace_lines',
           'validate',
         ]);
-        expect(JSON.stringify(body.messages)).toContain('Signals that did not fire');
+        expect(JSON.stringify(body.messages)).toContain('Address failing requirements');
         return sseResponse([
           {
             choices: [
@@ -7212,7 +7210,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       const names = body.tools?.map((entry) => entry.function.name).sort() ?? [];
       if (requestCount === 1) {
-        expect(names).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'write_file']);
+        expect(names).toEqual(['read_file', 'replace_in_file', 'replace_lines']);
         return sseResponse([
           {
             choices: [
@@ -9158,20 +9156,18 @@ describe('malformed structured tool-call argument repair', () => {
     expect(repaired?.content).not.toContain('path: "index.html"');
   });
 
-  it('defaults Gemma raw-string write_file args to index.html when path repair captures punctuation', () => {
+  it('rejects a write without a target when path repair captures punctuation', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><script>document.body.textContent=\\"ok\\";</script></body></html>\\n\\"\\"\\",path:';
     const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
-    expect(repaired?.path).toBe('index.html');
-    expect(repaired?.content).toContain('<script>document.body.textContent');
+    expect(repaired).toBeNull();
   });
 
-  it('defaults Gemma raw-string HTML writes to index.html when path repair captures a product name', () => {
+  it('rejects a write without an identifiable target when path repair captures a product name', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><h1>Pet Shop</h1><script>document.body.onclick=()=>{};</script></body></html>\\n\\"\\"\\", path: \\"Premium Dog Kibble\\" });';
     const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
-    expect(repaired?.path).toBe('index.html');
-    expect(repaired?.content).toContain('<h1>Pet Shop</h1>');
+    expect(repaired).toBeNull();
   });
 
   it('keeps explicit HTML paths when repairing malformed write_file args', () => {
@@ -9693,12 +9689,10 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     // sendAndWaitInner would set it (right before pushing user msg).
     const internal = session as unknown as {
       currentTurnStartIdx: number;
-      compactedThisTurn: boolean;
       maybeCompactMidLoop: () => Promise<void>;
       messages: Array<{ role: string; content: string }>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
-    internal.compactedThisTurn = false;
     internal.messages.push({ role: 'user', content: 'short prompt' });
     // Imitate the iteration-2 hook: a tool result was just pushed.
     internal.messages.push({
@@ -9722,7 +9716,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect(internal.messages[1]!.role).toBe('assistant');
     expect(internal.messages[1]!.content).toContain('summarized');
     expect(internal.messages[2]!.content).toBe('short prompt');
-    expect(internal.compactedThisTurn).toBe(true);
+    expect(await internal.maybeCompactMidLoop()).toBe(false);
     // currentTurnStartIdx now points at index 2 (the user msg, after
     // [system, synthesis]).
     expect(internal.currentTurnStartIdx).toBe(2);
@@ -9745,12 +9739,10 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     });
     const internal = session as unknown as {
       currentTurnStartIdx: number;
-      compactedThisTurn: boolean;
       maybeCompactMidLoop: (opts?: { force?: boolean }) => Promise<boolean>;
       messages: Array<{ role: string; content: string }>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
-    internal.compactedThisTurn = false;
     internal.messages.push({ role: 'user', content: 'current turn' });
 
     expect(await internal.maybeCompactMidLoop({ force: true })).toBe(true);
@@ -9787,12 +9779,10 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     session.onWarning?.((warning) => warnings.push(warning));
     const internal = session as unknown as {
       currentTurnStartIdx: number;
-      compactedThisTurn: boolean;
       maybeCompactMidLoop: (opts?: { force?: boolean }) => Promise<boolean>;
       messages: Array<{ role: string; content: string }>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
-    internal.compactedThisTurn = false;
     internal.messages.push({ role: 'user', content: 'hello' });
 
     expect(await internal.maybeCompactMidLoop({ force: true })).toBe(false);
@@ -9883,16 +9873,13 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     });
     const internal = session as unknown as {
       currentTurnStartIdx: number;
-      compactedThisTurn: boolean;
       maybeCompactMidLoop: () => Promise<void>;
       messages: Array<{ role: string }>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
-    internal.compactedThisTurn = false;
     internal.messages.push({ role: 'user' });
     await internal.maybeCompactMidLoop();
     expect(compactionCalls.length).toBe(0);
-    expect(internal.compactedThisTurn).toBe(false);
   });
 
   it('mid-loop compaction is bounded to once per turn', async () => {
@@ -9916,12 +9903,10 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     });
     const internal = session as unknown as {
       currentTurnStartIdx: number;
-      compactedThisTurn: boolean;
       maybeCompactMidLoop: () => Promise<void>;
       messages: Array<{ role: string; content: string }>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
-    internal.compactedThisTurn = false;
     internal.messages.push({ role: 'user', content: 'p' });
     await internal.maybeCompactMidLoop();
     // Now pretend more tool results pile in — pressure stays high.

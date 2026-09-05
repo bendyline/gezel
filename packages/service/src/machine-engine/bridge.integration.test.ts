@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { MachineMemoryUsageSchema } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type RunningService, startService } from '../service.js';
+import { type RunningEngineService, type RunningService, startService } from '../service.js';
 
-let machine: RunningService;
+let machine: RunningEngineService;
 let user: RunningService;
 let machineHome: string;
 let userHome: string;

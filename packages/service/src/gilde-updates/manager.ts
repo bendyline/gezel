@@ -28,7 +28,7 @@ import {
 } from '@bendyline/gezel/paths';
 import { z } from 'zod';
 import { writeFileAtomic } from '../fs/atomic.js';
-import type { Store } from '../fs/store.js';
+import type { ConfigStore } from '../fs/config-store.js';
 import type { HistoryManager } from '../history/manager.js';
 
 /**
@@ -66,8 +66,8 @@ export type GildeUpdateTrigger = 'scheduled' | 'manual' | 'enabled';
 
 export interface GildeUpdateManagerOptions {
   home: string;
-  store: Store;
-  history: HistoryManager;
+  store: Pick<ConfigStore, 'readConfig'>;
+  history?: HistoryManager;
   /** Test/private-registry seam; default registry.npmjs.org. */
   registry?: string;
   /** Test seam; default read from the installed `@bendyline/gilde`. */
@@ -81,8 +81,8 @@ export interface GildeUpdateManagerOptions {
 
 export class GildeUpdateManager {
   private readonly home: string;
-  private readonly store: Store;
-  private readonly history: HistoryManager;
+  private readonly store: Pick<ConfigStore, 'readConfig'>;
+  private readonly history?: HistoryManager;
   private readonly registry: string | undefined;
   private readonly intervalMs: number;
   private readonly startupDelayMs: number;
@@ -333,7 +333,7 @@ export class GildeUpdateManager {
       await this.recordCheck({ outcome: 'updated', version: update.version });
       await this.pruneVersionsExcept(update.version);
       await this.history
-        .log({
+        ?.log({
           kind: 'gilde.updated',
           summary: `Catalog content updated to gilde ${update.version} (was ${previousVersion})`,
           details: { previousVersion, version: update.version, trigger },

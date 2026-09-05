@@ -8,20 +8,8 @@ import {
   isRetiredModel,
   localContextFloorTokens,
 } from '@bendyline/gezel';
-import type {
-  IncompleteModelDownload,
-  LlamaCppInstallEvent,
-  LlamaCppInstalledModel,
-  ModelFitnessEntry,
-  UnrecognizedLocalModel,
-} from '@bendyline/gezel-client';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import {
-  MODEL_INVENTORY_CHANGED_EVENT,
-  announceModelInventoryChanged,
-  changedModelInventoryEngine,
-} from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
@@ -35,8 +23,11 @@ import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
+import { llamaModelAdapter } from './model-management-adapters.js';
 import { formatBytes } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
+import { useLocalModelManager } from './use-local-model-manager.js';
+import type { ActiveModelInstall as ActiveInstall } from './use-model-installs.js';
 
 interface MemoryProfile {
   totalRamBytes: number;
@@ -133,36 +124,6 @@ function formatReleased(iso: string | undefined): string | null {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
 }
 
-interface ActiveInstall {
-  catalogId: string;
-  bytesWritten: number;
-  totalBytes: number;
-  phase: 'downloading' | 'verifying' | 'extracting-metadata';
-  /**
-   * When set, the shared downloader is between attempts. Cleared on
-   * the next `progress` event. UI renders "Connection dropped —
-   * retrying in 4s (attempt 3/5)…" while present.
-   */
-  retrying?: {
-    attempt: number;
-    maxAttempts: number;
-    delayMs: number;
-    reason: string;
-  };
-  error?: string;
-  /**
-   * `local` — this React instance kicked off the install via SSE and
-   * owns the AbortController for its own event stream.
-   * `remote` — the install was discovered via the polled
-   * `/active-installs` endpoint; another path (the first-run
-   * bootstrap, or another open Settings tab) started it. Either way the
-   * install itself is a server-owned background job, so Cancel works for
-   * both origins via the explicit cancel endpoint.
-   */
-  origin: 'local' | 'remote';
-  controller?: AbortController;
-}
-
 /**
  * Narrow a catalog entry to "chat-model with a llamaCpp source
  * block" — entries that exist only as Ollama tags don't appear in
@@ -204,28 +165,31 @@ interface Props {
  * always uses the `llamaCpp` source block from chat-model entries.
  */
 export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
-  const [models, setModels] = useState<LlamaCppInstalledModel[]>([]);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  // Interrupted/unverified downloads holding disk with no install manifest —
-  // invisible to the installed list. Surfaced so the user can resume or
-  // delete them before the daemon's 7-day reclaim sweep.
-  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
-  const [unrecognized, setUnrecognized] = useState<UnrecognizedLocalModel[]>([]);
-  const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
-  const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
-    null,
-  );
-  const [installError, setInstallError] = useState<string | null>(null);
-  // A pinned-checksum mismatch (upstream re-published the file). Tracked
-  // separately from `installError` so we can show a friendly "newer
-  // upstream" prompt with a "Download anyway" action instead of dumping
-  // a raw sha256 comparison the user can't act on.
-  const [installMismatch, setInstallMismatch] = useState<{
-    catalogId: string;
-    file: string;
-  } | null>(null);
-  const [toDelete, setToDelete] = useState<string | null>(null);
+  const {
+    modelsLoading,
+    models,
+    modelsError,
+    incomplete,
+    unrecognized,
+    installs,
+    installWarning,
+    setInstallWarning,
+    installError,
+    setInstallError,
+    installMismatch,
+    setInstallMismatch,
+    toDelete,
+    setToDelete,
+    fitness,
+    probing,
+    refreshFitness,
+    refresh,
+    deleteOne,
+    startInstall,
+    retryInstall,
+    cancelInstall,
+    downloadAnyway,
+  } = useLocalModelManager(llamaModelAdapter, onModelsChanged);
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
   // Which model row has the context-size editor expanded beneath it.
@@ -238,76 +202,25 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
-  const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
-  const [probing, setProbing] = useState<string[]>([]);
-  const probingRef = useRef<string[]>([]);
-  const refreshInFlight = useRef<Promise<void> | null>(null);
-  const hadRemoteInstallRef = useRef(false);
-
-  const refreshFitness = useCallback(async () => {
-    try {
-      const res = await api.listModelFitness();
-      setFitness(new Map(res.records.map((r) => [r.key, r])));
-      setProbing(res.probing);
-      probingRef.current = res.probing;
-    } catch {
-      /* fitness surface is advisory — a blip just keeps the last state */
-    }
-  }, []);
-
-  // Writes only. The row carries the resolved state, so after a flip we
-  // re-read the list rather than second-guessing the server's default.
-  const toggleVision = useCallback(async (modelId: string, next: boolean) => {
-    setVisionSaving(modelId);
-    try {
-      const cfg = await api.getConfig();
-      await api.updateConfig({
-        nativeVision: { ...(cfg.nativeVision ?? {}), [modelId]: next },
-      });
-      await refresh();
-    } catch {
-      /* leave the previous state visible rather than lying about the flip */
-    } finally {
-      setVisionSaving(null);
-    }
-  }, []);
-
-  const refreshIncomplete = useCallback(async () => {
-    try {
-      const res = await api.listIncompleteLlamaCppModels();
-      setIncomplete(res.incomplete ?? []);
-    } catch {
-      /* advisory surface — a blip just keeps the last state */
-    }
-  }, []);
-
-  const refresh = useCallback((): Promise<void> => {
-    if (refreshInFlight.current) return refreshInFlight.current;
-
-    setModelsLoading(true);
-    const request = (async () => {
+  const toggleVision = useCallback(
+    async (modelId: string, next: boolean) => {
+      setVisionSaving(modelId);
       try {
-        const res = await api.listLlamaCppModels();
-        setModels(res.models);
-        setUnrecognized(res.unrecognized ?? []);
-        setModelsError(null);
-      } catch (err) {
-        setModelsError(err instanceof Error ? err.message : String(err));
+        const cfg = await api.getConfig();
+        await api.updateConfig({
+          nativeVision: { ...(cfg.nativeVision ?? {}), [modelId]: next },
+        });
+        await refresh();
+      } catch {
+        /* leave the previous state visible rather than lying about the flip */
       } finally {
-        setModelsLoading(false);
+        setVisionSaving(null);
       }
-      void refreshFitness();
-      void refreshIncomplete();
-    })();
-    refreshInFlight.current = request;
-    void request.then(() => {
-      if (refreshInFlight.current === request) refreshInFlight.current = null;
-    });
-    return request;
-  }, [refreshFitness, refreshIncomplete]);
+    },
+    [refresh],
+  );
 
   useEffect(() => {
-    void refresh();
     void api
       .getMemoryProfile()
       .then((m) => setMemory(m as MemoryProfile))
@@ -316,303 +229,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       .getModelContextOverrides('llama-cpp')
       .then(() => setContextOverridesSupported(true))
       .catch(() => setContextOverridesSupported(false));
-  }, [refresh]);
-
-  useEffect(() => {
-    const onChanged = (event: Event) => {
-      const engine = changedModelInventoryEngine(event);
-      if (engine === 'llama-cpp') void refresh();
-    };
-    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
-  }, [refresh]);
-
-  // Poll the service for installs that another path kicked off — the
-  // first-run bootstrap is the load-bearing case (Home banner says
-  // "installing Gemma 4 (E2B)" while Settings would otherwise show
-  // every model with a fresh "Install" button). Local installs that
-  // this component started via SSE keep their own state and aren't
-  // touched by the merge below.
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await api.listLlamaCppActiveInstalls();
-        if (cancelled) return;
-        setInstalls((prev) => {
-          const next = new Map(prev);
-          const seen = new Set<string>();
-          for (const remote of res.installs) {
-            seen.add(remote.catalogId);
-            const existing = next.get(remote.catalogId);
-            if (existing && existing.origin === 'local') {
-              // The local SSE handler is authoritative — it has the
-              // controller and finer-grained progress timing.
-              continue;
-            }
-            next.set(remote.catalogId, {
-              catalogId: remote.catalogId,
-              bytesWritten: remote.bytesWritten,
-              totalBytes: remote.totalBytes,
-              phase: remote.phase,
-              origin: 'remote',
-            });
-          }
-          // Drop remote entries the server no longer reports —
-          // either the install completed or errored. Local entries
-          // are cleared by their own SSE finalizer; never evict them
-          // here.
-          for (const [id, entry] of next) {
-            if (entry.origin === 'remote' && !seen.has(id)) {
-              next.delete(id);
-            }
-          }
-          return next;
-        });
-        // Refresh only on the non-empty -> empty transition. Refreshing on
-        // every empty poll reloaded every installed GGUF every two seconds,
-        // including expensive metadata previews, even while Settings was
-        // otherwise idle.
-        const hadRemoteInstall = hadRemoteInstallRef.current;
-        hadRemoteInstallRef.current = res.installs.length > 0;
-        if (hadRemoteInstall && res.installs.length === 0) {
-          void refresh();
-        }
-      } catch {
-        /* service blip — try again on the next tick */
-      }
-    };
-    void tick();
-    const t = setInterval(() => void tick(), 2_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [refresh]);
-
-  // Fitness polling owns its own timer, deliberately NOT the install tick's.
-  // It used to run at the tail of that tick, behind `await
-  // listLlamaCppActiveInstalls()` — so while a multi-GB download had the
-  // daemon busy, the pills froze on "checking fitness…" for as long as that
-  // request stayed slow, long after the probe had finished and failed.
-  // Self-scheduling (not setInterval) so a slow request never stacks up.
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const loop = async () => {
-      await refreshFitness();
-      if (cancelled) return;
-      // Fast while a proeve is in flight; slow otherwise, which is what lets
-      // an install-triggered probe appear without the user doing anything.
-      timer = setTimeout(() => void loop(), probingRef.current.length > 0 ? 2_000 : 15_000);
-    };
-    void loop();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [refreshFitness]);
-
-  const handleEvent = useCallback((catalogId: string, ev: LlamaCppInstallEvent) => {
-    if (ev.type === 'progress') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        // Drop any prior retrying/error state — fresh progress means
-        // the downloader successfully resumed.
-        const { retrying: _retrying, error: _error, ...rest } = cur;
-        next.set(catalogId, {
-          ...rest,
-          bytesWritten: ev.bytesWritten,
-          totalBytes: ev.totalBytes || cur.totalBytes,
-          phase: 'downloading',
-        });
-        return next;
-      });
-    } else if (ev.type === 'retrying') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, {
-          ...cur,
-          retrying: {
-            attempt: ev.attempt,
-            maxAttempts: ev.maxAttempts,
-            delayMs: ev.delayMs,
-            reason: ev.reason,
-          },
-        });
-        return next;
-      });
-    } else if (ev.type === 'verifying') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, phase: 'verifying' });
-        return next;
-      });
-    } else if (ev.type === 'extracting-metadata') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, phase: 'extracting-metadata' });
-        return next;
-      });
-    } else if (ev.type === 'done') {
-      if (ev.warning) setInstallWarning({ id: ev.id, message: ev.warning });
-    } else if (ev.type === 'error') {
-      if (ev.mismatch) {
-        // Checksum mismatch = the upstream file changed since this
-        // Gezel's catalog was pinned (model authors routinely re-publish
-        // chat_template.jinja / tokenizer configs). Drop the row and
-        // surface a friendly prompt instead of the raw sha dump.
-        const file = ev.mismatch.file;
-        setInstalls((prev) => {
-          const next = new Map(prev);
-          next.delete(catalogId);
-          return next;
-        });
-        setInstallMismatch({ catalogId, file });
-        return;
-      }
-      // Keep the install row alive so the user can hit Retry inline,
-      // not just an error in the banner up top. The auto-cleanup in
-      // `startInstall`'s `finally` removes it on natural completion;
-      // when there's an error the row sits with the error attached
-      // until the user clicks Retry or Cancel.
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, error: ev.error, retrying: undefined });
-        return next;
-      });
-      setInstallError(ev.error);
-    }
   }, []);
-
-  const startInstall = useCallback(
-    (catalogId: string, opts?: { skipSha?: boolean }) => {
-      if (installs.has(catalogId)) return;
-      setInstallError(null);
-      setInstallMismatch(null);
-      const controller = new AbortController();
-      setInstalls((prev) => {
-        const next = new Map(prev);
-        next.set(catalogId, {
-          catalogId,
-          bytesWritten: 0,
-          totalBytes: 0,
-          phase: 'downloading',
-          origin: 'local',
-          controller,
-        });
-        return next;
-      });
-
-      // Client handles bearer auth + SSE framing; we just consume
-      // the typed events as they arrive.
-      void (async () => {
-        try {
-          await api.installLlamaCppModel(
-            catalogId,
-            (ev) => handleEvent(catalogId, ev),
-            controller.signal,
-            opts?.skipSha ? { skipSha: true } : undefined,
-          );
-          announceModelInventoryChanged('llama-cpp');
-        } catch (err) {
-          if (!controller.signal.aborted) {
-            const message = `download failed: ${describe(err)}`;
-            setInstallError(message);
-            // Stamp the failure onto the row so the `finally` holds it for
-            // an inline Retry instead of deleting it (a silent revert to
-            // "Download"). Covers a stream that closed without ever
-            // emitting an `error` event — the client now throws here.
-            setInstalls((prev) => {
-              const cur = prev.get(catalogId);
-              if (!cur) return prev;
-              const next = new Map(prev);
-              next.set(catalogId, { ...cur, error: cur.error ?? message, retrying: undefined });
-              return next;
-            });
-          }
-        } finally {
-          setInstalls((prev) => {
-            const next = new Map(prev);
-            const cur = next.get(catalogId);
-            // Hold the row on error so the user can Retry inline. The
-            // shared downloader will resume from the existing
-            // `.partial` on the next attempt.
-            if (cur?.error) {
-              next.set(catalogId, { ...cur, controller: undefined });
-              return next;
-            }
-            next.delete(catalogId);
-            return next;
-          });
-          void refresh();
-          onModelsChanged?.();
-        }
-      })();
-    },
-    [installs, refresh, handleEvent, onModelsChanged],
-  );
-
-  // "Download anyway" from the mismatch prompt — reinstall bypassing the
-  // pinned-checksum check so the current upstream file is accepted.
-  const downloadAnyway = useCallback(
-    (catalogId: string) => {
-      setInstallMismatch(null);
-      startInstall(catalogId, { skipSha: true });
-    },
-    [startInstall],
-  );
-
-  const cancelInstall = useCallback(
-    (catalogId: string) => {
-      // Installs run as background jobs on the service — closing the SSE
-      // stream only detaches this view, so cancellation must be the
-      // explicit server-side call. Works for `remote`-origin rows too.
-      const inflight = installs.get(catalogId);
-      inflight?.controller?.abort();
-      void api.cancelLlamaCppModelInstall(catalogId).catch(() => {});
-      setInstalls((prev) => {
-        const next = new Map(prev);
-        next.delete(catalogId);
-        return next;
-      });
-    },
-    [installs],
-  );
-
-  const deleteOne = useCallback(async () => {
-    const id = toDelete;
-    if (!id) return;
-    setToDelete(null);
-    setModelsError(null);
-    // Optimistically drop the row (from both the installed and incomplete
-    // lists) so the delete feels instant even when the daemon is briefly busy
-    // — a concurrent download verify can otherwise delay the round-trip and
-    // make a successful delete look like a no-op. On failure we refresh (which
-    // restores whatever still exists) and surface the error.
-    setModels((cur) => cur.filter((m) => m.id !== id));
-    setIncomplete((cur) => cur.filter((d) => d.id !== id));
-    setUnrecognized((cur) => cur.filter((model) => model.id !== id));
-    try {
-      await api.deleteLlamaCppModel(id);
-      announceModelInventoryChanged('llama-cpp');
-      await refresh();
-      onModelsChanged?.();
-    } catch (err) {
-      setModelsError(`delete failed: ${describe(err)}`);
-      void refresh();
-    }
-  }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(models.map((m) => m.id)), [models]);
   const attentionIds = useMemo(
@@ -642,18 +259,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 key={inst.catalogId}
                 inst={inst}
                 onCancel={() => cancelInstall(inst.catalogId)}
-                onRetry={() => {
-                  // Drop the failed row and re-kick. The shared
-                  // downloader picks up from the existing `.partial`
-                  // so this isn't a full restart.
-                  setInstalls((prev) => {
-                    const next = new Map(prev);
-                    next.delete(inst.catalogId);
-                    return next;
-                  });
-                  setInstallError(null);
-                  startInstall(inst.catalogId);
-                }}
+                onRetry={() => retryInstall(inst.catalogId)}
               />
             ))}
           </div>
@@ -1124,8 +730,4 @@ function InstallProgress({
       onRetry={onRetry}
     />
   );
-}
-
-function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

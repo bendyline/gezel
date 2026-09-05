@@ -1,3 +1,4 @@
+import { FileTurnIntentSchema } from '@bendyline/gezel';
 /**
  * Wire contract for remote model execution — the shared schema both ends of
  * the `/v1/remote/infer` link compile against.
@@ -97,6 +98,7 @@ export type WireQueueHints = z.infer<typeof WireQueueHintsSchema>;
  * session/project state and sends the full transcript each turn.
  */
 export const RemoteInferRequestSchema = z.object({
+  fileTurnIntent: FileTurnIntentSchema.optional(),
   protocolVersion: z.number(),
   /** B-native model id (A already stripped the `remote:<remoteId>/` prefix). */
   model: z.string(),

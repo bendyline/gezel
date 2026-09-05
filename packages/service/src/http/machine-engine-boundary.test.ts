@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type RunningService, startService } from '../service.js';
+import { type RunningEngineService, startService } from '../service.js';
 
-let service: RunningService;
+let service: RunningEngineService;
 let home: string;
 let baseUrl: string;
 let httpFetch: typeof fetch;

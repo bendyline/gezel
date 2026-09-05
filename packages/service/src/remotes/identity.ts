@@ -58,11 +58,16 @@ import { z } from 'zod';
 import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import {
   SecretBackendUnavailableError,
-  type SecretStore,
+  type SecretKey,
   deviceIdentityScope,
 } from '../secrets/types.js';
 
 export { deviceIdentityScope } from '../secrets/types.js';
+
+export interface IdentityKeyStore {
+  get(key: Extract<SecretKey, { kind: 'deviceIdentity' }>): Promise<string | null>;
+  set(key: Extract<SecretKey, { kind: 'deviceIdentity' }>, value: string): Promise<void>;
+}
 
 const log = createLogger('remote-identity');
 
@@ -142,8 +147,8 @@ function scopedKey(home: string) {
  * would regenerate the identity and rotate a fingerprint peers have pinned.
  */
 async function readPrivateKey(
-  secrets: SecretStore,
-  key: Parameters<SecretStore['get']>[0],
+  secrets: IdentityKeyStore,
+  key: Parameters<IdentityKeyStore['get']>[0],
 ): Promise<{ value: string | null; unavailable: SecretBackendUnavailableError | null }> {
   try {
     return { value: await secrets.get(key), unavailable: null };
@@ -174,7 +179,7 @@ async function readPrivateKey(
  */
 export async function loadOrCreateDeviceIdentity(
   home: string,
-  secrets: SecretStore,
+  secrets: IdentityKeyStore,
 ): Promise<DeviceIdentity> {
   const file = deviceIdentityFile(home);
   const key = scopedKey(home);
@@ -247,7 +252,7 @@ export async function loadOrCreateDeviceIdentity(
  * available (caller should surface a clear "identity not initialized" error).
  */
 export async function signCertFingerprint(
-  secrets: SecretStore,
+  secrets: IdentityKeyStore,
   home: string,
   tlsCertFingerprint: string,
 ): Promise<string | null> {
@@ -342,7 +347,7 @@ function privateMatchesPublic(privatePem: string, publicPem: string): boolean {
  * and leaving it lets a downgrade still find its key.
  */
 async function adoptLegacyKey(
-  secrets: SecretStore,
+  secrets: IdentityKeyStore,
   key: { kind: 'deviceIdentity'; scope: string },
   identity: DeviceIdentity,
 ): Promise<boolean> {
@@ -407,7 +412,7 @@ async function persistPublic(file: string, identity: DeviceIdentity): Promise<vo
 
 async function generateAndPersist(
   file: string,
-  secrets: SecretStore,
+  secrets: IdentityKeyStore,
   key: { kind: 'deviceIdentity'; scope: string },
 ): Promise<DeviceIdentity> {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');

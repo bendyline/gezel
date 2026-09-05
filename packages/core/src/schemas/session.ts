@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ProjectTypeToolSchema } from './catalog.js';
+import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
 import {
   ChatMessageSchema,
@@ -535,6 +536,7 @@ export const ListChatSessionsResponseSchema = z.object({
 export type ListChatSessionsResponse = z.infer<typeof ListChatSessionsResponseSchema>;
 
 export const SendToSessionRequestSchema = z.object({
+  fileTurnIntent: FileTurnIntentSchema.optional(),
   message: z.string().min(1),
   /**
    * Gezel ids to also deliver this message to as verbatim user messages.

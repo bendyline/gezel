@@ -225,6 +225,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             primarySessionId: id,
             text,
             mentionGezelIds: body.mentions,
+            ...(body.fileTurnIntent ? { fileTurnIntent: body.fileTurnIntent } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
           })
           .catch((err) => {
@@ -236,6 +237,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       ctx.chat.trackBackground(
         ctx.chat
           .send(id, text, {
+            ...(body.fileTurnIntent ? { fileTurnIntent: body.fileTurnIntent } : {}),
             ...(body.nudge ? { nudge: true } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
           })

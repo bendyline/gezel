@@ -159,6 +159,8 @@ packages/app/screenshots/
 
 # Browser UX suite — regenerated screenshot gallery + manifest (run `pnpm test:e2e:web`)
 packages/app/ux-screenshots/
+packages/app/visual-test-results/
+packages/app/visual-report/
 
 # Playwright test artifacts (per-run, not team-shared)
 test-results/

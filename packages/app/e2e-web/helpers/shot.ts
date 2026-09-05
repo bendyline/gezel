@@ -1,15 +1,16 @@
 /**
  * `shot()` — capture one UX frame to a stable, AI-addressable path and record
  * its metadata. Page-level (`fullPage`) or element-scoped (`clip`), with frozen
- * animations and volatile regions masked. Names come from shot-registry.ts so
- * filenames never drift.
+ * animations and volatile regions masked. In the visual configuration every
+ * capture also compares against a reviewed baseline. Names come from
+ * shot-registry.ts so filenames never drift.
  *
  *   await shot(page, 'composer', { area: 'chat', description: 'Empty composer', clip: page.getByTestId('chat-composer') });
  *   // -> ux-screenshots/chat/02-composer.png  (+ a manifest fragment)
  */
 import { mkdir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { type Locator, type Page, test } from '@playwright/test';
+import { type Locator, type Page, expect, test } from '@playwright/test';
 import { VOLATILE_SELECTORS, settle } from './determinism.js';
 import { SCREENSHOT_DIR, type ShotEntry, type ShotTheme, writePart } from './manifest.js';
 import { type ShotArea, shotNumber } from './shot-registry.js';
@@ -23,7 +24,7 @@ export interface ShotOptions {
   /** Extra mask selectors, applied on top of the default volatile regions. */
   mask?: string[];
   theme?: ShotTheme;
-  /** Logical viewport name (matches the Playwright project); recorded only. */
+  /** Logical viewport name; non-default sizes get distinct gallery paths. */
   viewport?: string;
   /** Page shots only; defaults to true. */
   fullPage?: boolean;
@@ -43,8 +44,11 @@ function currentSpec(): string {
 
 export async function shot(page: Page, name: string, opts: ShotOptions): Promise<string> {
   const theme: ShotTheme = opts.theme ?? 'light';
-  const viewport = opts.viewport ?? 'default';
-  const suffix = theme === 'dark' ? '-dark' : '';
+  const project = test.info().project.name;
+  const regression = test.info().config.metadata.visualRegression === true;
+  const viewport = opts.viewport ?? (project === 'desktop' ? 'default' : project);
+  const themeSuffix = theme === 'dark' ? '-dark' : '';
+  const suffix = `${themeSuffix}${viewport === 'default' ? '' : `-${viewport}`}`;
   const nn = shotNumber(opts.area, name);
   const file = `${nn}-${name}${suffix}.png`;
   const relativePath = `${opts.area}/${file}`;
@@ -52,6 +56,7 @@ export async function shot(page: Page, name: string, opts: ShotOptions): Promise
   await mkdir(dirname(absPath), { recursive: true });
 
   await settle(page);
+  await expect(page.getByText('Loading view…', { exact: true })).toBeHidden();
 
   const maskedSelectors = [
     ...(opts.noDefaultMasks ? [] : VOLATILE_SELECTORS),
@@ -61,6 +66,26 @@ export async function shot(page: Page, name: string, opts: ShotOptions): Promise
 
   // Neutral redaction color — Playwright's default mask is alarming magenta.
   const maskColor = '#9aa0a6';
+
+  if (regression) {
+    const snapshot = [opts.area, `${nn}-${name}${themeSuffix}.png`];
+    const options = {
+      mask: masks,
+      maskColor,
+      animations: 'disabled' as const,
+      scale: 'css' as const,
+    };
+    if (opts.clip) {
+      await opts.clip.scrollIntoViewIfNeeded();
+      await expect(opts.clip).toBeInViewport({ ratio: 1 });
+      await expect(opts.clip).toHaveScreenshot(snapshot, options);
+    } else {
+      await expect(page).toHaveScreenshot(snapshot, {
+        ...options,
+        fullPage: opts.fullPage ?? true,
+      });
+    }
+  }
 
   if (opts.clip) {
     await opts.clip.scrollIntoViewIfNeeded();
@@ -85,6 +110,7 @@ export async function shot(page: Page, name: string, opts: ShotOptions): Promise
     selector: opts.selector,
     theme,
     viewport,
+    regression,
     masked: maskedSelectors,
     spec: currentSpec(),
   };

@@ -46,11 +46,6 @@ import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
 import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
-import {
-  applyConstrainedTurnShape,
-  isImmediateFileWriteTurn,
-  writeFileOnlyTools,
-} from '../constrained-turn.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import {
   appendCapTruncationHintToRejectedWrite,
@@ -156,7 +151,34 @@ export {
   isMidStreamConnectionDrop,
 };
 
-const MAX_TOOL_LOOP_TURNS = 96;
+import {
+  FILE_REPAIR_MUTATION_TOOLS,
+  FILE_REPAIR_READ_TOOLS,
+  applyConstrainedTurnShape,
+  fileRepairTargetPath,
+  isSourceFileRepairPrompt,
+  writeFileOnlyTools,
+} from '../constrained-turn.js';
+import { hasExplicitFullFileRewriteWording } from '../direct-file-work-prompt.js';
+import {
+  buildImmediateFileWriteNoMutationNudge,
+  buildPrerequisiteRepairReadNudge,
+  buildScenarioRepairNoMutationNudge,
+  completeWorkspaceReadPaths,
+  extractPrerequisiteRepairReadPaths,
+  normalizeWorkspacePathForCompare,
+  remainingPrerequisiteRepairReadPaths,
+} from '../file-repair-policy.js';
+import {
+  LOCAL_TURN_LIMITS,
+  LocalTurnPolicy,
+  compactLocalTurn,
+  planFileTurn,
+  repairTools,
+  turnCheckpoint,
+} from '../local-turn-policy.js';
+
+const MAX_TOOL_LOOP_TURNS = LOCAL_TURN_LIMITS.iterations;
 // Hard per-turn ceiling when the caller doesn't pass `opts.timeoutMs`.
 // 10 minutes matches what the manager passes for local providers in
 // short-form sessions; the original 3-minute floor was too tight for
@@ -186,7 +208,7 @@ const FILE_WRITE_MIN_TOKENS = 4_096;
 // refused. Two is enough to convert "re-emit the whole file" into
 // "make targeted edits"; beyond that the model is not reading the
 // steer and more attempts only burn engine time at full context.
-const MAX_CAP_TRUNCATION_STEERS = 2;
+const MAX_CAP_TRUNCATION_STEERS = LOCAL_TURN_LIMITS.capTruncation;
 // Max automatic append_to_file continuations after an immediate-write
 // truncation before we bail with the partial. Each continuation is one
 // bounded turn that writes the next chunk — comfortably above any
@@ -195,7 +217,7 @@ const MAX_CAP_TRUNCATION_STEERS = 2;
 // path: the weak model had no append_to_file in its surface and just rambled
 // instead (wild-caught tankcombat: a 5.8 KB game truncated at the former
 // short output budget and the model never continued it).
-const MAX_IMMEDIATE_WRITE_CONTINUATIONS = 6;
+const MAX_IMMEDIATE_WRITE_CONTINUATIONS = LOCAL_TURN_LIMITS.writeContinuations;
 // Minimal `append_to_file` surfaced ONLY during a write-continuation. The
 // base immediate-write surface is write_file-only; on truncation we add
 // this so the model can emit the file's missing tail instead of
@@ -232,7 +254,7 @@ const log = createLogger('mlx');
  * enough that a model that just can't form structured calls (small
  * quants, certain Gemma variants) doesn't burn the whole turn budget.
  */
-const MAX_MALFORMED_RETRIES = 2;
+const MAX_MALFORMED_RETRIES = LOCAL_TURN_LIMITS.malformed;
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -915,10 +937,6 @@ interface MlxSessionDeps {
   terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
-/** See `MID_LOOP_COMPACT_RATIO` in llama-cpp/provider.ts. */
-const MID_LOOP_COMPACT_RATIO = 0.7;
-const MID_LOOP_COMPACT_MIN_PRIOR = 4;
-
 class MlxSession extends StreamingSessionBase implements LLMSession {
   private readonly messages: ChatMessage[];
   /**
@@ -939,7 +957,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
   private sendSeq = 0;
   /** See LlamaCppSession.currentTurnStartIdx — same role here. */
   private currentTurnStartIdx = 0;
-  private compactedThisTurn = false;
+  private turnPolicy = new LocalTurnPolicy();
   /**
    * Aggregated `<think>` / `<reasoning>` text captured this turn,
    * across every iteration of the tool loop. Reset at the top of each
@@ -1206,56 +1224,26 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
   publishEngineStats(ev: EngineStatsEvent): void {
     this.emitEngineStats(ev);
   }
-
-  /**
-   * See {@link LlamaCppSession.maybeCompactMidLoop} — same contract.
-   * MLX shares the same in-memory transcript pattern, so the same
-   * pressure-and-swap logic applies.
-   */
-  private async maybeCompactMidLoop(): Promise<void> {
-    if (this.compactedThisTurn) return;
-    if (!this.deps.requestCompaction) return;
-    const estimatedTokens = Math.ceil(this.estimatePromptChars() / 4);
-    const ratio = estimatedTokens / this.deps.numCtx;
-    if (ratio < MID_LOOP_COMPACT_RATIO) return;
-    const prior: Array<{ role: string; content: string }> = [];
-    for (let i = 1; i < this.currentTurnStartIdx; i++) {
-      const m = this.messages[i]!;
-      if (typeof m.content === 'string' && m.content.length > 0) {
-        prior.push({ role: m.role, content: m.content });
-      }
-    }
-    if (prior.length < MID_LOOP_COMPACT_MIN_PRIOR) return;
-    let result: { syntheticContent: string } | null = null;
-    try {
-      result = await this.deps.requestCompaction({
-        priorMessages: prior,
-        estimatedTokens,
+  private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
+    return compactLocalTurn(
+      this.turnPolicy,
+      {
+        messages: this.messages,
+        turnStart: this.currentTurnStartIdx,
+        estimatedTokens: Math.ceil(this.estimatePromptChars() / 4),
         numCtx: this.deps.numCtx,
-      });
-    } catch (err) {
-      log.warn(
-        `[mlx] mid-loop compaction request failed (continuing un-compacted): ${err instanceof Error ? err.message : String(err)}`,
-      );
-      this.compactedThisTurn = true;
-      return;
-    }
-    if (!result) {
-      this.compactedThisTurn = true;
-      return;
-    }
-    const removed = this.currentTurnStartIdx - 1;
-    this.messages.splice(1, removed, {
-      role: 'assistant',
-      content: result.syntheticContent,
-    });
-    this.currentTurnStartIdx = 2;
-    this.compactedThisTurn = true;
-    log.info(
-      `mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
-    );
-    this.emitWarning(
-      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
+        request: this.deps.requestCompaction,
+        replace: (start, count, content) => {
+          this.messages.splice(start, count, { role: 'assistant', content });
+          this.currentTurnStartIdx = start + 1;
+        },
+        warn: (error) => log.warn('Mid-loop compaction failed', { error: String(error) }),
+        completed: (removed) =>
+          this.emitWarning(
+            `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
+          ),
+      },
+      opts?.force,
     );
   }
 
@@ -1324,7 +1312,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // history (compactable) from in-flight tool loop (preserve verbatim).
     // See LlamaCppSession.sendAndWaitInner for the rationale.
     this.currentTurnStartIdx = this.messages.length;
-    this.compactedThisTurn = false;
+    this.turnPolicy = new LocalTurnPolicy(
+      turnCheckpoint(opts?.queue?.signal, () => budget.expired(), turnTimeoutError),
+    );
+    this.turnPolicy.checkpoint();
     // Reset captured reasoning at the top of each turn — manager
     // reads `getLastTurnReasoning()` after this resolves.
     this.lastTurnReasoning = '';
@@ -1418,6 +1409,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // per-turn token cap), we keep the turn alive — surfacing
     // `append_to_file` and looping — until the model writes the tail
     // without truncating, or we hit MAX_IMMEDIATE_WRITE_CONTINUATIONS.
+    let repairReadCalls = 0;
+    const repairReadPaths: string[] = [];
+    let repairFailedMutations = 0;
+    let repairMutationSucceeded = false;
+    const requiredReadPaths =
+      opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
+        ? opts.fileTurnIntent.readPaths
+        : extractPrerequisiteRepairReadPaths(prompt);
     let writeContinuationActive = false;
     let writeContinuations = 0;
     // Per-tool consecutive-failure tracker. Catches the Qwen 3.6 27B
@@ -1433,7 +1432,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // never reaching write_file. See ToolRepeatTracker docstring for
     // the threshold rationale.
     const repeatTracker = new ToolRepeatTracker();
-    const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(prompt);
+    const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(
+      prompt,
+      opts?.fileTurnIntent,
+    );
     // Per-turn `ask_user_question` guard. Once a question card lands
     // successfully, additional ask_user_question calls in the same
     // turn are intercepted with a synthetic "you already asked, end
@@ -1578,10 +1580,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
-        // Mid-loop pressure check — same shape as LlamaCppSession.
-        // Skip the first iteration; from iteration 2 a freshly pushed
-        // tool result can tip a healthy turn over the slot ctx.
-        if (turn > 0) await this.maybeCompactMidLoop();
+        this.turnPolicy.checkpoint();
+        // Shared pressure check preserves all system bands and active tool results.
+        await this.maybeCompactMidLoop();
 
         lastIterationStartedAt = Date.now();
         lastIterationFirstTokenAt = null;
@@ -1649,7 +1650,32 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Tool surface actually sent this turn. Defaults to the full roster;
         // constrained turns narrow it below.
         let requestTools = tools;
-        const immediateFileWriteTurn = isImmediateFileWriteTurn(prompt, tools);
+        const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
+        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
+        const fileRepairTurn = fileTurnPlan.kind === 'repair-file';
+        const remainingReadPaths = fileRepairTurn
+          ? remainingPrerequisiteRepairReadPaths(requiredReadPaths, repairReadPaths)
+          : [];
+        if (fileRepairTurn) {
+          if (
+            remainingReadPaths.length &&
+            repairReadCalls > requiredReadPaths.length + LOCAL_TURN_LIMITS.noProgress
+          ) {
+            throw new Error('File repair exceeded its bounded prerequisite read allowance.');
+          }
+          const rewrite =
+            opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.strategy
+              ? opts.fileTurnIntent.strategy === 'rewrite'
+              : hasExplicitFullFileRewriteWording(prompt);
+          requestTools = repairTools(tools, {
+            readSucceeded: repairReadPaths.length > 0,
+            source: isSourceFileRepairPrompt(prompt, opts?.fileTurnIntent),
+            rewrite:
+              rewrite || repairFailedMutations >= 2 || this.turnPolicy.count('noProgress') >= 2,
+            prerequisiteReadsPending: remainingReadPaths.length > 0,
+          });
+          applyConstrainedTurnShape(body);
+        }
         if (immediateFileWriteTurn) {
           if (
             typeof userMsg.content === 'string' &&
@@ -2509,6 +2535,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // drives the warning + model self-correction below.
         const strippedBodies = stripper.getStrippedBodies();
         const eosFlushedIndices = stripper.getEosFlushedBodyIndices();
+        this.turnPolicy.checkpoint();
+        let unknownCall: { wanted: string; suggestion: string | null } | null = null;
         const repairedCalls: typeof structuredCalls = [];
         const unrepairedBodies: string[] = [];
         for (let bodyIdx = 0; bodyIdx < strippedBodies.length; bodyIdx++) {
@@ -2884,6 +2912,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           turnContent.length > 0
         ) {
           const miss = findUnrecognizedToolEnvelope(turnContent, knownToolNames);
+          unknownCall = miss;
           if (miss) {
             turnContent = stripJsonEnvelopesFromText(turnContent, [
               { matchStart: miss.matchStart, matchEnd: miss.matchEnd },
@@ -3115,7 +3144,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         if (
           toolCalls.length === 0 &&
           droppedTruncatedPayloadCalls.length > 0 &&
-          capTruncationSteers < MAX_CAP_TRUNCATION_STEERS
+          this.turnPolicy.retry('capTruncation')
         ) {
           capTruncationSteers++;
           const dropped = droppedTruncatedPayloadCalls[0]!;
@@ -3294,11 +3323,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // a no-write-access role to delegation instead of "did you
           // mean…?". Wild-caught (Space Shooter Arcade).
           const miss =
+            unknownCall ??
             findUnrecognizedToolEnvelope(turnContent, knownToolNames) ??
             findUnrecognizedFunctionMarkup(turnContent, knownToolNames);
           if (miss) {
             const missSig = `u:${miss.wanted.toLowerCase()}`;
-            if (malformedRetries < MAX_MALFORMED_RETRIES && missSig !== lastBadCallSig) {
+            if (this.turnPolicy.retry('malformed', missSig)) {
               malformedRetries++;
               lastBadCallSig = missSig;
               log.info(
@@ -3328,6 +3358,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 `turn#${seq}.${turn} model repeated unknown tool "${miss.wanted}" after a nudge — stopping retries`,
               );
             }
+            this.emitWarning(
+              'The model could not call an available tool after bounded recovery. No tool ran.',
+            );
+            return fullText;
           }
         }
 
@@ -3340,7 +3374,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // just can't form structured calls.
         if (toolCalls.length === 0 && unrepairedBodies.length > 0) {
           const malSig = `m:${unrepairedBodies[0]!.replace(/\s+/g, '').toLowerCase().slice(0, 200)}`;
-          if (malformedRetries < MAX_MALFORMED_RETRIES && malSig !== lastBadCallSig) {
+          if (this.turnPolicy.retry('malformed', malSig)) {
             malformedRetries++;
             lastBadCallSig = malSig;
             const detail = describeMalformation(unrepairedBodies[0]!);
@@ -3416,6 +3450,32 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           });
         }
 
+        if (
+          toolCalls.length === 0 &&
+          fileTurnPlan.kind !== 'ordinary' &&
+          !repairMutationSucceeded &&
+          !askedQuestionThisTurn
+        ) {
+          const noMutationNudges = this.turnPolicy.requireProgressRetry();
+          const nudge = remainingReadPaths.length
+            ? buildPrerequisiteRepairReadNudge({
+                remainingPaths: remainingReadPaths,
+                noProgressNudges: noMutationNudges,
+              })
+            : immediateFileWriteTurn
+              ? buildImmediateFileWriteNoMutationNudge({
+                  targetPath: opts?.fileTurnIntent?.path ?? fileRepairTargetPath(prompt),
+                  noMutationNudges,
+                })
+              : buildScenarioRepairNoMutationNudge(knownToolNames, {
+                  readOnlyCalls: repairReadCalls,
+                  readFilePaths: repairReadPaths,
+                  failedMutationCalls: repairFailedMutations,
+                  noMutationNudges,
+                });
+          this.messages.push({ role: 'user', content: nudge });
+          continue;
+        }
         if (toolCalls.length === 0) {
           this.messages.push({ role: 'assistant', content: turnContent });
           if (finishReason === 'length') {
@@ -3475,6 +3535,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // decision below.
         let immediateWriteTruncated = false;
         for (const call of toolCalls) {
+          this.turnPolicy.checkpoint();
           if (terminalActionClosing) {
             this.messages.push({
               role: 'tool',
@@ -3484,18 +3545,57 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             continue;
           }
           let args: Record<string, unknown> = {};
+          let malformedArgs = false;
           try {
             args = call.function.arguments.length > 0 ? JSON.parse(call.function.arguments) : {};
           } catch {
-            /* bad JSON — let the tool see empty args */
+            malformedArgs = true;
           }
+          malformedArgs ||= !args || typeof args !== 'object' || Array.isArray(args);
           let output: string;
           // Intercept duplicate ask_user_question calls within the
           // same turn — synthesize a response that tells the model
           // its first question is already pending and to end the
           // turn. The second card is suppressed entirely (no API
           // call, no UI clutter).
-          if (call.function.name === 'ask_user_question' && askedQuestionThisTurn) {
+          if (malformedArgs) {
+            if (
+              !this.turnPolicy.retry(
+                'malformed',
+                `args:${call.function.name}:${call.function.arguments}`,
+              )
+            ) {
+              throw new Error(
+                'Malformed tool-call recovery budget exhausted; no tool was executed.',
+              );
+            }
+            args = {};
+            output = `ERROR: ${call.function.name} was not executed because its arguments are not a valid JSON object. Retry with the declared fields.`;
+          } else if (
+            opts?.fileTurnIntent &&
+            FILE_REPAIR_MUTATION_TOOLS.has(call.function.name) &&
+            (opts.fileTurnIntent.kind === 'create-file' ||
+              opts.fileTurnIntent.mutationPath ||
+              opts.fileTurnIntent.strategy === 'rewrite') &&
+            (typeof args.path !== 'string' ||
+              normalizeWorkspacePathForCompare(args.path) !==
+                normalizeWorkspacePathForCompare(
+                  opts.fileTurnIntent.kind === 'repair-file'
+                    ? (opts.fileTurnIntent.mutationPath ?? opts.fileTurnIntent.path)
+                    : opts.fileTurnIntent.path,
+                ))
+          ) {
+            output = 'ERROR: This mutation must use the requested output path.';
+          } else if (
+            fileRepairTurn &&
+            remainingReadPaths.length &&
+            (call.function.name !== 'read_file' ||
+              typeof args.path !== 'string' ||
+              remainingPrerequisiteRepairReadPaths(remainingReadPaths, [args.path]).length ===
+                remainingReadPaths.length)
+          ) {
+            output = 'ERROR: Read the remaining required source paths before editing.';
+          } else if (call.function.name === 'ask_user_question' && askedQuestionThisTurn) {
             output =
               "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
           } else if (
@@ -3586,6 +3686,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               );
             }
           }
+          this.turnPolicy.checkpoint();
+          if (fileRepairTurn) {
+            if (FILE_REPAIR_READ_TOOLS.has(call.function.name)) repairReadCalls++;
+            repairReadPaths.push(...completeWorkspaceReadPaths(call.function.name, args, output));
+            if (FILE_REPAIR_MUTATION_TOOLS.has(call.function.name)) {
+              if (output.startsWith('ERROR:')) repairFailedMutations++;
+              else repairMutationSucceeded = true;
+            }
+          }
           const tracked = failureTracker.recordResult(call.function.name, output);
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,
@@ -3658,6 +3767,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
           });
         }
+        this.turnPolicy.checkpoint();
+        if (fileRepairTurn && repairMutationSucceeded) {
+          const closing = 'Updated the requested file.';
+          this.messages.push({ role: 'assistant', content: closing });
+          return closing;
+        }
         if (terminalActionClosing) {
           // The action itself is the terminal outcome. Do not spend another
           // generation asking the model to re-analyze a board that changed
@@ -3674,7 +3789,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // budget — keep the turn alive instead of bailing on a partial.
           // The tool result already carries the "append the rest" hint;
           // surfacing `append_to_file` (above) lets the model act on it.
-          if (immediateWriteTruncated && writeContinuations < MAX_IMMEDIATE_WRITE_CONTINUATIONS) {
+          if (immediateWriteTruncated && this.turnPolicy.retry('writeContinuations')) {
             writeContinuationActive = true;
             writeContinuations++;
             // Make append_to_file callable + salvageable for the next turn.

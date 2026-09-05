@@ -53,9 +53,9 @@ Adding or removing a published package means editing
 [`scripts/published-packages.mjs`](../scripts/published-packages.mjs) and
 nothing else. That module is the single registry the release scripts and the
 contract tests all read — `check-package-consumers.mjs`,
-`rehearse-npm-release.mjs` and `tests/published/_packages.ts`. It is plain
-Node rather than TypeScript because the first two run before, and without,
-any build.
+`rehearse-npm-release.mjs`, `verify-published-npm-release.mjs` and
+`tests/published/_packages.ts`. It is plain Node rather than TypeScript so
+the release scripts can load it without any build.
 
 The list used to be written out in all three places, and it drifted: `gezk`
 reached two of them, the release rehearsal kept packing twelve tarballs, and
@@ -458,6 +458,13 @@ re-pointed.
 3. The `verify` job runs the canonical gate plus the license, SBOM and
    vulnerability audits. The `release` job publishes.
 4. Confirm on npmjs.com that the new versions carry a provenance badge.
+
+After publishing, `verify-published-npm-release.mjs` downloads every exact
+version in the shared package list and runs the strict consumer checks.
+It refreshes npm metadata on each attempt and retries every 15 seconds for
+five minutes (21 attempts, plus npm request time), since npm can acknowledge
+a publish before the version becomes readable. Exhausted download retries or
+failed consumer checks still fail the release job.
 
 Locally, `pnpm exec multi-semantic-release --dry-run` shows the computed
 versions and notes without touching anything.

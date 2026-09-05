@@ -18,8 +18,60 @@ Gezel uses two local service roles in packaged installs:
 | Shared knowledge catalog bytes (`assets/knowledge/`) | Mounts read-only; re-verifies before first use | Owns download/verify/publish/inventory/reclaim of **signed registry coordinates only** |
 
 The roles use the same service package so engine/provider implementations stay shared, but
-`serviceRole` changes the startup work, credential scopes, and—most importantly—the HTTP route
-table. Treat the engine route table as a security boundary, not a feature flag.
+`startService` resolves the role before importing either composition root. Treat the engine
+context and route table as capability boundaries.
+
+## Configuration ownership
+
+Each Gezel home has one owning daemon process, enforced by `acquireSingleInstanceLock`
+before configuration or product Store initialization. Electron, CLI, and MCP clients patch configuration through
+that daemon's API. A standalone Store consumer must have exclusive ownership of its home;
+concurrent direct writes from another process or a file editor are not supported.
+
+Within the owning process, `ConfigStore.writeConfig` (also used by `Store.writeConfig`) serializes the entire read/merge/validate/write
+operation by normalized absolute config path, including across Store instances. Failed
+patches release the queue. Atomic replacement protects readers from partial files; the
+queue protects patches from lost updates. Callers must send only fields they intend to
+change, not an earlier full config snapshot. Top-level null resets a field; external-folder
+scope nulls remove that scope; external-folder and ambient-dashboard patches merge their
+immediate fields. Other nested values are replaced as a whole.
+
+## Composition boundaries
+
+- [service.ts](../packages/service/src/service.ts) is the role dispatcher. Existing product
+  directories still select `legacy-full` during an incomplete upgrade.
+- [product-service.ts](../packages/service/src/product-service.ts) owns product startup and
+  shutdown. [engine-service.ts](../packages/service/src/engine-service.ts) has a separate
+  lifecycle and never constructs Store, ChatManager, memory, tasks, terminals, channels,
+  content indexes, product schedulers, or the cloud credential store.
+- [EngineContext](../packages/service/src/http/engine-context.ts) exposes configuration,
+  native inference, model lifecycle, telemetry, device identity and pairing. Its `chat`
+  property is the narrow `NativeInference` contract; it cannot resolve product sessions,
+  run tools, or initiate product background work. ServiceContext extends it with the
+  capabilities owned by the product daemon.
+- [LocalEngineRuntime](../packages/service/src/providers/native/local-engine-runtime.ts)
+  owns shared native provider construction, admission, residency, queues and cache control.
+  Both EngineInference and ChatManager use it. Product cache prefill and session affinity
+  are hooks supplied only by ChatManager.
+- [engine-server.ts](../packages/service/src/http/engine-server.ts) imports explicit model
+  management routers. Image, video and audio execution that reads or writes project files
+  lives in separate product routers. Adding a product execution endpoint no longer requires
+  a matching broker exclusion. Product session warming is also absent from the broker's
+  management surface; prepared inference warming remains available to authenticated tenants.
+
+The machine's private identity key lives in `engine-identity-key.json` with owner-only file
+permissions. The first upgraded boot reads only the identity account from an existing vault,
+then preserves that key locally without enumerating or migrating cloud credentials. An
+unavailable legacy key backend must be made available for this migration; the broker does not
+silently change the identity pinned by paired devices. Fresh engine homes never open a vault.
+
+Engine shutdown closes admission, listeners and native providers, cancels model pulls, stops
+fitness scheduling, clears runtime discovery and releases the home lock. Failed startup uses
+that same cleanup path. Regression coverage in
+[machine-engine-startup.integration.test.ts](../packages/service/src/http/machine-engine-startup.integration.test.ts)
+prohibits product construction/imports and checks persistence across startup, restart, shutdown
+and failed binding. Existing boundary and bridge tests cover authenticated route reachability,
+telemetry merging, broker adoption and credential rotation.
 
 ## Request flow
 

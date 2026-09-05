@@ -625,6 +625,11 @@ export async function postSniffFeedback(
   }
   try {
     const delivered = await ctx.client.messageGezel(target.gezelId, {
+      fileTurnIntent: {
+        kind: 'repair-file',
+        path: filePath,
+        ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
+      },
       fromGezelId: ctx.meesterId,
       text,
       suppressReply: true,
@@ -1291,6 +1296,7 @@ export async function postMissingDeliverableFeedback(
         return;
       }
       await ctx.client.messageGezel(specialist.gezelId, {
+        fileTurnIntent: { kind: 'create-file', path: filePath },
         fromGezelId: ctx.meesterId,
         text,
         suppressReply: true,
