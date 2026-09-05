@@ -1425,6 +1425,19 @@ function executableFailureDependencyDeliverable(
   );
 }
 
+/**
+ * Polls the virtual repair target may hold the channel at an unchanged sniff
+ * score before the deliverable branch gets a turn.
+ *
+ * Deliberately small. The virtual target's message ("drive the task to a
+ * terminal step") is the right FIRST instruction and usually the right one for
+ * a while — this only fires once it has demonstrably stopped moving the score,
+ * at which point a deliverable with a concrete error is the better use of the
+ * channel. Both are still reported in `failures`; this only decides which one
+ * the repair nudge is addressed to.
+ */
+const VIRTUAL_TARGET_PLATEAU_LIMIT = 12;
+
 function repairVirtualTargetForFailures(
   spec: CraftbookEvalSpec,
   failures: readonly string[],
@@ -1683,6 +1696,11 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
   }
   const prompt = craftbookEvalKickoffPrompt(spec);
   let noWriteRepairState: NoWriteRepairState | null = null;
+  /**
+   * How many consecutive polls the virtual repair target has held the channel
+   * with the sniff score unmoved. See {@link VIRTUAL_TARGET_PLATEAU_LIMIT}.
+   */
+  let virtualTargetPlateau = { score: -1, polls: 0 };
   // Advisory judge wiring from the book's test.json rubric: --llm-judge
   // scores these axes against the primary artifact. Never affects
   // pass/fail — deterministic checks alone decide that.
@@ -1951,8 +1969,32 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         return { done: false };
       }
 
+      // The virtual target keeps the repair channel only while it is EARNING
+      // it. `repairVirtualTargetForFailures` matches `task sourced from
+      // craftbook …`, which is the "has not reached a terminal step" failure —
+      // a condition that holds for nearly a whole trial. Returning early on it
+      // unconditionally meant one message owned the channel start to finish
+      // and every deliverable went unrepaired.
+      //
+      // Wild-caught on the 2026-09-04 smoke run, in BOTH of its failures:
+      // codemod-sweep's `review.md` sat in the workspace, absent from the
+      // artifacts drawer it is graded on, and invoice-run's `report.md` was
+      // 685 bytes against an 800-byte floor with a named-client check unmet.
+      // Each had a concrete, correctable error. Each received ZERO repair
+      // nudges; codemod-sweep then exhausted all four attempts on
+      // task-graph.md and died "missing signals stayed unchanged".
+      //
+      // So: hold the channel while the score moves, and hand it to the
+      // deliverable once it demonstrably is not.
       const virtualRepairTarget = repairVirtualTargetForFailures(spec, failures);
-      if (virtualRepairTarget) {
+      if (virtualTargetPlateau.score !== passed) {
+        virtualTargetPlateau = { score: passed, polls: 0 };
+      }
+      const virtualTargetStarving =
+        virtualRepairTarget !== undefined &&
+        virtualTargetPlateau.polls >= VIRTUAL_TARGET_PLATEAU_LIMIT;
+      if (virtualRepairTarget && !virtualTargetStarving) {
+        virtualTargetPlateau.polls += 1;
         noWriteRepairState = null;
         await postSniffFeedback(
           ctx,

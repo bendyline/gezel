@@ -7,6 +7,8 @@ import {
   lastDeliveredHarnessIntervention,
   postMissingDeliverableFeedback,
   postSniffFeedback,
+  stageForSniffAttempts,
+  stageForSniffPlateau,
   structuralOrderRepairLine,
 } from './sniff-feedback.ts';
 import type { SniffResult } from './success-check.ts';
@@ -2681,5 +2683,49 @@ describe('score-plateau escalation (progressive failures)', () => {
     expect(texts.length).toBe(2);
     expect(texts[1]).toContain('REPEAT MISS — attempt 2');
     expect(texts[1]).not.toContain('SCORE PLATEAU');
+  });
+});
+
+describe('terminal rung requires the SCENARIO to be stuck, not one signature', () => {
+  /**
+   * craftbook-codemod-sweep, 2026-09-05: score climbed 9 -> 25 of 32, gained
+   * its last point at 03:07:38, and was terminated 15s later at 03:07:53 with
+   * 51 of its 90 minutes unused — because task-graph.md's signature had
+   * repeated four times. The signature ladder was right that THAT gate was
+   * stuck; it was wrong that the trial was.
+   */
+  const resolveStage = (signatureAttempts: number, scorePlateauAttempts: number | null) => {
+    const signatureStage = stageForSniffAttempts(signatureAttempts);
+    const plateauStage =
+      scorePlateauAttempts === null ? 0 : stageForSniffPlateau(scorePlateauAttempts);
+    if (plateauStage > signatureStage) return plateauStage;
+    const climbing = scorePlateauAttempts !== null && plateauStage < 2;
+    return signatureStage === 3 && climbing ? 2 : signatureStage;
+  };
+
+  it('holds the terminal rung while the score is still climbing', () => {
+    // 4 repeats of one signature, but the score just moved (fresh plateau key).
+    expect(resolveStage(4, 0)).toBe(2);
+    expect(resolveStage(9, 1)).toBe(2);
+  });
+
+  it('fires the terminal rung once the score has also stopped moving', () => {
+    expect(resolveStage(4, 4)).toBe(3);
+    expect(resolveStage(4, 6)).toBe(3);
+  });
+
+  it('leaves the score-plateau ladder able to terminate on its own', () => {
+    // Signature churning (attempts 1) but score frozen 6 polls: plateau wins.
+    expect(resolveStage(1, 6)).toBe(3);
+  });
+
+  it('does not hold the rung when there is no score to plateau on', () => {
+    // score 0/absent => no plateau key => nothing to say the trial is moving.
+    expect(resolveStage(4, null)).toBe(3);
+  });
+
+  it('leaves sub-terminal stages untouched', () => {
+    expect(resolveStage(2, 0)).toBe(1);
+    expect(resolveStage(3, 0)).toBe(2);
   });
 });

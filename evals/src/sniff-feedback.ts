@@ -509,7 +509,30 @@ export async function postSniffFeedback(
   // The plateau ladder only ever RAISES the stage — a frozen signature
   // repeating is always at least as damning as a churning one.
   const plateauDriven = plateauStage > signatureStage;
-  const stage = plateauDriven ? plateauStage : signatureStage;
+  // The TERMINAL rung asks a question about the scenario, not about one
+  // signature: is this trial stuck? A frozen sub-failure beside a climbing
+  // score is not — it is a scenario making progress on everything else while
+  // one gate stays shut.
+  //
+  // `craftbook-codemod-sweep` on the 2026-09-05 smoke run rose 9 -> 25 of 32,
+  // gaining its last point at 03:07:38, and was terminated 15 seconds later
+  // at 03:07:53 with 51 minutes still unused on its 90-minute ceiling —
+  // because `task-graph.md`'s signature ("has not reached a terminal step")
+  // had repeated four times. Same family as the ceiling deaths this suite
+  // has already produced: killed while demonstrably advancing.
+  //
+  // The plateau key is `__plateau__::score:N`, so a rising score mints a
+  // fresh state at attempts 0 and a returning score resumes its own count —
+  // which makes this robust to the 22 -> 21 -> 22 oscillation in that same
+  // timeline. Holding at stage 2 still posts the escalated nudge once and
+  // then dedupes, so a model that is climbing is not spammed either.
+  const scoreStillClimbing =
+    plateauState !== undefined && stageForSniffPlateau(plateauState.attempts) < 2;
+  const stage = plateauDriven
+    ? plateauStage
+    : signatureStage === 3 && scoreStillClimbing
+      ? 2
+      : signatureStage;
   const stagedAttempts = plateauDriven ? plateauState!.attempts : state.attempts;
   const drivingState = plateauDriven ? plateauState! : state;
 

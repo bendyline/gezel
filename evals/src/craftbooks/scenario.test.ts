@@ -2367,3 +2367,34 @@ describe('repairDeliverableForFailures', () => {
     ).toBe('reviews/rev-eval-1/findings.json');
   });
 });
+
+describe('virtual repair target does not starve deliverables', () => {
+  /**
+   * The plateau rule as a pure predicate. `repairVirtualTargetForFailures`
+   * matches "task sourced from craftbook …", i.e. the not-yet-terminal
+   * failure, which holds for nearly a whole trial. Before this, that one
+   * message owned the repair channel start to finish: on the 2026-09-04 smoke
+   * run codemod-sweep's review.md and invoice-run's report.md each had a
+   * concrete, correctable error and each received ZERO repair nudges.
+   */
+  const holdsChannel = (pollsAtSameScore: number, limit = 12) => pollsAtSameScore < limit;
+
+  it('keeps the channel while the score is still moving', () => {
+    expect(holdsChannel(0)).toBe(true);
+    expect(holdsChannel(11)).toBe(true);
+  });
+
+  it('yields the channel once the score has plateaued', () => {
+    expect(holdsChannel(12)).toBe(false);
+    expect(holdsChannel(30)).toBe(false);
+  });
+
+  it('a score change resets the hold', () => {
+    // The driver rebuilds { score, polls: 0 } whenever `passed` changes, so a
+    // scenario that is genuinely advancing never reaches the limit.
+    let state = { score: 7, polls: 11 };
+    const passed = 8;
+    if (state.score !== passed) state = { score: passed, polls: 0 };
+    expect(holdsChannel(state.polls)).toBe(true);
+  });
+});
