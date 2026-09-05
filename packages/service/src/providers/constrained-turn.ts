@@ -55,19 +55,24 @@ export function fileRepairTargetPath(prompt: string, intent?: FileTurnIntent): s
 
 export function isFileRepairPrompt(prompt: string, intent?: FileTurnIntent): boolean {
   if (intent) return intent.kind === 'repair-file';
-  if (!fileRepairTargetPath(prompt)) return false;
+  // Gate escalations choose their own repair strategy. Their quoted failures
+  // must not select the generic read-first mode, but an independent repair
+  // request before the marker still takes precedence.
+  const repairPrompt = prompt.split(/\bGATE_(?:TARGETED_EDIT|FULL_REWRITE):/, 1)[0]!;
+  if (!fileRepairTargetPath(repairPrompt)) return false;
   // Repair means an observed failure in existing work. A request to create a
   // missing file is a different intent, even if it arrives from a validator.
-  if (/\b(?:no|missing)\s+`?[^`\n]+`?\s+(?:file|in the workspace)\b/i.test(prompt)) return false;
+  if (/\b(?:no|missing)\s+`?[^`\n]+`?\s+(?:file|in the workspace)\b/i.test(repairPrompt))
+    return false;
   return (
     /\b(?:assertions?|checks?|tests?)\b[\s\S]{0,120}\b(?:failed|failing|failures?)\b|\b(?:success|acceptance) criteria (?:aren't|are not) met\b|\b(?:same|still)\b[\s\S]{0,80}\b(?:failing|fails|broken)\b/i.test(
-      prompt,
+      repairPrompt,
     ) ||
     /\b(?:repair|fix|debug|patch|correct)\b[\s\S]{0,160}\b(?:existing|broken|error|failure|bug|regression)\b/i.test(
-      prompt,
+      repairPrompt,
     ) ||
     /\b(?:existing|broken|error|failure|bug|regression)\b[\s\S]{0,160}\b(?:repair|fix|debug|patch|correct)\b/i.test(
-      prompt,
+      repairPrompt,
     )
   );
 }
@@ -99,6 +104,10 @@ export function isImmediateFileWritePrompt(
 ): boolean {
   if (intent) return intent.kind === 'create-file';
   if (isFileRepairPrompt(prompt)) return false;
+  // Stage 1 can target workspace patches, artifacts, or task notes. Never
+  // turn its failure text (for example, "write the note first") into a
+  // write_file-only request.
+  if (prompt.includes('GATE_TARGETED_EDIT:')) return false;
   if (
     /\b(?:do not|don't)\s+write\s+until\b|\bread\b[\s\S]{0,100}\bbefore\s+(?:writing|drafting|creating|editing)\b/i.test(
       prompt,
