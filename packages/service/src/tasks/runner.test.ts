@@ -422,48 +422,59 @@ describe('TaskRunner — dispatch + FIFO', () => {
     expect(runner.snapshot().pendingCount).toBe(2);
   });
 
-  it('initializes a cold one-slot provider before admitting a 21-batch fanout', async () => {
-    await store.createProject({ name: 'p1' });
-    await store.createGezel({ name: 'Bea' });
-    const now = new Date().toISOString();
-    for (let num = 1; num <= 21; num++) {
-      await store.writeTask({
-        projectId: 'p1',
-        num,
-        ref: `p1/${num}`,
-        title: `PR batch ${num}`,
-        status: 'active',
-        assignee: { kind: 'gezel', gezelId: 'bea' },
-        craftbook: fixtureCraftbook([
-          {
-            id: 'review',
-            name: 'review',
-            assignee: { kind: 'gezel', gezelId: 'bea' },
-            createdAt: now,
-          },
-        ]),
-        activeStepId: 'review',
-        createdAt: now,
-        updatedAt: now,
-        createdBy: { kind: 'user' },
+  it.each(['copilot', 'llama-cpp', 'mlx', 'ds4'] as const)(
+    'paces a cold %s fanout without loading an unrelated native model',
+    async (providerName) => {
+      await store.createProject({ name: 'p1' });
+      await store.createGezel({ name: 'Bea' });
+      const now = new Date().toISOString();
+      for (let num = 1; num <= 21; num++) {
+        await store.writeTask({
+          projectId: 'p1',
+          num,
+          ref: `p1/${num}`,
+          title: `PR batch ${num}`,
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'bea' },
+          craftbook: fixtureCraftbook([
+            {
+              id: 'review',
+              name: 'review',
+              assignee: { kind: 'gezel', gezelId: 'bea' },
+              createdAt: now,
+            },
+          ]),
+          activeStepId: 'review',
+          createdAt: now,
+          updatedAt: now,
+          createdBy: { kind: 'user' },
+        });
+      }
+
+      const dispatcher = new FakeDispatcher(new Map([['bea', providerName]]));
+      const initialize = vi.fn(async (name: ProviderName) => {
+        dispatcher.setProvider(name, new ProviderQueue({ concurrency: 1 }));
+        return dispatcher.getProvider(name)!;
       });
-    }
+      dispatcher.ensureProvider = initialize;
+      const runner = new TaskRunner({ store, dispatcher });
+      await runner.rehydrateFromStore({ projectId: 'p1' });
+      await runner.tick();
 
-    const dispatcher = new FakeDispatcher(new Map([['bea', 'llama-cpp']]));
-    const initialize = vi.fn(async (name: ProviderName) => {
-      dispatcher.setProvider(name, new ProviderQueue({ concurrency: 1 }));
-      return dispatcher.getProvider(name)!;
-    });
-    dispatcher.ensureProvider = initialize;
-    const runner = new TaskRunner({ store, dispatcher });
-    await runner.rehydrateFromStore({ projectId: 'p1' });
-    await runner.tick();
-
-    expect(initialize).toHaveBeenCalledTimes(1);
-    expect(dispatcher.dispatches).toHaveLength(1);
-    expect(dispatcher.dispatches[0]?.resumeExisting).toBe(true);
-    expect(runner.snapshot().pendingCount).toBe(20);
-  });
+      expect(initialize).toHaveBeenCalledTimes(providerName === 'copilot' ? 1 : 0);
+      expect(dispatcher.dispatches).toHaveLength(1);
+      expect(dispatcher.dispatches[0]?.resumeExisting).toBe(true);
+      expect(runner.snapshot().pendingCount).toBe(20);
+      if (providerName !== 'copilot') {
+        await runner.tick();
+        expect(dispatcher.dispatches).toHaveLength(1);
+        dispatcher.activeSessionIds.clear();
+        await runner.tick();
+        expect(dispatcher.dispatches).toHaveLength(2);
+        expect(initialize).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('holds restored work at the background cap and preserves foreground headroom', async () => {
     await store.createProject({ name: 'p1' });

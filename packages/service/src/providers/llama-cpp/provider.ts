@@ -95,7 +95,7 @@ import type {
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
-import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 
@@ -105,6 +105,7 @@ export {
   hasSalvageableImmediateFileWriteContent,
   tryRepairMalformedWriteToolArguments,
 } from '../immediate-write-salvage.js';
+import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import {
@@ -2015,6 +2016,10 @@ export class LlamaCppProvider implements LLMProvider {
     // the provider to exist.
   }
 
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
   async shutdown(): Promise<void> {
     // Poison FIRST so a turn racing the shutdown can't lazily respawn
     // llama-server after the stop below (see `disposed` field doc).
@@ -2041,7 +2046,7 @@ export class LlamaCppProvider implements LLMProvider {
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
     if (this.disposed) {
-      throw new Error('[llama-cpp] provider disposed (engine was evicted) — re-resolve it');
+      throw new ProviderDisposedError('llama-cpp');
     }
     const bridges = await McpBridgePool.fromSessionOpts(opts, '[llama-cpp]');
     return new LlamaCppSession({
@@ -2735,6 +2740,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     this.emitEngineStats({ provider: 'llama-cpp', ramAllocBytes: ev.ramAllocBytes });
   }
 
+  get isDisposed(): boolean {
+    return this.deps.provider.isDisposed;
+  }
+
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     // Ask-spawned sub-sessions bypass the TS-side queue to avoid the
     // ask_specialist / ask_gezel deadlock (asker holds the only slot
@@ -2742,8 +2751,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // `--parallel` allocator still serializes against the slot pool,
     // so bypassing the FIFO is safe. See MlxSession.sendAndWait for
     // the same rationale.
-    if (opts?.queue?.bypassQueue) return this.sendAndWaitInner(prompt, opts);
-    return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
+    return runOnLiveProvider(this.deps.provider, opts, () => this.sendAndWaitInner(prompt, opts));
   }
   private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
     return compactLocalTurn(

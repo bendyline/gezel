@@ -156,6 +156,7 @@ import { installedModelInfos } from '../providers/native/inference.js';
 import { LocalEngineRuntime } from '../providers/native/local-engine-runtime.js';
 import { OllamaProvider } from '../providers/ollama.js';
 import { OpenAIProvider } from '../providers/openai.js';
+import { ProviderDisposedError } from '../providers/provider-disposal.js';
 import type { Lane } from '../providers/queue.js';
 import { makeRemoteModelId, parseRemoteModelId } from '../providers/remote/model-id.js';
 import { RemoteGezelProvider } from '../providers/remote/provider.js';
@@ -7728,7 +7729,38 @@ export class ChatManager extends LocalEngineRuntime {
           this.telemetry.noteProviderRequestStart(sessionId);
           finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
         } catch (err) {
-          if (isContextOverflowError(err) && compactionsThisSend < this.maxCompactionsPerSend) {
+          if (err instanceof ProviderDisposedError && !inflightTurn.cancelled) {
+            // Only the provider's pre-start guard uses this error type. A
+            // mid-tool-loop failure must never replay already executed work.
+            log.info(`local engine evicted before send; rebinding session ${sessionId}`);
+            liveUnsub();
+            try {
+              await liveSession.disconnect();
+            } catch {
+              /* the retired provider may already have closed its bridges */
+            }
+            state.session = null;
+            const fresh = await this.createFreshSessionForRecord(
+              state.record,
+              { pendingUserText: userText, omitLastUserFromPriorMessages: continuations === 0 },
+              false,
+            );
+            fresh.onUsage((usage) => {
+              this.usageTracker.recordTurn(state.record.providerName, usage);
+              this.accountTaskBudget(state.record, usage);
+            });
+            state.session = fresh;
+            liveSession = fresh;
+            liveUnsub = subscribeLive(fresh);
+            if (inflightTurn.cancelled) {
+              throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
+            }
+            this.telemetry.noteProviderRequestStart(sessionId);
+            finalContent = await fresh.sendAndWait(promptForTurn, sendOpts);
+          } else if (
+            isContextOverflowError(err) &&
+            compactionsThisSend < this.maxCompactionsPerSend
+          ) {
             // The real prompt outgrew the slot mid-turn — in-turn
             // tool-loop bloat the proactive chars/4 estimate missed
             // (it undercounts tool-schema-heavy prompts by ~10%, and
@@ -9622,6 +9654,7 @@ export class ChatManager extends LocalEngineRuntime {
   private async createFreshSessionForRecord(
     record: ChatSession,
     runtime?: { pendingUserText?: string; omitLastUserFromPriorMessages?: boolean },
+    retryEvictedProvider = true,
   ): Promise<LLMSession> {
     const gezel = await this.store.getGezel(record.gezelId);
     if (!gezel) throw new Error(`agent ${record.gezelId} not found`);
@@ -9647,7 +9680,12 @@ export class ChatManager extends LocalEngineRuntime {
         ...(runtime?.omitLastUserFromPriorMessages ? { omitLastUserFromPriorMessages: true } : {}),
       },
     );
-    return provider.createSession(sessionOpts);
+    try {
+      return await provider.createSession(sessionOpts);
+    } catch (err) {
+      if (!(err instanceof ProviderDisposedError) || !retryEvictedProvider) throw err;
+      return this.createFreshSessionForRecord(record, runtime, false);
+    }
   }
 
   /**
@@ -12187,8 +12225,17 @@ export class ChatManager extends LocalEngineRuntime {
   private async ensureState(
     sessionId: string,
     pendingUserText?: string,
+    retryEvictedProvider = true,
   ): Promise<LiveSessionState> {
     const existing = this.states.get(sessionId);
+    if (existing?.session?.isDisposed) {
+      try {
+        await existing.session.disconnect();
+      } catch {
+        /* the retired provider may already have closed its bridges */
+      }
+      existing.session = null;
+    }
     if (existing?.session) {
       // Rebuild if the gezel's about OR tools.md has drifted since we
       // created the session. about.md drives the gezel's character +
@@ -12443,7 +12490,13 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
     if (!session) {
-      session = await provider.createSession(sessionOpts);
+      try {
+        session = await provider.createSession(sessionOpts);
+      } catch (err) {
+        // Prompt and bridge preparation can outlive this pool generation.
+        if (!(err instanceof ProviderDisposedError) || !retryEvictedProvider) throw err;
+        return this.ensureState(sessionId, pendingUserText, false);
+      }
       if (resumeFailed) {
         record.resumeFailed = true;
         record.providerState = {};

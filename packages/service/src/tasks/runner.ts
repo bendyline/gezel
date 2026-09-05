@@ -53,6 +53,7 @@ import {
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
+import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { mainBookSource, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
@@ -196,7 +197,8 @@ export interface TaskRunnerDispatcher {
   /**
    * Initialize a cold provider before admission. Production supplies this so
    * a boot-time fanout cannot mistake "not initialized yet" for unlimited
-   * capacity. Optional for queue-less test dispatchers.
+   * capacity. Native engines defer model selection to dispatch and use the
+   * conservative one-wide admission fallback. Optional for test dispatchers.
    */
   ensureProvider?(name: ProviderName): Promise<LLMProvider | null>;
 }
@@ -753,7 +755,14 @@ export class TaskRunner {
       if (!admissionProviders.has(providerName)) {
         provider = this.dispatcher.getProvider(providerName);
       }
-      if (!admissionProviders.has(providerName) && !provider && this.dispatcher.ensureProvider) {
+      // Native model selection belongs to the step dispatch. Initializing
+      // the install default here can evict the different model doing the work.
+      if (
+        !admissionProviders.has(providerName) &&
+        !provider &&
+        !isPooledLocalProvider(providerName) &&
+        this.dispatcher.ensureProvider
+      ) {
         let initializationFailed = false;
         provider = await this.dispatcher.ensureProvider(providerName).catch((err) => {
           initializationFailed = true;
@@ -785,7 +794,7 @@ export class TaskRunner {
           continue;
         }
       } else if (this.dispatcher.ensureProvider) {
-        // Some production providers (notably per-model remotes) cannot expose
+        // Pool-routed local engines and per-model remotes cannot expose
         // a singleton queue by provider name. Treat that as a conservative
         // one-wide lane across ticks, rather than restoring the old unlimited
         // cold-provider fanout race. Queue-less test dispatchers omit

@@ -227,3 +227,4 @@ packages/catalog/scripts/harvested-auth/
 # packages/cli (the same reason `.gezel/village.json` above is root-only).
 **/.gezel/index/
 /.codex-tmp
+/packages/app/e2e-visual/snapshots

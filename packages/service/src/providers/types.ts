@@ -741,6 +741,8 @@ export interface SendAndWaitOpts {
 }
 
 export interface LLMSession {
+  /** The owning engine was retired; rebuild from saved history before the next turn. */
+  readonly isDisposed?: boolean;
   /**
    * Effective context window for this concrete session, after any native
    * engine admission clamp. Stateless/local-history providers expose this so

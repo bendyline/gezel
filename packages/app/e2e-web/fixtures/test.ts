@@ -168,9 +168,15 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           /* storage disabled — fall through */
         }
 
-        // Kill transitions/animations/caret for byte-stable captures.
+        // Kill transitions/animations/caret for byte-stable captures. Force
+        // zero-width scrollbars as well: macOS can expose either overlay or
+        // classic scrollbars depending on the host preference, and a classic
+        // scrollbar changes the width of scrollbar-gutter: stable layouts.
+        // The content remains scrollable; only the platform-owned chrome is
+        // suppressed in browser tests.
         const css =
-          '*{transition:none !important;animation:none !important;caret-color:transparent !important;scroll-behavior:auto !important}';
+          '*{transition:none !important;animation:none !important;caret-color:transparent !important;scroll-behavior:auto !important;scrollbar-width:none !important}' +
+          '*::-webkit-scrollbar{width:0 !important;height:0 !important}';
         const inject = () => {
           const style = document.createElement('style');
           style.setAttribute('data-e2e-determinism', '');

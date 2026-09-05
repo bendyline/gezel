@@ -45,8 +45,9 @@ platform requires its own reviewed baselines and a CI runner exercising them.
 
 The real built UI and daemon run against temporary seeded homes with the
 mock provider. Background scheduling is disabled. The browser fixes its
-clock, random seed, locale, timezone, color profile, and animations, and
-waits for fonts. Baselines use CSS-pixel scale; the diagnostic gallery retains
+clock, random seed, locale, timezone, color profile, and animations, suppresses
+platform-owned scrollbar chrome without disabling scrolling, and waits for
+fonts. Baselines use CSS-pixel scale; the diagnostic gallery retains
 device-pixel scale. The comparison allows at most 100 differing pixels with
 Playwright's 0.2 per-pixel color threshold. Do not increase this allowance to
 hide changed layout or missing content. Existing volatile masks cover engine
@@ -55,8 +56,10 @@ regions. Product content must remain visible in the comparison.
 
 ## Running and reviewing changes
 
-Build the workspace first. With the existing dependencies and Chromium
-available, these commands do not install or update anything:
+Build the workspace first. Global setup rejects a missing UI bundle or one
+older than packages/ui/src so a snapshot update cannot approve a stale render.
+With the existing dependencies and Chromium available, these commands do not
+install or update anything:
 
 ```bash
 pnpm build
