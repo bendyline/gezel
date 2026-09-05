@@ -50,9 +50,19 @@ package into their runtime trees, preserving the full local-embedding and TTS
 feature set in complete distributions.
 
 Adding or removing a published package means editing
-[`tests/published/_packages.ts`](../tests/published/_packages.ts) and the
-`PUBLISHED` list in
-[`scripts/check-package-consumers.mjs`](../scripts/check-package-consumers.mjs).
+[`scripts/published-packages.mjs`](../scripts/published-packages.mjs) and
+nothing else. That module is the single registry the release scripts and the
+contract tests all read — `check-package-consumers.mjs`,
+`rehearse-npm-release.mjs` and `tests/published/_packages.ts`. It is plain
+Node rather than TypeScript because the first two run before, and without,
+any build.
+
+The list used to be written out in all three places, and it drifted: `gezk`
+reached two of them, the release rehearsal kept packing twelve tarballs, and
+the consumer check it feeds rejected the set. `packageShape.test.ts` now fails
+when any directory under `packages/` is neither published,
+versioned-but-private, nor named in the release's `--ignore-packages`, so a new
+package cannot go missing the same way.
 
 ## Versioning
 
@@ -186,14 +196,24 @@ They catch publishing-shape bugs no per-package suite can see:
 packs all thirteen packages, `npm install`s the tarballs into a throwaway
 **non-pnpm, non-workspace** project, and then:
 
-1. enforces an 800 MiB logical `node_modules` budget,
-2. runs `npm audit --omit=dev --audit-level=high`,
-3. proves a clean-install macOS `node-pty` can spawn a shell,
-4. imports every public subpath under plain node,
-5. resolves the runtime-resolved specifiers,
-6. runs the installed `gezel` binary,
-7. boots the installed `gezeld` with the mock provider, probes `/api/health`,
+1. asserts every package resolved from a candidate tarball rather than the
+   registry,
+2. enforces an 800 MiB logical `node_modules` budget,
+3. runs `npm audit --omit=dev --audit-level=high`,
+4. proves a clean-install macOS `node-pty` can spawn a shell,
+5. imports every public subpath under plain node,
+6. resolves the runtime-resolved specifiers,
+7. runs the installed `gezel` binary, including `gezel run` against an
+   already-running daemon,
+8. boots the installed `gezeld` with the mock provider, probes `/api/health`,
    creates a gezel, and asserts the daemon found its bundled UI and handboek.
+
+Step 1 exists because a version pin cannot tell a candidate from its
+already-published namesake. When the supplied tarball set was short one
+package, npm quietly satisfied that dependency from registry.npmjs.org and
+every later check validated the published package instead of the build. The
+lockfile records a `file:` resolution for a tarball install, so that is what
+gets checked.
 
 The separate project is the whole point. Inside this repo everything resolves
 through pnpm's workspace links and hoisted store, which hides two classes of
@@ -203,9 +223,29 @@ and a failure in the default native/prebuild chain (`node-pty`,
 nothing else installs outside pnpm. The optional ML stack has separate complete-
 bundle checks.
 
-`GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 7; `--keep` leaves the temp project
+`GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 8; `--keep` leaves the temp project
 for inspection. `--tarball-dir <path>` skips packing and tests an existing set
 of candidate artifacts byte-for-byte.
+
+### `pnpm check:npm-release-candidate`
+
+[`scripts/rehearse-npm-release.mjs`](../scripts/rehearse-npm-release.mjs) is
+the last gate before a publish, and the publish workflow runs it as its own
+step after `pnpm validate`. `check:packages` proves ordinary development packs;
+this proves the artifacts npm will actually receive. It stamps
+`packages/core/src/index.ts` with the current core version exactly as
+`prepare-package.mjs` does at release time, packs every published package, and
+hands the result to `check-package-consumers.mjs` in strict release mode
+(`--require-release-stamp`), which additionally asserts the installed
+`gezel --version` matches.
+
+The stamped constant must never reach a commit, so the script restores the
+source and rebuilds core in a `finally`. It refuses to start unless
+`GEZEL_VERSION` and `GEZEL_CONTENT_COMPAT` are both at their development
+`0.0.0`, and verifies they are again afterwards. Restoring "whatever was there
+at start-up" is not enough: an interrupted earlier run leaves the file already
+stamped, and a faithful restore then writes the release version straight back
+while reporting success.
 
 ## npm consumers get a lean dependency graph
 
@@ -394,7 +434,11 @@ Two things decide whether that is the whole job:
   `prepare-package.mjs` run by hand first, and only via `packages/core`.
 
 Then register its trusted publisher on npmjs.com exactly as in step 2, and add
-it to `PUBLISHED` in `tests/published/_packages.ts` so the shape gates cover it.
+it to `PUBLISHED_PACKAGES` in
+[`scripts/published-packages.mjs`](../scripts/published-packages.mjs) so every
+shape and consumer gate covers it. Do that in the same change that creates the
+package: `packageShape.test.ts` fails on an unaccounted-for workspace
+directory, which is the reminder.
 Its first CI release will be `1.0.0`, independent of where the other lines are.
 
 ### `ENONPMTOKEN` is not a missing secret

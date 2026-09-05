@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -17,15 +17,30 @@ test('reads PATH whatever case the platform stored it under', () => {
   assert.equal(readPathVar({ PATH: undefined, Path: '/fallback' }), '/fallback');
 });
 
-test('resolves pnpm from a spread environment', () => {
-  // The regression: `{...process.env}` loses `PATH` on Windows, the PATH scan
-  // saw an empty string, and resolution threw "Could not resolve pnpm's
-  // JavaScript CLI on Windows" while pnpm was installed and on PATH.
-  const env = { ...process.env };
-  delete env.npm_execpath;
-  delete env.GEZEL_PNPM_CLI;
-  assert.doesNotThrow(() => resolvePnpmCli(['--version'], { env }));
-});
+test(
+  'resolves a Corepack pnpm shim from a spread Windows environment',
+  { skip: process.platform !== 'win32' },
+  () => {
+    // The regression: `{...process.env}` loses `PATH` on Windows, the PATH scan
+    // saw an empty string. Corepack adds a second wrinkle: its pnpm.cmd points
+    // to node_modules/corepack/dist/pnpm.js rather than node_modules/pnpm/bin.
+    const dir = mkdtempSync(join(tmpdir(), 'gezel-pnpm-corepack-'));
+    const cliDir = join(dir, 'node_modules', 'corepack', 'dist');
+    const cli = join(cliDir, 'pnpm.js');
+    try {
+      mkdirSync(cliDir, { recursive: true });
+      writeFileSync(join(dir, 'pnpm.cmd'), '@echo off\n', 'utf8');
+      writeFileSync(cli, '// stub\n', 'utf8');
+
+      const resolved = resolvePnpmCli(['--version'], { env: { Path: dir } });
+      assert.equal(resolved.command, process.execPath);
+      assert.deepEqual(resolved.args, [cli, '--version']);
+      assert.equal(resolved.shell, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test('synchronously launches pnpm through a resolved JavaScript CLI', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gezel-pnpm-sync-'));

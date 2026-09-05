@@ -1,7 +1,9 @@
 /**
- * Shared registry of the packages gezel publishes to npm, driving every
- * loop in the `tests/published/` suite. Adding a published package means
- * touching this file and nothing else.
+ * Test-side view of the published-package registry, driving every loop in the
+ * `tests/published/` suite. The registry itself is
+ * `scripts/published-packages.mjs` — plain Node, because the release scripts
+ * that share it run before any build. Adding a published package means
+ * editing that file and nothing else.
  *
  * These tests run against built `dist/` output, not `src/` — they catch
  * publishing-shape bugs the in-package vitest suites cannot see (missing
@@ -13,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PUBLISHED_PACKAGES } from '../../scripts/published-packages.mjs';
 
 /** Repo root (parent of `tests/published/`). */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -55,34 +58,11 @@ export interface PublicPackage {
   pkg: PackageJson;
 }
 
-/**
- * Every package published to npm. `ui`, `eval-viewer` and `evals` are
- * excluded entirely; `app` and `vscode` are versioned by
- * multi-semantic-release but stay `private` and ship through
- * electron-builder / the VS Code Marketplace instead.
- */
-const PUBLISHED: ReadonlyArray<{ dir: string; typed: boolean }> = [
-  { dir: 'gezk', typed: true },
-  { dir: 'core', typed: true },
-  { dir: 'client', typed: true },
-  { dir: 'sdk', typed: true },
-  { dir: 'app-sdk', typed: true },
-  { dir: 'plugin-sdk', typed: true },
-  { dir: 'catalog', typed: true },
-  { dir: 'knowledge', typed: true },
-  { dir: 'mcp', typed: true },
-  { dir: 'service', typed: true },
-  // Spawn-only: the service resolves `run-action` and executes it as a
-  // subprocess, never imports it, so it emits no declarations.
-  { dir: 'connectors-spectral', typed: false },
-  // Ships plain `.ts` gate-script sources read in place by the runner.
-  { dir: 'script-stdlib', typed: false },
-  // Bin-only: its public contract is the `gezel` command line.
-  { dir: 'cli', typed: false },
-];
-
-/** Packages multi-semantic-release versions but never publishes. */
-export const VERSIONED_NOT_PUBLISHED = ['app', 'vscode'] as const;
+export {
+  PUBLISHED_PACKAGES,
+  RELEASE_IGNORED_PACKAGE_PATHS,
+  VERSIONED_NOT_PUBLISHED,
+} from '../../scripts/published-packages.mjs';
 
 export function readManifest(dir: string): PackageJson {
   return JSON.parse(readFileSync(resolve(REPO_ROOT, 'packages', dir, 'package.json'), 'utf8'));
@@ -90,7 +70,7 @@ export function readManifest(dir: string): PackageJson {
 
 /** Resolved list of published packages, read fresh from disk. */
 export function loadPublishedPackages(): PublicPackage[] {
-  return PUBLISHED.map(({ dir, typed }) => {
+  return PUBLISHED_PACKAGES.map(({ dir, typed }) => {
     const path = resolve(REPO_ROOT, 'packages', dir);
     const pkg = readManifest(dir);
     return { name: pkg.name, dir, path, dist: resolve(path, 'dist'), typed, pkg };

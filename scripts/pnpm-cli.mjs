@@ -37,6 +37,7 @@ function pnpmJavaScriptCli(env) {
     for (const candidate of [
       join(unquoted, 'node_modules', 'pnpm', 'bin', 'pnpm.mjs'),
       join(unquoted, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+      join(unquoted, 'node_modules', 'corepack', 'dist', 'pnpm.js'),
     ]) {
       if (existsSync(candidate)) return candidate;
     }

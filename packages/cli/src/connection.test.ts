@@ -1,9 +1,14 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { GezelClient } from '@bendyline/gezel-client/node';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { GezelSdkError } from '@bendyline/gezel-app-sdk';
+import { type GezelClient, LiveDaemonUnhealthyError } from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  PENDING_GRANT_MINUTES,
+  authorizeLocalOwnedDaemon,
+  cliGrantError,
   cliUserDaemonEnv,
   describeMachineEngineBroker,
   ensureCliProjectLead,
@@ -241,6 +246,116 @@ describe('CLI grant token storage', () => {
     await first.delete('gezel-cli');
     await expect(first.load('gezel-cli')).resolves.toBeNull();
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
+  });
+});
+
+describe('local owner authorization for `gezel run`', () => {
+  const authorized = {
+    baseUrl: 'https://127.0.0.1:51423',
+    token: 'runtime-scoped-token',
+    fetch: globalThis.fetch,
+    daemon: { mode: 'adopted' as const, pid: 4242, cert: null },
+  };
+
+  const runtime = (pid: number, baseUrl: string) => ({
+    pid,
+    baseUrl,
+    port: Number(new URL(baseUrl).port),
+    token: 'runtime-scoped-token',
+    cert: null,
+  });
+
+  /**
+   * The regression this seam exists for: a daemon is already running — because
+   * `gezel start`, or an ordinary `gezel agent list`, left one — and `run` must
+   * adopt it with the runtime credential rather than open a Connected Apps
+   * consent handshake that nobody can answer on a headless install.
+   */
+  it('adopts a running daemon with the owner credential and never asks for consent', async () => {
+    const authorizeOwner = vi.fn().mockResolvedValue(authorized);
+    const connect = vi
+      .fn()
+      .mockResolvedValue({ client: makeClient({}), baseUrl: authorized.baseUrl });
+
+    const result = await authorizeLocalOwnedDaemon({ authorizeOwner, connect });
+
+    expect(result?.baseUrl).toBe(authorized.baseUrl);
+    expect(connect).toHaveBeenCalledWith(authorized);
+    expect(authorizeOwner).toHaveBeenCalledTimes(1);
+    // Discovery only: `run` adopts what is already there and never becomes a
+    // second writer against the same home.
+    expect(authorizeOwner.mock.calls[0]?.[0]?.daemon?.spawnIfMissing).toBe(false);
+  });
+
+  it('reports absence so a cold machine can still own a one-shot in-process service', async () => {
+    const authorizeOwner = vi
+      .fn()
+      .mockRejectedValue(new GezelSdkError('no daemon', { code: 'daemon_not_running' }));
+
+    await expect(
+      authorizeLocalOwnedDaemon({
+        authorizeOwner,
+        readRuntimeFn: vi.fn().mockResolvedValue(null),
+        isProcessAliveFn: () => false,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('fails loudly when a live daemon stopped answering instead of spawning beside it', async () => {
+    const authorizeOwner = vi
+      .fn()
+      .mockRejectedValue(new LiveDaemonUnhealthyError(9182, 'https://127.0.0.1:6228'));
+
+    await expect(authorizeLocalOwnedDaemon({ authorizeOwner })).rejects.toThrow(
+      /\(pid 9182\) is running but did not answer/,
+    );
+  });
+
+  it('fails loudly when a daemon appears between discovery and the liveness re-check', async () => {
+    const authorizeOwner = vi
+      .fn()
+      .mockRejectedValue(new GezelSdkError('no daemon', { code: 'daemon_not_running' }));
+
+    await expect(
+      authorizeLocalOwnedDaemon({
+        authorizeOwner,
+        readRuntimeFn: vi.fn().mockResolvedValue(runtime(777, 'https://127.0.0.1:6229')),
+        isProcessAliveFn: () => true,
+      }),
+    ).rejects.toThrow(/\(pid 777\) is running but did not answer/);
+  });
+
+  it('surfaces an unexpected authorization failure rather than silently degrading', async () => {
+    const authorizeOwner = vi.fn().mockRejectedValue(new Error('runtime token was rejected'));
+
+    await expect(authorizeLocalOwnedDaemon({ authorizeOwner })).rejects.toThrow(
+      /runtime token was rejected/,
+    );
+  });
+});
+
+describe('grant failure messages', () => {
+  it('tells a person how to clear a pending request instead of printing its error code', () => {
+    const error = cliGrantError(
+      new GezelSdkError('grant_already_pending', { code: 'grant_already_pending', status: 409 }),
+      'https://gezel.example',
+    );
+
+    expect(error.message).toContain('https://gezel.example');
+    expect(error.message).toContain('Settings → Connected Apps');
+    expect(error.message).toContain(`${PENDING_GRANT_MINUTES} minutes`);
+    expect(error.message).not.toContain('grant_already_pending');
+  });
+
+  it('keeps the advertised pending-grant wait in step with the daemon that enforces it', async () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manager = await readFile(
+      join(here, '..', '..', 'service', 'src', 'grants', 'manager.ts'),
+      'utf8',
+    );
+    const declared = /PENDING_GRANT_TTL_MS = (\d+) \* 60_000/.exec(manager);
+
+    expect(declared?.[1]).toBe(String(PENDING_GRANT_MINUTES));
   });
 });
 

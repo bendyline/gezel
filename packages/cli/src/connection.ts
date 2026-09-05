@@ -13,6 +13,7 @@ import {
 import {
   GezelApiError,
   GezelClient,
+  LiveDaemonUnhealthyError,
   createTrustingFetch,
   discoverOrSpawn,
   electronNativeBinCandidates,
@@ -253,55 +254,105 @@ export type RunConnection = {
   stop?: () => Promise<void>;
 };
 
+export interface LocalOwnerAuthorizationDeps {
+  authorizeOwner?: typeof authorizeLocalOwner;
+  readRuntimeFn?: typeof readRuntime;
+  isProcessAliveFn?: typeof isProcessAlive;
+  connect?: (
+    authorized: LocalAuthorizedConnection,
+  ) => Promise<{ client: GezelClient; baseUrl: string }>;
+}
+
+/**
+ * Adopt a running same-user local daemon as its owner, or report absence.
+ *
+ * This is the path `connectOwned` (agent/env/task/TUI) has always taken, and
+ * `gezel run` now takes it too. `authorizeLocalOwner` reads the daemon's
+ * rotating scoped credential out of the protected `runtime/` directory under
+ * this user's own Gezel home and deliberately skips Connected Apps consent,
+ * because a local daemon's runtime directory lives in the calling user's home:
+ * being able to read it and being the owner are the same fact, so a consent
+ * handshake here protects nothing that the filesystem does not already.
+ *
+ * `run` used to request an app grant instead, which meant any command that
+ * started a daemon — `gezel start`, or a read-only `gezel agent list` — left
+ * the next `gezel run` blocking for the full approval timeout on a
+ * verification code that can only be typed into the desktop app. An npm-only
+ * install has no such app, so the command could not complete at all; the bug
+ * was invisible on a cold machine because the in-process fallback below only
+ * fires when nothing is running.
+ *
+ * Consent still guards every connection the CLI does not own: `--connect` and
+ * the legacy full-product machine service both go through
+ * `connectWithCliGrant` in `connectPreferredService`.
+ *
+ * Returns null only when no local daemon is running — the one condition under
+ * which a caller may own an ephemeral in-process service instead. A live but
+ * unhealthy daemon stays loud rather than becoming a second writer.
+ */
+export async function authorizeLocalOwnedDaemon(
+  deps: LocalOwnerAuthorizationDeps = {},
+): Promise<{ client: GezelClient; baseUrl: string } | null> {
+  try {
+    const authorized = await (deps.authorizeOwner ?? authorizeLocalOwner)({
+      daemon: {
+        daemonEntry: resolveDaemonEntry(import.meta.url),
+        spawnIfMissing: false,
+        ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
+      },
+    });
+    return await (deps.connect ?? defaultConnectAsOwner)(authorized);
+  } catch (error) {
+    if (error instanceof LiveDaemonUnhealthyError) {
+      throw unhealthyLocalDaemonError(error.pid, error.baseUrl);
+    }
+    if (!(error instanceof GezelSdkError) || error.code !== 'daemon_not_running') {
+      throw cliGrantError(error, 'the local Gezel daemon');
+    }
+
+    // The SDK reports an unreachable runtime as not running. Re-check pid
+    // liveness before accepting that as absence: a daemon that appeared in
+    // the gap must fail loudly instead of gaining a second writer.
+    const runtime = await (deps.readRuntimeFn ?? readRuntime)();
+    if (runtime && (deps.isProcessAliveFn ?? isProcessAlive)(runtime.pid)) {
+      throw unhealthyLocalDaemonError(runtime.pid, runtime.baseUrl);
+    }
+    return null;
+  }
+}
+
+function defaultConnectAsOwner(
+  authorized: LocalAuthorizedConnection,
+): Promise<{ client: GezelClient; baseUrl: string }> {
+  return connectionFromAuthorization(authorized, 'The local Gezel owner authorization');
+}
+
+function unhealthyLocalDaemonError(pid: number, baseUrl: string): CliError {
+  return new CliError(
+    `The local Gezel daemon (pid ${pid}) is running but did not answer at ${baseUrl}. Stop or repair it before retrying.`,
+  );
+}
+
 /**
  * Connection for `gezel run`:
  *   - `--connect <url>` → explicitly authorized full CLI connection.
  *   - else use a healthy legacy full-product machine service when available.
- *   - else authorize against a running user-local daemon through the app SDK,
+ *   - else adopt a running same-user local daemon as its owner,
  *   - else start the service in-process for this single turn (`/api`),
  *     returning a `stop` to tear it down — a self-cleaning one-shot.
  *
  * Only an absent/dead user daemon permits the in-process fallback. A live but
- * unhealthy daemon, denied grant, expired grant, or other authorization error
- * remains loud; none of those conditions may silently bypass consent or open
- * a second writer against the same home.
+ * unhealthy daemon, or any other authorization error, remains loud; none of
+ * those conditions may open a second writer against the same home.
  */
 export async function connectForRun(globals: CliGlobals): Promise<RunConnection> {
   applyHome(globals);
   const preferred = await connectPreferredService(globals);
   if (preferred) return { kind: 'owned', ...preferred };
 
-  // Ask the SDK to discover + authorize the ordinary local product daemon.
-  // Discovery-only mode never starts one: a missing/dead daemon is the one
-  // condition where `run` intentionally owns an ephemeral in-proc fallback.
-  try {
-    const connected = await requestCliGrant({
-      storageKey: localTokenStorageKey(),
-      daemon: {
-        spawnIfMissing: false,
-        ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
-      },
-    });
-    const authorized = await connectionFromAuthorization(
-      connected,
-      'The approved Gezel CLI authorization',
-    );
-    return { kind: 'owned', ...authorized };
-  } catch (error) {
-    if (!(error instanceof GezelSdkError) || error.code !== 'daemon_not_running') {
-      throw cliGrantError(error, 'the local Gezel daemon');
-    }
+  const owned = await authorizeLocalOwnedDaemon();
+  if (owned) return { kind: 'owned', ...owned };
 
-    // `authorizeLocal` reports an unreachable runtime as not running. Check
-    // PID liveness before accepting that as absence: a live process that has
-    // stopped answering must fail loudly instead of racing a second writer.
-    const runtime = await readRuntime();
-    if (runtime && isProcessAlive(runtime.pid)) {
-      throw new CliError(
-        `The local Gezel daemon (pid ${runtime.pid}) is running but did not answer at ${runtime.baseUrl}. Stop or repair it before retrying.`,
-      );
-    }
-  }
   await prepareStandaloneAssets();
 
   // Nothing running → start the service in-process for this single turn, on
@@ -349,6 +400,16 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
 
 const CLI_APP_ID_PREFIX = 'gezel-cli';
 const CLI_APPROVAL_TIMEOUT_SEC = 300;
+
+/**
+ * How long the daemon holds an undecided grant before sweeping it, in whole
+ * minutes. Mirrors `PENDING_GRANT_TTL_MS` in the service's grant manager. It
+ * is duplicated rather than imported because the service is a lazy dynamic
+ * import here, and this value is only ever used to tell a person how long to
+ * wait — nothing branches on it. The `grant failure messages` suite in
+ * connection.test.ts reads the service source and fails if the two drift.
+ */
+export const PENDING_GRANT_MINUTES = 10;
 
 export interface HealthySystemService {
   baseUrl: string;
@@ -590,7 +651,7 @@ function clientFromAuthorization(authorized: LocalAuthorizedConnection): GezelCl
   return buildCliClient(authorized.baseUrl, authorized.token, authorized.fetch);
 }
 
-function cliGrantError(error: unknown, target: string): CliError {
+export function cliGrantError(error: unknown, target: string): CliError {
   if (error instanceof CliError) return error;
   if (error instanceof GezelSdkError) {
     if (error.code === 'already_connected') {
@@ -609,6 +670,11 @@ function cliGrantError(error: unknown, target: string): CliError {
     if (error.code === 'grant_expired') {
       return new CliError(
         'The Gezel CLI approval request expired. Run the command again to get a new code.',
+      );
+    }
+    if (error.code === 'grant_already_pending') {
+      return new CliError(
+        `An earlier Gezel CLI connection request to ${target} is still waiting to be approved, so a new code cannot be issued yet. Approve or dismiss it in Gezel under Settings → Connected Apps, or wait ${PENDING_GRANT_MINUTES} minutes for it to expire and run this command again.`,
       );
     }
     if (error.code === 'daemon_not_running') {
@@ -725,11 +791,6 @@ export function fileTokenStorage(storageKey: string): {
     },
     delete: deleteToken,
   };
-}
-
-/** Stable across the per-user daemon's dynamic port and certificate rotation. */
-function localTokenStorageKey(): string {
-  return 'local-user-daemon';
 }
 
 /**

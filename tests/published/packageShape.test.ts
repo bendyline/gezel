@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  RELEASE_IGNORED_PACKAGE_PATHS,
   REPO_ROOT,
   VERSIONED_NOT_PUBLISHED,
   exportTargets,
@@ -138,6 +139,54 @@ describe('published package manifests', () => {
     expect(lifecycle, `${lifecycle.join(', ')} would execute on every consumer install`).toEqual(
       [],
     );
+  });
+
+  /**
+   * The guard for the failure that made a single registry worth having.
+   *
+   * `gezk` was added to `packages/` and to two of the three hand-maintained
+   * copies of this list. The one it missed was `rehearse-npm-release.mjs`, so
+   * `pnpm check:npm-release-candidate` packed twelve tarballs and the
+   * consumer check refused the set. Counting is no longer possible to get
+   * wrong — every consumer reads the same array — but a *new* package can
+   * still be created and never added to it. Every workspace directory must
+   * therefore be accounted for: published, versioned-but-private, or
+   * deliberately ignored by the release.
+   */
+  it('accounts for every workspace package', () => {
+    const ignored = new Set(
+      RELEASE_IGNORED_PACKAGE_PATHS.filter((path) => path.startsWith('packages/')).map((path) =>
+        path.slice('packages/'.length),
+      ),
+    );
+    const accounted = new Set([
+      ...packages.map((pkg) => pkg.dir),
+      ...VERSIONED_NOT_PUBLISHED,
+      ...ignored,
+    ]);
+    const present = readdirSync(resolve(REPO_ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((dir) => existsSync(resolve(REPO_ROOT, 'packages', dir, 'package.json')));
+
+    expect(
+      present.filter((dir) => !accounted.has(dir)),
+      'add it to scripts/published-packages.mjs — as published, versioned-not-published, or release-ignored',
+    ).toEqual([]);
+  });
+
+  /**
+   * The ignore list is duplicated into a shell array in the release workflow,
+   * where nothing else can see it. Read it back so the two cannot drift.
+   */
+  it('keeps the release-ignored set in step with the publish workflow', () => {
+    const workflow = readFileSync(
+      resolve(REPO_ROOT, '.github', 'workflows', 'publish-npm.yml'),
+      'utf8',
+    );
+    const declared = /--ignore-packages=([^\s)]+)/.exec(workflow)?.[1]?.split(',') ?? [];
+
+    expect(declared).toEqual([...RELEASE_IGNORED_PACKAGE_PATHS]);
   });
 
   it.each(VERSIONED_NOT_PUBLISHED)('%s stays private so publish-package.mjs skips it', (dir) => {

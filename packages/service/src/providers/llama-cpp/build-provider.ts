@@ -434,7 +434,6 @@ export async function buildLlamaCppProvider(opts: {
   // (Co-resident pool models aren't subtracted here — the broker still
   // denies an over-commit at spawn; threading committed bytes is a TODO.)
   const {
-    fastMemoryBudgetBytes,
     defaultLocalEngineSlots,
     llamaCppSlotCeiling,
     computeCapacityBudget,
@@ -442,6 +441,11 @@ export async function buildLlamaCppProvider(opts: {
     planCtxTokensForMemory,
     plannedLocalEngineSlots,
   } = await import('../native/capacity-broker.js');
+  const { measuredCapacityBudget } = await import('../native/measured-budget.js');
+  // Measured, not the ambient probe: the singleton path has no broker to read
+  // pools from, and a launch that plans against a card this process has not
+  // measured yet sizes its slots and its KV rung off system RAM alone.
+  const hostCapacity = await measuredCapacityBudget();
   // Subtract co-resident model reservations from the budget when the pool
   // broker is wired (multi-model path), using its actual (possibly config-
   // overridden) budget. Caveat: the broker tracks each model's resident
@@ -456,7 +460,7 @@ export async function buildLlamaCppProvider(opts: {
   const brokerSnap = opts.broker?.committed();
   const budgetBytes = brokerSnap?.enforced
     ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-    : fastMemoryBudgetBytes();
+    : hostCapacity.fastBytes;
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
   // Gemma f16-KV vs a second slot: when memory alone forces single-slot,
   // trade to q8_0 KV if that buys ≥2 slots — SWA models get no rescue
@@ -508,7 +512,7 @@ export async function buildLlamaCppProvider(opts: {
       budgetBytes,
       sizingBudgetBytes: brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
-        : computeCapacityBudget().concurrencySizingBytes,
+        : hostCapacity.concurrencySizingBytes,
       weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
       perTurnCtxTokens: ctxTokens,
       kvCacheType: kv,
@@ -528,7 +532,7 @@ export async function buildLlamaCppProvider(opts: {
   const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
     mmprojBytes: visionBudgetBytes,
   });
-  const planCapacity = computeCapacityBudget();
+  const planCapacity = hostCapacity;
   const planKvBytesPerToken = (kv: LlamaCppKvCacheType) => {
     const exact = headerSummary
       ? estimateKvReserveBytes({
