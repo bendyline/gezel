@@ -8,7 +8,7 @@
  * This module owns the clock constant, viewport presets, the post-navigation
  * `settle()`, and the default volatile-region masks.
  */
-import type { Locator, Page } from '@playwright/test';
+import { type Locator, type Page, expect } from '@playwright/test';
 
 /**
  * The fixed instant the browser clock is pinned to. 15:00Z → the greeting band
@@ -69,7 +69,29 @@ export async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<voi
 /** Wait for fonts + a paint frame so text isn't captured mid-layout. */
 const FONT_SETTLE_TIMEOUT_MS = 5_000;
 
-export async function settle(page: Page): Promise<void> {
+export async function settle(
+  page: Page,
+  opts: { requireLoadedFonts?: boolean } = {},
+): Promise<void> {
+  if (opts.requireLoadedFonts) {
+    // A stable fallback font is still the wrong renderer for a pixel comparison.
+    // Fail at readiness instead of capturing (or approving) an arbitrary fallback.
+    await expect
+      .poll(() => page.evaluate(() => document.fonts.status), {
+        timeout: FONT_SETTLE_TIMEOUT_MS,
+        message: 'Visual capture requires all requested fonts to finish loading',
+      })
+      .toBe('loaded');
+    const failedFonts = await page.evaluate(() =>
+      Array.from(document.fonts)
+        .filter((font) => font.status === 'error')
+        .map((font) => `${font.family} ${font.style} ${font.weight}`),
+    );
+    expect(failedFonts, 'Visual capture cannot use failed fonts').toEqual([]);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    return;
+  }
+
   await page.evaluate(async (fontTimeoutMs) => {
     try {
       const ready = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;

@@ -576,16 +576,12 @@ key out from under the cursor. Being glyph-only, each carries `title` and
 `aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
 announces the pending turn now that "Sending…" is no longer on its face.
 
-**Chat sends on Shift+Enter; the terminal fires on Enter.** The one place
-the two composers part company, and deliberately. A chat draft is prose —
-it holds paragraphs, a pasted brief, a spec — so Enter has to be a new
-line, or writing anything longer than a sentence means dodging the key
-that makes one. A shell command is a line, and a line ends with Enter;
-inverting that would fight thirty years of muscle memory for no gain.
-Each composer says which it is in the primary key's `title`, and the chat
-composer claims Shift+Enter in a capture-phase handler on its own wrapper
-— Squisq's `submitOnEnter` hook is plain-Enter-only and is left unset, so
-Enter reaches the editor as the ordinary paragraph break it should be.
+**Enter submits; Shift+Enter adds a new line.** Chat and terminal share the
+same primary-key convention: Enter commits the draft, while Shift+Enter keeps
+the cursor in the composer and inserts a line break. Each composer says so in
+the primary key's `title`. Chat delegates the split to Squisq's
+`submitOnEnter` hook, which preserves the editor's mention-picker handling and
+lets Shift+Enter reach the normal paragraph-break behavior.
 
 **The draft can take the window.** An icon key at the right end of the To
 line — past the recipient picker and the compose-mode tabs, so the frame's

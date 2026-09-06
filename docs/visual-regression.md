@@ -47,7 +47,10 @@ The real built UI and daemon run against temporary seeded homes with the
 mock provider. Background scheduling is disabled. The browser fixes its
 clock, random seed, locale, timezone, color profile, and animations, suppresses
 platform-owned scrollbar chrome without disabling scrolling, and waits for
-fonts. Baselines use CSS-pixel scale; the diagnostic gallery retains
+fonts. Visual comparisons reject failed or stalled font loads with a readiness
+error; they never approve fallback text after a timeout. The behavioral suite's
+diagnostic gallery can still capture fallbacks to help diagnose a broken page.
+Baselines use CSS-pixel scale; the diagnostic gallery retains
 device-pixel scale. The comparison allows at most 100 differing pixels with
 Playwright's 0.2 per-pixel color threshold. Do not increase this allowance to
 hide changed layout or missing content. Existing volatile masks cover engine
@@ -82,6 +85,14 @@ readability, overflow, controls, and focus states. A stable loading screen
 or a blank component is not an acceptable baseline. Keep readiness
 assertions when updating images. Browser/OS/font upgrades also require
 review; do not use CI to automatically replace the baseline tree.
+
+Treat a pixel failure as a request to inspect the diff, not as proof of a product
+bug. A moved control needs review of its source change; a column shift caused by
+the host's scrollbar preference needs fixture stabilization. Neither is fixed by
+raising the pixel allowance. Keep interaction, content, and layout assertions
+alongside images so the important behavior remains covered when a deliberate
+design change requires a new baseline. Repeat the comparisons after changing
+fixtures or baselines; a single passing capture does not establish repeatability.
 
 Failures include expected/actual/diff images and traces in
 `packages/app/visual-test-results/`, plus an HTML report in
