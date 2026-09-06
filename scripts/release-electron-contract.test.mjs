@@ -300,6 +300,11 @@ test('dependency security floors fix B3 while CI blocks only on critical advisor
     );
   }
   assert.match(consumerCheck, /'--audit-level=critical'/);
+  assert.match(
+    consumerCheck,
+    /npm_config_cache: npmCache/,
+    'npm consumer checks must not depend on the developer or runner global cache',
+  );
 
   for (const dependencyFloor of [
     /"dompurify@>=3 <4": "3\.4\.13"/,
@@ -380,6 +385,47 @@ test('PR artifact checks compile the same release-stamped source shape as Electr
     typecheckIndex > buildIndex,
     'the release-stamped tree must be typechecked after build',
   );
+  assert.match(packaged, /run: pnpm audit:sbom/);
+  assert.match(packaged, /node scripts\/verify-release-version\.mjs/);
+  assert.match(packaged, /--service-meta packages\/app\/dist\/service-bundle\.meta\.json/);
+  assert.match(packaged, /--sbom artifacts\/gezel\.cdx\.json/);
+  assert.match(
+    packaged,
+    /appstreamcli validate packages\/app\/assets\/com\.bendyline\.gezel\.metainfo\.xml/,
+  );
+});
+
+test('npm release-only source checks are shared by local validation and PR CI', async () => {
+  const [rootPackageSource, quality, publish] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+  ]);
+  const scripts = JSON.parse(rootPackageSource).scripts;
+  const validateSteps = scripts['validate:unlocked'].split(' && ');
+
+  assert.ok(
+    validateSteps.includes('pnpm check:release-toolchain'),
+    'pnpm all must validate the npm release toolchain',
+  );
+  assert.ok(
+    validateSteps.includes('pnpm check:npm-release-candidate:unbuilt'),
+    'pnpm all must exercise release-stamped npm tarballs',
+  );
+  assert.equal(
+    scripts['check:npm-release-candidate:unbuilt'],
+    'node scripts/rehearse-npm-release.mjs',
+  );
+
+  const npmJobStart = quality.indexOf('  npm-release-candidate:');
+  const npmJobEnd = quality.indexOf('\n  supply-chain:', npmJobStart);
+  assert.notEqual(npmJobStart, -1, 'PR CI must retain an npm release-candidate job');
+  assert.notEqual(npmJobEnd, -1, 'the npm release-candidate job must remain distinct');
+  const npmJob = quality.slice(npmJobStart, npmJobEnd);
+  assert.match(npmJob, /run: pnpm check:release-toolchain/);
+  assert.match(npmJob, /run: pnpm check:npm-release-candidate/);
+
+  assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
 test('macOS release installs the finished PKG and exercises recovery', async () => {
