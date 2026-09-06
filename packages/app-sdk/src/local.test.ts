@@ -4,9 +4,11 @@ const discoverOrSpawn = vi.hoisted(() => vi.fn());
 const createTrustingFetch = vi.hoisted(() => vi.fn());
 const readSystemServiceEndpoint = vi.hoisted(() => vi.fn());
 
-vi.mock('@bendyline/gezel-client/node', () => ({
+vi.mock('@bendyline/gezel-client/node', async (original) => ({
+  ...(await original<object>()),
   discoverOrSpawn,
   createTrustingFetch,
+  createPatientFetch: () => Object.assign(vi.fn(), { close: vi.fn(async () => {}) }),
   readSystemServiceEndpoint,
   DaemonNotRunningError: class DaemonNotRunningError extends Error {},
 }));

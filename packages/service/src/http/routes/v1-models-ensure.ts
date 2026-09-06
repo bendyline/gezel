@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { KnownEnsureError } from '../../models/ensure.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 
 const EnsureRequestSchema = z.object({
   model: z.string().min(1, 'model is required'),
@@ -35,7 +35,7 @@ const EnsureRequestSchema = z.object({
  * Auth: mounted under `bearerAuth + requireScope('openai')` like the
  * rest of `/v1/*`.
  */
-export function v1ModelsEnsureRoutes(ctx: ServiceContext): Hono {
+export function v1ModelsEnsureRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
 
   app.post('/', async (c) => {

@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 
 export const MACHINE_ENGINE_PROVIDER_NAMES = ['llama-cpp', 'mlx', 'ds4'] as const;
 export type MachineEngineProviderName = (typeof MACHINE_ENGINE_PROVIDER_NAMES)[number];
@@ -16,7 +16,7 @@ export function isMachineEngineProvider(name: string): name is MachineEngineProv
  * disconnected adopted broker still returns true: falling back to the user
  * daemon would create a second GPU owner while the system service restarts.
  */
-export function usesMachineEngine(ctx: ServiceContext): boolean {
+export function usesMachineEngine(ctx: EngineContext): boolean {
   const bridge = ctx.machineEngine;
   return Boolean(bridge && (bridge.isConnected() || bridge.isRequired()));
 }
@@ -37,7 +37,7 @@ export function userOwnedIdFromBroker(value: string): string {
  * developer and per-user-only installations retain today's behavior.
  */
 export function machineEngineProxy(
-  ctx: ServiceContext,
+  ctx: EngineContext,
   sourcePrefix: string,
   targetPrefix: string,
   localPaths: readonly string[] = [],

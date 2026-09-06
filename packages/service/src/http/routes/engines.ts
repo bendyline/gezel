@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import { EngineBusyError } from '../../providers/native/capacity-broker.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { isMachineEngineProvider, machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
@@ -38,7 +38,7 @@ const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
  *
  * Mounted under `/api/engines` from `http/server.ts`.
  */
-export function enginesRoutes(ctx: ServiceContext): Hono {
+export function enginesRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/engines', '/v1/remote/manage/engines'));
 
@@ -339,7 +339,7 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
  * `subscribeToPullSse` in image-gen.ts.
  */
 async function subscribeEngineSse(
-  ctx: ServiceContext,
+  ctx: EngineContext,
   key: string,
   stream: SSEStreamingApi,
 ): Promise<void> {
@@ -391,7 +391,7 @@ async function subscribeEngineSse(
  * before reporting `done` so a model pull or first generation in the same CLI
  * process immediately sees the newly stamped executable.
  */
-async function refreshNativeConsumer(ctx: ServiceContext, engine: NativeEngineName): Promise<void> {
+async function refreshNativeConsumer(ctx: EngineContext, engine: NativeEngineName): Promise<void> {
   if (engine === 'llama-server') {
     await ctx.recognition.reset();
   } else if (engine === 'sd-server') {

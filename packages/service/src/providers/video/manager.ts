@@ -7,12 +7,12 @@
 
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { Store } from '../../fs/store.js';
+import type { ConfigStore } from '../../fs/config-store.js';
 import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
+import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
-import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createVideoProvider } from './factory.js';
 import { RemoteVideoProvider } from './remote-video.js';
 import type { VideoProvider } from './types.js';
@@ -21,7 +21,7 @@ const log = createLogger('video');
 
 export interface VideoProviderManagerOptions {
   home: string;
-  store: Store;
+  store: Pick<ConfigStore, 'readConfig'>;
   catalog: CatalogService;
   uvRuntime: UvRuntime;
   /** Override env for tests. */
@@ -36,18 +36,13 @@ export interface VideoProviderManagerOptions {
 
 export class VideoProviderManager {
   private readonly home: string;
-  private readonly store: Store;
+  private readonly store: Pick<ConfigStore, 'readConfig'>;
   private readonly catalog: CatalogService;
   private readonly uvRuntime: UvRuntime;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly arbiter: GpuArbiter | undefined;
 
-  private current_: VideoProvider | null = null;
-  private currentView_: VideoProvider | null = null;
-  private retiring_: VideoProvider | null = null;
-  private buildPromise: Promise<VideoProvider> | null = null;
-  private machineRetirement: Promise<void> | null = null;
-  private readonly activity = new ProviderRetirementGate();
+  private readonly local = new ProviderLifecycle<VideoProvider>(new Set(['generate']));
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -106,10 +101,8 @@ export class VideoProviderManager {
       const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
       if (target) return this.providerForRemoteTarget(target);
     }
-    if (this.current_) return this.currentView_ ?? this.current_;
-    if (this.buildPromise) return this.buildPromise;
-    this.buildPromise = (async () => {
-      const provider = await createVideoProvider({
+    return this.local.current(async () => {
+      return createVideoProvider({
         home: this.home,
         catalog: this.catalog,
         uvRuntime: this.uvRuntime,
@@ -117,50 +110,22 @@ export class VideoProviderManager {
         config,
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
-      this.current_ = provider;
-      this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['generate']));
-      return this.currentView_;
-    })().finally(() => {
-      this.buildPromise = null;
     });
-    return this.buildPromise;
   }
 
   async reset(): Promise<void> {
-    const prev = this.current_;
-    this.current_ = null;
-    this.currentView_ = null;
-    if (prev?.shutdown) {
-      await prev.shutdown().catch((err: unknown) => {
-        log.warn(
-          '[video-provider] shutdown during reset failed:',
-          err instanceof Error ? err.message : String(err),
-        );
-      });
-    }
+    await this.local.reset().catch((err: unknown) => {
+      log.warn(
+        '[video-provider] shutdown during reset failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    });
   }
 
   async retireLocalForMachineBroker(): Promise<void> {
-    if (this.machineRetirement) return this.machineRetirement;
-    const run = (async () => {
-      const config = await this.store.readConfig();
-      if (!usesMachineVideo(config, this.env ?? process.env)) return;
-      this.activity.beginRetirement();
-      await this.buildPromise;
-      this.retiring_ ??= this.current_;
-      this.current_ = null;
-      this.currentView_ = null;
-      await this.activity.waitForIdle();
-      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
-      this.retiring_ = null;
-    })();
-    this.machineRetirement = run;
-    try {
-      await run;
-    } catch (error) {
-      if (this.machineRetirement === run) this.machineRetirement = null;
-      throw error;
-    }
+    const config = await this.store.readConfig();
+    if (usesMachineVideo(config, this.env ?? process.env))
+      await this.local.retireForMachineBroker();
   }
 
   async shutdown(): Promise<void> {

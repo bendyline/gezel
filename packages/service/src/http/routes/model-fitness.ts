@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 
 /**
@@ -11,7 +11,7 @@ import { machineEngineProxy } from './machine-engine-proxy.js';
  *
  * Mounted under `/api/model-fitness` from `http/server.ts`.
  */
-export function modelFitnessRoutes(ctx: ServiceContext): Hono {
+export function modelFitnessRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/model-fitness', '/v1/remote/manage/model-fitness'));
 

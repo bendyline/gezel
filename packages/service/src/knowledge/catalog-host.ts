@@ -9,6 +9,8 @@
  */
 
 import type {
+  CatalogAssetInfo,
+  CatalogAssetRead,
   CatalogChunkHit,
   CatalogDocumentMeta,
   CatalogHandle,
@@ -59,12 +61,16 @@ export interface KnowledgeCatalogHost {
   topics(key: string): Promise<CatalogTopic[]>;
   documentsPage(
     key: string,
-    opts: { topicId?: string; offset?: number; limit?: number },
+    opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
   ): Promise<{ documents: CatalogDocumentMeta[]; total: number }>;
   getDocument(
     key: string,
     documentId: string,
   ): Promise<(CatalogDocumentMeta & { markdown: string }) | null>;
+  /** The catalog's declared `assets/` files. */
+  assets(key: string): Promise<CatalogAssetInfo[]>;
+  /** One declared asset's bytes, or null when the catalog ships no such asset. */
+  readAsset(key: string, path: string): Promise<CatalogAssetRead | null>;
   search(request: GlobalSearchRequest): Promise<GlobalSearchResponse>;
   dispose(): Promise<void>;
 }
@@ -149,6 +155,8 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     topics: async (key) => mustGet(handles, key).topics(),
     documentsPage: async (key, opts) => mustGet(handles, key).documentsPage(opts),
     getDocument: async (key, documentId) => mustGet(handles, key).getDocument(documentId),
+    assets: async (key) => mustGet(handles, key).assets(),
+    readAsset: async (key, path) => mustGet(handles, key).readAsset(path),
     search: async (request) => searchImpl(request),
     dispose: async () => {
       for (const handle of handles.values()) handle.close();

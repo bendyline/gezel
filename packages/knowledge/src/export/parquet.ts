@@ -32,7 +32,7 @@ import { type CatalogDb, openCatalogDatabase } from '../reader/open.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 import { type DuckdbCli, assertDuckdbCli, runDuckdbScript } from './duckdb.js';
 
-export const PARQUET_EXPORT_VERSION = 1;
+export const PARQUET_EXPORT_VERSION = 2;
 const DEFAULT_ROW_GROUP_SIZE = 32_768;
 /** `read_ndjson` refuses objects above this; a document body can approach MAX_KNOWLEDGE_DOCUMENT_BYTES. */
 const NDJSON_MAX_OBJECT_BYTES = Math.max(64 * 1024 * 1024, MAX_KNOWLEDGE_DOCUMENT_BYTES * 2);
@@ -293,9 +293,12 @@ async function stageDocuments(
   const aliasesOf = router.db.prepare(
     'SELECT alias FROM aliases WHERE document_id = ? ORDER BY alias',
   );
+  // 0.6 routers carry ordinal + meta_json; earlier generations export nulls.
+  const extra =
+    router.schemaVersion >= 3 ? ', ordinal, meta_json' : ', NULL AS ordinal, NULL AS meta_json';
   const statement = router.db.prepare(
     `SELECT id, title, slug, summary, language, topic_id, shard_id, chunk_count,
-            source_url, source_revision, source_updated_at, attribution_json, body_codec, body_blob
+            source_url, source_revision, source_updated_at, attribution_json, body_codec, body_blob${extra}
        FROM documents WHERE shard_id = ? ORDER BY id`,
   );
   for (const row of statement.iterate(shardId) as Iterable<Record<string, unknown>>) {
@@ -317,6 +320,8 @@ async function stageDocuments(
       source_revision: row.source_revision ?? null,
       source_updated_at: row.source_updated_at ?? null,
       attribution: row.attribution_json ?? null,
+      ordinal: row.ordinal == null ? null : Number(row.ordinal),
+      meta: row.meta_json ?? null,
       aliases,
     });
     rows++;
@@ -470,9 +475,11 @@ function documentsCopy(
     source_revision: 'VARCHAR',
     source_updated_at: 'VARCHAR',
     attribution: 'VARCHAR',
+    ordinal: 'INTEGER',
+    meta: 'VARCHAR',
     aliases: 'VARCHAR[]',
   });
-  return `${PRELUDE}COPY (SELECT id, title, slug, summary, language, topic_id, topic_path, shard_id, chunk_count, markdown, source_url, source_revision, source_updated_at, attribution, aliases FROM ${source}) TO ${sqlString(out)} ${copyOptions(rowGroupSize, metadata)};\n`;
+  return `${PRELUDE}COPY (SELECT id, title, slug, summary, language, topic_id, topic_path, shard_id, chunk_count, markdown, source_url, source_revision, source_updated_at, attribution, ordinal, meta, aliases FROM ${source}) TO ${sqlString(out)} ${copyOptions(rowGroupSize, metadata)};\n`;
 }
 
 function chunksCopy(

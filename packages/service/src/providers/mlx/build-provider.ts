@@ -78,7 +78,7 @@ export function resolveMlxEffectiveNumCtx(opts: {
 export async function buildMlxProvider(opts: {
   config: GezelConfig;
   affinity: boolean | undefined;
-  store: Store;
+  store: Pick<Store, 'readConfig' | 'writeConfig' | 'homePath'>;
   mlxModels?: import('./index.js').MlxModelManager;
   uvRuntime?: import('../../python/uv-runtime.js').UvRuntime;
   mlxRuntimeStatus?: import('../../python/mlx-runtime-status-bus.js').MlxRuntimeStatusBus;

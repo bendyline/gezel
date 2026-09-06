@@ -1048,7 +1048,7 @@ export class KnowledgeManager {
 
   async documentsPage(
     catalogId: string,
-    opts: { topicId?: string; offset?: number; limit?: number },
+    opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
   ): ReturnType<KnowledgeCatalogHost['documentsPage']> {
     return this.opts.host.documentsPage(this.requireMounted(catalogId).key, opts);
   }
@@ -1058,6 +1058,19 @@ export class KnowledgeManager {
     documentId: string,
   ): ReturnType<KnowledgeCatalogHost['getDocument']> {
     return this.opts.host.getDocument(this.requireMounted(catalogId).key, documentId);
+  }
+
+  async assets(catalogId: string): ReturnType<KnowledgeCatalogHost['assets']> {
+    return this.opts.host.assets(this.requireMounted(catalogId).key);
+  }
+
+  async readAsset(catalogId: string, path: string): ReturnType<KnowledgeCatalogHost['readAsset']> {
+    return this.opts.host.readAsset(this.requireMounted(catalogId).key, path);
+  }
+
+  /** The mounted version of a catalog — what an asset URL binds to for caching. */
+  mountedVersion(catalogId: string): string {
+    return this.requireMounted(catalogId).ref.version;
   }
 
   // ── the SearchService knowledge arm ───────────────────────────────────────

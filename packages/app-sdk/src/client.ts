@@ -17,6 +17,8 @@ export interface GezelAppOptions {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /** Transport ownership supplied by connect/authorize; omitted for borrowed fetches. */
+  close?: () => Promise<void>;
 }
 
 /**
@@ -25,19 +27,26 @@ export interface GezelAppOptions {
  * also be instantiated directly when the app has already stored a
  * baseUrl + token from a previous run.
  *
- * Lifecycle: stateless. Every method does its own HTTP request and
- * cleans up. No `close()` is required — the underlying fetch agent
- * stays alive as long as the host process does.
+ * Call `close()` when finished, after consuming or cancelling response streams.
+ * Only an SDK-owned transport is closed; an injected fetch remains caller-owned.
  */
 export class GezelApp {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchFn: typeof fetch;
+  private readonly closeTransport?: () => Promise<void>;
+  private closing?: Promise<void>;
 
   constructor(opts: GezelAppOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.token = opts.token;
     this.fetchFn = opts.fetch;
+    this.closeTransport = opts.close;
+  }
+
+  close(): Promise<void> {
+    this.closing ??= this.closeTransport?.() ?? Promise.resolve();
+    return this.closing;
   }
 
   /**

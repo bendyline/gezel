@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveSuitesFlag, suitesFlagFragment } from './scorecard-args.ts';
+import { resolveSuitesFlag, resolveSuitesForRun, suitesFlagFragment } from './scorecard-args.ts';
 
 const DEFAULTS = ['core', 'productivity', 'developer', 'complex-work'] as const;
 
@@ -45,5 +45,32 @@ describe('eval:scorecard resume hints', () => {
     expect(suitesFlagFragment(['core', 'productivity'], DEFAULTS)).toBe(
       ' --suites core,productivity',
     );
+  });
+});
+
+describe('eval:scorecard --suites on re-ingest', () => {
+  it('inherits a narrowed run’s own suites when the flag is omitted', () => {
+    // The trap this closes: `--ingest-only --run-id X` with no --suites
+    // would rebuild a core+productivity run as a four-suite one, claiming
+    // developer/complex-work cells that were never measured.
+    const r = resolveSuitesForRun(undefined, DEFAULTS, ['core', 'productivity']);
+    expect(r.suites).toEqual(['core', 'productivity']);
+    expect(r.inherited).toBe(true);
+  });
+
+  it('falls back to the full set for a run the dataset has never seen', () => {
+    const r = resolveSuitesForRun(undefined, DEFAULTS, undefined);
+    expect(r.suites).toEqual([...DEFAULTS]);
+    expect(r.inherited).toBeUndefined();
+  });
+
+  it('lets an explicit flag widen or change a recorded scope', () => {
+    const r = resolveSuitesForRun('core,developer', DEFAULTS, ['core', 'productivity']);
+    expect(r.suites).toEqual(['core', 'developer']);
+    expect(r.inherited).toBeUndefined();
+  });
+
+  it('still rejects a bad value even when a prior scope exists', () => {
+    expect(resolveSuitesForRun('bogus', DEFAULTS, ['core']).error).toContain('unknown suite(s)');
   });
 });

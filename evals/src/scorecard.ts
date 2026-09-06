@@ -339,6 +339,12 @@ export function mergeScorecard(
   const preserved: ScorecardRun = prior
     ? {
         ...run,
+        // A note describes the sweep AS RUN, and only `--note` puts one on
+        // the incoming record — so a bare `--ingest-only` rebuild carries
+        // none and would erase the description of a published sweep. Same
+        // class of loss as the provenance fields below; an explicit note
+        // still wins.
+        ...(run.note === undefined && prior.note !== undefined ? { note: prior.note } : {}),
         provenance: {
           ...run.provenance,
           startedAt: prior.provenance.startedAt,

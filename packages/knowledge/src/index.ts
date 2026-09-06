@@ -27,6 +27,7 @@ export * from './profiles/registry.js';
 export * from './embedding/profile-embedder.js';
 export * from './embedding/artifact-verify.js';
 export * from './markdown-adapter/load.js';
+export * from './markdown-adapter/outline.js';
 export * from './registry-client/fetch.js';
 export * from './signatures/anchors.js';
 export * from './signatures/jcs.js';

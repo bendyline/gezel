@@ -18,10 +18,11 @@ import { pipeline } from 'node:stream/promises';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
 import { GEZK_MANIFEST_KIND, KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
 import {
-  GEZK_FORMAT_VERSION,
   GEZK_MIME_TYPE,
+  GEZK_SUPPORTED_FORMAT_VERSIONS,
   MANIFEST_PATH,
   MIMETYPE_PATH,
+  isSupportedFormatVersion,
 } from '../format/constants.js';
 
 const nodeRequire = createRequire(import.meta.url);
@@ -221,9 +222,9 @@ function assertMimetypeEntry(entry: YauzlEntry, position: number): void {
 function assertSupportedFormat(raw: unknown): void {
   const kind = (raw as { kind?: unknown } | null)?.kind;
   const version = (raw as { formatVersion?: unknown } | null)?.formatVersion;
-  if (kind !== GEZK_MANIFEST_KIND || version !== GEZK_FORMAT_VERSION) {
+  if (kind !== GEZK_MANIFEST_KIND || !isSupportedFormatVersion(version)) {
     throw new GezkArchiveError(
-      `unsupported gezk format (kind ${String(kind)}, version ${String(version)}); this reader supports ${GEZK_MANIFEST_KIND} ${GEZK_FORMAT_VERSION} — catalogs built for an earlier version must be rebuilt`,
+      `unsupported gezk format (kind ${String(kind)}, version ${String(version)}); this reader supports ${GEZK_MANIFEST_KIND} ${GEZK_SUPPORTED_FORMAT_VERSIONS.join(', ')} — catalogs built for another version need a matching reader`,
       'format-version',
     );
   }

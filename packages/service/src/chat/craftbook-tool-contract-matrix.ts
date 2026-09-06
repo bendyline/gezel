@@ -276,7 +276,7 @@ function addPolicyFindings(
   for (const medium of expectedMedia) {
     if (declaredMedia.has(medium)) continue;
     addFinding(findings, {
-      severity: 'warning',
+      severity: 'error',
       rule: 'policy-missing-output-declaration',
       craftbookId: entry.craftbookId,
       craftbookName: entry.craftbookName,
@@ -285,7 +285,7 @@ function addPolicyFindings(
       spawn: entry.spawn,
       phase: 'policy',
       role,
-      detail: `Generated policy should declare ${medium} output, but the published step does not.`,
+      detail: `Published policy must declare ${medium} output, but the step does not.`,
     });
   }
   const actualBuiltinDenials = new Set(actualPolicy?.disallowBuiltinToolsets ?? []);

@@ -22,8 +22,8 @@ const appRoot = join(_dirname, '..');
 let gezelHome: string;
 
 /**
- * One message, typed as two lines. The line break is the point: Enter
- * opens a new line in the chat composer and Shift+Enter is what sends,
+ * One message, typed as two lines. The line break is the point: Shift+Enter
+ * opens a new line in the chat composer and Enter is what sends,
  * so a draft that survives the first keypress proves the split.
  */
 const FIRST_LINE = 'hello from e2e';
@@ -81,9 +81,9 @@ test('sessions — send a message, it persists, shows up after restart', async (
       const editor = page.locator('.squisq-wysiwyg-editor').first();
       await editor.click();
       await page.keyboard.type(FIRST_LINE);
-      // Enter is a new line, not a send. Proving that needs the real
+      // Shift+Enter is a new line, not a send. Proving that needs the real
       // editor: jsdom cannot tell a paragraph break from a swallowed key.
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('Shift+Enter');
       await page.keyboard.type(SECOND_LINE);
       await expect(page.locator('.msg-user')).toHaveCount(0);
       await captureScreenshot(page, {
@@ -91,8 +91,8 @@ test('sessions — send a message, it persists, shows up after restart', async (
         fullPage: true,
       });
 
-      // Send is Shift+Enter; a bare Enter is a new line in the draft.
-      await page.keyboard.press('Shift+Enter');
+      // A bare Enter sends; Shift+Enter is a new line in the draft.
+      await page.keyboard.press('Enter');
 
       // Auto-recall may prepend indexed context to the provider prompt, so
       // assert within an assistant bubble rather than requiring the user text

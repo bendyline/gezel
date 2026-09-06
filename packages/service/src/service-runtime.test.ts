@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type RunningService, startService } from './service.js';
+import { type RunningEngineService, startService } from './service.js';
 
 const priorMock = process.env.GEZEL_MOCK_PROVIDER;
 const priorSecrets = process.env.GEZEL_SECRETS_BACKEND;
@@ -37,7 +37,10 @@ async function fileMode(path: string): Promise<string> {
   return ((await stat(path)).mode & 0o777).toString(8);
 }
 
-async function assertRootTokenNowhereOnDisk(svc: RunningService, home: string): Promise<void> {
+async function assertRootTokenNowhereOnDisk(
+  svc: RunningEngineService,
+  home: string,
+): Promise<void> {
   const runtimeDir = join(home, 'runtime');
   for (const file of await readdir(runtimeDir)) {
     const content = await readFile(join(runtimeDir, file), 'utf8').catch(() => '');
@@ -49,7 +52,7 @@ async function assertRootTokenNowhereOnDisk(svc: RunningService, home: string): 
 
 describe.skipIf(process.platform === 'win32')('runtime directory contract (POSIX)', () => {
   describe('system scope (machine service)', () => {
-    let svc: RunningService;
+    let svc: RunningEngineService;
     let home: string;
 
     beforeAll(async () => {
@@ -98,7 +101,7 @@ describe.skipIf(process.platform === 'win32')('runtime directory contract (POSIX
   });
 
   describe('user scope', () => {
-    let svc: RunningService;
+    let svc: RunningEngineService;
     let home: string;
 
     beforeAll(async () => {

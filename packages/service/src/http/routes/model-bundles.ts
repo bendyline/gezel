@@ -8,7 +8,7 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { GezmodelManager } from '../../models/gezmodel.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
@@ -24,7 +24,7 @@ interface ActiveModelBundleScan {
 }
 
 /** Portable `.gezmodel` export + staged, review-before-publish import. */
-export function modelBundleRoutes(ctx: ServiceContext): Hono {
+export function modelBundleRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/model-bundles', '/v1/remote/manage/model-bundles'));
   const bundles = new GezmodelManager({

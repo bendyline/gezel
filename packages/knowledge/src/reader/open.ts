@@ -4,11 +4,16 @@
  * publisher artifact: it mkdirs the parent, switches on WAL (sidecar files),
  * and quarantine-RENAMES a corrupt database. A catalog reader must fail
  * with a typed reason and never touch the bytes. No extension is loaded:
- * every table in a 0.5 catalog is plain SQLite (plus FTS5).
+ * every table in a catalog is plain SQLite (plus FTS5).
  */
 
 import { pathToFileURL } from 'node:url';
-import { GEZK_APPLICATION_ID, GEZK_INDEX_SCHEMA_VERSION } from '../format/constants.js';
+import {
+  GEZK_APPLICATION_ID,
+  GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS,
+  type GezkIndexSchemaVersion,
+  isSupportedIndexSchemaVersion,
+} from '../format/constants.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
 
 export class CatalogOpenError extends Error {
@@ -23,6 +28,8 @@ export class CatalogOpenError extends Error {
 
 export interface CatalogDb {
   db: DatabaseSync;
+  /** The `PRAGMA user_version` generation the file was written with. */
+  schemaVersion: GezkIndexSchemaVersion;
   close(): void;
 }
 
@@ -52,9 +59,9 @@ export function openCatalogDatabase(absPath: string): CatalogDb {
       );
     }
     const schemaVersion = readPragmaNumber(db, 'user_version');
-    if (schemaVersion !== GEZK_INDEX_SCHEMA_VERSION) {
+    if (!isSupportedIndexSchemaVersion(schemaVersion)) {
       throw new CatalogOpenError(
-        `unsupported index schema version ${schemaVersion} (this reader supports ${GEZK_INDEX_SCHEMA_VERSION}; catalogs built for gezk 0.4 and earlier must be rebuilt)`,
+        `unsupported index schema version ${schemaVersion} (this reader supports ${GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS.join(', ')}; catalogs built for another generation need a matching reader)`,
         'schema-version',
       );
     }
@@ -65,6 +72,7 @@ export function openCatalogDatabase(absPath: string): CatalogDb {
 
     return {
       db,
+      schemaVersion,
       close: () => {
         try {
           db.close();

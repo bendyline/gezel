@@ -8,12 +8,13 @@
  */
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { CatalogDocument, KnowledgeCatalogManifest } from '@bendyline/gezel';
 import { KnowledgeIdSchema, formatKnowledgeUri } from '@bendyline/gezel';
-import type { ProfileEmbedder } from '@bendyline/gezel-knowledge';
+import type { ProfileEmbedder, TableOfContentsFormat } from '@bendyline/gezel-knowledge';
 import {
   CatalogHandle,
   EmbedderUnavailableError,
@@ -21,10 +22,12 @@ import {
   MARKDOWN_CHUNKS_2,
   compileKnowledgeCatalog,
   createProfileEmbedder,
+  detectTableOfContents,
   extractGezkVerified,
   knowledgeEmbeddingProfile,
   loadMarkdownCatalog,
   readGezkManifest,
+  readMkdocsDocsDir,
   signManifest,
   validateExtractedCatalog,
 } from '@bendyline/gezel-knowledge';
@@ -43,6 +46,12 @@ interface CatalogConfig {
   license: { name: string; spdx?: string; noticePath?: string; attributionRequired: boolean };
   profile?: string;
   createdAt?: string;
+  /** Content root relative to the catalog folder; default `content/` when present, else the folder. */
+  content?: string;
+  /** Content-relative Markdown files to leave out of the catalog. */
+  ignore?: string[];
+  /** Where the table of contents comes from; detected from the tree when absent. */
+  toc?: { format: TableOfContentsFormat; path?: string };
 }
 
 /** Test seam: build/search accept an injected embedder factory. */
@@ -102,6 +111,9 @@ export async function runKnowledgeInit(dir: string): Promise<void> {
   console.log(`Initialized knowledge catalog at ${root}`);
   console.log(`  ${CATALOG_JSON} — identity, license, embedding profile`);
   console.log(`  ${CONTENT_DIR}/ — Markdown content (folders become topics)`);
+  console.log(
+    '  An outline the tree already has is honored: SUMMARY.md, an mkdocs.yml nav, _toc.yml, or Hugo _index.md pages',
+  );
   console.log(`Build with: gezel knowledge build ${dir}`);
 }
 
@@ -118,6 +130,52 @@ function sanitizeCatalogId(name: string): string {
 
 // ── build ───────────────────────────────────────────────────────────────────
 
+async function isDirectory(path: string): Promise<boolean> {
+  return stat(path).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+}
+
+/**
+ * Where the Markdown lives: `content` from catalog.json, else `content/`,
+ * else — for an MkDocs project pointed at directly — its `docs_dir`, else
+ * the catalog folder itself.
+ */
+async function resolveContentRoot(root: string, config: CatalogConfig): Promise<string> {
+  if (config.content) {
+    const dir = resolve(root, config.content);
+    if (!(await isDirectory(dir))) {
+      throw new CliError(
+        `${CATALOG_JSON} names content '${config.content}', which is not a directory`,
+      );
+    }
+    return dir;
+  }
+  const contentDir = join(root, CONTENT_DIR);
+  if (await isDirectory(contentDir)) return contentDir;
+  if (config.toc === undefined || config.toc.format === 'mkdocs') {
+    const mkdocs = config.toc?.path
+      ? resolve(root, config.toc.path)
+      : [join(root, 'mkdocs.yml'), join(root, 'mkdocs.yaml')].find((p) => existsSync(p));
+    if (mkdocs && existsSync(mkdocs)) {
+      const docsDir = await readMkdocsDocsDir(mkdocs);
+      if (await isDirectory(docsDir)) return docsDir;
+    }
+  }
+  return root;
+}
+
+function describeToc(toc: { format: TableOfContentsFormat; path?: string }, root: string): string {
+  const source =
+    toc.format === 'folders'
+      ? 'folders'
+      : toc.format === 'hugo'
+        ? 'Hugo conventions (_index.md, weight)'
+        : toc.format;
+  return toc.path ? `${source} (${relative(root, toc.path) || toc.path})` : source;
+}
+
 export async function runKnowledgeBuild(
   dir: string,
   opts: { out?: string; signKey?: string },
@@ -125,14 +183,16 @@ export async function runKnowledgeBuild(
 ): Promise<void> {
   const root = resolve(dir);
   const config = await readCatalogConfig(root);
-  const contentDir = join(root, CONTENT_DIR);
-  const hasContentDir = await stat(contentDir).then(
-    (s) => s.isDirectory(),
-    () => false,
-  );
-  const source = await loadMarkdownCatalog(hasContentDir ? contentDir : root, {
+  const contentRoot = await resolveContentRoot(root, config);
+  const toc = config.toc ?? (await detectTableOfContents(contentRoot, root));
+  const source = await loadMarkdownCatalog(contentRoot, {
     language: config.language,
+    uri: { publisherId: config.publisher.id, catalogId: config.id },
+    ...(config.ignore ? { ignore: config.ignore } : {}),
+    toc,
+    onWarning: (message) => console.warn(`warning: ${message}`),
   });
+  console.log(`Table of contents: ${describeToc(source.toc, root)}`);
   const profileId = config.profile ?? 'bge-small-en-v1.5@1';
   const profile = knowledgeEmbeddingProfile(profileId);
   if (!profile) {
@@ -141,7 +201,7 @@ export async function runKnowledgeBuild(
     );
   }
   console.log(
-    `Building ${config.id}@${config.version}: ${source.documents.length} documents, profile ${profileId}`,
+    `Building ${config.id}@${config.version}: ${source.documents.length} documents, ${source.assets.length} assets, profile ${profileId}`,
   );
   console.log('Loading the embedding model (first run downloads it)…');
   const embedder = await (deps.createEmbedder ?? defaultCreateEmbedder)(profileId);
@@ -172,6 +232,7 @@ export async function runKnowledgeBuild(
       embed: (texts) => embedder.embed(texts),
       countTokens: (text) => embedder.countTokens(text),
       workDir,
+      assets: source.assets,
       ...(signKeyPem ? { finalizeManifest: (manifest) => signManifest(manifest, signKeyPem) } : {}),
       onProgress: ({ done, total }) => {
         if (!process.stderr.isTTY || total === 0) return;

@@ -1,0 +1,49 @@
+name: Visual regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '43 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    name: Chromium visual regression (desktop, tablet, phone)
+    # Match the reviewed baselines; do not compare Linux rasterization to macOS.
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      GEZEL_NODE_SKIP: '1'
+      GEZEL_PNPM_SKIP: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24'
+          pnpm-version: '11.15.1'
+      - run: pnpm build
+      - name: Install the lockfile's Chromium revision
+        run: pnpm --filter @bendyline/gezel-app exec playwright install chromium
+      - name: Compare reviewed baselines
+        run: pnpm test:e2e:visual
+      - name: Preserve report, image diffs, traces, and gallery
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-regression
+          path: |
+            packages/app/visual-report/
+            packages/app/visual-test-results/
+            packages/app/ux-screenshots/
+          if-no-files-found: error
+          retention-days: 14

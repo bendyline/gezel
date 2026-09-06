@@ -59,7 +59,33 @@ interface Vectors {
     ftsQueries: Array<{ query: string; expectedDocumentId: string }>;
     semanticProbe: { chunkUid: string; embedInput: string; documentId: string };
     documentRoundTrip: { documentId: string; markdownSha256: string };
+    nestedTopic: {
+      id: string;
+      parentId: string | null;
+      directDocuments: number;
+      parentDirectDocuments: number;
+      parentTotalDocuments: number;
+    };
+    orderedListing: { topicId: string; firstDocumentIds: string[] };
+    metaSample: { documentId: string; meta: Record<string, unknown> };
+    assets: Array<{ path: string; contentType: string; sizeBytes: number; sha256: string }>;
+    assetDocument: { documentId: string; path: string };
   };
+  legacy: Array<
+    { formatVersion: string } & Pick<
+      Vectors['fixture'],
+      | 'path'
+      | 'sha256'
+      | 'sizeBytes'
+      | 'catalogId'
+      | 'version'
+      | 'documents'
+      | 'chunks'
+      | 'shards'
+      | 'ftsQueries'
+      | 'documentRoundTrip'
+    >
+  >;
 }
 
 let vectors: Vectors;
@@ -137,7 +163,49 @@ describe('conformance fixture', () => {
       documents: vectors.fixture.documents,
       chunks: vectors.fixture.chunks,
       shards: vectors.fixture.shards,
+      assets: vectors.fixture.assets.length,
     });
+  });
+
+  it('reads the 0.6 additions the kit records', () => {
+    const handle = CatalogHandle.open(extracted);
+    try {
+      const nested = vectors.fixture.nestedTopic;
+      const topics = handle.topics();
+      const topic = topics.find((t) => t.id === nested.id);
+      const parent = topics.find((t) => t.id === nested.parentId);
+      expect(topic?.parentId).toBe(nested.parentId);
+      expect(topic?.documentCount).toBe(nested.directDocuments);
+      expect(parent?.documentCount).toBe(nested.parentDirectDocuments);
+      expect(parent?.totalDocumentCount).toBe(nested.parentTotalDocuments);
+      expect(handle.documentsPage({ topicId: nested.parentId ?? '' }).total).toBe(
+        nested.parentTotalDocuments,
+      );
+      const listing = vectors.fixture.orderedListing;
+      expect(
+        handle
+          .documentsPage({ topicId: listing.topicId, limit: listing.firstDocumentIds.length })
+          .documents.map((d) => d.id),
+      ).toEqual(listing.firstDocumentIds);
+      expect(handle.getDocument(vectors.fixture.metaSample.documentId)?.meta).toEqual(
+        vectors.fixture.metaSample.meta,
+      );
+      expect(handle.assets()).toEqual(vectors.fixture.assets);
+      for (const asset of vectors.fixture.assets) {
+        const read = handle.readAsset(asset.path);
+        expect(read?.contentType).toBe(asset.contentType);
+        expect(
+          createHash('sha256')
+            .update(read?.bytes ?? new Uint8Array())
+            .digest('hex'),
+        ).toBe(asset.sha256);
+      }
+      expect(handle.getDocument(vectors.fixture.assetDocument.documentId)?.markdown).toContain(
+        `](${vectors.fixture.assetDocument.path})`,
+      );
+    } finally {
+      handle.close();
+    }
   });
 
   it('verifies under the test key and fails when tampered', () => {
@@ -173,6 +241,51 @@ describe('conformance fixture', () => {
       expect(hits[0]?.documentId).toBe(vectors.fixture.semanticProbe.documentId);
     } finally {
       handle.close();
+    }
+  });
+});
+
+describe('legacy fixtures', () => {
+  it('lists the generation this kit was upgraded from', () => {
+    expect(vectors.legacy.map((entry) => entry.formatVersion)).toContain('0.5');
+  });
+
+  it('still opens, validates, and answers under a newer reader', async () => {
+    for (const entry of vectors.legacy) {
+      const path = join(KIT, entry.path);
+      const bytes = await readFile(path);
+      expect(bytes.length, entry.formatVersion).toBe(entry.sizeBytes);
+      expect(createHash('sha256').update(bytes).digest('hex'), entry.formatVersion).toBe(
+        entry.sha256,
+      );
+      const manifest = await readGezkManifest(path);
+      expect(manifest.formatVersion).toBe(entry.formatVersion);
+      expect(manifest.id).toBe(entry.catalogId);
+      expect(manifest.version).toBe(entry.version);
+      const extracted = join(dir, `legacy-${entry.formatVersion}`);
+      await extractGezkVerified(path, extracted);
+      const report = await validateExtractedCatalog(extracted, { deep: true });
+      expect(
+        report.checks.filter((c) => !c.ok),
+        entry.formatVersion,
+      ).toEqual([]);
+      const handle = CatalogHandle.open(extracted);
+      try {
+        expect(handle.documentsPage({ limit: 1 }).total).toBe(entry.documents);
+        expect(handle.topics().reduce((sum, t) => sum + t.documentCount, 0)).toBe(entry.documents);
+        for (const q of entry.ftsQueries) {
+          const ids = handle.searchDocumentsFts(q.query, 5).map((h) => h.documentId);
+          expect(ids, `${entry.formatVersion}: ${q.query}`).toContain(q.expectedDocumentId);
+        }
+        const doc = handle.getDocument(entry.documentRoundTrip.documentId);
+        expect(
+          createHash('sha256')
+            .update(doc?.markdown ?? '', 'utf8')
+            .digest('hex'),
+        ).toBe(entry.documentRoundTrip.markdownSha256);
+      } finally {
+        handle.close();
+      }
     }
   });
 });

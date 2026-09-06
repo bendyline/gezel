@@ -114,17 +114,7 @@ export class FileSecretStore implements SecretStore {
       return this.cache;
     }
     const k = await this.ensureKey();
-    let parsed: { version: number; entries: Record<string, string> };
-    try {
-      parsed = JSON.parse(raw) as typeof parsed;
-    } catch (error) {
-      throw new SecretStoreCorruptError('[secrets] secrets.enc is malformed JSON', {
-        cause: error,
-      });
-    }
-    if (parsed.version !== 1) {
-      throw new Error(`[secrets] unsupported secrets.enc version ${parsed.version}`);
-    }
+    const parsed = parseEncryptedSecrets(raw);
     const out = new Map<string, string>();
     for (const [name, blob] of Object.entries(parsed.entries)) {
       out.set(name, decryptString(k, blob));
@@ -199,4 +189,38 @@ async function tryChmod600(path: string): Promise<void> {
   } catch {
     // best-effort; some filesystems (e.g. FAT) don't support chmod
   }
+}
+
+/** Read only a legacy identity entry, without constructing a credential store,
+ * decrypting other entries, or creating/replacing an encryption key. */
+export async function readFileIdentityKey(
+  home: string,
+  identity: Extract<SecretKey, { kind: 'deviceIdentity' }>,
+): Promise<string | null> {
+  const parsed = parseEncryptedSecrets(await readFile(secretsFile(home), 'utf8'));
+  const blob = parsed.entries[stringifySecretKey(identity)];
+  if (blob === undefined) return null;
+  const key = await readFile(secretsKeyFile(home));
+  if (key.length !== 32)
+    throw new SecretStoreCorruptError('[secrets] invalid identity encryption key');
+  return decryptString(key, blob);
+}
+
+function parseEncryptedSecrets(raw: string): { version: number; entries: Record<string, string> } {
+  let parsed: { version: number; entries: Record<string, string> };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch (cause) {
+    throw new SecretStoreCorruptError('[secrets] secrets.enc is malformed JSON', { cause });
+  }
+  if (
+    !parsed ||
+    parsed.version !== 1 ||
+    !parsed.entries ||
+    typeof parsed.entries !== 'object' ||
+    Array.isArray(parsed.entries)
+  ) {
+    throw new SecretStoreCorruptError('[secrets] unsupported or invalid secrets.enc format');
+  }
+  return parsed;
 }

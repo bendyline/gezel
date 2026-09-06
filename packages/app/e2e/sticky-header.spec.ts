@@ -61,7 +61,7 @@ async function sendAndWaitForReply(
 
   await editor.click();
   await editor.fill(message);
-  await editor.press('Shift+Enter');
+  await composer.getByTestId('chat-send').click();
   const reply = timeline
     .locator('.msg-from-gezel, .msg-assistant')
     .filter({ hasText: 'Mock reply:' })

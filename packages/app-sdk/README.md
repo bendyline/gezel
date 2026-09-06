@@ -191,7 +191,7 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 
 | Method | Purpose |
 |---|---|
-| `detectGezel()` | Probe runtime files + health |
+| `detectGezel({ timeoutMs? })` | Probe runtime files + health; defaults to a 5-second headers-and-body budget |
 | `connect()` | Register + consent + token storage |
 | `authorize()` | Generic discovery + consent result (`baseUrl`, scoped token, fetch) |
 | `connectLocal()` | Complete Node-native discovery + consent, returning `GezelApp` and diagnostics |
@@ -203,10 +203,23 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 | `app.ensureModel()` | Make sure a local model is downloaded |
 | `app.streamEnsureEvents()` | SSE: install progress + done/error |
 | `app.revokeMyToken()` | Self-revoke (user can also revoke from Settings) |
+| `app.close()` | Release the SDK-owned transport after consuming or cancelling response streams |
 
 ## TLS pinning
 
 The daemon serves HTTPS with a per-launch self-signed cert at `~/.gezel/runtime/cert.pem`. The SDK reads that cert and builds a fetch that trusts it — your first integration won't fail with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The `createTrustingFetch` helper is exported in case you build your own request pipeline.
+
+Health discovery uses a separate five-second budget covering both headers and the
+response body. `detectGezel({ timeoutMs: 2_000 })` customizes that budget in awake
+milliseconds. A stalled health request returns `installed: true, running: false`;
+it never waits on the inference transport's unlimited header/body policy. Native
+SDK discovery uses the same default health budget.
+
+Temporary probes close their dispatcher after a response and destroy it on a
+request failure or timeout. Connected apps own their dispatcher until `app.close()`
+(or the authorization result's optional `close()` callback). Injected fetches are
+borrowed and never closed or destroyed by the SDK. The Node fetch helpers also
+expose `close()` and `destroy()` for callers managing their own transport lifetime.
 
 ## Errors
 

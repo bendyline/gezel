@@ -114,6 +114,8 @@ export interface AuthorizedConnection {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /** Release an SDK-owned transport after consuming/cancelling active streams. Borrowed fetches are not closed. */
+  close?: () => Promise<void>;
 }
 
 /** How the Node SDK reached the logged-in user's product daemon. */

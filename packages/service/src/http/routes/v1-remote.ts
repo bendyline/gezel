@@ -45,7 +45,7 @@ import {
   ModelNotInstalledError,
   type TurnUsage,
 } from '../../providers/types.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { resolveModelTarget } from '../openai-compat/translate.js';
 import { serializeSseWrites } from './chat-events.js';
 
@@ -168,7 +168,7 @@ function residentBaseUrl(provider: LLMProvider): string | null {
 }
 
 async function prewarmRemoteCache(
-  ctx: ServiceContext,
+  ctx: EngineContext,
   body: ReturnType<typeof RemoteCacheWarmRequestSchema.parse>,
   originDeviceId: string,
 ): Promise<void> {
@@ -203,7 +203,7 @@ async function prewarmRemoteCache(
   }
 }
 
-export function v1RemoteRoutes(ctx: ServiceContext): Hono {
+export function v1RemoteRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
 
   // Inference-only model discovery: what this server will run for clients.
@@ -673,6 +673,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
         await session.sendAndWait(body.prompt, {
           timeoutMs: REMOTE_INFER_TIMEOUT_MS,
           ...(continueFromToolResult ? { continueFromToolResult: true } : {}),
+          ...(body.fileTurnIntent ? { fileTurnIntent: body.fileTurnIntent } : {}),
           ...(body.attachments && body.attachments.length > 0
             ? {
                 attachments: body.attachments.map((a) => ({

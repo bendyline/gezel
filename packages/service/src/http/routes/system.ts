@@ -1,3 +1,5 @@
+import { systemMemoryRoutes } from './system-memory.js';
+export { systemMemoryRoutes } from './system-memory.js';
 import { freemem, totalmem } from 'node:os';
 import { delimiter, dirname } from 'node:path';
 import {
@@ -11,7 +13,6 @@ import {
   type GitHubRepoPreviewResponse,
   type GitHubRepoSummary,
   type GitHubReposResponse,
-  MachineMemoryUsageSchema,
   ModelDownloadPreflightRequestSchema,
   ModelDownloadPreflightResponseSchema,
   PNPM_HOISTED_NODE_LINKER,
@@ -42,15 +43,10 @@ import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
-import { sampleDarwinSystemMemoryCached } from '../../system/darwin-memory.js';
+
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
-import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
-import {
-  detectMemoryProfile,
-  detectMemoryProfileCached,
-  sampleMachineMemoryUsage,
-  summarizeResidentModels,
-} from '../../system/memory.js';
+
+import { detectMemoryProfile } from '../../system/memory.js';
 import { checkDiskSpace } from '../../utils/disk-space.js';
 import type { ServiceContext } from '../context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -574,88 +570,6 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         error: string;
       });
     }
-  });
-
-  return app;
-}
-
-/**
- * The machine-owner view of memory used by local inference. Kept as its own
- * router so the machine-engine capability boundary can expose this one safe
- * telemetry endpoint without mounting the product-facing `/api/system`
- * surface.
- */
-export function systemMemoryRoutes(ctx: ServiceContext): Hono {
-  const app = new Hono();
-
-  /**
-   * Live memory pool behind local inference. This endpoint is intentionally
-   * cheap enough to poll while the engine dropdown is open: accelerator
-   * capacity is cached, device telemetry is coalesced by DeviceHealthGate,
-   * and main-memory use comes from node:os.
-   */
-  app.get('/usage', async (c) => {
-    const [profile, config] = await Promise.all([
-      detectMemoryProfileCached(),
-      ctx.store.readConfig(),
-    ]);
-    const configuredBackend =
-      config.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
-        ? config.llamaCppBackendOverride
-        : (process.env.GEZEL_LLAMA_SERVER_BACKEND ?? process.env.GEZEL_LLAMA_DETECTED_BACKEND);
-    const forceMainMemory = configuredBackend === 'cpu';
-    const unifiedMemory =
-      profile.source === 'darwin-unified' ||
-      profile.source === 'gpu-integrated' ||
-      profile.gpuMemoryKind === 'unified';
-    // Main/UMA memory comes from host counters (`vm_stat` on macOS). Avoid
-    // spawning any SMI adapter there or on CPU-only hosts, where it cannot
-    // improve this sample.
-    const sampleDarwinMemory = profile.platform === 'darwin' && (forceMainMemory || unifiedMemory);
-    const [deviceHealth, gezelProcessMemory, darwinSystemMemory] = await Promise.all([
-      forceMainMemory || profile.source === 'system-ram-fallback' || unifiedMemory
-        ? undefined
-        : ctx.gpuArbiter.getDeviceHealthStatus(1_000),
-      sampleDarwinMemory ? sampleDarwinGezelProcessMemoryCached({ home: ctx.home }) : null,
-      sampleDarwinMemory
-        ? sampleDarwinSystemMemoryCached({ totalBytes: profile.totalRamBytes })
-        : null,
-    ]);
-    const engineSnapshot = ctx.chat.peekEngineStatus();
-    const engineModelWeightsBytes = (engineSnapshot?.entries ?? []).reduce(
-      (sum, entry) =>
-        sum + Math.min(entry.modelWeightsBytes ?? entry.residentBytes, entry.residentBytes),
-      0,
-    );
-    const engineLifecycles = (engineSnapshot?.entries ?? []).flatMap((entry) =>
-      entry.lifecycle
-        ? [
-            {
-              provider: entry.provider,
-              modelId: entry.modelId,
-              replicaIdx: entry.replicaIdx,
-              ...entry.lifecycle,
-            },
-          ]
-        : [],
-    );
-    const snapshot = {
-      ...sampleMachineMemoryUsage({
-        profile,
-        ...(deviceHealth ? { deviceHealth } : {}),
-        engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
-        engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
-        residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
-        engineLifecycles,
-        engineModelWeightsBytes,
-        gezelProcessMemory,
-        darwinSystemMemory,
-        forceMainMemory,
-      }),
-      enginePools: engineSnapshot?.pools ?? null,
-      ...(engineSnapshot?.ramSpillover ? { engineRamSpillover: engineSnapshot.ramSpillover } : {}),
-    };
-    return c.json(MachineMemoryUsageSchema.parse(snapshot));
   });
 
   return app;

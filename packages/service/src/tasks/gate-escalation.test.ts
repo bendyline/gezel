@@ -215,6 +215,30 @@ describe('appendGateAttempt', () => {
 describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
   const bullets = '- index.html failed the html-game check: no render surface';
 
+  it.each([
+    '- Acceptance checks for `src/worker.py` failed: missing retry handling.',
+    '- Tests are still failing in `src/worker.py`; fix the regression.',
+  ])('preserves both escalation strategies with repair-shaped verdicts: %s', (failingBullets) => {
+    const repairTools = [
+      ...WRITE_FILE_TOOL,
+      {
+        type: 'function' as const,
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
+      },
+    ];
+    const stage1 = buildStageOneNudge({ file: 'src/worker.py', failingBullets, frozen: false });
+    const stage2 = buildStageTwoNudge({ file: 'src/worker.py', failingBullets, repeats: 3 });
+    // Scheduler delivery can put ordinary assignment context before the marker.
+    for (const prefix of ['', "You're still assigned the implementation step.\n\n"]) {
+      expect(isScenarioFileRepairTurn(prefix + stage1, repairTools)).toBe(false);
+      expect(isScenarioFileRepairTurn(prefix + stage2, repairTools)).toBe(false);
+      expect(isGateSurgicalEditTurn(prefix + stage1, repairTools)).toBe(true);
+      expect(isImmediateFileWriteTurn(prefix + stage1, repairTools)).toBe(false);
+      expect(isGateSurgicalEditTurn(prefix + stage2, repairTools)).toBe(false);
+      expect(isImmediateFileWriteTurn(prefix + stage2, repairTools)).toBe(true);
+    }
+  });
+
   it('stage 2 TRIPS immediate-write mode; stage 1 does NOT', () => {
     const stage2 = buildStageTwoNudge({ file: 'index.html', failingBullets: bullets, repeats: 3 });
     expect(isImmediateFileWriteTurn(stage2, WRITE_FILE_TOOL)).toBe(true);

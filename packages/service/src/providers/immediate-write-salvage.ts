@@ -1,3 +1,4 @@
+import { extractDirectFileWorkTargetPath } from './direct-file-work-prompt.js';
 /**
  * Text-form immediate-write salvage, shared by the local engines.
  *
@@ -75,7 +76,7 @@ export function normalizeLooseWritePath(value: string | undefined, content: stri
   const trimmed = value?.trim() ?? '';
   if (looksLikeLooseSingleFileHtml(content)) {
     if (isTrustworthyLooseHtmlPath(trimmed)) return trimmed;
-    return 'index.html';
+    return null;
   }
   if (trimmed.length > 0 && !/^[,.:;'"`]+$/.test(trimmed)) return trimmed;
   return null;
@@ -129,18 +130,15 @@ export function tryRepairMalformedWriteToolArguments(
   return { path: normalizedPath, content };
 }
 
-export function immediateFileWritePathFromPrompt(prompt: string): string {
+export function immediateFileWritePathFromPrompt(prompt: string): string | null {
   const explicit = /write_file\s*\(\s*\{\s*path\s*:\s*["']([^"']+)["']/i.exec(prompt)?.[1];
-  if (explicit) return explicit;
-  const workspacePath = /workspace\/([A-Za-z0-9._/-]+index\.html)\b/i.exec(prompt)?.[1];
-  if (workspacePath) return workspacePath.replace(/^workspace\//i, '');
-  if (/\bindex\.html\b/i.test(prompt)) return 'index.html';
-  return 'index.html';
+  return explicit ?? extractDirectFileWorkTargetPath(prompt);
 }
 
 export function salvageImmediateFileWriteArgs(
   rawContent: string,
   prompt: string,
+  targetPath?: string,
 ): { path: string; content: string } | null {
   const loose = tryRepairMalformedWriteToolArguments(
     'write_file',
@@ -156,7 +154,8 @@ export function salvageImmediateFileWriteArgs(
   const htmlEnd = content.toLowerCase().lastIndexOf('</html>');
   if (htmlEnd >= 0) content = content.slice(0, htmlEnd + '</html>'.length).trim();
   if (!looksLikeLooseSingleFileHtml(content)) return null;
-  return { path: immediateFileWritePathFromPrompt(prompt), content };
+  const path = targetPath ?? immediateFileWritePathFromPrompt(prompt);
+  return path ? { path, content } : null;
 }
 
 export function hasSalvageableImmediateFileWriteContent(

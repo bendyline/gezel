@@ -214,6 +214,36 @@ describe('mergeScorecard', () => {
     expect(board?.otherRunScores.map((s) => s.result.modelId)).toEqual(['a']);
   });
 
+  it('re-ingesting without a note keeps the one the sweep was recorded with', () => {
+    // `--ingest-only` exists to rebuild the dataset from disk, and buildRun
+    // only carries a note when --note is passed. Dropping the prior note
+    // silently erases the description of how a published sweep was run --
+    // the same class of loss the startedAt/commit/gilde preservation above
+    // exists to prevent.
+    const noted = {
+      ...run('r1', '2026-08-01T00:00:00Z'),
+      note: 'Vulkan backend; no NVIDIA driver',
+    };
+    const first = mergeScorecard(empty, noted, [result('a', 'r1', 3)]);
+    expect(first.runs[0]!.note).toBe('Vulkan backend; no NVIDIA driver');
+
+    const reingested = mergeScorecard(first, run('r1', '2026-08-01T00:00:00Z'), [
+      result('a', 'r1', 3),
+    ]);
+    expect(reingested.runs[0]!.note).toBe('Vulkan backend; no NVIDIA driver');
+  });
+
+  it('lets an explicit note replace the recorded one', () => {
+    const noted = { ...run('r1', '2026-08-01T00:00:00Z'), note: 'first' };
+    const first = mergeScorecard(empty, noted, [result('a', 'r1', 3)]);
+    const second = mergeScorecard(
+      first,
+      { ...run('r1', '2026-08-01T00:00:00Z'), note: 'corrected' },
+      [result('a', 'r1', 3)],
+    );
+    expect(second.runs[0]!.note).toBe('corrected');
+  });
+
   it('adding a model to the current sweep puts it in the same table', () => {
     // The "we got a new model, test it and add it in" path.
     const first = mergeScorecard(empty, run('r1', '2026-08-01T00:00:00Z'), [result('a', 'r1', 3)]);

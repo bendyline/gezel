@@ -13,16 +13,13 @@
 import { GEZEL_VERSION } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { PROTOCOL_VERSION } from '../../providers/remote/wire.js';
-import { signCertFingerprint } from '../../remotes/identity.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 
-export function v1IdentityRoutes(ctx: ServiceContext): Hono {
+export function v1IdentityRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
 
   app.get('/', async (c) => {
-    const sig = ctx.tlsCertSha256
-      ? await signCertFingerprint(ctx.secrets, ctx.home, ctx.tlsCertSha256)
-      : null;
+    const sig = await ctx.signIdentityCertificate();
     return c.json({
       deviceId: ctx.deviceIdentity.deviceId,
       publicKeyPem: ctx.deviceIdentity.publicKeyPem,

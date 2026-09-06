@@ -12,6 +12,7 @@ import { extractGezkVerified } from '../archive/read.js';
 import { readGezkManifest } from '../archive/read.js';
 import { validateExtractedCatalog } from '../reader/validate.js';
 import {
+  FIXTURE_ASSETS,
   FIXTURE_CHUNKING_PROFILE,
   FIXTURE_EMBEDDING_PROFILE,
   FIXTURE_TOPICS,
@@ -58,6 +59,7 @@ function build(opts: {
     embed: fakeEmbed,
     countTokens: fakeCountTokens,
     workDir: opts.workDir,
+    assets: FIXTURE_ASSETS,
     smokeQueries: opts.smokeQueries,
     ...(opts.smokeQueryPolicy ? { smokeQueryPolicy: opts.smokeQueryPolicy } : {}),
   });

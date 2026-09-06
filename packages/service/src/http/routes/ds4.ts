@@ -4,7 +4,7 @@ import { streamSSE } from 'hono/streaming';
 import { shouldUseDs4SsdStreaming } from '../../providers/ds4/residency.js';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
@@ -20,7 +20,7 @@ import { invalidateModelsCache } from './models.js';
  *
  * Mounted under `/api/ds4` from `http/server.ts`.
  */
-export function ds4Routes(ctx: ServiceContext): Hono {
+export function ds4Routes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/ds4', '/v1/remote/manage/ds4'));
 
@@ -168,7 +168,7 @@ export function ds4Routes(ctx: ServiceContext): Hono {
 
   /**
    * Install a chat-model entry's ds4 source. The install runs as a
-   * background job owned by {@link ServiceContext.chatInstalls}; this SSE
+   * background job owned by {@link EngineContext.chatInstalls}; this SSE
    * is just a subscriber, so a client disconnect does not abandon the
    * download. That matters doubly here — these are large (~81–153 GB)
    * DeepSeek-V4 quants. Idempotent: a second `POST` for a running id

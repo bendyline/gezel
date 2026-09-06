@@ -3,16 +3,20 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync } from 'node:zlib';
+import { canonicalizeJson } from '@bendyline/gezk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extractGezkVerified, readGezkManifest } from '../archive/read.js';
 import { compileKnowledgeCatalog } from '../compiler/compile.js';
 import { openCatalogDatabase } from '../reader/open.js';
 import {
+  FIXTURE_ASSETS,
   FIXTURE_CHUNKING_PROFILE,
   FIXTURE_EMBEDDING_PROFILE,
   FIXTURE_TOPICS,
   fakeCountTokens,
   fakeEmbed,
+  fixtureMeta,
+  fixtureOrdinal,
   generateFixtureCorpus,
 } from '../test/fixture.js';
 import { duckdbVersion, runDuckdbScript } from './duckdb.js';
@@ -54,6 +58,7 @@ beforeAll(async () => {
     embed: fakeEmbed,
     countTokens: fakeCountTokens,
     workDir: join(dir, 'work'),
+    assets: FIXTURE_ASSETS,
   });
 }, 120_000);
 
@@ -146,6 +151,15 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
       expect(doc?.markdown).toBe(body);
       expect(doc?.topic_id).toBe(stored.topic_id);
       expect((doc?.topic_path as string[]).at(-1)).toBe(stored.topic_id);
+
+      // 0.6 columns: the ordinal and the canonical metadata travel too.
+      const extras = await query(
+        `SELECT id, ordinal, meta FROM '${documents}' WHERE id IN ('doc-0005', 'doc-0007') ORDER BY id;`,
+      );
+      expect(extras).toEqual([
+        { id: 'doc-0005', ordinal: fixtureOrdinal(5), meta: null },
+        { id: 'doc-0007', ordinal: null, meta: canonicalizeJson(fixtureMeta(7)) },
+      ]);
     } finally {
       router.close();
     }

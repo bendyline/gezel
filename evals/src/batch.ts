@@ -355,6 +355,25 @@ export async function runMatrix(
     scenarioId: scenario.id,
     trials: capTrials(scenario),
   }));
+  // Say UP FRONT when the plan is not what `--count` asked for. Each capped
+  // scenario already announces itself, but those lines arrive one at a time
+  // over hours and are easy to miss beside the header, which prints a bare
+  // `count=N`. A 2026-09-04 scorecard run was launched at `--count 3`, ran
+  // for seven hours, and produced 14 trials instead of 30 — mostly n=1 cells,
+  // in a run whose entire purpose was measuring run-to-run variance. The
+  // arithmetic belongs next to the request that it contradicts.
+  const cappedScenarios = requestedScenarios.filter((s) => s.trials < opts.count);
+  if (cappedScenarios.length > 0) {
+    const planned = requestedScenarios.reduce((sum, s) => sum + s.trials, 0);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[matrix] NOTE: --count ${opts.count} is capped by suggestedTrials on ` +
+        `${cappedScenarios.length}/${scenarios.length} scenario(s) — planning ${planned} trials, ` +
+        `not ${opts.count * scenarios.length}. Capped: ${cappedScenarios
+          .map((s) => `${s.scenarioId}=${s.trials}`)
+          .join(', ')}. Pass --count-strict to honour --count exactly (use it for variance work).`,
+    );
+  }
   const perScenario: MatrixSummary['scenarios'] = [];
   // All scenarios in a matrix run the same model, so preflight is checked
   // once (cached) and represents the whole matrix.

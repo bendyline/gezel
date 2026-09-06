@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
@@ -18,7 +18,7 @@ import { invalidateModelsCache } from './models.js';
  *
  * Mounted under `/api/mlx` from `http/server.ts`.
  */
-export function mlxRoutes(ctx: ServiceContext): Hono {
+export function mlxRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   app.use('*', machineEngineProxy(ctx, '/api/mlx', '/v1/remote/manage/mlx'));
 
@@ -110,7 +110,7 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
    * the llama-cpp install endpoint; event body carries `fileIndex` +
    * `fileCount` so the UI can render per-file progress inside the
    * overall model install. The install runs as a background job owned by
-   * {@link ServiceContext.chatInstalls} — this SSE is just a subscriber,
+   * {@link EngineContext.chatInstalls} — this SSE is just a subscriber,
    * so a client disconnect does not abandon the download. Idempotent: a
    * second `POST` for a running id attaches to the in-flight install.
    * Cancel is the explicit `DELETE` below.

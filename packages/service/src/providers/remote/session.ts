@@ -533,6 +533,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     const tools = this.advertisedTools(grammarFallback);
 
     const body: RemoteInferRequest = {
+      ...(prompt.length > 0 && opts?.fileTurnIntent ? { fileTurnIntent: opts.fileTurnIntent } : {}),
       protocolVersion: PROTOCOL_VERSION,
       model: this.deps.model,
       systemMessage: this.systemMessage,

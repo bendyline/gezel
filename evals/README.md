@@ -193,8 +193,8 @@ pnpm eval:scorecard --count 3 --run-id 2026-08-09-mac-apple-m4-max --models qwen
 pnpm eval:scorecard --ingest-only --run-id 2026-08-09-mac-apple-m4-max
 ```
 
-It writes [packages/core/src/scorecard/data/scorecard.json](../packages/core/src/scorecard/data/scorecard.json).
-That checked-in file is the published record; the articles carry no numbers
+It writes one `<run-id>.json` file per sweep in [packages/core/src/scorecard/data/runs/](../packages/core/src/scorecard/data/runs/).
+Those checked-in files are the published record; the articles carry no numbers
 of their own, so a re-run updates what ships with no article edits.
 
 The ceiling `--list` prints is the sum of authored timeouts, not an

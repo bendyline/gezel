@@ -175,6 +175,7 @@
 
 .handboek-pane-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
@@ -254,6 +255,18 @@
 
 .handboek-listen-key {
   white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .handboek-view {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(7rem, 28%) minmax(0, 1fr);
+  }
+
+  .handboek-toc {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

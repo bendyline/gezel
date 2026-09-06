@@ -12,7 +12,7 @@ npm install @bendyline/gezel-knowledge
 
 ## What a `.gezk` is
 
-An open format (gezk 0.5, preliminary until 1.0): a ZIP whose first entry is
+An open format (gezk 0.6, preliminary until 1.0; 0.5 archives still open): a ZIP whose first entry is
 the stored `mimetype` magic (`application/vnd.gezk+zip`), then
 `manifest.json`, `README.md`, `LICENSES/`, a `router.db` (topics, document
 directory, brotli bodies, routing centroids) and shard SQLite databases with

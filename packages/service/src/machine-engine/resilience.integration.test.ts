@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type RunningService, startService } from '../service.js';
+import { type RunningEngineService, type RunningService, startService } from '../service.js';
 
-let machine: RunningService;
+let machine: RunningEngineService;
 let userA: RunningService;
 let userB: RunningService;
 let root: string;
@@ -62,7 +62,11 @@ afterAll(async () => {
   else process.env.GEZEL_SECRETS_BACKEND = priorSecrets;
 }, 45_000);
 
-function api(service: RunningService, path: string, init: RequestInit = {}): Promise<Response> {
+function api(
+  service: RunningEngineService,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const baseUrl = `${service.cert ? 'https' : 'http'}://127.0.0.1:${service.port}`;
   const fetchImpl = service.cert ? createTrustingFetch({ cert: service.cert.certPem }) : fetch;
   const headers = new Headers(init.headers);
@@ -83,7 +87,7 @@ async function waitFor(
 }
 
 async function createExternalProject(
-  service: RunningService,
+  service: RunningEngineService,
   name: string,
   workingDir: string,
 ): Promise<string> {

@@ -14,12 +14,16 @@ import type {
   ImageModelPullEvent,
   IncompleteKnowledgeDownload,
   KnowledgeActiveInstall,
+  KnowledgeAssetInfo as KnowledgeAssetInfoWire,
   KnowledgeAvailableCatalog,
   KnowledgeCatalogRef,
   KnowledgeCatalogStatus,
+  KnowledgeDocumentRead as KnowledgeDocumentReadWire,
+  KnowledgeDocumentSummary as KnowledgeDocumentSummaryWire,
   KnowledgeInstallEvent,
   KnowledgeInstallRequest,
   KnowledgeSearchRequest,
+  KnowledgeTopicNode as KnowledgeTopicNodeWire,
   KnowledgeUpdatesResponse,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
@@ -2299,27 +2303,15 @@ export interface KnowledgeInstallJobSnapshot {
   events: Array<Record<string, unknown> & { type: string }>;
 }
 
-export interface KnowledgeTopicNode {
-  id: string;
-  parentId: string | null;
-  name: string;
-  description: string | null;
-  sortKey: string;
-  documentCount: number;
-}
-
-export interface KnowledgeDocumentMeta {
-  id: string;
-  title: string;
-  slug: string;
-  summary: string | null;
-  language: string;
-  topicId: string;
-  sourceUrl: string | null;
-  sourceRevision: string | null;
-  sourceUpdatedAt: string | null;
-  attribution: Record<string, string> | null;
-}
+export type KnowledgeTopicNode = KnowledgeTopicNodeWire;
+export type KnowledgeDocumentSummary = KnowledgeDocumentSummaryWire;
+export type KnowledgeDocumentRead = KnowledgeDocumentReadWire;
+export type KnowledgeAssetInfo = KnowledgeAssetInfoWire;
+/**
+ * @deprecated The listing row is `KnowledgeDocumentSummary`; the format's
+ * per-document metadata record now owns the name `KnowledgeDocumentMeta`.
+ */
+export type KnowledgeDocumentMeta = KnowledgeDocumentSummary;
 
 export class GezelClient {
   private readonly baseUrl: string;
@@ -2961,12 +2953,13 @@ export class GezelClient {
 
   knowledgeCatalogDocuments(
     catalogId: string,
-    opts?: { topicId?: string; offset?: number; limit?: number },
-  ): Promise<{ documents: KnowledgeDocumentMeta[]; total: number }> {
+    opts?: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
+  ): Promise<{ documents: KnowledgeDocumentSummary[]; total: number }> {
     const params = new URLSearchParams();
     if (opts?.topicId) params.set('topic', opts.topicId);
     if (opts?.offset) params.set('offset', String(opts.offset));
     if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.descendants === false) params.set('descendants', '0');
     const query = params.toString();
     return this.request(
       'GET',
@@ -2975,14 +2968,39 @@ export class GezelClient {
   }
 
   /** Metadata + normalized Markdown body for one catalog document. */
-  readKnowledgeDocument(
-    catalogId: string,
-    documentId: string,
-  ): Promise<KnowledgeDocumentMeta & { markdown: string }> {
+  readKnowledgeDocument(catalogId: string, documentId: string): Promise<KnowledgeDocumentRead> {
     return this.request(
       'GET',
       `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/document?id=${encodeURIComponent(documentId)}`,
     );
+  }
+
+  /** The image assets a mounted catalog declares. */
+  knowledgeCatalogAssets(catalogId: string): Promise<{ assets: KnowledgeAssetInfo[] }> {
+    return this.request('GET', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets`);
+  }
+
+  /**
+   * One catalog asset by its archive path (`assets/…`), as a Blob the caller
+   * turns into an object URL. `version` binds the URL to the mounted catalog
+   * version so the response may be cached as immutable.
+   */
+  async fetchKnowledgeAsset(
+    catalogId: string,
+    assetPath: string,
+    opts?: { version?: string },
+  ): Promise<Blob> {
+    const relative = assetPath.startsWith('assets/')
+      ? assetPath.slice('assets/'.length)
+      : assetPath;
+    const encoded = relative.split('/').map(encodeURIComponent).join('/');
+    const query = opts?.version ? `?v=${encodeURIComponent(opts.version)}` : '';
+    const url = `${this.baseUrl}/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets/${encoded}${query}`;
+    const res = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`knowledge asset fetch failed: ${res.status}`);
+    return res.blob();
   }
 
   // ── storage accounting, cleanup & backup ──

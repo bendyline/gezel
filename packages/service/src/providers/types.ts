@@ -641,6 +641,8 @@ export interface ImageAttachment {
 import type { ProviderQueue } from './queue.js';
 
 export interface SendAndWaitOpts {
+  /** Structured intent from a caller that knows whether a file exists or failed checks. */
+  fileTurnIntent?: import('@bendyline/gezel').FileTurnIntent;
   timeoutMs?: number;
   attachments?: ImageAttachment[];
   /**
@@ -739,6 +741,8 @@ export interface SendAndWaitOpts {
 }
 
 export interface LLMSession {
+  /** The owning engine was retired; rebuild from saved history before the next turn. */
+  readonly isDisposed?: boolean;
   /**
    * Effective context window for this concrete session, after any native
    * engine admission clamp. Stateless/local-history providers expose this so

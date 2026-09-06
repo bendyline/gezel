@@ -1,15 +1,18 @@
 import { readFile } from 'node:fs/promises';
 import {
   DaemonNotRunningError,
-  createTrustingFetch,
   discoverOrSpawn,
   readSystemServiceEndpoint,
+  requestDaemonHealth,
 } from '@bendyline/gezel-client/node';
 import { GezelApp } from './client.js';
 import { authorize } from './connect.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError } from './errors.js';
+import { type SdkTransport, createSdkTransport } from './tls.js';
 import type {
+  AuthorizedConnection,
+  ConnectInput,
   LocalAuthorizedConnection,
   LocalConnectInput,
   LocalOwnerConnectInput,
@@ -34,10 +37,7 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
       connectInput.fetch,
       tlsCertPath,
     );
-    const authorized = await authorize({
-      ...connectInput,
-      fetch: configured.fetch,
-    });
+    const authorized = await authorizeTransport(connectInput, configured);
     return {
       ...authorized,
       daemon: { mode: 'configured', cert: configured.cert },
@@ -46,11 +46,10 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
 
   const legacyFull = await discoverLegacyFullService(daemon?.home, connectInput.fetch);
   if (legacyFull) {
-    const authorized = await authorize({
-      ...connectInput,
-      baseUrl: legacyFull.baseUrl,
-      fetch: legacyFull.fetch,
-    });
+    const authorized = await authorizeTransport(
+      { ...connectInput, baseUrl: legacyFull.baseUrl },
+      legacyFull,
+    );
     return {
       ...authorized,
       daemon: { mode: 'legacy-full', cert: legacyFull.cert },
@@ -64,14 +63,19 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
         { code: 'daemon_entry_required' },
       );
     }
-    const discovered = await readRuntimeForConnect(daemon?.home);
+    const discovered = await readRuntimeForConnect(daemon?.home, connectInput.fetch);
     if (!discovered) throw daemonNotRunning();
-    await probeHealth(discovered.baseUrl, discovered.fetch);
-    const authorized = await authorize({
-      ...connectInput,
-      baseUrl: discovered.baseUrl,
-      fetch: connectInput.fetch ?? discovered.fetch,
-    });
+    try {
+      await probeHealth(discovered.baseUrl, discovered.fetch);
+    } catch (error) {
+      if (discovered.destroy) await discovered.destroy();
+      else await discovered.close?.();
+      throw error;
+    }
+    const authorized = await authorizeTransport(
+      { ...connectInput, baseUrl: discovered.baseUrl },
+      discovered,
+    );
     return {
       ...authorized,
       daemon: { mode: 'adopted', cert: discovered.cert },
@@ -94,14 +98,11 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
     throw error;
   }
 
-  const fetchImpl = resolved.cert
-    ? createTrustingFetch({ cert: resolved.cert })
-    : (globalThis.fetch as typeof fetch);
-  const authorized = await authorize({
-    ...connectInput,
-    baseUrl: resolved.baseUrl,
-    fetch: connectInput.fetch ?? fetchImpl,
-  });
+  const transport = createSdkTransport(resolved.cert, connectInput.fetch);
+  const authorized = await authorizeTransport(
+    { ...connectInput, baseUrl: resolved.baseUrl },
+    transport,
+  );
   return {
     ...authorized,
     daemon: {
@@ -120,7 +121,7 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
 async function discoverLegacyFullService(
   explicitHome: string | undefined,
   fetchOverride: typeof fetch | undefined,
-): Promise<{ baseUrl: string; cert: string | null; fetch: typeof fetch } | null> {
+): Promise<({ baseUrl: string; cert: string | null } & SdkTransport) | null> {
   if (explicitHome || process.env.GEZEL_HOME || process.env.GEZEL_DEV === '1') return null;
   let endpoint: Awaited<ReturnType<typeof readSystemServiceEndpoint>> = null;
   try {
@@ -129,19 +130,22 @@ async function discoverLegacyFullService(
     endpoint = null;
   }
   if (!endpoint) return null;
-  const fetchImpl =
-    fetchOverride ??
-    (endpoint.cert
-      ? createTrustingFetch({ cert: endpoint.cert })
-      : (globalThis.fetch as typeof fetch));
+  const transport = createSdkTransport(endpoint.cert, fetchOverride);
+  let adopted = false;
   try {
-    const response = await fetchImpl(`${endpoint.baseUrl}/api/health`);
-    if (!response.ok) return null;
-    const health = (await response.json()) as { serviceRole?: string };
+    const response = await requestDaemonHealth(endpoint.baseUrl, { fetch: transport.fetch });
+    if (!response.ok || !response.body || typeof response.body !== 'object') return null;
+    const health = response.body as { serviceRole?: string };
     if (health.serviceRole !== undefined && health.serviceRole !== 'legacy-full') return null;
-    return { baseUrl: endpoint.baseUrl, cert: endpoint.cert, fetch: fetchImpl };
+    adopted = true;
+    return { baseUrl: endpoint.baseUrl, cert: endpoint.cert, ...transport };
   } catch {
     return null;
+  } finally {
+    if (!adopted) {
+      if (transport.destroy) await transport.destroy();
+      else await transport.close?.();
+    }
   }
 }
 
@@ -170,15 +174,11 @@ export async function authorizeLocalOwner(
     if (error instanceof DaemonNotRunningError) throw daemonNotRunning();
     throw error;
   }
-  const fetchImpl =
-    input.fetch ??
-    (resolved.cert
-      ? createTrustingFetch({ cert: resolved.cert })
-      : (globalThis.fetch as typeof fetch));
+  const transport = createSdkTransport(resolved.cert, input.fetch);
   return {
     baseUrl: resolved.baseUrl,
     token: resolved.token,
-    fetch: fetchImpl,
+    ...transport,
     daemon: {
       mode: resolved.outcome,
       pid: resolved.pid,
@@ -191,19 +191,32 @@ async function configuredTransport(
   baseUrl: string,
   fetchOverride: typeof fetch | undefined,
   tlsCertPath: string | undefined,
-): Promise<{ fetch: typeof fetch; cert: string | null }> {
+): Promise<SdkTransport & { cert: string | null }> {
   if (fetchOverride) return { fetch: fetchOverride, cert: null };
   if (!baseUrl.startsWith('https://') || !tlsCertPath) {
-    return { fetch: globalThis.fetch as typeof fetch, cert: null };
+    return { ...createSdkTransport(null), cert: null };
   }
   try {
     const cert = await readFile(tlsCertPath, 'utf8');
-    return { fetch: createTrustingFetch({ cert }), cert };
+    return { ...createSdkTransport(cert), cert };
   } catch (cause) {
     throw new GezelSdkError('could not read the configured Gezel TLS certificate', {
       code: 'tls_cert_unreadable',
       cause,
     });
+  }
+}
+
+/** Transfer transport ownership only after authorization succeeds. */
+async function authorizeTransport(
+  input: ConnectInput,
+  transport: SdkTransport,
+): Promise<AuthorizedConnection> {
+  try {
+    return { ...(await authorize({ ...input, fetch: transport.fetch })), close: transport.close };
+  } catch (error) {
+    await transport.close?.();
+    throw error;
   }
 }
 
@@ -242,7 +255,7 @@ function userDaemonEnv(home: string | undefined, preferCanonicalPort?: boolean):
 
 async function probeHealth(baseUrl: string, fetchImpl: typeof fetch): Promise<void> {
   try {
-    const response = await fetchImpl(`${baseUrl}/api/health`);
+    const response = await requestDaemonHealth(baseUrl, { fetch: fetchImpl });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (cause) {
     throw new GezelSdkError('gezel daemon is not responding', {

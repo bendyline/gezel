@@ -22,9 +22,9 @@
 import { RemoteServingConfigSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { GrantExpiredError } from '../../grants/manager.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 
-export function remoteServingManageRoutes(ctx: ServiceContext): Hono {
+export function remoteServingManageRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
 
   // Serialize config read-modify-write + reconfigure so two managing user

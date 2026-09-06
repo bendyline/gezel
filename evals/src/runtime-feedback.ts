@@ -152,6 +152,7 @@ export async function postRuntimeFeedback(
   try {
     await ctx.client.messageGezel(target.gezelId, {
       fromGezelId: ctx.meesterId,
+      fileTurnIntent: { kind: 'repair-file', path: filePath },
       text,
       suppressReply: true,
       ...(expectedDeliverable ? { expectedDeliverable } : {}),

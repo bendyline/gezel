@@ -1,0 +1,73 @@
+import type { ResolvedDistributionPolicy, ServiceRole } from '@bendyline/gezel';
+import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { DebugFlag } from '../debug/flag.js';
+import type { EngineBinaryRegistry } from '../engines/registry.js';
+import type { ModelFitnessManager } from '../fitness/manager.js';
+import type { ConfigStore } from '../fs/config-store.js';
+import type { GrantManager } from '../grants/manager.js';
+import type { EnsureModelOrchestrator } from '../models/ensure.js';
+import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
+import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
+import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
+import type { GpuArbiter } from '../providers/gpu-arbiter.js';
+import type { ImageProviderManager } from '../providers/image/manager.js';
+import type { ImageModelPullRegistry } from '../providers/image/pull-registry.js';
+import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
+import type { MlxModelManager } from '../providers/mlx/index.js';
+import type { NativeInference } from '../providers/native/inference.js';
+import type { RecognitionManager } from '../providers/recognition/manager.js';
+import type { VideoProviderManager } from '../providers/video/manager.js';
+import type { VideoModelPullRegistry } from '../providers/video/pull-registry.js';
+import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
+import type { UvRuntime } from '../python/uv-runtime.js';
+import type { DeviceIdentity } from '../remotes/identity.js';
+import type { RemoteServingController } from '../remotes/serving.js';
+import type { TenantLimiter } from '../remotes/tenant-limits.js';
+import type { SpawnCapability } from '../system/spawn-capability.js';
+import type { TokenStore } from './token-store.js';
+/** Engine and model capabilities shared by local and machine-backed HTTP surfaces.
+ * No project store, product chat sessions, credentials, tools, terminals or background jobs.
+ */
+export interface EngineContext {
+  store: Pick<ConfigStore, 'readConfig' | 'writeConfig' | 'homePath'>;
+  chat: NativeInference;
+  signIdentityCertificate(): Promise<string | null>;
+  serviceRole: ServiceRole;
+  distribution: ResolvedDistributionPolicy;
+  home: string;
+  catalog: CatalogService;
+  imageProvider: ImageProviderManager;
+  imagePulls: ImageModelPullRegistry;
+  chatInstalls: ChatModelInstallRegistries;
+  videoProvider: VideoProviderManager;
+  videoPulls: VideoModelPullRegistry;
+  engineBinaries: EngineBinaryRegistry;
+  stt: SpeechToTextProviderManager;
+  tts: TextToSpeechProviderManager;
+  recognition: RecognitionManager;
+  gpuArbiter: GpuArbiter;
+  llamaCppModels: LlamaCppModelManager;
+  ds4Models: LlamaCppModelManager;
+  modelFitness: ModelFitnessManager;
+  mlxModels: MlxModelManager;
+  uvRuntime: UvRuntime;
+  mlxRuntimeStatus: MlxRuntimeStatusBus;
+  debug: DebugFlag;
+  token: string;
+  tokenStore: TokenStore;
+  grants: GrantManager;
+  deviceIdentity: DeviceIdentity;
+  machineEngine?: {
+    isConnected(): boolean;
+    isRequired(): boolean;
+    proxy(request: Request, sourcePrefix: string, targetPrefix: string): Promise<Response>;
+    stop(): Promise<void>;
+  };
+  remoteServing: RemoteServingController;
+  remoteTenantLimits: TenantLimiter;
+  tlsCertSha256?: string;
+  tlsCertPem?: string;
+  ensureModel: EnsureModelOrchestrator;
+  startedAt: string;
+  childProcessSpawn?: SpawnCapability;
+}

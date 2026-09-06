@@ -3,6 +3,11 @@ import { resolveRoleId, toolsetGroupsForRole } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { canonicalToolName } from '@bendyline/gezel-mcp';
 import {
+  isDirectCreateSourceWritePrompt,
+  isFileRepairPrompt,
+  isImmediateFileWritePrompt,
+} from '../providers/constrained-turn.js';
+import {
   extractExplicitFileEditTools,
   hasDirectFileDeliverableWording,
   hasExplicitFullFileRewriteWording,
@@ -1053,10 +1058,7 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   // an existing-file edit, even when a stale generic annotation elsewhere in
   // the message mentions write_file. Preserve the requested tool surface.
   if (extractExplicitFileEditTools(text).length > 0) return false;
-  if (isExistingScenarioCheckNudge(text)) return false;
-  if (isScenarioSniffRepairNudge(text) || isRuntimeScenarioRepairNudge(text)) {
-    return false;
-  }
+  if (isFileRepairPrompt(text)) return false;
   // Message-matching regexes accept BOTH the canonical snake_case names
   // and the pre-rename spellings (`write_?file` matches `write_file` and,
   // case-insensitively, `writeFile`) — handoffs replayed from old
@@ -1075,36 +1077,12 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   ) {
     return true;
   }
-  if (
-    roleKey !== 'reviewer' &&
-    /first move:\s+create the workspace deliverable/i.test(text) &&
-    /next concrete action should land\s+(?:a\s+)?(?:(?:compact but complete|concise but substantive)\s+)?(?:workspace\/index\.html|workspace file)/i.test(
-      text,
-    ) &&
-    /write_?file\s*\(\s*\{\s*path\s*:\s*["']index\.html["']/i.test(text)
-  ) {
-    return true;
-  }
-  if (roleKey !== 'reviewer' && isDirectCreateSourceWriteRequest(text)) {
-    return true;
-  }
-  if (
-    /(?:^|\]:\s*)direct kick from the eval harness:/i.test(text) &&
-    /(?:deliverable hasn't landed|deliverable file hasn't reached its expected path)/i.test(text) &&
-    /your next tool call MUST be\s+`write_?file`/i.test(text)
-  ) {
-    return true;
-  }
-  if (
-    /^(?:\[[^\]]+\]:\s*)?\[scenario check\]\s+there is still\s+\*?\*?no\s+`[^`]+`\*?\*?\s+in the workspace/i.test(
-      text,
-    ) &&
-    /write_?file\s*\(\s*\{\s*path\s*:/i.test(text) &&
-    /do not end your turn until\s+`write_?file`/i.test(text)
-  ) {
-    return true;
-  }
-  return false;
+  return (
+    (roleKey !== 'reviewer' || !isDirectCreateSourceWritePrompt(text)) &&
+    isImmediateFileWritePrompt(text.replace(/writeFile/gi, 'write_file'), {
+      toolSurfaceIsWriteFileOnly: false,
+    })
+  );
 }
 
 export function shouldConstrainToScenarioFileRepair(opts: {
@@ -1115,11 +1093,7 @@ export function shouldConstrainToScenarioFileRepair(opts: {
   if (opts.hasToolsetOverride) return false;
   if (!roleActsAsUrgentFileWriter(opts.role)) return false;
   const text = (opts.latestUserMessage ?? '').trim();
-  if (isScenarioFullRewriteNudge(text)) return true;
-  if (isExistingScenarioCheckNudge(text)) return true;
-  if (isScenarioSniffRepairNudge(text)) return true;
-  if (isSingleFileSourceRepairRequest(text)) return true;
-  return isRuntimeScenarioRepairNudge(text);
+  return isFileRepairPrompt(text) || isSingleFileSourceRepairRequest(text);
 }
 
 export function shouldConstrainToDirectFileWork(opts: {
@@ -1131,9 +1105,7 @@ export function shouldConstrainToDirectFileWork(opts: {
   if (!roleActsAsDirectFileWorker(opts.role)) return false;
   const text = (opts.latestUserMessage ?? '').trim();
   if (!text) return false;
-  if (isScenarioFullRewriteNudge(text)) return false;
-  if (isExistingScenarioCheckNudge(text)) return false;
-  if (isScenarioSniffRepairNudge(text) || isRuntimeScenarioRepairNudge(text)) return false;
+  if (isFileRepairPrompt(text)) return false;
   if (!mentionsWorkspaceFilePath(text)) return false;
   return hasDirectFileDeliverableWording(text);
 }
@@ -1224,68 +1196,8 @@ function mentionsWorkspaceFilePath(text: string): boolean {
   );
 }
 
-function isScenarioSniffRepairNudge(text: string): boolean {
-  if (
-    /^(?:\[[^\]]+\]:\s*)?\[scenario check\]\s+I looked at\s+`[^`]+`\s+and\s+the\s+success\s+criteria\s+aren't\s+met\s+yet\./i.test(
-      text,
-    )
-  ) {
-    return (
-      /Signals that didn't fire:/i.test(text) &&
-      /patch the deliverable/i.test(text) &&
-      /\b(?:replace_?in_?file|write_?file|re-emit)\b/i.test(text)
-    );
-  }
-  return false;
-}
-
-function isExistingScenarioCheckNudge(text: string): boolean {
-  return /^(?:\[[^\]]+\]:\s*)?\[scenario check\]\s+I looked at\s+`[^`]+`\s+and\s+the\s+success\s+criteria\s+aren't\s+met\s+yet\./i.test(
-    text,
-  );
-}
-
-function isRuntimeScenarioRepairNudge(text: string): boolean {
-  const header =
-    /^(?:\[[^\]]+\]:\s*)?\[runtime check(?:\s+[^\]]+)?\]\s+I\s+(?:opened|re-opened)\s+`[^`]+`\s+(?:in\s+a\s+headless\s+browser|after\s+your\s+latest\s+edit)\./i.test(
-      text,
-    ) ||
-    /^(?:\[[^\]]+\]:\s*)?\[runtime check(?:\s+[^\]]+)?\]\s+You've now rewritten\s+`[^`]+`\s+\d+\s+time\(s\)/i.test(
-      text,
-    );
-  if (!header) return false;
-  if (!/(?:assertion\(s\) failed:|SAME assertion\(s\) are still failing:|Failures:)/i.test(text)) {
-    return false;
-  }
-  return /\b(?:page doesn'?t actually function|previous edit didn'?t address the cause|same defect|specific code|targeted patch|replace_?in_?file|write_?file|re-emit)\b/i.test(
-    text,
-  );
-}
-
 function isScenarioFullRewriteNudge(text: string): boolean {
-  return (
-    /\[(?:runtime check(?:\s+[^\]]+)?|scenario check)\]/i.test(text) &&
-    hasExplicitFullFileRewriteWording(text)
-  );
-}
-
-function isDirectCreateSourceWriteRequest(text: string): boolean {
-  if (!/\bwrite_?file\b/i.test(text)) return false;
-  if (!/`?[\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)`?/i.test(text)) {
-    return false;
-  }
-  if (
-    /\b(?:modify|repair|fix|debug|patch|refactor|continue evolving|existing codebase)\b/i.test(text)
-  ) {
-    return false;
-  }
-  if (/\bpreserve\b/i.test(text) && !/\bfirst (?:version|pass)\b/i.test(text)) return false;
-  return (
-    /\b(?:build|create|make|implement|scaffold|write|produce)\b/i.test(text) &&
-    /\b(?:first version|first pass|initial version|new|from scratch|at\s+`?[\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)`?)/i.test(
-      text,
-    )
-  );
+  return isFileRepairPrompt(text) && hasExplicitFullFileRewriteWording(text);
 }
 
 /** Flat set of every tool name in `BUILTIN_TOOLSETS`. */

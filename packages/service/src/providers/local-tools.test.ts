@@ -205,10 +205,28 @@ describe('MlxProvider engine request lock', () => {
 describe('MlxProvider immediate write_file rescue tuning', () => {
   it('turns off thinking and raises short output budgets for urgent write_file-only turns', async () => {
     let capturedBody: Record<string, unknown> | null = null;
+    const writeArgs = { path: 'index.html', content: '<!doctype html><html></html>' };
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       const sse = [
-        'data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}',
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    type: 'function',
+                    function: { name: 'write_file', arguments: JSON.stringify(writeArgs) },
+                  },
+                ],
+              },
+              finish_reason: 'tool_calls',
+            },
+          ],
+        })}`,
         '',
         'data: [DONE]',
         '',
@@ -246,6 +264,9 @@ describe('MlxProvider immediate write_file rescue tuning', () => {
       { timeoutMs: 5_000 },
     );
 
+    expect(session.capturedToolCalls?.()).toEqual([
+      { id: 'call_write', name: 'write_file', arguments: JSON.stringify(writeArgs) },
+    ]);
     const body = capturedBody as Record<string, unknown> | null;
     expect(body?.max_tokens).toBe(4096);
     expect(body?.temperature).toBe(0.2);

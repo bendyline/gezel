@@ -324,3 +324,20 @@ export function probeKeyringAvailable(
     return err instanceof Error ? err.message : String(err);
   }
 }
+
+/** Identity-only migration read. No credential index, store, or write authority. */
+export async function readKeyringIdentityKey(
+  identity: Extract<SecretKey, { kind: 'deviceIdentity' }>,
+): Promise<string | null> {
+  const account = stringifySecretKey(identity);
+  try {
+    return defaultEntryFactory(SERVICE_NAME, account).getPassword() ?? null;
+  } catch (cause) {
+    if (isMissingEntry(cause)) return null;
+    throw new SecretBackendUnavailableError(
+      'keyring',
+      `OS keychain is unavailable while reading ${account}`,
+      { cause },
+    );
+  }
+}

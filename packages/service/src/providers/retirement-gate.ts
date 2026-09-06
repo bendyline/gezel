@@ -6,16 +6,18 @@
  */
 export class ProviderRetirementGate {
   private retiring = false;
+  private retirementMessage = 'local provider retired after machine engine adoption';
   private active = 0;
   private readonly idleWaiters = new Set<() => void>();
 
-  beginRetirement(): void {
+  beginRetirement(message?: string): void {
     this.retiring = true;
+    if (message) this.retirementMessage = message;
   }
 
   async run<T>(operation: () => Promise<T>): Promise<T> {
     if (this.retiring) {
-      throw new Error('local provider retired after machine engine adoption');
+      throw new Error(this.retirementMessage);
     }
     this.active += 1;
     try {

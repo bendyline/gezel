@@ -1,3 +1,13 @@
+import {
+  type UnexpectedHttpErrorHandler,
+  notifyUnexpectedHttpError,
+  opaqueServerErrors,
+} from './errors.js';
+export {
+  opaqueServerErrors,
+  type UnexpectedHttpErrorHandler,
+  type UnexpectedHttpErrorEvent,
+} from './errors.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -21,7 +31,7 @@ import {
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { hostGuard } from './host-guard.js';
-import { mountMachineEngineHints } from './machine-engine-hints.js';
+
 import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
@@ -93,7 +103,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
-import { remoteServingManageRoutes } from './routes/remote-serving-manage.js';
+
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -105,7 +115,7 @@ import { sessionRoutes } from './routes/sessions.js';
 import { storageRoutes } from './routes/storage.js';
 import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
-import { systemMemoryRoutes, systemRoutes } from './routes/system.js';
+import { systemRoutes } from './routes/system.js';
 import { terminalRoutes } from './routes/terminals.js';
 import { timelineRoutes } from './routes/timeline.js';
 import { toolRoutes } from './routes/tools.js';
@@ -116,7 +126,7 @@ import { v1ChatRoutes } from './routes/v1-chat.js';
 import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
-import { v1KnowledgeAssetsRoutes } from './routes/v1-knowledge-assets.js';
+
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
@@ -135,17 +145,6 @@ import {
 } from './scope-guard.js';
 import { shouldServeUiShell, staticUiCacheControl } from './static-ui.js';
 
-export interface UnexpectedHttpErrorEvent {
-  kind: 'unhandled_exception' | 'unsanitized_response';
-  requestId: string;
-  method: string;
-  path: string;
-  status: number;
-  detail: string;
-}
-
-export type UnexpectedHttpErrorHandler = (event: UnexpectedHttpErrorEvent) => void;
-
 interface BuildAppOptions {
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
   /**
@@ -161,117 +160,6 @@ interface BuildAppOptions {
    * Read lazily — the preview listener binds after this app is built.
    */
   previewBrowserOrigin?: () => string | null;
-}
-
-function notifyUnexpectedHttpError(
-  handler: UnexpectedHttpErrorHandler | undefined,
-  event: UnexpectedHttpErrorEvent,
-  log: { error: (message: string) => void },
-): void {
-  if (!handler) return;
-  try {
-    handler(event);
-  } catch (err) {
-    log.error(
-      `[http] unexpected-error observer failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-    );
-  }
-}
-
-export function opaqueServerErrors(
-  log: { error: (message: string) => void },
-  onUnexpectedHttpError?: UnexpectedHttpErrorHandler,
-): MiddlewareHandler {
-  return async (c, next) => {
-    await next();
-    if (c.res.status < 500) return;
-
-    const prior = c.res;
-    const raw = await prior
-      .clone()
-      .text()
-      .catch(() => '');
-    try {
-      const parsed = JSON.parse(raw) as {
-        error?: unknown;
-        message?: unknown;
-        requestId?: unknown;
-      };
-      if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') {
-        // Keep the correlation id in both the opaque body and the conventional
-        // response header so clients can retain it without parsing JSON.
-        c.header('x-request-id', parsed.requestId);
-        return;
-      }
-      // The remote model boundary deliberately uses 503 as a scheduling /
-      // admission result. These two route-owned messages are user-facing
-      // contracts, and their request id is already opaque; preserving them is
-      // what keeps an expected busy swap or memory refusal from turning back
-      // into the generic 500-style error this middleware normally enforces.
-      const remoteAvailabilityPath =
-        c.req.path === '/v1/remote/admit' || c.req.path === '/v1/remote/infer';
-      const remoteAvailabilityCode =
-        parsed.error === 'capacity_denied' || parsed.error === 'engine_busy';
-      const remoteAvailabilityKeys = Object.keys(parsed as Record<string, unknown>);
-      if (
-        prior.status === 503 &&
-        remoteAvailabilityPath &&
-        remoteAvailabilityCode &&
-        typeof parsed.message === 'string' &&
-        parsed.message.length > 0 &&
-        parsed.message.length <= 2_000 &&
-        typeof parsed.requestId === 'string' &&
-        remoteAvailabilityKeys.every((key) => ['error', 'message', 'requestId'].includes(key))
-      ) {
-        c.header('x-request-id', parsed.requestId);
-        return;
-      }
-      // Broker outages, capacity denials, and media-engine readiness failures
-      // are expected, actionable degraded states rather than route exceptions.
-      // Preserve only their fixed codes; the route/provider logs the underlying
-      // detail and never puts it in this body.
-      if (
-        (parsed.error === 'machine_engine_unavailable' ||
-          parsed.error === 'capacity_denied' ||
-          parsed.error === 'speech_to_text_not_ready' ||
-          parsed.error === 'speech_to_text_failed') &&
-        Object.keys(parsed as Record<string, unknown>).length === 1
-      ) {
-        return;
-      }
-    } catch {
-      /* sanitize non-JSON and malformed JSON errors too */
-    }
-
-    const requestId = randomUUID();
-    const detail = raw.slice(0, 2000);
-    log.error(
-      `[http] route returned unsanitized ${prior.status} id=${requestId} method=${c.req.method} path=${c.req.path}: ${detail}`,
-    );
-    notifyUnexpectedHttpError(
-      onUnexpectedHttpError,
-      {
-        kind: 'unsanitized_response',
-        requestId,
-        method: c.req.method,
-        path: c.req.path,
-        status: prior.status,
-        detail,
-      },
-      log,
-    );
-    const replacement = new Response(JSON.stringify({ error: 'internal_error', requestId }), {
-      status: prior.status,
-      headers: { 'content-type': 'application/json; charset=UTF-8' },
-    });
-    for (const [name, value] of prior.headers) {
-      if (name.startsWith('access-control-') || name === 'vary' || name === 'retry-after') {
-        replacement.headers.set(name, value);
-      }
-    }
-    replacement.headers.set('x-request-id', requestId);
-    c.res = replacement;
-  };
 }
 
 export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Hono {
@@ -551,64 +439,6 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(ctx.childProcessSpawn ? { childProcessSpawn: ctx.childProcessSpawn } : {}),
     });
   });
-
-  // A machine engine is deliberately not a smaller-flavored product daemon.
-  // Its route table is a capability boundary: identity, inference, managed
-  // model lifecycle, and engine telemetry only. In particular there is no
-  // static UI, project/session API, terminal, credential, connector, or file
-  // route to accidentally authorize with the cross-account runtime token.
-  if (ctx.serviceRole === 'machine-engine') {
-    app.route('/v1/identity', v1IdentityRoutes(ctx));
-    app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
-    app.use('/v1/remote/*', requireScope('remote-inference'));
-    app.use('/v1/remote/models/ensure', requireScope('machine-models'));
-    app.use('/v1/remote/models/ensure/*', requireScope('machine-models'));
-    // The knowledge overlay must register BEFORE the broad manage gate so a
-    // machine-models-only token cannot reach the knowledge broker, and a
-    // machine-knowledge-assets token cannot reach model management.
-    app.use('/v1/remote/manage/knowledge/*', requireScope('machine-knowledge-assets'));
-    app.use('/v1/remote/manage/*', (c, next) => {
-      if (c.req.path.startsWith('/v1/remote/manage/knowledge/')) return next();
-      return requireScope('machine-models')(c, next);
-    });
-    // Model ensure must win over the exact `/models` discovery handler.
-    app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
-    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes({ catalog: ctx.catalog }));
-    app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
-    app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
-    app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
-    app.route('/v1/remote/manage/engines', enginesRoutes(ctx));
-    app.route('/v1/remote/manage/queues', queueRoutes(ctx));
-    app.route('/v1/remote/manage/cache', cacheRoutes(ctx));
-    app.route('/v1/remote/manage/system/memory', systemMemoryRoutes(ctx));
-    app.route('/v1/remote/manage/model-fitness', modelFitnessRoutes(ctx));
-    app.route('/v1/remote/manage/model-bundles', modelBundleRoutes(ctx));
-    // These routers mix project-persisting execution with model lifecycle.
-    // Block the execution endpoints here; inference goes through the dedicated
-    // `/v1/remote/image|video|audio/*` handlers, which persist nothing.
-    app.all('/v1/remote/manage/image-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
-    app.all('/v1/remote/manage/video-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
-    app.all('/v1/remote/manage/audio/transcribe', (c) => c.json({ error: 'not_found' }, 404));
-    app.all('/v1/remote/manage/audio/synthesize', (c) => c.json({ error: 'not_found' }, 404));
-    app.all('/v1/remote/manage/audio/synthesize-stream', (c) =>
-      c.json({ error: 'not_found' }, 404),
-    );
-    app.route('/v1/remote/manage/image-gen', imageGenRoutes(ctx));
-    app.route('/v1/remote/manage/video-gen', videoGenRoutes(ctx));
-    app.route('/v1/remote/manage/audio', audioRoutes(ctx));
-    // LAN-serving administration (config, pairing grants, device roster).
-    // Loopback-only by construction: nothing under /v1/remote/manage is in
-    // isRemoteServingRoute, so the LAN app 404s it.
-    app.route('/v1/remote/manage/serving', remoteServingManageRoutes(ctx));
-    app.route('/v1/remote', v1RemoteRoutes(ctx));
-    // Actionable dead-ends for third-party clients that reach the broker on
-    // the canonical port expecting the product /v1 API.
-    mountMachineEngineHints(app);
-    // `all`, not `get`: the classic wrong call here is a POST, which would
-    // otherwise fall through to Hono's plain-text default 404.
-    app.all('*', (c) => c.json({ error: 'not_found', service: 'gezel-machine-engine' }, 404));
-    return app;
-  }
 
   app.route('/api/gezels', gezelRoutes(ctx));
   // Chat sub-routes (history/send/reset) are mounted under /api/agents too

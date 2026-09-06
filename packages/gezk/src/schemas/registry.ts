@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GEZK_FORMAT_VERSION } from '../format/constants.js';
+import { GEZK_SUPPORTED_FORMAT_VERSIONS } from '../format/constants.js';
 import { KnowledgeIdSchema, Sha256HexSchema } from './ids.js';
 import { GEZK_REGISTRY_KIND, KnowledgeSignatureSchema } from './manifest.js';
 
@@ -34,7 +34,7 @@ export type KnowledgeRegistryEntry = z.infer<typeof KnowledgeRegistryEntrySchema
  */
 export const KnowledgeRegistryIndexSchema = z.object({
   kind: z.literal(GEZK_REGISTRY_KIND),
-  formatVersion: z.literal(GEZK_FORMAT_VERSION),
+  formatVersion: z.enum(GEZK_SUPPORTED_FORMAT_VERSIONS),
   publisher: z.object({
     id: KnowledgeIdSchema,
     name: z.string().min(1),

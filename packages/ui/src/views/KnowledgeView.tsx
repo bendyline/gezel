@@ -1,11 +1,12 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
-import { formatKnowledgeUri } from '@bendyline/gezel';
+import { formatKnowledgeUri, parseKnowledgeUri } from '@bendyline/gezel';
 import type {
   KnowledgeCatalogStatus,
-  KnowledgeDocumentMeta,
+  KnowledgeDocumentRead,
+  KnowledgeDocumentSummary,
   KnowledgeTopicNode,
 } from '@bendyline/gezel-client';
-import { LinearDocView } from '@bendyline/squisq-react';
+import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +18,7 @@ import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
 import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
@@ -59,7 +61,7 @@ export function KnowledgeView() {
   });
   const [topics, setTopics] = useState<KnowledgeTopicNode[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<KnowledgeDocumentMeta[] | null>(null);
+  const [documents, setDocuments] = useState<KnowledgeDocumentSummary[] | null>(null);
   const [documentsTotal, setDocumentsTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
@@ -69,7 +71,7 @@ export function KnowledgeView() {
       return null;
     }
   });
-  const [doc, setDoc] = useState<(KnowledgeDocumentMeta & { markdown: string }) | null>(null);
+  const [doc, setDoc] = useState<KnowledgeDocumentRead | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -240,6 +242,52 @@ export function KnowledgeView() {
   );
   const topicTree = useMemo(() => foldTopics(topics), [topics]);
   const topicNames = useMemo(() => new Map(topics.map((t) => [t.id, t.name])), [topics]);
+
+  // Catalog images resolve through the daemon (bearer-authed, so never a
+  // bare <img src>); one provider per mounted catalog version, disposed —
+  // blob URLs revoked — when either changes.
+  const mediaProvider = useMemo(
+    () =>
+      selectedCatalogId
+        ? createKnowledgeMediaProvider({
+            catalogId: selectedCatalogId,
+            ...(selectedCatalog?.ref.version ? { version: selectedCatalog.ref.version } : {}),
+          })
+        : null,
+    [selectedCatalogId, selectedCatalog?.ref.version],
+  );
+  const providerRef = useRef(mediaProvider);
+  useEffect(() => {
+    providerRef.current = mediaProvider;
+    return () => providerRef.current?.dispose?.();
+  }, [mediaProvider]);
+
+  // Cross-document links inside a body are `knowledge://` references (the
+  // compiler rewrites relative article links to them). Same catalog: open
+  // the document here. Another installed catalog: switch to it.
+  const onBodyClickCapture = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]');
+      const href = anchor?.getAttribute('href');
+      if (!href) return;
+      const target = parseKnowledgeUri(href);
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (target.catalogId === selectedCatalogId) {
+        setSelectedDocId(target.documentId);
+        return;
+      }
+      const installed = catalogs?.find(
+        (c) => c.ref.catalogId === target.catalogId && c.ref.publisherId === target.publisherId,
+      );
+      if (installed) {
+        setSelectedCatalogId(installed.ref.catalogId);
+        setSelectedDocId(target.documentId);
+      }
+    },
+    [catalogs, selectedCatalogId],
+  );
   const renderedDoc = useMemo(() => {
     if (!doc) return null;
     try {
@@ -308,7 +356,7 @@ export function KnowledgeView() {
         }}
       >
         <span>{node.name}</span>
-        <span className="knowledge-topic-count">{node.documentCount}</span>
+        <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
       </button>
       {node.children.length > 0 && (
         <ul>{node.children.map((child) => renderTopic(child, depth + 1))}</ul>
@@ -439,16 +487,18 @@ export function KnowledgeView() {
                 {doc.sourceUpdatedAt ? ` · snapshot ${doc.sourceUpdatedAt.slice(0, 10)}` : ''}
               </p>
             </header>
-            <div className="knowledge-reader-body">
-              {renderedDoc ? (
-                <LinearDocView
-                  doc={renderedDoc}
-                  className="gezel-article-view"
-                  theme={gezelChatTheme}
-                  {...(surface ? { surface } : {})}
-                  imageDisplayMode="inline"
-                  showCover={false}
-                />
+            <div className="knowledge-reader-body" onClickCapture={onBodyClickCapture}>
+              {renderedDoc && mediaProvider ? (
+                <MediaContext.Provider value={mediaProvider}>
+                  <LinearDocView
+                    doc={renderedDoc}
+                    className="gezel-article-view"
+                    theme={gezelChatTheme}
+                    {...(surface ? { surface } : {})}
+                    imageDisplayMode="inline"
+                    showCover={false}
+                  />
+                </MediaContext.Provider>
               ) : (
                 <p className="error small">This document could not be rendered.</p>
               )}

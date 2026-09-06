@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createPatientFetch, createTrustingFetch } from './tls.js';
+import { requestDaemonHealth } from '@bendyline/gezel-client/node';
+import { type SdkTransport, createSdkTransport } from './tls.js';
 import type { DetectResult } from './types.js';
 
 /**
@@ -16,6 +17,8 @@ export interface DetectGezelOptions {
   home?: string;
   /** Override the fetch used for the health probe (tests inject). */
   fetch?: typeof fetch;
+  /** Health headers + body budget in awake milliseconds. Defaults to 5,000. */
+  timeoutMs?: number;
 }
 
 interface RuntimeFiles {
@@ -45,15 +48,6 @@ async function readRuntimeFiles(home: string): Promise<RuntimeFiles | null> {
   }
 }
 
-/**
- * Default fetch factory: returns the cert-trusting fetch when a cert
- * is available, the patient HTTP fetch otherwise. Apps can pass their
- * own via `opts.fetch` (tests use this to inject a stub).
- */
-function defaultFetch(cert: string | null): typeof fetch {
-  return cert ? createTrustingFetch({ cert }) : createPatientFetch();
-}
-
 export async function detectGezel(opts: DetectGezelOptions = {}): Promise<DetectResult> {
   const home = opts.home ?? process.env.GEZEL_HOME ?? join(homedir(), '.gezel');
   const runtime = await readRuntimeFiles(home);
@@ -61,22 +55,31 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
     return { installed: false, running: false };
   }
 
-  const f = opts.fetch ?? defaultFetch(runtime.cert);
+  const transport = createSdkTransport(runtime.cert, opts.fetch);
   let running = false;
+  let failed = false;
   let version: string | undefined;
   try {
-    const res = await f(`${runtime.baseUrl}/api/health`);
+    const res = await requestDaemonHealth(runtime.baseUrl, {
+      fetch: transport.fetch,
+      timeoutMs: opts.timeoutMs,
+    });
     if (res.ok) {
       running = true;
-      try {
-        const body = (await res.json()) as { version?: string };
-        if (body.version) version = body.version;
-      } catch {
-        /* no body — still alive */
-      }
+      if (
+        res.body &&
+        typeof res.body === 'object' &&
+        'version' in res.body &&
+        typeof res.body.version === 'string'
+      )
+        version = res.body.version;
     }
   } catch {
     running = false;
+    failed = true;
+  } finally {
+    if (failed && transport.destroy) await transport.destroy();
+    else await transport.close?.();
   }
 
   return {
@@ -94,13 +97,14 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
  */
 export async function readRuntimeForConnect(
   home?: string,
-): Promise<{ baseUrl: string; cert: string | null; fetch: typeof fetch } | null> {
+  fetchOverride?: typeof fetch,
+): Promise<({ baseUrl: string; cert: string | null } & SdkTransport) | null> {
   const resolvedHome = home ?? process.env.GEZEL_HOME ?? join(homedir(), '.gezel');
   const runtime = await readRuntimeFiles(resolvedHome);
   if (!runtime) return null;
   return {
     baseUrl: runtime.baseUrl,
     cert: runtime.cert,
-    fetch: defaultFetch(runtime.cert),
+    ...createSdkTransport(runtime.cert, fetchOverride),
   };
 }

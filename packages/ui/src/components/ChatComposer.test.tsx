@@ -63,6 +63,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder,
       toolbarSlotRight,
       onChange,
+      submitOnEnter,
       minHeight,
       maxHeight,
     }: {
@@ -70,6 +71,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder?: string;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
+      submitOnEnter?: () => void;
       minHeight?: string;
       maxHeight?: string;
     }) => {
@@ -88,6 +90,19 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
               onChange={(event) => {
                 setDraft(event.target.value);
                 onChange?.(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== 'Enter' ||
+                  event.shiftKey ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.altKey
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                submitOnEnter?.();
               }}
             />
             <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
@@ -111,12 +126,11 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
 });
 
 /**
- * The send gesture, fired the way a person makes it. Enter alone is a
- * newline now, so nothing here may go through a shim: the composer's own
- * capture handler is the thing under test.
+ * The send gesture, fired the way a person makes it. Squisq owns the key
+ * split, so the editor mock follows its Enter-to-submit contract too.
  */
 function pressSendShortcut() {
-  fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter', shiftKey: true });
+  fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' });
 }
 
 describe('ChatComposer keyboard hints', () => {
@@ -132,11 +146,11 @@ describe('ChatComposer keyboard hints', () => {
 
     expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
       'title',
-      'Shift+Enter to send, Enter for newline',
+      'Enter to send, Shift+Enter for newline',
     );
   });
 
-  it('sends on Shift+Enter and leaves a bare Enter to the editor', async () => {
+  it('sends on Enter and leaves Shift+Enter to the editor', async () => {
     vi.mocked(api.sendToChatSession).mockResolvedValue(undefined as never);
     render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
@@ -144,10 +158,13 @@ describe('ChatComposer keyboard hints', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
 
-    // A bare Enter is a new line: the composer must not claim it, and the
+    // Shift+Enter is a new line: the submit hook must not claim it, and the
     // editor must still see it.
-    const bareEnter = fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' });
-    expect(bareEnter).toBe(true);
+    const shiftedEnter = fireEvent.keyDown(screen.getByLabelText('Message'), {
+      key: 'Enter',
+      shiftKey: true,
+    });
+    expect(shiftedEnter).toBe(true);
     expect(api.sendToChatSession).not.toHaveBeenCalled();
 
     pressSendShortcut();
@@ -155,7 +172,7 @@ describe('ChatComposer keyboard hints', () => {
     await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
   });
 
-  it('leaves Shift+Enter alone outside the typing surface', () => {
+  it('leaves Enter alone outside the typing surface', () => {
     render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
@@ -163,7 +180,6 @@ describe('ChatComposer keyboard hints', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
     fireEvent.keyDown(screen.getByRole('button', { name: /^send$/i }), {
       key: 'Enter',
-      shiftKey: true,
     });
 
     expect(api.sendToChatSession).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 import { GezelApp } from './client.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import type { SdkTransport } from './tls.js';
 import type { AuthorizedConnection, ConnectInput } from './types.js';
 
 /**
@@ -37,7 +38,19 @@ export async function connect(input: ConnectInput): Promise<GezelApp> {
  * client matches the scopes they requested.
  */
 export async function authorize(input: ConnectInput): Promise<AuthorizedConnection> {
-  const baseUrlAndFetch = await resolveBaseUrlAndFetch(input);
+  const transport = await resolveBaseUrlAndFetch(input);
+  try {
+    return await authorizeWithTransport(input, transport);
+  } catch (error) {
+    await transport.close?.();
+    throw error;
+  }
+}
+
+async function authorizeWithTransport(
+  input: ConnectInput,
+  baseUrlAndFetch: SdkTransport & { baseUrl: string },
+): Promise<AuthorizedConnection> {
   const expectsVerification =
     input.requireVerificationCode === true ||
     input.scopes.some((scope) => scope !== 'openai' && scope !== 'remote-inference');
@@ -58,6 +71,7 @@ export async function authorize(input: ConnectInput): Promise<AuthorizedConnecti
         baseUrl: baseUrlAndFetch.baseUrl,
         token: existing,
         fetch: baseUrlAndFetch.fetch,
+        close: baseUrlAndFetch.close,
       };
     }
 
@@ -77,6 +91,7 @@ export async function authorize(input: ConnectInput): Promise<AuthorizedConnecti
     if (!revoke.ok && revoke.status !== 401 && revoke.status !== 404) {
       throw await errorFromResponse(revoke);
     }
+    await revoke.body?.cancel();
     await input.tokenStorage?.delete?.(input.appId);
     existing = null;
   }
@@ -144,6 +159,7 @@ export async function authorize(input: ConnectInput): Promise<AuthorizedConnecti
     baseUrl: baseUrlAndFetch.baseUrl,
     token,
     fetch: baseUrlAndFetch.fetch,
+    close: baseUrlAndFetch.close,
   };
 }
 
@@ -171,13 +187,17 @@ async function tokenHasRequestedScopes(opts: {
     const response = await opts.fetch(`${opts.baseUrl}${path}`, {
       headers: { Authorization: `Bearer ${opts.token}` },
     });
-    if (response.status === 401) return false;
+    if (response.status === 401) {
+      await response.body?.cancel();
+      return false;
+    }
     if (response.status === 403) {
       const error = await errorFromResponse(response);
       if (error.code === 'forbidden' || error.code?.startsWith('missing_scope:')) return false;
       throw error;
     }
     if (!response.ok) throw await errorFromResponse(response);
+    await response.body?.cancel();
   }
   return true;
 }
@@ -192,14 +212,14 @@ function assertVerificationHandler(input: ConnectInput, expectsVerification: boo
 
 async function resolveBaseUrlAndFetch(
   input: ConnectInput,
-): Promise<{ baseUrl: string; fetch: typeof fetch }> {
+): Promise<SdkTransport & { baseUrl: string }> {
   if (input.baseUrl) {
     return {
       baseUrl: input.baseUrl,
       fetch: input.fetch ?? globalThis.fetch,
     };
   }
-  const discovered = await readRuntimeForConnect();
+  const discovered = await readRuntimeForConnect(undefined, input.fetch);
   if (!discovered) {
     throw new GezelSdkError(
       "gezel daemon not found — no runtime files under the gezel home's runtime/ directory (default ~/.gezel, GEZEL_HOME overrides). Start the gezel app or run `gezeld` first.",
@@ -208,7 +228,8 @@ async function resolveBaseUrlAndFetch(
   }
   return {
     baseUrl: discovered.baseUrl,
-    fetch: input.fetch ?? discovered.fetch,
+    fetch: discovered.fetch,
+    close: discovered.close,
   };
 }
 

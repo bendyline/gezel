@@ -23,6 +23,8 @@
       "**/.claude/**",
       "**/test-results/**",
       "**/playwright-report/**",
+      "**/visual-test-results/**",
+      "**/visual-report/**",
       "**/ux-screenshots/**",
       "**/.import-state/**",
       "**/.import-cache/**",

@@ -1,3 +1,5 @@
+import { ConfigStore } from './config-store.js';
+export { ConfigCorruptionError } from './config-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFile,
@@ -12,7 +14,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   type BoekwachterIssueDismissalReason,
@@ -27,7 +29,6 @@ import {
   type CraftbookSummary,
   type FileReviewIssue,
   type GezelConfig,
-  GezelConfigSchema,
   type GezelDetail,
   type GezelFrontmatter,
   type GezelGender,
@@ -352,19 +353,6 @@ export interface GezelChangeEvent {
   name: string;
 }
 
-/**
- * The store owns all reads and writes to `~/.gezel/`. It's the only place
- * in the service that touches disk for agent/env/task data — HTTP routes call
- * into it rather than constructing paths themselves.
- */
-export class ConfigCorruptionError extends Error {
-  readonly code = 'CONFIG_CORRUPT';
-  constructor(message: string) {
-    super(message);
-    this.name = 'ConfigCorruptionError';
-  }
-}
-
 /** Thrown by {@link Store.deleteProject} for refusable cases. */
 export class ProjectDeleteError extends Error {
   constructor(
@@ -461,6 +449,14 @@ function craftbookFieldsFromVersionManifest(v: Record<string, unknown>): Partial
 }
 
 export class Store {
+  private readonly config: ConfigStore;
+  readConfig(): Promise<GezelConfig> {
+    return this.config.readConfig();
+  }
+  writeConfig(config: Partial<Record<keyof GezelConfig, unknown>>): Promise<GezelConfig> {
+    return this.config.writeConfig(config);
+  }
+
   private readonly home: string;
   private readonly history?: import('../history/manager.js').HistoryManager;
   private readonly external?: ExternalFolders;
@@ -495,6 +491,7 @@ export class Store {
   private readonly gezelListeners = new Set<(ev: GezelChangeEvent) => void>();
 
   constructor(opts: StoreOptions) {
+    this.config = new ConfigStore(opts.home);
     this.home = opts.home;
     this.history = opts.history;
     this.external = opts.external;
@@ -1140,13 +1137,13 @@ export class Store {
       // boot rather than walking the id space forever.
       const fallbackId = await this.uniqueProjectId(SHARED_PROJECT_FALLBACK_ID);
       const created = await this.createSharedProject(fallbackId, documentsRoot);
-      await this.writeConfig({ ...config, sharedProjectId: created.id });
+      await this.writeConfig({ sharedProjectId: created.id });
       return { id: created.id, created: true };
     }
 
     const created = await this.createSharedProject(preferredId, documentsRoot);
     if (config.sharedProjectId !== preferredId && preferredId !== SHARED_PROJECT_ID) {
-      await this.writeConfig({ ...config, sharedProjectId: created.id });
+      await this.writeConfig({ sharedProjectId: created.id });
     }
     return { id: created.id, created: true };
   }
@@ -1528,86 +1525,6 @@ export class Store {
     }
     await mkdir(dirname(file), { recursive: true });
     await writeFileAtomic(file, `${JSON.stringify({ version: 1, messages }, null, 2)}\n`);
-  }
-
-  async readConfig(): Promise<GezelConfig> {
-    const p = gezelPaths(this.home);
-    let raw: string;
-    try {
-      raw = await readFile(p.config, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-      throw new ConfigCorruptionError(
-        `Unable to read ${p.config}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new ConfigCorruptionError(
-        `config.json is not valid JSON. Gezel left it untouched: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-    const result = GezelConfigSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new ConfigCorruptionError(
-        `config.json failed schema validation. Gezel left it untouched: ${result.error.message}`,
-      );
-    }
-    return result.data;
-  }
-
-  async writeConfig(config: Partial<Record<keyof GezelConfig, unknown>>): Promise<GezelConfig> {
-    const p = gezelPaths(this.home);
-    const existing = await this.readConfig();
-    // Explicit `null` on any patched field means "reset to default" —
-    // drop it from the merged shape instead of persisting the null.
-    // `undefined` values never reach here (JSON.stringify strips them
-    // at the client), so this is the only way the UI can express
-    // "clear this optional field."
-    const merged: Record<string, unknown> = { ...existing, ...config };
-    for (const [k, v] of Object.entries(config)) {
-      if (v === null) delete merged[k];
-    }
-    // externalFolders is a nested object; per-scope `null` clears that
-    // scope's external path. If all three scopes end up absent the
-    // parent object goes away entirely so the on-disk config stays
-    // narrow.
-    if ('externalFolders' in config && config.externalFolders !== null) {
-      const incoming = config.externalFolders as Record<string, unknown> | undefined;
-      if (incoming) {
-        const existingExternal =
-          (existing as { externalFolders?: Record<string, unknown> }).externalFolders ?? {};
-        const mergedExternal: Record<string, unknown> = { ...existingExternal, ...incoming };
-        for (const [k, v] of Object.entries(incoming)) {
-          if (v === null) delete mergedExternal[k];
-        }
-        if (Object.keys(mergedExternal).length === 0) {
-          delete merged.externalFolders;
-        } else {
-          merged.externalFolders = mergedExternal;
-        }
-      }
-    }
-    // ambientDashboard combines user-authored preferences with the Electron
-    // shell's last-known primary-display target. A settings toggle commonly
-    // patches only `{ enabled }`; merge this object so that action cannot erase
-    // the screen geometry needed by scheduled renders after the app closes.
-    if ('ambientDashboard' in config && config.ambientDashboard !== null) {
-      const incoming = config.ambientDashboard as Record<string, unknown> | undefined;
-      if (incoming) {
-        merged.ambientDashboard = {
-          ...((existing as { ambientDashboard?: Record<string, unknown> }).ambientDashboard ?? {}),
-          ...incoming,
-        };
-      }
-    }
-    await writeFileAtomic(p.config, `${JSON.stringify(merged, null, 2)}\n`);
-    await tryChmod600(p.config);
-    return merged as GezelConfig;
   }
 
   // ---------- agents ----------

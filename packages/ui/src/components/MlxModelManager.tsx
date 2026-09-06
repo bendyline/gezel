@@ -1,19 +1,7 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
 import { isRetiredModel } from '@bendyline/gezel';
-import type {
-  IncompleteModelDownload,
-  MlxInstallEvent,
-  MlxInstalledModel,
-  ModelFitnessEntry,
-  UnrecognizedLocalModel,
-} from '@bendyline/gezel-client';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import {
-  MODEL_INVENTORY_CHANGED_EVENT,
-  announceModelInventoryChanged,
-  changedModelInventoryEngine,
-} from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
@@ -28,8 +16,11 @@ import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { formatContextWindow } from './model-context.js';
+import { mlxModelAdapter } from './model-management-adapters.js';
 import { formatBytes } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
+import { useLocalModelManager } from './use-local-model-manager.js';
+import type { ActiveModelInstall as ActiveInstall } from './use-model-installs.js';
 
 interface MemoryProfile {
   totalRamBytes: number;
@@ -47,45 +38,6 @@ function formatReleased(iso: string | undefined): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
-}
-
-// MLX install progress is multi-file (weights ship as multiple
-// safetensors shards + a tokenizer). `fileIndex` / `fileCount` /
-// `file` track which shard is downloading right now;
-// `bytesWrittenAll` / `totalBytesAll` track the cumulative download
-// across every shard so the UI can render one model-wide progress bar
-// instead of per-shard bars that reset to zero on every new file.
-interface ActiveInstall {
-  catalogId: string;
-  fileIndex: number;
-  fileCount: number;
-  file: string;
-  bytesWrittenAll: number;
-  totalBytesAll: number;
-  phase: 'downloading' | 'verifying' | 'extracting-metadata';
-  /**
-   * When set, the shared downloader is between attempts for the
-   * current shard. UI surfaces "Connection dropped on shard 2/5 —
-   * retrying in 4s (attempt 3/5)…". Cleared on next `progress`.
-   */
-  retrying?: {
-    attempt: number;
-    maxAttempts: number;
-    delayMs: number;
-    reason: string;
-    file: string;
-  };
-  /** Held terminal error so the row stays alive for a Retry click. */
-  error?: string;
-  /**
-   * `local` — owns an SSE stream + AbortController.
-   * `remote` — discovered via `/active-installs` polling (e.g. the
-   *   first-run bootstrap fired the install server-side). Cancel is
-   *   hidden because we don't own the lifecycle. See
-   *   LlamaCppModelManager for the matching pattern.
-   */
-  origin: 'local' | 'remote';
-  controller?: AbortController;
 }
 
 function asMlxEntry(
@@ -123,26 +75,30 @@ type CategoryTab = ChatModelCategory | 'all';
  * source block.
  */
 export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
-  const [models, setModels] = useState<MlxInstalledModel[]>([]);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  // Interrupted/unverified downloads with no manifest — invisible to the
-  // installed list. Surfaced for resume/delete before the reclaim sweep.
-  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
-  const [unrecognized, setUnrecognized] = useState<UnrecognizedLocalModel[]>([]);
-  const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
-  const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
-    null,
-  );
-  const [installError, setInstallError] = useState<string | null>(null);
-  // A pinned-checksum mismatch (upstream re-published the file). Tracked
-  // separately from `installError` so we can show a friendly "newer
-  // upstream" prompt with a "Download anyway" action instead of dumping
-  // a raw sha256 comparison the user can't act on.
-  const [installMismatch, setInstallMismatch] = useState<{
-    catalogId: string;
-    file: string;
-  } | null>(null);
-  const [toDelete, setToDelete] = useState<string | null>(null);
+  const {
+    models,
+    modelsError,
+    incomplete,
+    unrecognized,
+    installs,
+    installWarning,
+    setInstallWarning,
+    installError,
+    setInstallError,
+    installMismatch,
+    setInstallMismatch,
+    toDelete,
+    setToDelete,
+    fitness,
+    probing,
+    refreshFitness,
+    refresh,
+    deleteOne,
+    startInstall,
+    retryInstall,
+    cancelInstall,
+    downloadAnyway,
+  } = useLocalModelManager(mlxModelAdapter, onModelsChanged);
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
@@ -152,45 +108,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
-  const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
-  const [probing, setProbing] = useState<string[]>([]);
-  const probingRef = useRef<string[]>([]);
-
-  const refreshFitness = useCallback(async () => {
-    try {
-      const res = await api.listModelFitness();
-      setFitness(new Map(res.records.map((r) => [r.key, r])));
-      setProbing(res.probing);
-      probingRef.current = res.probing;
-    } catch {
-      /* fitness surface is advisory — a blip just keeps the last state */
-    }
-  }, []);
-
-  const refreshIncomplete = useCallback(async () => {
-    try {
-      const res = await api.listIncompleteMlxModels();
-      setIncomplete(res.incomplete ?? []);
-    } catch {
-      /* advisory surface — a blip just keeps the last state */
-    }
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await api.listMlxModels();
-      setModels(res.models);
-      setUnrecognized(res.unrecognized ?? []);
-      setModelsError(null);
-    } catch (err) {
-      setModelsError(err instanceof Error ? err.message : String(err));
-    }
-    void refreshFitness();
-    void refreshIncomplete();
-  }, [refreshFitness, refreshIncomplete]);
-
   useEffect(() => {
-    void refresh();
     void api
       .getMemoryProfile()
       .then((m) => setMemory(m as MemoryProfile))
@@ -199,280 +117,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       .getModelContextOverrides('mlx')
       .then(() => setContextOverridesSupported(true))
       .catch(() => setContextOverridesSupported(false));
-  }, [refresh]);
-
-  useEffect(() => {
-    const onChanged = (event: Event) => {
-      const engine = changedModelInventoryEngine(event);
-      if (engine === 'mlx') void refresh();
-    };
-    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
-  }, [refresh]);
-
-  // Mirror server-driven installs (most importantly the first-run
-  // bootstrap one) into our local progress state. See the matching
-  // effect on LlamaCppModelManager for the full rationale.
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await api.listMlxActiveInstalls();
-        if (cancelled) return;
-        setInstalls((prev) => {
-          const next = new Map(prev);
-          const seen = new Set<string>();
-          for (const remote of res.installs) {
-            seen.add(remote.catalogId);
-            const existing = next.get(remote.catalogId);
-            if (existing && existing.origin === 'local') continue;
-            next.set(remote.catalogId, {
-              catalogId: remote.catalogId,
-              fileIndex: 0,
-              fileCount: 1,
-              file: '',
-              bytesWrittenAll: remote.bytesWritten,
-              totalBytesAll: remote.totalBytes,
-              phase: remote.phase,
-              origin: 'remote',
-            });
-          }
-          for (const [id, entry] of next) {
-            if (entry.origin === 'remote' && !seen.has(id)) next.delete(id);
-          }
-          return next;
-        });
-        if (res.installs.length === 0) {
-          void refresh();
-        }
-      } catch {
-        /* service blip — try again on the next tick */
-      }
-    };
-    void tick();
-    const t = setInterval(() => void tick(), 2_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [refresh]);
-
-  // Own timer, not the install tick's: running behind that tick's
-  // `await listMlxActiveInstalls()` froze the pills on "checking fitness…"
-  // whenever a large download kept that request slow. Self-scheduling so a
-  // slow request never stacks up.
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const loop = async () => {
-      await refreshFitness();
-      if (cancelled) return;
-      timer = setTimeout(() => void loop(), probingRef.current.length > 0 ? 2_000 : 15_000);
-    };
-    void loop();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [refreshFitness]);
-
-  const handleEvent = useCallback((catalogId: string, ev: MlxInstallEvent) => {
-    if (ev.type === 'progress') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        // Drop any prior retrying/error state — fresh progress means resume succeeded.
-        const { retrying: _r, error: _e, ...rest } = cur;
-        next.set(catalogId, {
-          ...rest,
-          fileIndex: ev.fileIndex,
-          fileCount: ev.fileCount,
-          file: ev.file,
-          bytesWrittenAll: ev.bytesWrittenAll,
-          totalBytesAll: ev.totalBytesAll || cur.totalBytesAll,
-          phase: 'downloading',
-        });
-        return next;
-      });
-    } else if (ev.type === 'retrying') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, {
-          ...cur,
-          retrying: {
-            attempt: ev.attempt,
-            maxAttempts: ev.maxAttempts,
-            delayMs: ev.delayMs,
-            reason: ev.reason,
-            file: ev.file,
-          },
-        });
-        return next;
-      });
-    } else if (ev.type === 'verifying') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, file: ev.file, phase: 'verifying' });
-        return next;
-      });
-    } else if (ev.type === 'extracting-metadata') {
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, phase: 'extracting-metadata' });
-        return next;
-      });
-    } else if (ev.type === 'done') {
-      if (ev.warning) setInstallWarning({ id: ev.id, message: ev.warning });
-    } else if (ev.type === 'error') {
-      if (ev.mismatch) {
-        // Checksum mismatch = the upstream file changed since this
-        // Gezel's catalog was pinned (model authors routinely re-publish
-        // chat_template.jinja / tokenizer configs). Drop the row and
-        // surface a friendly prompt instead of the raw sha dump.
-        const file = ev.mismatch.file;
-        setInstalls((prev) => {
-          const next = new Map(prev);
-          next.delete(catalogId);
-          return next;
-        });
-        setInstallMismatch({ catalogId, file });
-        return;
-      }
-      // Hold the row so the user can Retry inline; the shared
-      // downloader resumes from the existing `.partial`.
-      setInstalls((prev) => {
-        const cur = prev.get(catalogId);
-        if (!cur) return prev;
-        const next = new Map(prev);
-        next.set(catalogId, { ...cur, error: ev.error, retrying: undefined });
-        return next;
-      });
-      setInstallError(ev.error);
-    }
   }, []);
-
-  const startInstall = useCallback(
-    (catalogId: string, opts?: { skipSha?: boolean }) => {
-      if (installs.has(catalogId)) return;
-      setInstallError(null);
-      setInstallMismatch(null);
-      const controller = new AbortController();
-      setInstalls((prev) => {
-        const next = new Map(prev);
-        next.set(catalogId, {
-          catalogId,
-          fileIndex: 0,
-          fileCount: 1,
-          file: '',
-          bytesWrittenAll: 0,
-          totalBytesAll: 0,
-          phase: 'downloading',
-          origin: 'local',
-          controller,
-        });
-        return next;
-      });
-
-      void (async () => {
-        try {
-          await api.installMlxModel(
-            catalogId,
-            (ev) => handleEvent(catalogId, ev),
-            controller.signal,
-            opts?.skipSha ? { skipSha: true } : undefined,
-          );
-          announceModelInventoryChanged('mlx');
-        } catch (err) {
-          if (!controller.signal.aborted) {
-            const message = `download failed: ${describe(err)}`;
-            setInstallError(message);
-            // Stamp the failure onto the row so the `finally` below holds
-            // it for an inline Retry instead of deleting it (which would
-            // silently revert the card to "Download"). Covers the case
-            // where the stream closed without ever emitting an `error`
-            // event — the client now throws here rather than resolving.
-            setInstalls((prev) => {
-              const cur = prev.get(catalogId);
-              if (!cur) return prev;
-              const next = new Map(prev);
-              next.set(catalogId, { ...cur, error: cur.error ?? message, retrying: undefined });
-              return next;
-            });
-          }
-        } finally {
-          setInstalls((prev) => {
-            const next = new Map(prev);
-            const cur = next.get(catalogId);
-            // Hold the row on error so user can Retry inline.
-            if (cur?.error) {
-              next.set(catalogId, { ...cur, controller: undefined });
-              return next;
-            }
-            next.delete(catalogId);
-            return next;
-          });
-          void refresh();
-          onModelsChanged?.();
-        }
-      })();
-    },
-    [installs, refresh, handleEvent, onModelsChanged],
-  );
-
-  // "Download anyway" from the mismatch prompt — reinstall bypassing the
-  // pinned-checksum check so the current upstream file is accepted.
-  const downloadAnyway = useCallback(
-    (catalogId: string) => {
-      setInstallMismatch(null);
-      startInstall(catalogId, { skipSha: true });
-    },
-    [startInstall],
-  );
-
-  const cancelInstall = useCallback(
-    (catalogId: string) => {
-      // Installs run as background jobs on the service — closing the SSE
-      // stream only detaches this view, so cancellation must be the
-      // explicit server-side call. Works for `remote`-origin rows too.
-      const inflight = installs.get(catalogId);
-      inflight?.controller?.abort();
-      void api.cancelMlxModelInstall(catalogId).catch(() => {});
-      setInstalls((prev) => {
-        const next = new Map(prev);
-        next.delete(catalogId);
-        return next;
-      });
-    },
-    [installs],
-  );
-
-  const deleteOne = useCallback(async () => {
-    const id = toDelete;
-    if (!id) return;
-    setToDelete(null);
-    setModelsError(null);
-    // Optimistically drop the row so the delete feels instant even when the
-    // daemon is busy; refresh restores it (and shows the error) on failure.
-    setModels((cur) => cur.filter((m) => m.id !== id));
-    setIncomplete((cur) => cur.filter((d) => d.id !== id));
-    setUnrecognized((cur) => cur.filter((model) => model.id !== id));
-    try {
-      await api.deleteMlxModel(id);
-      announceModelInventoryChanged('mlx');
-      await refresh();
-      onModelsChanged?.();
-    } catch (err) {
-      setModelsError(`delete failed: ${describe(err)}`);
-      void refresh();
-    }
-  }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(models.map((m) => m.id)), [models]);
   const attentionIds = useMemo(
@@ -502,15 +147,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                 key={inst.catalogId}
                 inst={inst}
                 onCancel={() => cancelInstall(inst.catalogId)}
-                onRetry={() => {
-                  setInstalls((prev) => {
-                    const next = new Map(prev);
-                    next.delete(inst.catalogId);
-                    return next;
-                  });
-                  setInstallError(null);
-                  startInstall(inst.catalogId);
-                }}
+                onRetry={() => retryInstall(inst.catalogId)}
               />
             ))}
           </div>
@@ -795,11 +432,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
             const needsAttention = attentionIds.has(m.id);
             const inflight = installs.get(m.id);
             const pct =
-              inflight && inflight.totalBytesAll > 0
-                ? Math.min(
-                    100,
-                    Math.round((inflight.bytesWrittenAll / inflight.totalBytesAll) * 100),
-                  )
+              inflight && inflight.totalBytes > 0
+                ? Math.min(100, Math.round((inflight.bytesWritten / inflight.totalBytes) * 100))
                 : null;
             const tight = memory ? !mlxFitsMemoryBudget(m.mlx, memory.usableBytes) : false;
             return (
@@ -889,10 +523,8 @@ function InstallProgress({
    *  existing `.partial` so this isn't a full restart. */
   onRetry: () => void;
 }) {
-  const known = inst.totalBytesAll > 0;
-  const pct = known
-    ? Math.min(100, Math.round((inst.bytesWrittenAll / inst.totalBytesAll) * 100))
-    : 0;
+  const known = inst.totalBytes > 0;
+  const pct = known ? Math.min(100, Math.round((inst.bytesWritten / inst.totalBytes) * 100)) : 0;
   // Status precedence: hard error > retrying-between-attempts > normal phase.
   let phaseLabel: string;
   if (inst.error) {
@@ -903,9 +535,9 @@ function InstallProgress({
     phaseLabel = `${inst.retrying.reason}${shardHint} — retrying in ${delaySec}s (attempt ${inst.retrying.attempt}/${inst.retrying.maxAttempts})`;
   } else if (inst.phase === 'downloading') {
     phaseLabel = known
-      ? `Downloading ${formatBytes(inst.bytesWrittenAll)} of ${formatBytes(inst.totalBytesAll)} (${pct}%)`
-      : inst.bytesWrittenAll > 0
-        ? `Downloading ${formatBytes(inst.bytesWrittenAll)}…`
+      ? `Downloading ${formatBytes(inst.bytesWritten)} of ${formatBytes(inst.totalBytes)} (${pct}%)`
+      : inst.bytesWritten > 0
+        ? `Downloading ${formatBytes(inst.bytesWritten)}…`
         : 'Preparing download…';
   } else if (inst.phase === 'verifying') {
     phaseLabel = `Checking download${inst.file ? ` (${inst.file})` : '…'}`;
@@ -923,9 +555,4 @@ function InstallProgress({
       onRetry={onRetry}
     />
   );
-}
-
-function describe(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
 }

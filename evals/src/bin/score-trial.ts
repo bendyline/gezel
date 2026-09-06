@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
 import { summarizeKeurmeesterCasesSync } from '../keurmeester-metrics.ts';
 import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
 
@@ -49,6 +50,13 @@ export interface TrialFacts {
   /** Unexpected native-engine exits observed during the trial, including
    * crashes recovered by an automatic restart before the trial completed. */
   nativeEngineIncidents?: NativeEngineIncidentSummary;
+  /**
+   * `craftbook-*` trials only: whether the book under test actually drove the
+   * task, or the trial only graded a freehand deliverable. See
+   * {@link summarizeCraftbookDrove} — a PASS with `verdict: 'artifact-only'`
+   * says the model produced the artifact, not that the recipe works.
+   */
+  craftbook?: CraftbookDroveSummary;
 
   outcome: {
     success: boolean;
@@ -1027,6 +1035,7 @@ export function score(runDir: string): TrialFacts {
   // the harvested case records, so the postmortem can report the
   // Keurmeester's contribution without parsing raw JSONL.
   const keurmeester = summarizeKeurmeesterCasesSync(runDir);
+  const craftbook = summarizeCraftbookDrove(runDir, result.scenarioId);
   const { timeToFirstTokenMs, firstTurnTtftMs } = parseFirstTokenTiming(
     readLines(join(runDir, 'daemon.log')).join('\n'),
     result.startedAt,
@@ -1042,6 +1051,7 @@ export function score(runDir: string): TrialFacts {
     ...(perf ? { perf } : {}),
     ...(judge ? { judge } : {}),
     ...(keurmeester ? { keurmeester } : {}),
+    ...(craftbook ? { craftbook } : {}),
     ...(result.nativeEngineIncidents
       ? { nativeEngineIncidents: result.nativeEngineIncidents }
       : {}),

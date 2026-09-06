@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { type RunningService, startService } from '../service.js';
+import { type RunningEngineService, type RunningService, startService } from '../service.js';
 
 async function waitFor(predicate: () => boolean, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -20,7 +20,7 @@ describe('late machine-engine adoption', () => {
     process.env.GEZEL_SECRETS_BACKEND = 'file';
     const machineHome = await mkdtemp(join(tmpdir(), 'gezel-late-engine-'));
     const userHome = await mkdtemp(join(tmpdir(), 'gezel-late-user-'));
-    let machine: RunningService | undefined;
+    let machine: RunningEngineService | undefined;
     let user: RunningService | undefined;
     try {
       user = await startService({ home: userHome, role: 'user', machineEngineHome: machineHome });

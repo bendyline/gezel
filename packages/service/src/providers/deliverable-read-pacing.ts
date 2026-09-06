@@ -1,4 +1,6 @@
+import type { FileTurnIntent } from '@bendyline/gezel';
 import { canonicalToolName } from '@bendyline/gezel-mcp';
+import { isImmediateFileWritePrompt } from './constrained-turn.js';
 import { TurnAbortError } from './turn-abort-error.js';
 
 const DEFAULT_SOFT_READ_WARNING_AT = 5;
@@ -48,10 +50,14 @@ export class DeliverableReadPaceTracker {
   private readCount = 0;
   private wrote = false;
 
-  static fromUserText(userText: string | undefined): DeliverableReadPaceTracker | null {
+  static fromUserText(
+    userText: string | undefined,
+    intent?: FileTurnIntent,
+  ): DeliverableReadPaceTracker | null {
+    if (intent?.kind === 'repair-file') return null;
     const text = userText ?? '';
-    if (!isFileDeliverableTurn(text)) return null;
-    return new DeliverableReadPaceTracker({ targetPath: extractTargetPath(text) });
+    if (!intent && !isFileDeliverableTurn(text)) return null;
+    return new DeliverableReadPaceTracker({ targetPath: intent?.path ?? extractTargetPath(text) });
   }
 
   constructor(opts: DeliverableReadPaceTrackerOpts = {}) {
@@ -136,22 +142,10 @@ function truncateHardAbortOutput(output: string): string {
 }
 
 function isFileDeliverableTurn(text: string): boolean {
-  if (/\[Deliverable expected as a FILE\b/i.test(text)) return true;
-  if (
-    /\[scenario check\]\s+there is still\s+\*?\*?no\s+`[^`]+`\*?\*?\s+in the workspace/i.test(
-      text,
-    ) &&
-    /write_file\s*\(\s*\{\s*path\s*:/i.test(text)
-  ) {
-    return true;
-  }
-  if (
-    /Direct kick from the eval harness:/i.test(text) &&
-    /next tool call MUST be\s+`?write_file`?/i.test(text)
-  ) {
-    return true;
-  }
-  return false;
+  return (
+    /\bdeliverable expected as a file\b/i.test(text) ||
+    isImmediateFileWritePrompt(text, { toolSurfaceIsWriteFileOnly: false })
+  );
 }
 
 function extractTargetPath(text: string): string | undefined {

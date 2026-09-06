@@ -12,7 +12,7 @@ import {
   VerificationCodeRequiredError,
 } from '../../grants/manager.js';
 import { bearerAuth, requireFirstParty } from '../auth.js';
-import type { ServiceContext } from '../context.js';
+import type { EngineContext } from '../engine-context.js';
 import {
   APP_GRANTABLE_SCOPES,
   ReservedPublicGrantAppIdError,
@@ -93,7 +93,7 @@ function toPollResponse(grant: GrantRequest, token?: string | null): GrantPollRe
   return base;
 }
 
-export function v1AppsRoutes(ctx: ServiceContext): Hono {
+export function v1AppsRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
   const auth = bearerAuth(ctx.tokenStore);
   const firstParty = requireFirstParty();

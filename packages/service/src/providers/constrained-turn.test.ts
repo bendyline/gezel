@@ -49,6 +49,16 @@ describe('isImmediateFileWriteTurn', () => {
     expect(isImmediateFileWriteTurn(prompt, ROSTER)).toBe(false);
   });
 
+  it('keeps explicit file intent authoritative over gate text', () => {
+    const prompt = 'GATE_TARGETED_EDIT: The checks for `src/worker.py` failed. Write a note first.';
+    const create = { kind: 'create-file' as const, path: 'src/worker.py' };
+    const repair = { kind: 'repair-file' as const, path: 'src/worker.py' };
+    expect(isImmediateFileWriteTurn(prompt, ROSTER, create)).toBe(true);
+    expect(isScenarioFileRepairPrompt(prompt, create)).toBe(false);
+    expect(isImmediateFileWriteTurn(prompt, ROSTER, repair)).toBe(false);
+    expect(isScenarioFileRepairPrompt(prompt, repair)).toBe(true);
+  });
+
   it('treats a bare deliverable line as urgent only once the surface is narrowed', () => {
     const prompt = '[Deliverable expected as a FILE at `notes/plan.md`] — see brief.';
     expect(isImmediateFileWriteTurn(prompt, [tool('write_file')])).toBe(true);

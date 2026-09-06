@@ -59,3 +59,5 @@ export * from './audio.js';
 export * from './script-input.js';
 export * from './handboek.js';
 export * from './storage.js';
+
+export * from './file-turn-intent.js';

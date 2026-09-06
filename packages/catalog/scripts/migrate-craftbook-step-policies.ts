@@ -1,5 +1,6 @@
 /**
- * Publish one append-only policy release for every current Gilde craftbook.
+ * Publish one append-only policy release for every current Gilde craftbook
+ * whose steps do not explicitly declare all inferred output media.
  *
  * The migration copies the newest immutable version, adds deterministic
  * per-step `toolPolicy` JSON (including fanout steps), bumps only the patch
@@ -19,10 +20,13 @@ import {
   formatCraftbookDocErrors,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
-import { applyDefaultCraftbookStepPolicies } from '../src/craftbook-step-policy.js';
+import {
+  applyDefaultCraftbookStepPolicies,
+  outputMediaForCraftbookBlueprint,
+} from '../src/craftbook-step-policy.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 
-const RELEASED_AT = '2026-09-01T20:00:00Z';
+const RELEASED_AT = '2026-09-05T03:30:00Z';
 
 function compareSemver(a: string, b: string): number {
   const left = a.split('.').map(Number);
@@ -74,9 +78,18 @@ async function versions(bookDir: string): Promise<string[]> {
     .sort(compareSemver);
 }
 
-function allStepsHavePolicies(doc: ReturnType<typeof CraftbookDocSchema.parse>): boolean {
+function allStepsDeclareRequiredOutputMedia(
+  doc: ReturnType<typeof CraftbookDocSchema.parse>,
+): boolean {
   const steps = [...doc.steps, ...(doc.spawn?.steps ?? [])];
-  return steps.every((step) => step.toolPolicy?.outputMedium !== undefined);
+  return steps.every((step) => {
+    if (step.toolPolicy?.outputMedium === undefined) return false;
+    const declared = new Set([
+      ...(step.toolPolicy.outputMedium === 'none' ? [] : [step.toolPolicy.outputMedium]),
+      ...(step.toolPolicy.additionalOutputMedia ?? []),
+    ]);
+    return [...outputMediaForCraftbookBlueprint(step)].every((medium) => declared.has(medium));
+  });
 }
 
 async function main(): Promise<void> {
@@ -125,7 +138,7 @@ async function main(): Promise<void> {
     const parsed = CraftbookDocSchema.parse(
       JSON.parse(await readFile(join(sourceDir, 'craftbook.json'), 'utf8')) as unknown,
     );
-    if (allStepsHavePolicies(parsed)) continue;
+    if (allStepsDeclareRequiredOutputMedia(parsed)) continue;
 
     const targetVersion = bumpPatch(sourceVersion);
     const targetDir = join(bookDir, 'versions', targetVersion);

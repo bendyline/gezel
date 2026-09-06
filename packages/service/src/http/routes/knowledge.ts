@@ -17,8 +17,10 @@
  *   DELETE /api/knowledge/catalogs/:catalogId          remove ref + private bytes
  *   POST   /api/knowledge/search                       browser/global catalog search
  *   GET    /api/knowledge/catalogs/:catalogId/topics   the shipped TOC
- *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=
+ *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=&descendants=0
  *   GET    /api/knowledge/catalogs/:catalogId/document?id=<docId>   body + metadata
+ *   GET    /api/knowledge/catalogs/:catalogId/assets                the declared image assets
+ *   GET    /api/knowledge/catalogs/:catalogId/assets/<path>?v=      one asset's bytes
  *
  * Installs run as background jobs owned by the KnowledgeManager's registry;
  * the SSE routes are subscribers, so a client disconnect detaches the
@@ -30,6 +32,7 @@
 
 import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
 import {
+  KnowledgeAssetPathSchema,
   KnowledgeInstallRequestSchema,
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
@@ -199,8 +202,44 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
       ...(topicId ? { topicId } : {}),
       offset,
       limit,
+      descendants: c.req.query('descendants') !== '0',
     });
     return c.json(page);
+  });
+
+  app.get('/catalogs/:catalogId/assets', async (c) => {
+    const assets = await manager().assets(c.req.param('catalogId'));
+    return c.json({ assets });
+  });
+
+  // Served as bytes for the viewer's media provider. The manifest declaration
+  // is the authorization (extraction reconciled and hashed every entry), the
+  // sha256 doubles as the ETag, and an SVG is sandboxed in case a person
+  // opens the URL directly — the format already refuses active SVG content.
+  app.get('/catalogs/:catalogId/assets/:path{.+}', async (c) => {
+    const catalogId = c.req.param('catalogId');
+    const parsed = KnowledgeAssetPathSchema.safeParse(`assets/${c.req.param('path')}`);
+    if (!parsed.success) return c.json({ error: 'invalid asset path' }, 400);
+    const version = c.req.query('v');
+    if (version && version !== manager().mountedVersion(catalogId)) {
+      return c.json({ error: 'catalog version not mounted' }, 404);
+    }
+    const asset = await manager().readAsset(catalogId, parsed.data);
+    if (!asset) return c.json({ error: 'asset not found' }, 404);
+    const etag = `"${asset.sha256}"`;
+    if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+    return c.body(Buffer.from(asset.bytes), 200, {
+      'Content-Type': asset.contentType,
+      'Content-Length': String(asset.sizeBytes),
+      ETag: etag,
+      'Cache-Control': version ? 'private, max-age=31536000, immutable' : 'private, no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      'Content-Disposition': 'inline',
+      ...(asset.contentType === 'image/svg+xml'
+        ? { 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'" }
+        : {}),
+    });
   });
 
   app.get('/catalogs/:catalogId/document', async (c) => {

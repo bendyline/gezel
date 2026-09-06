@@ -39,7 +39,7 @@
  *     process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
  *   }
  */
-export { detectGezel } from './detect.js';
+export { detectGezel, type DetectGezelOptions } from './detect.js';
 export { authorize, connect } from './connect.js';
 export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
@@ -47,6 +47,8 @@ export { GezelSdkError } from './errors.js';
 export {
   createTrustingFetch,
   createPatientFetch,
+  type ManagedFetch,
+  type CreateTrustingFetchOptions,
 } from './tls.js';
 export type {
   DetectResult,

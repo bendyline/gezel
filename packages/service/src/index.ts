@@ -1,5 +1,5 @@
 export { startService } from './service.js';
-export type { RunningService, StartServiceOptions } from './service.js';
+export type { RunningService, RunningEngineService, StartServiceOptions } from './service.js';
 export type {
   UnexpectedHttpErrorEvent,
   UnexpectedHttpErrorHandler,
@@ -24,3 +24,5 @@ export {
   type ElectronNativeReuseOptions,
   type ElectronNativeReuseResult,
 } from './engines/electron-native-reuse.js';
+
+export type { EngineContext } from './http/engine-context.js';
