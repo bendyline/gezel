@@ -5,12 +5,14 @@ import {
   ACCESSORY_OPTIONS,
   ACCESSORY_RARITY,
   ACCESSORY_RARITY_WEIGHT,
+  BANGS_OPTIONS,
   BODY_SHAPE_KEYS,
   DRESS_OPTIONS,
   DRESS_RARITY,
   EXPRESSION_OPTIONS,
   FACIAL_HAIR_OPTIONS,
   FIGURE_SCALE_ODDS,
+  HAIR_PART_OPTIONS,
   HAIR_SHAPES,
   HAT_OPTIONS,
   PALETTE,
@@ -174,6 +176,15 @@ export function poppetjeFromSeed(n: number, options: PoppetjeSeedOptions = {}): 
   const hair = pickFrom(PALETTE.hairs, idx(n, 4, PALETTE.hairs.length));
   const hairShape = pickFrom(HAIR_SHAPES, idx(n, 5, HAIR_SHAPES.length));
 
+  const canStyleHair = hairShape !== 'bald' && hairShape !== 'shaved';
+  const bangs =
+    canStyleHair && roll(n, 20) < SLOT_ODDS.bangs
+      ? pickFrom(BANGS_OPTIONS, idx(n, 21, BANGS_OPTIONS.length))
+      : null;
+  const hairPart = canStyleHair
+    ? pickFrom(HAIR_PART_OPTIONS, idx(n, 22, HAIR_PART_OPTIONS.length))
+    : 'none';
+
   const hat =
     roll(n, 6) < SLOT_ODDS.hat ? pickFrom(ROLLABLE_HATS, idx(n, 7, ROLLABLE_HATS.length)) : null;
   // Dress garment — the 22% slot roll fires independently, but *which* dress
@@ -222,6 +233,8 @@ export function poppetjeFromSeed(n: number, options: PoppetjeSeedOptions = {}): 
     skin2: skinPick.skin2,
     hair,
     hairShape,
+    bangs,
+    hairPart,
     hat,
     dress,
     accessory,

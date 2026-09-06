@@ -13,4 +13,4 @@
  * so a scheme change simply misses once and re-probes, which is the same
  * thing any bump does.
  */
-export const LLAMA_ENGINE_VERSION = 'v0.3.0';
+export const LLAMA_ENGINE_VERSION = 'v0.4.0';

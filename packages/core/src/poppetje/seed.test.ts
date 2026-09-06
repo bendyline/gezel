@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { GROWTH_COSMETICS } from '../growth-cosmetics.js';
 import {
+  BANGS_OPTIONS,
   BODY_SHAPE_KEYS,
   EXPRESSION_OPTIONS,
   FACIAL_HAIR_OPTIONS,
   FIGURE_SCALE_KEYS,
+  HAIR_PART_OPTIONS,
   HAIR_SHAPES,
   MARK_OPTIONS,
   PALETTE,
@@ -485,5 +487,43 @@ describe('initialPoppetjeForGezel', () => {
       expect(new Set(marks)).toEqual(new Set(MARK_OPTIONS));
       expect(new Set(facial)).toEqual(new Set(FACIAL_HAIR_OPTIONS));
     });
+  });
+});
+
+describe('hair styling persistence', () => {
+  it('defaults older files without rerolling their existing slots', () => {
+    const { bangs: _bangs, hairPart: _part, ...legacy } = poppetjeFromSeed(7);
+    expect(PoppetjeSchema.parse(legacy)).toEqual({ ...legacy, bangs: null, hairPart: 'none' });
+  });
+
+  it('round-trips every length, fringe and part as explicit JSON fields', () => {
+    const base = poppetjeFromSeed(7);
+    for (const hairShape of HAIR_SHAPES) {
+      for (const bangs of [null, ...BANGS_OPTIONS]) {
+        for (const hairPart of HAIR_PART_OPTIONS) {
+          const styled = { ...base, hairShape, bangs, hairPart };
+          expect(PoppetjeSchema.parse(JSON.parse(JSON.stringify(styled)))).toEqual(styled);
+        }
+      }
+    }
+  });
+
+  it('reaches all styling choices on every cut and every part on each fringe', () => {
+    const cast = Array.from({ length: 6000 }, (_, n) =>
+      initialPoppetjeForGezel(`hair-crew-${n}`, 'Crew'),
+    );
+    for (const hairShape of HAIR_SHAPES) {
+      const figures = cast.filter((p) => p.hairShape === hairShape);
+      if (hairShape === 'bald' || hairShape === 'shaved') {
+        expect(figures.every((p) => p.bangs === null && p.hairPart === 'none')).toBe(true);
+      } else {
+        expect(new Set(figures.map((p) => p.bangs))).toEqual(new Set([null, ...BANGS_OPTIONS]));
+        for (const bangs of [null, ...BANGS_OPTIONS]) {
+          expect(new Set(figures.filter((p) => p.bangs === bangs).map((p) => p.hairPart))).toEqual(
+            new Set(HAIR_PART_OPTIONS),
+          );
+        }
+      }
+    }
   });
 });

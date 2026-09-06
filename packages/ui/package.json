@@ -10,12 +10,13 @@
     "build:embedded": "vite build --config vite.embedded.config.ts",
     "build:all": "vite build && node ../../scripts/check-ui-startup-budget.mjs dist/index.html && vite build --config vite.embedded.config.ts",
     "dev": "vite",
-    "poppetje:gallery": "tsx scripts/poppetje-gallery.tsx",
-    "poppetje:eval": "tsx scripts/poppetje-eval.ts",
+    "poppetje:gallery": "node scripts/poppetje-review.mjs gallery",
+    "poppetje:eval": "node scripts/poppetje-review.mjs eval",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist dist-embedded .turbo"
+    "clean": "rm -rf dist dist-embedded .turbo",
+    "poppetje:review": "node scripts/poppetje-review.mjs"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

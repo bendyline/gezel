@@ -12,18 +12,18 @@ export interface ResolvedLayout {
 
 /**
  * Resolve the Y positions of the five body width control points and the
- * head ellipse, given the figure-scale knobs. Mirrors the helper from
- * `poppetjes-handoff/engine.jsx`. The head intentionally dips into the
+ * head ellipse, given the figure-scale knobs. A generous head and shorter
+ * torso give the figure toy proportions. The head intentionally dips into the
  * body by ~22% of its radius — the join reads "turned wood", not glued.
  */
 export function resolveLayout(scale: { bodyScale: number; headScale: number }): ResolvedLayout {
   const baseY = 160;
-  const span = 96 * scale.bodyScale;
+  const span = 86 * scale.bodyScale;
   const shoulderY = baseY - span;
   const chestY = shoulderY + span * 0.18;
   const waistY = shoulderY + span * 0.42;
   const hipY = shoulderY + span * 0.72;
-  const headR = 22 * scale.headScale;
+  const headR = 25 * scale.headScale;
   const overlap = Math.max(4, headR * 0.22);
   const headCY = shoulderY - headR + overlap;
   return { baseY, hipY, waistY, chestY, shoulderY, headR, headCY };
@@ -66,6 +66,9 @@ export function buildBodyPath(arch: BodyArchetype, L: ResolvedLayout): string {
     `Q ${shoulderRight} ${shoulderY + 0.2}, ${shoulderRight} ${shoulderSideY}`,
     seg(shoulderSideY, shoulderW, chestY, chestW, waistY, waistW, 'R'),
     seg(waistY, waistW, hipY, hipW, baseY, baseW, 'R'),
+    `Q ${rx(baseW)} ${baseY + 2.8}, ${rx(baseW) - 3} ${baseY + 3.2}`,
+    `Q ${cx} ${baseY + 5.2}, ${lx(baseW) + 3} ${baseY + 3.2}`,
+    `Q ${lx(baseW)} ${baseY + 2.8}, ${lx(baseW)} ${baseY}`,
     'Z',
   ].join(' ');
 }

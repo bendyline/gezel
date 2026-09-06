@@ -148,8 +148,26 @@ export type HatOption = (typeof HAT_OPTIONS)[number];
 export const DRESS_OPTIONS = ['scarf', 'apron', 'collar', 'turtleneck'] as const;
 export type DressOption = (typeof DRESS_OPTIONS)[number];
 
-export const HAIR_SHAPES = ['halo', 'short', 'long', 'bun', 'braids', 'shaved', 'bald'] as const;
+export const HAIR_SHAPES = [
+  'halo',
+  'short',
+  'bob',
+  'medium',
+  'long',
+  'extra-long',
+  'bun',
+  'braids',
+  'shaved',
+  'bald',
+] as const;
 export type HairShape = (typeof HAIR_SHAPES)[number];
+
+/** Fringe and part are independent of length; null bangs leave the forehead open. */
+export const BANGS_OPTIONS = ['straight', 'side-swept', 'curtain', 'short'] as const;
+export type BangsOption = (typeof BANGS_OPTIONS)[number];
+/** Left/right follow the viewer's perspective, matching the appearance preview. */
+export const HAIR_PART_OPTIONS = ['none', 'center', 'left', 'right'] as const;
+export type HairPart = (typeof HAIR_PART_OPTIONS)[number];
 
 /**
  * Wearable accessories — things a gezel can put on or take off, so
@@ -384,6 +402,7 @@ export const PALETTE = {
 
 /** Slot odds tuned for balanced diversity in seed-based generation. */
 export const SLOT_ODDS = {
+  bangs: 0.45,
   hat: 0.3,
   dress: 0.22,
   accessory: 0.5,

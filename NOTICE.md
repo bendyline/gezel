@@ -204,7 +204,7 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.3.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.4.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — Metal/BLAS/CPU/RPC backends) | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `c1d4597a` (`main-2026-08-23`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-789-5114672` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |

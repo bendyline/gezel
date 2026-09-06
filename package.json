@@ -156,7 +156,8 @@
     "format": "node scripts/run-with-dependency-lease.mjs format:unleased",
     "format:unleased": "biome format --write .",
     "clean": "node scripts/run-with-dependency-lease.mjs clean:unleased",
-    "clean:unleased": "pnpm -r --filter \"@bendyline/gezel*\" --filter \"@bendyline/gezk*\" run clean"
+    "clean:unleased": "pnpm -r --filter \"@bendyline/gezel*\" --filter \"@bendyline/gezk*\" run clean",
+    "poppetje:review": "node packages/ui/scripts/poppetje-review.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

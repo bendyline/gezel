@@ -27,6 +27,8 @@ export interface ItemCtx {
   scarfBandFill?: string;
   shirtFill?: string;
   shirtAccentFill?: string;
+  linenFill?: string;
+  strawFill?: string;
   /** Hair-zone accessories hide under a hat. */
   hasHat: boolean;
 }
@@ -54,7 +56,7 @@ export function renderHatCrown(hat: HatOption | null, ctx: ItemCtx): JSX.Element
     return (
       <>
         <path
-          d="M -22 -8 C -22 -23, -11 -29, 0 -29 C 11 -29, 22 -23, 22 -8 C 16 -11, 8 -13, 0 -13 C -8 -13, -16 -11, -22 -8 Z"
+          d="M -22 -8 C -22 -23, -11 -29, 0 -29 C 11 -29, 22 -23, 22 -8 C 12 -4, -12 -4, -22 -8 Z"
           fill={feltFill}
         />
         {/* Front bill — seen face-on it reads as a lens-shaped curve
@@ -113,7 +115,7 @@ export function renderHatCrown(hat: HatOption | null, ctx: ItemCtx): JSX.Element
         <ellipse cx={0} cy={-8.5} rx={29} ry={4.2} fill="#b98942" />
         <path
           d="M -18 -9 C -18 -23, -9 -29, 0 -29 C 9 -29, 18 -23, 18 -9 C 12 -11, 6 -12, 0 -12 C -6 -12, -12 -11, -18 -9 Z"
-          fill="#cda75d"
+          fill={ctx.strawFill ?? '#cda75d'}
         />
         {/* Hat band */}
         <ellipse cx={0} cy={-10} rx={18} ry={1.25} fill="#5b3518" opacity={0.5} />
@@ -131,7 +133,7 @@ export function renderHatCrown(hat: HatOption | null, ctx: ItemCtx): JSX.Element
     return (
       <>
         <path
-          d="M -22 -8 C -23 -21, -11 -28, 0 -28 C 11 -28, 23 -21, 22 -8 C 16 -11, 8 -13, 0 -13 C -8 -13, -16 -11, -22 -8 Z"
+          d="M -22 -8 C -23 -21, -11 -28, 0 -28 C 11 -28, 23 -21, 22 -8 C 12 -4, -12 -4, -22 -8 Z"
           fill={feltFill}
         />
         <circle cx={0} cy={-25} r={1} fill={feltBandFill} />
@@ -253,7 +255,7 @@ export function renderDress(dress: DressOption | null, ctx: ItemCtx): JSX.Elemen
               L ${40 + 7} ${L.chestY - 0.5}
               L ${40 + 8.5} ${L.waistY - 0.5}
               L ${40 - 8.5} ${L.waistY - 0.5} Z`}
-          fill="#e6dabb"
+          fill={ctx.linenFill ?? '#e6dabb'}
         />
         {/* Skirt — gently flared, hem dips at center so the cloth
             reads as draping over the figure instead of a flat card. */}
@@ -267,7 +269,7 @@ export function renderDress(dress: DressOption | null, ctx: ItemCtx): JSX.Elemen
               C ${40 - arch.hipW * 0.47} ${L.hipY + 4},
                 ${40 - arch.hipW * 0.5} ${L.hipY},
                 ${40 - arch.waistW * 0.47} ${L.waistY} Z`}
-          fill="#e6dabb"
+          fill={ctx.linenFill ?? '#e6dabb'}
         />
         {/* Patch pocket */}
         <path
@@ -294,29 +296,30 @@ export function renderDress(dress: DressOption | null, ctx: ItemCtx): JSX.Elemen
       <g stroke="rgba(60,40,15,0.4)" strokeWidth={0.45} strokeLinejoin="round">
         <path
           d={`M ${40 - 9} ${L.shoulderY + 1} L ${40} ${L.shoulderY + 11} L ${40 - 13} ${L.shoulderY + 8.5} Z`}
-          fill="#f0e8d0"
+          fill={ctx.linenFill ?? '#f0e8d0'}
         />
         <path
           d={`M ${40 + 9} ${L.shoulderY + 1} L ${40} ${L.shoulderY + 11} L ${40 + 13} ${L.shoulderY + 8.5} Z`}
-          fill="#f0e8d0"
+          fill={ctx.linenFill ?? '#f0e8d0'}
         />
       </g>
     );
   }
   if (dress === 'turtleneck') {
     return (
-      /* Cowl wide enough to peek around the chin — the head ellipse
-         spans ±16.5 at collar height, so anything narrower is fully
-         hidden behind the face (the old rx=11 version was invisible).
-         Pure shirt color + a light top rim: the body gradient is
-         accent-dark at these x positions, so the lighter cowl pops
-         against it (an accent-tinted cowl vanished into the body). */
+      /* Keep the rolled collar below the chin across head scales. A cowl
+         centered above the shoulders was completely hidden by larger heads. */
       <g>
-        <ellipse cx={40} cy={L.shoulderY - 3} rx={19} ry={7} fill={ctx.shirtFill ?? shirt} />
-        <ellipse cx={40} cy={L.shoulderY - 5.2} rx={16.5} ry={3.4} fill="rgba(255,245,225,0.22)" />
-        <g stroke="rgba(0,0,0,0.2)" strokeWidth={0.55}>
-          {[-17.5, -15, -12.5, 12.5, 15, 17.5].map((k) => (
-            <line key={k} x1={40 + k} y1={L.shoulderY - 7} x2={40 + k} y2={L.shoulderY + 1.5} />
+        <ellipse cx={40} cy={L.shoulderY + 4} rx={19} ry={6.5} fill={ctx.shirtFill ?? shirt} />
+        <path
+          d={`M 22 ${L.shoulderY + 3} Q 40 ${L.shoulderY + 12}, 58 ${L.shoulderY + 3}`}
+          fill="none"
+          stroke="rgba(255,245,225,0.22)"
+          strokeWidth={1.2}
+        />
+        <g stroke="rgba(0,0,0,0.16)" strokeWidth={0.55}>
+          {[-14, -10, -6, 6, 10, 14].map((k) => (
+            <line key={k} x1={40 + k} y1={L.shoulderY + 5} x2={40 + k} y2={L.shoulderY + 8.5} />
           ))}
         </g>
       </g>
