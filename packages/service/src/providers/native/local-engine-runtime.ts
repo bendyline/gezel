@@ -13,7 +13,7 @@ import {
 import { ds4VisionResidentBytes } from '../ds4/residency.js';
 import { buildLlamaCppProvider, ensureLlamaEngineStatus } from '../llama-cpp/build-provider.js';
 import { readGgufSummaryAsync } from '../llama-cpp/gguf-metadata-async.js';
-import type { GgufSummary } from '../llama-cpp/gguf-metadata.js';
+import { type GgufSummary, effectiveLazyTensorBytes } from '../llama-cpp/gguf-metadata.js';
 import {
   type LlamaCppKvCacheType,
   isGemmaModel,
@@ -758,7 +758,35 @@ export class LocalEngineRuntime {
           // `approxSizeBytes` is the weights alone; a multimodal entry also
           // loads its projector, which the catalog sizes separately.
           const mmprojBytes = provider === 'llama-cpp' ? (cm.llamaCpp?.mmproj?.sizeBytes ?? 0) : 0;
-          bytes = CapacityBroker.estimateResidentBytes(provider, block.approxSizeBytes, {
+          let residentWeightFileBytes = block.approxSizeBytes;
+          if (provider === 'llama-cpp') {
+            // v0.4 can leave architecture-marked row-addressable embeddings
+            // file-backed (notably Qwen 3.8 Flash Next's 51B-parameter
+            // PLE/engram table). Inspect the installed split GGUF before the pool's
+            // preflight reservation; otherwise it rejects the model before
+            // buildLlamaCppProvider gets a chance to make the same deduction.
+            const installed = await this.llamaCppModels?.resolveModel(modelId).catch(() => null);
+            if (installed?.weightsPath) {
+              const [summary, config, perModel] = await Promise.all([
+                readGgufSummaryAsync(installed.weightsPath, { includeTensorSizes: true }).catch(
+                  () => null,
+                ),
+                this.store.readConfig(),
+                resolveCatalogLlamaCppEngineConfig(this.catalog, modelId),
+              ]);
+              if (summary) {
+                residentWeightFileBytes = Math.max(
+                  0,
+                  residentWeightFileBytes -
+                    effectiveLazyTensorBytes(
+                      summary,
+                      config.llamaCppLazyMode ?? perModel?.lazyMode ?? 'auto',
+                    ),
+                );
+              }
+            }
+          }
+          bytes = CapacityBroker.estimateResidentBytes(provider, residentWeightFileBytes, {
             mmprojBytes,
           });
         }
@@ -1455,14 +1483,25 @@ export class LocalEngineRuntime {
       override: config.llamaCppKvCacheType,
     });
     // Header-exact per-slot KV for the slot ceiling (M2); the
-    // weights-scaled heuristic only when the GGUF is unreadable.
-    // Metadata-only read — this path never needs tensor sizes.
+    // weights-scaled heuristic only when the GGUF is unreadable. Tensor sizes
+    // also expose Qwen/Gemma's v0.4 lazy embedding range, which must not be
+    // advertised as resident RAM/VRAM in the Settings preview.
     let summary: GgufSummary | null = null;
     try {
-      summary = await readGgufSummaryAsync(installed.weightsPath);
+      summary = await readGgufSummaryAsync(installed.weightsPath, { includeTensorSizes: true });
     } catch {
       summary = null;
     }
+    const lazyTensorBytes = summary
+      ? effectiveLazyTensorBytes(
+          summary,
+          config.llamaCppLazyMode ?? manifestEngineConfig?.lazyMode ?? 'auto',
+        )
+      : 0;
+    const residentWeightFileBytes = Math.max(0, installed.approxSizeBytes - lazyTensorBytes);
+    const residentWeightsBytes = estimateLlamaCppResidentBytes(residentWeightFileBytes, {
+      mmprojBytes: visionBudgetBytes,
+    });
     const exactPerSlotKvF16 = summary
       ? estimateExactPerSlotKvBytesF16(
           {
@@ -1520,13 +1559,10 @@ export class LocalEngineRuntime {
         ctx,
       );
       if (perSlotF16 === undefined) return undefined;
-      const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: visionBudgetBytes,
-      });
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
-        single: Math.round(weightsBytes + perSlotBytes),
-        reserved: Math.round(weightsBytes + perSlotBytes * slotCount),
+        single: Math.round(residentWeightsBytes + perSlotBytes),
+        reserved: Math.round(residentWeightsBytes + perSlotBytes * slotCount),
         slots: slotCount,
       };
     };
@@ -1568,7 +1604,7 @@ export class LocalEngineRuntime {
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
         sizingBudgetBytes: capacity.concurrencySizingBytes,
-        weightsBytes: installed.approxSizeBytes,
+        weightsBytes: residentWeightFileBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
         committedOtherBytes,
@@ -1600,9 +1636,7 @@ export class LocalEngineRuntime {
               plannedResidentBytes: planned.single,
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
-              weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                mmprojBytes: visionBudgetBytes,
-              }),
+              weightsResidentBytes: residentWeightsBytes,
             }
           : {}),
         ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
@@ -1678,7 +1712,7 @@ export class LocalEngineRuntime {
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
           sizingBudgetBytes: capacity.concurrencySizingBytes,
-          weightsBytes: installed.approxSizeBytes,
+          weightsBytes: residentWeightFileBytes,
           perTurnCtxTokens: ctxTokens,
           kvCacheType: kvType,
           committedOtherBytes,
@@ -1719,13 +1753,10 @@ export class LocalEngineRuntime {
           ? exact / referenceCtx
           : estimatePerSlotKvBytes({
               perTurnCtxTokens: referenceCtx,
-              weightsBytes: installed.approxSizeBytes,
+              weightsBytes: residentWeightFileBytes,
               kvCacheType: kvType,
             }) / referenceCtx;
       };
-      const weightsResidentBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: visionBudgetBytes,
-      });
       const planFitsAt = (kvType: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
         // `minimumPerTurnCtxTokens: ctxTokens` makes this ask for the WHOLE
         // window — a plan admission would only accept by clamping does not
@@ -1735,7 +1766,7 @@ export class LocalEngineRuntime {
           slots: slotCount,
           minimumPerTurnCtxTokens: ctxTokens,
           kvBytesPerToken: kvBytesPerTokenFor(kvType),
-          weightsResidentBytes,
+          weightsResidentBytes: residentWeightsBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...(capacity.freeSystemRamBytes !== undefined
@@ -1787,9 +1818,7 @@ export class LocalEngineRuntime {
           slots,
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
-          weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-            mmprojBytes: visionBudgetBytes,
-          }),
+          weightsResidentBytes: residentWeightsBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...(capacity.freeSystemRamBytes !== undefined
@@ -1841,11 +1870,7 @@ export class LocalEngineRuntime {
               slots,
               minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
               kvBytesPerToken: windowed.bytesPerToken,
-              weightsResidentBytes:
-                estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                  mmprojBytes: visionBudgetBytes,
-                }) +
-                windowed.fixedBytes * slots,
+              weightsResidentBytes: residentWeightsBytes + windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
               ...(capacity.freeSystemRamBytes !== undefined
@@ -1885,9 +1910,7 @@ export class LocalEngineRuntime {
             slots,
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
-            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: visionBudgetBytes,
-            }),
+            weightsResidentBytes: residentWeightsBytes,
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: capacity.budgetKind,
@@ -1947,9 +1970,7 @@ export class LocalEngineRuntime {
             plannedResidentBytes: planned.single,
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
-            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: visionBudgetBytes,
-            }),
+            weightsResidentBytes: residentWeightsBytes,
           }
         : {}),
       ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),

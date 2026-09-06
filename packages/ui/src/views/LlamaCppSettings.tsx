@@ -851,9 +851,11 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           Loads rows from very large eligible tensors only when they are used. Auto follows
-          llama.cpp's 4 GiB threshold; forcing On can cut resident memory for unusually large
-          embeddings but trades decode speed for storage reads and requires a memory-mapped load
-          mode. Takes effect the next time the engine starts.
+          llama.cpp's 4 GiB threshold; this is what lets models such as Qwen 3.8 Flash Next leave
+          their large engram embedding table on fast storage instead of holding all of it in RAM.
+          Forcing On can cut resident memory for smaller eligible embeddings but trades decode speed
+          for storage reads. The engine memory-maps lazy ranges independently of the general loading
+          choice above. Takes effect the next time the engine starts.
         </p>
         <p className="muted small" style={{ marginTop: '0.5rem', marginLeft: '10rem' }}>
           More engine flags (an explicit GPU-layer count, partial expert split, prompt-reuse size,

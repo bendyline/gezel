@@ -40,7 +40,7 @@ import {
 } from './devices.js';
 import { type PlannerOffloadDecision, buildLlamaCppEngineArgs } from './engine-flags.js';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
-import type { GgufSummary } from './gguf-metadata.js';
+import { type GgufSummary, effectiveLazyTensorBytes } from './gguf-metadata.js';
 import {
   type LlamaCppKvCacheType,
   isGemmaModel,
@@ -476,12 +476,18 @@ export async function buildLlamaCppProvider(opts: {
   // kvCacheType or slot config disables the trade.
   // Header-exact per-slot KV for the slot ceiling (M2); the weights
   // heuristic only when no readable GGUF is at hand (external base URL,
-  // manual model path). Metadata-only read — the tensor-size walk for the
-  // offload planner happens later and separately.
+  // manual model path). The tensor-size walk is cached and reused by the
+  // offload planner below; doing it here is what exposes lazy sibling shards
+  // soon enough for slot and KV admission.
   let headerSummary: GgufSummary | null = null;
   if (modelPath) {
     try {
-      headerSummary = await readGgufSummaryAsync(modelPath);
+      // Include exact tensor sizes here as well as below. Split GGUFs can put
+      // Qwen's 51B-parameter per-layer embedding table in a dedicated sibling
+      // shard (~26.8 GiB in the IQ4 build); pricing only shard 1 (often
+      // metadata-only) makes a lazy-loadable model look far larger in RAM than
+      // the engine actually runs it.
+      headerSummary = await readGgufSummaryAsync(modelPath, { includeTensorSizes: true });
     } catch {
       headerSummary = null;
     }
@@ -513,13 +519,20 @@ export async function buildLlamaCppProvider(opts: {
   // SSM/SWA component (over-reserving is the safe direction, and Gemma
   // never takes the cap ladder anyway).
   const planTimeCtx = effectiveNumCtx;
+  const effectiveLazyMode = config.llamaCppLazyMode ?? manifestEngineConfig?.lazyMode ?? 'auto';
+  const planApproxWeightsBytes =
+    modelCatalogInfo?.approxSizeBytes ?? headerSummary?.fileSizeBytes ?? 8 * 1024 ** 3;
+  const planLazyBytes = headerSummary
+    ? effectiveLazyTensorBytes(headerSummary, effectiveLazyMode)
+    : 0;
+  const planWeightsBytes = Math.max(0, planApproxWeightsBytes - planLazyBytes);
   const ceilingFor = (kv: LlamaCppKvCacheType, ctxTokens: number) =>
     llamaCppSlotCeiling({
       budgetBytes,
       sizingBudgetBytes: brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : hostCapacity.concurrencySizingBytes,
-      weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
+      weightsBytes: planWeightsBytes,
       perTurnCtxTokens: ctxTokens,
       kvCacheType: kv,
       committedOtherBytes,
@@ -530,11 +543,9 @@ export async function buildLlamaCppProvider(opts: {
   // The admission this launch is held to further down, asked here at plan
   // time so the ladder can tell "does not fit at all" from "fits in exactly
   // one slot" — `ceilingFor` is floored at 1 and cannot. See the `fitsAt`
-  // contract in planLlamaCppKv. Priced from the header read above; the
-  // fuller GGUF walk has not happened yet, so this uses the same catalog
-  // weights figure `ceilingFor` already trusts.
+  // contract in planLlamaCppKv. Priced from the cached exact GGUF walk above,
+  // including any v0.4 lazy-tensor deduction.
   const PLAN_REFERENCE_CTX = 4096;
-  const planWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
   const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
     mmprojBytes: visionBudgetBytes,
   });
@@ -777,16 +788,23 @@ export async function buildLlamaCppProvider(opts: {
         ggufHasMtp = mtpLayerCount > 0;
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
-      const residentBytes = estimateLlamaCppResidentBytes(approxBytes, {
+      const lazyTensorBytes = effectiveLazyTensorBytes(summary, effectiveLazyMode);
+      const residentWeightBytes = Math.max(0, approxBytes - lazyTensorBytes);
+      const residentBytes = estimateLlamaCppResidentBytes(residentWeightBytes, {
         mmprojBytes: visionBudgetBytes,
       });
+      if (lazyTensorBytes > 0) {
+        log.info(
+          `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: lazy-reading ${(lazyTensorBytes / 1024 ** 3).toFixed(1)} GiB of row-addressable embeddings from the GGUF; budgeting ${(residentWeightBytes / 1024 ** 3).toFixed(1)} GiB as resident model weights`,
+        );
+      }
       const vramBytes = maxGpuVramBytes(llamaDevices);
       const split =
         summary.nonExpertBytes !== undefined &&
         summary.expertBytesByLayer !== undefined &&
         summary.expertBytesByLayer.length > 0
           ? {
-              nonExpertBytes: summary.nonExpertBytes,
+              nonExpertBytes: Math.max(0, summary.nonExpertBytes - lazyTensorBytes),
               expertBytesByLayer: summary.expertBytesByLayer,
             }
           : undefined;
@@ -795,7 +813,7 @@ export async function buildLlamaCppProvider(opts: {
         summary.denseFfnBytesByLayer !== undefined &&
         summary.denseFfnBytesByLayer.length > 0
           ? {
-              nonFfnBytes: summary.nonDenseFfnBytes,
+              nonFfnBytes: Math.max(0, summary.nonDenseFfnBytes - lazyTensorBytes),
               ffnBytesByLayer: summary.denseFfnBytesByLayer,
             }
           : undefined;
