@@ -49,7 +49,8 @@ except Exception:
 
 FRAMEWORK_RULES = {
     "daemon-crash", "spawn-error", "engine-hung",
-    "chat-template-500", "scheduler-voorman-deadlock", "render-killed",
+    "chat-template-500", "scheduler-voorman-deadlock", "scheduler-draft-deadlock",
+    "render-killed",
 }
 ENVIRONMENT_RULES = {"capacity-denial", "context-overflow"}
 

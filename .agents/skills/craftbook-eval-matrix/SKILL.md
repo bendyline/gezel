@@ -124,7 +124,7 @@ It prints the `book × model` pass grid and a **failure worklist grouped by a me
 
 | First-pass category | Comes from | What it means for you |
 |---|---|---|
-| `FRAMEWORK` | `failureClass: infra` with a harness rule (`daemon-crash`, `spawn-error`, `engine-hung`, `chat-template-500`, `scheduler-voorman-deadlock`, `render-killed`) | almost certainly a **framework bug** — confirm in Phase 3 |
+| `FRAMEWORK` | `failureClass: infra` with a harness rule (`daemon-crash`, `spawn-error`, `engine-hung`, `chat-template-500`, `scheduler-voorman-deadlock`, `scheduler-draft-deadlock`, `render-killed`) | almost certainly a **framework bug** — confirm in Phase 3 |
 | `ENVIRONMENT` | `infra` + `capacity-denial` / `context-overflow` | the box/model couldn't fit. Usually not a code bug — but `context-overflow` can also mean a **craftbook that over-feeds context** to a small model; check which |
 | `EVAL` | `failureClass: grader` (only ever set by the backfill re-classifier) | the grader was already proven wrong — an **eval bug** |
 | `RERUN` | `failureClass: operator` | interrupted (SIGINT/SIGTERM). Not a result — re-run it |

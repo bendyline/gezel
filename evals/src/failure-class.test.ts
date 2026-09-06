@@ -218,6 +218,22 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'scheduler-voorman-deadlock' });
   });
 
+  it('all-drafts-await-activation scheduler deadlock → infra', () => {
+    // An unattended trial has nobody to activate a draft, so the scheduler's
+    // (correct) refusal to nudge means the run can only go silent.
+    const line =
+      '[tasks] [scheduler] piano-practice: skip meester nudge — only draft task(s) await activation; not nudging or stabilizing';
+    const c = classifyTrial({ ...stall, daemonLog: Array(21).fill(line).join('\n') });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'scheduler-draft-deadlock' });
+  });
+
+  it('a couple of draft skips are routine — stays model', () => {
+    const line =
+      '[tasks] [scheduler] piano-practice: skip meester nudge — only draft task(s) await activation; not nudging or stabilizing';
+    const c = classifyTrial({ ...stall, daemonLog: Array(3).fill(line).join('\n') });
+    expect(c.failureClass).toBe('model');
+  });
+
   it('log signatures do NOT apply to non-stall failures', () => {
     // A success-check-false trial with an incidental old render-start in
     // the log must not be re-blamed on infra.
