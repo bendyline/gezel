@@ -476,23 +476,33 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.expertBytesTotal).toBe(4096 + 4096 + 8192);
     expect(s.nonExpertBytes).toBe(1024 + 2048 + 512 + 1024);
     expect(s.expertBytesByLayer).toEqual([8192, 8192]);
+    expect(s.denseFfnBytesTotal).toBe(0);
+    expect(s.nonDenseFfnBytes).toBe(1024 + 2048 + 4096 + 4096 + 8192 + 512 + 1024);
+    expect(s.denseFfnBytesByLayer).toEqual([]);
   });
 
-  it('reports zero expert bytes for a dense model', () => {
+  it('reports zero expert bytes and sizes dense FFN by layer for a dense model', () => {
     const blob = new GgufBuilder()
       .header(3)
       .metaString('general.architecture', 'llama')
+      .metaU32('llama.block_count', 2)
       .tensor('token_embd.weight', 1024)
       .tensor('blk.0.attn_q.weight', 2048)
       .tensor('blk.0.ffn_gate.weight', 4096)
+      .tensor('blk.0.ffn_up.weight', 4096)
+      .tensor('blk.1.ffn_down.weight', 8192)
+      .tensor('blk.1.ffn_gate_shexp.weight', 512)
       .finish();
     const path = join(dir, 'dense-tensors.gguf');
     writeFileSync(path, blob);
 
     const s = readGgufSummary(path, { includeTensorSizes: true });
     expect(s.expertBytesTotal).toBe(0);
-    expect(s.nonExpertBytes).toBe(1024 + 2048 + 4096);
+    expect(s.nonExpertBytes).toBe(1024 + 2048 + 4096 + 4096 + 8192 + 512);
     expect(s.expertBytesByLayer).toEqual([]);
+    expect(s.denseFfnBytesTotal).toBe(4096 + 4096 + 8192);
+    expect(s.nonDenseFfnBytes).toBe(1024 + 2048 + 512);
+    expect(s.denseFfnBytesByLayer).toEqual([8192, 8192]);
   });
 
   it('leaves sizing fields unset when not asked for them', () => {
@@ -509,6 +519,9 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.expertBytesTotal).toBeUndefined();
     expect(s.nonExpertBytes).toBeUndefined();
     expect(s.expertBytesByLayer).toBeUndefined();
+    expect(s.denseFfnBytesTotal).toBeUndefined();
+    expect(s.nonDenseFfnBytes).toBeUndefined();
+    expect(s.denseFfnBytesByLayer).toBeUndefined();
   });
 });
 

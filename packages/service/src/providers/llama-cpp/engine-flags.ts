@@ -4,7 +4,7 @@
  * unit-tested in isolation. It owns only the flags that were NOT
  * already computed by the launcher (`--model`, `--ctx-size`,
  * `--parallel`, `--slot-save-path`, `--cache-type-k/v`, `--jinja`,
- * `--mlock`, `--mmproj`, `--reasoning-budget` stay in the launcher).
+ * `--mmproj` and `--reasoning-budget` stay in the launcher).
  *
  * Three input layers, merged per-field with this precedence (first
  * defined wins):
@@ -30,6 +30,11 @@ export interface GlobalLlamaCppFlags {
   llamaCppNGpuLayers?: number;
   llamaCppCpuMoe?: boolean;
   llamaCppNCpuMoe?: number;
+  llamaCppNCpuFfn?: number;
+  llamaCppLoadMode?: 'auto' | 'none' | 'mmap' | 'mlock' | 'mmap+mlock' | 'dio';
+  /** Legacy input, translated to v0.4.0's `--load-mode mlock`. */
+  llamaCppMlock?: boolean;
+  llamaCppLazyMode?: 'on' | 'auto' | 'off';
   llamaCppCacheReuse?: number;
   llamaCppSwaFull?: boolean;
   llamaCppThreads?: number;
@@ -46,6 +51,9 @@ export interface PerModelLlamaCppEngineConfig {
   nGpuLayers?: number;
   cpuMoe?: boolean;
   nCpuMoe?: number;
+  nCpuFfn?: number;
+  loadMode?: 'auto' | 'none' | 'mmap' | 'mlock' | 'mmap+mlock' | 'dio';
+  lazyMode?: 'on' | 'auto' | 'off';
   cacheReuse?: number;
   swaFull?: boolean;
   flashAttn?: 'on' | 'off' | 'auto';
@@ -62,6 +70,7 @@ export interface PlannerOffloadDecision {
   nGpuLayers?: number;
   cpuMoe?: boolean;
   nCpuMoe?: number;
+  nCpuFfn?: number;
   /** Human-readable reason, for the decision log (not emitted as a flag). */
   reason?: string;
 }
@@ -207,6 +216,25 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     args.push('--n-cpu-moe', String(nCpuMoe));
   }
 
+  // ── Dense FFN offload (`--n-cpu-ffn`) ────────────────────────────
+  // Zero is an explicit "do not offload" sentinel: omit the CLI flag but
+  // suppress the planner. Positive values pin the first N blocks' dense
+  // FFN tensors to CPU while `-ngl all` can keep attention on the GPU.
+  const explicitNCpuFfn = config.llamaCppNCpuFfn ?? perModel?.nCpuFfn;
+  const nCpuFfn = explicitNCpuFfn ?? planner?.nCpuFfn;
+  if (typeof nCpuFfn === 'number' && nCpuFfn > 0) {
+    args.push('--n-cpu-ffn', String(nCpuFfn));
+  }
+
+  // ── Model loading (`--load-mode` / `--lazy-mode`) ────────────────
+  // v0.4.0 consolidates mmap/mlock/direct-I/O under --load-mode. Preserve
+  // the old `llamaCppMlock` setting without emitting its deprecated flag.
+  const loadMode =
+    config.llamaCppLoadMode ?? (config.llamaCppMlock ? 'mlock' : undefined) ?? perModel?.loadMode;
+  if (loadMode) args.push('--load-mode', loadMode);
+  const lazyMode = config.llamaCppLazyMode ?? perModel?.lazyMode;
+  if (lazyMode) args.push('--lazy-mode', lazyMode);
+
   // ── Flash attention (`--flash-attn on|off|auto`) ──────────────────
   let flashAttn = normalizeFlashAttn(config.llamaCppFlashAttn) ?? perModel?.flashAttn;
   // Coherence: quantized KV cache wants FA on for the fast path. Only
@@ -299,7 +327,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (reasoningFormat) args.push('--reasoning-format', reasoningFormat);
 
   // ── Cross-turn reasoning history (`--reasoning-preserve`) ─────────
-  if (reasoningPreserve) args.push('--reasoning-preserve');
+  if (reasoningPreserve === true) args.push('--reasoning-preserve');
+  else if (reasoningPreserve === false) args.push('--no-reasoning-preserve');
 
   // ── Escape hatch (`llamaCppExtraArgs`) — applied last, wins ────────
   if (config.llamaCppExtraArgs) {

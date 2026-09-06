@@ -27,6 +27,7 @@ export * from './history.js';
 export * from './index-readiness.js';
 export * from './gilde-updates.js';
 export * from './knowledge.js';
+export * from './llama-cpp-config.js';
 export * from './keurmeester.js';
 export * from './meester-status.js';
 export * from './ambient-dashboard.js';

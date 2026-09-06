@@ -29,6 +29,7 @@ export interface ItemCtx {
   shirtAccentFill?: string;
   linenFill?: string;
   strawFill?: string;
+  hoodFill?: string;
   /** Hair-zone accessories hide under a hat. */
   hasHat: boolean;
 }
@@ -156,27 +157,41 @@ export function renderHatCrown(hat: HatOption | null, ctx: ItemCtx): JSX.Element
 export function renderHood(ctx: ItemCtx): JSX.Element {
   return (
     <>
+      {/* A fitted dome follows the skull. The curved opening leaves a thin
+          rolled edge, which gathers gently at the neck instead of flaring. */}
       <path
-        d="M -15 20
-           C -24 9, -26 -10, -24 -20
-           C -22 -28, -12 -31, 0 -31
-           C 12 -31, 22 -28, 24 -20
-           C 26 -10, 24 9, 15 20
-           L 9 20
-           C 15 8, 16 -9, 13 -15
-           C 7 -18, -7 -18, -13 -15
-           C -16 -9, -15 8, -9 20
-           Z"
-        fill={ctx.shirtAccentFill ?? ctx.shirtAccent}
+        d="M -14 20
+           C -20 15, -24 5, -24 -5
+           C -24 -18, -14 -29, -1 -29
+           C 12 -29, 23 -18, 24 -5
+           C 25 6, 20 17, 14 21
+           Q 12 22, 10 20
+           C 16 13, 19 3, 18 -7
+           C 17 -17, 9 -22, 0 -22
+           C -9 -22, -17 -17, -18 -7
+           C -19 3, -16 13, -10 20
+           Q -12 22, -14 20 Z"
+        fill={ctx.hoodFill ?? ctx.shirtAccentFill ?? ctx.shirtAccent}
       />
-      {/* Soft inner rim along the face opening so the hood reads as
-          a recessed cowl rather than a flat cutout. */}
+      {/* One continuous inside edge follows both cheeks and the brow. */}
       <path
-        d="M 13 -15 C 7 -18, -7 -18, -13 -15 C -16 -9, -15 8, -9 20"
+        d="M -10 20 C -16 13, -19 3, -18 -7
+           C -17 -17, -9 -22, 0 -22
+           C 9 -22, 17 -17, 18 -7
+           C 19 3, 16 13, 10 20"
         fill="none"
         stroke="#1a1410"
-        strokeWidth={0.9}
-        strokeOpacity={0.16}
+        strokeWidth={0.75}
+        strokeOpacity={0.19}
+        strokeLinecap="round"
+      />
+      <path
+        d="M -21 -5 C -21 -16, -12 -25.5, -1 -26
+           M -21 7 Q -18 16, -13 19 M 21 8 Q 18 16, 13 20"
+        fill="none"
+        stroke={ctx.shirt}
+        strokeWidth={0.85}
+        strokeOpacity={0.32}
         strokeLinecap="round"
       />
     </>

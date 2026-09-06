@@ -195,6 +195,11 @@ describe('operational API surface', () => {
       llamaCppFlashAttn: 'on',
       llamaCppSpecType: 'ngram-simple',
       llamaCppCpuMoe: true,
+      llamaCppNCpuFfn: 12,
+      llamaCppMlock: true,
+      llamaCppLoadMode: 'mmap+mlock',
+      llamaCppLazyMode: 'on',
+      llamaCppReasoningPreserve: true,
       llamaCppSwaFull: true,
     };
     const update = await api('PUT', '/api/config', overrides);
@@ -212,6 +217,11 @@ describe('operational API surface', () => {
       llamaCppFlashAttn: null,
       llamaCppSpecType: null,
       llamaCppCpuMoe: null,
+      llamaCppNCpuFfn: null,
+      llamaCppMlock: null,
+      llamaCppLoadMode: null,
+      llamaCppLazyMode: null,
+      llamaCppReasoningPreserve: null,
       llamaCppSwaFull: null,
     });
     expect(cleared.status).toBe(200);
@@ -220,6 +230,11 @@ describe('operational API surface', () => {
     expect(clearedBody.llamaCppFlashAttn).toBeUndefined();
     expect(clearedBody.llamaCppSpecType).toBeUndefined();
     expect(clearedBody.llamaCppCpuMoe).toBeUndefined();
+    expect(clearedBody.llamaCppNCpuFfn).toBeUndefined();
+    expect(clearedBody.llamaCppMlock).toBeUndefined();
+    expect(clearedBody.llamaCppLoadMode).toBeUndefined();
+    expect(clearedBody.llamaCppLazyMode).toBeUndefined();
+    expect(clearedBody.llamaCppReasoningPreserve).toBeUndefined();
     expect(clearedBody.llamaCppSwaFull).toBeUndefined();
   });
 

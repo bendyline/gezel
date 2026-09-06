@@ -244,6 +244,7 @@ export function Poppetje({
     shirtAccentFill: `url(#${id}-accent)`,
     linenFill: `url(#${id}-linen)`,
     strawFill: `url(#${id}-straw)`,
+    hoodFill: `url(#${id}-hood)`,
     hasHat: !!hat,
   };
 
@@ -366,6 +367,13 @@ export function Poppetje({
           <stop offset="0.42" stopColor={scarfBandLight} />
           <stop offset="1" stopColor={scarfBandShadow} />
         </linearGradient>
+        {hat === 'hood' && (
+          <radialGradient id={`${id}-hood`} gradientUnits="userSpaceOnUse" cx={-10} cy={-22} r={51}>
+            <stop offset="0" stopColor={mixHex(shirtAccent, shirt, 0.5)} />
+            <stop offset="0.55" stopColor={shirtAccent} />
+            <stop offset="1" stopColor={mixHex(shirtAccent, '#241b16', 0.28)} />
+          </radialGradient>
+        )}
         <linearGradient id={`${id}-accent`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor={bodyRim} />
           <stop offset="0.42" stopColor={mixHex(shirtAccent, '#fff0d0', 0.16)} />

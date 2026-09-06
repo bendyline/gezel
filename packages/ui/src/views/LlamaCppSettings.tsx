@@ -28,6 +28,8 @@ type KvCacheType = NonNullable<ConfigResponse['llamaCppKvCacheType']>;
 type SpecType = NonNullable<ConfigResponse['llamaCppSpecType']>;
 type FlashAttnMode = 'auto' | 'on' | 'off';
 type TriState = 'auto' | 'on' | 'off';
+type LoadMode = NonNullable<ConfigResponse['llamaCppLoadMode']>;
+type LazyMode = NonNullable<ConfigResponse['llamaCppLazyMode']>;
 
 /** Map a nullable boolean config override to the tri-state select value. */
 function triStateValue(v: boolean | null | undefined): TriState {
@@ -139,6 +141,9 @@ function needsRestart(
 export function LlamaCppSettings({ config, onConfigChanged, health, title }: Props) {
   const [baseUrlDraft, setBaseUrlDraft] = useState(config?.llamaCppBaseUrl ?? '');
   const [modelPathDraft, setModelPathDraft] = useState(config?.llamaCppModelPath ?? '');
+  const [nCpuFfnDraft, setNCpuFfnDraft] = useState(
+    config?.llamaCppNCpuFfn === undefined ? '' : String(config.llamaCppNCpuFfn),
+  );
   const [installed, setInstalled] = useState<LlamaCppInstalledModel[]>([]);
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
@@ -185,6 +190,9 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   useEffect(() => {
     setModelPathDraft(config?.llamaCppModelPath ?? '');
   }, [config?.llamaCppModelPath]);
+  useEffect(() => {
+    setNCpuFfnDraft(config?.llamaCppNCpuFfn === undefined ? '' : String(config.llamaCppNCpuFfn));
+  }, [config?.llamaCppNCpuFfn]);
 
   const refreshInstalled = useCallback(async () => {
     try {
@@ -343,6 +351,75 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     [onConfigChanged, showSavedState, showSavingState],
   );
 
+  const saveNCpuFfn = useCallback(async () => {
+    const trimmed = nCpuFfnDraft.trim();
+    const parsed = trimmed === '' ? null : Number(trimmed);
+    if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0)) return;
+    showSavingState('saving');
+    try {
+      const next = await api.updateConfig({ llamaCppNCpuFfn: parsed });
+      if (!mounted.current) return;
+      onConfigChanged(next);
+      showSavedState();
+    } catch {
+      showSavingState('idle');
+    }
+  }, [nCpuFfnDraft, onConfigChanged, showSavedState, showSavingState]);
+
+  const saveLoadMode = useCallback(
+    async (value: LoadMode) => {
+      showSavingState('saving');
+      try {
+        const next = await api.updateConfig({
+          llamaCppLoadMode: value === 'auto' ? null : value,
+          // Replace the deprecated setting so selecting Auto really means Auto.
+          llamaCppMlock: null,
+        });
+        if (!mounted.current) return;
+        onConfigChanged(next);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [onConfigChanged, showSavedState, showSavingState],
+  );
+
+  const saveLazyMode = useCallback(
+    async (value: LazyMode) => {
+      showSavingState('saving');
+      try {
+        const next = await api.updateConfig({
+          llamaCppLazyMode: value === 'auto' ? null : value,
+        });
+        if (!mounted.current) return;
+        onConfigChanged(next);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [onConfigChanged, showSavedState, showSavingState],
+  );
+
+  const saveReasoningPreserve = useCallback(
+    async (enabled: boolean) => {
+      showSavingState('saving');
+      try {
+        const next = await api.updateConfig({
+          // Off is the Gezel default; clear the override instead of pinning it.
+          llamaCppReasoningPreserve: enabled ? true : null,
+        });
+        if (!mounted.current) return;
+        onConfigChanged(next);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [onConfigChanged, showSavedState, showSavingState],
+  );
+
   const saveSwaFull = useCallback(
     async (value: TriState) => {
       showSavingState('saving');
@@ -363,14 +440,14 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   );
 
   const saveSpecType = useCallback(
-    async (value: SpecType | 'none') => {
+    async (value: SpecType | 'auto') => {
       showSavingState('saving');
       try {
         const next = await api.updateConfig({
-          // Unset is the persisted off/default state. Catalog MTP capability
-          // metadata never activates speculative decoding by itself. Send
-          // null, not undefined (see saveKvCacheType).
-          llamaCppSpecType: value === 'none' ? null : value,
+          // Unset is capability-gated Auto: MTP when the installed GGUF
+          // confirms a compatible head, off otherwise. `none` must remain an
+          // explicit value or it would silently re-enable MTP.
+          llamaCppSpecType: value === 'auto' ? null : value,
         });
         if (!mounted.current) return;
         onConfigChanged(next);
@@ -614,21 +691,80 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             Speculative decoding
           </label>
           <select
-            value={config?.llamaCppSpecType ?? 'none'}
-            onChange={(e) => void saveSpecType(e.target.value as SpecType | 'none')}
+            value={config?.llamaCppSpecType ?? 'auto'}
+            onChange={(e) => void saveSpecType(e.target.value as SpecType | 'auto')}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
+            <option value="auto">Auto — MTP when the model supports it (recommended)</option>
             <option value="none">Off</option>
             <option value="ngram-mod">N-gram lookup (no draft model)</option>
-            <option value="draft-mtp">Model MTP head (experimental)</option>
+            <option value="draft-mtp">Model MTP head (force when compatible)</option>
           </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
-          Drafts several tokens per step and verifies them against the target model. <em>N-gram</em>{' '}
-          needs no extra model and helps most on repetitive or structured output. <em>MTP</em> uses
-          the model's own prediction head, requires compatible downloaded weights, and may change
-          behavior on experimental engine/model combinations. Takes effect the next time the engine
-          starts.
+          Drafts several tokens per step and verifies them against the target model. <em>Auto</em>{' '}
+          enables MTP only when the installed weights confirm a compatible prediction head;
+          otherwise speculative decoding stays off. <em>N-gram</em> needs no extra model and helps
+          most on repetitive or structured output. Takes effect the next time the engine starts.
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+            Reasoning history
+          </label>
+          <select
+            value={config?.llamaCppReasoningPreserve === true ? 'on' : 'off'}
+            onChange={(e) => void saveReasoningPreserve(e.target.value === 'on')}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          >
+            <option value="off">Don't retain private reasoning (default)</option>
+            <option value="on">Retain across turns</option>
+          </select>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          Replays a model's private reasoning into later turns when its chat template supports it.
+          This can improve continuity in long tool loops, but consumes more context and can make a
+          model cling to an earlier approach. Gezel explicitly keeps both the engine template and
+          replay policy in sync. Takes effect the next time the engine starts.
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label
+            htmlFor="llama-cpp-n-cpu-ffn"
+            className="muted"
+            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+          >
+            Dense FFN offload
+          </label>
+          <input
+            id="llama-cpp-n-cpu-ffn"
+            type="number"
+            min={0}
+            step={1}
+            placeholder="Auto"
+            value={nCpuFfnDraft}
+            onChange={(e) => setNCpuFfnDraft(e.target.value)}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          />
+          <button
+            type="button"
+            disabled={
+              saving === 'saving' ||
+              !/^(?:|0|[1-9]\d*)$/.test(nCpuFfnDraft.trim()) ||
+              nCpuFfnDraft.trim() ===
+                (config?.llamaCppNCpuFfn === undefined ? '' : String(config.llamaCppNCpuFfn))
+            }
+            onClick={() => void saveNCpuFfn()}
+          >
+            Save
+          </button>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          Leave blank for Auto: when a dense model narrowly exceeds discrete GPU memory, Gezel keeps
+          attention on the GPU and moves only the smallest useful prefix of feed-forward layers to
+          safe system RAM. This avoids the larger speed loss of moving whole layers. Enter 0 to
+          disable the planner, or a positive layer count to pin <code>--n-cpu-ffn</code>. Takes
+          effect the next time the engine starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
@@ -673,6 +809,51 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <em>Auto</em> uses the full cache only when the model weights and full KV cache fit in
           fast memory — VRAM on a discrete GPU — and otherwise keeps the windowed cache. Takes
           effect the next time the engine starts.
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+            Model loading
+          </label>
+          <select
+            value={config?.llamaCppLoadMode ?? (config?.llamaCppMlock ? 'mlock' : 'auto')}
+            onChange={(e) => void saveLoadMode(e.target.value as LoadMode)}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          >
+            <option value="auto">Auto (recommended)</option>
+            <option value="mmap">Memory mapped</option>
+            <option value="none">Read into memory</option>
+            <option value="mlock">Locked in memory</option>
+            <option value="mmap+mlock">Memory mapped + locked</option>
+            <option value="dio">Direct I/O</option>
+          </select>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          Controls how model files enter memory. Auto normally uses memory mapping and is the best
+          general choice. Locked modes resist swapping but hold RAM away from other apps; Direct I/O
+          is for storage and platform troubleshooting. Existing <code>llamaCppMlock</code> settings
+          are translated to the new v0.4.0 load mode without a deprecation warning.
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+            Lazy tensor loading
+          </label>
+          <select
+            value={config?.llamaCppLazyMode ?? 'auto'}
+            onChange={(e) => void saveLazyMode(e.target.value as LazyMode)}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          >
+            <option value="auto">Auto — tensors above 4 GiB (recommended)</option>
+            <option value="on">On — always load eligible rows on demand</option>
+            <option value="off">Off — keep eligible tensors resident</option>
+          </select>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          Loads rows from very large eligible tensors only when they are used. Auto follows
+          llama.cpp's 4 GiB threshold; forcing On can cut resident memory for unusually large
+          embeddings but trades decode speed for storage reads and requires a memory-mapped load
+          mode. Takes effect the next time the engine starts.
         </p>
         <p className="muted small" style={{ marginTop: '0.5rem', marginLeft: '10rem' }}>
           More engine flags (an explicit GPU-layer count, partial expert split, prompt-reuse size,

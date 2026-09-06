@@ -228,6 +228,16 @@ export interface GgufSummary {
    * hybrids) hold 0.
    */
   expertBytesByLayer?: number[];
+  /**
+   * On-disk bytes of dense FFN tensors matched by llama.cpp v0.4.0's
+   * `--n-cpu-ffn` override (`ffn_{up,down,gate}`). Expert and shared-expert
+   * tensors are deliberately excluded.
+   */
+  denseFfnBytesTotal?: number;
+  /** Everything `--n-cpu-ffn` leaves on the GPU. */
+  nonDenseFfnBytes?: number;
+  /** Dense FFN bytes per transformer block, indexed by `blk.N`. */
+  denseFfnBytesByLayer?: number[];
   /** Total on-disk size of the GGUF (a resident-footprint proxy for the planner). */
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
@@ -551,6 +561,8 @@ function readBoolArray(r: Reader, type: GgufValueType): boolean[] | undefined {
  * planner's byte math matches what the engine will actually place.
  */
 const EXPERT_TENSOR_RE = /\.ffn_(?:up|down|gate)_exps\./;
+/** Mirrors llama.cpp's `LLM_FFN_DENSE_REGEX`. */
+const DENSE_FFN_TENSOR_RE = /\.ffn_(?:up|down|gate)\./;
 const BLOCK_INDEX_RE = /^blk\.(\d+)\./;
 
 /** GGUF default tensor-data alignment when `general.alignment` is absent. */
@@ -696,7 +708,10 @@ export function readGgufSummary(
         infos.sort((a, b) => a.offset - b.offset);
         let expertTotal = 0;
         let nonExpertTotal = 0;
-        const byLayer: number[] = [];
+        let denseFfnTotal = 0;
+        let nonDenseFfnTotal = 0;
+        const expertByLayer: number[] = [];
+        const denseFfnByLayer: number[] = [];
         for (let i = 0; i < infos.length; i++) {
           const info = infos[i] as { name: string; offset: number };
           const end =
@@ -707,15 +722,28 @@ export function readGgufSummary(
             const block = BLOCK_INDEX_RE.exec(info.name);
             if (block) {
               const idx = Number(block[1]);
-              byLayer[idx] = (byLayer[idx] ?? 0) + size;
+              expertByLayer[idx] = (expertByLayer[idx] ?? 0) + size;
             }
           } else {
             nonExpertTotal += size;
           }
+          if (DENSE_FFN_TENSOR_RE.test(info.name)) {
+            denseFfnTotal += size;
+            const block = BLOCK_INDEX_RE.exec(info.name);
+            if (block) {
+              const idx = Number(block[1]);
+              denseFfnByLayer[idx] = (denseFfnByLayer[idx] ?? 0) + size;
+            }
+          } else {
+            nonDenseFfnTotal += size;
+          }
         }
         summary.expertBytesTotal = expertTotal;
         summary.nonExpertBytes = nonExpertTotal;
-        summary.expertBytesByLayer = Array.from(byLayer, (v) => v ?? 0);
+        summary.expertBytesByLayer = Array.from(expertByLayer, (v) => v ?? 0);
+        summary.denseFfnBytesTotal = denseFfnTotal;
+        summary.nonDenseFfnBytes = nonDenseFfnTotal;
+        summary.denseFfnBytesByLayer = Array.from(denseFfnByLayer, (v) => v ?? 0);
       }
     }
 

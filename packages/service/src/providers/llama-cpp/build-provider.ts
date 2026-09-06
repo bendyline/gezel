@@ -48,11 +48,13 @@ import {
   resolveLlamaCppKvCacheType,
 } from './kv-cache-type.js';
 import {
+  degradeDenseFfnOffloadDecision,
   degradeMoeOffloadDecision,
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
   fitsSwaFullInFastMemory,
+  planDenseFfnOffload,
   planMoeOffload,
 } from './offload-planner.js';
 import { LlamaCppProvider } from './provider.js';
@@ -149,12 +151,16 @@ export async function buildLlamaCppProvider(opts: {
     ? undefined
     : (process.env.GEZEL_LLAMA_SERVER_URL ?? config.llamaCppBaseUrl);
   const binary = process.env.GEZEL_LLAMA_SERVER_BIN;
-  // Experimental A/B lever. Preservation is a two-sided contract: launch
-  // llama-server with `--reasoning-preserve` AND replay the captured
-  // `reasoning_content` on subsequent requests. Keep it opt-in until diverse
-  // agent-loop trials show that the extra history improves convergence.
+  // Preservation is a two-sided contract: launch llama-server with the
+  // explicit preserve/no-preserve flag AND replay captured
+  // `reasoning_content` only in the preserve case. v0.4.0 changed the server
+  // default to enabled, so omission would leave Gezel and the template on
+  // opposite policies. The env lever remains highest-precedence for evals.
   const reasoningLaunchOverrides = reasoningLaunchOverridesFromEnv();
-  const reasoningPreserve = reasoningLaunchOverrides.preserve;
+  const reasoningPreserve =
+    process.env.GEZEL_LLAMA_REASONING_PRESERVE !== undefined
+      ? reasoningLaunchOverrides.preserve
+      : (config.llamaCppReasoningPreserve ?? false);
 
   const defaultModelId = opts.modelOverride?.modelId ?? config.defaultModel?.['llama-cpp'];
   // Slot count (`--parallel N`) is the single source of truth — drives the
@@ -714,16 +720,18 @@ export async function buildLlamaCppProvider(opts: {
   const resolvedManifestEngineConfig = specDraft.perModel;
   if (specDraft.log) log[specDraft.log.level](specDraft.log.message);
 
-  // Phase v2 — hardware-aware MoE offload. Probe device VRAM (cached to
+  // Phase v4 — hardware-aware structured-weight offload. Probe device VRAM (cached to
   // `engines/llama-cpp/devices.json` via `--list-devices`) and read the
   // model's MoE metadata from its GGUF header; the planner decides
-  // whether to stream experts from system RAM (`--cpu-moe`) on a
-  // constrained-VRAM GPU. This is the LOWEST-precedence input to
+  // whether to stream MoE experts (`--cpu-moe` / `--n-cpu-moe`) or a
+  // dense model's first N FFN blocks (`--n-cpu-ffn`) from system RAM on
+  // a constrained-VRAM GPU. This is the LOWEST-precedence input to
   // `buildLlamaCppEngineArgs` (an explicit global config or manifest
   // value still wins), and we log the rationale so the operator can see
   // WHY a model was — or wasn't — split. Best-effort: any failure falls
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
+  let offloadBlockCount: number | undefined;
   // Whether weights + full-attention KV at the requested context fit the
   // fast-memory pool — VRAM on a discrete GPU. Gates the Gemma
   // `--swa-full` auto-default (see `EngineFlagInput.swaFullAutoFits`). Set
@@ -760,6 +768,7 @@ export async function buildLlamaCppProvider(opts: {
       // byte split instead of a flat resident estimate.
       const summary = await readGgufSummaryAsync(modelPath, { includeTensorSizes: true });
       const isMoE = (summary.expertCount ?? 0) > 1;
+      offloadBlockCount = summary.blockCount;
       mtpLayerCount = summary.nextnPredictLayers ?? 0;
       ggufHasMtp = mtpLayerCount > 0;
       if (!ggufHasMtp && modelCatalogInfo?.draftModelPath) {
@@ -779,6 +788,15 @@ export async function buildLlamaCppProvider(opts: {
           ? {
               nonExpertBytes: summary.nonExpertBytes,
               expertBytesByLayer: summary.expertBytesByLayer,
+            }
+          : undefined;
+      const denseFfnSplit =
+        summary.nonDenseFfnBytes !== undefined &&
+        summary.denseFfnBytesByLayer !== undefined &&
+        summary.denseFfnBytesByLayer.length > 0
+          ? {
+              nonFfnBytes: summary.nonDenseFfnBytes,
+              ffnBytesByLayer: summary.denseFfnBytesByLayer,
             }
           : undefined;
       // ── RAM-aware context admission ──
@@ -1136,27 +1154,57 @@ export async function buildLlamaCppProvider(opts: {
       if (kvReserveBytes !== undefined) {
         plannedReservationBytes = residentBytes + kvReserveBytes;
       }
-      offloadDecision = planMoeOffload({
-        isMoE,
-        residentBytes,
-        vramBytes,
-        ...(split
-          ? {
-              split,
-              ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
-              ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
-            }
-          : {}),
-      });
-      if (offloadDecision.reason) {
+      if (isMoE) {
+        offloadDecision = planMoeOffload({
+          isMoE,
+          residentBytes,
+          vramBytes,
+          ...(split
+            ? {
+                split,
+                ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
+                ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+              }
+            : {}),
+        });
+      } else {
+        const explicitNCpuFfn = config.llamaCppNCpuFfn ?? resolvedManifestEngineConfig?.nCpuFfn;
+        const explicitNGpuLayers =
+          config.llamaCppNGpuLayers ?? resolvedManifestEngineConfig?.nGpuLayers;
+        // A positive/zero nCpuFfn is already the user's/model's decision.
+        // A finite whole-layer GPU count is a different placement strategy;
+        // don't layer an automatic tensor override on top of it. `-1` means
+        // all and is compatible with the planner's own attention-on-GPU plan.
+        offloadDecision =
+          explicitNCpuFfn === undefined &&
+          (explicitNGpuLayers === undefined || explicitNGpuLayers === -1)
+            ? planDenseFfnOffload({
+                isMoE,
+                // Respect the usable accelerator pool, any explicit capacity
+                // ceiling, and co-resident reservations. The raw probe still
+                // gates this to a real discrete-GPU build rather than treating
+                // a CPU/unified fast pool as VRAM.
+                vramBytes: vramBytes > 0 ? Math.max(0, budgetBytes - committedOtherBytes) : 0,
+                ...(denseFfnSplit ? { split: denseFfnSplit } : {}),
+                ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
+                ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+                additionalGpuBytes: visionBudgetBytes,
+                ramBudgetBytes: brokerSnap?.enforced
+                  ? brokerSnap.pools.ramShareBytes
+                  : hostCapacity.ramShareBytes,
+                freeSystemRamBytes: availableSystemRamBytes(),
+              })
+            : undefined;
+      }
+      if (offloadDecision?.reason) {
         log.info(
           `[llama-cpp] offload plan (${modelCatalogInfo?.id ?? 'model'}): ${offloadDecision.reason}`,
         );
       }
-      // Surface an MTP opportunity WITHOUT auto-enabling it. `--spec-type
-      // draft-mtp` on a model llama.cpp can't build an MTP context for is a
-      // fatal launch error, and current model/backend pairs still need A/B
-      // qualification before default-on.
+      // Surface the capability-gated MTP decision. `--spec-type draft-mtp`
+      // on a model llama.cpp can't build an MTP context for is fatal, so the
+      // metadata gate remains load-bearing even though supported GGUFs are
+      // now default-on.
       if (ggufHasMtp) {
         log.info(
           `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); speculative decoding ${
@@ -1264,7 +1312,7 @@ export async function buildLlamaCppProvider(opts: {
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
     // planner's offload decision was in play, degrade it one step
-    // (partial split → all experts to RAM → engine-owned fit) and let the
+    // (partial split → all expert/FFN weights to RAM → engine-owned fit) and let the
     // supervisor retry — `resolveLaunch` below re-reads `offloadDecision`
     // on every spawn. The degraded plan sticks for later restarts of this
     // provider, so a recovered engine doesn't re-OOM on its next boot.
@@ -1277,15 +1325,36 @@ export async function buildLlamaCppProvider(opts: {
       // ladder would change is pinned, a retry replays the same argv.
       const pinned = (globalValue: unknown, manifestValue: unknown) =>
         globalValue !== undefined || manifestValue !== undefined;
-      if (
+      const densePlan = typeof offloadDecision?.nCpuFfn === 'number';
+      if (densePlan) {
+        if (
+          pinned(config.llamaCppNGpuLayers, resolvedManifestEngineConfig?.nGpuLayers) &&
+          pinned(config.llamaCppNCpuFfn, resolvedManifestEngineConfig?.nCpuFfn)
+        ) {
+          return false;
+        }
+      } else if (
         pinned(config.llamaCppNGpuLayers, resolvedManifestEngineConfig?.nGpuLayers) &&
         pinned(config.llamaCppCpuMoe, resolvedManifestEngineConfig?.cpuMoe) &&
         pinned(config.llamaCppNCpuMoe, resolvedManifestEngineConfig?.nCpuMoe)
       ) {
         return false;
       }
-      const degraded = degradeMoeOffloadDecision(offloadDecision);
+      const degraded = densePlan
+        ? degradeDenseFfnOffloadDecision(offloadDecision, offloadBlockCount)
+        : degradeMoeOffloadDecision(offloadDecision);
       if (!degraded) return false;
+      // The dense ladder's last rung removes the planner's `-ngl all`.
+      // If an explicit global/manifest layer count shadows that removal,
+      // retrying would replay byte-identical argv.
+      if (
+        densePlan &&
+        degraded.nGpuLayers === undefined &&
+        degraded.nCpuFfn === offloadDecision?.nCpuFfn &&
+        pinned(config.llamaCppNGpuLayers, resolvedManifestEngineConfig?.nGpuLayers)
+      ) {
+        return false;
+      }
       log.warn(
         `[llama-cpp] ${panicKind} while starting ${modelCatalogInfo?.id ?? 'model'} — ${degraded.reason}`,
       );
@@ -1367,6 +1436,13 @@ export async function buildLlamaCppProvider(opts: {
           // math doesn't double-count.
           '--ctx-size',
           String(effectiveNumCtx * slots),
+          // v0.4.0 can use one shared KV pool when `--kv-unified` is
+          // enabled (including through the raw advanced escape hatch).
+          // Keep one busy slot from consuming another's promised window;
+          // on the default partitioned cache this equals the partition size
+          // and is intentionally a no-op.
+          '--kv-unified-per-slot',
+          String(effectiveNumCtx),
           // --parallel matches the ProviderQueue's `concurrency` so the
           // engine has one KV slot per request lane. Without this,
           // llama-server stays at its default 1 slot and the 2nd
@@ -1392,13 +1468,10 @@ export async function buildLlamaCppProvider(opts: {
           kvCacheType,
           '--cache-type-v',
           kvCacheType,
-          // Conditional flags — only pass when explicitly enabled
-          // via config so we don't override per-backend defaults the
-          // upstream maintainers picked deliberately.
-          ...(config.llamaCppMlock ? ['--mlock'] : []),
           // Advanced engine-launch flags: flash-attn (tri-state, forced
-          // `on` under quantized KV), `--ubatch-size`, GPU/MoE offload
-          // (`--n-gpu-layers` / `--cpu-moe` / `--n-cpu-moe`),
+          // `on` under quantized KV), `--ubatch-size`, GPU/MoE/dense offload
+          // (`--n-gpu-layers` / `--cpu-moe` / `--n-cpu-moe` / `--n-cpu-ffn`),
+          // v0.4.0 load/lazy modes,
           // `--cache-reuse` (auto-on prefix reuse), speculative decoding,
           // and the `llamaCppExtraArgs` escape hatch. Resolved from
           // global `config` ⊕ the model's manifest `tuning.engine.llamaCpp`.

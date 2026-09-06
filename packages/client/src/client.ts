@@ -1051,7 +1051,7 @@ export interface ConfigResponse {
    * llama-cpp: keep ALL Mixture-of-Experts weights in system RAM
    * (`--cpu-moe`) while attention/dense layers run on the GPU — the
    * lever for running a big MoE on a constrained-VRAM discrete GPU.
-   * Undefined → off (Phase v2's planner may enable it automatically).
+   * Undefined → off (the hardware planner may enable it automatically).
    */
   llamaCppCpuMoe?: boolean;
   /**
@@ -1059,6 +1059,20 @@ export interface ConfigResponse {
    * RAM (`--n-cpu-moe N`) — the partial-split form of `llamaCppCpuMoe`.
    */
   llamaCppNCpuMoe?: number;
+  /**
+   * llama-cpp: keep dense FFN weights from the first N layers in system
+   * RAM (`--n-cpu-ffn N`). Undefined lets the hardware planner decide;
+   * 0 explicitly disables automatic dense-FFN offload.
+   */
+  llamaCppNCpuFfn?: number;
+  /** Legacy setting retained so Settings can migrate it to `llamaCppLoadMode`. */
+  llamaCppMlock?: boolean;
+  /** llama-cpp v0.4.0 model file loading policy (`--load-mode`). */
+  llamaCppLoadMode?: 'auto' | 'none' | 'mmap' | 'mlock' | 'mmap+mlock' | 'dio';
+  /** llama-cpp v0.4.0 on-demand tensor loading policy (`--lazy-mode`). */
+  llamaCppLazyMode?: 'on' | 'auto' | 'off';
+  /** Preserve and replay private reasoning across assistant history. */
+  llamaCppReasoningPreserve?: boolean;
   /**
    * llama-cpp: allocate a full-size sliding-window KV cache (`--swa-full`)
    * instead of the memory-efficient windowed one, for SWA models (Gemma).
@@ -1072,7 +1086,8 @@ export interface ConfigResponse {
   /**
    * llama-cpp: speculative-decoding mode (`--spec-type`). Lossless
    * decode speedup. `ngram-*` need no draft model; `draft-mtp` uses the
-   * model's own MTP head (only when the GGUF ships it). Undefined → off.
+   * model's own MTP head. Undefined → capability-gated Auto: MTP for a
+   * compatible installed GGUF, off otherwise.
    */
   llamaCppSpecType?:
     | 'none'

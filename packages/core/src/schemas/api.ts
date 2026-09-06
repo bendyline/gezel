@@ -125,6 +125,7 @@ import {
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
 import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
+import { LlamaCppV4ConfigResetSchema, LlamaCppV4ConfigSchema } from './llama-cpp-config.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { NativeEngineNameSchema } from './native-engines.js';
 import {
@@ -1536,6 +1537,7 @@ export const GezelConfigSchema = z.object({
    * auto-detect because the trade-off is workload-specific.
    */
   llamaCppMlock: z.boolean().optional(),
+  ...LlamaCppV4ConfigSchema.shape,
   /**
    * Flash Attention mode for llama-server (`--flash-attn on|off|auto`).
    * On modern Metal/CUDA/Vulkan builds FA is meaningfully faster
@@ -1566,7 +1568,7 @@ export const GezelConfigSchema = z.object({
    * on the GPU. The lever for running a big MoE (qwen3.6-35b-a3b,
    * gpt-oss-120b, …) on a constrained-VRAM discrete GPU. Pair with
    * `llamaCppNGpuLayers: -1`. For a partial split use `llamaCppNCpuMoe`
-   * instead. Default unset (off). Phase v2's offload planner sets this
+   * instead. Default unset (off). The hardware offload planner sets this
    * automatically when a model won't otherwise fit VRAM.
    */
   llamaCppCpuMoe: z.boolean().optional(),
@@ -1632,7 +1634,7 @@ export const GezelConfigSchema = z.object({
    * lossless, but experimental model/backend pairs must still be A/B tested.
    * `ngram-mod`/`ngram-simple` need no draft model; `draft-mtp`/
    * `draft-eagle3` use a model prediction head; `draft-simple` needs a
-   * separate `llamaCppDraftModelPath`. Default unset (off).
+   * separate `llamaCppDraftModelPath`. Unset auto-selects `draft-mtp` only for a confirmed MTP head; otherwise it stays off.
    */
   llamaCppSpecType: z
     .enum([
@@ -2953,6 +2955,7 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
     .nullable()
     .optional(),
   llamaCppCpuMoe: z.boolean().nullable().optional(),
+  ...LlamaCppV4ConfigResetSchema.shape,
   llamaCppSwaFull: z.boolean().nullable().optional(),
   // MLX Advanced overrides the Settings UI can reset to their default —
   // same reset-on-null contract as the llama-cpp fields above.
