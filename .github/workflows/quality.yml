@@ -317,6 +317,15 @@ jobs:
         run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
       - name: Exercise shell and write flows
         run: pnpm test:e2e:web:smoke
+      - name: Guard chat and terminal composer geometry
+        run: >-
+          pnpm --filter @bendyline/gezel-app exec playwright test
+          --config playwright.web.config.ts
+          e2e-web/terminal.spec.ts
+          --grep "keeps terminal composer geometry aligned with chat"
+          --reporter=line
+          --retries=0
+          --workers=1
       - name: Preserve failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

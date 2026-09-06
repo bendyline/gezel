@@ -1106,6 +1106,23 @@ describe('ChatComposer expand toggle', () => {
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
   });
 
+  it('keeps trailing mode controls anchored after the expand toggle', () => {
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        addressLineTrailing={<span data-testid="address-line-trailing">Modes</span>}
+      />,
+    );
+
+    const toggle = screen.getByTestId('chat-composer-expand');
+    const trailing = screen.getByTestId('address-line-trailing');
+    expect(toggle.nextElementSibling).toBe(trailing);
+    expect(trailing.nextElementSibling).toBeNull();
+  });
+
   it('hands the draft the chat window and gives it back', () => {
     render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
