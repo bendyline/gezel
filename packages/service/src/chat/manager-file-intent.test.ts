@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -49,12 +49,13 @@ afterEach(async () => {
 describe('per-message file intent delivery', () => {
   it('keeps structured repair intents distinct while queued nudges drain', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    const stall = mock.scriptStreamThenStall('started');
-    mock.script('first reply', 'second reply');
-    const first = manager.send(session.id, 'start');
-    await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'send')).toBe(true));
+    mock.script('started', 'first reply', 'second reply');
     const a = { kind: 'repair-file' as const, path: 'lib/worker.py' };
     const b = { kind: 'create-file' as const, path: 'reports/summary.rst' };
+    // send claims the session synchronously, before provider/MCP startup.
+    // Queue both nudges in this tick so cold-start speed cannot decide whether
+    // they queue. Await every send before asserting, even if startup fails.
+    const first = manager.send(session.id, 'start');
     const second = manager.send(session.id, 'continue with the repair', {
       nudge: true,
       fileTurnIntent: a,
@@ -63,12 +64,17 @@ describe('per-message file intent delivery', () => {
       nudge: true,
       fileTurnIntent: b,
     });
-    stall.release();
+    const queued = manager.listSessionQueue(session.id);
     await Promise.all([first, second, third]);
+    expect(queued).toMatchObject([
+      { text: 'continue with the repair', nudge: true },
+      { text: 'create the requested output', nudge: true },
+    ]);
     const sends = mock.calls.filter(
       (call) => call.kind === 'send' && call.sendOpts?.queue?.sessionId === session.id,
     );
     expect(sends.map((call) => call.sendOpts?.fileTurnIntent)).toEqual([undefined, a, b]);
+    expect(manager.listSessionQueue(session.id)).toEqual([]);
   });
   it('preserves intent when the message takes the mention delivery path', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
