@@ -232,7 +232,7 @@ MIT-licensed ADL SDK headers. It dynamically loads the AMD display driver's
 that AMD binary. The ADL code is excluded from Linux builds, which read AMD and
 Intel telemetry from DRM/hwmon sysfs instead.
 
-The **ds4** engine (antirez's DeepSeek-V4 inference engine) is MIT-licensed:
+The **ds4** engine (antirez's specialized DeepSeek/GLM inference engine) is MIT-licensed:
 its `LICENSE` carries the dual copyright *"The ds4.c authors"* and *"The ggml
 authors"* — its Metal kernels derive from ggml, the same MIT as llama.cpp
 above. The `ds4-server` binary statically incorporates antirez's **rax** radix

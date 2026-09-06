@@ -164,6 +164,27 @@ describe('operational API surface', () => {
     }
   });
 
+  it('round-trips ds4 vision launch settings and rebuilds cached providers', async () => {
+    const visionSettings = {
+      ds4VisionEncoderPath: '/tmp/integration-ds4-vision-encoder.gguf',
+      nativeVision: { '__integration-ds4-vision__': false },
+    };
+    const resetClient = vi.spyOn(svc.context.chat, 'resetClient');
+
+    try {
+      const update = await api('PUT', '/api/config', visionSettings);
+      expect(update.status).toBe(200);
+      expect((await update.json()) as Record<string, unknown>).toMatchObject(visionSettings);
+      expect(resetClient).toHaveBeenCalledWith({ deferBusy: true });
+
+      const read = await api('GET', '/api/config');
+      expect(read.status).toBe(200);
+      expect((await read.json()) as Record<string, unknown>).toMatchObject(visionSettings);
+    } finally {
+      resetClient.mockRestore();
+    }
+  });
+
   it('round-trips the per-engine default media models through PUT and GET', async () => {
     // Same whitelist bug class as the Codex case above: the video panel's
     // active-model radio and confirmation tray were saved to config.json but

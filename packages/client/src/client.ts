@@ -1020,10 +1020,12 @@ export interface ConfigResponse {
    * target; Model maximum requests the advertised native window.
    */
   llamaCppNumCtx?: number;
-  /** ds4 (DeepSeek-V4): base URL of an already-running ds4-server (external mode). */
+  /** ds4: base URL of an already-running ds4-server (external mode). */
   ds4BaseUrl?: string;
-  /** ds4: explicit DeepSeek-V4 GGUF path passed to `ds4-server --model`. */
+  /** ds4: explicit supported GGUF path passed to `ds4-server --model`. */
   ds4ModelPath?: string;
+  /** ds4: model-matched vision encoder passed to `ds4-server --vision`. */
+  ds4VisionEncoderPath?: string;
   /** ds4: context window (tokens) ds4-server is booted with (`--ctx`). */
   ds4NumCtx?: number;
   /** ds4: request SSD expert streaming (safe default; unsafe `false` is ignored). */
@@ -1548,7 +1550,7 @@ export interface ConfigResponse {
     maxDigestChars?: number;
     maxMegapixels?: number;
   };
-  /** Per-model native-vision opt-in, keyed by catalog id. Absent → off. */
+  /** Per-model native-vision preference, keyed by catalog id. Absent → on. */
   nativeVision?: Record<string, boolean>;
   /**
    * OpenAI-compatible endpoint controls (Settings → Connected Apps).
@@ -3859,7 +3861,7 @@ export class GezelClient {
     );
   }
 
-  // ── ds4 (DeepSeek-V4) local model management — same shape as llama.cpp ──
+  // ── ds4 local model management — same shape as llama.cpp ──
 
   listDs4Models(): Promise<{
     models: LlamaCppInstalledModel[];

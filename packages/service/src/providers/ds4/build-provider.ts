@@ -228,7 +228,7 @@ export async function buildDs4Provider(opts: {
     const err = new Error(
       defaultModelId
         ? `DwarfStar (ds4) engine: model "${defaultModelId}" isn't available locally yet — download it from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL to a GGUF DwarfStar supports.`
-        : 'DwarfStar (ds4) engine: no DwarfStar model is available locally — download one from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL. DwarfStar is not a general GGUF runner; it runs the specific DeepSeek-V4 and GLM 5.2 builds its engine supports.',
+        : 'DwarfStar (ds4) engine: no DwarfStar model is available locally — download one from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL. DwarfStar is not a general GGUF runner; it runs the specific DeepSeek-V4 and GLM 5.2/5.3 builds its engine supports.',
     );
     (err as Error & { isActionable: boolean }).isActionable = true;
     throw err;
@@ -430,14 +430,18 @@ export async function buildDs4Provider(opts: {
           ? 'interactive'
           : 'background',
       requirement: async () => {
-        const { ds4ResidentLine, ds4ProjectedResidentBytes, ds4ResidentBytesForMode } =
-          await import('./residency.js');
+        const {
+          ds4BaseResidentBytes,
+          ds4ResidentLine,
+          ds4ProjectedResidentBytes,
+          ds4ResidentBytesForMode,
+        } = await import('./residency.js');
         const line = ds4ResidentLine(ds4Source ?? {});
         const projected = line ? ds4ProjectedResidentBytes(line, numCtx) : ds4Source?.residentBytes;
         const base = ssdStreaming
           ? Math.max(0, (projected ?? 8 * 1024 ** 3) - (ds4Source?.cacheExpertsBytes ?? 0)) +
             cacheExpertsGb * 1024 ** 3
-          : Math.max(projected ?? 0, (modelSizeBytes ?? 0) * 1.1);
+          : ds4BaseResidentBytes({ projectedBytes: projected, modelSizeBytes });
         return {
           bytes: ds4ResidentBytesForMode(
             base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0),

@@ -30,6 +30,26 @@ export function ds4VisionResidentBytes(encoderSizeBytes: number | undefined): nu
   );
 }
 
+/**
+ * Base resident working set before optional vision/drafting companions.
+ *
+ * A catalog `residentBytes` value is a model-specific measurement that already
+ * includes runtime overhead. The generic weights multiplier is only a fallback
+ * for an unmeasured explicit GGUF; applying it as a lower bound discarded the
+ * better measurement and made the measured GLM 5.3 Q2 launch exceed the
+ * unified-GPU admission ceiling. Never accept a measurement below the raw
+ * weights themselves, which still fails safely for a malformed catalog row.
+ */
+export function ds4BaseResidentBytes(opts: {
+  projectedBytes?: number;
+  modelSizeBytes?: number;
+}): number {
+  const modelSizeBytes = Math.max(0, opts.modelSizeBytes ?? 0);
+  if (opts.projectedBytes !== undefined)
+    return Math.max(modelSizeBytes, Math.max(0, opts.projectedBytes));
+  return Math.round(modelSizeBytes * LLAMA_CPP_WEIGHTS_MULTIPLIER);
+}
+
 export interface Ds4ResidencyOptions {
   configured?: boolean;
   /** Size of the selected GGUF. Unknown sizes are never allowed full residency. */

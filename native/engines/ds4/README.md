@@ -77,6 +77,13 @@ its engine was built for, co-versioned with the pin in `VERSION`:
 
 An entry is a ds4 model exactly when its manifest carries a `ds4` source block.
 
+A ds4 entry may also declare a model-matched `visionEncoder` payload. The
+installer downloads and verifies that GGUF beside the language weights, the
+launcher accounts for its resident memory and passes it as `--vision`, and the
+turn router sends image bytes natively only when that exact encoder is loaded.
+An explicit `ds4ModelPath` never borrows a catalog encoder; pair development
+overrides with `ds4VisionEncoderPath` / `GEZEL_DS4_VISION_ENCODER`.
+
 **Not supported: split (multi-shard) GGUFs.** ds4's `model_open()` maps one
 file and the source has no `split.*` handling, so upstream's
 `download_model.sh glm-unsloth-q4` target (unsloth's 11-shard UD-Q4_K_XL, whose

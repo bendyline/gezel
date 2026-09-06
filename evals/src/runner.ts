@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir, totalmem } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelConfig, SessionTelemetryListResponse } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
@@ -1647,16 +1647,74 @@ function killStaleDs4Servers(log: (m: string) => void): void {
  * undefined when none is found (the provider then surfaces its actionable
  * "install from Settings" error and the trial fails fast with a clear reason).
  */
-function resolveDs4ModelPath(modelId: string): string | undefined {
-  const env = process.env.GEZEL_DS4_MODEL?.trim();
-  if (env && existsSync(env)) return env;
+export interface Ds4EvalPayloadPaths {
+  modelPath?: string;
+  visionEncoderPath?: string;
+}
+
+/** Resolve the exact payload filenames recorded by a product ds4 install. */
+export function ds4EvalPayloadFromModelDir(dir: string): Ds4EvalPayloadPaths {
+  let weightsFilename: string | undefined;
+  let visionEncoderFilename: string | undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as {
+      weightsFilename?: unknown;
+      visionEncoderFilename?: unknown;
+    };
+    if (typeof parsed.weightsFilename === 'string') weightsFilename = parsed.weightsFilename;
+    if (typeof parsed.visionEncoderFilename === 'string') {
+      visionEncoderFilename = parsed.visionEncoderFilename;
+    }
+  } catch {
+    /* legacy install: fall back to an unambiguous GGUF scan below */
+  }
+
+  const containedFile = (filename: string | undefined): string | undefined => {
+    if (!filename || filename !== basename(filename)) return undefined;
+    const path = join(dir, filename);
+    return existsSync(path) ? path : undefined;
+  };
+  const visionEncoderPath = containedFile(visionEncoderFilename);
+  const manifestModelPath = containedFile(weightsFilename);
+  if (manifestModelPath) {
+    return {
+      modelPath: manifestModelPath,
+      ...(visionEncoderPath ? { visionEncoderPath } : {}),
+    };
+  }
+
+  const fallbackCandidates = readdirSync(dir).filter(
+    (filename) =>
+      filename.endsWith('.gguf') &&
+      filename !== visionEncoderFilename &&
+      !/(?:vision.*encoder|encoder.*vision)/i.test(filename),
+  );
+  // A pre-manifest install only ever had one GGUF. Once multiple plausible
+  // language payloads exist, guessing by directory order can launch the wrong
+  // checkpoint and invalidate the evaluation, so fail closed instead.
+  const fallback = fallbackCandidates.length === 1 ? fallbackCandidates[0] : undefined;
+  return {
+    ...(fallback ? { modelPath: join(dir, fallback) } : {}),
+    ...(visionEncoderPath ? { visionEncoderPath } : {}),
+  };
+}
+
+function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
+  const envModel = process.env.GEZEL_DS4_MODEL?.trim();
+  const envVision = process.env.GEZEL_DS4_VISION_ENCODER?.trim();
+  if (envModel && existsSync(envModel)) {
+    return {
+      modelPath: envModel,
+      ...(envVision && existsSync(envVision) ? { visionEncoderPath: envVision } : {}),
+    };
+  }
   for (const home of [join(homedir(), '.gezel-eval-cache'), join(homedir(), '.gezel-dev')]) {
     const dir = join(home, 'engines', 'ds4', 'models', modelId);
     if (!existsSync(dir)) continue;
-    const gguf = readdirSync(dir).find((f) => f.endsWith('.gguf'));
-    if (gguf) return join(dir, gguf);
+    const payload = ds4EvalPayloadFromModelDir(dir);
+    if (payload.modelPath) return payload;
   }
-  return undefined;
+  return {};
 }
 
 /**
@@ -1676,6 +1734,7 @@ function resolveDs4ModelPath(modelId: string): string | undefined {
 export function ds4EvalShouldUseSsdStreaming(opts?: {
   totalRamBytes?: number;
   modelSizeBytes?: number;
+  companionBytes?: number;
   platform?: NodeJS.Platform;
   arch?: string;
 }): boolean {
@@ -1688,15 +1747,17 @@ export function ds4EvalShouldUseSsdStreaming(opts?: {
   return !(
     unifiedMemoryTarget &&
     modelSizeBytes &&
-    modelSizeBytes + fullResidencyHeadroomBytes <= totalRamBytes
+    modelSizeBytes + (opts?.companionBytes ?? 0) + fullResidencyHeadroomBytes <= totalRamBytes
   );
 }
 
 export function ds4EvalLaunchOverridesForModel(
   modelId: string,
 ): LlamaCppEvalLaunchOverrides | undefined {
-  const bin = resolveDs4Binary();
-  const model = resolveDs4ModelPath(modelId);
+  const payload = resolveDs4EvalPayload(modelId);
+  const model = payload.modelPath;
+  const visionEncoder = payload.visionEncoderPath;
+  const bin = resolveDs4Binary({ requireVision: visionEncoder !== undefined });
   // Mirror buildDs4Provider's RAM tiers for the resident expert cache, and size
   // the broker budget to cover it (cache + ~4 GiB ctx buffers + KV) with OS
   // headroom. Throughput only — does not change capability/scores.
@@ -1710,9 +1771,32 @@ export function ds4EvalLaunchOverridesForModel(
         }
       })()
     : undefined;
-  const ssdStreaming = ds4EvalShouldUseSsdStreaming({ modelSizeBytes });
+  const visionEncoderSizeBytes = visionEncoder
+    ? (() => {
+        try {
+          return statSync(visionEncoder).size;
+        } catch {
+          return undefined;
+        }
+      })()
+    : undefined;
+  // Match the production launcher's conservative sidecar accounting: encoder
+  // weights plus a fixed image-graph allowance. Keeping this in the residency
+  // decision prevents a model that only fits text-only from silently turning
+  // into a full-residency OOM when an eval enables vision.
+  const visionResidentBytes = visionEncoderSizeBytes
+    ? Math.round(visionEncoderSizeBytes * 1.1) + 384 * 1024 ** 2
+    : 0;
+  const ssdStreaming = ds4EvalShouldUseSsdStreaming({
+    modelSizeBytes,
+    ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
+  });
   const cacheExpertsGb = totalRamGb >= 120 ? 64 : totalRamGb >= 88 ? 48 : 32;
-  const capacityBudgetGb = totalRamGb >= 120 ? 96 : totalRamGb >= 88 ? 72 : 56;
+  // The previous 96 GiB override admitted the 81 GiB DeepSeek Q2 build but
+  // rejected GLM 5.3 Q2's conservative ~100 GiB launch reservation before
+  // ds4 could start. 104 GiB mirrors the product budget on a 128 GiB unified
+  // host and still leaves 24 GiB outside the native-engine pool.
+  const capacityBudgetGb = totalRamGb >= 120 ? 104 : totalRamGb >= 88 ? 72 : 56;
   // ds4/DeepSeek-V4 supports ~1M context and SSD-STREAMS its KV cache to disk
   // (not RAM), so a small window throws away the engine's headline strength.
   // At 24576 a single specialist-handoff message (~36K tokens) overflowed the
@@ -1726,6 +1810,7 @@ export function ds4EvalLaunchOverridesForModel(
     extraEnv: {
       ...(bin ? { GEZEL_DS4_SERVER_BIN: bin.path } : {}),
       ...(model ? { GEZEL_DS4_MODEL: model } : {}),
+      ...(visionEncoder ? { GEZEL_DS4_VISION_ENCODER: visionEncoder } : {}),
       GEZEL_DS4_STARTUP_TIMEOUT_MS: '1200000',
       GEZEL_CAPACITY_BUDGET_GB: String(capacityBudgetGb),
     },
@@ -1737,7 +1822,7 @@ export function ds4EvalLaunchOverridesForModel(
     },
     minTrialTimeoutMs: 120 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} numCtx=${numCtx} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
+    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
   };
 }
 

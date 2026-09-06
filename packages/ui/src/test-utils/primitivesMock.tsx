@@ -253,6 +253,33 @@ const DropdownMenu = {
       {children}
     </button>
   ),
+  CheckboxItem: ({
+    children,
+    checked,
+    disabled,
+    title,
+    onCheckedChange,
+  }: {
+    children?: ReactNode;
+    checked?: boolean;
+    disabled?: boolean;
+    title?: string;
+    onCheckedChange?: (checked: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      disabled={disabled}
+      title={title}
+      onClick={() => onCheckedChange?.(!checked)}
+    >
+      {children}
+    </button>
+  ),
+  ItemIndicator: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Label: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Separator: () => null,
 };
 
 const DropdownChevron = ({ className, ...props }: Omit<SVGProps<SVGSVGElement>, 'children'>) => (

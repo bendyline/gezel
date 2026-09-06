@@ -1823,7 +1823,7 @@ export const ChatModelVersionManifestSchema = z.object({
   llamaCpp: ChatModelLlamaCppSourceSchema.optional(),
   /** MLX source — Apple Silicon only. Optional. */
   mlx: ChatModelMlxSourceSchema.optional(),
-  /** ds4 (DwarfStar) source — DeepSeek-V4 GGUFs, Metal/CUDA only. Optional. */
+  /** ds4 (DwarfStar) source — supported DeepSeek/GLM GGUFs, GPU-only. Optional. */
   ds4: ChatModelDs4SourceSchema.optional(),
   notes: z.string().optional(),
 });

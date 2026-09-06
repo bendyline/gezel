@@ -45,6 +45,19 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
     expect(
       resolveDs4VisionLaunch({
         modelId: 'glm-5.3-flash-q2',
+        nativeVision: { 'glm-5.3-flash-q2': false },
+        installedVisionEncoderPath: '/models/glm-vision.gguf',
+      }),
+    ).toEqual({ visionEncoderPath: '/models/glm-vision.gguf', enabled: false });
+    expect(
+      resolveDs4VisionLaunch({
+        explicitModelPath: '/models/custom-language-model.gguf',
+        explicitVisionEncoderPath: '/models/custom-vision-encoder.gguf',
+      }),
+    ).toEqual({ visionEncoderPath: '/models/custom-vision-encoder.gguf', enabled: true });
+    expect(
+      resolveDs4VisionLaunch({
+        modelId: 'glm-5.3-flash-q2',
         installedVisionEncoderPath: '/models/glm-vision.gguf',
         externalBaseUrl: 'http://127.0.0.1:8000',
       }),

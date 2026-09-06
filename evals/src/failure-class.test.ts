@@ -41,6 +41,16 @@ describe('classifyTrial — terminal classes', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'capacity-denial' });
   });
 
+  it('bounded capacity wait wrapped by repair-aborted stays infrastructure', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'model-stuck',
+      reason:
+        'repair-aborted: onno/f485f5cf exhausted its bounded automatic recovery allowance; last error: Not enough memory became available for this model. Current engine work is still protected; retry when it finishes.',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'capacity-denial' });
+  });
+
   it('context overflow', () => {
     const c = classifyTrial({
       success: false,

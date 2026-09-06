@@ -2439,6 +2439,26 @@ button.machine-memory-unload-button {
   font-weight: 600;
 }
 
+.model-actions-section-label {
+  padding: 0.3rem 0.7rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.app-nav-menu-separator {
+  height: 1px;
+  margin: 0.3rem 0.45rem;
+  background: var(--border);
+}
+
+.model-vision-menu-hint {
+  margin-left: 0;
+}
+
 /* Top-nav "Updates" button — only rendered when pending-question
    count > 0. Styled as a regular tab but with an amber accent so it
    reads as actionable. It briefly wore the serif to match the logotype;

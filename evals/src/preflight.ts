@@ -368,14 +368,16 @@ export interface PreflightOptions
   minGenTokensPerSec?: number;
 }
 
-// v2 requires an observed native supervisor launch; old cached reports only
-// proved that the daemon process itself came up.
-const PREFLIGHT_POLICY_VERSION = 2;
+// v2 requires an observed native supervisor launch; v3 adds ds4's model-matched
+// vision encoder to the launch identity so a text-only pass cannot be reused
+// as evidence for a multimodal catalog install.
+const PREFLIGHT_POLICY_VERSION = 3;
 
 const PREFLIGHT_LAUNCH_ENV_KEYS = [
   'GEZEL_CAPACITY_BUDGET_GB',
   'GEZEL_DS4_MODEL',
   'GEZEL_DS4_SERVER_BIN',
+  'GEZEL_DS4_VISION_ENCODER',
   'GEZEL_EVAL_SOFT_PROGRESS_TIMEOUT_MS',
   'GEZEL_LLAMA_NUM_CTX',
   'GEZEL_LLAMA_PRE_FIRST_BYTE_TIMEOUT_MS',

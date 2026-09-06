@@ -3,6 +3,7 @@ import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   DS4_FULL_RESIDENCY_RESERVATION_BYTES,
   canUseDs4FullResidency,
+  ds4BaseResidentBytes,
   ds4ProjectedResidentBytes,
   ds4ResidentBytesForMode,
   ds4ResidentLine,
@@ -14,6 +15,16 @@ import {
 const GB = 1024 ** 3;
 
 describe('DS4 residency policy', () => {
+  it('prefers a measured working set over the generic explicit-GGUF multiplier', () => {
+    expect(ds4BaseResidentBytes({ projectedBytes: 94 * GB, modelSizeBytes: 90 * GB })).toBe(
+      94 * GB,
+    );
+    expect(ds4BaseResidentBytes({ projectedBytes: 80 * GB, modelSizeBytes: 90 * GB })).toBe(
+      90 * GB,
+    );
+    expect(ds4BaseResidentBytes({ modelSizeBytes: 90 * GB })).toBeCloseTo(99 * GB, -3);
+  });
+
   it('resides by default when the model fits, and streams when it does not', () => {
     // The whole point of the inversion: an 81 GB model on a 128 GB unified
     // machine used to stream (≈10x slower) unless a UI-less config key said

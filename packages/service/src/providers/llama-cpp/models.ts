@@ -722,8 +722,9 @@ export class LlamaCppModelManager {
     options?: { skipSha?: boolean; includeMmproj?: boolean },
   ): AsyncIterable<InstallEvent> {
     const skipSha = options?.skipSha === true;
-    // Default ON — see `planDownloads`. Only an explicit `false` (ds4, which
-    // has no sidecar path) suppresses it.
+    // Default ON — see `planDownloads`. ds4 passes `false` because it has no
+    // llama.cpp mmproj; its own `visionEncoder` remains mandatory and is not
+    // governed by this flag.
     const includeMmproj = options?.includeMmproj !== false;
     if (!isSafeId(catalogId)) {
       yield { type: 'error', error: `unsafe catalog id: ${catalogId}` };

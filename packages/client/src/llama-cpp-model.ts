@@ -16,10 +16,11 @@ export interface LlamaCppInstalledModel {
   /** On-disk size of ds4's model-matched `--vision` encoder, when installed. */
   visionEncoderSizeBytes?: number;
   /**
-   * Whether this model will be launched with `--mmproj` — i.e. images go
-   * straight to it rather than through the image reader. Present only when a
-   * projector is installed. Server-resolved: the "absent config means on"
-   * rule lives in the daemon, not in each client.
+   * Whether this model will be launched with its native vision sidecar
+   * (`--mmproj` for llama.cpp or `--vision` for ds4) — i.e. images go straight
+   * to it rather than through the image reader. Present only when the sidecar
+   * is installed. Server-resolved: the "absent config means on" rule lives in
+   * the daemon, not in each client.
    */
   nativeVisionEnabled?: boolean;
   installedAt: string;

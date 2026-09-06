@@ -9,9 +9,9 @@ export const Ds4ConfigSchema = z.object({
    */
   ds4BaseUrl: z.string().optional(),
   /**
-   * ds4-only: explicit GGUF path passed to `ds4-server --model`. Only
-   * antirez's DeepSeek-V4 GGUFs load (ds4 is not a general GGUF runner).
-   * Env override: `GEZEL_DS4_MODEL`.
+   * ds4-only: explicit GGUF path passed to `ds4-server --model`. Only the
+   * DeepSeek-V4 and GLM 5.2/5.3 checkpoints ds4 implements load (ds4 is not a
+   * general GGUF runner). Env override: `GEZEL_DS4_MODEL`.
    */
   ds4ModelPath: z.string().optional(),
   /**
@@ -30,9 +30,10 @@ export const Ds4ConfigSchema = z.object({
   ds4NumCtx: z.number().int().positive().optional(),
   /**
    * ds4-only: stream MoE expert weights from SSD instead of full residency
-   * (`--ssd-streaming`). Streaming is the safe default. `false` is honored
-   * only when the selected GGUF plus a fixed runtime/OS reserve fits a local
-   * unified-memory target; otherwise the service keeps streaming enabled.
+   * (`--ssd-streaming`). Unset keeps the model resident when it fits a local
+   * unified-memory target and streams otherwise. `true` always requests
+   * streaming; unsafe `false` is ignored when the selected GGUF plus a fixed
+   * runtime/OS reserve does not fit.
    */
   ds4SsdStreaming: z.boolean().optional(),
   /**

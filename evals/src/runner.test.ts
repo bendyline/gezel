@@ -16,6 +16,7 @@ import {
   defaultSoftProgressTimeoutMsForModel,
   describeSendFailure,
   ds4EvalLaunchOverridesForModel,
+  ds4EvalPayloadFromModelDir,
   ds4EvalShouldUseSsdStreaming,
   envHardProgressFloorMs,
   evalDaemonEnvForTrial,
@@ -1348,6 +1349,7 @@ describe('ds4 eval residency policy', () => {
     });
     expect(actual?.config).not.toHaveProperty('modelTuning');
     expect(actual?.summary).toContain('tuning=catalog');
+    expect(actual?.summary).toContain('capacityBudget=104GB');
     expect(actual?.summary).not.toContain('maxTokens=4096');
     expect(actual?.summary).not.toContain('thinking=off');
   });
@@ -1368,6 +1370,15 @@ describe('ds4 eval residency policy', () => {
       ds4EvalShouldUseSsdStreaming({
         totalRamBytes: 128 * GB,
         modelSizeBytes: 153 * GB,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(true);
+    expect(
+      ds4EvalShouldUseSsdStreaming({
+        totalRamBytes: 128 * GB,
+        modelSizeBytes: 95 * GB,
+        companionBytes: 2 * GB,
         platform: 'darwin',
         arch: 'arm64',
       }),
@@ -1395,6 +1406,41 @@ describe('ds4 eval residency policy', () => {
         arch: 'arm64',
       }),
     ).toBe(true);
+  });
+
+  it('resolves a product install by manifest instead of mistaking its vision encoder for weights', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-eval-payload-'));
+    try {
+      await writeFile(join(dir, 'weights.gguf'), 'weights');
+      await writeFile(join(dir, 'encoder.gguf'), 'encoder');
+      await writeFile(
+        join(dir, 'manifest.json'),
+        JSON.stringify({
+          weightsFilename: 'weights.gguf',
+          visionEncoderFilename: 'encoder.gguf',
+        }),
+      );
+
+      expect(ds4EvalPayloadFromModelDir(dir)).toEqual({
+        modelPath: join(dir, 'weights.gguf'),
+        visionEncoderPath: join(dir, 'encoder.gguf'),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for an ambiguous legacy ds4 install without a manifest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-eval-legacy-'));
+    try {
+      await writeFile(join(dir, 'one.gguf'), 'one');
+      await writeFile(join(dir, 'two.gguf'), 'two');
+      await writeFile(join(dir, 'Vision-Encoder.gguf'), 'encoder');
+
+      expect(ds4EvalPayloadFromModelDir(dir)).toEqual({});
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

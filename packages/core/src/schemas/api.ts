@@ -1076,7 +1076,7 @@ export const GezelConfigSchema = z.object({
    * granted a larger context window. Worth it for, say, a night-shift model
    * that will never be handed a screenshot.
    *
-   * Off by default because an mmproj-backed llama-server 501s on slot
+   * Enabled by default even though an mmproj-backed llama-server 501s on slot
    * save/restore, so gezel cannot persist that model's KV to disk. Scope
    * that precisely, because it is narrower than it first reads: llama-server's
    * own in-request prefix reuse (`cache_prompt` + `id_slot`, which
@@ -1087,8 +1087,9 @@ export const GezelConfigSchema = z.object({
    * a fresh session for the same gezel skip the system-prompt prefill. The
    * cost lands on cold starts, not on every turn.
    *
-   * llama.cpp only. MLX has no slot save/restore to lose (and no vision path
-   * yet — see `MLX_VISION_SUPPORTED`).
+   * The cold-start trade applies to llama.cpp's mmproj path. ds4 uses this
+   * same per-model preference for its `--vision` encoder, while MLX has no
+   * vision path yet — see `MLX_VISION_SUPPORTED`.
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —

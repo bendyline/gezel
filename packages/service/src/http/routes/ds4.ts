@@ -11,8 +11,8 @@ import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 /**
- * ds4 (DwarfStar / DeepSeek-V4) local model management — install / list /
- * delete the antirez DeepSeek-V4 GGUFs from the chat-model catalog. ds4's
+ * ds4 (DwarfStar) local model management — install / list / delete the
+ * supported DeepSeek-V4 and GLM GGUFs from the chat-model catalog. ds4's
  * GGUFs are structurally identical to llama.cpp's, so this mirrors
  * `llama-cpp.ts` and funnels through the same `LlamaCppModelManager`
  * (constructed with `engine: 'ds4'`, so it reads the catalog `ds4` source
@@ -183,8 +183,8 @@ export function ds4Routes(ctx: EngineContext): Hono {
    * Install a chat-model entry's ds4 source. The install runs as a
    * background job owned by {@link EngineContext.chatInstalls}; this SSE
    * is just a subscriber, so a client disconnect does not abandon the
-   * download. That matters doubly here — these are large (~81–153 GB)
-   * DeepSeek-V4 quants. Idempotent: a second `POST` for a running id
+   * download. That matters doubly here — these are large (~81–200+ GB)
+   * DeepSeek/GLM quants. Idempotent: a second `POST` for a running id
    * attaches to the in-flight install. Cancel is the explicit `DELETE`.
    */
   app.post('/models/:catalogId/install', async (c) => {

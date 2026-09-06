@@ -730,7 +730,7 @@ export function tuningMapFor(provider: ProviderName): TuningMap {
     case 'mlx':
       return MLX_TUNING_MAP;
     case 'ds4':
-      // ds4 (DwarfStar) serves DeepSeek-V4 over an OpenAI-compatible body with
+      // ds4 (DwarfStar) serves its supported models over an OpenAI-compatible body with
       // the same sampling surface (temperature / top_p / max_tokens / tool_choice)
       // as llama-server, so it shares llama.cpp's tuning map.
       return LLAMA_CPP_TUNING_MAP;
