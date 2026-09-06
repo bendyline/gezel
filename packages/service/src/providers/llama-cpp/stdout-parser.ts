@@ -66,6 +66,8 @@ export function stripLogPrefix(line: string): string {
  * the event bus).
  */
 export function classifyStartupLine(rawLine: string): StartupPhase | null {
+  if (rawLine.includes('memory-admission:'))
+    return { phase: 'starting', detail: 'Waiting for available memory' };
   const line = stripLogPrefix(rawLine);
   if (!line) return null;
 

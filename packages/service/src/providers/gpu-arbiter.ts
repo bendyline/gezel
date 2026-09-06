@@ -1,15 +1,10 @@
 /**
- * GpuArbiter — coordinates GPU/VRAM tenancy between the local LLM
- * (llama-cpp) and the local image generator (sd-cpp). Both engines
- * are GPU-resident when running, and on consumer cards (12 GB
- * VRAM-class) they don't fit in memory simultaneously. This class
- * decides whether they coexist or take turns.
+ * GpuArbiter — thermal admission plus the user's explicit cross-slot swap
+ * preference. Automatic memory admission belongs to DeviceCapacityLedger,
+ * shared by all native supervisors and cooperating daemon processes.
  *
  * Policies:
- *   - `coexist` — `acquire()` is a no-op. Both engines stay loaded.
- *     Right when the user has plenty of memory (Mac unified memory
- *     ≥24 GB, or a discrete GPU ≥20 GB) so swap latency would be
- *     pure overhead.
+ *   - `coexist` — no slot eviction; supervisors admit residency by bytes.
  *   - `swap` — `acquire(slot)` evicts the *other* slot first. The
  *     evicted engine's lazy-restart kicks in on its next request,
  *     so callers see a small one-time latency on the turn after a
@@ -27,7 +22,6 @@
  * call when the supervisor is already stopped is a tested no-op.
  */
 
-import { totalmem } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import type {
   DeviceHealthGate,
@@ -342,35 +336,16 @@ export class GpuArbiter {
 }
 
 /**
- * Pick a sensible default GPU policy from platform + memory. Coexist
- * when we're confident both a 7B-class LLM and an SDXL-class image
- * model fit alongside the OS; swap otherwise. Conservative thresholds
- * — the cost of misclassifying coexist is OOM, while swap just adds
- * one cold-start every time the user crosses domains.
- *
- * Mac (Apple Silicon) uses unified memory, so total system RAM is
- * the right thing to compare against. ≥24 GB comfortably holds a
- * Q4 7B (~5 GB), an SDXL-class model (~7 GB), and the OS + app
- * working set with margin.
- *
- * Windows / Linux discrete GPUs are dominated by VRAM, not system
- * RAM. We don't probe `nvidia-smi` here — the cost of a synchronous
- * probe at startup isn't worth it for a heuristic, and the user can
- * flip to coexist explicitly via Settings if they have the headroom.
+ * Automatic co-residency is now admitted by the device memory ledger at actual
+ * engine startup. The slot arbiter retains explicit `swap` as an operator
+ * preference; platform/RAM heuristics must not serialize models that fit.
  */
-export function detectGpuPolicy(opts?: {
+export function detectGpuPolicy(_opts?: {
   platform?: NodeJS.Platform;
   arch?: string;
   totalMemBytes?: number;
 }): GpuPolicy {
-  const platform = opts?.platform ?? process.platform;
-  const arch = opts?.arch ?? process.arch;
-  const totalMem = opts?.totalMemBytes ?? totalmem();
-  const COEXIST_MAC_THRESHOLD = 24 * 1024 ** 3;
-  if (platform === 'darwin' && arch === 'arm64' && totalMem >= COEXIST_MAC_THRESHOLD) {
-    return 'coexist';
-  }
-  return 'swap';
+  return 'coexist';
 }
 
 /**

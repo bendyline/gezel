@@ -62,3 +62,4 @@ export * from './handboek.js';
 export * from './storage.js';
 
 export * from './file-turn-intent.js';
+export * from './native-capacity.js';

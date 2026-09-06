@@ -616,6 +616,17 @@ export async function buildMlxProvider(opts: {
     return 300_000;
   })();
   const supervisor = new NativeEngineSupervisor({
+    capacity: {
+      home: opts.store.homePath,
+      priority: () =>
+        (providerHolder.current?.queue.describe().runningInteractive ?? 0) > 0
+          ? 'interactive'
+          : 'background',
+      requirement: () =>
+        mlxPlannedReservationBytes !== undefined
+          ? { bytes: mlxPlannedReservationBytes }
+          : undefined,
+    },
     logPrefix: '[mlx]',
     startupTimeoutMs: mlxStartupTimeoutMs,
     idleTimeoutMs: mlxIdleMs,

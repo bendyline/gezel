@@ -49,8 +49,9 @@ function writeInstall(
   modelId: string,
   manifest: Record<string, unknown>,
   extraFiles: string[] = [],
+  engine: 'llama-cpp' | 'ds4' = 'llama-cpp',
 ): string {
-  const dir = join(root, 'engines', 'llama-cpp', 'models', modelId);
+  const dir = join(root, 'engines', engine, 'models', modelId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
@@ -147,6 +148,53 @@ describe('ensureWarmModel', () => {
       }),
     ).rejects.toMatchObject({ name: 'AbortError' });
     expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+  });
+
+  it('warms ds4 through its own install route, including declared vision sidecars', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-ds4-warm-'));
+    const modelId = 'glm-5.3-flash-320b-q2';
+    const modelDir = join(root, 'engines', 'ds4', 'models', modelId);
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(join(modelDir, 'weights.gguf.partial'), 'resume me');
+    const updateConfig = vi.fn().mockResolvedValue(undefined);
+    const installDs4Model = vi.fn(async (_id: string, onEvent: (event: object) => void) => {
+      // ds4 weights are 90-200+ GiB; eval warm-up must preserve the product
+      // downloader's resumable partial instead of forcing a fresh transfer.
+      expect(readFileSync(join(modelDir, 'weights.gguf.partial'), 'utf8')).toBe('resume me');
+      writeFileSync(join(modelDir, 'weights.gguf'), 'weights');
+      writeFileSync(join(modelDir, 'vision.gguf'), 'vision');
+      writeFileSync(
+        join(modelDir, 'manifest.json'),
+        JSON.stringify({
+          weightsFilename: 'weights.gguf',
+          visionEncoderFilename: 'vision.gguf',
+        }),
+      );
+      onEvent({ type: 'done', id: modelId });
+    });
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: { updateConfig, installDs4Model },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'ds4',
+        modelId,
+        log: () => {},
+      });
+
+      expect(updateConfig).toHaveBeenCalledWith({
+        provider: 'ds4',
+        defaultModel: { ds4: modelId },
+        firstRunCompleted: true,
+      });
+      expect(installDs4Model).toHaveBeenCalledWith(modelId, expect.any(Function), undefined);
+      expect(spawnMocks.shutdownTrialDaemon).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -300,6 +348,36 @@ describe('staleInstallReason', () => {
     await expect(
       staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
     ).resolves.toBeNull();
+  });
+
+  it('flags a ds4 install predating its required vision encoder sidecar', async () => {
+    const modelId = 'glm-5.3-flash-320b-q2';
+    useSyntheticIndex([
+      {
+        id: modelId,
+        version: '1.0.0',
+        ds4: {
+          huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+          filename: 'weights.gguf',
+          sha256: 'a'.repeat(64),
+          visionEncoder: { filename: 'vision.gguf' },
+        },
+      },
+    ]);
+    const r = root();
+    const ds4Install = {
+      weightsFilename: 'weights.gguf',
+      sha256: 'a'.repeat(64),
+      huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+      catalogVersion: '1.0.0',
+    };
+    writeInstall(r, modelId, ds4Install, [], 'ds4');
+    await expect(staleInstallReason({ cacheRoot: r, engine: 'ds4', modelId })).resolves.toMatch(
+      /missing vision encoder vision\.gguf/,
+    );
+
+    writeInstall(r, modelId, ds4Install, ['vision.gguf'], 'ds4');
+    await expect(staleInstallReason({ cacheRoot: r, engine: 'ds4', modelId })).resolves.toBeNull();
   });
 
   // The catalog names a draft by its upstream repo-relative path; the

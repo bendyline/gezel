@@ -75,6 +75,10 @@ telemetry merging, broker adoption and credential rotation.
 
 ## Request flow
 
+Native child startup also uses shared memory reservations, including isolated
+development and evaluation engines. See [native resource admission](native-resource-admission.md)
+for the cross-process authority, scheduling policy, and pressure limits.
+
 Electron authenticates only to the user daemon. The user daemon discovers the installed broker from
 the protected system runtime directory, pins its loopback certificate, verifies the stable
 device-identity signature, and installs an ephemeral `this-machine` remote. The broker credential is

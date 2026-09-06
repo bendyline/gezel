@@ -277,6 +277,72 @@ describe('LlamaCppModelManager.install', () => {
     expect(resolved?.weightsPath).toContain(join('engines', 'ds4', 'models'));
   });
 
+  it('downloads and resolves a declared ds4 vision encoder beside the language GGUF', async () => {
+    const weights = buildGguf({
+      arch: 'glm4_moe',
+      contextLength: 131072,
+      fileType: 10,
+      chatTemplate: '{%- if tools %}tools{%- endif %}',
+    });
+    const encoder = Buffer.from('DS4-GLM-VISION-ENCODER', 'utf8');
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'glm-5.3-flash-q2',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'glm-5.3-flash-q2',
+            name: 'GLM 5.3 Flash (Q2)',
+            description: 'fixture',
+            tags: ['vision'],
+            maintainer: { name: 'antirez' },
+            version: '1.0.0',
+            releasedAt: '2026-09-06T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: 'fixture',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            ds4: {
+              huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+              filename: 'GLM-5.3-Flash-Q2.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              residentBytes: weights.byteLength,
+              visionEncoder: {
+                filename: 'GLM-5.3-Flash-Vision-Encoder.gguf',
+                sha256: sha256Hex(encoder),
+                sizeBytes: encoder.byteLength,
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const body = href.includes('Vision-Encoder') ? encoder : weights;
+      return new Response(body, {
+        status: 200,
+        headers: { 'content-length': String(body.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl, engine: 'ds4' });
+
+    const events = await drain(mgr.install('glm-5.3-flash-q2', { includeMmproj: false }));
+    expect(events.find((event) => event.type === 'done')).toBeDefined();
+    expect(requested.some((url) => url.includes('Vision-Encoder'))).toBe(true);
+
+    const dir = join(home, 'engines', 'ds4', 'models', 'glm-5.3-flash-q2');
+    const installedManifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    expect(installedManifest.visionEncoderFilename).toBe('GLM-5.3-Flash-Vision-Encoder.gguf');
+    const resolved = await mgr.resolveModel('glm-5.3-flash-q2');
+    expect(resolved?.visionEncoderPath).toBe(join(dir, 'GLM-5.3-Flash-Vision-Encoder.gguf'));
+    expect(resolved?.visionEncoderSizeBytes).toBe(encoder.byteLength);
+  });
+
   it('downloads from the pinned revision when the source sets one', async () => {
     const blob = buildGguf({ arch: 'qwen2', contextLength: 8192, fileType: 15 });
     const expected = sha256Hex(blob);
@@ -884,7 +950,7 @@ describe('LlamaCppModelManager.install', () => {
     expect(installed[0]?.mmprojPath).toBe(join(dir, 'mmproj-BF16.gguf'));
   });
 
-  it('still honors an explicit includeMmproj:false — ds4 has no sidecar path', async () => {
+  it('still honors an explicit includeMmproj:false for llama.cpp installs', async () => {
     const weights = buildGguf({
       arch: 'nemotron_h',
       contextLength: 131072,

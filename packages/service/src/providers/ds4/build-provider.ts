@@ -11,6 +11,7 @@ import { minViableLocalContextTokens, pressureIdleGraceMs } from '../native/capa
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
+import { nativeVisionEnabledFor } from '../vision-capability.js';
 import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
 import { Ds4Provider } from './provider.js';
 
@@ -49,6 +50,45 @@ export function resolveDs4LaunchCtx(opts: {
 }
 
 /**
+ * Resolve the one vision configuration the launch arguments, request wire
+ * shape, and turn-level capability gate must agree on.
+ *
+ * An explicit language-model path must never silently borrow an encoder from
+ * a catalog install: ds4 encoders are checkpoint-specific, and a mismatched
+ * pair is worse than an honest text-only launch. External servers own their
+ * argv, so Gezel cannot claim they support vision without a future capability
+ * handshake.
+ */
+export function resolveDs4VisionLaunch(opts: {
+  modelId?: string | undefined;
+  nativeVision?: Record<string, boolean> | undefined;
+  installedVisionEncoderPath?: string | undefined;
+  explicitModelPath?: string | undefined;
+  explicitVisionEncoderPath?: string | undefined;
+  externalBaseUrl?: string | undefined;
+}): { visionEncoderPath?: string; enabled: boolean } {
+  if (opts.externalBaseUrl) return { enabled: false };
+  const visionEncoderPath =
+    opts.explicitVisionEncoderPath ??
+    (opts.explicitModelPath ? undefined : opts.installedVisionEncoderPath);
+  const enabled =
+    Boolean(visionEncoderPath) &&
+    (opts.modelId ? nativeVisionEnabledFor(opts.nativeVision, opts.modelId) : true);
+  return {
+    ...(visionEncoderPath ? { visionEncoderPath } : {}),
+    enabled,
+  };
+}
+
+/** Command-line fragment for the resolved ds4 vision state. */
+export function ds4VisionArgs(vision: {
+  visionEncoderPath?: string;
+  enabled: boolean;
+}): string[] {
+  return vision.enabled && vision.visionEncoderPath ? ['--vision', vision.visionEncoderPath] : [];
+}
+
+/**
  * Build a ds4 (DwarfStar) provider. `ds4-server` is wire-compatible with
  * `llama-server` (OpenAI `/v1/chat/completions` SSE), so this returns a
  * {@link Ds4Provider} wrapping a {@link LlamaCppProvider} pointed at either an
@@ -56,7 +96,7 @@ export function resolveDs4LaunchCtx(opts: {
  * supervised bundled `ds4-server` (`GEZEL_DS4_SERVER_BIN`).
  *
  * ds4 is not a general GGUF runner: it loads the specific DeepSeek-V4 and
- * GLM 5.2 quants its engine was built for, detecting the family at load time
+ * GLM 5.2/5.3 quants its engine was built for, detecting the family at load time
  * from the GGUF's `general.architecture`. Models reach the supervised path
  * through the catalog's `ds4` source block, or an EXPLICIT GGUF via
  * `config.ds4ModelPath` / `GEZEL_DS4_MODEL`. GPU-only: `--metal` on darwin,
@@ -171,7 +211,8 @@ export async function buildDs4Provider(opts: {
   // Model path: explicit env/config wins; otherwise resolve the catalog
   // modelId through the ds4 GGUF store (installed via the model picker into
   // `engines/ds4/models`). Mirrors buildLlamaCppProvider's precedence.
-  let modelPath = process.env.GEZEL_DS4_MODEL ?? config.ds4ModelPath;
+  const explicitModelPath = process.env.GEZEL_DS4_MODEL ?? config.ds4ModelPath;
+  let modelPath = explicitModelPath;
   let installedModel: import('../llama-cpp/index.js').InstalledLlamaCppModel | null | undefined;
   if (!modelPath && opts.ds4Models) {
     if (defaultModelId) {
@@ -198,6 +239,20 @@ export async function buildDs4Provider(opts: {
   const backendFlag = process.platform === 'darwin' ? '--metal' : '--cuda';
 
   const effectiveModelId = defaultModelId ?? installedModel?.id;
+  const vision = resolveDs4VisionLaunch({
+    ...(effectiveModelId ? { modelId: effectiveModelId } : {}),
+    ...(config.nativeVision ? { nativeVision: config.nativeVision } : {}),
+    ...(installedModel?.visionEncoderPath
+      ? { installedVisionEncoderPath: installedModel.visionEncoderPath }
+      : {}),
+    ...(explicitModelPath ? { explicitModelPath } : {}),
+    ...((process.env.GEZEL_DS4_VISION_ENCODER ?? config.ds4VisionEncoderPath)
+      ? {
+          explicitVisionEncoderPath:
+            process.env.GEZEL_DS4_VISION_ENCODER ?? config.ds4VisionEncoderPath,
+        }
+      : {}),
+  });
   const catalogDetail = effectiveModelId
     ? await opts.catalog?.get('chat-model', effectiveModelId).catch(() => null)
     : null;
@@ -241,12 +296,25 @@ export async function buildDs4Provider(opts: {
   // build). `shouldUseDs4SsdStreaming` still refuses a model that cannot fit,
   // which is what keeps the flip safe: overriding that on a 90.89 GiB build
   // OOM-killed the engine mid-load on a 121.63 GiB host.
-  const { planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import('./residency.js');
+  const { ds4VisionResidentBytes, planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import(
+    './residency.js'
+  );
   const totalRamBytes = totalRamGb * 1024 ** 3;
+  let visionEncoderSizeBytes = installedModel?.visionEncoderSizeBytes;
+  if (vision.enabled && vision.visionEncoderPath && !visionEncoderSizeBytes) {
+    const { stat: statVisionEncoder } = await import('node:fs/promises');
+    visionEncoderSizeBytes = await statVisionEncoder(vision.visionEncoderPath)
+      .then((st) => st.size)
+      .catch(() => undefined);
+  }
+  const visionResidentBytes = ds4VisionResidentBytes(
+    vision.enabled ? visionEncoderSizeBytes : undefined,
+  );
   const ssdStreaming = shouldUseDs4SsdStreaming({
     configured: config.ds4SsdStreaming,
     modelSizeBytes,
     totalRamBytes,
+    ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
   });
   if (config.ds4SsdStreaming === false && ssdStreaming) {
     log.warn(
@@ -256,7 +324,7 @@ export async function buildDs4Provider(opts: {
   }
 
   // DSpark speculative decoding. Resolved here, beside the residency decision
-  // it depends on: ds4 aborts at startup if `--mtp` is combined with
+  // it depends on: ds4 aborts at startup if an external `--mtp-model` is combined with
   // `--ssd-streaming`, so this can only ever draft on a fully resident launch.
   const dsparkSupportPath = config.ds4DsparkModelPath ?? installedModel?.draftModelPath;
   // Residency is decided on the weights alone, then the companion is priced
@@ -265,16 +333,20 @@ export async function buildDs4Provider(opts: {
   // push the model out of memory loses its own flag rather than costing the
   // launch its residency.
   let companionFitsMemory = true;
+  let dsparkCompanionBytes = 0;
   if (dsparkSupportPath && !ssdStreaming) {
     const { canUseDs4FullResidency } = await import('./residency.js');
     const { stat: statCompanion } = await import('node:fs/promises');
     const companionBytes = await statCompanion(dsparkSupportPath)
       .then((st) => st.size)
       .catch(() => undefined);
+    dsparkCompanionBytes = companionBytes ?? 0;
     companionFitsMemory = canUseDs4FullResidency({
       modelSizeBytes,
       totalRamBytes,
-      ...(companionBytes !== undefined ? { companionBytes } : {}),
+      ...(companionBytes !== undefined || visionResidentBytes > 0
+        ? { companionBytes: (companionBytes ?? 0) + visionResidentBytes }
+        : {}),
     });
   }
   const dspark = resolveDs4Dspark({
@@ -289,7 +361,10 @@ export async function buildDs4Provider(opts: {
   const cachePlan = planDs4ExpertCache({
     configuredGb: config.ds4CacheExpertsGb,
     catalogCacheBytes: ds4Source?.cacheExpertsBytes,
-    catalogResidentBytes: ds4Source?.residentBytes,
+    catalogResidentBytes:
+      ds4Source?.residentBytes !== undefined || visionResidentBytes > 0
+        ? (ds4Source?.residentBytes ?? 0) + visionResidentBytes
+        : undefined,
     totalRamBytes: totalRamGb * 1024 ** 3,
   });
   if (ssdStreaming && !cachePlan.safe) {
@@ -348,6 +423,30 @@ export async function buildDs4Provider(opts: {
 
   let cachedDs4Port: number | undefined;
   const supervisor = new NativeEngineSupervisor({
+    capacity: {
+      home,
+      priority: () =>
+        (ds4ProviderHolder.current?.queue.describe().runningInteractive ?? 0) > 0
+          ? 'interactive'
+          : 'background',
+      requirement: async () => {
+        const { ds4ResidentLine, ds4ProjectedResidentBytes, ds4ResidentBytesForMode } =
+          await import('./residency.js');
+        const line = ds4ResidentLine(ds4Source ?? {});
+        const projected = line ? ds4ProjectedResidentBytes(line, numCtx) : ds4Source?.residentBytes;
+        const base = ssdStreaming
+          ? Math.max(0, (projected ?? 8 * 1024 ** 3) - (ds4Source?.cacheExpertsBytes ?? 0)) +
+            cacheExpertsGb * 1024 ** 3
+          : Math.max(projected ?? 0, (modelSizeBytes ?? 0) * 1.1);
+        return {
+          bytes: ds4ResidentBytesForMode(
+            base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0),
+            ssdStreaming,
+          ),
+          exclusive: !ssdStreaming,
+        };
+      },
+    },
     logPrefix: '[ds4-server]',
     startupTimeoutMs,
     idleTimeoutMs: idleMs,
@@ -409,6 +508,7 @@ export async function buildDs4Provider(opts: {
           args.push('--ssd-streaming-cache-experts', `${cacheExpertsGb}GB`);
         }
       }
+      args.push(...ds4VisionArgs(vision));
       args.push(...ds4DsparkArgs(dspark));
       // Record the effective safety policy before spawn. ds4-server's own
       // stdout does not reliably echo its argv, and a hard lockup/force-quit
@@ -418,7 +518,7 @@ export async function buildDs4Provider(opts: {
           `sizeGiB=${modelSizeBytes ? (modelSizeBytes / 1024 ** 3).toFixed(1) : 'unknown'} ` +
           `backend=${backendFlag.slice(2)} ctx=${numCtx} ` +
           `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0} ` +
-          `dspark=${dspark.enabled} (${dspark.reason})`,
+          `vision=${vision.enabled} dspark=${dspark.enabled} (${dspark.reason})`,
       );
       return { command: binary, args, baseUrl: `http://127.0.0.1:${port}`, cwd: ds4BundleDir };
     },
@@ -429,6 +529,7 @@ export async function buildDs4Provider(opts: {
     logFile: ds4LogFile,
     disableThinkingRequestShape: 'deepseek',
     classifyLine: classifyDs4Line,
+    visionEnabled: vision.enabled,
     ...baseProviderOpts,
   });
   ds4ProviderHolder.current = ds4Inner;

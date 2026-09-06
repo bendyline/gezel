@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "engines": {
     "ds4": {
-      "tag": "main-2026-08-23",
-      "commit": "c1d4597a80e300b803dc642519718f2c999589da",
+      "tag": "main-2026-09-05",
+      "commit": "9ab705347c1775e7599ede7eb81a6255ec7dccb5",
       "files": [
         "LICENSE-ds4-MIT.txt",
         "LICENSE-ds4-rax-BSD-3-Clause.txt",

@@ -2,23 +2,9 @@
  * LlamaVisionProvider — runs a small vision model on a dedicated
  * `llama-server` instance launched with `--model … --mmproj …`.
  *
- * Deliberately NOT the chat `ProviderPool`. Three reasons, in order of how
- * badly each would hurt:
- *
- *   1. Recognition runs *before* the chat model's turn, so pooling would
- *      serialize them through the same `CapacityBroker` — evict chat model,
- *      load vision model, evict it, reload chat model. Two cold starts on the
- *      exact turn the user is blocked on.
- *   2. An mmproj-backed server returns 501 on slot save/restore, which latches
- *      disk-KV prefix caching off process-wide (see the cache adapter's
- *      `slotActionsUnsupported`). Putting a vision model in the chat pool
- *      would degrade prompt caching for every model in it.
- *   3. Pool entries carry session affinity and KV state; a recognition call is
- *      a stateless one-shot with neither.
- *
- * Running a second `llama-server` alongside the chat one is already safe: the
- * orphan reaper consults a process-wide live-pid set precisely so a second
- * supervisor never reaps a live sibling.
+ * Recognition retains a separate stateless provider and cache. Its native
+ * supervisor shares device memory admission with chat and media engines, so
+ * keeping it outside the chat ProviderPool does not bypass capacity checks.
  */
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -81,8 +67,6 @@ export interface LlamaVisionProviderOptions {
   fetchImpl?: typeof fetch;
   supervisor?: NativeEngineSupervisor;
   configured?: boolean;
-  /** Refuses the run when the broker can't spare the memory. */
-  reserveMemory?: (bytes: number) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 export class LlamaVisionProvider implements RecognitionProvider {
@@ -111,6 +95,12 @@ export class LlamaVisionProvider implements RecognitionProvider {
   }
 
   async recognize(input: RecognizeInput): Promise<ImageRecognition> {
+    return this.supervisor
+      ? this.supervisor.withRequest(() => this.recognizeInner(input))
+      : this.recognizeInner(input);
+  }
+
+  private async recognizeInner(input: RecognizeInput): Promise<ImageRecognition> {
     const started = Date.now();
     const meta = readImageStaticMeta(input.bytes);
     // Static metadata is the floor: whatever happens next, the caller gets

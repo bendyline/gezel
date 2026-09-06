@@ -5,7 +5,12 @@ import { type GezelConfig, estimateLlamaCppResidentBytes } from '@bendyline/geze
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
 import { resolveCatalogLlamaCppEngineConfig } from '../catalog-model-config.js';
-import { buildDs4Provider, resolveDs4LaunchCtx } from '../ds4/build-provider.js';
+import {
+  buildDs4Provider,
+  resolveDs4LaunchCtx,
+  resolveDs4VisionLaunch,
+} from '../ds4/build-provider.js';
+import { ds4VisionResidentBytes } from '../ds4/residency.js';
 import { buildLlamaCppProvider, ensureLlamaEngineStatus } from '../llama-cpp/build-provider.js';
 import { readGgufSummaryAsync } from '../llama-cpp/gguf-metadata-async.js';
 import type { GgufSummary } from '../llama-cpp/gguf-metadata.js';
@@ -619,6 +624,42 @@ export class LocalEngineRuntime {
     }
   }
 
+  /** Extra fixed reservation for the exact ds4 vision encoder this launch uses. */
+  private async resolveDs4VisionResidentBytes(
+    config: GezelConfig,
+    modelId: string,
+    installed: { visionEncoderPath?: string; visionEncoderSizeBytes?: number } | null | undefined,
+    source?: { visionEncoder?: { sizeBytes: number } },
+  ): Promise<number> {
+    const explicitModelPath = process.env.GEZEL_DS4_MODEL ?? config.ds4ModelPath;
+    const explicitVisionEncoderPath =
+      process.env.GEZEL_DS4_VISION_ENCODER ?? config.ds4VisionEncoderPath;
+    const externalBaseUrl = process.env.GEZEL_DS4_SERVER_URL ?? config.ds4BaseUrl;
+    const vision = resolveDs4VisionLaunch({
+      modelId,
+      ...(config.nativeVision ? { nativeVision: config.nativeVision } : {}),
+      ...(installed?.visionEncoderPath
+        ? { installedVisionEncoderPath: installed.visionEncoderPath }
+        : {}),
+      ...(explicitModelPath ? { explicitModelPath } : {}),
+      ...(explicitVisionEncoderPath ? { explicitVisionEncoderPath } : {}),
+      ...(externalBaseUrl ? { externalBaseUrl } : {}),
+    });
+    if (!vision.enabled || !vision.visionEncoderPath) return 0;
+
+    let sizeBytes =
+      vision.visionEncoderPath === installed?.visionEncoderPath
+        ? (installed?.visionEncoderSizeBytes ?? source?.visionEncoder?.sizeBytes)
+        : undefined;
+    if (!sizeBytes) {
+      const { stat } = await import('node:fs/promises');
+      sizeBytes = await stat(vision.visionEncoderPath)
+        .then((entry) => entry.size)
+        .catch(() => undefined);
+    }
+    return ds4VisionResidentBytes(sizeBytes);
+  }
+
   protected async resolveResidentBytes(
     provider: LocalProviderName,
     modelId: string,
@@ -652,6 +693,7 @@ export class LocalEngineRuntime {
               kvBytesPerToken?: number;
               residentCtxTokens?: number;
               maxLaunchCtx?: number;
+              visionEncoder?: { sizeBytes: number };
             };
           }
         | undefined;
@@ -675,6 +717,13 @@ export class LocalEngineRuntime {
               // broker admits a model whose KV no longer fits — the exact
               // memory-pressure event the residency rules exist to prevent.
               const ds4Block = cm.ds4;
+              const installed = await this.ds4Models?.resolveModel(modelId).catch(() => null);
+              const visionResidentBytes = await this.resolveDs4VisionResidentBytes(
+                config,
+                modelId,
+                installed,
+                ds4Block,
+              );
               const line = ds4ResidentLine({
                 residentBytes: bytes,
                 kvBytesPerToken: ds4Block?.kvBytesPerToken,
@@ -698,8 +747,10 @@ export class LocalEngineRuntime {
                 shouldUseDs4SsdStreaming({
                   configured: config.ds4SsdStreaming,
                   modelSizeBytes: block.approxSizeBytes,
+                  ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
                 }),
               );
+              bytes += visionResidentBytes;
             }
           }
         } else if (block?.approxSizeBytes) {
@@ -1286,20 +1337,40 @@ export class LocalEngineRuntime {
       // `fixed + slope × ctx` line llama.cpp/MLX rows carry, so the slider
       // prices a drag instead of claiming the footprint never moves. Entries
       // without a measured slope keep the flat number and say so.
-      const { ds4ProjectedResidentBytes, ds4ResidentLine } = await import('../ds4/residency.js');
+      const {
+        ds4ProjectedResidentBytes,
+        ds4ResidentBytesForMode,
+        ds4ResidentLine,
+        shouldUseDs4SsdStreaming,
+      } = await import('../ds4/residency.js');
       const ds4Line = ds4ResidentLine({
         residentBytes: ds4Source?.residentBytes,
         kvBytesPerToken: ds4Source?.kvBytesPerToken,
         residentCtxTokens: ds4Source?.residentCtxTokens,
       });
+      const visionResidentBytes = await this.resolveDs4VisionResidentBytes(
+        config,
+        modelId,
+        installed,
+        ds4Source,
+      );
+      const ssdStreaming = shouldUseDs4SsdStreaming({
+        configured: config.ds4SsdStreaming,
+        modelSizeBytes: ds4Source?.approxSizeBytes ?? installed?.approxSizeBytes,
+        ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
+      });
+      const plannedResidentBytes = ds4Line
+        ? ds4ResidentBytesForMode(ds4ProjectedResidentBytes(ds4Line, effective), ssdStreaming) +
+          visionResidentBytes
+        : await this.resolveResidentBytes('ds4', modelId);
       return {
         contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
-        plannedResidentBytes: ds4Line
-          ? ds4ProjectedResidentBytes(ds4Line, effective)
-          : await this.resolveResidentBytes('ds4', modelId),
+        plannedResidentBytes,
         ...(ds4Line
           ? {
-              weightsResidentBytes: ds4Line.contextFreeBytes,
+              weightsResidentBytes:
+                ds4ResidentBytesForMode(ds4Line.contextFreeBytes, ssdStreaming) +
+                visionResidentBytes,
               kvFixedBytesPerSlot: 0,
               kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
             }

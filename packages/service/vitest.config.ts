@@ -147,6 +147,7 @@ export default defineConfig({
       GEZEL_HF_CACHE_DIR: join(homedir(), '.cache', 'gezel-test-hf'),
       GEZEL_MACHINE_SHARED_HOME: join(HOST_ISOLATION_ROOT, 'shared'),
       GEZEL_SYSTEM_SERVICE_HOME: join(HOST_ISOLATION_ROOT, 'machine-engine'),
+      GEZEL_NATIVE_CAPACITY_DIR: join(HOST_ISOLATION_ROOT, 'native-capacity'),
       // The local context floor is host-derived (64K, or 32K on a
       // memory-constrained machine — see minViableLocalContextTokens), and a
       // 16 GB CI runner IS such a machine. Pin it so context assertions mean

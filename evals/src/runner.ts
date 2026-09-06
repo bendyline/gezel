@@ -559,6 +559,16 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
           log,
         });
       }
+    } else if (engine === 'ds4') {
+      for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
+        await ensureWarmModel({
+          cacheRoot,
+          engine: 'ds4',
+          modelId,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          log,
+        });
+      }
     } else if (engine === 'mlx') {
       // MLX: verify the source dir is a complete install (not just present —
       // a stalled download leaves a partial, manifest-less dir that the MLX
@@ -649,15 +659,15 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   // where the filesystem supports them. Llama-cpp clones from the eval cache;
   // MLX clones from the user's existing `engines/mlx/models/<id>` tree.
   // CLI-wrapper and cloud providers have nothing to materialize.
-  if (engine === 'llama-cpp') {
+  if (engine === 'llama-cpp' || engine === 'ds4') {
     for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
       await linkModelIntoTrial({
         cacheRoot,
         trialHome,
-        engine: 'llama-cpp',
+        engine,
         modelId,
       });
-      log(`[trial] linked llama-cpp/${modelId} into ${trialHome}`);
+      log(`[trial] linked ${engine}/${modelId} into ${trialHome}`);
     }
   } else if (engine === 'mlx') {
     const mlxSourceHome = opts.mlxSourceHome ?? defaultMlxSourceHome();

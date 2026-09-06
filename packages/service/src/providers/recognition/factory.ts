@@ -60,6 +60,7 @@ export async function createRecognitionProvider(
   if (binary) {
     let cachedPort: number | undefined;
     const supervisor = new NativeEngineSupervisor({
+      capacity: { home: opts.home },
       logPrefix: '[vision-server]',
       startupTimeoutMs: 3 * 60 * 1000,
       // Much shorter than chat's 30 minutes: holding ~3 GB resident after one

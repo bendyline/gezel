@@ -34,12 +34,57 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {"name": {"type": "string"}, "description": {"type": "string"}},
+                "required": ["name"],
             },
         },
     },
     {
         "type": "function",
         "function": {"name": "list_projects", "parameters": {"type": "object", "properties": {}}},
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "language": {"type": "string"},
+                    "maxChars": {"type": "integer"},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "language": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        },
     },
 ]
 
@@ -97,6 +142,52 @@ def test_hermes(model_dir):
     think = "<think>\nI'll create it.\n</think>\n"
     TC = lambda body: think + "<tool_call>\n" + body + "\n</tool_call>"
     valid = TC("<function=create_project>\n<parameter=name>\nX\n</parameter>\n</function>")
+    optional_first = TC(
+        "<function=create_project>\n"
+        "<parameter=description>\nA project\n</parameter>\n"
+        "<parameter=name>\nX\n</parameter>\n"
+        "</function>"
+    )
+    missing_required = TC(
+        "<function=create_project>\n"
+        "<parameter=description>\nA project\n</parameter>\n"
+        "</function>"
+    )
+    reversed_required = TC(
+        "<function=write_file>\n"
+        "<parameter=content>\nhello\n</parameter>\n"
+        "<parameter=path>\nx.txt\n</parameter>\n"
+        "</function>"
+    )
+    one_of_two_required = TC(
+        "<function=write_file>\n"
+        "<parameter=path>\nx.txt\n</parameter>\n"
+        "</function>"
+    )
+    wikipedia_read = TC(
+        "<function=wikipedia_read>\n"
+        "<parameter=language>\nen\n</parameter>\n"
+        "<parameter=maxChars>\n12000\n</parameter>\n"
+        "<parameter=title>\nVienna\n</parameter>\n"
+        "</function>"
+    )
+    wikipedia_read_missing_title = TC(
+        "<function=wikipedia_read>\n"
+        "<parameter=language>\nen\n</parameter>\n"
+        "<parameter=maxChars>\n12000\n</parameter>\n"
+        "</function>"
+    )
+    wikipedia_search = TC(
+        "<function=wikipedia_search>\n"
+        "<parameter=limit>\n3\n</parameter>\n"
+        "<parameter=query>\n1913 Vienna population\n</parameter>\n"
+        "</function>"
+    )
+    wikipedia_search_missing_query = TC(
+        "<function=wikipedia_search>\n"
+        "<parameter=limit>\n3\n</parameter>\n"
+        "</function>"
+    )
     fake = TC("<function=totally_fake>\n</function>")
     param_as_fn = TC("<function=description>\n</function>")
     bad_key = TC("<function=create_project>\n<parameter=bogus_key>\nX\n</parameter>\n</function>")
@@ -104,6 +195,22 @@ def test_hermes(model_dir):
         "hermes",
         [
             ("valid call + valid param key accepted", accepts(valid), True),
+            ("optional key before required key accepted", accepts(optional_first), True),
+            ("call missing its required key rejected", accepts(missing_required), False),
+            ("multiple required keys accepted in reverse order", accepts(reversed_required), True),
+            ("call with only one of two required keys rejected", accepts(one_of_two_required), False),
+            ("Wikipedia read with title accepted", accepts(wikipedia_read), True),
+            (
+                "Wikipedia read missing title rejected",
+                accepts(wikipedia_read_missing_title),
+                False,
+            ),
+            ("Wikipedia search with query accepted", accepts(wikipedia_search), True),
+            (
+                "Wikipedia search missing query rejected",
+                accepts(wikipedia_search_missing_query),
+                False,
+            ),
             ("hallucinated function name rejected", accepts(fake), False),
             ("param-as-function (description) rejected", accepts(param_as_fn), False),
             ("tier2: bogus param key rejected", accepts(bad_key), False),
@@ -124,6 +231,7 @@ STRUCTURAL_TOOLS = TOOLS + [
                     "source": {"type": "object", "properties": {"path": {"type": "string"}}},
                     "targets": {"type": "array", "items": {"type": "object"}},
                 },
+                "required": ["source", "targets"],
             },
         },
     },
@@ -161,16 +269,110 @@ def test_hermes_json_escape(model_dir):
             },
         }
     )
+    missing_required = json.dumps(
+        {
+            "name": "convert_document",
+            "arguments": {
+                "source": {"kind": "file", "rootId": "root-1", "path": "deck.md"}
+            },
+        }
+    )
+    fake_json_name = json.dumps(
+        {
+            "name": "totally_fake",
+            "arguments": {
+                "source": {"kind": "file", "path": "deck.md"},
+                "targets": [],
+            },
+        }
+    )
     flat_call = TC("<function=create_project>\n<parameter=name>\nX\n</parameter>\n</function>")
+    flat_structural = TC(
+        "<function=convert_document>\n"
+        "<parameter=source>\n{}\n</parameter>\n"
+        "<parameter=targets>\n[]\n</parameter>\n"
+        "</function>"
+    )
     bad_key = TC("<function=create_project>\n<parameter=bogus>\nX\n</parameter>\n</function>")
     return _report(
         "hermes-json-escape",
         [
             ("JSON envelope carrying nested args accepted", accepts(TC(nested)), True),
+            ("JSON envelope missing a required arg rejected", accepts(TC(missing_required)), False),
+            ("JSON envelope with unknown function rejected", accepts(TC(fake_json_name)), False),
             ("markup branch still accepted", accepts(flat_call), True),
+            ("structural tool rejected on lossy markup branch", accepts(flat_structural), False),
             ("markup branch still pins names", accepts(TC("<function=nope>\n</function>")), False),
             ("markup branch still pins param keys", accepts(bad_key), False),
             ("plain text, no call accepted", accepts("Just a normal answer."), True),
+        ],
+    )
+
+
+def test_hermes_large_roster(model_dir):
+    """Exercise the 100+ tool shape used by research/document sessions."""
+    from llguidance import LLMatcher
+
+    tok, llg = _load(model_dir)
+    roster = []
+    for i in range(72):
+        roster.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": f"flat_tool_{i}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "subject": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                        "required": ["subject"],
+                    },
+                },
+            }
+        )
+    for i in range(32):
+        roster.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": f"structural_tool_{i}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "object"},
+                            "targets": {"type": "array"},
+                        },
+                        "required": ["source", "targets"],
+                    },
+                },
+            }
+        )
+    grammar = tg.build_grammar_string(roster, {"format": "hermes"})
+    assert grammar is not None
+    assert LLMatcher.validate_grammar(grammar, llg) == "", "large-roster grammar invalid"
+    accepts = _accepts_fn(tok, llg, grammar)
+    TC = lambda body: "<tool_call>\n" + body + "\n</tool_call>"
+    flat = TC("<function=flat_tool_42>\n<parameter=subject>\nVienna\n</parameter>\n</function>")
+    missing_flat = TC("<function=flat_tool_42>\n<parameter=limit>\n3\n</parameter>\n</function>")
+    structural = TC(
+        '{"name":"structural_tool_3","arguments":{"source":{},"targets":[]}}'
+    )
+    missing_structural = TC(
+        '{"name":"structural_tool_3","arguments":{"source":{}}}'
+    )
+    return _report(
+        "hermes-large-roster",
+        [
+            ("104-tool grammar accepts valid flat call", accepts(flat), True),
+            ("104-tool grammar rejects missing flat arg", accepts(missing_flat), False),
+            ("104-tool grammar accepts valid structural call", accepts(structural), True),
+            (
+                "104-tool grammar rejects missing structural arg",
+                accepts(missing_structural),
+                False,
+            ),
         ],
     )
 
@@ -267,6 +469,9 @@ def main():
         failed += f
         total += t
         f, t = test_hermes_json_escape(qwen)
+        failed += f
+        total += t
+        f, t = test_hermes_large_roster(qwen)
         failed += f
         total += t
     if not qwens:

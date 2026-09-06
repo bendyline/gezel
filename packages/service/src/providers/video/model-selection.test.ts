@@ -56,6 +56,7 @@ function fakeSupervisor(selector: VideoModelSelector): {
 } {
   const calls = { stop: 0, ensureRunning: 0 };
   const supervisor = {
+    withRequest: <T>(run: () => Promise<T>) => run(),
     async ensureRunning() {
       calls.ensureRunning += 1;
       selector.launchedId = (await selector.pick())?.id;

@@ -30,17 +30,29 @@ describe('resolveVisionCapability', () => {
     }
   });
 
-  // ds4 is the case that motivated the feature. It must be false on the
-  // strength of the provider alone — no config, no installed-model lookup.
-  it('reports ds4 as blind regardless of what else is set', () => {
+  it('requires a ds4 vision encoder and the effective native-vision setting', () => {
+    expect(
+      resolveVisionCapability({
+        provider: 'ds4',
+        modelId: 'glm-5.3-flash-744b-q2',
+        nativeVisionEnabled: true,
+      }).native,
+    ).toBe(false);
     const result = resolveVisionCapability({
       provider: 'ds4',
-      modelId: 'deepseek-v4-flash-284b-q2',
-      mmprojPath: '/somehow/a/projector.gguf',
+      modelId: 'glm-5.3-flash-744b-q2',
+      visionEncoderPath: '/models/GLM-5.3-Flash-Vision-Encoder.gguf',
       nativeVisionEnabled: true,
     });
-    expect(result.native).toBe(false);
-    expect(result.reason).toContain('ds4');
+    expect(result.native).toBe(true);
+    expect(result.reason).toContain('vision encoder');
+    expect(
+      resolveVisionCapability({
+        provider: 'ds4',
+        modelId: 'glm-5.3-flash-744b-q2',
+        visionEncoderPath: '/models/GLM-5.3-Flash-Vision-Encoder.gguf',
+      }).native,
+    ).toBe(false);
   });
 
   it('reports the CLI-backed providers as blind', () => {

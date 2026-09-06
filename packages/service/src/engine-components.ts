@@ -119,9 +119,9 @@ export async function createEngineComponents(opts: {
   // Cross-engine GPU arbiter. Constructed before ChatManager and
   // ImageProviderManager so both can register their evictors as soon
   // as the underlying providers are built (lazy — first chat turn /
-  // first image gen). Policy comes from config; `'auto'` resolves to
-  // `'coexist'` on big-memory Apple Silicon and `'swap'` everywhere
-  // else. The PUT /api/config handler hot-swaps via `setPolicy`.
+  // first image gen). The shared device ledger admits automatic co-residency;
+  // an explicit swap preference still uses this slot arbiter. The PUT
+  // /api/config handler hot-swaps via `setPolicy`.
   const deviceSafetyPolicy = resolveDeviceSafetyPolicy(bootConfig.deviceSafety);
   const deviceHealthGate = new DeviceHealthGate({
     policy: deviceSafetyPolicy,

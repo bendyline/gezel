@@ -6,6 +6,7 @@ import {
   ds4ProjectedResidentBytes,
   ds4ResidentBytesForMode,
   ds4ResidentLine,
+  ds4VisionResidentBytes,
   planDs4ExpertCache,
   shouldUseDs4SsdStreaming,
 } from './residency.js';
@@ -70,6 +71,11 @@ describe('DS4 residency policy', () => {
     const tight = { modelSizeBytes: model, totalRamBytes: 118 * GB, ...linuxArm };
     expect(canUseDs4FullResidency(tight)).toBe(true);
     expect(canUseDs4FullResidency({ ...tight, companionBytes: companion })).toBe(false);
+  });
+
+  it('prices a vision encoder as weights plus a vision compute graph', () => {
+    expect(ds4VisionResidentBytes(undefined)).toBe(0);
+    expect(ds4VisionResidentBytes(1 * GB)).toBeGreaterThan(1.4 * GB);
   });
 
   it('does not trust system RAM as discrete GPU capacity', () => {

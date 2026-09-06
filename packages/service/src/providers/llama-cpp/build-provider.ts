@@ -1255,6 +1255,15 @@ export async function buildLlamaCppProvider(opts: {
     return 180_000;
   })();
   const supervisor = new NativeEngineSupervisor({
+    capacity: {
+      home,
+      priority: () =>
+        (providerHolder.current?.queue.describe().runningInteractive ?? 0) > 0
+          ? 'interactive'
+          : 'background',
+      requirement: () =>
+        plannedReservationBytes !== undefined ? { bytes: plannedReservationBytes } : undefined,
+    },
     logPrefix: '[llama-server]',
     startupTimeoutMs: llamaStartupTimeoutMs,
     idleTimeoutMs: llamaIdleMs,

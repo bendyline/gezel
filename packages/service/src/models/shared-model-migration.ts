@@ -474,6 +474,12 @@ function assertCatalogPayloadIntegrity(
   if (engine === 'llama-cpp' && catalog.llamaCpp?.mmproj) {
     expected.set(basename(catalog.llamaCpp.mmproj.filename), catalog.llamaCpp.mmproj.sha256);
   }
+  if (engine === 'ds4' && catalog.ds4?.visionEncoder) {
+    const encoder = catalog.ds4.visionEncoder;
+    const path = basename(encoder.filename);
+    expected.set(path, encoder.sha256);
+    required.add(path);
+  }
   for (const path of required) requireHash(path, expected.get(path) as string);
   for (const [path, file] of payload) {
     if (!path.toLowerCase().endsWith('.gguf')) continue;

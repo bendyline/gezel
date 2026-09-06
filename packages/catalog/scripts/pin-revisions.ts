@@ -125,6 +125,8 @@ function pinnedFiles(key: SourceBlock['key'], src: Record<string, unknown>): Pin
   }
   const mmproj = src.mmproj as { filename: string; sha256: string } | undefined;
   if (mmproj) out.push({ path: mmproj.filename, sha256: mmproj.sha256 });
+  const visionEncoder = src.visionEncoder as { filename: string; sha256: string } | undefined;
+  if (visionEncoder) out.push({ path: visionEncoder.filename, sha256: visionEncoder.sha256 });
   const draftModel = src.draftModel as { filename: string; sha256: string } | undefined;
   if (draftModel) out.push({ path: draftModel.filename, sha256: draftModel.sha256 });
   return out;

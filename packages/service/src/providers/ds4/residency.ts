@@ -1,17 +1,34 @@
 import { totalmem } from 'node:os';
-import { DS4_FULL_RESIDENCY_HEADROOM_BYTES, ds4FitsFullResidency } from '@bendyline/gezel';
+import {
+  DS4_FULL_RESIDENCY_HEADROOM_BYTES,
+  LLAMA_CPP_VISION_COMPUTE_BYTES,
+  LLAMA_CPP_WEIGHTS_MULTIPLIER,
+  ds4FitsFullResidency,
+} from '@bendyline/gezel';
 
 const GB = 1024 ** 3;
 
 export { DS4_FULL_RESIDENCY_HEADROOM_BYTES };
 
 /**
- * Full residency must monopolize the local-engine broker. The broker's normal
- * workstation ceiling is 96 GiB; reserving that ceiling prevents a second
- * local model from being admitted while DS4's measured working set is live,
- * without requiring a global capacity-policy increase.
+ * Conservative floor for the full-residency working set. Exclusivity is an
+ * explicit device lease at process startup, not a consequence of this number:
+ * the automatic model budget can exceed 96 GiB on larger machines.
  */
 export const DS4_FULL_RESIDENCY_RESERVATION_BYTES = 96 * GB;
+
+/**
+ * Extra resident memory for ds4's `--vision` encoder. The encoder is a GGUF
+ * tensor payload plus a separate image graph, matching the two terms measured
+ * for llama.cpp vision. Keep this conservative until ds4-specific telemetry
+ * gives us a tighter number.
+ */
+export function ds4VisionResidentBytes(encoderSizeBytes: number | undefined): number {
+  if (!encoderSizeBytes || encoderSizeBytes <= 0) return 0;
+  return (
+    Math.round(encoderSizeBytes * LLAMA_CPP_WEIGHTS_MULTIPLIER) + LLAMA_CPP_VISION_COMPUTE_BYTES
+  );
+}
 
 export interface Ds4ResidencyOptions {
   configured?: boolean;

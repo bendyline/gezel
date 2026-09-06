@@ -1,7 +1,7 @@
 import type { GezelConfig } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { LlamaCppProvider } from '../llama-cpp/index.js';
-import { buildDs4Provider } from './build-provider.js';
+import { buildDs4Provider, ds4VisionArgs, resolveDs4VisionLaunch } from './build-provider.js';
 import { Ds4Provider } from './provider.js';
 import { classifyDs4Line } from './stdout-parser.js';
 
@@ -28,6 +28,71 @@ function mockInner(overrides: Partial<LlamaCppProvider> = {}): LlamaCppProvider 
 }
 
 describe('Ds4Provider (composition over llama.cpp)', () => {
+  it('uses only a model-matched encoder and stays conservative for external servers', () => {
+    expect(
+      resolveDs4VisionLaunch({
+        modelId: 'glm-5.3-flash-q2',
+        installedVisionEncoderPath: '/models/glm-vision.gguf',
+      }),
+    ).toEqual({ visionEncoderPath: '/models/glm-vision.gguf', enabled: true });
+    expect(
+      resolveDs4VisionLaunch({
+        modelId: 'glm-5.3-flash-q2',
+        installedVisionEncoderPath: '/models/glm-vision.gguf',
+        explicitModelPath: '/models/other-language-model.gguf',
+      }),
+    ).toEqual({ enabled: false });
+    expect(
+      resolveDs4VisionLaunch({
+        modelId: 'glm-5.3-flash-q2',
+        installedVisionEncoderPath: '/models/glm-vision.gguf',
+        externalBaseUrl: 'http://127.0.0.1:8000',
+      }),
+    ).toEqual({ enabled: false });
+  });
+
+  it('passes the installed encoder to ds4-server and enables image request blocks', async () => {
+    const savedBin = process.env.GEZEL_DS4_SERVER_BIN;
+    const savedModel = process.env.GEZEL_DS4_MODEL;
+    const savedVision = process.env.GEZEL_DS4_VISION_ENCODER;
+    process.env.GEZEL_DS4_SERVER_BIN = '/opt/gezel/gezel-ds4-server';
+    delete process.env.GEZEL_DS4_MODEL;
+    delete process.env.GEZEL_DS4_VISION_ENCODER;
+    try {
+      const p = await buildDs4Provider({
+        config: {
+          defaultModel: { ds4: 'glm-5.3-flash-q2' },
+          ds4SsdStreaming: true,
+        } as unknown as GezelConfig,
+        affinity: undefined,
+        home: '/tmp/gezel-ds4-vision-wiring-test',
+        ds4Models: {
+          resolveModel: vi.fn().mockResolvedValue({
+            id: 'glm-5.3-flash-q2',
+            weightsPath: '/models/GLM-5.3-Flash-Q2.gguf',
+            visionEncoderPath: '/models/GLM-5.3-Flash-Vision-Encoder.gguf',
+            approxSizeBytes: 96_505_816_384,
+          }),
+        } as never,
+      });
+      const inner = p.llamaCpp as unknown as { visionEnabled: boolean };
+      expect(
+        ds4VisionArgs({
+          enabled: true,
+          visionEncoderPath: '/models/GLM-5.3-Flash-Vision-Encoder.gguf',
+        }),
+      ).toEqual(['--vision', '/models/GLM-5.3-Flash-Vision-Encoder.gguf']);
+      expect(inner.visionEnabled).toBe(true);
+    } finally {
+      if (savedBin === undefined) delete process.env.GEZEL_DS4_SERVER_BIN;
+      else process.env.GEZEL_DS4_SERVER_BIN = savedBin;
+      if (savedModel === undefined) delete process.env.GEZEL_DS4_MODEL;
+      else process.env.GEZEL_DS4_MODEL = savedModel;
+      if (savedVision === undefined) delete process.env.GEZEL_DS4_VISION_ENCODER;
+      else process.env.GEZEL_DS4_VISION_ENCODER = savedVision;
+    }
+  });
+
   it('presents name "ds4" while wrapping a llama-cpp engine', () => {
     const inner = mockInner();
     const p = new Ds4Provider({ inner });

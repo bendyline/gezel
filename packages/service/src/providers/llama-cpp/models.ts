@@ -100,6 +100,14 @@ export interface InstalledLlamaCppModel {
    */
   mmprojSizeBytes?: number;
   /**
+   * Absolute path to ds4's model-matched vision encoder, when the catalog
+   * source declares one. The DwarfStar launcher forwards it as
+   * `--vision <path>`; it is intentionally distinct from llama.cpp's mmproj.
+   */
+  visionEncoderPath?: string;
+  /** On-disk size of {@link visionEncoderPath}, used by launch admission. */
+  visionEncoderSizeBytes?: number;
+  /**
    * Absolute path to a speculative-decoding companion GGUF, when the
    * catalog ships one. The launcher forwards it as
    * `--spec-draft-model <path>` for the selected draft algorithm.
@@ -268,6 +276,8 @@ interface InstalledManifest {
    * resolves it to an absolute path and passes `--mmproj` on launch.
    */
   mmprojFilename?: string;
+  /** ds4 vision encoder filename, stored beside the language GGUF. */
+  visionEncoderFilename?: string;
   /**
    * Speculative-decoding companion filename, when the catalog source set
    * `draftModel`. Stored beside the weights and resolved by the launcher.
@@ -308,11 +318,12 @@ interface DownloadPlanEntry {
    * What this file is. `weights` entries (single-file or first-shard)
    * drive the GGUF metadata parse and the `weightsFilename` field on
    * the install manifest; `weights-shard` entries are extra GGUF shards
-   * (the 2nd-onwards of a split model); `mmproj` is the multimodal
-   * projector sidecar consumed by `--mmproj`; `draft-model` is a
-   * speculative-decoding companion consumed by `--spec-draft-model`.
+   * (the 2nd-onwards of a split model); `mmproj` is the llama.cpp
+   * multimodal projector consumed by `--mmproj`; `vision-encoder` is the
+   * DwarfStar encoder consumed by `--vision`; `draft-model` is a speculative-
+   * decoding companion consumed by `--spec-draft-model` / `--mtp-model`.
    */
-  role: 'weights' | 'weights-shard' | 'mmproj' | 'draft-model';
+  role: 'weights' | 'weights-shard' | 'mmproj' | 'vision-encoder' | 'draft-model';
 }
 
 export interface LlamaCppModelManagerOptions {
@@ -382,16 +393,17 @@ export class LlamaCppModelManager {
   /**
    * The catalog source block this manager downloads from — `ds4` for the
    * DwarfStar engine, `llamaCpp` otherwise. Cast to the llama.cpp source
-   * shape because the download path reads only the fields both blocks share
-   * (HF repo / revision / filename / shards / sha256 / approxSizeBytes).
+   * shape. The common downloader accepts the union directly so engine-specific
+   * sidecars (`mmproj` versus `visionEncoder`) keep their honest catalog names.
    */
   private srcBlock(manifest: {
     llamaCpp?: import('@bendyline/gezel').ChatModelLlamaCppSource;
     ds4?: import('@bendyline/gezel').ChatModelDs4Source;
-  }): import('@bendyline/gezel').ChatModelLlamaCppSource | undefined {
-    return this.engine === 'ds4'
-      ? (manifest.ds4 as import('@bendyline/gezel').ChatModelLlamaCppSource | undefined)
-      : manifest.llamaCpp;
+  }):
+    | import('@bendyline/gezel').ChatModelLlamaCppSource
+    | import('@bendyline/gezel').ChatModelDs4Source
+    | undefined {
+    return this.engine === 'ds4' ? manifest.ds4 : manifest.llamaCpp;
   }
 
   /**
@@ -661,6 +673,9 @@ export class LlamaCppModelManager {
     }
     if (parsed.mmprojFilename && !files.includes(parsed.mmprojFilename)) {
       throw new Error('installed manifest references a missing multimodal projector');
+    }
+    if (parsed.visionEncoderFilename && !files.includes(parsed.visionEncoderFilename)) {
+      throw new Error('installed manifest references a missing ds4 vision encoder');
     }
     if (parsed.draftModelFilename && !files.includes(parsed.draftModelFilename)) {
       throw new Error('installed manifest references a missing speculative draft model');
@@ -1030,6 +1045,7 @@ export class LlamaCppModelManager {
 
     const weightsShards = plan.filter((e) => e.role === 'weights' || e.role === 'weights-shard');
     const mmprojEntry = plan.find((e) => e.role === 'mmproj');
+    const visionEncoderEntry = plan.find((e) => e.role === 'vision-encoder');
     const draftModelEntry = plan.find((e) => e.role === 'draft-model');
     // Snapshot what the catalog said this payload IS, so a later version bump
     // that only edits metadata can be recognized as such without re-reading a
@@ -1044,7 +1060,9 @@ export class LlamaCppModelManager {
     const installed: InstalledManifest = {
       id: catalogId,
       name: manifest.name,
-      approxSizeBytes: bytesCompleted || totalPlanned,
+      // Language weights only. Sidecars are surfaced and budgeted separately;
+      // folding them in here makes every vision launch count the encoder twice.
+      approxSizeBytes: src.approxSizeBytes,
       weightsFilename: firstWeights.destFilename,
       sha256: firstWeights.sha256.toLowerCase(),
       installedAt: new Date().toISOString(),
@@ -1061,6 +1079,7 @@ export class LlamaCppModelManager {
           }
         : {}),
       ...(mmprojEntry ? { mmprojFilename: mmprojEntry.destFilename } : {}),
+      ...(visionEncoderEntry ? { visionEncoderFilename: visionEncoderEntry.destFilename } : {}),
       ...(draftModelEntry ? { draftModelFilename: draftModelEntry.destFilename } : {}),
       ...(src.quantization ? { quantization: src.quantization } : {}),
       ...(declaredQuantization ? { ggufQuantization: declaredQuantization } : {}),
@@ -1175,6 +1194,11 @@ export class LlamaCppModelManager {
           .then((s) => s.size)
           .catch(() => 0)
       : 0;
+    const visionEncoderSizeBytes = parsed.visionEncoderFilename
+      ? await stat(join(root, id, parsed.visionEncoderFilename))
+          .then((s) => s.size)
+          .catch(() => 0)
+      : 0;
     // Absent on every copy installed before the field existed, and on those
     // the catalog tag is the only thing the table has to show.
     const ggufQuantization =
@@ -1197,6 +1221,12 @@ export class LlamaCppModelManager {
         ? {
             mmprojPath: join(root, id, parsed.mmprojFilename),
             ...(mmprojSizeBytes > 0 ? { mmprojSizeBytes } : {}),
+          }
+        : {}),
+      ...(parsed.visionEncoderFilename
+        ? {
+            visionEncoderPath: join(root, id, parsed.visionEncoderFilename),
+            ...(visionEncoderSizeBytes > 0 ? { visionEncoderSizeBytes } : {}),
           }
         : {}),
       ...(parsed.draftModelFilename
@@ -1236,6 +1266,7 @@ function planDownloads(
     approxSizeBytes: number;
     shards?: Array<{ name: string; sha256: string; sizeBytes: number }>;
     mmproj?: { filename: string; sha256: string; sizeBytes: number };
+    visionEncoder?: { filename: string; sha256: string; sizeBytes: number };
     draftModel?: { filename: string; sha256: string; sizeBytes: number };
   },
   /**
@@ -1251,7 +1282,8 @@ function planDownloads(
    * now works immediately instead of requiring a re-install nobody knew to
    * run.
    *
-   * ds4 passes `false` explicitly — it has no sidecar path at all.
+   * This option only governs llama.cpp's `mmproj`; a declared ds4
+   * `visionEncoder` is part of that model's install and is always fetched.
    */
   includeMmproj = true,
 ): DownloadPlanEntry[] {
@@ -1284,6 +1316,15 @@ function planDownloads(
       sha256: src.mmproj.sha256,
       sizeBytes: src.mmproj.sizeBytes,
       role: 'mmproj',
+    });
+  }
+  if (src.visionEncoder) {
+    out.push({
+      repoPath: src.visionEncoder.filename,
+      destFilename: basename(src.visionEncoder.filename),
+      sha256: src.visionEncoder.sha256,
+      sizeBytes: src.visionEncoder.sizeBytes,
+      role: 'vision-encoder',
     });
   }
   // Draft companions are part of the model's selected decoding path, not

@@ -421,14 +421,14 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
           usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'
         } from an earlier service session`
       : null,
+    cachedBytes === null
+      ? null
+      : `model and file cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
     usage.otherBytes === null
       ? null
       : `${otherLabel.toLowerCase()} use ${formatBytes(usage.otherBytes)}${
           otherLabel === 'Unattributed' ? '; this may include retained Gezel models' : ''
         }`,
-    cachedBytes === null
-      ? null
-      : `model and file cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
     usage.freeBytes === null ? null : `free ${formatBytes(usage.freeBytes)}`,
   ]
     .filter(Boolean)
@@ -462,16 +462,16 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
                 </Tooltip.Root>
               ) : null,
             )}
-            <span
-              className="machine-memory-segment machine-memory-segment-other"
-              style={{ width: `${otherPercent}%` }}
-            />
             {cachedBytes !== null && cachedBytes > 0 && (
               <span
                 className="machine-memory-segment machine-memory-segment-cached"
                 style={{ width: `${cachedPercent}%` }}
               />
             )}
+            <span
+              className="machine-memory-segment machine-memory-segment-other"
+              style={{ width: `${otherPercent}%` }}
+            />
           </div>
         </Tooltip.Provider>
       )}
@@ -484,16 +484,16 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
               {formatBytes(gezelBytes)}
             </span>
           )}
-          {usage.otherBytes !== null && (
-            <span title={otherLabel === 'Unattributed' ? unattributedDescription : undefined}>
-              <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
-              {otherLabel} {formatBytes(usage.otherBytes)}
-            </span>
-          )}
           {cachedBytes !== null && (
             <span title="Memory-mapped model files and other reclaimable file cache">
               <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
               Model &amp; file cache {formatBytes(cachedBytes)}
+            </span>
+          )}
+          {usage.otherBytes !== null && (
+            <span title={otherLabel === 'Unattributed' ? unattributedDescription : undefined}>
+              <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
+              {otherLabel} {formatBytes(usage.otherBytes)}
             </span>
           )}
           {usage.freeBytes !== null && (

@@ -206,7 +206,6 @@ export function MeesterConversation({
                   gezelId={activeGezelId}
                   projectId={projectId}
                   sessionId={sessionId || undefined}
-                  gezelName={activeGezelName}
                   onSessionIdChange={(next) => setSessionId(next ?? '')}
                   refreshKey={sessionRefreshKey}
                   activeDraftId={draftId || undefined}

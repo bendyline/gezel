@@ -1408,12 +1408,13 @@ export type ChatModelLlamaCppSource = z.infer<typeof ChatModelLlamaCppSourceSche
 
 /**
  * Per-entry ds4 (DwarfStar) source. ds4 loads supported routed-MoE GGUFs
- * (including DeepSeek V4 and GLM 5.2, single-file or sharded), so the shape mirrors
+ * (including DeepSeek V4 and GLM 5.2/5.3), so the shape mirrors
  * {@link ChatModelLlamaCppSourceSchema} — HF repo + revision + filename/shards
  * + sha256 + residentBytes + quantization — plus two ds4-specific SSD-
- * streaming hints. ds4 is NOT a general GGUF loader: use this block only for
- * architectures/quants the engine explicitly supports. Stock llama.cpp cannot
- * load the routed ds4-only quants.
+ * streaming hints. Current Gezel registrations use single-file artifacts.
+ * ds4 is NOT a general GGUF loader: use this block only for architectures and
+ * quants the engine explicitly supports. Stock llama.cpp cannot load the
+ * routed ds4-only quants.
  */
 export const ChatModelDs4SourceSchema = z
   .object({
@@ -1468,6 +1469,27 @@ export const ChatModelDs4SourceSchema = z
     /** Short quant tag for display ('IQ2_XXS', 'Q4_K', …). */
     quantization: z.string().optional(),
     /**
+     * Optional model-specific vision encoder GGUF. DwarfStar loads this
+     * sidecar with `--vision <path>`; unlike llama.cpp's `mmproj`, this is a
+     * complete encoder whose output is projected into the selected model's
+     * visual-token space. The encoder MUST match the language checkpoint.
+     *
+     * It lives in the same Hugging Face repository as the language GGUF and
+     * is downloaded, hashed, and stored beside it. Declaring one makes native
+     * image input available for the installed ds4 model; absent means the
+     * model is deliberately text-only.
+     */
+    visionEncoder: z
+      .object({
+        /** Filename within the repo, e.g. `GLM-5.3-Flash-Vision-Encoder.gguf`. */
+        filename: z.string(),
+        /** SHA-256 of the encoder GGUF, lifted from HF LFS metadata. */
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        /** Size on disk after download. */
+        sizeBytes: z.number().int().positive(),
+      })
+      .optional(),
+    /**
      * Suggested `--ssd-streaming-cache-experts` budget in bytes for this
      * quant. Drives both the launch flag and the resident estimate on
      * machines that can't hold the full weights. Absent → ds4 auto-sizes.
@@ -1493,10 +1515,11 @@ export const ChatModelDs4SourceSchema = z
     /**
      * Optional DSpark speculative-decoding companion GGUF, the ds4 analogue of
      * {@link ChatModelLlamaCppSourceSchema}'s `draftModel`. ds4 loads it with
-     * `--mtp <path>` and drafts with `--dspark`; the draft width comes from the
+     * `--mtp-model <path>` and drafts with `--dspark`; the draft width comes from the
      * support model's own `block_size`, not from `--mtp-draft` (that flag is
-     * legacy-MTP only). Family-scoped: DeepSeek V4 Flash publishes one, GLM 5.2
-     * does not support the external `--mtp` file at all.
+     * for model-embedded MTP). Family-scoped: DeepSeek V4 Flash publishes one; GLM
+     * 5.2/5.3 do not use an external `--mtp-model` file. GLM 5.3 Flash instead
+     * carries an embedded draft block enabled with the boolean `--mtp` flag.
      *
      * Declaring this makes it a MANDATORY download for every install of the
      * entry — `buildDownloadPlan` fetches a declared draft companion

@@ -257,43 +257,14 @@ describe('GpuArbiter', () => {
 });
 
 describe('detectGpuPolicy', () => {
-  it('returns coexist on Apple Silicon with ≥24 GB unified RAM', () => {
-    expect(
-      detectGpuPolicy({
-        platform: 'darwin',
-        arch: 'arm64',
-        totalMemBytes: 32 * 1024 ** 3,
-      }),
-    ).toBe('coexist');
-  });
-
-  it('returns swap on Apple Silicon with <24 GB', () => {
-    expect(
-      detectGpuPolicy({
-        platform: 'darwin',
-        arch: 'arm64',
-        totalMemBytes: 16 * 1024 ** 3,
-      }),
-    ).toBe('swap');
-  });
-
-  it('returns swap on Intel Mac (no unified memory)', () => {
-    expect(
-      detectGpuPolicy({
-        platform: 'darwin',
-        arch: 'x64',
-        totalMemBytes: 64 * 1024 ** 3,
-      }),
-    ).toBe('swap');
-  });
-
-  it('returns swap on Windows / Linux regardless of RAM', () => {
-    expect(
-      detectGpuPolicy({ platform: 'win32', arch: 'x64', totalMemBytes: 128 * 1024 ** 3 }),
-    ).toBe('swap');
-    expect(
-      detectGpuPolicy({ platform: 'linux', arch: 'x64', totalMemBytes: 128 * 1024 ** 3 }),
-    ).toBe('swap');
+  it.each([
+    ['darwin', 'arm64', 16],
+    ['darwin', 'arm64', 128],
+    ['darwin', 'x64', 32],
+    ['win32', 'x64', 32],
+    ['linux', 'x64', 32],
+  ] as const)('uses memory admission for %s %s with %i GiB', (platform, arch, gb) => {
+    expect(detectGpuPolicy({ platform, arch, totalMemBytes: gb * 1024 ** 3 })).toBe('coexist');
   });
 });
 

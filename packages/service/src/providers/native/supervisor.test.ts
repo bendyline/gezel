@@ -1538,3 +1538,169 @@ describe('NativeEngineSupervisor — pressure it cannot act on', () => {
     }
   });
 });
+
+describe('native process memory admission', () => {
+  function harness(
+    options: {
+      available?: boolean;
+      yielding?: boolean;
+      readyGate?: Promise<void>;
+      spawnError?: Error;
+    } = {},
+  ) {
+    const commands: string[] = [];
+    const children: FakeChild[] = [];
+    const logs: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      capacity: {
+        home: '/unused',
+        requirement: () => ({ bytes: 1024 ** 3, gpuBytes: 1024 ** 3 }),
+        execute: async (command) => {
+          commands.push(command.action);
+          if (command.action === 'ready') await options.readyGate;
+          return {
+            state:
+              command.action === 'release'
+                ? 'released'
+                : command.action === 'acquire' && options.available === false
+                  ? 'waiting'
+                  : 'granted',
+            releaseRequested: options.yielding === true,
+          };
+        },
+      },
+      resolveLaunch: async () => ({
+        command: 'fake-model',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: (() => {
+        commands.push('spawn');
+        if (options.spawnError) throw options.spawnError;
+        const child = makeFakeChild(70000 + children.length);
+        children.push(child);
+        return child;
+      }) as unknown as typeof import('node:child_process').spawn,
+      fetchImpl: async () => new Response('ok'),
+      psRunner: async () => [],
+      idleTimeoutMs: 0,
+      healthIntervalMs: 60_000,
+      onLog: (line) => logs.push(line),
+    });
+    return { sup, commands, children, logs };
+  }
+
+  it('reserves before actual spawn, coalesces simultaneous lazy starts, and re-admits a restart', async () => {
+    const { sup, commands, children } = harness();
+    try {
+      await Promise.all([sup.ensureRunning(), sup.ensureRunning()]);
+      expect(children).toHaveLength(1);
+      expect(commands.slice(0, 4)).toEqual(['acquire', 'spawn', 'bind', 'ready']);
+      children[0]!.emitExit(1, null);
+      await sup.ensureRunning();
+      expect(children).toHaveLength(2);
+      expect(commands.filter((c) => c === 'acquire')).toHaveLength(2);
+      expect(commands.indexOf('release')).toBeLessThan(commands.lastIndexOf('acquire'));
+    } finally {
+      await sup.stop();
+    }
+  });
+
+  it('cancels an admission wait without spawning or leaking a queued claim', async () => {
+    const { sup, commands } = harness({ available: false });
+    const starting = sup.ensureRunning();
+    const rejected = expect(starting).rejects.toThrow(/cancelled/);
+    while (!commands.includes('acquire')) await new Promise((resolve) => setTimeout(resolve, 5));
+    await sup.stop();
+    await rejected;
+    expect(commands).not.toContain('spawn');
+    expect(commands).toContain('release');
+  });
+
+  it('makes a second caller wait for the reservation readiness acknowledgement', async () => {
+    let acknowledge!: () => void;
+    const readyGate = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    const { sup, commands, children } = harness({ readyGate });
+    const first = sup.ensureRunning();
+    while (!commands.includes('ready')) await new Promise((resolve) => setTimeout(resolve, 5));
+    let finished = false;
+    const second = sup.ensureRunning().then(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finished).toBe(false);
+    acknowledge();
+    await Promise.all([first, second]);
+    expect(children).toHaveLength(1);
+    await sup.stop();
+  });
+
+  it('waits for a stopping child to exit before reserving for its replacement', async () => {
+    const { sup, commands, children } = harness();
+    await sup.ensureRunning();
+    let signalled = false;
+    children[0]!.kill = () => {
+      signalled = true;
+      return true;
+    };
+    const stopping = sup.stop();
+    while (!signalled) await new Promise((resolve) => setTimeout(resolve, 5));
+    const replacement = sup.ensureRunning();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(children).toHaveLength(1);
+    children[0]!.emitExit(0, 'SIGTERM');
+    await Promise.all([stopping, replacement]);
+    expect(children).toHaveLength(2);
+    expect(commands.indexOf('release')).toBeLessThan(commands.lastIndexOf('acquire'));
+    await sup.stop();
+  });
+
+  it('does not resurrect a child that exits while readiness acknowledgement is pending', async () => {
+    let acknowledge!: () => void;
+    const readyGate = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    const { sup, commands, children } = harness({ readyGate });
+    const starting = sup.ensureRunning();
+    const rejected = expect(starting).rejects.toThrow(/before becoming ready/);
+    while (!commands.includes('ready')) await new Promise((resolve) => setTimeout(resolve, 5));
+    children[0]!.emitExit(1, null);
+    acknowledge();
+    await rejected;
+    expect(sup.lifecycleSnapshot().running).toBe(false);
+    expect(commands).toContain('release');
+    await sup.stop();
+  });
+
+  it('returns the reservation when spawning fails', async () => {
+    const { sup, commands } = harness({ spawnError: new Error('spawn failed') });
+    await expect(sup.ensureRunning()).rejects.toThrow(/spawn failed/);
+    expect(commands).toEqual(['acquire', 'spawn', 'release']);
+    await sup.stop();
+  });
+
+  it('keeps active native work alive, then gives waiting models a turn before new work', async () => {
+    const options = { yielding: false };
+    const { sup, children } = harness(options);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const running = sup.withRequest(async () => {
+      await sup.ensureRunning();
+      await gate;
+    });
+    while (!sup.lifecycleSnapshot().running) await new Promise((resolve) => setTimeout(resolve, 5));
+    options.yielding = true;
+    const yielding = sup.yieldForWaitingCapacity();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(children[0]!.signalCode).toBeNull();
+    finish();
+    await running;
+    await yielding;
+    expect(children[0]!.signalCode).toBe('SIGTERM');
+    await sup.stop();
+  });
+});
