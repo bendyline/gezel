@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { npmPackFiles } from './npm-pack-output.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageRoot = join(repoRoot, 'packages', 'connectors-spectral');
@@ -39,10 +40,12 @@ function npmPackDryRun(cache) {
       `npm pack failed (status=${result.status}, signal=${result.signal}):\n${detail}`,
     );
   }
-  const parsed = JSON.parse(result.stdout);
-  const packed = Array.isArray(parsed) ? parsed[0] : parsed;
-  if (!packed?.files) throw new Error('npm pack returned no Spectral connector payload');
-  return new Set(packed.files.map((file) => file.path.replaceAll('\\', '/')));
+  return new Set(
+    npmPackFiles(result.stdout, {
+      packageName: '@bendyline/gezel-connectors-spectral',
+      payloadLabel: 'Spectral connector',
+    }),
+  );
 }
 
 export async function verifyConnectorsSpectralPackageLicenses() {

@@ -123,7 +123,7 @@
     "check:notice": "node scripts/check-notice.mjs",
     "stage:licenses": "node scripts/stage-third-party-licenses.mjs",
     "verify:licenses": "node scripts/verify-packaged-licenses.mjs packages/app/dist/licenses && pnpm verify:npm-licenses",
-    "verify:npm-licenses": "node scripts/verify-service-package-licenses.mjs && node scripts/verify-connectors-spectral-package-licenses.mjs",
+    "verify:npm-licenses": "node --test scripts/npm-pack-output.test.mjs && node scripts/verify-service-package-licenses.mjs && node scripts/verify-connectors-spectral-package-licenses.mjs",
     "audit:sbom": "node scripts/generate-sbom.mjs",
     "audit:vulnerabilities": "node scripts/audit-vulnerabilities.mjs",
     "test:audit-vulnerabilities": "node --test scripts/audit-vulnerabilities.test.mjs",

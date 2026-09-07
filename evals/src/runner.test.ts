@@ -169,6 +169,44 @@ describe('runaway session safety cap', () => {
 });
 
 describe('scenario terminal failure handoff', () => {
+  it('leaves aborted-session repair to the runtime while preserving the hard watchdog', async () => {
+    const client = terminalHandoffTestClient();
+    vi.mocked(client.listChatSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: 'worker-session',
+          gezelId: 'worker',
+          projectId: 'project',
+          lastTurnError: 'The prior turn aborted',
+        },
+      ],
+    } as Awaited<ReturnType<GezelClient['listChatSessions']>>);
+    client.listInflightTurns = vi.fn().mockResolvedValue({ inflight: [] });
+    client.sendChatMessage = vi.fn();
+    client.messageGezel = vi.fn();
+    const verdict = await pollUntilDone(
+      {
+        id: 'runtime-repair-test',
+        description: 'Observe a real workflow',
+        prompt: 'Create a document',
+        repairPolicy: 'runtime',
+        successCheck: async () => ({ done: false }),
+      },
+      {
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        pollIntervalMs: 10,
+        maxDurationMs: 60_000,
+        hardProgressTimeoutMs: 1,
+        softProgressTimeoutMs: 60_000,
+      },
+    );
+    expect(verdict.failureMode).toBe('model-stuck');
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+  });
+
   it('ends immediately with the latest sniff when a bounded helper exhausts', async () => {
     const logs: string[] = [];
     let checks = 0;

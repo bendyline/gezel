@@ -45,6 +45,9 @@ export function parseLatestVersion(output) {
   } catch {
     throw new Error(`npm returned invalid JSON for ${GILDE_PACKAGE}: ${output.trim()}`);
   }
+  if (Array.isArray(parsed) && parsed.length === 1) {
+    [parsed] = parsed;
+  }
   if (typeof parsed !== 'string' || !VERSION_PATTERN.test(parsed)) {
     throw new Error(
       `npm returned an invalid latest version for ${GILDE_PACKAGE}: ${output.trim()}`,

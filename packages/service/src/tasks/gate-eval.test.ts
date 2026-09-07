@@ -1162,6 +1162,36 @@ describe('evaluateGate — hardened kinds', () => {
     expect(sourceless.failures[0]).toContain('no readable source files');
   });
 
+  it('valuesSubsetOf compares an artifact deliverable with workspace source files', async () => {
+    const check = {
+      kind: 'valuesSubsetOf' as const,
+      file: 'tasks/7/report.md',
+      sourceFiles: ['recordings/interview.txt', 'tree.json'],
+      pattern: '\\b(1[89]\\d{2}|20\\d{2})\\b',
+      artifact: true,
+    };
+    const r = splitReader(
+      {
+        'recordings/interview.txt': 'The bakery opened in 1978 and closed in 1990.',
+        'tree.json': '{"registered": 1921}',
+      },
+      { 'tasks/7/report.md': 'The interview says 1978; the register says 1921.' },
+    );
+
+    expect((await evaluateGate([check], r)).pass).toBe(true);
+
+    const invented = splitReader(
+      {
+        'recordings/interview.txt': 'The bakery opened in 1978 and closed in 1990.',
+        'tree.json': '{"registered": 1921}',
+      },
+      { 'tasks/7/report.md': 'The interview says 1978; another account says 1984.' },
+    );
+    const result = await evaluateGate([check], invented);
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toContain('1984');
+  });
+
   it('nodeRuns: appends the wrapper-return hint when stderr shows the shape', async () => {
     const res = await evaluateGate(
       [{ kind: 'nodeRuns', file: 'correct.mjs' }],

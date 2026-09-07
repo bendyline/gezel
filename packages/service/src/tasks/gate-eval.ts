@@ -1286,7 +1286,15 @@ async function evalCheckInner(
       // WEAKENS the check (a larger allowed set), so globs are safe;
       // matching zero sources is a loud fail (misconfigured gate or the
       // inputs were deleted), never a silent pass.
-      const listing = await reader.list();
+      // The checked output may live in the artifacts drawer while its source
+      // corpus remains in the workspace (an interview report grounded in a
+      // seeded transcript is the common case). Keep the output read scoped by
+      // `artifact`, but resolve source files across both project surfaces.
+      // Prefer the workspace when the same source path exists on both: source
+      // fixtures and shipped project data live there by default.
+      const listing = usesArtifact
+        ? [...new Set([...(await ws.list()), ...(await artifactReader.list())])]
+        : await reader.list();
       const wanted = new Set<string>();
       for (const entry of c.sourceFiles) {
         if (entry.includes('*')) {
@@ -1298,13 +1306,15 @@ async function evalCheckInner(
       }
       const sources: string[] = [];
       for (const f of wanted) {
-        const text = await reader.read(f);
+        const text = usesArtifact
+          ? ((await ws.read(f)) ?? (await artifactReader.read(f)))
+          : await reader.read(f);
         if (text !== null) sources.push(text);
       }
       if (sources.length === 0) {
         return {
           ok: false,
-          detail: `valuesSubsetOf ${c.file}: no readable source files matched ${c.sourceFiles.join(', ')} — the check needs the input data present in the workspace.`,
+          detail: `valuesSubsetOf ${c.file}: no readable source files matched ${c.sourceFiles.join(', ')} — the check needs the input data present in the project.`,
         };
       }
       const r = valuesSubsetOf(content, sources, {

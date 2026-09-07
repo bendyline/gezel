@@ -273,6 +273,10 @@ export interface EvalScenario {
    * closes it at teardown.
    */
   mockServices?: import('@bendyline/gezel').MockService[];
+  /** Real DocBlocks workflow; permits an explicitly selected local CLI build for A/B evals. */
+  requiresDocblocks?: boolean;
+  /** Runtime-owned workflow repair; watchdogs still bound a stalled or hung trial. */
+  repairPolicy?: 'harness' | 'runtime';
   /**
    * Eval-only required/optional string arguments advertised by fake MCP
    * tools. Keyed service id -> tool name -> argument name. This keeps

@@ -186,6 +186,11 @@ export const BatchReadToolOutputSchema = z.object({
       endLine: z.number().int().nonnegative().optional(),
       completeFile: z.boolean().optional(),
       code: z.string().optional(),
+      content: z.string().optional(),
+      totalLines: z.number().int().nonnegative().optional(),
+      hasMore: z.boolean().optional(),
+      nextStartLine: z.number().int().positive().optional(),
+      error: z.string().optional(),
     }),
   ),
 });

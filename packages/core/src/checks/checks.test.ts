@@ -156,6 +156,27 @@ describe('markdownHeadingsMatch', () => {
     expect(result.detail).toContain('single slide');
   });
 
+  it('compares visible titles when DocBlocks layout annotations are present', async () => {
+    const deck =
+      '# Battle of Trafalgar {[content]}\n# Strategic stakes {[quote]}\n# What Trafalgar teaches us {[content]}';
+    const result = await markdownHeadingsMatch(
+      ws({ 'outline.md': outline, 'deck.md': deck }),
+      'deck.md',
+      'outline.md',
+    );
+    expect(result.ok).toBe(true);
+    const changed = await markdownHeadingsMatch(
+      ws({
+        'outline.md': outline,
+        'deck.md': deck.replace('Strategic stakes', 'Different stakes'),
+      }),
+      'deck.md',
+      'outline.md',
+    );
+    expect(changed.ok).toBe(false);
+    expect(changed.mismatchIndex).toBe(1);
+  });
+
   it('keeps the plain count message when the level is right but the count is not', async () => {
     const result = await markdownHeadingsMatch(
       ws({

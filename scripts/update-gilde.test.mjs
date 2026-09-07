@@ -14,7 +14,8 @@ import {
 
 test('parses an npm latest-version response', () => {
   assert.equal(parseLatestVersion('"1.2.3"'), '1.2.3');
-  assert.throws(() => parseLatestVersion('["1.2.3"]'), /invalid latest version/);
+  assert.equal(parseLatestVersion('["1.2.3"]'), '1.2.3');
+  assert.throws(() => parseLatestVersion('["1.2.3", "1.2.4"]'), /invalid latest version/);
 });
 
 test('reads and updates only the exact Gilde dependency pin', () => {

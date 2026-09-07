@@ -31,6 +31,17 @@ export interface EvalSuite {
 }
 
 export const SUITES: Record<string, EvalSuite> = {
+  docblocks: {
+    id: 'docblocks',
+    description:
+      'All four DocBlocks craftbooks through the real CLI: DOCX, PDF, PPTX, and MP4/GIF. Full task workflows with conversion, preview, saved-binary, and tool-history gates. Requires Chromium and FFmpeg.',
+    scenarios: [
+      'docblocks-research-to-document',
+      'docblocks-report-pdf',
+      'docblocks-powerpoint-deck',
+      'docblocks-narrated-slideshow',
+    ],
+  },
   // ~30-60 min on a healthy medium local model. A pulse check, not a
   // scorecard — one game anchor, one tool-routing probe, one debugging
   // probe. Use before/after a risky framework change or engine bump.

@@ -7,13 +7,17 @@ export interface MarkdownHeadingsMatchResult extends CheckResult {
 }
 
 function cleanHeading(text: string): string {
-  return text
-    .replace(/\s+#+\s*$/, '')
-    .replace(/[*_`]/g, '')
-    .replace(/[–—]/g, '-')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()
-    .toLocaleLowerCase();
+  return (
+    text
+      .replace(/\s+#+\s*$/, '')
+      // DocBlocks template annotations control layout, not the visible title.
+      .replace(/\s+\{\[[^\]\r\n]+\]\}\s*$/, '')
+      .replace(/[*_`]/g, '')
+      .replace(/[–—]/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+      .toLocaleLowerCase()
+  );
 }
 
 function documentH1s(markdown: string): string[] {

@@ -7,6 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelConfig, SessionTelemetryListResponse } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
+import { seedDocblocksRuntime } from './docblocks-runtime.ts';
 import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
   classifyTrial,
@@ -801,6 +802,36 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     }
   }
   const fetchUrlMockIds = scenario.allowFetchUrlMockServiceIds ?? [];
+  if (scenario.requiresDocblocks && process.env.GEZEL_EVAL_DOCBLOCKS_DIR) {
+    try {
+      const provenance = await seedDocblocksRuntime(
+        trialHome,
+        process.env.GEZEL_EVAL_DOCBLOCKS_DIR,
+        log,
+      );
+      await writeFile(
+        join(runDir, 'docblocks-eval-provenance.json'),
+        JSON.stringify(provenance, null, 2),
+      );
+    } catch (error) {
+      await mockRuntime?.close().catch(() => {});
+      return finalize({
+        trialId,
+        scenarioId: scenario.id,
+        modelId: opts.modelId,
+        modelTier,
+        startedAt,
+        startMonotonic,
+        runDir,
+        success: false,
+        reason: `DocBlocks eval runtime setup failed: ${error instanceof Error ? error.message : String(error)}`,
+        failureMode: 'spawn-error',
+        logger,
+        trialHome,
+        client: null,
+      });
+    }
+  }
   if (fetchUrlMockIds.length > 0) {
     let originEnv: Record<string, string>;
     try {
@@ -2262,13 +2293,13 @@ export async function pollUntilDone(
       };
     }
     let poisonedSnapshotReliable = true;
-    const poisonedForRecovery = await listPoisonedSessionsForWatchdog(
-      args.client,
-      args.meesterId,
-    ).catch(() => {
-      poisonedSnapshotReliable = false;
-      return [];
-    });
+    const poisonedForRecovery =
+      scenario.repairPolicy === 'runtime'
+        ? []
+        : await listPoisonedSessionsForWatchdog(args.client, args.meesterId).catch(() => {
+            poisonedSnapshotReliable = false;
+            return [];
+          });
     // Recovery is bounded by checked progress. A strictly higher sniff score
     // starts a fresh checkpoint. At the same score, one additional recovery is
     // allowed only when a successful mutation changed BOTH the checked byte
@@ -2469,6 +2500,7 @@ export async function pollUntilDone(
       } | null = latestSniff;
       const hadAnyProgress = lastHardChangeAt > startedAt + 5000;
       if (
+        scenario.repairPolicy !== 'runtime' &&
         !deferSoftForInflight &&
         !imageGenerationActive &&
         !harnessInterventionSettling &&
@@ -2630,7 +2662,7 @@ export async function pollUntilDone(
         sniffPlateauStartingTurnStarts = currentTurnStarts;
         sniffPlateauStartingPathSignature = currentPathSignature;
         retryLoopGrantedNudgeStages.clear();
-      } else if (currentSniffKey !== 'none') {
+      } else if (currentSniffKey !== 'none' && scenario.repairPolicy !== 'runtime') {
         const plateauMs = Date.now() - sniffPlateauStartedAt;
         const toolCallsInPlateau = currentToolCalls - sniffPlateauStartingToolCalls;
         const writeCallsInPlateau = currentWriteCalls - sniffPlateauStartingWriteCalls;
