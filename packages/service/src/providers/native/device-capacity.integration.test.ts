@@ -20,7 +20,10 @@ it('atomically admits one of two independent daemon processes against one GPU bu
     const run = () =>
       promisify(execFile)(
         process.execPath,
-        ['--import', 'tsx', '--input-type=module', '-e', code],
+        // Resolve from this service package before starting the child. The
+        // child evaluates `-e` from the workspace root, where pnpm correctly
+        // does not expose the service package's private `tsx` dev dependency.
+        ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', code],
         {
           env: {
             ...process.env,

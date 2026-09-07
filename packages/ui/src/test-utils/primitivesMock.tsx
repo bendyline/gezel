@@ -112,8 +112,11 @@ const Select = {
               {typeof placeholder === 'string' ? placeholder : nodeText(placeholder)}
             </option>
           )}
-          {options.map((o, i) => (
-            <option key={`${o.value}-${i}`} value={o.value}>
+          {/* Select item values are unique. Keying by value preserves an
+              option's identity when a neighboring item appears, matching
+              Radix instead of handing assertions a detached DOM node. */}
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
               {typeof o.label === 'string' ? o.label : nodeText(o.label)}
             </option>
           ))}

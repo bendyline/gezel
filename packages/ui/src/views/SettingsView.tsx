@@ -1,6 +1,5 @@
 import {
   type ClaudePermissionMode,
-  type CodexPermissionMode,
   type GezelSummary,
   type HealthResponse,
   type ProviderName,
@@ -47,6 +46,7 @@ import {
   formatStartedAt,
 } from './SettingsSystemStatus.js';
 import { TimeoutRow } from './TimeoutRow.js';
+import { CLAUDE_PERMISSION_CHOICES, CODEX_PERMISSION_CHOICES } from './cli-permission-choices.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
 import {
@@ -173,61 +173,6 @@ function assignmentLabel(gezel: GezelSummary, roleBasedNameOnly: boolean): strin
 
 const INCLUDE_TESTING_WEB_SEARCH_PROVIDER = import.meta.env.DEV;
 const WEB_SEARCH_PROVIDER_OPTIONS = webSearchProviderOptions(INCLUDE_TESTING_WEB_SEARCH_PROVIDER);
-
-const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
-  id: ClaudePermissionMode;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: 'plan',
-    label: 'Plan only',
-    description: 'Read and review without making changes.',
-  },
-  {
-    id: 'default',
-    label: 'Standard prompts',
-    description: "Use Claude Code's normal permission prompts.",
-  },
-  {
-    id: 'acceptEdits',
-    label: 'Accept edits',
-    description: 'Approve file changes; ask before commands and other actions.',
-  },
-  {
-    id: 'bypassPermissions',
-    label: 'Full access',
-    description: 'Approve every tool automatically, including shell commands.',
-  },
-];
-
-const CODEX_PERMISSION_CHOICES: ReadonlyArray<{
-  id: CodexPermissionMode;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: 'plan',
-    label: 'Plan',
-    description: 'Read-only. Codex can look at the workspace but never changes it.',
-  },
-  {
-    id: 'edit',
-    label: 'Edit',
-    description: 'Can change files in the workspace, but cannot reach outside its sandbox.',
-  },
-  {
-    id: 'reviewed',
-    label: 'Reviewed',
-    description:
-      'Like Edit, and anything that would cross the sandbox boundary goes to an independent Codex reviewer first.',
-  },
-  {
-    id: 'full',
-    label: 'Full',
-    description: 'Turns off Codex sandboxing and approvals. Codex may do anything the CLI can.',
-  },
-];
 
 type SectionId =
   | 'general'
