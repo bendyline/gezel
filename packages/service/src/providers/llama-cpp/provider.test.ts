@@ -1,6 +1,7 @@
 import { turnCancelledMessage } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lookupBehavior } from '../../model-profile/registry.js';
+import { resolveTuning } from '../../model-profile/tuning.js';
 import { buildStageOneNudge } from '../../tasks/gate-escalation.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
@@ -45,19 +46,71 @@ import {
 } from './provider.js';
 
 describe('llama.cpp reasoning request diagnostics', () => {
-  it('reports only effective chat-template reasoning controls', () => {
+  it('reports only effective reasoning controls', () => {
     expect(
       llamaCppReasoningRequestDiagnostic({
         messages: [{ role: 'user', content: 'secret' }],
+        reasoning_budget_tokens: 1024,
         chat_template_kwargs: {
           enable_thinking: true,
           reasoning_effort: 'xhigh',
           unrelated: 'ignored',
         },
       }),
-    ).toEqual({ enableThinking: true, reasoningEffort: 'xhigh' });
+    ).toEqual({ reasoningBudgetTokens: 1024, enableThinking: true, reasoningEffort: 'xhigh' });
     expect(llamaCppReasoningRequestDiagnostic({ messages: [] })).toBeNull();
   });
+
+  it('reports a budget even when no chat-template kwargs are set', () => {
+    expect(llamaCppReasoningRequestDiagnostic({ reasoning_budget_tokens: 2048 })).toEqual({
+      reasoningBudgetTokens: 2048,
+    });
+  });
+});
+
+describe('llama.cpp reasoning request budgets', () => {
+  it.each([
+    { shape: 'chat-template' as const, envBudget: undefined, expected: 1024 },
+    { shape: 'chat-template' as const, envBudget: '4096', expected: 4096 },
+    { shape: 'deepseek' as const, envBudget: '4096', expected: undefined },
+  ])(
+    'sends the effective budget for $shape with env $envBudget',
+    async ({ shape, envBudget, expected }) => {
+      vi.stubEnv('GEZEL_LLAMA_REASONING_BUDGET_TOKENS', envBudget);
+      const requests: Array<Record<string, unknown>> = [];
+      const provider = new LlamaCppProvider({
+        baseUrl: 'http://llama.test',
+        disableThinkingRequestShape: shape,
+        fetchImpl: (async (_input, init) => {
+          requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return sseResponse([
+            { choices: [{ index: 0, delta: { content: 'Ready.' } }] },
+            { choices: [{ index: 0, finish_reason: 'stop' }] },
+            '[DONE]',
+          ]);
+        }) as typeof fetch,
+      });
+      try {
+        const session = await provider.createSession({
+          systemMessage: 'You are a test.',
+          tuning: resolveTuning({
+            catalog: { reasoning: { thinkingBudget: 96 } },
+            override: { reasoning: { thinkingBudget: 1024 } },
+          }),
+        });
+        expect(await session.sendAndWait('Hello')).toBe('Ready.');
+        expect(requests).toHaveLength(1);
+        if (expected === undefined) {
+          expect(requests[0]).not.toHaveProperty('reasoning_budget_tokens');
+        } else {
+          expect(requests[0]?.reasoning_budget_tokens).toBe(expected);
+        }
+      } finally {
+        await provider.shutdown();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 describe('llama.cpp JSON Schema compatibility', () => {

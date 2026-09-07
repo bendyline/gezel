@@ -40,7 +40,12 @@ describe('CatalogService against bundled data', () => {
     const detail = await service.get('chat-model', 'gemma4-e4b-q4');
     expect(detail?.manifest.kind).toBe('chat-model');
     if (detail?.manifest.kind === 'chat-model') {
-      expect(detail.manifest.tuning?.reasoning?.thinkingBudget).toBe(96);
+      // Content owns the calibrated value. Keep the finite-budget contract
+      // without freezing a historical cap that may truncate useful thinking.
+      const budget = detail.manifest.tuning?.reasoning?.thinkingBudget;
+      expect(Number.isSafeInteger(budget)).toBe(true);
+      expect(budget).toBeGreaterThan(0);
+      expect(budget).toBeLessThan(detail.manifest.tuning?.sampling?.maxTokens ?? 0);
       expect(detail.manifest.tuning?.profiles?.['thinking-coding']?.sampling?.maxTokens).toBe(
         12288,
       );

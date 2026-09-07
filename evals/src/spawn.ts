@@ -14,6 +14,8 @@ import { assertServiceDistArtifact } from './service-dist-authority.ts';
 export interface SpawnTrialDaemonOptions {
   /** GEZEL_HOME for this daemon — should be a writable, ideally fresh dir. */
   home: string;
+  /** Explicit compiled daemon entry for an isolated build under evaluation. */
+  daemonEntry?: string;
   /**
    * Absolute path to the bundled `llama-server` binary. Optional —
    * MLX trials don't need llama-server at all, so the env var is only
@@ -245,7 +247,7 @@ export class BoundedDaemonLogSink extends Writable {
  * lot of output) but discarded.
  */
 export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<TrialDaemon> {
-  const daemonEntry = resolveDaemonEntry(import.meta.url);
+  const daemonEntry = opts.daemonEntry ?? resolveDaemonEntry(import.meta.url);
   assertServiceDistArtifact(daemonEntry);
 
   const env: NodeJS.ProcessEnv = {

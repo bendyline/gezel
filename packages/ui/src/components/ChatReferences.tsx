@@ -1468,7 +1468,7 @@ function ReferenceViewer({
         if (!cancelled) {
           setError(
             err instanceof GezelApiError && err.status === 404
-              ? `Not found in artifacts, workspace, or documents: ${referencePath}`
+              ? `"${referencePath}" was not found in artifacts, workspace, or documents.`
               : (err as Error).message,
           );
         }
@@ -1569,7 +1569,11 @@ function ReferenceViewer({
       {actionError && <p className="error small chat-rail-viewer-action-error">{actionError}</p>}
       <div className="chat-rail-viewer-body">
         {loading && <p className="muted small">Loading…</p>}
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="chat-rail-viewer-error" role="alert">
+            {error}
+          </p>
+        )}
         {blobUrl !== null && !loading && !error && mediaKind === 'video' && (
           <ReferenceVideoPreview path={reference.path} src={blobUrl} />
         )}

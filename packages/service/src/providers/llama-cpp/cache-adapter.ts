@@ -170,6 +170,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    * each mapping has been established.
    */
   private allocationTail: Promise<void> = Promise.resolve();
+  private engineGeneration = 0;
   private readonly slotCount: number;
   private readonly resolveBaseUrl: LlamaCppCacheAdapterOptions['resolveBaseUrl'];
   private readonly resolveAuthToken: () => string | null;
@@ -213,6 +214,17 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     this.slotCount = Math.max(1, opts.slotCount ?? 1);
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.slotSavePath) this.slotSavePath = opts.slotSavePath;
+  }
+
+  /** The provider survives engine restarts, but its resident slot contents do not. */
+  resetEngineState(): void {
+    this.engineGeneration++;
+    this.sessionToSlot.clear();
+    this.slotToSession.clear();
+    this.slotOrder.length = 0;
+    this.nextSlotToTry = 0;
+    this.restoredSessions.clear();
+    this.slotActionsUnsupported = false;
   }
 
   /**
@@ -275,6 +287,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   }
 
   async evict(sessionIds: readonly string[]): Promise<void> {
+    const generation = this.engineGeneration;
     // Save before forgetting so the session can resume on next access.
     // Persistence is best-effort; failures are logged and the local
     // mapping is still cleared (controller view stays consistent).
@@ -282,6 +295,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       const slot = this.sessionToSlot.get(id);
       if (slot === undefined) continue;
       await this.saveSlotForSession(slot, id);
+      if (generation !== this.engineGeneration) return;
       this.sessionToSlot.delete(id);
       this.slotToSession.delete(slot);
       const idx = this.slotOrder.indexOf(slot);
@@ -293,8 +307,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   }
 
   async reportUsage(): Promise<readonly EngineCacheUsage[]> {
+    const generation = this.engineGeneration;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
-    if (!baseUrl) return [];
+    if (!baseUrl || generation !== this.engineGeneration) return [];
     let res: Response;
     try {
       const token = this.resolveAuthToken();
@@ -311,7 +326,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     } catch {
       return [];
     }
-    if (!Array.isArray(payload)) return [];
+    if (!Array.isArray(payload) || generation !== this.engineGeneration) return [];
 
     const usage: EngineCacheUsage[] = [];
     const now = Date.now();
@@ -354,9 +369,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    */
   async flushAll(): Promise<number> {
     if (!this.slotSavePath) return 0;
+    const generation = this.engineGeneration;
     let saved = 0;
     for (const [sessionId, slot] of this.sessionToSlot) {
       if (await this.saveSlotForSession(slot, sessionId)) saved++;
+      if (generation !== this.engineGeneration) break;
     }
     return saved;
   }
@@ -368,6 +385,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    * {@link prepareForSend}.
    */
   private async allocateSlot(sessionId: string): Promise<number> {
+    const generation = this.engineGeneration;
     const previous = this.allocationTail;
     let release!: () => void;
     this.allocationTail = new Promise<void>((resolve) => {
@@ -376,13 +394,22 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
 
     await previous;
     try {
-      return await this.allocateSlotUnlocked(sessionId);
+      this.assertEngineGeneration(generation);
+      return await this.allocateSlotUnlocked(sessionId, generation);
     } finally {
       release();
     }
   }
 
-  private async allocateSlotUnlocked(sessionId: string): Promise<number> {
+  private assertEngineGeneration(generation: number): void {
+    if (generation !== this.engineGeneration) {
+      throw new Error(
+        'The local engine stopped while preparing the conversation cache. Retry the turn.',
+      );
+    }
+  }
+
+  private async allocateSlotUnlocked(sessionId: string, generation: number): Promise<number> {
     const existing = this.sessionToSlot.get(sessionId);
     if (existing !== undefined) {
       // Promote in LRU.
@@ -418,6 +445,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       const victimSession = this.slotToSession.get(chosen);
       if (victimSession !== undefined) {
         const saved = await this.saveSlotForSession(chosen, victimSession);
+        this.assertEngineGeneration(generation);
         log.debug(
           `slot ${chosen} recycled: evicting session ${victimSession.slice(0, 8)} for ${sessionId.slice(0, 8)} (disk save: ${saved ? 'ok' : 'MISSED'})`,
         );
@@ -431,6 +459,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     // Restore is best-effort; failure leaves the slot empty and the
     // next request just prefills from scratch.
     const restored = await this.tryRestoreForSession(chosen, sessionId);
+    this.assertEngineGeneration(generation);
     if (restored) this.restoredSessions.add(sessionId);
     log.debug(
       `slot ${chosen} bound to session ${sessionId.slice(0, 8)} (disk restore: ${restored ? 'hit' : 'none — next request prefills from scratch'})`,
@@ -499,10 +528,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   private async saveSlotForSession(slot: number, sessionId: string): Promise<boolean> {
     if (!this.slotSavePath) return false;
     if (this.slotActionsUnsupported) return false;
+    const generation = this.engineGeneration;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
-    if (!baseUrl) return false;
+    if (!baseUrl || generation !== this.engineGeneration) return false;
     const filename = sessFilename(sessionId);
-    const ok = await this.invokeSlotAction(baseUrl, slot, 'save', filename);
+    const ok = await this.invokeSlotAction(baseUrl, slot, 'save', filename, generation);
     if (!ok) return false;
 
     // Seed the gezel prefix file on first save. We use copyFile (not
@@ -536,14 +566,22 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   private async tryRestoreForSession(slot: number, sessionId: string): Promise<boolean> {
     if (!this.slotSavePath) return false;
     if (this.slotActionsUnsupported) return false;
+    const generation = this.engineGeneration;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
-    if (!baseUrl) return false;
+    if (!baseUrl || generation !== this.engineGeneration) return false;
 
     const sessPath = join(this.slotSavePath, sessFilename(sessionId));
     if (await stat(sessPath).catch(() => null)) {
-      const ok = await this.invokeSlotAction(baseUrl, slot, 'restore', sessFilename(sessionId));
+      const ok = await this.invokeSlotAction(
+        baseUrl,
+        slot,
+        'restore',
+        sessFilename(sessionId),
+        generation,
+      );
       if (ok) return true;
     }
+    if (generation !== this.engineGeneration) return false;
     // Layered cascade (flag ON): try most-specific (gp) then gezel. Once a
     // layer file restores, llama-server's `cache_prompt` LCP-matches it
     // against the actual prompt and reuses the common leading prefix.
@@ -552,7 +590,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       for (const pid of layered) {
         const path = join(this.slotSavePath, prefixFilename(pid));
         if (!(await stat(path).catch(() => null))) continue;
-        if (await this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(pid))) return true;
+        if (await this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(pid), generation))
+          return true;
+        if (generation !== this.engineGeneration) return false;
       }
       return false;
     }
@@ -560,7 +600,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     if (!prefixId) return false;
     const prefixPath = join(this.slotSavePath, prefixFilename(prefixId));
     if (!(await stat(prefixPath).catch(() => null))) return false;
-    return this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(prefixId));
+    return this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(prefixId), generation);
   }
 
   /**
@@ -575,7 +615,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     slot: number,
     action: 'save' | 'restore',
     filename: string,
+    generation: number,
   ): Promise<boolean> {
+    if (generation !== this.engineGeneration) return false;
     const token = this.resolveAuthToken();
     try {
       const res = await this.fetchImpl(`${baseUrl}/slots/${slot}?action=${action}`, {
@@ -586,6 +628,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
         },
         body: JSON.stringify({ filename }),
       });
+      if (generation !== this.engineGeneration) return false;
       if (!res.ok) {
         // 501 Not Implemented (or 5xx with a multimodal-specific body)
         // means this server permanently refuses slot save/restore — flip
@@ -598,6 +641,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
         } else if (res.status >= 500) {
           try {
             const body = await res.text();
+            if (generation !== this.engineGeneration) return false;
             if (/not supported by multimodal/i.test(body)) {
               this.slotActionsUnsupported = true;
             }

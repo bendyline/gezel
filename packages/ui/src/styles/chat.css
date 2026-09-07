@@ -4388,6 +4388,17 @@ button.timeline-session-divider-child::before {
   font-size: 0.85rem;
 }
 
+.chat-rail-viewer-error {
+  margin: 0.35rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
 .chat-rail-viewer-raw {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;

@@ -39,7 +39,11 @@ import {
 } from './machine-engine-compat.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
-import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
+import {
+  nativeBinDir,
+  resolveNativeBinaryPath,
+  verifyLlamaBinaryAgainstCheckoutPin,
+} from './native-bin.js';
 import {
   inBundleServiceTree,
   resolveRuntimeInPlace,
@@ -1241,7 +1245,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
   if (!process.env.GEZEL_SD_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('sd-server', import.meta.url);
+    const bin = resolveNativeBinaryPath('sd-server', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_SD_SERVER_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled sd-server: ${bin}`);
@@ -1285,9 +1291,36 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // resolution entirely — so spawn and embedded launches would keep
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
+    const checkoutLlamaCompatibility = new Map<
+      string,
+      ReturnType<typeof verifyLlamaBinaryAgainstCheckoutPin>
+    >();
     const resolved = resolveAvailableLlamaBinary(
       probe.backend,
-      (backend) => resolveNativeBinaryPath('llama-server', import.meta.url, backend),
+      (backend) =>
+        resolveNativeBinaryPath('llama-server', import.meta.url, backend, {
+          preferDevelopmentBuild: !opts.packaged,
+          ...(!opts.packaged
+            ? {
+                accept: (path: string) => {
+                  let compatibility = checkoutLlamaCompatibility.get(path);
+                  if (!compatibility) {
+                    compatibility = verifyLlamaBinaryAgainstCheckoutPin(path, import.meta.url);
+                    checkoutLlamaCompatibility.set(path, compatibility);
+                    const message = `${path}: ${compatibility.reason}`;
+                    if (compatibility.compatible) {
+                      opts.logger?.info?.(`[supervisor] verified checkout llama-server ${message}`);
+                    } else {
+                      opts.logger?.warn?.(
+                        `[supervisor] ignoring stale dev llama-server ${message}`,
+                      );
+                    }
+                  }
+                  return compatibility.compatible;
+                },
+              }
+            : {}),
+        }),
       override === undefined || override === 'auto',
       quarantine.length > 0
         ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
@@ -1321,7 +1354,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
   if (!process.env.GEZEL_WHISPER_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url);
+    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_WHISPER_SERVER_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled whisper-server: ${bin}`);
@@ -1332,7 +1367,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // Python-based feature). The service's UvRuntime prefers this
     // bundled binary so packaged builds never probe macOS's developer-
     // tools `python3` shim. System runtimes are source/dev fallbacks.
-    const bin = resolveNativeBinaryPath('uv', import.meta.url);
+    const bin = resolveNativeBinaryPath('uv', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_UV_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled uv: ${bin}`);

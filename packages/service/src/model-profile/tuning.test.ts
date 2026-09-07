@@ -504,7 +504,7 @@ describe('applyTuning — llama-cpp', () => {
     expect(target.chat_template_kwargs).toEqual({ enable_thinking: true });
   });
 
-  it('does NOT thread reasoning.thinkingBudget through the request body — llama-server takes it as a launch-time CLI flag (--reasoning-budget) only, so the body writer is null and the supervisor reads it directly from the catalog', () => {
+  it('sends the catalog thinking budget alongside the thinking toggle', () => {
     const target: Record<string, unknown> = {};
     applyTuning(
       target,
@@ -514,7 +514,46 @@ describe('applyTuning — llama-cpp', () => {
       LLAMA_CPP_TUNING_MAP,
     );
     expect(target.chat_template_kwargs).toEqual({ enable_thinking: true });
-    expect(target.reasoning_budget_tokens).toBeUndefined();
+    expect(target.reasoning_budget_tokens).toBe(2048);
+  });
+
+  it.each([
+    { installDefault: undefined, override: undefined, expected: 1024 },
+    { installDefault: 2048, override: undefined, expected: 2048 },
+    { installDefault: 2048, override: 4096, expected: 4096 },
+  ])(
+    'sends the resolved profile/install/gezel budget ($expected) without changing the output cap',
+    ({ installDefault, override, expected }) => {
+      const target: Record<string, unknown> = {};
+      applyTuning(
+        target,
+        resolveTuning({
+          catalog: {
+            sampling: { maxTokens: 8192 },
+            reasoning: { thinkingBudget: 96 },
+            profiles: {
+              'thinking-general': { reasoning: { thinkingBudget: 1024 } },
+            },
+          },
+          tuningProfileId: 'thinking-general',
+          ...(installDefault === undefined
+            ? {}
+            : { installDefault: { reasoning: { thinkingBudget: installDefault } } }),
+          ...(override === undefined
+            ? {}
+            : { override: { reasoning: { thinkingBudget: override } } }),
+        }),
+        LLAMA_CPP_TUNING_MAP,
+      );
+      expect(target.reasoning_budget_tokens).toBe(expected);
+      expect(target.max_tokens).toBe(8192);
+    },
+  );
+
+  it('leaves the launch budget in effect when no request budget is configured', () => {
+    const target: Record<string, unknown> = {};
+    applyTuning(target, resolveTuning({}), LLAMA_CPP_TUNING_MAP);
+    expect(target).not.toHaveProperty('reasoning_budget_tokens');
   });
 
   it('forwards manifest-declared reasoning.templateKwargs verbatim — the model names its own control (Muse Glimmer reads reasoning_strength, GPT-OSS reads reasoning_effort)', () => {

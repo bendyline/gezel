@@ -1,4 +1,5 @@
 import { type Task, initialPoppetjeForGezel } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -751,6 +752,30 @@ describe('ChatReferences reference picker', () => {
         path: 'battle-research.md',
       });
     });
+  });
+
+  it('presents a missing reference as an inline alert', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockRejectedValue(new GezelApiError('Missing', 404));
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onWorkspaceReference }) => (
+          <button type="button" onClick={() => onWorkspaceReference('Issaquah.md')}>
+            Open missing reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open missing reference' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveClass('chat-rail-viewer-error');
+    expect(alert).toHaveTextContent(
+      '"Issaquah.md" was not found in artifacts, workspace, or documents.',
+    );
   });
 
   it('selects files from a dropdown under the References tab', async () => {

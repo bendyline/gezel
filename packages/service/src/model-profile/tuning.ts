@@ -590,14 +590,12 @@ export const LLAMA_CPP_TUNING_MAP: TuningMap = {
   'sampling.dry': { write: writeDrySplit },
   'sampling.xtc': { write: writeXtcSplit },
   'reasoning.effort': null,
-  // llama-server takes `--reasoning-budget N` at launch (default -1 =
-  // unrestricted; N>0 caps thinking tokens) but does NOT expose a
-  // per-request override. The flag is applied in
-  // `buildLlamaCppProvider`'s launch resolver from the catalog's
-  // `tuning.reasoning.thinkingBudget`. Per-gezel overrides on this
-  // field are deliberately ignored — the server is shared across
-  // gezels, the budget is a server-wide knob.
-  'reasoning.thinkingBudget': null,
+  // The pinned llama-server supports request budgets, so profile and user
+  // overrides must reach the wire even when gezels share one engine.
+  // An absent budget leaves the launch default in effect; request -1 also
+  // inherits that default, while 0 forces thinking to end immediately.
+  // The shared tuning schema accepts only positive integer budgets.
+  'reasoning.thinkingBudget': { key: 'reasoning_budget_tokens' },
   'reasoning.enableThinking': { write: writeChatTemplateKwarg('enable_thinking') },
   'reasoning.templateKwargs': { write: writeChatTemplateKwargs },
   'output.responseFormat': { write: writeLlamaCppResponseFormat },

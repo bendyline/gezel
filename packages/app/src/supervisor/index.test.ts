@@ -115,12 +115,25 @@ vi.mock('./extract-bundle.js', () => ({
   extractBundleIfNeeded: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./native-bin.js', () => ({
-  resolveNativeBinaryPath: vi.fn((binaryName: string, _mainMetaUrl: string, variant?: string) =>
-    binaryName === 'llama-server' && variant
-      ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
-      : null,
+  resolveNativeBinaryPath: vi.fn(
+    (
+      binaryName: string,
+      _mainMetaUrl: string,
+      variant?: string,
+      options?: { accept?: (path: string) => boolean },
+    ) => {
+      const candidate =
+        binaryName === 'llama-server' && variant
+          ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
+          : null;
+      return candidate && (!options?.accept || options.accept(candidate)) ? candidate : null;
+    },
   ),
   nativeBinDir: () => ctx.nativeRoot,
+  verifyLlamaBinaryAgainstCheckoutPin: vi.fn(() => ({
+    compatible: true,
+    reason: 'mock checkout pin match',
+  })),
 }));
 // Probe + cache-bust key live in core (`@bendyline/gezel/native`)
 // because the supervisor needs to static-import them BEFORE the
@@ -247,7 +260,9 @@ vi.mock('@bendyline/gezel-service', () => ({
 const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, stopProcessByPid } =
   await import('./index.js');
 const { resolveMode } = await import('./mode.js');
-const { resolveNativeBinaryPath } = await import('./native-bin.js');
+const { resolveNativeBinaryPath, verifyLlamaBinaryAgainstCheckoutPin } = await import(
+  './native-bin.js'
+);
 const {
   discoverOrSpawn,
   stopOwnedDaemon,
@@ -1204,6 +1219,19 @@ describe('native llama-server selection', () => {
     );
     expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
     expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(resolveNativeBinaryPath).toHaveBeenCalledWith(
+      'llama-server',
+      expect.any(String),
+      'vulkan',
+      expect.objectContaining({
+        preferDevelopmentBuild: true,
+        accept: expect.any(Function),
+      }),
+    );
+    expect(verifyLlamaBinaryAgainstCheckoutPin).toHaveBeenCalledWith(
+      '/mock/native-bin/linux-x64-vulkan/gezel-llama-server',
+      expect.any(String),
+    );
     const llamaVariants = vi
       .mocked(resolveNativeBinaryPath)
       .mock.calls.filter(([name]) => name === 'llama-server')
