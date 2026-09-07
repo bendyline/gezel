@@ -1782,6 +1782,12 @@ export function ds4EvalShouldUseSsdStreaming(opts?: {
   );
 }
 
+/** Select the eval broker budget from an explicit host-memory measurement. */
+export function ds4EvalCapacityBudgetGb(totalRamBytes: number): 56 | 72 | 104 {
+  const totalRamGb = totalRamBytes / 1024 ** 3;
+  return totalRamGb >= 120 ? 104 : totalRamGb >= 88 ? 72 : 56;
+}
+
 export function ds4EvalLaunchOverridesForModel(
   modelId: string,
 ): LlamaCppEvalLaunchOverrides | undefined {
@@ -1792,7 +1798,8 @@ export function ds4EvalLaunchOverridesForModel(
   // Mirror buildDs4Provider's RAM tiers for the resident expert cache, and size
   // the broker budget to cover it (cache + ~4 GiB ctx buffers + KV) with OS
   // headroom. Throughput only — does not change capability/scores.
-  const totalRamGb = totalmem() / 1024 ** 3;
+  const totalRamBytes = totalmem();
+  const totalRamGb = totalRamBytes / 1024 ** 3;
   const modelSizeBytes = model
     ? (() => {
         try {
@@ -1827,7 +1834,7 @@ export function ds4EvalLaunchOverridesForModel(
   // rejected GLM 5.3 Q2's conservative ~100 GiB launch reservation before
   // ds4 could start. 104 GiB mirrors the product budget on a 128 GiB unified
   // host and still leaves 24 GiB outside the native-engine pool.
-  const capacityBudgetGb = totalRamGb >= 120 ? 104 : totalRamGb >= 88 ? 72 : 56;
+  const capacityBudgetGb = ds4EvalCapacityBudgetGb(totalRamBytes);
   // ds4/DeepSeek-V4 supports ~1M context and SSD-STREAMS its KV cache to disk
   // (not RAM), so a small window throws away the engine's headline strength.
   // At 24576 a single specialist-handoff message (~36K tokens) overflowed the

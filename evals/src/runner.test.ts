@@ -15,6 +15,7 @@ import {
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
   describeSendFailure,
+  ds4EvalCapacityBudgetGb,
   ds4EvalLaunchOverridesForModel,
   ds4EvalPayloadFromModelDir,
   ds4EvalShouldUseSsdStreaming,
@@ -1387,9 +1388,15 @@ describe('ds4 eval residency policy', () => {
     });
     expect(actual?.config).not.toHaveProperty('modelTuning');
     expect(actual?.summary).toContain('tuning=catalog');
-    expect(actual?.summary).toContain('capacityBudget=104GB');
+    expect(actual?.summary).toMatch(/capacityBudget=(?:56|72|104)GB/);
     expect(actual?.summary).not.toContain('maxTokens=4096');
     expect(actual?.summary).not.toContain('thinking=off');
+  });
+
+  it('selects capacity budgets deterministically across host RAM tiers', () => {
+    expect(ds4EvalCapacityBudgetGb(16 * GB)).toBe(56);
+    expect(ds4EvalCapacityBudgetGb(96 * GB)).toBe(72);
+    expect(ds4EvalCapacityBudgetGb(128 * GB)).toBe(104);
   });
 
   it('loads Q2-sized weights fully on 128 GB-class unified-memory eval hosts', () => {
