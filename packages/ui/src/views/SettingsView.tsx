@@ -22,7 +22,12 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
-import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
+import {
+  EffortPicker,
+  EffortTray,
+  ModelPicker,
+  useReasoningSupport,
+} from '../components/ModelPicker.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { shortModelName } from '../components/model-display-name.js';
 import { providerLabel } from '../components/provider-label.js';
@@ -193,6 +198,34 @@ const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
     id: 'bypassPermissions',
     label: 'Full access',
     description: 'Approve every tool automatically, including shell commands.',
+  },
+];
+
+const CODEX_PERMISSION_CHOICES: ReadonlyArray<{
+  id: CodexPermissionMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'plan',
+    label: 'Plan',
+    description: 'Read-only. Codex can look at the workspace but never changes it.',
+  },
+  {
+    id: 'edit',
+    label: 'Edit',
+    description: 'Can change files in the workspace, but cannot reach outside its sandbox.',
+  },
+  {
+    id: 'reviewed',
+    label: 'Reviewed',
+    description:
+      'Like Edit, and anything that would cross the sandbox boundary goes to an independent Codex reviewer first.',
+  },
+  {
+    id: 'full',
+    label: 'Full',
+    description: 'Turns off Codex sandboxing and approvals. Codex may do anything the CLI can.',
   },
 ];
 
@@ -1247,12 +1280,45 @@ export function SettingsView() {
     }
   }, []);
 
+  // The Default provider screen mirrors each CLI's model controls, but only
+  // once that CLI has answered a probe, so it needs the same probe on entry.
+  const claudePermissionCurrent: ClaudePermissionMode =
+    config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits';
+  const claudePermissionChoice =
+    CLAUDE_PERMISSION_CHOICES.find((choice) => choice.id === claudePermissionCurrent) ??
+    CLAUDE_PERMISSION_CHOICES[0]!;
+  const codexPermissionCurrent = normalizeCodexPermissionMode(
+    config?.codexCli?.defaultPermissionMode,
+  );
+  const codexPermissionChoice =
+    CODEX_PERMISSION_CHOICES.find((choice) => choice.id === codexPermissionCurrent) ??
+    CODEX_PERMISSION_CHOICES[0]!;
+
+  const configuredProvider = config?.provider;
+  const anthropicCliControlsShown =
+    section === 'anthropicCli' ||
+    (section === 'defaults' && configuredProvider === 'anthropic-cli');
+  const codexCliControlsShown =
+    section === 'codexCli' || (section === 'defaults' && configuredProvider === 'codex-cli');
   useEffect(() => {
-    if (section === 'anthropicCli') void runAnthropicCliProbe();
-  }, [section, runAnthropicCliProbe]);
+    if (anthropicCliControlsShown) void runAnthropicCliProbe();
+  }, [anthropicCliControlsShown, runAnthropicCliProbe]);
   useEffect(() => {
-    if (section === 'codexCli') void runCodexCliProbe();
-  }, [section, runCodexCliProbe]);
+    if (codexCliControlsShown) void runCodexCliProbe();
+  }, [codexCliControlsShown, runCodexCliProbe]);
+
+  const anthropicCliReasoningSupported = useReasoningSupport(
+    'anthropic-cli',
+    config?.defaultModel?.['anthropic-cli'],
+    undefined,
+    anthropicCliControlsShown && anthropicCliProbe.kind === 'ok',
+  );
+  const codexCliReasoningSupported = useReasoningSupport(
+    'codex-cli',
+    config?.defaultModel?.['codex-cli'],
+    'gpt-5.5',
+    codexCliControlsShown && codexCliProbe.kind === 'ok',
+  );
 
   const saveToolFilterMode = useCallback(async (mode: 'always' | 'never' | 'small-model') => {
     setStatus('saving…');
@@ -2663,6 +2729,122 @@ export function SettingsView() {
                   </div>
                 )}
 
+                {provider === 'codex-cli' && (
+                  <>
+                    {codexCliProbe.kind === 'ok' && (
+                      <>
+                        <div
+                          className="new-row"
+                          style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                        >
+                          <label className="muted" style={{ fontSize: '0.9rem' }}>
+                            Default model
+                          </label>
+                          <ModelPicker
+                            provider="codex-cli"
+                            value={config?.defaultModel?.['codex-cli']}
+                            onChange={(v) => void saveDefaultModel('codex-cli', v)}
+                          />
+                        </div>
+                        {codexCliReasoningSupported !== false && (
+                          <div
+                            className="new-row"
+                            style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                          >
+                            <label className="muted" style={{ fontSize: '0.9rem' }}>
+                              Reasoning effort
+                            </label>
+                            <EffortTray
+                              provider="codex-cli"
+                              model={config?.defaultModel?.['codex-cli']}
+                              defaultModel="gpt-5.5"
+                              value={config?.codexCli?.defaultReasoningEffort ?? ''}
+                              onChange={(value) =>
+                                void saveCodexCli({
+                                  defaultReasoningEffort: value as
+                                    | CodexCliReasoningEffort
+                                    | undefined,
+                                })
+                              }
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                      {codexCliProbe.kind === 'fail'
+                        ? 'The Codex CLI is not connected yet. Set it up in the '
+                        : codexCliProbe.kind === 'ok'
+                          ? 'Permissions and advanced settings live in the '
+                          : 'Checking the Codex CLI connection… Settings live in the '}
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setSection('codexCli')}
+                        style={{ padding: 0 }}
+                      >
+                        OpenAI Codex CLI
+                      </button>{' '}
+                      tab.
+                    </p>
+                  </>
+                )}
+
+                {provider === 'anthropic-cli' && (
+                  <>
+                    {anthropicCliProbe.kind === 'ok' && (
+                      <>
+                        <div
+                          className="new-row"
+                          style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                        >
+                          <label className="muted" style={{ fontSize: '0.9rem' }}>
+                            Default model
+                          </label>
+                          <ModelPicker
+                            provider="anthropic-cli"
+                            value={config?.defaultModel?.['anthropic-cli']}
+                            onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                            placeholder="Gezel default (Claude Sonnet)"
+                          />
+                        </div>
+                        {anthropicCliReasoningSupported === true && (
+                          <div
+                            className="new-row"
+                            style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                          >
+                            <label className="muted" style={{ fontSize: '0.9rem' }}>
+                              Reasoning effort
+                            </label>
+                            <EffortPicker
+                              provider="anthropic-cli"
+                              model={config?.defaultModel?.['anthropic-cli']}
+                              value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                              onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                      {anthropicCliProbe.kind === 'fail'
+                        ? 'The Claude CLI is not connected yet. Set it up in the '
+                        : anthropicCliProbe.kind === 'ok'
+                          ? 'Permissions and advanced settings live in the '
+                          : 'Checking the Claude CLI connection… Settings live in the '}
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setSection('anthropicCli')}
+                        style={{ padding: 0 }}
+                      >
+                        Anthropic Claude CLI
+                      </button>{' '}
+                      tab.
+                    </p>
+                  </>
+                )}
+
                 {provider === 'ollama' && (
                   <>
                     <div
@@ -3187,7 +3369,7 @@ export function SettingsView() {
 
           {section === 'codexCli' && (
             <section className="provider-card">
-              <h3>OpenAI Codex CLI</h3>
+              <h3>OpenAI Codex CLI (command line interface)</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 Drives a locally-installed{' '}
                 <a
@@ -3210,8 +3392,8 @@ export function SettingsView() {
                   </span>
                 )}
                 {codexCliProbe.kind === 'fail' && (
-                  <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                    ✗ {codexCliProbe.error}
+                  <span className="provider-connection-state" data-tone="danger">
+                    Not connected
                   </span>
                 )}
                 {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
@@ -3230,85 +3412,96 @@ export function SettingsView() {
               </div>
 
               {codexCliProbe.kind === 'fail' && (
-                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-                  <li>
-                    Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
-                    <code>OPENAI_API_KEY</code>) so the binary is ready to use.
-                  </li>
-                  <li>
-                    Optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                    <code>$PATH</code> by default.
-                  </li>
-                  <li>Pick a default model and permission mode.</li>
-                </ol>
+                <div className="provider-connection-callout">
+                  <p>{codexCliProbe.error}</p>
+                  <ol>
+                    <li>
+                      Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
+                      <code>OPENAI_API_KEY</code>) so the CLI app is ready to use.
+                    </li>
+                    <li>
+                      or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                      <code>$PATH</code> by default.
+                    </li>
+                    <li>
+                      Click Test connection. Once Codex is connected, you can pick a default model
+                      and reasoning effort here.
+                    </li>
+                  </ol>
+                </div>
               )}
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+              <div className="new-row cli-permission-row" style={{ marginTop: '0.75rem' }}>
+                <label className="muted cli-permission-label" style={{ fontSize: '0.9rem' }}>
                   Default permission
                 </label>
-                <div className="gz-tray" role="radiogroup" aria-label="Default Codex access">
-                  {(
-                    [
-                      ['plan', 'Plan'],
-                      ['edit', 'Edit'],
-                      ['reviewed', 'Reviewed'],
-                      ['full', 'Full'],
-                    ] as const satisfies ReadonlyArray<readonly [CodexPermissionMode, string]>
-                  ).map(([value, label]) => {
-                    const selected =
-                      normalizeCodexPermissionMode(config?.codexCli?.defaultPermissionMode) ===
-                      value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-                        role="radio"
-                        aria-checked={selected}
-                        className={`gz-key${selected ? ' gz-key-active' : ''}`}
-                        onClick={() => void saveCodexCli({ defaultPermissionMode: value })}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+                <div className="cli-permission-field">
+                  <div
+                    className="gz-tray gz-tray--described"
+                    role="radiogroup"
+                    aria-label="Default Codex access"
+                  >
+                    {CODEX_PERMISSION_CHOICES.map((choice) => {
+                      const selected = codexPermissionCurrent === choice.id;
+                      return (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+                          role="radio"
+                          aria-checked={selected}
+                          className={`gz-key${selected ? ' gz-key-active' : ''}`}
+                          onClick={() => void saveCodexCli({ defaultPermissionMode: choice.id })}
+                        >
+                          {choice.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="gz-tray-description cli-permission-description">
+                    <strong>{codexPermissionChoice.label}</strong> —{' '}
+                    {codexPermissionChoice.description}
+                  </p>
                 </div>
               </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Plan is read-only. Edit can change the workspace but cannot cross its sandbox.
-                Reviewed sends boundary crossings to an independent Codex reviewer. Full disables
-                Codex sandboxing and approvals. Gezel’s narrow destructive-command guard remains on
-                in every mode. Projects and individual gezels can override this default.
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                Gezel’s narrow destructive-command guard stays on in every mode. Projects and
+                individual gezels can override this default.
               </p>
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Default model
-                </label>
-                <ModelPicker
-                  provider="codex-cli"
-                  value={config?.defaultModel?.['codex-cli']}
-                  onChange={(v) => void saveDefaultModel('codex-cli', v)}
-                />
-              </div>
+              {codexCliProbe.kind === 'ok' && (
+                <>
+                  <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                    <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                      Default model
+                    </label>
+                    <ModelPicker
+                      provider="codex-cli"
+                      value={config?.defaultModel?.['codex-cli']}
+                      onChange={(v) => void saveDefaultModel('codex-cli', v)}
+                    />
+                  </div>
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Reasoning effort
-                </label>
-                <EffortTray
-                  provider="codex-cli"
-                  model={config?.defaultModel?.['codex-cli']}
-                  defaultModel="gpt-5.5"
-                  value={config?.codexCli?.defaultReasoningEffort ?? ''}
-                  onChange={(value) =>
-                    void saveCodexCli({
-                      defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
-                    })
-                  }
-                />
-              </div>
+                  {codexCliReasoningSupported !== false && (
+                    <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                      <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                        Reasoning effort
+                      </label>
+                      <EffortTray
+                        provider="codex-cli"
+                        model={config?.defaultModel?.['codex-cli']}
+                        defaultModel="gpt-5.5"
+                        value={config?.codexCli?.defaultReasoningEffort ?? ''}
+                        onChange={(value) =>
+                          void saveCodexCli({
+                            defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+                </>
+              )}
 
               <details style={{ marginTop: '1rem' }}>
                 <summary style={{ cursor: 'pointer' }}>
@@ -3440,7 +3633,7 @@ export function SettingsView() {
 
           {section === 'anthropicCli' && (
             <section className="provider-card">
-              <h3>Anthropic Claude CLI</h3>
+              <h3>Anthropic Claude CLI (command line interface)</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 Drives a locally-installed{' '}
                 <a
@@ -3463,8 +3656,8 @@ export function SettingsView() {
                   </span>
                 )}
                 {anthropicCliProbe.kind === 'fail' && (
-                  <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                    ✗ {anthropicCliProbe.error}
+                  <span className="provider-connection-state" data-tone="danger">
+                    Not connected
                   </span>
                 )}
                 {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
@@ -3483,75 +3676,93 @@ export function SettingsView() {
               </div>
 
               {anthropicCliProbe.kind === 'fail' && (
-                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-                  <li>
-                    Install the Claude CLI globally and run <code>claude /status</code> in a
-                    terminal to confirm it's authenticated.
-                  </li>
-                  <li>
-                    Optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                    <code>$PATH</code> by default.
-                  </li>
-                  <li>Pick a default model and permission mode.</li>
-                </ol>
+                <div className="provider-connection-callout">
+                  <p>{anthropicCliProbe.error}</p>
+                  <ol>
+                    <li>
+                      Install Claude Code and run <code>claude /status</code> in a terminal to
+                      confirm it is signed in, so the CLI app is ready to use.
+                    </li>
+                    <li>
+                      or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                      <code>$PATH</code> by default.
+                    </li>
+                    <li>
+                      Click Test connection. Once Claude is connected, you can pick a default model
+                      here.
+                    </li>
+                  </ol>
+                </div>
               )}
 
-              <div
-                className="new-row claude-permission-row"
-                style={{ alignItems: 'flex-start', marginTop: '0.75rem' }}
-              >
-                <span className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+              <div className="new-row cli-permission-row" style={{ marginTop: '0.75rem' }}>
+                <span className="muted cli-permission-label" style={{ fontSize: '0.9rem' }}>
                   Default permission
                 </span>
-                <div
-                  className="gz-tray claude-permission-tray"
-                  role="radiogroup"
-                  aria-label="Default permission"
-                >
-                  {CLAUDE_PERMISSION_CHOICES.map((choice) => {
-                    const selected =
-                      (config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits') === choice.id;
-                    return (
-                      <button
-                        key={choice.id}
-                        type="button"
-                        // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
-                        role="radio"
-                        aria-checked={selected}
-                        className={`gz-key gz-key--stacked${selected ? ' gz-key-active' : ''}`}
-                        onClick={() => void saveAnthropicCli({ defaultPermissionMode: choice.id })}
-                      >
-                        <span className="claude-permission-label">{choice.label}</span>
-                        <span className="claude-permission-hint">{choice.description}</span>
-                      </button>
-                    );
-                  })}
+                <div className="cli-permission-field">
+                  <div
+                    className="gz-tray gz-tray--described"
+                    role="radiogroup"
+                    aria-label="Default permission"
+                  >
+                    {CLAUDE_PERMISSION_CHOICES.map((choice) => {
+                      const selected = claudePermissionCurrent === choice.id;
+                      return (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
+                          role="radio"
+                          aria-checked={selected}
+                          className={`gz-key${selected ? ' gz-key-active' : ''}`}
+                          onClick={() =>
+                            void saveAnthropicCli({ defaultPermissionMode: choice.id })
+                          }
+                        >
+                          {choice.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="gz-tray-description cli-permission-description">
+                    <strong>{claudePermissionChoice.label}</strong> —{' '}
+                    {claudePermissionChoice.description}
+                  </p>
                 </div>
               </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                Projects and individual gezels can override this default.
+              </p>
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Default model
-                </label>
-                <ModelPicker
-                  provider="anthropic-cli"
-                  value={config?.defaultModel?.['anthropic-cli']}
-                  onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
-                  placeholder="Gezel default (Claude Sonnet)"
-                />
-              </div>
+              {anthropicCliProbe.kind === 'ok' && (
+                <>
+                  <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                    <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                      Default model
+                    </label>
+                    <ModelPicker
+                      provider="anthropic-cli"
+                      value={config?.defaultModel?.['anthropic-cli']}
+                      onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                      placeholder="Gezel default (Claude Sonnet)"
+                    />
+                  </div>
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Reasoning effort
-                </label>
-                <EffortPicker
-                  provider="anthropic-cli"
-                  model={config?.defaultModel?.['anthropic-cli']}
-                  value={config?.defaultReasoningEffort?.['anthropic-cli']}
-                  onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
-                />
-              </div>
+                  {anthropicCliReasoningSupported === true && (
+                    <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                      <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                        Reasoning effort
+                      </label>
+                      <EffortPicker
+                        provider="anthropic-cli"
+                        model={config?.defaultModel?.['anthropic-cli']}
+                        value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                        onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
 
               <details style={{ marginTop: '1rem' }}>
                 <summary style={{ cursor: 'pointer' }}>
@@ -3618,14 +3829,14 @@ export function SettingsView() {
                     style={{ width: '2.5rem' }}
                   />
                   <span className="muted" style={{ fontSize: '0.85rem' }}>
-                    warm <code>claude</code> subprocesses to keep around
+                    Claude processes kept ready
                   </span>
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Each pool slot holds one <code>claude</code> process pinned to a chat thread; turn
-                  2+ of a thread skips the cold-start cost. More slots = lower per-turn latency for
-                  parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
-                  least-recently-used non-busy worker is evicted.
+                  Each ready process stays with one chat thread, so later turns skip the start-up
+                  wait. More processes mean faster replies when several gezels work at once, and
+                  more memory (about 100–200 MB each). When the pool is full, the idle process that
+                  was used longest ago is closed.
                 </p>
 
                 <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -3650,15 +3861,13 @@ export function SettingsView() {
                     style={{ width: '2.5rem' }}
                   />
                   <span className="muted" style={{ fontSize: '0.85rem' }}>
-                    turns running in parallel
+                    turns running at the same time
                   </span>
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  How many gezel turns can dispatch to <code>claude</code> at once. Defaults to the
-                  pool size — every warm slot can be running a turn. Lower this if you want a memory
-                  headroom buffer (warm processes that aren't currently executing). Setting it above
-                  the pool size logs a warning at provider init; the pool will spawn over-cap
-                  transiently to honor the request.
+                  How many gezel turns can run through Claude at once. Defaults to the pool size.
+                  Lower it to keep some ready processes in reserve. Setting it higher still works,
+                  but extra processes are started temporarily.
                 </p>
 
                 <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -3684,7 +3893,8 @@ export function SettingsView() {
                   </span>
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Shut down a warm subprocess after this long without a turn. Resets on every turn.
+                  Close a ready process after this long without a turn. The timer restarts on every
+                  turn.
                 </p>
               </details>
             </section>

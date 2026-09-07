@@ -977,6 +977,15 @@ use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
 
+**A missing tool is a setup step, not a failure.** When a CLI-backed provider
+(Codex, Claude CLI) is simply not installed yet, the Connection row shows one
+short colored word ("Not connected", `.provider-connection-state`) and the
+reason plus the fix go in a `.provider-connection-callout` beneath it: body
+ink, a `--danger` left rule, numbered steps in muted type. No red ✗ and no
+paragraph of red text. Settings that only make sense once the tool answers
+(default model, reasoning effort) stay hidden until the probe succeeds, so a
+first-time user sees only what they can act on.
+
 **A red error names both exits.** A persistent red alert never uses an
 ambiguous verb such as “Continue” for dismissal. When the user can remove the
 alert without fixing its cause, label that action **Acknowledge** and say in

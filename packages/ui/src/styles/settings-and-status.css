@@ -272,34 +272,45 @@
   cursor: pointer;
 }
 
-.claude-permission-tray.gz-tray {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: min(100%, 42rem);
+/* Default permission for the CLI providers (Codex, Claude): a described tray
+   in the row's value column. The label sits on the tray's first line, and
+   the readout beneath the tray explains only the latched mode, so the
+   paragraph-that-lists-every-mode is gone. */
+.cli-permission-row {
+  align-items: flex-start;
 }
 
-.claude-permission-tray .gz-key {
+.cli-permission-label {
+  min-width: 7rem;
+  padding-top: 0.45rem;
+}
+
+.cli-permission-field {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  max-width: 42rem;
 }
 
-.claude-permission-label {
-  font-weight: 600;
+.cli-permission-field .gz-tray--described {
+  flex-wrap: wrap;
 }
 
-.claude-permission-hint {
-  font-size: var(--text-xs);
-  line-height: 1.3;
-  opacity: 0.82;
+.cli-permission-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 @media (max-width: 760px) {
-  .claude-permission-row {
+  .cli-permission-row {
     flex-direction: column;
     gap: 0.45rem;
   }
 
-  .claude-permission-tray.gz-tray {
-    grid-template-columns: 1fr;
+  .cli-permission-label {
+    padding-top: 0;
   }
 }
 
@@ -1080,6 +1091,48 @@
    fieldset stay tight against each other. */
 .provider-card > .provider-row {
   margin-bottom: 0.85rem;
+}
+
+/* Connection state of a CLI-backed provider. The row carries a short
+   colored word; the callout beneath it carries the reason and the fix in
+   body ink, so a not-yet-installed tool reads as a setup step rather than
+   a wall of red. Same shape as .settings-notice with --danger in place
+   of --warning. */
+.provider-connection-state {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.provider-connection-state[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.provider-connection-callout {
+  box-sizing: border-box;
+  max-width: 640px;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.provider-connection-callout > p {
+  margin: 0;
+}
+
+.provider-connection-callout > ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--text-muted);
+}
+
+.provider-connection-callout code {
+  font-size: 0.85em;
 }
 
 .ff-img-hint-have {
