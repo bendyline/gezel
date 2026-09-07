@@ -183,7 +183,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
   packages/app-sdk:
     dependencies:
@@ -210,8 +210,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@bendyline/gilde':
-        specifier: 0.1.59
-        version: 0.1.59
+        specifier: 0.1.60
+        version: 0.1.60
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -259,14 +259,14 @@ importers:
         specifier: workspace:*
         version: link:../service
       '@bendyline/squisq':
-        specifier: 2.11.2
-        version: 2.11.2(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.6.2
-        version: 2.6.2(supports-color@8.1.1)
+        specifier: 2.6.3
+        version: 2.6.3(supports-color@8.1.1)
       '@bendyline/squisq-react':
-        specifier: 2.11.2
-        version: 2.11.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -596,14 +596,14 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@bendyline/squisq':
-        specifier: 2.11.2
-        version: 2.11.2(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(supports-color@8.1.1)
       '@bendyline/squisq-cli':
-        specifier: 2.8.2
-        version: 2.8.2(supports-color@8.1.1)
+        specifier: 2.8.3
+        version: 2.8.3(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.6.2
-        version: 2.6.2(supports-color@8.1.1)
+        specifier: 2.6.3
+        version: 2.6.3(supports-color@8.1.1)
       '@hono/node-server':
         specifier: 2.0.11
         version: 2.0.11(hono@4.12.34)
@@ -740,20 +740,20 @@ importers:
         specifier: workspace:*
         version: link:../client
       '@bendyline/squisq':
-        specifier: 2.11.2
-        version: 2.11.2(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(supports-color@8.1.1)
       '@bendyline/squisq-calc':
         specifier: 2.11.0
         version: 2.11.0(@ironcalc/wasm@0.8.4)
       '@bendyline/squisq-editor-react':
-        specifier: 2.11.2
-        version: 2.11.2(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.6.2
-        version: 2.6.2(supports-color@8.1.1)
+        specifier: 2.6.3
+        version: 2.6.3(supports-color@8.1.1)
       '@bendyline/squisq-react':
-        specifier: 2.11.2
-        version: 2.11.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.11.3
+        version: 2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@ironcalc/wasm':
         specifier: 0.8.4
         version: 0.8.4
@@ -979,8 +979,8 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@bendyline/gilde@0.1.59':
-    resolution: {integrity: sha512-zwkNzsO8NqY6YUSTVjdev3lXGX3am207IpX8PuZ1WVgh+IR1RRCwIF2gJ7i2X8WXXiF8Zp96xe2285kgKYP32g==}
+  '@bendyline/gilde@0.1.60':
+    resolution: {integrity: sha512-edTMYDh07xb+gjsWMY2QE7V3GR0sOCFgXukdzWw8Qt8kw2YYOkst7SWlsbl2sd8crRQfj1WEaeJjjVH/qp8aGw==}
 
   '@bendyline/squisq-calc@2.11.0':
     resolution: {integrity: sha512-KFikTwiMOmTytb8U9qhKTaHLe1O8cNJAaONtteUOCGIWuMSR8tUuT+sLqIRCuWoOyTyI3zqitrDwRezwAzZ4ww==}
@@ -991,13 +991,13 @@ packages:
       '@ironcalc/wasm':
         optional: true
 
-  '@bendyline/squisq-cli@2.8.2':
-    resolution: {integrity: sha512-zm4ELOYCfrTkcZyOETUKFUyjpOXtJAv6Yo/Wyc+QZPGx8m/1B6EMULmUu9tcGk62Jg/9sGhskkjH+IxFKYz9+g==}
+  '@bendyline/squisq-cli@2.8.3':
+    resolution: {integrity: sha512-gaSHVtRS1uD8wV/qPxrWwrc79vMEWXDrFUwaEDzYKVQffAHKuv62gh+sie45e4gf4Nw8HcbFpy0jYMxpfMd+GQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-editor-react@2.11.2':
-    resolution: {integrity: sha512-1nxOaYHZ6UjcxBO3ZcFf7st3r7OK4zVt5rL5ttqLKf57WiZ84ZcGu6cbuKy9hjlkMR/RzQXFIVzA4vhhKEGyiQ==}
+  '@bendyline/squisq-editor-react@2.11.3':
+    resolution: {integrity: sha512-xeAOws4GkbyXH8Gz5DuNTNlEi6ae8UzyJAoQQcjIRTHOLGnBek+4/HMKMyDHLBWNLLBrWnZGeMupkscYxiIurg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       harper.js: ^2.7.0
@@ -1008,8 +1008,8 @@ packages:
       harper.js:
         optional: true
 
-  '@bendyline/squisq-formats@2.6.2':
-    resolution: {integrity: sha512-2adFYdPXljBAFjQS0SgwJC0So5TAZAOl0GP5RgOcPJt3URLFn1Kdu3jPol/Ka7AUTVCa1ieLBX6G+J1zI43d0Q==}
+  '@bendyline/squisq-formats@2.6.3':
+    resolution: {integrity: sha512-wOrBpmDjWM67lu4O1JgXmtlMQfztCpkSDs5BWLeKJkH7tohYp+k7ywMSmCXqxWw8UDpF4/PBr+Ns6tQqsdF9Sw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       hyparquet: ^1.29.1
@@ -1017,33 +1017,33 @@ packages:
       hyparquet:
         optional: true
 
-  '@bendyline/squisq-grid-react@2.11.3':
-    resolution: {integrity: sha512-Yg1Vl6VLrubCUuZZoBpRDL3pzCMIDysrYLbUB55AmNCo2u94nomuHY6ajozjxB8FkEsL4AUCFWk7lqQJ25pXnA==}
+  '@bendyline/squisq-grid-react@2.11.4':
+    resolution: {integrity: sha512-F1M4NAQlz5w3MQf2S+kh6qOT1zqvxa1IEQG0gh7he1MOTew4Dq10CK+EIxMqVuQ1ItUG+FIak9hec8ndUFzktQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-react@2.11.2':
-    resolution: {integrity: sha512-Yspa8Fp4eUoQzjOCjlUiPha9LA/b7SX30vBhDIRqrPsQ6fFHhxNNGzAhYGnw21o9FGfICNXm7KAY4yDlTFs9cQ==}
+  '@bendyline/squisq-react@2.11.3':
+    resolution: {integrity: sha512-uHP1xha4FBkqBE5NuWmuMtxUzf9XPsb3ouenDU+3RK+4F0LGzcDcqnuKtzAVQP617joem6aiym94ResficTwig==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-video-react@2.4.6':
-    resolution: {integrity: sha512-zU8Uu51S7vlCp4ETvDOmODuIOHLQjAsDDoT7lf5t9v9BwCwg5iLoVOaQgEcWmuL3Jhjbx74VB9QTLqYCh99JMw==}
+  '@bendyline/squisq-video-react@2.4.7':
+    resolution: {integrity: sha512-A11PohIxxicCVnRqAhhpwHi0ObdQ6UM5zNwCfM0e0ObxuFefLq+3ZaayHTFwwqJ8H8FJ3dnE8yv/FDvGocK64Q==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-video@2.3.5':
-    resolution: {integrity: sha512-AaQEb/iu8p0XDlKnwUP+BMi0VM2YMvR75qoF2Crl6TM5N3SnhVuw384KaFE5C0wUIhxN9vi/Cb+UuK8QumYeZQ==}
+  '@bendyline/squisq-video@2.3.6':
+    resolution: {integrity: sha512-wFEtmh/mfwSduY3t1bYSIn4vwz15gXFRW1k7pOuVNBxlcH6KFTPcq/s3ZEXsiRg1hq2PfFlO/TXXYgVQ+mj0rg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@bendyline/squisq@2.11.2':
-    resolution: {integrity: sha512-mWmB0R2nen3rOjCRuR8yaxVWtX1JZQbX6aMuzqdNkESXX3abIEIXsfpxK4iMuSMMS29sP0hXIL8N0pZ3lZQpVA==}
+  '@bendyline/squisq@2.11.3':
+    resolution: {integrity: sha512-kd370jEypISX76+38vzlIfE6JIbw+X+Xxrra+4d7wleAOsqwBsGdhX+AwHzHWeC4oULRjM3wZm9RZVYmuR6j5w==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@biomejs/biome@1.9.4':
@@ -8285,31 +8285,31 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@bendyline/gilde@0.1.59': {}
+  '@bendyline/gilde@0.1.60': {}
 
   '@bendyline/squisq-calc@2.11.0(@ironcalc/wasm@0.8.4)':
     optionalDependencies:
       '@ironcalc/wasm': 0.8.4
 
-  '@bendyline/squisq-cli@2.8.2(supports-color@8.1.1)':
+  '@bendyline/squisq-cli@2.8.3(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.6.2(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.3.5(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.6.3(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.3.6(supports-color@8.1.1)
       commander: 12.1.0
       playwright-core: 1.61.1
     transitivePeerDependencies:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-editor-react@2.11.2(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-editor-react@2.11.3(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
       '@bendyline/squisq-calc': 2.11.0(@ironcalc/wasm@0.8.4)
-      '@bendyline/squisq-formats': 2.6.2(supports-color@8.1.1)
-      '@bendyline/squisq-grid-react': 2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-react': 2.11.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video-react': 2.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.6.3(supports-color@8.1.1)
+      '@bendyline/squisq-grid-react': 2.11.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-react': 2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-video-react': 2.4.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@fortawesome/fontawesome-free': 7.2.0
       '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
       '@tiptap/extension-heading': 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
@@ -8339,9 +8339,9 @@ snapshots:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-formats@2.6.2(supports-color@8.1.1)':
+  '@bendyline/squisq-formats@2.6.3(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
       '@pdf-lib/fontkit': 1.1.1
       '@pdf-lib/upng': 1.0.1
       '@xmldom/xmldom': 0.9.12
@@ -8351,18 +8351,18 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-grid-react@2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-grid-react@2.11.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
       '@tanstack/react-virtual': 3.14.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-react@2.11.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-react@2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
       '@fortawesome/fontawesome-free': 7.2.0
       mermaid: 11.16.1
       react: 19.2.8
@@ -8370,11 +8370,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-video-react@2.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-video-react@2.4.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
-      '@bendyline/squisq-react': 2.11.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.3.5(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
+      '@bendyline/squisq-react': 2.11.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.3.6(supports-color@8.1.1)
       '@ffmpeg/core': 0.12.9
       '@ffmpeg/ffmpeg': 0.12.15
       '@ffmpeg/util': 0.12.2
@@ -8384,15 +8384,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-video@2.3.5(supports-color@8.1.1)':
+  '@bendyline/squisq-video@2.3.6(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.11.2(supports-color@8.1.1)
+      '@bendyline/squisq': 2.11.3(supports-color@8.1.1)
       '@ffmpeg/ffmpeg': 0.12.15
       '@ffmpeg/util': 0.12.2
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq@2.11.2(supports-color@8.1.1)':
+  '@bendyline/squisq@2.11.3(supports-color@8.1.1)':
     dependencies:
       genson-js: 0.0.8
       hast-util-from-html: 2.0.3
@@ -10926,7 +10926,7 @@ snapshots:
       obug: 2.1.4
       std-env: 4.2.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+      vitest: 4.1.10(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
   '@vitest/expect@4.1.10':
     dependencies:
@@ -10936,14 +10936,6 @@ snapshots:
       '@vitest/utils': 4.1.10
       chai: 6.2.2
       tinyrainbow: 3.1.0
-
-  '@vitest/mocker@4.1.10(vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))':
-    dependencies:
-      '@vitest/spy': 4.1.10
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-    optionalDependencies:
-      vite: 8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0)
 
   '@vitest/mocker@4.1.10(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))':
     dependencies:
@@ -15574,21 +15566,6 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0):
-    dependencies:
-      lightningcss: 1.33.0
-      picomatch: 4.0.5
-      postcss: 8.5.22
-      rolldown: 1.1.5
-      tinyglobby: 0.2.17
-    optionalDependencies:
-      '@types/node': 24.13.3
-      esbuild: 0.27.7
-      fsevents: 2.3.3
-      jiti: 2.7.0
-      tsx: 4.23.1
-      yaml: 2.9.0
-
   vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
@@ -15618,35 +15595,6 @@ snapshots:
       jiti: 2.7.0
       tsx: 4.23.1
       yaml: 2.9.0
-
-  vitest@4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0)):
-    dependencies:
-      '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-      '@vitest/pretty-format': 4.1.10
-      '@vitest/runner': 4.1.10
-      '@vitest/snapshot': 4.1.10
-      '@vitest/spy': 4.1.10
-      '@vitest/utils': 4.1.10
-      es-module-lexer: 2.3.1
-      expect-type: 1.4.0
-      magic-string: 0.30.21
-      obug: 2.1.4
-      pathe: 2.0.3
-      picomatch: 4.0.5
-      std-env: 4.2.0
-      tinybench: 2.9.0
-      tinyexec: 1.2.4
-      tinyglobby: 0.2.17
-      tinyrainbow: 3.1.0
-      vite: 8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0)
-      why-is-node-running: 2.3.0
-    optionalDependencies:
-      '@types/node': 24.13.3
-      '@vitest/coverage-v8': 4.1.10(vitest@4.1.10)
-      jsdom: 29.1.1(@noble/hashes@2.2.0)
-    transitivePeerDependencies:
-      - msw
 
   vitest@4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:

@@ -54,12 +54,12 @@ describe('DocBlocks catalog contract', () => {
     expect(docblocks, 'the bundled DocBlocks toolset should exist').toBeDefined();
     if (!docblocks) return;
 
-    expect(docblocks.version).toBe('2.6.0');
+    expect(docblocks.version).toBe('2.6.1');
     expect(docblocks.runtime).toEqual(
       expect.objectContaining({
         package: '@bendyline/docblocks-cli',
-        version: '2.6.0',
-        sha256: 'e60e5924f89a89ab339810ee18b5a7db02466f697d0d8bedc91df5c722ad1935',
+        version: '2.6.1',
+        sha256: 'fe150dfc7e966edfdae9fe4b35f5279f7efb94c827306dd35ba2b7faafd8dbd0',
         entry: 'dist/bin.js',
         args: ['mcp'],
       }),

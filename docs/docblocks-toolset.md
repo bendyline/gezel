@@ -20,9 +20,9 @@ pre-authorized tool set from `tools[].name`
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
-The current authored release is **`@bendyline/docblocks-cli@2.6.0`**, pinned to
+The current authored release is **`@bendyline/docblocks-cli@2.6.1`**, pinned to
 tarball SHA-256
-`e60e5924f89a89ab339810ee18b5a7db02466f697d0d8bedc91df5c722ad1935`.
+`fe150dfc7e966edfdae9fe4b35f5279f7efb94c827306dd35ba2b7faafd8dbd0`.
 (The gezel install serves whatever the pinned `@bendyline/gilde` release
 carries — check `docblocks-catalog-contract.test.ts` for the version the
 current pin actually ships.) Compared with the old 2.0.0 inventory,
@@ -114,9 +114,8 @@ to make an intermediary page.
   `previewBasis`: Office/PDF previews reconstruct imported content and do not
   establish native pagination, fonts, or clipping; MP4/GIF previews currently
   extract only the first frame. Review notes must say what was actually checked.
-  The local CLI integration candidate adds inline MCP images with a shared 4 MiB
-  encoded budget; the pinned release's resource links alone do not deliver pixels
-  through Gezel's bridge. This fix needs a DocBlocks release and catalog pin bump.
+  The bundled 2.6.1 release delivers inline MCP images with a shared 4 MiB
+  encoded budget.
 - Default fidelity is `editable-native` for DOCX/PPTX, `rendered-fidelity` for
   MP4/GIF, and `semantic` for most other formats. MP4/GIF (and
   `rendered-fidelity`/`hybrid` PPTX/PDF) need Chromium; MP4/GIF also need
@@ -154,6 +153,8 @@ actual package version and entry SHA-256 alongside the catalog identity in
 `docblocks-eval-provenance.json`. Chromium is required for visual previews and
 FFmpeg for media; run in an environment that can launch them. The smoke probe
 retains evidence, real outputs, and returned preview PNGs for inspection.
+Set `SQUISQ_FFMPEG` to an absolute FFmpeg executable path if it is not discoverable
+on `PATH`; the smoke probe forwards this override to the MCP server.
 
 The override is installed in the shared toolset roster, and scenario setup checks
 its resolved path. A system-scoped override can otherwise be shadowed by a

@@ -115,6 +115,13 @@ export function localDeviceCapacity(home: string): DeviceCapacityLedger {
 async function capacityExecutor(
   home: string,
 ): Promise<(command: NativeCapacityCommand) => Promise<NativeCapacityReply>> {
+  // Set only after an explicit desktop-startup choice (or deliberately by an
+  // operator). This is not tied to GEZEL_DISABLE_MACHINE_ENGINE: isolated
+  // inference normally still shares the installed broker's admission ledger.
+  if (process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local') {
+    const ledger = localDeviceCapacity(home);
+    return (command) => ledger.execute(command);
+  }
   const machineHome = systemServiceHome();
   if (machineHome && machineHome !== home) {
     const runtime = await readSystemServiceRuntime(machineHome);
