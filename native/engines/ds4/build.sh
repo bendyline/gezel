@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — Linux + macOS build of ds4-server (DwarfStar / DeepSeek-V4)
+# build.sh — Linux + macOS build of ds4-server (DwarfStar)
 # from the pinned antirez/ds4 upstream.
 #
 # Emits: native/build/<platform>/gezel-ds4-server

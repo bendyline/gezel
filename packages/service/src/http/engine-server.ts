@@ -26,6 +26,7 @@ import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { mlxRoutes } from './routes/mlx.js';
 import { modelBundleRoutes } from './routes/model-bundles.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
+import { nativeCapacityRoutes } from './routes/native-capacity.js';
 import { remoteServingManageRoutes } from './routes/remote-serving-manage.js';
 import { systemMemoryRoutes } from './routes/system-memory.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
@@ -108,6 +109,7 @@ export function buildEngineApp(
   app.route('/v1/remote/manage/video-gen', videoModelRoutes(ctx));
   app.route('/v1/remote/manage/audio', audioModelRoutes(ctx));
   app.route('/v1/remote/manage/serving', remoteServingManageRoutes(ctx));
+  app.route('/v1/remote/manage/native-capacity', nativeCapacityRoutes(ctx.home));
   app.route('/v1/remote', v1RemoteRoutes(ctx));
   mountMachineEngineHints(app);
   app.all('*', (c) => c.json({ error: 'not_found', service: 'gezel-machine-engine' }, 404));

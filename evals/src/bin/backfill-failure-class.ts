@@ -36,7 +36,7 @@ import {
 } from '../success-check.ts';
 import type { FailureClass, TrialResult } from '../types.ts';
 
-const CLASSIFIER_VERSION = 1;
+const CLASSIFIER_VERSION = 2;
 
 interface SidecarShape extends FailureClassification {
   trialId: string;

@@ -1,11 +1,6 @@
-name: Visual regression
+name: Visual regression (manual)
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-  schedule:
-    - cron: '43 9 * * *'
   workflow_dispatch:
 
 concurrency:

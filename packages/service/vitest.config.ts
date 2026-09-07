@@ -11,6 +11,16 @@ import { defineConfig } from 'vitest/config';
 const MAX_WORKERS = Math.max(2, Math.min(8, availableParallelism()));
 
 /**
+ * Vitest projects run concurrently. The integration project below consumes one
+ * worker because file parallelism is disabled, so leave that lane out of the
+ * parallel project's budget. Without this subtraction an advertised 8-worker
+ * cap actually starts 9 workers before accounting for the subprocesses many
+ * integration tests create. Under full-suite pressure that can starve a fresh
+ * fork long enough to hit Vitest's fixed worker-start timeout.
+ */
+const UNIT_WORKERS = Math.max(1, MAX_WORKERS - 1);
+
+/**
  * A large slice of the service tests stand up a real moving part: an
  * embedded HTTP service, a ChatManager driving the mock provider, the MCP
  * bridge, git child processes, or a script sandbox. Keep those files in a
@@ -147,6 +157,7 @@ export default defineConfig({
       GEZEL_HF_CACHE_DIR: join(homedir(), '.cache', 'gezel-test-hf'),
       GEZEL_MACHINE_SHARED_HOME: join(HOST_ISOLATION_ROOT, 'shared'),
       GEZEL_SYSTEM_SERVICE_HOME: join(HOST_ISOLATION_ROOT, 'machine-engine'),
+      GEZEL_NATIVE_CAPACITY_DIR: join(HOST_ISOLATION_ROOT, 'native-capacity'),
       // The local context floor is host-derived (64K, or 32K on a
       // memory-constrained machine — see minViableLocalContextTokens), and a
       // 16 GB CI runner IS such a machine. Pin it so context assertions mean
@@ -185,8 +196,9 @@ export default defineConfig({
           exclude: INTEGRATION_SUITES,
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
-          // Bound unit + integration workers to avoid oversubscribing hosts.
-          maxWorkers: MAX_WORKERS,
+          // One worker is already occupied by the concurrent integration
+          // project; keep the combined project total inside MAX_WORKERS.
+          maxWorkers: UNIT_WORKERS,
         },
       },
     ],

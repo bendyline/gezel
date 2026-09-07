@@ -241,6 +241,12 @@ describe('ProjectChat default recipient', () => {
 
     render(<ProjectChat project={PROJECT} />);
 
+    // Sessions and drafts load independently. Wait for the session list to
+    // settle before reading the native-select mock so the draft option is not
+    // captured from the intermediate render that is replaced by auto-pick.
+    await waitFor(() => {
+      expect(screen.getByTestId('composer')).toHaveAttribute('data-session', 's1');
+    });
     expect(await screen.findByRole('option', { name: /sdfsd/ })).toBeInTheDocument();
   });
 });

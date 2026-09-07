@@ -372,6 +372,52 @@ export function ModelPicker({
 }
 
 /**
+ * A provider's model list through the page-lifetime cache; `null` while
+ * loading or while `enabled` is false. Listing a CLI provider's models can
+ * spawn that CLI, so a caller that only sometimes shows the control passes
+ * `enabled` rather than paying for the list on every render.
+ */
+export function useProviderModels(provider: ProviderName, enabled = true): ModelInfo[] | null {
+  const [models, setModels] = useState<ModelInfo[] | null>(
+    enabled ? (cached.get(provider) ?? null) : null,
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    loadModels(provider)
+      .then((loaded) => {
+        if (!cancelled) setModels(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, enabled]);
+
+  return enabled ? models : null;
+}
+
+/**
+ * Whether {@link EffortPicker} / {@link EffortTray} will have anything to show
+ * for this model. `null` while the model list is loading. Callers use it to
+ * keep the "Reasoning effort" label off the page too: a label beside an
+ * empty control reads as a broken row, not as "this model has no levels".
+ */
+export function useReasoningSupport(
+  provider: ProviderName,
+  model: string | undefined,
+  defaultModel?: string,
+  enabled = true,
+): boolean | null {
+  const models = useProviderModels(provider, enabled);
+  if (!models) return null;
+  const id = model ?? defaultModel;
+  if (!id) return false;
+  return models.find((candidate) => candidate.id === id)?.supportsReasoning === true;
+}
+
+/**
  * Effort picker that renders nothing when the selected model doesn't support
  * reasoning effort. Looks up the allowed values from the model list.
  */
@@ -386,13 +432,7 @@ export function EffortPicker({
   value: string | undefined;
   onChange: (effort: string | undefined) => void;
 }) {
-  const [models, setModels] = useState<ModelInfo[] | null>(cached.get(provider) ?? null);
-
-  useEffect(() => {
-    loadModels(provider)
-      .then(setModels)
-      .catch(() => {});
-  }, [provider]);
+  const models = useProviderModels(provider);
 
   if (!model || !models) return null;
   const info = models.find((m) => m.id === model);
@@ -449,19 +489,7 @@ export function EffortTray({
   value: string | undefined;
   onChange: (effort: string | undefined) => void;
 }) {
-  const [models, setModels] = useState<ModelInfo[] | null>(cached.get(provider) ?? null);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadModels(provider)
-      .then((loaded) => {
-        if (!cancelled) setModels(loaded);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [provider]);
+  const models = useProviderModels(provider);
 
   if (!models) return <span className="muted small">loading effort levels…</span>;
   const info = models.find((candidate) => candidate.id === (model ?? defaultModel));

@@ -128,7 +128,11 @@ import {
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { extractDirectFileWorkTargetPath } from '../providers/direct-file-work-prompt.js';
-import { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
+import {
+  buildDs4Provider,
+  resolveDs4LaunchCtx,
+  resolveDs4VisionLaunch,
+} from '../providers/ds4/build-provider.js';
 import {
   buildLlamaCppProvider,
   ensureLlamaEngineStatus,
@@ -7299,8 +7303,8 @@ export class ChatManager extends LocalEngineRuntime {
     //
     // Models that can genuinely decode images get the raw bytes, attached
     // once on the first sendAndWait — continuation nudges don't re-ship them.
-    // Everything else (ds4 structurally, any local model without a loaded
-    // projector, the CLI-backed providers) gets a text description produced by
+    // Everything else (any local model without a loaded projector/encoder,
+    // the CLI-backed providers) gets a text description produced by
     // the local recognition engine, which is persisted on the message so it
     // survives replay. Before this, base64 was shipped blind: ds4-server
     // discarded megabytes per turn and then answered confidently about an
@@ -11968,13 +11972,17 @@ export class ChatManager extends LocalEngineRuntime {
 
   /**
    * Whether THIS session's engine can decode images, from the same two facts
-   * that decide `--mmproj` on the llama-server command line. A model whose
-   * server was launched without the flag is blind no matter what its weights
-   * could do — so the launch config, not the catalog tag, is the source.
+   * that decide `--mmproj` / `--vision` on the native server command line. A
+   * model whose server was launched without its sidecar is blind no matter
+   * what its weights could do — so launch config, not a catalog tag, is the
+   * source.
    */
-  private async resolveTurnVisionContext(
-    state: LiveSessionState,
-  ): Promise<{ modelId?: string; mmprojPath?: string; nativeVisionEnabled?: boolean }> {
+  private async resolveTurnVisionContext(state: LiveSessionState): Promise<{
+    modelId?: string;
+    mmprojPath?: string;
+    visionEncoderPath?: string;
+    nativeVisionEnabled?: boolean;
+  }> {
     // Ask about the model that is actually SERVING this turn.
     //
     // `record.model` is only one input to model resolution (gezel
@@ -11990,10 +11998,37 @@ export class ChatManager extends LocalEngineRuntime {
       ? parseEngineKey(state.record.engineKey)?.modelId
       : undefined;
     const modelId = boundModelId ?? state.record.model ?? undefined;
-    if (!modelId || !this.llamaCppModels) return modelId ? { modelId } : {};
+    const modelStore = state.record.providerName === 'ds4' ? this.ds4Models : this.llamaCppModels;
+    if (!modelId || !modelStore) return modelId ? { modelId } : {};
     try {
-      const resolved = await this.llamaCppModels.resolveModel(modelId);
+      const resolved = await modelStore.resolveModel(modelId);
       const cfg = await this.store.readConfig().catch(() => null);
+      if (state.record.providerName === 'ds4') {
+        const vision = resolveDs4VisionLaunch({
+          modelId,
+          ...(cfg?.nativeVision ? { nativeVision: cfg.nativeVision } : {}),
+          ...(resolved?.visionEncoderPath
+            ? { installedVisionEncoderPath: resolved.visionEncoderPath }
+            : {}),
+          ...((process.env.GEZEL_DS4_MODEL ?? cfg?.ds4ModelPath)
+            ? { explicitModelPath: process.env.GEZEL_DS4_MODEL ?? cfg?.ds4ModelPath }
+            : {}),
+          ...((process.env.GEZEL_DS4_VISION_ENCODER ?? cfg?.ds4VisionEncoderPath)
+            ? {
+                explicitVisionEncoderPath:
+                  process.env.GEZEL_DS4_VISION_ENCODER ?? cfg?.ds4VisionEncoderPath,
+              }
+            : {}),
+          ...((process.env.GEZEL_DS4_SERVER_URL ?? cfg?.ds4BaseUrl)
+            ? { externalBaseUrl: process.env.GEZEL_DS4_SERVER_URL ?? cfg?.ds4BaseUrl }
+            : {}),
+        });
+        return {
+          modelId,
+          ...(vision.visionEncoderPath ? { visionEncoderPath: vision.visionEncoderPath } : {}),
+          ...(vision.enabled ? { nativeVisionEnabled: true } : {}),
+        };
+      }
       const enabled = nativeVisionEnabledFor(cfg?.nativeVision, modelId);
       return {
         modelId,

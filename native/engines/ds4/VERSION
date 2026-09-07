@@ -1,4 +1,4 @@
-# ds4 (DwarfStar) upstream pin — antirez's DeepSeek-V4 inference engine.
+# ds4 (DwarfStar) upstream pin — antirez's specialized MoE inference engine.
 #
 # Format: same as the other engines (upstream / tag / commit). ds4 cuts
 # no release tags (it's developed on `main`), so `tag` is a human-readable
@@ -6,10 +6,10 @@
 # checks out. Bump by editing `tag` + `commit` together.
 #
 # ds4 is beta-quality and moves fast; pin deliberately and re-validate the
-# DeepSeek-V4 GGUF compatibility (the GGUFs and the engine are co-versioned)
-# when bumping.
+# supported DeepSeek/GLM GGUF compatibility (the tested GGUFs and engine are
+# co-versioned) when bumping.
 #
 # License: MIT (https://github.com/antirez/ds4)
 upstream=https://github.com/antirez/ds4.git
-tag=main-2026-08-23
-commit=c1d4597a80e300b803dc642519718f2c999589da
+tag=main-2026-09-05
+commit=9ab705347c1775e7599ede7eb81a6255ec7dccb5

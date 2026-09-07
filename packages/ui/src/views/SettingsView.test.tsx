@@ -1021,6 +1021,55 @@ describe('SettingsView', () => {
     expect(within(effortSelect).queryByRole('option', { name: 'ultra' })).toBeNull();
   });
 
+  it('mirrors the connected Claude CLI model and reasoning controls on the AI screen', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'anthropic-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      defaultModel: { 'anthropic-cli': 'opus' },
+      defaultReasoningEffort: { 'anthropic-cli': 'xhigh' },
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      models: [
+        {
+          id: 'opus',
+          name: 'opus — Latest Claude Opus',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultReasoningEffort: 'xhigh',
+        },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-defaults'));
+
+    expect(await screen.findByTestId('model-picker-anthropic-cli')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('xhigh')).toBeInTheDocument();
+    expect(screen.getByText(/Permissions and advanced settings live in the/)).toBeInTheDocument();
+  });
+
+  it('keeps the CLI model controls off the AI screen until the CLI is connected', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'codex-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({
+      ok: false,
+      error: 'The Codex command line interface (CLI) was not found.',
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-defaults'));
+
+    expect(await screen.findByText(/The Codex CLI is not connected yet/)).toBeInTheDocument();
+    expect(screen.queryByTestId('model-picker-codex-cli')).toBeNull();
+    expect(screen.queryByText('Reasoning effort')).toBeNull();
+    const listedProviders = vi.mocked(api.listProviderModels).mock.calls.map(([p]) => p);
+    expect(listedProviders).not.toContain('codex-cli');
+  });
+
   it('offers human-readable Claude permission choices in a tray', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'anthropic-cli',
@@ -1039,8 +1088,10 @@ describe('SettingsView', () => {
 
     const tray = await screen.findByRole('radiogroup', { name: 'Default permission' });
     expect(within(tray).getByRole('radio', { name: /Accept edits/i })).toBeChecked();
-    expect(within(tray).getByText('Read and review without making changes.')).toBeInTheDocument();
     expect(within(tray).queryByText('bypassPermissions')).toBeNull();
+    const readout = screen.getByText(/Approve file changes; ask before commands/);
+    expect(within(readout).getByText('Accept edits')).toBeInTheDocument();
+    expect(screen.queryByText(/Read and review without making changes/)).toBeNull();
     expect(screen.getByText('Gezel tools')).toBeInTheDocument();
     expect(
       screen.getByRole('checkbox', {

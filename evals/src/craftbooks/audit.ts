@@ -76,6 +76,41 @@ function gateScriptRoutesToAnotherStep(
   return false;
 }
 
+/**
+ * Gate checks that hand the file to a JavaScript/TypeScript parser.
+ *
+ * `sourceParses` routes `.html` to the inline-<script> validator, so HTML is
+ * legitimate; everything else goes through `ts.transpileModule`, which reports
+ * a syntax error for a correct Python script, SQL migration, shell script or
+ * Dockerfile. A book gating those with a JS check therefore cannot be
+ * completed by anyone — wild-caught across 11 bundled books (booking.py,
+ * add_indexes.sql, backup.sh, Dockerfile …), each of which had a gate no
+ * correct deliverable could clear.
+ */
+const JS_SOURCE_CHECK_KINDS = new Set([
+  'esmImports',
+  'sourceParses',
+  'jsParses',
+  'standaloneJsParses',
+]);
+const JS_PARSEABLE_EXTENSION = /\.(?:js|mjs|cjs|jsx|ts|tsx|mts|cts|html?)$/i;
+
+function jsCheckOnNonJsFile(
+  step: CraftbookTemplateStepSummary,
+): Array<{ kind: string; file: string }> {
+  const gate = parseGate(step);
+  if (!gate) return [];
+  const out: Array<{ kind: string; file: string }> = [];
+  for (const check of normalizeStepGate(gate).checks) {
+    const file = (check as { file?: unknown }).file;
+    if (typeof file !== 'string' || file.includes('{{')) continue;
+    if (!JS_SOURCE_CHECK_KINDS.has(check.kind)) continue;
+    if (JS_PARSEABLE_EXTENSION.test(file)) continue;
+    out.push({ kind: check.kind, file });
+  }
+  return out;
+}
+
 export function auditCraftbookTemplate(
   template: CraftbookTemplateSummary,
   evalStatus: CraftbookEvalCoverageStatus = 'missing',
@@ -115,6 +150,18 @@ export function auditCraftbookTemplate(
   }
   if (terminalSteps.length === 0) {
     issues.push(issue('fail', 'graph.no-terminal', 'No terminal step found.'));
+  }
+  for (const step of steps) {
+    for (const bad of jsCheckOnNonJsFile(step)) {
+      issues.push(
+        issue(
+          'fail',
+          'gate.js-check-on-non-js',
+          `\`${bad.kind}\` on \`${bad.file}\` sends a non-JavaScript file to the TypeScript parser; no correct version of that file can pass.`,
+          step.id,
+        ),
+      );
+    }
   }
   if (!steps.some((step) => step.id === template.entryStepId)) {
     issues.push(

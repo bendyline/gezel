@@ -80,8 +80,9 @@ pnpm test
 pnpm test:e2e:web:run
 ```
 
-The [visual regression gate](docs/visual-regression.md) compares reviewed
-desktop, tablet, and phone baselines with `pnpm test:e2e:visual` on macOS 26 ARM64.
+The optional [visual regression suite](docs/visual-regression.md) compares reviewed
+desktop, tablet, and phone baselines with `pnpm test:e2e:visual` on macOS 26 ARM64;
+it is available locally or by manual workflow and does not block CI.
 
 Implementation contributions are not currently accepted. We do welcome issue reports and proposal-only pull requests; read [Contributing](CONTRIBUTING.md) and the [`specs/` guide](specs/README.md) before opening one. Contributors should also read [the engineering guide](AGENTS.md), [UX direction](docs/ux.md), and [Code of Conduct](CODE_OF_CONDUCT.md).
 

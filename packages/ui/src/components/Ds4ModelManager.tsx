@@ -103,6 +103,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   const [showAll, setShowAll] = useState(false);
   // Which installed row has the context-size editor expanded beneath it.
   const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // Which model's vision toggle is mid-save. The row owns the effective state:
+  // the service has already combined catalog sidecar availability with the
+  // user's per-model override, so the UI must not infer either one itself.
+  const [visionSaving, setVisionSaving] = useState<string | null>(null);
   // False until the override endpoint answers — an older daemon or machine
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
@@ -160,6 +164,24 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     }
     void refreshIncomplete();
   }, [refreshIncomplete]);
+
+  const toggleVision = useCallback(
+    async (modelId: string, next: boolean) => {
+      setVisionSaving(modelId);
+      try {
+        const cfg = await api.getConfig();
+        await api.updateConfig({
+          nativeVision: { ...(cfg.nativeVision ?? {}), [modelId]: next },
+        });
+        await refresh();
+      } catch {
+        /* keep the server-reported state visible when the save fails */
+      } finally {
+        setVisionSaving(null);
+      }
+    },
+    [refresh],
+  );
 
   const loadCatalog = useCallback(async () => {
     setError(null);
@@ -620,8 +642,20 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                         </div>
                       </td>
                       <td>
-                        <span className="model-size-cell" title={ds4SizeTitle(memoryCopy)}>
+                        <span
+                          className="model-size-cell"
+                          title={`${ds4SizeTitle(memoryCopy)}${
+                            m.ds4.visionEncoder
+                              ? ` The ${formatBytes(m.ds4.visionEncoder.sizeBytes, 2)} vision encoder is installed separately, loaded by default, and can be turned off under Advanced to save runtime memory.`
+                              : ''
+                          }`}
+                        >
                           {formatBytes(m.ds4.approxSizeBytes)}
+                          {m.ds4.visionEncoder ? (
+                            <span className="muted small model-memory-headline">
+                              +{formatBytes(m.ds4.visionEncoder.sizeBytes, 2)} vision encoder
+                            </span>
+                          ) : null}
                           {memoryHeadline ? (
                             <span className="muted small model-memory-headline">
                               {memoryHeadline}
@@ -720,6 +754,22 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                                 onToggleContextEditor={() =>
                                   setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                                 }
+                                {...(installedRow?.nativeVisionEnabled !== undefined
+                                  ? {
+                                      visionAction: {
+                                        enabled: installedRow.nativeVisionEnabled,
+                                        busy: visionSaving === m.id,
+                                        sidecarSizeBytes:
+                                          installedRow.visionEncoderSizeBytes ??
+                                          m.ds4.visionEncoder?.sizeBytes,
+                                        onToggle: () =>
+                                          void toggleVision(
+                                            m.id,
+                                            !installedRow.nativeVisionEnabled,
+                                          ),
+                                      },
+                                    }
+                                  : {})}
                                 fitnessAction={fitnessMenuAction(
                                   fitness.get(fitnessKey),
                                   probing.includes(fitnessKey),

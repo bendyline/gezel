@@ -211,6 +211,12 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    return this.supervisor
+      ? this.supervisor.withRequest(() => this.generateInner(input))
+      : this.generateInner(input);
+  }
+
+  private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const width = input.width ?? 512;
     const height = input.height ?? 512;
     const modelId = input.model ?? (await this.currentDefaultModelId());

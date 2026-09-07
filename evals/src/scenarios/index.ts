@@ -9,6 +9,7 @@ import { conflictSynthesisScenario } from './conflict-synthesis.ts';
 import { constrainedCommsScenario } from './constrained-comms.ts';
 import { dataWrangleScenario } from './data-wrangle.ts';
 import { decoyResearchScenario } from './decoy-research.ts';
+import { docblocksIntegrationScenarios } from './docblocks-integration.ts';
 import { docblocksThemeRoundtripScenario } from './docblocks-theme-roundtrip.ts';
 import { failingTestsSpecScenario } from './failing-tests-spec.ts';
 import { fantasyFictionScenario } from './fantasy-fiction.ts';
@@ -50,6 +51,7 @@ const CRAFTBOOK_SCENARIOS = Object.fromEntries(
 ) as Record<string, EvalScenario>;
 
 export const SCENARIOS: Record<string, EvalScenario> = {
+  ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   [ticTacToeScenario.id]: ticTacToeScenario,
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,

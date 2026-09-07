@@ -5,6 +5,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { npmPackFiles } from './npm-pack-output.mjs';
 import {
   SERVICE_FONT_LEGAL_ROOT,
   SERVICE_NOTICE_PATH,
@@ -38,10 +39,10 @@ function npmPackDryRun(cache) {
       `npm pack failed (status=${result.status}, signal=${result.signal}):\n${detail}`,
     );
   }
-  const parsed = JSON.parse(result.stdout);
-  const packed = Array.isArray(parsed) ? parsed[0] : parsed;
-  if (!packed?.files) throw new Error('npm pack returned no service payload');
-  return packed.files.map((file) => file.path.replaceAll('\\', '/'));
+  return npmPackFiles(result.stdout, {
+    packageName: '@bendyline/gezel-service',
+    payloadLabel: 'service',
+  });
 }
 
 export async function verifyServicePackageLicenses() {

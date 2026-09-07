@@ -369,6 +369,48 @@ describe('GezelDetail', () => {
     });
   });
 
+  it('edits length, bangs and part independently and preserves selections when covered', async () => {
+    vi.mocked(api.getGezel).mockResolvedValue(DETAIL_WITH_POP);
+    vi.mocked(api.setGezelPoppetje).mockImplementation(async (_id, body) => ({
+      poppetje: body.poppetje,
+    }));
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
+    fireEvent.click(screen.getByRole('button', { name: /Accessories/ }));
+    const pick = async (group: string, label: string) => {
+      const radio = within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', {
+        name: label,
+      });
+      await waitFor(() => expect(radio).toBeEnabled());
+      fireEvent.click(radio);
+      await waitFor(() => expect(radio).toBeChecked());
+      await waitFor(() => expect(radio).toBeEnabled());
+    };
+    await pick('Hair style', 'Extra long');
+    await pick('Bangs', 'Curtain');
+    await pick('Hair part', 'Right');
+    expect(api.setGezelPoppetje).toHaveBeenLastCalledWith('gz-maya', {
+      poppetje: { ...POP, hairShape: 'extra-long', bangs: 'curtain', hairPart: 'right' },
+    });
+    await pick('Hair style', 'Bald');
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Hair part' })).getByRole('radio', {
+        name: 'Right',
+      }),
+    ).toBeDisabled();
+    await pick('Hair style', 'Bob');
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Hair part' })).getByRole('radio', {
+        name: 'Right',
+      }),
+    ).toBeChecked();
+    await pick('Hat', 'Cap');
+    expect(api.setGezelPoppetje).toHaveBeenLastCalledWith('gz-maya', {
+      poppetje: { ...POP, hat: 'cap', hairShape: 'bob', bangs: 'curtain', hairPart: 'right' },
+    });
+  });
+
   it('refetches when gezelId prop changes', async () => {
     const { rerender } = render(<GezelDetail gezelId="gz-maya" />);
     await waitFor(() => {

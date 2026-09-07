@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  degradeDenseFfnOffloadDecision,
   degradeMoeOffloadDecision,
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
   fitsSwaFullInFastMemory,
+  planDenseFfnOffload,
   planMoeOffload,
 } from './offload-planner.js';
 
@@ -137,6 +139,65 @@ describe('degradeMoeOffloadDecision — the OOM ladder', () => {
     expect(degradeMoeOffloadDecision({})).toBeNull();
     expect(degradeMoeOffloadDecision(undefined)).toBeNull();
     expect(degradeMoeOffloadDecision({ reason: 'fits' })).toBeNull();
+  });
+});
+
+describe('planDenseFfnOffload — exact v0.4.0 tensor split', () => {
+  // 32 dense FFN layers of 0.5 GiB (16 GiB) + 4 GiB attention/embeddings.
+  const split = {
+    nonFfnBytes: 4 * GiB,
+    ffnBytesByLayer: Array.from({ length: 32 }, () => 0.5 * GiB),
+  };
+  const base = {
+    isMoE: false,
+    vramBytes: 12 * GiB,
+    split,
+    blockCount: 32,
+    kvReserveBytes: 1 * GiB,
+    marginBytes: 1 * GiB,
+    ramBudgetBytes: 20 * GiB,
+    freeSystemRamBytes: 20 * GiB,
+  };
+
+  it('keeps attention and the largest FFN suffix on GPU', () => {
+    // FFN budget = 12 - 4 non-FFN - 1 KV - 1 margin - 0.5 compute = 5.5 GiB.
+    // Eleven trailing FFN layers fit; the first 21 move to RAM.
+    const d = planDenseFfnOffload(base);
+    expect(d).toMatchObject({ nGpuLayers: -1, nCpuFfn: 21 });
+    expect(d.reason).toMatch(/11\/32 layers/);
+  });
+
+  it('does nothing when the full dense working set fits VRAM', () => {
+    const d = planDenseFfnOffload({ ...base, vramBytes: 24 * GiB });
+    expect(d.nCpuFfn).toBeUndefined();
+    expect(d.reason).toMatch(/full GPU residency/i);
+  });
+
+  it('does not mix the dense strategy into an MoE model', () => {
+    expect(planDenseFfnOffload({ ...base, isMoE: true })).toEqual({});
+  });
+
+  it('declines the split when its CPU prefix exceeds safe system RAM', () => {
+    const d = planDenseFfnOffload({ ...base, ramBudgetBytes: 8 * GiB });
+    expect(d.nCpuFfn).toBeUndefined();
+    expect(d.reason).toMatch(/above the safe/i);
+  });
+
+  it('declines when attention and reserves alone exceed VRAM', () => {
+    const d = planDenseFfnOffload({ ...base, vramBytes: 6 * GiB });
+    expect(d.nCpuFfn).toBeUndefined();
+    expect(d.reason).toMatch(/whole-layer fit/i);
+  });
+});
+
+describe('degradeDenseFfnOffloadDecision — the OOM ladder', () => {
+  it('moves every dense FFN layer to RAM, then releases the GPU-layer pin', () => {
+    const allCpu = degradeDenseFfnOffloadDecision({ nGpuLayers: -1, nCpuFfn: 21 }, 32);
+    expect(allCpu).toMatchObject({ nGpuLayers: -1, nCpuFfn: 32 });
+    const engineFit = degradeDenseFfnOffloadDecision(allCpu ?? undefined, 32);
+    expect(engineFit).toMatchObject({ nCpuFfn: 32 });
+    expect(engineFit?.nGpuLayers).toBeUndefined();
+    expect(degradeDenseFfnOffloadDecision(engineFit ?? undefined, 32)).toBeNull();
   });
 });
 

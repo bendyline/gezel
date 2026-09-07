@@ -178,6 +178,8 @@ export interface CraftbookEvalSpec {
 
   /** Explicitly states whether this eval proves an artifact or the workflow. */
   mode: CraftbookEvalMode;
+  /** Observe the production step gates without injecting final-output repair turns. */
+  repairPolicy?: 'harness' | 'runtime';
 
   /**
    * Backticked slash-containing path tokens from the book's own step

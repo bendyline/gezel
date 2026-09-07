@@ -97,27 +97,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Check release toolchain
-        run: pnpm check:release-toolchain
-
       - name: Install Chromium
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
 
       # The canonical gate. Keep local, CI and release assurance identical:
       # add mandatory checks to the root `validate` script rather than
-      # duplicating a step list here. `validate` already runs
-      # `test:published` and `check:packages`, which are the npm-specific
-      # gates (tarball shape, size budgets, workspace-protocol resolution,
-      # and a real `npm install` of the tarballs into a non-workspace
-      # project followed by a daemon boot).
+      # duplicating a step list here. `validate` includes the release-toolchain
+      # preflight, a release-stamped package rehearsal, `test:published`, and
+      # `check:packages`, covering tarball shape, size budgets, versioning,
+      # workspace-protocol resolution, and a real `npm install` of the tarballs
+      # into a non-workspace project followed by a daemon boot.
       - name: Canonical gate
         run: xvfb-run -a pnpm validate
-
-      # `validate` checks ordinary development packs. Repeat the clean npm
-      # consumer against release-stamped tarballs so CLI/daemon versioning and
-      # the complete exact sibling graph are proven before publishing.
-      - name: Rehearse release-stamped npm artifacts
-        run: node scripts/rehearse-npm-release.mjs
 
       - name: Audit licenses
         run: pnpm audit:licenses

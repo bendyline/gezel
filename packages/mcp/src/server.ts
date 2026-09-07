@@ -1709,17 +1709,28 @@ server.tool(
             text: `[read_files requested=${response.results.length} ok=${response.results.filter((r) => r.status === 'ok').length} errors=${response.results.filter((r) => r.status === 'error').length}]\n${index.join('\n')}\n\n${sections.join('\n\n')}`,
           },
         ],
+        // Structured-first hosts need the same file slices, pagination, and
+        // item-level errors that the formatted text exposes.
         structuredContent: {
           results: response.results.map((result) =>
             result.status === 'ok'
               ? {
                   path: result.path,
                   status: result.status,
+                  content: result.content,
                   startLine: result.startLine,
                   endLine: result.endLine,
                   completeFile: result.completeFile,
+                  totalLines: result.totalLines,
+                  hasMore: result.hasMore,
+                  nextStartLine: result.nextStartLine,
                 }
-              : { path: result.path, status: result.status, code: result.code },
+              : {
+                  path: result.path,
+                  status: result.status,
+                  code: result.code,
+                  error: result.error,
+                },
           ),
         },
         ...(allFailed ? { isError: true } : {}),
@@ -4046,6 +4057,12 @@ server.tool(
         requestedPath: clean,
         resolvedPath: res.path,
         fuzzy: res.fuzzy,
+        // Hosts may prefer structuredContent over the text blocks. Both forms
+        // must carry the requested slice, not just its lookup metadata.
+        content: res.content,
+        linesReturned: res.linesReturned,
+        totalLines: res.totalLines,
+        hasMore: res.hasMore,
       },
     };
   },

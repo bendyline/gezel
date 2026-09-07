@@ -1,16 +1,16 @@
 /**
- * DSpark speculative decoding for ds4 (`--dspark --mtp <support.gguf>`).
+ * DSpark speculative decoding for ds4 (`--dspark --mtp-model <support.gguf>`).
  *
  * ds4 can draft several tokens ahead with a small companion GGUF and verify
  * them against the target model in one batched pass. Two hard constraints and
  * one measurement shape the policy here:
  *
- *  - **The engine refuses `--mtp` alongside `--ssd-streaming`**, aborting at
- *    startup with "--ssd-streaming is not compatible with --mtp yet". Streaming
+ *  - **The engine refuses an external MTP model alongside `--ssd-streaming`**,
+ *    aborting at startup. Streaming
  *    is gezel's safe default and the only way the 153 GiB Q4 GGUF runs at all
  *    on a 128 GiB machine, so drafting is unreachable for most installs.
  *  - **A support model is required.** Without one there is nothing to draft
- *    with, and ds4 exits on `--dspark` alone ("--dspark requires --mtp FILE").
+ *    with, and ds4 exits on `--dspark` alone ("--dspark requires --mtp-model FILE").
  *  - **It does not pay on Metal.** Measured 2026-08-26, M5 Max, DeepSeek V4
  *    Flash IQ2_XXS at full residency, seed-pinned A/B/C/A: baseline 38.4 tok/s
  *    against 38.5 opportunistic and 36.7 exact, with ds4's own
@@ -49,7 +49,7 @@ export interface Ds4DsparkOptions {
 
 export interface Ds4DsparkDecision {
   enabled: boolean;
-  /** Support model to pass to `--mtp`. Only set when {@link enabled}. */
+  /** Support model to pass to `--mtp-model`. Only set when {@link enabled}. */
   supportModelPath?: string;
   /**
    * Why drafting is on or off, in launch-log voice. Always populated: a
@@ -96,11 +96,11 @@ export function resolveDs4Dspark(opts: Ds4DsparkOptions): Ds4DsparkDecision {
   if (opts.ssdStreaming) {
     return {
       enabled: false,
-      reason: 'SSD streaming is on; ds4 rejects --mtp with --ssd-streaming',
+      reason: 'SSD streaming is on; ds4 rejects --mtp-model with --ssd-streaming',
       ...(mode === 'on'
         ? {
             unmetRequest:
-              'ds4Dspark=on cannot be honored while SSD streaming is active — ds4 refuses --mtp with --ssd-streaming. Full residency requires a model that fits this machine with headroom to spare (ds4SsdStreaming=false).',
+              'ds4Dspark=on cannot be honored while SSD streaming is active — ds4 refuses an external --mtp-model with --ssd-streaming. Full residency requires a model that fits this machine with headroom to spare (ds4SsdStreaming=false).',
           }
         : {}),
     };
@@ -154,5 +154,5 @@ export function resolveDs4Dspark(opts: Ds4DsparkOptions): Ds4DsparkDecision {
  */
 export function ds4DsparkArgs(decision: Ds4DsparkDecision): string[] {
   if (!decision.enabled || !decision.supportModelPath) return [];
-  return ['--dspark', '--mtp', decision.supportModelPath];
+  return ['--dspark', '--mtp-model', decision.supportModelPath];
 }

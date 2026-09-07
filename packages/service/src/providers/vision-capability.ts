@@ -60,12 +60,10 @@ const VISION_NATIVE: Record<ProviderName, 'always' | 'never' | 'per-model'> = {
   'llama-cpp': 'per-model',
   mlx: 'per-model',
   /**
-   * Structural, not a policy choice: `ChatModelDs4SourceSchema` has no
-   * `mmproj` arm and ds4-server has no mtmd. The schema is telling us. Note
-   * that `Ds4Provider` delegates to an inner `LlamaCppProvider`, so without
-   * this gate attachments flow all the way to the wire and are discarded.
+   * ds4 accepts OpenAI image content only when its model-matched encoder was
+   * installed and the supervised server was launched with `--vision`.
    */
-  ds4: 'never',
+  ds4: 'per-model',
   /** The far side's capability is unknown, and text is cheaper to relay. */
   remote: 'never',
 };
@@ -90,6 +88,8 @@ export interface VisionCapabilityInput {
    * `--mmproj` is blind no matter what its weights could do.
    */
   mmprojPath?: string;
+  /** Resolved ds4 encoder path that decides whether launch receives `--vision`. */
+  visionEncoderPath?: string;
   /** Whether the user opted this model into native vision. */
   nativeVisionEnabled?: boolean;
 }
@@ -143,12 +143,13 @@ export function resolveVisionCapability(input: VisionCapabilityInput): {
   if (input.provider === 'mlx' && !MLX_VISION_SUPPORTED) {
     return { native: false, reason: 'the mlx engine has no vision path yet' };
   }
-  if (!input.mmprojPath) {
+  const visionSidecarPath = input.provider === 'ds4' ? input.visionEncoderPath : input.mmprojPath;
+  if (!visionSidecarPath) {
     return {
       native: false,
       reason: input.modelId
-        ? `${input.modelId} is installed without a vision projector`
-        : 'no vision projector is installed for this model',
+        ? `${input.modelId} is installed without a ${input.provider === 'ds4' ? 'vision encoder' : 'vision projector'}`
+        : `no ${input.provider === 'ds4' ? 'vision encoder' : 'vision projector'} is installed for this model`,
     };
   }
   if (!input.nativeVisionEnabled) {
@@ -157,7 +158,10 @@ export function resolveVisionCapability(input: VisionCapabilityInput): {
       reason: 'native image support is off for this model',
     };
   }
-  return { native: true, reason: `${input.modelId ?? 'this model'} runs with a vision projector` };
+  return {
+    native: true,
+    reason: `${input.modelId ?? 'this model'} runs with a ${input.provider === 'ds4' ? 'vision encoder' : 'vision projector'}`,
+  };
 }
 
 export type RecognitionMode = 'auto' | 'always' | 'off';

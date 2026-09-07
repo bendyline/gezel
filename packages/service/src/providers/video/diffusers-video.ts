@@ -97,6 +97,12 @@ export class DiffusersVideoProvider implements VideoProvider {
   }
 
   async generate(input: VideoGenerationInput): Promise<VideoGenerationOutput> {
+    return this.supervisor
+      ? this.supervisor.withRequest(() => this.generateInner(input))
+      : this.generateInner(input);
+  }
+
+  private async generateInner(input: VideoGenerationInput): Promise<VideoGenerationOutput> {
     const width = input.width ?? 704;
     const height = input.height ?? 480;
     const numFrames = input.numFrames ?? DEFAULT_NUM_FRAMES;

@@ -1,10 +1,12 @@
 # Browser visual regression
 
 `pnpm test:e2e:visual` compares the rendered UI with reviewed PNG baselines.
-The [visual workflow](../.github/workflows/visual-regression.yml) runs on pull
-requests, pushes to main, and daily. A missing baseline, changed image, failed
-content assertion, or clipped capture fails the job. Ordinary runs use
-`updateSnapshots: 'none'`; they never approve their own output.
+The [visual workflow](../.github/workflows/visual-regression.yml) is manual-only:
+pixel differences vary across operating systems and devices, so they do not
+block pull requests, pushes to main, or scheduled CI. A deliberate workflow run
+still fails for a missing baseline, changed image, failed content assertion, or
+clipped capture. Ordinary runs use `updateSnapshots: 'none'`; they never approve
+their own output.
 
 ## Coverage
 
@@ -37,11 +39,11 @@ it cannot establish that every untested state is correct.
 Baselines live in [e2e-visual/snapshots](../packages/app/e2e-visual/snapshots/).
 The canonical renderer is **macOS 26 ARM64**, with the Chromium revision
 provided by the lockfile's Playwright (initial baselines: 1.61.1).
-CI selects the explicit `macos-26` runner label, which GitHub documents as
+The manual workflow selects the explicit `macos-26` runner label, which GitHub documents as
 [the standard ARM64 runner](https://github.blog/changelog/2026-02-26-macos-26-is-now-generally-available-for-github-hosted-runners/).
 Linux and Windows continue to run the portable behavioral suite; comparing
 their font rasterization against macOS images is not supported. Adding a
-platform requires its own reviewed baselines and a CI runner exercising them.
+platform requires its own reviewed baselines and a matching review environment.
 
 The real built UI and daemon run against temporary seeded homes with the
 mock provider. Background scheduling is disabled. The browser fixes its
@@ -96,7 +98,7 @@ fixtures or baselines; a single passing capture does not establish repeatability
 
 Failures include expected/actual/diff images and traces in
 `packages/app/visual-test-results/`, plus an HTML report in
-`packages/app/visual-report/`. CI uploads those with the diagnostic gallery.
+`packages/app/visual-report/`. The manual workflow uploads those with the diagnostic gallery.
 Both suites also write `packages/app/ux-screenshots/manifest.json` and
 `INDEX.md`; run them sequentially when retaining that gallery. Phone and
 tablet frames have distinct keys and filenames, so they cannot overwrite

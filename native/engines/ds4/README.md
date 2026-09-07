@@ -2,17 +2,17 @@
 
 [antirez/ds4](https://github.com/antirez/ds4) is a small, from-scratch C
 inference engine purpose-built for a handful of very large mixture-of-experts
-models: **DeepSeek V4 Flash / PRO** and **GLM 5.2**. It treats SSD as a
+models: **DeepSeek V4 Flash / PRO** and **GLM 5.2 / 5.3**. It treats SSD as a
 first-class citizen — routed MoE expert weights and KV cache stream from disk —
 so a 284B-parameter model runs on a 64 GB Mac. We vendor its `ds4-server` (an
 OpenAI-compatible HTTP server) as a first-class on-device engine alongside
 `llama-server`.
 
 One binary serves both families: `DS4_MODEL_FAMILY` is a runtime global set
-from the GGUF's `general.architecture` at load time (`glm-dsa` → GLM,
-otherwise DeepSeek-V4), and ds4-server renders/parses each family's own prompt
-and tool-call syntax behind the same OpenAI-shaped API. Nothing in our build or
-provider layer is family-specific.
+from the GGUF's `general.architecture` at load time (`glm-dsa` → GLM 5.2,
+`glm5-next` → GLM 5.3, otherwise DeepSeek-V4), and ds4-server renders/parses
+each family's own prompt and tool-call syntax behind the same OpenAI-shaped
+API. Nothing in our build or provider layer is family-specific.
 
 ## What we build
 
@@ -33,8 +33,8 @@ kernel), so there is exactly one shippable backend per platform:
 | darwin-x64    | —       | —                                 | ❌ no unified-memory Metal target |
 | win32-x64     | —       | —                                 | ❌ no upstream MSVC build (use WSL2) |
 
-ROCm exists only in an upstream `rocm` branch (community-maintained, no test
-hardware) and is out of scope.
+ROCm is now on upstream `main`, but remains out of our shipping matrix because
+we have no ROCm build/release job or test hardware.
 
 ## Build
 
@@ -54,7 +54,7 @@ pinned Makefile promote base capabilities such as `sm_121` to `sm_121a` and
 add matching feature defines such as `DS4_CUDA_HAVE_MXF4=1` automatically.
 
 Output: `native/build/<platform>/gezel-ds4-server`. **On macOS the binary is NOT
-self-contained** — it compiles its Metal shaders from `./metal/*.metal` (19
+self-contained** — it compiles its Metal shaders from `./metal/*.metal` (23
 sources) at runtime, resolved relative to the working directory, so build.sh
 stages a `metal/` dir next to the binary and the supervisor launches ds4-server
 with `cwd` set to the bundle dir (see `buildDs4Provider`). Without `metal/`,
@@ -71,10 +71,18 @@ its engine was built for, co-versioned with the pin in `VERSION`:
 | Catalog id | GGUF | Size |
 |---|---|---|
 | `deepseek-v4-flash-284b-q2` | [`antirez/deepseek-v4-gguf`](https://huggingface.co/antirez/deepseek-v4-gguf) IQ2_XXS | ~81 GiB |
-| `deepseek-v4-flash-284b-q4` | same repo, FP4 | ~153 GiB |
+| `deepseek-v4-flash-284b-q4` | same repo, routed Q4_K | ~153 GiB |
+| `glm-5.3-flash-320b-q2` | [`antirez/glm-5.3-flash-gguf`](https://huggingface.co/antirez/glm-5.3-flash-gguf) IQ2_XXS/Q2_K + model-matched vision encoder | ~91 GiB |
 | `glm-5.2-754b-q2` | [`antirez/glm-5.2-gguf`](https://huggingface.co/antirez/glm-5.2-gguf) routed IQ2_XXS | ~197 GiB |
 
 An entry is a ds4 model exactly when its manifest carries a `ds4` source block.
+
+A ds4 entry may also declare a model-matched `visionEncoder` payload. The
+installer downloads and verifies that GGUF beside the language weights, the
+launcher accounts for its resident memory and passes it as `--vision`, and the
+turn router sends image bytes natively only when that exact encoder is loaded.
+An explicit `ds4ModelPath` never borrows a catalog encoder; pair development
+overrides with `ds4VisionEncoderPath` / `GEZEL_DS4_VISION_ENCODER`.
 
 **Not supported: split (multi-shard) GGUFs.** ds4's `model_open()` maps one
 file and the source has no `split.*` handling, so upstream's
@@ -130,10 +138,10 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   capacity broker re-price the model at whatever window a device launches it
   with. Omit both and the footprint is treated as flat, which is what every
   entry did before these fields existed.
-- GLM does not support directional steering, `--power` below 100, an explicit
-  `--prefill-chunk`, or the external `--mtp` file. We pass none of these, so
-  the launch args are family-agnostic. `--glm-mtp` (experimental greedy
-  speculation) is deliberately not wired up.
+- GLM does not support `--power` below 100, an explicit `--prefill-chunk`, or
+  the external `--mtp-model` file. GLM 5.2 also lacks directional steering.
+  GLM 5.3 Flash's embedded draft block is enabled by the separate boolean
+  `--mtp` flag; Gezel deliberately does not enable it yet.
 - A controlled 6,012-token GB10 benchmark measured full residency at 97.98
   prefill / 5.20 decode tok/s, versus 39.35 / 1.44 tok/s with a 64 GB expert
   cache: 2.59x faster end-to-end. The capacity broker reserves its full 96 GiB

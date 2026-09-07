@@ -78,8 +78,8 @@ export async function resolveClaudeBinary(opts: {
   }
   if (candidates.length === 0) {
     throw new ClaudeBinaryNotFoundError(
-      'Claude CLI not found on PATH. Install Anthropic Claude Code, or set ' +
-        '`anthropicCli.binaryPath` in Settings to point at the executable.',
+      'The Claude command line interface (CLI) was not found. Install Anthropic Claude Code, ' +
+        'or point Gezel at the Claude app under Advanced in Settings.',
     );
   }
   const last = candidates.length - 1;

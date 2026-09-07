@@ -433,21 +433,50 @@ export function resolveSdBinary(): ResolvedBinary | null {
  * searched too, matching `resolveLlamaBinary`: a machine with the desktop app
  * installed has a usable engine even with no local build tree.
  */
-export function resolveDs4Binary(): ResolvedBinary | null {
+export function ds4HelpSupportsVision(help: string): boolean {
+  return /(?:^|\s)--vision(?:\s|$)/m.test(help);
+}
+
+function ds4BinarySupportsVision(path: string): boolean {
+  const result = spawnSync(path, ['--help'], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  return ds4HelpSupportsVision(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+}
+
+export function resolveDs4Binary(options: { requireVision?: boolean } = {}): ResolvedBinary | null {
   const envBin = process.env.GEZEL_DS4_SERVER_BIN?.trim();
   if (envBin) {
-    if (existsSync(envBin)) return { path: envBin, variant: 'env', build: null, warnings: [] };
+    if (existsSync(envBin)) {
+      if (options.requireVision && !ds4BinarySupportsVision(envBin))
+        throw new Error(
+          `GEZEL_DS4_SERVER_BIN is set to "${envBin}", but that binary does not advertise the required --vision option.`,
+        );
+      return { path: envBin, variant: 'env', build: null, warnings: [] };
+    }
     throw new Error(`GEZEL_DS4_SERVER_BIN is set to "${envBin}" but no file exists there.`);
   }
   const roots = [...lookupRoots(), ...installedAppRoots()];
+  let staleVisionCandidate: string | undefined;
   for (const variant of [null, ...LLAMA_BACKEND_PRECEDENCE] as const) {
     const dir = variant ? `${platformKey()}-${variant}` : platformKey();
     for (const root of roots) {
       for (const exe of exeCandidates('ds4-server')) {
         const path = join(root, dir, exe);
-        if (existsSync(path)) return { path, variant, build: null, warnings: [] };
+        if (!existsSync(path)) continue;
+        if (options.requireVision && !ds4BinarySupportsVision(path)) {
+          staleVisionCandidate ??= path;
+          continue;
+        }
+        return { path, variant, build: null, warnings: [] };
       }
     }
   }
+  if (options.requireVision && staleVisionCandidate)
+    throw new Error(
+      `Found ds4-server at "${staleVisionCandidate}", but no discovered DS4 binary advertises the required --vision option. Rebuild or fetch the pinned native engine before running this vision eval.`,
+    );
   return null;
 }

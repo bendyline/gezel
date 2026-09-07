@@ -63,6 +63,8 @@ const NUM = (n: number): string => n.toLocaleString('en-US');
  * phases and accumulates `bufferBytes`.
  */
 export function classifyDs4Line(rawLine: string): StartupPhase | null {
+  if (rawLine.includes('memory-admission:'))
+    return { phase: 'starting', detail: 'Waiting for available memory' };
   const line = stripTimestamp(stripLogPrefix(rawLine));
   if (!line) return null;
 

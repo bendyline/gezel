@@ -1,10 +1,12 @@
 import {
   ACCESSORY_OPTIONS,
+  BANGS_OPTIONS,
   BODY_SHAPE_KEYS,
   DRESS_OPTIONS,
   EXPRESSION_OPTIONS,
   FACIAL_HAIR_OPTIONS,
   FIGURE_SCALE_KEYS,
+  HAIR_PART_OPTIONS,
   HAIR_SHAPES,
   HAT_OPTIONS,
   MARK_OPTIONS,
@@ -17,6 +19,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { Poppetje } from './Poppetje.js';
+import { resolveLayout, scaleFor } from './geometry.js';
 
 /** Static markup with all def-id noise removed, for content comparisons. */
 function staticMarkup(poppetje: PoppetjeStruct, props: Record<string, unknown> = {}): string {
@@ -77,6 +80,52 @@ describe('Poppetje', () => {
     expect(hw).toBeGreaterThan(bw);
     expect(hx).toBeLessThan(bx);
     expect(hy).toBeLessThan(by);
+  });
+
+  it('keeps crown, brim, and braid extents inside clipped avatar frames at every scale', () => {
+    const base = poppetjeFromSeed(7);
+    const silhouettes: Array<{
+      patch: Partial<PoppetjeStruct>;
+      top: number;
+      halfW: number;
+      bottom: number;
+    }> = [
+      ...HAT_OPTIONS.map((hat) => ({ patch: { hat }, top: 35.3, halfW: 29, bottom: 23 })),
+      { patch: { hat: null, hairShape: 'bun' }, top: 31.1, halfW: 22, bottom: 23 },
+      { patch: { hat: null, hairShape: 'long' }, top: 29, halfW: 26, bottom: 32 },
+      { patch: { hat: null, hairShape: 'braids' }, top: 29, halfW: 26, bottom: 32 },
+      { patch: { hat: null, accessory: 'headphones' }, top: 28, halfW: 26, bottom: 23 },
+    ];
+    for (const figureScale of FIGURE_SCALE_KEYS) {
+      const layout = resolveLayout(scaleFor(figureScale));
+      const unit = layout.headR / 22;
+      for (const { patch, top, halfW, bottom } of silhouettes) {
+        for (const variant of ['icon', 'headshot'] as const) {
+          const markup = renderToStaticMarkup(
+            <Poppetje poppetje={{ ...base, ...patch, figureScale }} variant={variant} size={40} />,
+          );
+          const [x, y, w, h] = /viewBox="([^"]+)"/.exec(markup)![1]!.split(' ').map(Number) as [
+            number,
+            number,
+            number,
+            number,
+          ];
+          expect(y).toBeLessThan(layout.headCY - top * unit);
+          expect(y + h).toBeGreaterThan(layout.headCY + bottom * unit);
+          expect(x).toBeLessThan(40 - halfW * unit);
+          expect(x + w).toBeGreaterThan(40 + halfW * unit);
+        }
+      }
+    }
+  });
+
+  it('omits knots as well as turbulence when grain is disabled or too small', () => {
+    const p = poppetjeFromSeed(7, { key: 'grain-character-117' });
+    for (const props of [{ grainStyle: 'none' }, { variant: 'icon', size: 24 }]) {
+      expect(staticMarkup(p, { ...props, whorls: 2 })).toBe(
+        staticMarkup(p, { ...props, whorls: 0 }),
+      );
+    }
   });
 
   it('produces identical DOM for the same poppetje (wood-grain stability)', () => {
@@ -188,6 +237,8 @@ describe('Poppetje diversity rendering', () => {
     bodyShape: 'tapered',
     figureScale: 'adult',
     hairShape: 'short',
+    bangs: null,
+    hairPart: 'none',
     hat: null,
     dress: null,
     accessory: null,
@@ -204,6 +255,8 @@ describe('Poppetje diversity rendering', () => {
     ['bodyShape', BODY_SHAPE_KEYS],
     ['figureScale', FIGURE_SCALE_KEYS],
     ['hairShape', HAIR_SHAPES],
+    ['bangs', [null, ...BANGS_OPTIONS]],
+    ['hairPart', HAIR_PART_OPTIONS],
     ['hat', [null, ...HAT_OPTIONS]],
     ['dress', [null, ...DRESS_OPTIONS]],
     ['accessory', [null, ...ACCESSORY_OPTIONS]],
@@ -227,6 +280,28 @@ describe('Poppetje diversity rendering', () => {
       }
     });
   }
+
+  it('hides fringe and part under hats and on bald or shaved heads', () => {
+    for (const patch of [
+      { hat: 'cap' as const },
+      { hairShape: 'bald' as const },
+      { hairShape: 'shaved' as const },
+    ]) {
+      const bare = staticMarkup({ ...fixed, ...patch, bangs: null, hairPart: 'none' });
+      expect(staticMarkup({ ...fixed, ...patch, bangs: 'curtain', hairPart: 'left' })).toBe(bare);
+    }
+  });
+
+  it('keeps the avatar face scale constant across the longer lengths', () => {
+    const crops = ['medium', 'long', 'extra-long'].map(
+      (hairShape) =>
+        staticMarkup(
+          { ...fixed, hairShape: hairShape as PoppetjeStruct['hairShape'] },
+          { variant: 'icon' },
+        ).match(/viewBox="([^"]+)"/)![1],
+    );
+    expect(new Set(crops).size).toBe(1);
+  });
 
   it('hides hair-zone accessories while a hat is worn, shows them bareheaded', () => {
     for (const acc of ['flower', 'hairclip', 'headband', 'feather', 'pencil', 'ribbon'] as const) {

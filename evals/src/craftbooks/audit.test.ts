@@ -243,6 +243,58 @@ describe('craftbook eval audit', () => {
     });
   });
 
+  describe('gate.js-check-on-non-js', () => {
+    const withGate = (file: string, kind: string): CraftbookTemplateSummary =>
+      ({
+        id: 'sample',
+        name: 'Sample',
+        version: '1.0.0',
+        triggers: ['x'],
+        entryStepId: 'build',
+        steps: [
+          {
+            id: 'build',
+            name: 'Build',
+            suggestedRole: 'developer',
+            advanceWhen: { file },
+            gate: { at: 'completion', checks: [{ kind, file }], onReject: 'build', maxAttempts: 3 },
+            next: 'finish',
+          },
+          { id: 'finish', name: 'Finish', suggestedRole: 'lead', terminal: true },
+        ],
+      }) as unknown as CraftbookTemplateSummary;
+
+    const codes = (t: CraftbookTemplateSummary) =>
+      auditCraftbookTemplate(t, 'implemented').issues.map((i) => i.code);
+
+    it('flags a TypeScript parser check pointed at Python, SQL, shell or a Dockerfile', () => {
+      for (const file of ['booking.py', 'migrations/add_indexes.sql', 'backup.sh', 'Dockerfile']) {
+        expect(codes(withGate(file, 'sourceParses'))).toContain('gate.js-check-on-non-js');
+      }
+    });
+
+    it('allows it on real JavaScript and on HTML, which routes to the inline-script parser', () => {
+      for (const file of ['src/job.js', 'src/main.ts', 'index.html']) {
+        expect(codes(withGate(file, 'sourceParses'))).not.toContain('gate.js-check-on-non-js');
+      }
+    });
+
+    it('leaves an uninterpolated token alone — the extension is not known yet', () => {
+      expect(codes(withGate('{{workPath}}/out', 'sourceParses'))).not.toContain(
+        'gate.js-check-on-non-js',
+      );
+    });
+
+    it('the bundled library is clean', async () => {
+      const templates = await loadCraftbookTemplates();
+      const { audits } = auditCraftbookTemplates(templates);
+      const offenders = audits
+        .filter((a) => a.issues.some((i) => i.code === 'gate.js-check-on-non-js'))
+        .map((a) => a.craftbookId);
+      expect(offenders).toEqual([]);
+    });
+  });
+
   it('has at least one generic craftbook scenario available to evals', () => {
     expect(runnableGenericCraftbookSpecs().map((spec) => spec.scenarioId)).toContain(
       'craftbook-form-wizard',

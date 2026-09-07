@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
-import { ggufQuantizationTag, readGgufSummary } from './gguf-metadata.js';
+import {
+  LLAMA_CPP_LAZY_AUTO_MIN_BYTES,
+  effectiveLazyTensorBytes,
+  ggufQuantizationTag,
+  readGgufSummary,
+} from './gguf-metadata.js';
 
 /**
  * Build a synthetic GGUF binary in-memory so we can test the parser
@@ -451,6 +456,62 @@ describe('readGgufSummary', () => {
 });
 
 describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
+  it('recognizes architecture-marked row-addressable embedding bytes', () => {
+    const blob = new GgufBuilder()
+      .header(3)
+      .metaString('general.architecture', 'qwen4exp')
+      .tensor('per_layer_token_embd.weight', 8192)
+      .tensor('blk.0.attn_q.weight', 1024)
+      .finish();
+    const path = join(dir, 'qwen4exp-lazy.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path, { includeTensorSizes: true });
+    expect(s.lazyTensorBytesTotal).toBe(8192);
+    expect(s.nonExpertBytes).toBe(8192 + 1024);
+  });
+
+  it('aggregates tensor sizes across standard GGUF split siblings', async () => {
+    const prefix = join(dir, 'qwen-split');
+    writeFileSync(
+      `${prefix}-00001-of-00003.gguf`,
+      new GgufBuilder()
+        .header(3)
+        .metaString('general.architecture', 'qwen4exp')
+        .metaU32('qwen4exp.block_count', 2)
+        .finish(),
+    );
+    writeFileSync(
+      `${prefix}-00002-of-00003.gguf`,
+      new GgufBuilder().header(3).tensor('per_layer_token_embd.weight', 4096).finish(),
+    );
+    writeFileSync(
+      `${prefix}-00003-of-00003.gguf`,
+      new GgufBuilder().header(3).tensor('blk.1.ffn_gate_exps.weight', 2048).finish(),
+    );
+
+    const s = await readGgufSummaryAsync(`${prefix}-00001-of-00003.gguf`, {
+      includeTensors: true,
+      includeTensorSizes: true,
+    });
+    expect(s.shardCount).toBe(3);
+    expect(s.tensorCount).toBe(2n);
+    expect(s.tensorNames).toEqual(['per_layer_token_embd.weight', 'blk.1.ffn_gate_exps.weight']);
+    expect(s.lazyTensorBytesTotal).toBe(4096);
+    expect(s.expertBytesTotal).toBe(2048);
+    expect(s.nonExpertBytes).toBe(4096);
+    expect(s.expertBytesByLayer).toEqual([0, 2048]);
+    expect(s.fileSizeBytes).toBe(
+      [1, 2, 3].reduce(
+        (sum, index) =>
+          sum +
+          readGgufSummary(`${prefix}-${String(index).padStart(5, '0')}-of-00003.gguf`)
+            .fileSizeBytes,
+        0,
+      ),
+    );
+  });
+
   it('splits expert vs non-expert bytes and sums experts per layer', () => {
     // Sizes are multiples of the 32-byte alignment so offset-delta sizing
     // is exact, matching how real GGUFs pack quantized blocks.
@@ -476,23 +537,33 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.expertBytesTotal).toBe(4096 + 4096 + 8192);
     expect(s.nonExpertBytes).toBe(1024 + 2048 + 512 + 1024);
     expect(s.expertBytesByLayer).toEqual([8192, 8192]);
+    expect(s.denseFfnBytesTotal).toBe(0);
+    expect(s.nonDenseFfnBytes).toBe(1024 + 2048 + 4096 + 4096 + 8192 + 512 + 1024);
+    expect(s.denseFfnBytesByLayer).toEqual([]);
   });
 
-  it('reports zero expert bytes for a dense model', () => {
+  it('reports zero expert bytes and sizes dense FFN by layer for a dense model', () => {
     const blob = new GgufBuilder()
       .header(3)
       .metaString('general.architecture', 'llama')
+      .metaU32('llama.block_count', 2)
       .tensor('token_embd.weight', 1024)
       .tensor('blk.0.attn_q.weight', 2048)
       .tensor('blk.0.ffn_gate.weight', 4096)
+      .tensor('blk.0.ffn_up.weight', 4096)
+      .tensor('blk.1.ffn_down.weight', 8192)
+      .tensor('blk.1.ffn_gate_shexp.weight', 512)
       .finish();
     const path = join(dir, 'dense-tensors.gguf');
     writeFileSync(path, blob);
 
     const s = readGgufSummary(path, { includeTensorSizes: true });
     expect(s.expertBytesTotal).toBe(0);
-    expect(s.nonExpertBytes).toBe(1024 + 2048 + 4096);
+    expect(s.nonExpertBytes).toBe(1024 + 2048 + 4096 + 4096 + 8192 + 512);
     expect(s.expertBytesByLayer).toEqual([]);
+    expect(s.denseFfnBytesTotal).toBe(4096 + 4096 + 8192);
+    expect(s.nonDenseFfnBytes).toBe(1024 + 2048 + 512);
+    expect(s.denseFfnBytesByLayer).toEqual([8192, 8192]);
   });
 
   it('leaves sizing fields unset when not asked for them', () => {
@@ -509,6 +580,50 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.expertBytesTotal).toBeUndefined();
     expect(s.nonExpertBytes).toBeUndefined();
     expect(s.expertBytesByLayer).toBeUndefined();
+    expect(s.denseFfnBytesTotal).toBeUndefined();
+    expect(s.nonDenseFfnBytes).toBeUndefined();
+    expect(s.denseFfnBytesByLayer).toBeUndefined();
+  });
+});
+
+describe('effectiveLazyTensorBytes', () => {
+  it('matches llama.cpp v0.4 Auto, On, and Off semantics', () => {
+    expect(
+      effectiveLazyTensorBytes(
+        {
+          architecture: 'qwen4exp',
+          lazyTensorBytesTotal: LLAMA_CPP_LAZY_AUTO_MIN_BYTES,
+        },
+        'auto',
+      ),
+    ).toBe(0);
+    expect(
+      effectiveLazyTensorBytes(
+        {
+          architecture: 'qwen4exp',
+          lazyTensorBytesTotal: LLAMA_CPP_LAZY_AUTO_MIN_BYTES + 1,
+        },
+        undefined,
+      ),
+    ).toBe(LLAMA_CPP_LAZY_AUTO_MIN_BYTES + 1);
+    expect(
+      effectiveLazyTensorBytes({ architecture: 'qwen4exp', lazyTensorBytesTotal: 1024 }, 'on'),
+    ).toBe(1024);
+    expect(
+      effectiveLazyTensorBytes(
+        {
+          architecture: 'qwen4exp',
+          lazyTensorBytesTotal: LLAMA_CPP_LAZY_AUTO_MIN_BYTES + 1,
+        },
+        'off',
+      ),
+    ).toBe(0);
+    expect(
+      effectiveLazyTensorBytes(
+        { architecture: 'gemma3n', lazyTensorBytesTotal: 8 * 1024 ** 3 },
+        'on',
+      ),
+    ).toBe(0);
   });
 });
 

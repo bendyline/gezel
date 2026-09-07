@@ -73,6 +73,7 @@ export async function createVideoProvider(
   // Bundled engine: provision the venv + spawn the python server lazily.
   let cachedPort: number | undefined;
   const supervisor = new NativeEngineSupervisor({
+    capacity: { home: opts.home, exclusive: true },
     logPrefix: '[video-server]',
     // The server serves a real 200 at /health once listening; the model
     // loads lazily on the first generate, so readiness is fast.

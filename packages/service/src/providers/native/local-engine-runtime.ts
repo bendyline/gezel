@@ -5,10 +5,15 @@ import { type GezelConfig, estimateLlamaCppResidentBytes } from '@bendyline/geze
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
 import { resolveCatalogLlamaCppEngineConfig } from '../catalog-model-config.js';
-import { buildDs4Provider, resolveDs4LaunchCtx } from '../ds4/build-provider.js';
+import {
+  buildDs4Provider,
+  resolveDs4LaunchCtx,
+  resolveDs4VisionLaunch,
+} from '../ds4/build-provider.js';
+import { ds4VisionResidentBytes } from '../ds4/residency.js';
 import { buildLlamaCppProvider, ensureLlamaEngineStatus } from '../llama-cpp/build-provider.js';
 import { readGgufSummaryAsync } from '../llama-cpp/gguf-metadata-async.js';
-import type { GgufSummary } from '../llama-cpp/gguf-metadata.js';
+import { type GgufSummary, effectiveLazyTensorBytes } from '../llama-cpp/gguf-metadata.js';
 import {
   type LlamaCppKvCacheType,
   isGemmaModel,
@@ -619,6 +624,42 @@ export class LocalEngineRuntime {
     }
   }
 
+  /** Extra fixed reservation for the exact ds4 vision encoder this launch uses. */
+  private async resolveDs4VisionResidentBytes(
+    config: GezelConfig,
+    modelId: string,
+    installed: { visionEncoderPath?: string; visionEncoderSizeBytes?: number } | null | undefined,
+    source?: { visionEncoder?: { sizeBytes: number } },
+  ): Promise<number> {
+    const explicitModelPath = process.env.GEZEL_DS4_MODEL ?? config.ds4ModelPath;
+    const explicitVisionEncoderPath =
+      process.env.GEZEL_DS4_VISION_ENCODER ?? config.ds4VisionEncoderPath;
+    const externalBaseUrl = process.env.GEZEL_DS4_SERVER_URL ?? config.ds4BaseUrl;
+    const vision = resolveDs4VisionLaunch({
+      modelId,
+      ...(config.nativeVision ? { nativeVision: config.nativeVision } : {}),
+      ...(installed?.visionEncoderPath
+        ? { installedVisionEncoderPath: installed.visionEncoderPath }
+        : {}),
+      ...(explicitModelPath ? { explicitModelPath } : {}),
+      ...(explicitVisionEncoderPath ? { explicitVisionEncoderPath } : {}),
+      ...(externalBaseUrl ? { externalBaseUrl } : {}),
+    });
+    if (!vision.enabled || !vision.visionEncoderPath) return 0;
+
+    let sizeBytes =
+      vision.visionEncoderPath === installed?.visionEncoderPath
+        ? (installed?.visionEncoderSizeBytes ?? source?.visionEncoder?.sizeBytes)
+        : undefined;
+    if (!sizeBytes) {
+      const { stat } = await import('node:fs/promises');
+      sizeBytes = await stat(vision.visionEncoderPath)
+        .then((entry) => entry.size)
+        .catch(() => undefined);
+    }
+    return ds4VisionResidentBytes(sizeBytes);
+  }
+
   protected async resolveResidentBytes(
     provider: LocalProviderName,
     modelId: string,
@@ -652,6 +693,7 @@ export class LocalEngineRuntime {
               kvBytesPerToken?: number;
               residentCtxTokens?: number;
               maxLaunchCtx?: number;
+              visionEncoder?: { sizeBytes: number };
             };
           }
         | undefined;
@@ -675,6 +717,13 @@ export class LocalEngineRuntime {
               // broker admits a model whose KV no longer fits — the exact
               // memory-pressure event the residency rules exist to prevent.
               const ds4Block = cm.ds4;
+              const installed = await this.ds4Models?.resolveModel(modelId).catch(() => null);
+              const visionResidentBytes = await this.resolveDs4VisionResidentBytes(
+                config,
+                modelId,
+                installed,
+                ds4Block,
+              );
               const line = ds4ResidentLine({
                 residentBytes: bytes,
                 kvBytesPerToken: ds4Block?.kvBytesPerToken,
@@ -698,8 +747,10 @@ export class LocalEngineRuntime {
                 shouldUseDs4SsdStreaming({
                   configured: config.ds4SsdStreaming,
                   modelSizeBytes: block.approxSizeBytes,
+                  ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
                 }),
               );
+              bytes += visionResidentBytes;
             }
           }
         } else if (block?.approxSizeBytes) {
@@ -707,7 +758,35 @@ export class LocalEngineRuntime {
           // `approxSizeBytes` is the weights alone; a multimodal entry also
           // loads its projector, which the catalog sizes separately.
           const mmprojBytes = provider === 'llama-cpp' ? (cm.llamaCpp?.mmproj?.sizeBytes ?? 0) : 0;
-          bytes = CapacityBroker.estimateResidentBytes(provider, block.approxSizeBytes, {
+          let residentWeightFileBytes = block.approxSizeBytes;
+          if (provider === 'llama-cpp') {
+            // v0.4 can leave architecture-marked row-addressable embeddings
+            // file-backed (notably Qwen 3.8 Flash Next's 51B-parameter
+            // PLE/engram table). Inspect the installed split GGUF before the pool's
+            // preflight reservation; otherwise it rejects the model before
+            // buildLlamaCppProvider gets a chance to make the same deduction.
+            const installed = await this.llamaCppModels?.resolveModel(modelId).catch(() => null);
+            if (installed?.weightsPath) {
+              const [summary, config, perModel] = await Promise.all([
+                readGgufSummaryAsync(installed.weightsPath, { includeTensorSizes: true }).catch(
+                  () => null,
+                ),
+                this.store.readConfig(),
+                resolveCatalogLlamaCppEngineConfig(this.catalog, modelId),
+              ]);
+              if (summary) {
+                residentWeightFileBytes = Math.max(
+                  0,
+                  residentWeightFileBytes -
+                    effectiveLazyTensorBytes(
+                      summary,
+                      config.llamaCppLazyMode ?? perModel?.lazyMode ?? 'auto',
+                    ),
+                );
+              }
+            }
+          }
+          bytes = CapacityBroker.estimateResidentBytes(provider, residentWeightFileBytes, {
             mmprojBytes,
           });
         }
@@ -1286,20 +1365,40 @@ export class LocalEngineRuntime {
       // `fixed + slope × ctx` line llama.cpp/MLX rows carry, so the slider
       // prices a drag instead of claiming the footprint never moves. Entries
       // without a measured slope keep the flat number and say so.
-      const { ds4ProjectedResidentBytes, ds4ResidentLine } = await import('../ds4/residency.js');
+      const {
+        ds4ProjectedResidentBytes,
+        ds4ResidentBytesForMode,
+        ds4ResidentLine,
+        shouldUseDs4SsdStreaming,
+      } = await import('../ds4/residency.js');
       const ds4Line = ds4ResidentLine({
         residentBytes: ds4Source?.residentBytes,
         kvBytesPerToken: ds4Source?.kvBytesPerToken,
         residentCtxTokens: ds4Source?.residentCtxTokens,
       });
+      const visionResidentBytes = await this.resolveDs4VisionResidentBytes(
+        config,
+        modelId,
+        installed,
+        ds4Source,
+      );
+      const ssdStreaming = shouldUseDs4SsdStreaming({
+        configured: config.ds4SsdStreaming,
+        modelSizeBytes: ds4Source?.approxSizeBytes ?? installed?.approxSizeBytes,
+        ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
+      });
+      const plannedResidentBytes = ds4Line
+        ? ds4ResidentBytesForMode(ds4ProjectedResidentBytes(ds4Line, effective), ssdStreaming) +
+          visionResidentBytes
+        : await this.resolveResidentBytes('ds4', modelId);
       return {
         contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
-        plannedResidentBytes: ds4Line
-          ? ds4ProjectedResidentBytes(ds4Line, effective)
-          : await this.resolveResidentBytes('ds4', modelId),
+        plannedResidentBytes,
         ...(ds4Line
           ? {
-              weightsResidentBytes: ds4Line.contextFreeBytes,
+              weightsResidentBytes:
+                ds4ResidentBytesForMode(ds4Line.contextFreeBytes, ssdStreaming) +
+                visionResidentBytes,
               kvFixedBytesPerSlot: 0,
               kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
             }
@@ -1384,14 +1483,25 @@ export class LocalEngineRuntime {
       override: config.llamaCppKvCacheType,
     });
     // Header-exact per-slot KV for the slot ceiling (M2); the
-    // weights-scaled heuristic only when the GGUF is unreadable.
-    // Metadata-only read — this path never needs tensor sizes.
+    // weights-scaled heuristic only when the GGUF is unreadable. Tensor sizes
+    // also expose Qwen/Gemma's v0.4 lazy embedding range, which must not be
+    // advertised as resident RAM/VRAM in the Settings preview.
     let summary: GgufSummary | null = null;
     try {
-      summary = await readGgufSummaryAsync(installed.weightsPath);
+      summary = await readGgufSummaryAsync(installed.weightsPath, { includeTensorSizes: true });
     } catch {
       summary = null;
     }
+    const lazyTensorBytes = summary
+      ? effectiveLazyTensorBytes(
+          summary,
+          config.llamaCppLazyMode ?? manifestEngineConfig?.lazyMode ?? 'auto',
+        )
+      : 0;
+    const residentWeightFileBytes = Math.max(0, installed.approxSizeBytes - lazyTensorBytes);
+    const residentWeightsBytes = estimateLlamaCppResidentBytes(residentWeightFileBytes, {
+      mmprojBytes: visionBudgetBytes,
+    });
     const exactPerSlotKvF16 = summary
       ? estimateExactPerSlotKvBytesF16(
           {
@@ -1449,13 +1559,10 @@ export class LocalEngineRuntime {
         ctx,
       );
       if (perSlotF16 === undefined) return undefined;
-      const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: visionBudgetBytes,
-      });
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
-        single: Math.round(weightsBytes + perSlotBytes),
-        reserved: Math.round(weightsBytes + perSlotBytes * slotCount),
+        single: Math.round(residentWeightsBytes + perSlotBytes),
+        reserved: Math.round(residentWeightsBytes + perSlotBytes * slotCount),
         slots: slotCount,
       };
     };
@@ -1497,7 +1604,7 @@ export class LocalEngineRuntime {
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
         sizingBudgetBytes: capacity.concurrencySizingBytes,
-        weightsBytes: installed.approxSizeBytes,
+        weightsBytes: residentWeightFileBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
         committedOtherBytes,
@@ -1529,9 +1636,7 @@ export class LocalEngineRuntime {
               plannedResidentBytes: planned.single,
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
-              weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                mmprojBytes: visionBudgetBytes,
-              }),
+              weightsResidentBytes: residentWeightsBytes,
             }
           : {}),
         ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
@@ -1607,7 +1712,7 @@ export class LocalEngineRuntime {
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
           sizingBudgetBytes: capacity.concurrencySizingBytes,
-          weightsBytes: installed.approxSizeBytes,
+          weightsBytes: residentWeightFileBytes,
           perTurnCtxTokens: ctxTokens,
           kvCacheType: kvType,
           committedOtherBytes,
@@ -1648,13 +1753,10 @@ export class LocalEngineRuntime {
           ? exact / referenceCtx
           : estimatePerSlotKvBytes({
               perTurnCtxTokens: referenceCtx,
-              weightsBytes: installed.approxSizeBytes,
+              weightsBytes: residentWeightFileBytes,
               kvCacheType: kvType,
             }) / referenceCtx;
       };
-      const weightsResidentBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: visionBudgetBytes,
-      });
       const planFitsAt = (kvType: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
         // `minimumPerTurnCtxTokens: ctxTokens` makes this ask for the WHOLE
         // window — a plan admission would only accept by clamping does not
@@ -1664,7 +1766,7 @@ export class LocalEngineRuntime {
           slots: slotCount,
           minimumPerTurnCtxTokens: ctxTokens,
           kvBytesPerToken: kvBytesPerTokenFor(kvType),
-          weightsResidentBytes,
+          weightsResidentBytes: residentWeightsBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...(capacity.freeSystemRamBytes !== undefined
@@ -1716,9 +1818,7 @@ export class LocalEngineRuntime {
           slots,
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
-          weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-            mmprojBytes: visionBudgetBytes,
-          }),
+          weightsResidentBytes: residentWeightsBytes,
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...(capacity.freeSystemRamBytes !== undefined
@@ -1770,11 +1870,7 @@ export class LocalEngineRuntime {
               slots,
               minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
               kvBytesPerToken: windowed.bytesPerToken,
-              weightsResidentBytes:
-                estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                  mmprojBytes: visionBudgetBytes,
-                }) +
-                windowed.fixedBytes * slots,
+              weightsResidentBytes: residentWeightsBytes + windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
               ...(capacity.freeSystemRamBytes !== undefined
@@ -1814,9 +1910,7 @@ export class LocalEngineRuntime {
             slots,
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
-            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: visionBudgetBytes,
-            }),
+            weightsResidentBytes: residentWeightsBytes,
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: capacity.budgetKind,
@@ -1876,9 +1970,7 @@ export class LocalEngineRuntime {
             plannedResidentBytes: planned.single,
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
-            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: visionBudgetBytes,
-            }),
+            weightsResidentBytes: residentWeightsBytes,
           }
         : {}),
       ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),

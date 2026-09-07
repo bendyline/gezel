@@ -872,6 +872,7 @@ async function taskGraphTextForSpec(
   taskCount: number;
   matchingCraftbookTaskCount: number;
   authoringGezelId?: string;
+  workflowRunning: boolean;
 }> {
   const listed = await client.listProjectTasks(projectId);
   const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
@@ -985,6 +986,11 @@ async function taskGraphTextForSpec(
     failures,
     taskCount: listed.tasks.length,
     matchingCraftbookTaskCount: matching.length,
+    workflowRunning: matching.some(
+      (task) =>
+        task.status === 'active' &&
+        !task.craftbook.steps.find((step) => step.id === task.activeStepId)?.terminal,
+    ),
     ...(authoringTask ? { authoringGezelId: taskAssigneeGezelId(authoringTask) } : {}),
   };
 }
@@ -1767,6 +1773,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     description: `${spec.title}: ${spec.objective}`,
     prompt,
     suggestedTrials: 1,
+    repairPolicy: spec.repairPolicy,
     ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
     ...(spec.progressTimeoutMs !== undefined ? { progressTimeoutMs: spec.progressTimeoutMs } : {}),
     ...(judge ? { judge } : {}),
@@ -1919,6 +1926,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             taskCount: number;
             matchingCraftbookTaskCount: number;
             authoringGezelId?: string;
+            workflowRunning: boolean;
           }
         | undefined;
       let gateWorkspace = workspace;
@@ -2026,6 +2034,15 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           success: true,
           reason: `${spec.scenarioId} passed ${checkCount} deterministic craftbook checks`,
         };
+      }
+
+      // Final artifacts are expected to be absent during research and planning.
+      // Full production-workflow probes let the craftbook's own gates route
+      // repairs; injected file-writing turns can bypass roles and stage order.
+      if (spec.repairPolicy === 'runtime') {
+        return taskGraph?.workflowRunning
+          ? { done: false }
+          : { done: true, success: false, reason: repairFailures.join(' | ') };
       }
 
       const hasConcreteDeliverableFailures = failures.some(

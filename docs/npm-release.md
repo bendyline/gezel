@@ -230,9 +230,10 @@ of candidate artifacts byte-for-byte.
 ### `pnpm check:npm-release-candidate`
 
 [`scripts/rehearse-npm-release.mjs`](../scripts/rehearse-npm-release.mjs) is
-the last gate before a publish, and the publish workflow runs it as its own
-step after `pnpm validate`. `check:packages` proves ordinary development packs;
-this proves the artifacts npm will actually receive. It stamps
+part of the canonical `pnpm all` / `pnpm validate` gate and has a dedicated PR
+job; the publish workflow reaches it through that same gate. `check:packages`
+proves ordinary development packs; this proves the artifacts npm will actually
+receive. It stamps
 `packages/core/src/index.ts` with the current core version exactly as
 `prepare-package.mjs` does at release time, packs every published package, and
 hands the result to `check-package-consumers.mjs` in strict release mode
@@ -478,11 +479,11 @@ and it deep-imports the private path `semantic-release/lib/get-config`,
 then complete having published nothing, with no error.
 
 [`scripts/check-release-toolchain.mjs`](../scripts/check-release-toolchain.mjs)
-(`pnpm check:release-toolchain`, run in the release workflow) turns both into
-loud, early failures: it requires exact pins for both packages and asserts the
-deep import still resolves. If it ever breaks for real, the maintained
-successor is `@anolilab/multi-semantic-release`, which additionally has
-explicit support for pnpm's workspace protocol.
+(`pnpm check:release-toolchain`, run by local validation, PR CI, and the release
+workflow) turns both into loud, early failures: it requires exact pins for both
+packages and asserts the deep import still resolves. If it ever breaks for real,
+the maintained successor is `@anolilab/multi-semantic-release`, which
+additionally has explicit support for pnpm's workspace protocol.
 
 ## Known gaps for npm installs
 

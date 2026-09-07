@@ -157,8 +157,9 @@ export interface ChatComposerProps {
   belowAddressLine?: ReactNode;
   /**
    * Optional trailing content for the "To:" line, rendered after the
-   * recipient picker. Project chat puts the chat/terminal mode tabs here
-   * so the compose-surface switch sits on the address line it fronts.
+   * recipient picker and expand control. Project chat puts the chat/terminal
+   * mode tabs here so the compose-surface switch sits on the address line it
+   * fronts and stays anchored to the same right edge in both modes.
    */
   addressLineTrailing?: ReactNode;
   /**
@@ -1469,7 +1470,6 @@ export function ChatComposer({
             }
           />
         )}
-        {addressLineTrailing}
         <button
           type="button"
           className="chat-composer-expand-btn"
@@ -1485,6 +1485,7 @@ export function ChatComposer({
         >
           {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
         </button>
+        {addressLineTrailing}
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">

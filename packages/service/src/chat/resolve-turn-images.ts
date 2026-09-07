@@ -65,6 +65,7 @@ export interface ResolveTurnImagesInput {
   provider: ProviderName;
   modelId?: string;
   mmprojPath?: string;
+  visionEncoderPath?: string;
   nativeVisionEnabled?: boolean;
   recognition?: RecognitionManager;
   mode: RecognitionMode;
@@ -119,6 +120,7 @@ export async function resolveTurnImages(
       provider: input.provider,
       ...(input.modelId ? { modelId: input.modelId } : {}),
       ...(input.mmprojPath ? { mmprojPath: input.mmprojPath } : {}),
+      ...(input.visionEncoderPath ? { visionEncoderPath: input.visionEncoderPath } : {}),
       ...(input.nativeVisionEnabled ? { nativeVisionEnabled: true } : {}),
     },
     { mode: input.mode, recognitionAvailable },

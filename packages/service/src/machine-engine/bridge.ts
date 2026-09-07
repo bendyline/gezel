@@ -263,7 +263,7 @@ export async function startMachineEngineBridge(args: {
   };
 }
 
-async function inspectMachineRuntime(runtime: SystemServiceRuntime): Promise<PairedRemote> {
+export async function inspectMachineRuntime(runtime: SystemServiceRuntime): Promise<PairedRemote> {
   const fetchImpl = runtime.cert ? createPinnedFetch(runtime.cert) : fetch;
   try {
     const response = await fetchImpl(`${runtime.baseUrl}/v1/identity`, {

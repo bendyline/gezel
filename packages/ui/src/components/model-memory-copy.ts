@@ -8,8 +8,8 @@ import { formatContextWindow } from './model-context.js';
  * That keeps every number directly comparable with a "24 GB GPU" or
  * "128 GB RAM" machine without asking people to translate GB and GiB.
  */
-export function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+export function formatBytes(bytes: number, fractionDigits = 1): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(fractionDigits)} GB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${bytes} B`;

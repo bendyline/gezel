@@ -136,6 +136,12 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   }
 
   async transcribe(input: TranscribeInput): Promise<TranscribeOutput> {
+    return this.supervisor
+      ? this.supervisor.withRequest(() => this.transcribeInner(input))
+      : this.transcribeInner(input);
+  }
+
+  private async transcribeInner(input: TranscribeInput): Promise<TranscribeOutput> {
     const started = Date.now();
 
     let baseUrl = this.baseUrl;

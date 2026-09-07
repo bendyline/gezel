@@ -123,7 +123,13 @@ function countInLog(input: ClassifyTrialInput, pattern: RegExp): number {
 // Shape contract with the product: ProviderPool logs
 // `capacity broker denied <key>: <reason>` at both deny sites via
 // capacityDenialLogLine (packages/service/src/providers/native/provider-pool.ts).
-const CAPACITY_DENIAL = /capacity broker denied [^\n]*budget exhausted/;
+// The broker has two terminal shapes. An immediate over-budget refusal emits
+// the structured log line below; a temporarily unavailable host waits for its
+// bounded admission window and then surfaces the user-facing retry message.
+// The latter can be wrapped by the harness's repair-aborted/model-stuck text,
+// but no provider request was made, so it is still infrastructure capacity.
+const CAPACITY_DENIAL =
+  /capacity broker denied [^\n]*budget exhausted|Not enough memory became available for this model\. Current engine work is still protected/;
 const CONTEXT_OVERFLOW =
   /On-device model ran out of working memory|context overflow: [\d,]+ tokens|exceeds the available context size/;
 const ENGINE_HUNG_REASON = /engine appears hung|no daemon activity for|image render wedged/;
@@ -134,12 +140,25 @@ const STRUCTURED_CUDA_CRASH =
   /"expected":false[^\n]*"panicKind":"cuda-[^"]+"|"panicKind":"cuda-[^"]+"[^\n]*"expected":false/i;
 const JINJA_TEMPLATE_500 = /Jinja Exception: Conversation roles must alternate/;
 const VOORMAN_SCHEDULER_SKIP = /skip meester nudge — voorman is the Meester/;
+/**
+ * Every remaining task is a DRAFT awaiting activation. The scheduler is right
+ * to hold off — a draft waits for a person — but an unattended eval has no
+ * person, so nothing ever activates it and the run goes silent until a
+ * watchdog fires. It then books as `chat-stalled`/`model`, which reads as a
+ * capability failure when the model may well have done the right thing
+ * (wild-caught on craftbook-practice-session: two follow-up drafts in
+ * `piano-practice`, twenty skips, engine idled out).
+ */
+const DRAFT_ACTIVATION_SCHEDULER_SKIP =
+  /skip meester nudge — only draft task\(s\) await activation/;
 const PRE_PROVIDER_STALL_REASON = /pre-provider stall/i;
 
 /** Minimum repeats before a log signature counts as the cause: a single
  * Jinja 500 can be recovered from; a single scheduler skip is routine. */
 const JINJA_MIN_OCCURRENCES = 3;
 const VOORMAN_SKIP_MIN_OCCURRENCES = 10;
+/** Same reasoning as the voorman skip: one is routine, ten is a deadlock. */
+const DRAFT_ACTIVATION_SKIP_MIN_OCCURRENCES = 10;
 
 /**
  * Return high-precision evidence that every currently in-flight turn is still
@@ -248,6 +267,14 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
         failureClass: 'infra',
         rule: 'scheduler-voorman-deadlock',
         evidence: `${voorman}× "[scheduler] skip meester nudge — voorman is the Meester" (project never driven)`,
+      };
+    }
+    const draftSkips = countInLog(input, DRAFT_ACTIVATION_SCHEDULER_SKIP);
+    if (draftSkips >= DRAFT_ACTIVATION_SKIP_MIN_OCCURRENCES) {
+      return {
+        failureClass: 'infra',
+        rule: 'scheduler-draft-deadlock',
+        evidence: `${draftSkips}× "[scheduler] skip meester nudge — only draft task(s) await activation" (nothing in an unattended trial can activate a draft)`,
       };
     }
   }

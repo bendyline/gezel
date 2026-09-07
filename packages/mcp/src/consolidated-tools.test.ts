@@ -446,7 +446,7 @@ describe('consolidated MCP tools', () => {
     expect(text).not.toContain('THIS CONTENT MUST NOT LEAK');
   });
 
-  it('reports the canonical artifact path and fuzzy status as structured content', async () => {
+  it('returns readable artifact content to hosts that prefer structured results', async () => {
     handler = (url, method) => {
       expect(url.pathname).toBe('/api/projects/project-a/artifacts/slice');
       expect(method).toBe('GET');
@@ -474,10 +474,14 @@ describe('consolidated MCP tools', () => {
       requestedPath: 'summary.md',
       resolvedPath: 'reports/summary.md',
       fuzzy: true,
+      content: '# Summary',
+      linesReturned: 1,
+      totalLines: 1,
+      hasMore: false,
     });
   });
 
-  it('reads common paths batches, keeps an all-path status index first, and exposes metadata', async () => {
+  it('keeps batch status first and exposes file slices and errors to structured-first hosts', async () => {
     handler = (url, method, body) => {
       expect(url.pathname).toBe('/api/projects/project-a/tools/read-files');
       expect(method).toBe('POST');
@@ -522,10 +526,24 @@ describe('consolidated MCP tools', () => {
     expect(text.indexOf('1 OK a.ts')).toBeLessThan(text.indexOf('--- a.ts'));
     expect(text).toContain('2 ERROR missing.ts [path-not-found]');
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toMatchObject({
       results: [
-        { path: 'a.ts', status: 'ok', startLine: 1, endLine: 1, completeFile: true },
-        { path: 'missing.ts', status: 'error', code: 'path-not-found' },
+        {
+          path: 'a.ts',
+          status: 'ok',
+          content: 'export const a = 1;\n',
+          startLine: 1,
+          endLine: 1,
+          completeFile: true,
+          hasMore: false,
+          totalLines: 1,
+        },
+        {
+          path: 'missing.ts',
+          status: 'error',
+          code: 'path-not-found',
+          error: 'file not found',
+        },
       ],
     });
   });

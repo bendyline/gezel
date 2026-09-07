@@ -107,9 +107,9 @@ export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
         <h3>{title ?? localEngineSettingsLabel('ds4', health?.platform)}</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           DwarfStar (ds4) is an inference engine built for a handful of very large
-          mixture-of-experts models — DeepSeek V4 and GLM 5.2. They may not fit in memory; DwarfStar
-          keeps a bounded expert cache in RAM and reads the other experts from SSD as they are
-          needed.
+          mixture-of-experts models — DeepSeek V4 and GLM 5.2/5.3. They may not fit in memory;
+          DwarfStar keeps a bounded expert cache in RAM and reads the other experts from SSD as they
+          are needed.
         </p>
 
         {/* ── Availability banner ── */}

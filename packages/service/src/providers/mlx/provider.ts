@@ -614,6 +614,7 @@ export class MlxProvider implements LLMProvider {
   ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
+    if (this.supervisor?.coordinatesCapacity) await this.supervisor.yieldForWaitingCapacity(signal);
 
     const width = this.batchMaxConcurrency;
     const waitStartedAt = Date.now();

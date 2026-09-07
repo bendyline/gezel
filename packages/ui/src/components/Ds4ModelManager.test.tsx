@@ -17,10 +17,17 @@ vi.mock('./ModelContextControls.js', () => ({
     model,
     onUpdate,
     fitnessAction,
+    visionAction,
   }: {
     model: { updateAvailable?: boolean };
     onUpdate?: () => void;
     fitnessAction?: { label: string; checking?: boolean; onRun: () => void };
+    visionAction?: {
+      enabled: boolean;
+      busy?: boolean;
+      sidecarSizeBytes?: number;
+      onToggle: () => void;
+    };
   }) => (
     <>
       {model.updateAvailable && onUpdate ? (
@@ -32,6 +39,17 @@ vi.mock('./ModelContextControls.js', () => ({
         <button type="button" disabled={fitnessAction.checking} onClick={fitnessAction.onRun}>
           {fitnessAction.label}
         </button>
+      ) : null}
+      {visionAction ? (
+        <label>
+          <input
+            type="checkbox"
+            checked={visionAction.enabled}
+            disabled={visionAction.busy}
+            onChange={visionAction.onToggle}
+          />
+          {visionAction.busy ? 'Saving vision setting…' : 'Add vision'}
+        </label>
       ) : null}
     </>
   ),
@@ -50,6 +68,7 @@ function catalogModel(opts: {
   downloadGiB: number;
   residentGiB: number;
   cacheGiB: number;
+  visionEncoderGiB?: number;
   tags?: string[];
 }) {
   return {
@@ -77,6 +96,15 @@ function catalogModel(opts: {
         cacheExpertsBytes: opts.cacheGiB * GiB,
         quantization: opts.quantization,
         ssdStreaming: true,
+        ...(opts.visionEncoderGiB
+          ? {
+              visionEncoder: {
+                filename: `${opts.id}-vision.gguf`,
+                sha256: 'b'.repeat(64),
+                sizeBytes: opts.visionEncoderGiB * GiB,
+              },
+            }
+          : {}),
       },
     },
   };
@@ -242,6 +270,61 @@ describe('Ds4ModelManager', () => {
 
     expect(await screen.findByText('Retired DS4')).toBeInTheDocument();
     expect(screen.getByText('on device')).toBeInTheDocument();
+  });
+
+  it('lets an installed vision model opt out through the shared model menu', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        catalogModel({
+          id: 'glm-5.3-flash-320b-q2',
+          name: 'GLM 5.3 Flash (320B-A18B, IQ2_XXS)',
+          quantization: 'IQ2_XXS/Q2_K',
+          parameterSize: '320B',
+          downloadGiB: 89.9,
+          residentGiB: 93.9,
+          cacheGiB: 0,
+          visionEncoderGiB: 1.05,
+        }),
+      ],
+    } as never);
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [
+        {
+          id: 'glm-5.3-flash-320b-q2',
+          name: 'GLM 5.3 Flash (320B-A18B, IQ2_XXS)',
+          approxSizeBytes: 89.9 * GiB,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/glm-5.3-flash-320b-q2/model.gguf',
+          contextWindow: 1_048_576,
+          quantization: 'IQ2_XXS/Q2_K',
+          chatTemplatePresent: true,
+          visionEncoderSizeBytes: 1.05 * GiB,
+          nativeVisionEnabled: true,
+        },
+      ],
+    } as never);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'ds4',
+      nativeVision: { 'another-model': false },
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({ ok: true } as never);
+
+    render(<Ds4ModelManager />);
+
+    expect(await screen.findByText('GLM 5.3 Flash (320B-A18B, IQ2_XXS)')).toBeInTheDocument();
+    expect(screen.getByText('+1.05 GB vision encoder')).toBeInTheDocument();
+    const vision = screen.getByRole('checkbox', { name: 'Add vision' });
+    expect(vision).toBeChecked();
+    fireEvent.click(vision);
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        nativeVision: {
+          'another-model': false,
+          'glm-5.3-flash-320b-q2': false,
+        },
+      }),
+    );
   });
 
   it('quotes the launch window and its memory cost on models that are not downloaded', async () => {

@@ -85,8 +85,8 @@ export async function resolveCodexBinary(opts: {
   }
   if (candidates.length === 0) {
     throw new CodexBinaryNotFoundError(
-      'Codex CLI not found on PATH. Install OpenAI Codex (`npm i -g @openai/codex`), ' +
-        'or set `codexCli.binaryPath` in Settings to point at the executable.',
+      'The Codex command line interface (CLI) was not found. Install OpenAI Codex ' +
+        '(`npm i -g @openai/codex`), or point Gezel at the Codex app under Advanced in Settings.',
     );
   }
   const last = candidates.length - 1;

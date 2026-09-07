@@ -204,9 +204,9 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.3.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.4.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — Metal/BLAS/CPU/RPC backends) | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
-| **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `c1d4597a` (`main-2026-08-23`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
+| **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `9ab70534` (`main-2026-09-05`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-789-5114672` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
@@ -232,7 +232,7 @@ MIT-licensed ADL SDK headers. It dynamically loads the AMD display driver's
 that AMD binary. The ADL code is excluded from Linux builds, which read AMD and
 Intel telemetry from DRM/hwmon sysfs instead.
 
-The **ds4** engine (antirez's DeepSeek-V4 inference engine) is MIT-licensed:
+The **ds4** engine (antirez's specialized DeepSeek/GLM inference engine) is MIT-licensed:
 its `LICENSE` carries the dual copyright *"The ds4.c authors"* and *"The ggml
 authors"* — its Metal kernels derive from ggml, the same MIT as llama.cpp
 above. The `ds4-server` binary statically incorporates antirez's **rax** radix

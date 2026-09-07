@@ -69,12 +69,13 @@ describe('ModelActionsMenu', () => {
         visionAction={{ enabled: false, onToggle }}
       />,
     );
-    const item = screen.getByRole('menuitem', { name: 'Turn on vision' });
+    const item = screen.getByRole('menuitemcheckbox', { name: /Add vision/ });
+    expect(item).not.toBeChecked();
     fireEvent.click(item);
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
-  it('reads "Turn off vision" once the model is already using its projector', () => {
+  it('shows Add vision checked once the model is using its sidecar', () => {
     render(
       <ModelActionsMenu
         engine="llama-cpp"
@@ -82,11 +83,13 @@ describe('ModelActionsMenu', () => {
         contextSupported
         contextEditorOpen={false}
         onToggleContextEditor={() => {}}
-        visionAction={{ enabled: true, onToggle: () => {} }}
+        visionAction={{ enabled: true, sidecarSizeBytes: 1.05 * GiB, onToggle: () => {} }}
       />,
     );
-    expect(screen.getByRole('menuitem', { name: 'Turn off vision' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Turn on vision' })).not.toBeInTheDocument();
+    expect(screen.getByText('Advanced')).toBeInTheDocument();
+    const item = screen.getByRole('menuitemcheckbox', { name: /Add vision/ });
+    expect(item).toBeChecked();
+    expect(item).toHaveAttribute('title', expect.stringContaining('1.05 GB vision encoder'));
   });
 
   it('shows no vision item at all for a text-only model', () => {
@@ -99,7 +102,7 @@ describe('ModelActionsMenu', () => {
         onToggleContextEditor={() => {}}
       />,
     );
-    expect(screen.queryByRole('menuitem', { name: /vision/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitemcheckbox', { name: /vision/i })).not.toBeInTheDocument();
   });
 
   it('hides Delete for machine models and Context size when unsupported', () => {

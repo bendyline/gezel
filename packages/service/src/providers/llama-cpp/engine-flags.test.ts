@@ -149,6 +149,45 @@ describe('buildLlamaCppEngineArgs — GPU / MoE offload', () => {
     expect(has(args, '--cpu-moe')).toBe(false);
     expect(argValue(args, '--n-cpu-moe')).toBe('4');
   });
+  it('emits the planner dense-FFN split and lets an explicit zero disable it', () => {
+    const planned = buildLlamaCppEngineArgs({
+      config: {},
+      planner: { nGpuLayers: -1, nCpuFfn: 18 },
+    });
+    expect(argValue(planned, '--n-gpu-layers')).toBe('all');
+    expect(argValue(planned, '--n-cpu-ffn')).toBe('18');
+
+    const disabled = buildLlamaCppEngineArgs({
+      config: { llamaCppNCpuFfn: 0 },
+      planner: { nGpuLayers: -1, nCpuFfn: 18 },
+    });
+    expect(has(disabled, '--n-cpu-ffn')).toBe(false);
+  });
+
+  it('lets a global dense-FFN count override the model and planner', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppNCpuFfn: 7 },
+      perModel: { nCpuFfn: 12 },
+      planner: { nCpuFfn: 18 },
+    });
+    expect(argValue(args, '--n-cpu-ffn')).toBe('7');
+  });
+});
+
+describe('buildLlamaCppEngineArgs — v0.4.0 model loading', () => {
+  it('emits explicit load and lazy modes', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppLoadMode: 'mmap+mlock', llamaCppLazyMode: 'on' },
+    });
+    expect(argValue(args, '--load-mode')).toBe('mmap+mlock');
+    expect(argValue(args, '--lazy-mode')).toBe('on');
+  });
+
+  it('translates the legacy mlock switch without using the deprecated flag', () => {
+    const args = buildLlamaCppEngineArgs({ config: { llamaCppMlock: true } });
+    expect(argValue(args, '--load-mode')).toBe('mlock');
+    expect(has(args, '--mlock')).toBe(false);
+  });
 });
 
 describe('buildLlamaCppEngineArgs — SWA full cache (Gemma auto)', () => {
@@ -481,12 +520,20 @@ describe('buildLlamaCppEngineArgs — reasoning format', () => {
 
 describe('buildLlamaCppEngineArgs — reasoning preservation', () => {
   it('is off by default', () => {
-    expect(has(buildLlamaCppEngineArgs({ config: {} }), '--reasoning-preserve')).toBe(false);
+    const args = buildLlamaCppEngineArgs({ config: {} });
+    expect(has(args, '--reasoning-preserve')).toBe(false);
+    expect(has(args, '--no-reasoning-preserve')).toBe(false);
   });
 
   it('passes the opt-in bare flag', () => {
     const args = buildLlamaCppEngineArgs({ config: {}, reasoningPreserve: true });
     expect(has(args, '--reasoning-preserve')).toBe(true);
     expect(args.filter((arg) => arg === '--reasoning-preserve')).toHaveLength(1);
+  });
+
+  it('explicitly disables the v0.4.0 server default when replay is off', () => {
+    const args = buildLlamaCppEngineArgs({ config: {}, reasoningPreserve: false });
+    expect(has(args, '--reasoning-preserve')).toBe(false);
+    expect(has(args, '--no-reasoning-preserve')).toBe(true);
   });
 });

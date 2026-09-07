@@ -243,11 +243,22 @@ function windowsPackageManagerCli(manager) {
 }
 
 function runPackageManager(manager, args, options = {}) {
-  if (process.platform !== 'win32') return run(manager, args, options);
-  return run(process.execPath, [windowsPackageManagerCli(manager), ...args], options);
+  const isolatedOptions =
+    manager === 'npm'
+      ? {
+          ...options,
+          // A consumer check must not depend on (or mutate) the developer's
+          // global npm cache. Besides making the run hermetic, this avoids a
+          // stale root-owned cache entry turning `pnpm all` into an EPERM.
+          env: { ...process.env, ...options.env, npm_config_cache: npmCache },
+        }
+      : options;
+  if (process.platform !== 'win32') return run(manager, args, isolatedOptions);
+  return run(process.execPath, [windowsPackageManagerCli(manager), ...args], isolatedOptions);
 }
 
 const root = mkdtempSync(join(tmpdir(), 'gezel-packed-consumer-'));
+const npmCache = join(root, 'npm-cache');
 const tarballDir = suppliedTarballDir ?? join(root, 'tarballs');
 const consumer = join(root, 'consumer');
 mkdirSync(tarballDir, { recursive: true });

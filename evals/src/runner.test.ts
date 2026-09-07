@@ -15,7 +15,9 @@ import {
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
   describeSendFailure,
+  ds4EvalCapacityBudgetGb,
   ds4EvalLaunchOverridesForModel,
+  ds4EvalPayloadFromModelDir,
   ds4EvalShouldUseSsdStreaming,
   envHardProgressFloorMs,
   evalDaemonEnvForTrial,
@@ -168,6 +170,44 @@ describe('runaway session safety cap', () => {
 });
 
 describe('scenario terminal failure handoff', () => {
+  it('leaves aborted-session repair to the runtime while preserving the hard watchdog', async () => {
+    const client = terminalHandoffTestClient();
+    vi.mocked(client.listChatSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: 'worker-session',
+          gezelId: 'worker',
+          projectId: 'project',
+          lastTurnError: 'The prior turn aborted',
+        },
+      ],
+    } as Awaited<ReturnType<GezelClient['listChatSessions']>>);
+    client.listInflightTurns = vi.fn().mockResolvedValue({ inflight: [] });
+    client.sendChatMessage = vi.fn();
+    client.messageGezel = vi.fn();
+    const verdict = await pollUntilDone(
+      {
+        id: 'runtime-repair-test',
+        description: 'Observe a real workflow',
+        prompt: 'Create a document',
+        repairPolicy: 'runtime',
+        successCheck: async () => ({ done: false }),
+      },
+      {
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        pollIntervalMs: 10,
+        maxDurationMs: 60_000,
+        hardProgressTimeoutMs: 1,
+        softProgressTimeoutMs: 60_000,
+      },
+    );
+    expect(verdict.failureMode).toBe('model-stuck');
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+  });
+
   it('ends immediately with the latest sniff when a bounded helper exhausts', async () => {
     const logs: string[] = [];
     let checks = 0;
@@ -1348,8 +1388,15 @@ describe('ds4 eval residency policy', () => {
     });
     expect(actual?.config).not.toHaveProperty('modelTuning');
     expect(actual?.summary).toContain('tuning=catalog');
+    expect(actual?.summary).toMatch(/capacityBudget=(?:56|72|104)GB/);
     expect(actual?.summary).not.toContain('maxTokens=4096');
     expect(actual?.summary).not.toContain('thinking=off');
+  });
+
+  it('selects capacity budgets deterministically across host RAM tiers', () => {
+    expect(ds4EvalCapacityBudgetGb(16 * GB)).toBe(56);
+    expect(ds4EvalCapacityBudgetGb(96 * GB)).toBe(72);
+    expect(ds4EvalCapacityBudgetGb(128 * GB)).toBe(104);
   });
 
   it('loads Q2-sized weights fully on 128 GB-class unified-memory eval hosts', () => {
@@ -1368,6 +1415,15 @@ describe('ds4 eval residency policy', () => {
       ds4EvalShouldUseSsdStreaming({
         totalRamBytes: 128 * GB,
         modelSizeBytes: 153 * GB,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(true);
+    expect(
+      ds4EvalShouldUseSsdStreaming({
+        totalRamBytes: 128 * GB,
+        modelSizeBytes: 95 * GB,
+        companionBytes: 2 * GB,
         platform: 'darwin',
         arch: 'arm64',
       }),
@@ -1395,6 +1451,41 @@ describe('ds4 eval residency policy', () => {
         arch: 'arm64',
       }),
     ).toBe(true);
+  });
+
+  it('resolves a product install by manifest instead of mistaking its vision encoder for weights', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-eval-payload-'));
+    try {
+      await writeFile(join(dir, 'weights.gguf'), 'weights');
+      await writeFile(join(dir, 'encoder.gguf'), 'encoder');
+      await writeFile(
+        join(dir, 'manifest.json'),
+        JSON.stringify({
+          weightsFilename: 'weights.gguf',
+          visionEncoderFilename: 'encoder.gguf',
+        }),
+      );
+
+      expect(ds4EvalPayloadFromModelDir(dir)).toEqual({
+        modelPath: join(dir, 'weights.gguf'),
+        visionEncoderPath: join(dir, 'encoder.gguf'),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for an ambiguous legacy ds4 install without a manifest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-eval-legacy-'));
+    try {
+      await writeFile(join(dir, 'one.gguf'), 'one');
+      await writeFile(join(dir, 'two.gguf'), 'two');
+      await writeFile(join(dir, 'Vision-Encoder.gguf'), 'encoder');
+
+      expect(ds4EvalPayloadFromModelDir(dir)).toEqual({});
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -13,16 +13,16 @@ Three pieces make it native rather than "just another MCP server":
 [data/toolsets/do/docblocks/ in bendyline/gilde](https://github.com/bendyline/gilde/tree/main/data/toolsets/do/docblocks)
 pins `@bendyline/docblocks-cli` by exact version + tarball SHA-256 and spawns it
 as a stdio MCP server via the normal `npm-package` install pipeline
-(`node <install>/dist/index.js mcp`). The version manifest lists all **19 canonical
+(`node <install>/dist/bin.js mcp`). The version manifest lists all **19 canonical
 tools** — that list is load-bearing: craftbook `autoAllow` derives its
 pre-authorized tool set from `tools[].name`
 (see [docs/craftbook-toolsets.md](craftbook-toolsets.md)), so keep it in sync with
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
-The current authored release is **`@bendyline/docblocks-cli@2.4.0`**, pinned to
+The current authored release is **`@bendyline/docblocks-cli@2.6.0`**, pinned to
 tarball SHA-256
-`93ce7e3bbfe323911ef9398327259b8f41d28c030e9bd3ae1db8f4c398fc388e`.
+`e60e5924f89a89ab339810ee18b5a7db02466f697d0d8bedc91df5c722ad1935`.
 (The gezel install serves whatever the pinned `@bendyline/gilde` release
 carries — check `docblocks-catalog-contract.test.ts` for the version the
 current pin actually ships.) Compared with the old 2.0.0 inventory,
@@ -106,9 +106,17 @@ to make an intermediary page.
 - Plain Markdown converts directly. Call `get_authoring_context` only when exact
   target, template, theme, transform, or annotation guidance would materially
   help; do not turn it into a mandatory preflight.
-- `preview_document` returns page/slide images (max 20 per call) — use it for
-  visual QA before saving, and check `previewBasis` before treating pixels as
-  native-app rendering.
+- Read existing workspace DOCX/PPTX/PDF/XLSX sources with `read_doc_as_markdown`,
+  not the text-only `read_file`. Use DocBlocks `inspect_document` for structure,
+  tables, theme, and format diagnostics; reopen saved outputs using file sources
+  because artifact URIs belong to the MCP session that created them.
+- `preview_document` returns bounded visual items (max 20 per call). Check
+  `previewBasis`: Office/PDF previews reconstruct imported content and do not
+  establish native pagination, fonts, or clipping; MP4/GIF previews currently
+  extract only the first frame. Review notes must say what was actually checked.
+  The local CLI integration candidate adds inline MCP images with a shared 4 MiB
+  encoded budget; the pinned release's resource links alone do not deliver pixels
+  through Gezel's bridge. This fix needs a DocBlocks release and catalog pin bump.
 - Default fidelity is `editable-native` for DOCX/PPTX, `rendered-fidelity` for
   MP4/GIF, and `semantic` for most other formats. MP4/GIF (and
   `rendered-fidelity`/`hybrid` PPTX/PDF) need Chromium; MP4/GIF also need
@@ -117,3 +125,55 @@ to make an intermediary page.
 - Discover vocabulary live (`list_themes`, `list_templates`,
   `list_transform_styles`, `list_formats`) instead of hard-coding IDs in
   prompts.
+
+## Real integration evals
+
+The `craftbooks` suite retains its hermetic simulators. Those scorecards are useful
+for orchestration, but fake conversion results and Markdown-only checks cannot
+prove the DocBlocks integration. The separate `docblocks` suite runs all four
+production workflows, installs the real toolset, and requires successful convert,
+preview, and save calls plus valid saved binary containers. It observes the
+craftbook's own repair routing; the eval does not tell an active researcher to
+write the final document early.
+
+```sh
+pnpm eval:all --suite docblocks --count 1 --provider mlx --model <installed-model>
+
+# Test a built local CLI without changing product configuration or release pins.
+GEZEL_EVAL_DOCBLOCKS_DIR=/absolute/path/to/docblocks/packages/cli \
+  pnpm eval:all --suite docblocks --count 1 --provider mlx --model <installed-model>
+
+# Deterministic real-MCP probe: PPTX/DOCX/PDF/XLSX/CSV/MP4/GIF, previews, restart.
+GEZEL_EVAL_DOCBLOCKS_DIR=/absolute/path/to/docblocks/packages/cli \
+  node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/docblocks-smoke.ts
+```
+
+Build the CLI before running. Keep that build fixed for the duration of a matrix;
+an isolated package copy is useful during iteration. Local overrides record the
+actual package version and entry SHA-256 alongside the catalog identity in
+`docblocks-eval-provenance.json`. Chromium is required for visual previews and
+FFmpeg for media; run in an environment that can launch them. The smoke probe
+retains evidence, real outputs, and returned preview PNGs for inspection.
+
+The override is installed in the shared toolset roster, and scenario setup checks
+its resolved path. A system-scoped override can otherwise be shadowed by a
+shared published install and silently test the wrong CLI.
+
+Craftbook review success should advance to publishing or finishing by default;
+only a named defect should route back to writing. DocBlocks publishing roles
+must be reasoning roles: the `video-generator` role dispatches `generate_video`
+directly and cannot follow a multi-tool DocBlocks procedure. Render GIF and MP4
+in separate calls with explicit dimensions and frame rates so each receives its
+own operation budget.
+
+The current `consumes` contract synthesizes `read_file`/`read_artifact` text-read
+instructions. Keep native binaries in format-aware procedure instructions and
+output gates until required-input metadata can name a native reader. Markdown
+artifacts remain declared inputs. `read_artifact` and `read_files` supply requested
+text slices and pagination fields in both text and structured MCP results;
+batched reads also preserve item-level errors.
+
+Run DocBlocks' own `npm run eval:mcp -- run --suite full` as complementary
+PowerPoint/Word content coverage. Its content/grounding scores and native package
+checks are distinct from Gezel's multi-role completion gates. Neither substitutes
+for opening the saved files in Word or PowerPoint when assessing native fidelity.

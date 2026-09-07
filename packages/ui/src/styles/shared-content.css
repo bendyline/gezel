@@ -1160,9 +1160,10 @@
   min-height: 0;
 }
 
-/* Icon key for the expand toggle. It rides the far right of the To line,
-   past the recipient picker and the compose-mode tabs, so the size control
-   sits with the other frame-level keys instead of crowding Send. */
+/* Icon key for the expand toggle. It rides the To line after the recipient
+   picker and immediately before the compose-mode tabs, so the size control
+   sits with the other frame-level keys without displacing the tabs from the
+   right edge they share with terminal mode. */
 .chat-composer-expand-btn {
   width: 1.65rem;
   height: 1.65rem;

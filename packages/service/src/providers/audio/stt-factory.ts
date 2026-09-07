@@ -68,6 +68,7 @@ export async function createSpeechToTextProvider(
     const binary = env.GEZEL_WHISPER_SERVER_BIN;
     let cachedPort: number | undefined;
     const supervisor = new NativeEngineSupervisor({
+      capacity: { home: opts.home },
       logPrefix: '[whisper-server]',
       // whisper-server exposes a real /health, so the default readiness
       // path works — no readyOnAnyResponse needed unlike sd-server.

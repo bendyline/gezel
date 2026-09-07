@@ -10,12 +10,14 @@ chat template and constrain sampling; we do the same here with llguidance
 (already a transitive mlx-vlm dependency, and the same backend
 `mlx_vlm.structured` uses for `response_format`).
 
-v1 constrains the function NAME only (to the set of known tool names) and
-leaves arguments free — that makes the hallucinated-name failure
-unrepresentable with zero recursion / ParserTooComplex risk, while the
-existing TS salvage layer keeps handling argument repair.
+The Hermes tier constrains the function name, parameter keys, and required-key
+presence. The model may emit optional parameters anywhere and (for ordinary
+schemas) required parameters in any order, but it cannot close a call before
+every required top-level key has appeared. Values stay shallow so this does
+not recreate the recursive-schema / ParserTooComplex failures that motivated
+the original name-only grammar.
 
-Special-token reality (verified against the installed Qwen 3.6 tokenizer):
+Special-token reality (verified against the installed Qwen 3.6 and 3.8 tokenizers):
 `<think>`, `</think>`, `<tool_call>`, `</tool_call>` are each a SINGLE
 special token, while `<function=` / `<parameter=` are ordinary multi-token
 text. llguidance regex lexemes (`/(.|\n)*/`) match only text bytes and
@@ -38,7 +40,8 @@ from typing import Any, Dict, List, Optional
 
 # Tool-call grammar formats this module can build. Only formats verified at
 # the token level against a real tokenizer live here (tool_grammar_modeltest.py).
-# `hermes` covers Qwen 3.5/3.6 + the Hermes nesting (`<tool_call>\n<function=NAME>...`).
+# `hermes` covers Qwen 3.5/3.6/3.8 + the Hermes nesting
+# (`<tool_call>\n<function=NAME>...`).
 # `gemma` covers Gemma 4's native special-token call
 # (`<|tool_call>call:NAME{key:<|"|>val<|"|>}<tool_call|>`).
 # `glm` covers GLM-4.5/4.6 (`<tool_call>NAME<arg_key>K</arg_key><arg_value>V</arg_value></tool_call>`).
@@ -119,7 +122,7 @@ _HERMES_HEAD = (
 )
 
 
-def _hermes_name_only(alts: str, json_escape: bool = False) -> str:
+def _hermes_name_only(alts: str, json_branch: str = "") -> str:
     """Tier 1 — constrain only the function name (arguments fully free).
 
     `<tool_call>\\n<function=NAME>\\n…\\n</tool_call>` with NAME pinned to the
@@ -128,17 +131,17 @@ def _hermes_name_only(alts: str, json_escape: bool = False) -> str:
     Note that tier 1 still pins the `<function=` wrapper, so it does NOT
     on its own let a model reach for the JSON envelope — dropping from
     tier 2 to tier 1 is not a fix for unrepresentable nested arguments.
-    That is what `json_escape` is for.
+    That is what the constrained `json_branch` is for.
     """
-    if json_escape:
+    if json_branch:
         return (
             _HERMES_HEAD
-            + "tool_call: <tool_call> (hermes_call | JSONCALL) </tool_call>\n"
+            + "tool_call: <tool_call> (hermes_call | json_call) </tool_call>\n"
             + "hermes_call: PRE NAME POST\n"
             + f"NAME: /({alts})/\n"
             + "PRE: /\\s*<function=/\n"
             + "POST: /(.|\\n)*/\n"
-            + _HERMES_JSON_BRANCH
+            + json_branch
         )
     return (
         _HERMES_HEAD
@@ -266,8 +269,8 @@ def _has_structural_params(tools: List[Dict[str, Any]]) -> bool:
 
     When this returns True the Hermes grammar additionally admits a raw
     JSON body inside the `<tool_call>` envelope, so the model has a
-    representable way to make the call. Function-name pinning still
-    applies to the `<function=` branch.
+    representable way to make the call. The JSON branch is schema-constrained
+    too, so function names, top-level keys, and required fields stay pinned.
     """
     for tool in tools:
         fn = tool.get("function") if isinstance(tool, dict) else None
@@ -280,11 +283,102 @@ def _has_structural_params(tools: List[Dict[str, Any]]) -> bool:
     return False
 
 
-# Escape-hatch branch: a bare JSON object body inside the `<tool_call>`
-# envelope — the canonical `<tool_call>{"name":…,"arguments":{…}}</tool_call>`
-# shape Qwen also knows. Disjoint from `FNOPEN` at the first non-whitespace
-# byte (`{` vs `<`), so the lexer can always tell the two branches apart.
-_HERMES_JSON_BRANCH = 'JSONCALL: /\\s*\\{(.|\\n)*/\n'
+def _required_param_keys_from_tool(tool: Dict[str, Any], keys: List[str]) -> List[str]:
+    """Declared top-level required keys that the markup grammar can emit.
+
+    A malformed schema can mention a required key absent from `properties`.
+    Ignoring that impossible key is the safe direction: requiring it would
+    make every call to the tool unrepresentable at decode time.
+    """
+    fn = tool.get("function") if isinstance(tool, dict) else None
+    params = fn.get("parameters") if isinstance(fn, dict) else None
+    required = params.get("required") if isinstance(params, dict) else None
+    if not isinstance(required, list):
+        return []
+    available = set(keys)
+    out: List[str] = []
+    for value in required:
+        if isinstance(value, str) and value in available and value not in out:
+            out.append(value)
+    return out
+
+
+def _shallow_json_property(schema: Any) -> Dict[str, Any]:
+    """Keep cheap value constraints for the raw-JSON escape branch.
+
+    Full MCP schemas contain deep unions that can trip llguidance's parser
+    complexity ceiling. The service remains the authoritative validator; at
+    decode time we enforce the function name, top-level keys, and required
+    list, plus inexpensive type/enum/const hints where available.
+    """
+    if not isinstance(schema, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    declared = schema.get("type")
+    if isinstance(declared, str) or (
+        isinstance(declared, list) and all(isinstance(x, str) for x in declared)
+    ):
+        out["type"] = declared
+    if "const" in schema:
+        out["const"] = schema["const"]
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        out["enum"] = enum
+    return out
+
+
+def _hermes_json_branch(tools: List[Dict[str, Any]]) -> str:
+    """Constrained raw-JSON calls for tools needing nested values.
+
+    Hermes' `<parameter=K>text</parameter>` representation flattens objects
+    and arrays into strings. Qwen also knows the canonical JSON envelope, so
+    structural tools get that escape hatch. It used to be a free regex, which
+    silently bypassed every function-name, key-name, and required-field
+    guarantee. llguidance supports inline JSON Schema; use a deliberately
+    shallow per-tool union so the escape stays representable without becoming
+    unconstrained.
+    """
+    variants: List[Dict[str, Any]] = []
+    for tool in tools:
+        fn = tool.get("function") if isinstance(tool, dict) else None
+        name = fn.get("name") if isinstance(fn, dict) else None
+        params = fn.get("parameters") if isinstance(fn, dict) else None
+        props = params.get("properties") if isinstance(params, dict) else None
+        if not (isinstance(name, str) and name and isinstance(props, dict)):
+            continue
+        if not any(_schema_is_structural(value) for value in props.values()):
+            continue
+        keys = [key for key in props if isinstance(key, str) and key]
+        arguments: Dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                key: _shallow_json_property(props[key]) for key in keys
+            },
+            "additionalProperties": False,
+        }
+        required = _required_param_keys_from_tool(tool, keys)
+        if required:
+            arguments["required"] = required
+        variants.append(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"const": name},
+                    "arguments": arguments,
+                },
+                "required": ["name", "arguments"],
+                "additionalProperties": False,
+            }
+        )
+    if not variants:
+        return ""
+    schema: Dict[str, Any] = variants[0] if len(variants) == 1 else {"anyOf": variants}
+    encoded = json.dumps(schema, separators=(",", ":"))
+    return (
+        "json_call: JSON_WS json_body JSON_WS\n"
+        "JSON_WS: /\\s*/\n"
+        f"json_body: %json {encoded}\n"
+    )
 
 
 def _param_keys_from_tool(tool: Dict[str, Any]) -> Optional[List[str]]:
@@ -299,6 +393,82 @@ def _param_keys_from_tool(tool: Dict[str, Any]) -> Optional[List[str]]:
         keys = [k for k in props.keys() if isinstance(k, str) and k]
         return keys or None
     return None
+
+
+_MAX_ANY_ORDER_REQUIRED_PARAMS = 4
+
+
+def _hermes_required_param_rules(
+    idx: int, keys: List[str], required: List[str]
+) -> List[str]:
+    """Grammar rules that make every required markup parameter unavoidable.
+
+    For up to four required keys, a small state machine tracks which keys have
+    appeared and accepts them in any order. State growth is 2**N, so wider
+    schemas use their declared `required` order instead; decode-time steering
+    then guides the model through that canonical order without risking a
+    roster-sized ParserTooComplex failure.
+
+    Optional keys, and required keys already seen, may occur between required
+    transitions. The final state accepts any declared key, preserving the old
+    grammar's tolerance for duplicate parameters.
+    """
+    all_keys = tool_name_alternation(keys)
+    rules = [f"k_{idx}: /({all_keys})/"]
+    if not required:
+        rules.insert(0, f'params_{idx}: ( POPEN k_{idx} ">" pval )*')
+        return rules
+
+    if len(required) > _MAX_ANY_ORDER_REQUIRED_PARAMS:
+        optional = [key for key in keys if key not in set(required)]
+        pieces: List[str] = []
+        seen: List[str] = []
+        for pos, key in enumerate(required):
+            neutral = optional + seen
+            if neutral:
+                neutral_name = f"gap_{idx}_{pos}"
+                rules.append(
+                    f"{neutral_name}: /({tool_name_alternation(neutral)})/"
+                )
+                pieces.append(f'( POPEN {neutral_name} ">" pval )*')
+            pieces.append(f"POPEN {json.dumps(key + '>')} pval")
+            seen.append(key)
+        pieces.append(f'( POPEN k_{idx} ">" pval )*')
+        rules.insert(0, f"params_{idx}: {' '.join(pieces)}")
+        return rules
+
+    required_index = {key: pos for pos, key in enumerate(required)}
+    full_mask = (1 << len(required)) - 1
+    rules.insert(0, f"params_{idx}: params_{idx}_s_0")
+    for mask in range(full_mask + 1):
+        state = f"params_{idx}_s_{mask}"
+        if mask == full_mask:
+            rules.append(f'{state}: ( POPEN k_{idx} ">" pval )*')
+            continue
+
+        neutral = [
+            key
+            for key in keys
+            if key not in required_index or mask & (1 << required_index[key])
+        ]
+        prefix = ""
+        if neutral:
+            neutral_name = f"seen_{idx}_{mask}"
+            rules.append(
+                f"{neutral_name}: /({tool_name_alternation(neutral)})/"
+            )
+            prefix = f'( POPEN {neutral_name} ">" pval )* '
+
+        transitions = []
+        for pos, key in enumerate(required):
+            if mask & (1 << pos):
+                continue
+            next_state = f"params_{idx}_s_{mask | (1 << pos)}"
+            transitions.append(
+                f"POPEN {json.dumps(key + '>')} pval {next_state}"
+            )
+        rules.append(f"{state}: {prefix}({' | '.join(transitions)})")
+    return rules
 
 
 def _hermes_name_and_params(tools: List[Dict[str, Any]]) -> Optional[str]:
@@ -321,29 +491,41 @@ def _hermes_name_and_params(tools: List[Dict[str, Any]]) -> Optional[str]:
         if not (isinstance(name, str) and name) or name in seen:
             continue
         seen.add(name)
+        params = fn.get("parameters") if isinstance(fn, dict) else None
+        props = params.get("properties") if isinstance(params, dict) else None
+        # A structural value cannot survive Hermes' flat parameter markup:
+        # the parser necessarily turns it into a string. These tools are
+        # represented exclusively by the constrained JSON branch below so the
+        # grammar cannot steer the model into a call the validator must reject.
+        if isinstance(props, dict) and any(
+            _schema_is_structural(value) for value in props.values()
+        ):
+            continue
         branches.append(f"fn_{idx}")
         head = json.dumps(name + ">")  # lark string literal, safely escaped
         rules.append(f"fn_{idx}: {head} params_{idx} CLOSE")
         keys = _param_keys_from_tool(tool)
         if keys:
-            kalts = "|".join(re.escape(k) for k in sorted(set(keys), key=len, reverse=True))
-            rules.append(f'params_{idx}: ( POPEN k_{idx} ">" pval )*')
-            rules.append(f"k_{idx}: /({kalts})/")
+            required = _required_param_keys_from_tool(tool, keys)
+            rules.extend(_hermes_required_param_rules(idx, keys, required))
         else:
             rules.append(f'params_{idx}: ( POPEN FREEKEY ">" pval )*')
         idx += 1
-    if not branches:
+    json_branch = _hermes_json_branch(tools)
+    if not branches and not json_branch:
         return None
-    alt = " | ".join(branches)
-    json_escape = _has_structural_params(tools)
-    if json_escape:
+    if branches and json_branch:
+        alt = " | ".join(branches)
         head = (
-            "tool_call: <tool_call> (hermes_call | JSONCALL) </tool_call>\n"
+            "tool_call: <tool_call> (hermes_call | json_call) </tool_call>\n"
             + f"hermes_call: FNOPEN ({alt})\n"
-            + _HERMES_JSON_BRANCH
+            + json_branch
         )
-    else:
+    elif branches:
+        alt = " | ".join(branches)
         head = f"tool_call: <tool_call> FNOPEN ({alt}) </tool_call>\n"
+    else:
+        head = "tool_call: <tool_call> json_call </tool_call>\n" + json_branch
     return (
         _HERMES_HEAD
         + head
@@ -376,8 +558,8 @@ def build_grammar_string(
     unit-testable: validate it with `LLMatcher.validate_grammar`.
 
     `hint.mode` selects the tier: `name-and-params` (default — tier 2,
-    constrains the function name + each parameter key) or `name-only`
-    (tier 1, function name only).
+    constrains the function name, each parameter key, and required-key
+    presence) or `name-only` (tier 1, function name only).
     """
     fmt = str((hint or {}).get("format") or "").strip()
     if fmt not in SUPPORTED_FORMATS:
@@ -391,7 +573,7 @@ def build_grammar_string(
             alts = tool_name_alternation(_tool_names_from_request(tool_list))
             if not alts:
                 return None
-            return _hermes_name_only(alts, json_escape=_has_structural_params(tool_list))
+            return _hermes_name_only(alts, json_branch=_hermes_json_branch(tool_list))
         return _hermes_name_and_params(tool_list)
     if fmt == "gemma":
         # Gemma is name-only (tier 1) regardless of requested mode: pinning the
@@ -416,12 +598,12 @@ def build_tool_grammar_processor(
     tools: Optional[List[Dict[str, Any]]],
     hint: Dict[str, Any],
 ) -> Optional[Any]:
-    """Build a name-constraining logits processor for the request's
+    """Build a schema-constraining logits processor for the request's
     tool-call format, or None if unsupported / not applicable.
 
     `hint` is the gezel `tool_grammar` request field, e.g.
-    `{"format": "hermes", "mode": "name-only"}`. Tool names are read from
-    the OpenAI `tools` array. Any failure returns None — the turn then
+    `{"format": "hermes", "mode": "name-and-params"}`. Tool schemas are
+    read from the OpenAI `tools` array. Any failure returns None — the turn then
     runs unconstrained + TS salvage, so this never breaks a turn.
     """
     fmt = str((hint or {}).get("format") or "").strip()
@@ -482,9 +664,18 @@ def build_tool_grammar_processor(
     json_escape = fmt == "hermes" and _has_structural_params(
         [t for t in (tools or []) if isinstance(t, dict)]
     )
+    required_fields = 0
+    required_tools = 0
+    for tool in [t for t in (tools or []) if isinstance(t, dict)]:
+        keys = _param_keys_from_tool(tool) or []
+        count = len(_required_param_keys_from_tool(tool, keys))
+        required_fields += count
+        required_tools += int(count > 0)
     print(
         f"[tool-grammar] active format={fmt} mode={mode} "
         f"tools={len(_tool_names_from_request(tools))} "
+        f"declared-required-tools={required_tools} "
+        f"declared-required-fields={required_fields} "
         f"json-escape={'on' if json_escape else 'off'}",
         flush=True,
     )

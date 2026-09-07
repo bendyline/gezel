@@ -1,17 +1,18 @@
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { shouldUseDs4SsdStreaming } from '../../providers/ds4/residency.js';
+import { ds4VisionResidentBytes, shouldUseDs4SsdStreaming } from '../../providers/ds4/residency.js';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
+import { nativeVisionEnabledFor } from '../../providers/vision-capability.js';
 import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 /**
- * ds4 (DwarfStar / DeepSeek-V4) local model management — install / list /
- * delete the antirez DeepSeek-V4 GGUFs from the chat-model catalog. ds4's
+ * ds4 (DwarfStar) local model management — install / list / delete the
+ * supported DeepSeek-V4 and GLM GGUFs from the chat-model catalog. ds4's
  * GGUFs are structurally identical to llama.cpp's, so this mirrors
  * `llama-cpp.ts` and funnels through the same `LlamaCppModelManager`
  * (constructed with `engine: 'ds4'`, so it reads the catalog `ds4` source
@@ -29,7 +30,8 @@ export function ds4Routes(ctx: EngineContext): Hono {
       ctx.ds4Models.listInstalled(),
       ctx.ds4Models.listUnrecognized?.() ?? Promise.resolve([]),
     ]);
-    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
+    const cfg = await ctx.store.readConfig();
+    const overrides = cfg.modelContextOverrides ?? {};
     // Decorate with the launch-context preview (effective window, override,
     // ceiling) the same way llama-cpp/mlx do. ds4 rows never carried these
     // before; the preview is cheap (no GGUF read — RAM tier + catalog cap).
@@ -37,6 +39,9 @@ export function ds4Routes(ctx: EngineContext): Hono {
       installed.map(async (model) => {
         const overrideContextTokens = overrides[`ds4:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
+        const visionField = model.visionEncoderPath
+          ? { nativeVisionEnabled: nativeVisionEnabledFor(cfg.nativeVision, model.id) }
+          : {};
         try {
           const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id, {
             standalone: true,
@@ -65,6 +70,7 @@ export function ds4Routes(ctx: EngineContext): Hono {
               ? { weightsResidentBytes: plan.weightsResidentBytes }
               : {}),
             ...overrideField,
+            ...visionField,
           };
         } catch (error) {
           return {
@@ -78,6 +84,7 @@ export function ds4Routes(ctx: EngineContext): Hono {
                 }
               : {}),
             ...overrideField,
+            ...visionField,
           };
         }
       }),
@@ -141,6 +148,12 @@ export function ds4Routes(ctx: EngineContext): Hono {
               ...(manifest.ds4.approxSizeBytes !== undefined
                 ? { modelSizeBytes: manifest.ds4.approxSizeBytes }
                 : {}),
+              ...(manifest.ds4.visionEncoder &&
+              nativeVisionEnabledFor(ds4Config.nativeVision, manifest.id)
+                ? {
+                    companionBytes: ds4VisionResidentBytes(manifest.ds4.visionEncoder.sizeBytes),
+                  }
+                : {}),
             }),
           };
         } catch {
@@ -170,8 +183,8 @@ export function ds4Routes(ctx: EngineContext): Hono {
    * Install a chat-model entry's ds4 source. The install runs as a
    * background job owned by {@link EngineContext.chatInstalls}; this SSE
    * is just a subscriber, so a client disconnect does not abandon the
-   * download. That matters doubly here — these are large (~81–153 GB)
-   * DeepSeek-V4 quants. Idempotent: a second `POST` for a running id
+   * download. That matters doubly here — these are large (~81–200+ GB)
+   * DeepSeek/GLM quants. Idempotent: a second `POST` for a running id
    * attaches to the in-flight install. Cancel is the explicit `DELETE`.
    */
   app.post('/models/:catalogId/install', async (c) => {
@@ -181,7 +194,6 @@ export function ds4Routes(ctx: EngineContext): Hono {
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
     ctx.chatInstalls.ds4.start(catalogId, {
       skipSha,
-      includeMmproj: false,
       installCompanion: false,
     });
     return streamSSE(c, (stream) => subscribeToInstallSse(ctx.chatInstalls.ds4, catalogId, stream));

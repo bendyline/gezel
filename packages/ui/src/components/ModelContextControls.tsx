@@ -88,7 +88,13 @@ export function ModelActionsMenu({
    * Present only when this model actually has a projector on disk. Loading it
    * is a per-model choice because it is not free — see the item's own title.
    */
-  visionAction?: { enabled: boolean; busy?: boolean; onToggle: () => void };
+  visionAction?: {
+    enabled: boolean;
+    busy?: boolean;
+    /** Size of the optional native-vision payload, used for honest cost copy. */
+    sidecarSizeBytes?: number;
+    onToggle: () => void;
+  };
   onUpdate?: () => void;
   /** MLX says "Download again" for a stale catalog install; same action slot. */
   updateLabel?: { idle: string; busy: string };
@@ -116,6 +122,11 @@ export function ModelActionsMenu({
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align="end">
+            {(contextSupported || visionAction) && (
+              <DropdownMenu.Label className="model-actions-section-label">
+                Advanced
+              </DropdownMenu.Label>
+            )}
             {contextSupported && (
               <DropdownMenu.Item
                 className="app-nav-menu-item"
@@ -130,6 +141,56 @@ export function ModelActionsMenu({
                 {contextEditorOpen ? 'Hide context size' : 'Context size…'}
               </DropdownMenu.Item>
             )}
+            {visionAction && (
+              <DropdownMenu.CheckboxItem
+                className={`app-nav-menu-item${visionAction.enabled ? ' active' : ''}`}
+                checked={visionAction.enabled}
+                disabled={visionAction.busy}
+                title={
+                  visionAction.sidecarSizeBytes
+                    ? visionAction.enabled
+                      ? `Vision is on by default. Turn it off to avoid loading the ${formatBytes(visionAction.sidecarSizeBytes, 2)} vision encoder and its runtime memory; images will use Gezel's image reader instead.`
+                      : `Load the ${formatBytes(visionAction.sidecarSizeBytes, 2)} vision encoder so images go straight to this model instead of through Gezel's image reader.`
+                    : visionAction.enabled
+                      ? 'Stop sending images straight to this model. Pictures still reach it as a written description from the image reader, and this model regains cached session resume.'
+                      : "Send images to this model itself instead of a written description of them. Costs cached session resume for this model: the engine won't save or reload its conversation state to disk, so a session that goes cold re-reads its history. Speed within a live conversation is unaffected."
+                }
+                onCheckedChange={() => visionAction.onToggle()}
+              >
+                <span className="app-engagement-menu-row">
+                  <span className="app-engagement-menu-label">
+                    {visionAction.busy ? 'Saving vision setting…' : 'Add vision'}
+                  </span>
+                  <span className="app-engagement-menu-check" aria-hidden="true">
+                    <DropdownMenu.ItemIndicator>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M2 6.2 4.7 9 10 3"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </DropdownMenu.ItemIndicator>
+                  </span>
+                </span>
+                <span className="app-engagement-menu-hint model-vision-menu-hint">
+                  {visionAction.sidecarSizeBytes
+                    ? `${formatBytes(visionAction.sidecarSizeBytes, 2)} encoder; uses additional memory while loaded.`
+                    : 'Send images directly to this model.'}
+                </span>
+              </DropdownMenu.CheckboxItem>
+            )}
+            {(contextSupported || visionAction) && (
+              <DropdownMenu.Separator className="app-nav-menu-separator" />
+            )}
             {fitnessAction && (
               <DropdownMenu.Item
                 className="app-nav-menu-item"
@@ -138,24 +199,6 @@ export function ModelActionsMenu({
                 onSelect={() => fitnessAction.onRun()}
               >
                 {fitnessAction.label}
-              </DropdownMenu.Item>
-            )}
-            {visionAction && (
-              <DropdownMenu.Item
-                className="app-nav-menu-item"
-                disabled={visionAction.busy}
-                title={
-                  visionAction.enabled
-                    ? 'Stop sending images straight to this model. Pictures still reach it as a written description from the image reader, and this model regains cached session resume.'
-                    : "Send images to this model itself instead of a written description of them. Costs cached session resume for this model: the engine won't save or reload its conversation state to disk, so a session that goes cold re-reads its history. Speed within a live conversation is unaffected."
-                }
-                onSelect={() => visionAction.onToggle()}
-              >
-                {visionAction.busy
-                  ? 'Saving…'
-                  : visionAction.enabled
-                    ? 'Turn off vision'
-                    : 'Turn on vision'}
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Item
