@@ -11,8 +11,10 @@ export interface GgufInstallOpts {
   skipSha: boolean;
   /**
    * Fetch the vision projector the catalog ships. Defaults to on when
-   * omitted; only ds4 (no sidecar path) passes `false`. Loading it is a
-   * separate per-model runtime decision — see `config.nativeVision`.
+   * omitted; ds4 passes `false` because it has no llama.cpp mmproj. A ds4
+   * `visionEncoder` is a distinct mandatory payload and is unaffected by this
+   * flag. Loading either kind is a separate per-model runtime decision — see
+   * `config.nativeVision`.
    */
   includeMmproj?: boolean;
   /** Whether a text-only chat install should also pull the default image reader. */

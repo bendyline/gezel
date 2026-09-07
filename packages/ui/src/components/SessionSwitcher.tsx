@@ -22,14 +22,6 @@ interface Props {
   gezelId: string;
   projectId: string;
   sessionId: string | undefined;
-  /**
-   * Display name for the gezel the list is scoped to. When the switcher
-   * sits under a surface that shows OTHER conversations too (the project
-   * chat's interleaved timeline), a bare "No threads yet" reads as a
-   * contradiction beneath a visible thread — naming the scope ("No
-   * threads with Ada yet") keeps the empty state truthful.
-   */
-  gezelName?: string;
   onSessionIdChange: (next: string | undefined) => void;
   /** Reports the selected record so parents can enforce external read-only UI. */
   onActiveSessionChange?: (session: ChatSessionSummary | null) => void;
@@ -105,11 +97,6 @@ const DRAFT_VALUE_PREFIX = 'draft:';
 const NEW_THREAD_VALUE = '__NEW__';
 const NEW_THREAD_LABEL = 'New thread';
 
-/** Value for the disabled "nothing here yet" row. Never selectable, and
- *  deliberately not the unselected value — that one is the empty string, the
- *  only value Radix renders the trigger's placeholder for. */
-const EMPTY_ROW_VALUE = '__EMPTY__';
-
 /** A draft whose first line is still empty (it opens with an image, say). */
 const UNTITLED_DRAFT_LABEL = 'Untitled draft';
 
@@ -153,16 +140,14 @@ const SENT_VALUE_PREFIX = 'sent:';
  * which session the composer posts into and which session reads as
  * "active" in the interleaved view.
  *
- * First-time UX: if no sessions exist yet, shows "No sessions yet" and
- * leaves `sessionId` undefined so the composer's lazy-create path still
- * works. Once any session exists, auto-picks the most recent on first
- * load.
+ * First-time UX: if no sessions exist yet, shows "New thread" and leaves
+ * `sessionId` undefined so the composer's lazy-create path still works. Once
+ * any session exists, auto-picks the most recent on first load.
  */
 export function SessionSwitcher({
   gezelId,
   projectId,
   sessionId,
-  gezelName,
   onSessionIdChange,
   onActiveSessionChange,
   onFreshThread,
@@ -556,6 +541,17 @@ export function SessionSwitcher({
     onDraftSelect,
   ]);
 
+  /**
+   * Point the composer at a conversation that does not exist yet. The first
+   * send creates it; until then this only clears the current address/draft
+   * and asks the host surface to return focus to the editor.
+   */
+  const startFreshThread = useCallback(() => {
+    onDraftSelect?.(undefined);
+    onSessionIdChange(undefined);
+    onFreshThread?.();
+  }, [onDraftSelect, onSessionIdChange, onFreshThread]);
+
   // Throwing away a message in progress. No confirmation, matching the menu
   // item this replaces — but the control only appears on the row under the
   // pointer, so it cannot be hit blind.
@@ -684,11 +680,11 @@ export function SessionSwitcher({
   const newestFirst = <T extends { at: string }>(a: T, b: T) =>
     a.at < b.at ? 1 : a.at > b.at ? -1 : 0;
   // The line means "has this gone anywhere yet", not "does a session record
-  // exist". Whether the user reached "+ New" (which mints a thread up front)
-  // or just started typing (which does not) is an implementation detail they
-  // never chose; both leave them holding a message nobody has read. So the
-  // unsent section carries thread starters AND threads nothing was ever sent
-  // to, ordered together by when they were last touched.
+  // exist". A starter may or may not have a session record yet; that is an
+  // implementation detail the user never chose. Either way, they are holding
+  // a message nobody has read. So the unsent section carries thread starters
+  // AND threads nothing was ever sent to, ordered together by when they were
+  // last touched.
   const unsentRows = [
     ...newThreadDrafts.map((d) => {
       const draft = liveTitled(d);
@@ -803,10 +799,8 @@ export function SessionSwitcher({
       : sessionId && hasSessions
         ? sessionId
         : '';
-  const emptyLabel = gezelName
-    ? `No threads with ${gezelName} yet — a message starts one`
-    : 'No threads yet';
-  const emptyMenuLabel = showUnsent ? 'No threads yet' : emptyLabel;
+  const isFreshThread = activeValue === '';
+  const hasThreadChoices = showUnsent || hasSent;
 
   // Context meter for the thread the composer posts into. The persisted
   // summary is the reload seed; live events win field by field so a running
@@ -841,16 +835,13 @@ export function SessionSwitcher({
           if (open) void loadSent();
         }}
         onValueChange={(v) => {
-          if (!v || v === EMPTY_ROW_VALUE) return;
+          if (!v) return;
           if (v.startsWith(SENT_VALUE_PREFIX)) {
             void useAgain(v.slice(SENT_VALUE_PREFIX.length));
             return;
           }
           if (v === NEW_THREAD_VALUE) {
-            // Back to an empty composer: the next message opens the thread.
-            onDraftSelect?.(undefined);
-            onSessionIdChange(undefined);
-            onFreshThread?.();
+            startFreshThread();
             return;
           }
           if (v.startsWith(DRAFT_VALUE_PREFIX)) {
@@ -870,20 +861,22 @@ export function SessionSwitcher({
           onDraftSelect?.(undefined);
           onSessionIdChange(v);
         }}
-        disabled={busy}
+        disabled={busy || (isFreshThread && !hasThreadChoices)}
       >
         <Select.Trigger className="gezel-chat-session-select">
           {/* Nothing picked means the next message opens a thread — the row
               the user just chose, or the resting state with auto-pick off.
               The trigger names that destination rather than sitting blank
               and reading as a control they forgot to set. */}
-          <Select.Value placeholder={hasSessions ? newThreadLabel : emptyLabel} />
+          <Select.Value placeholder={NEW_THREAD_LABEL} />
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu">
-          <Select.Item value={NEW_THREAD_VALUE} textValue={NEW_THREAD_LABEL}>
-            {newThreadLabel}
-          </Select.Item>
-          {(showUnsent || hasSent) && <Select.Separator />}
+          {!isFreshThread && (
+            <Select.Item value={NEW_THREAD_VALUE} textValue={NEW_THREAD_LABEL}>
+              {newThreadLabel}
+            </Select.Item>
+          )}
+          {!isFreshThread && hasThreadChoices && <Select.Separator />}
           {showUnsent && (
             <Select.Group>
               <Select.Label>Not sent yet</Select.Label>
@@ -904,18 +897,12 @@ export function SessionSwitcher({
             </Select.Group>
           )}
           {showUnsent && hasSent && <Select.Separator />}
-          {hasSent ? (
+          {hasSent && (
             <Select.Group>
               <Select.Label>Threads</Select.Label>
               {sentThreads.map(renderThread)}
             </Select.Group>
-          ) : showUnsent ? (
-            <Select.Item value={EMPTY_ROW_VALUE} disabled>
-              {emptyMenuLabel}
-            </Select.Item>
-          ) : // With neither threads nor drafts the menu is just the new-thread
-          // row above, and the trigger carries the empty-state sentence.
-          null}
+          )}
           {sentDrafts.length > 0 && (
             <>
               <Select.Separator />
@@ -942,10 +929,18 @@ export function SessionSwitcher({
           )}
         </Select.Content>
       </Select.Root>
+      <button
+        type="button"
+        className="gezel-chat-session-btn"
+        onClick={startFreshThread}
+        disabled={busy || isFreshThread}
+        title={isFreshThread ? 'Already on a new thread' : 'Start a new thread'}
+      >
+        + New thread
+      </button>
       <ContextMeter status={contextStatus} sessionId={sessionId} />
-      {/* Only on a thread: a second message in progress inside a
-          conversation. Off a thread it would mean the same as the picker's
-          fresh-thread row, and two controls for one act is one too many. */}
+      {/* Only on a thread: a second message in progress inside the current
+          conversation, unlike New thread which clears that address. */}
       {sessionId && (
         <button
           type="button"

@@ -134,6 +134,7 @@ export async function createImageProvider(
     // when it changes; resolveLaunch reads it on the next start.
     const launchState: { modelId: string | undefined } = { modelId: undefined };
     const supervisor = new NativeEngineSupervisor({
+      capacity: { home: opts.home, exclusive: true },
       logPrefix: '[sd-server]',
       // sd-server doesn't expose `/health`; the master-587 build serves
       // either an HTML file (when --serve-html-path is set) or a 404 at

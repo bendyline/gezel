@@ -1427,13 +1427,13 @@ button.machine-memory-unload-button {
   box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 45%, transparent);
 }
 .machine-memory-segment-other {
-  background: color-mix(in srgb, var(--warning) 62%, var(--surface));
+  background: color-mix(in srgb, var(--success) 62%, var(--surface));
 }
 .machine-memory-segment-cached {
   background-color: color-mix(in srgb, var(--surface) 75%, var(--panel));
   background-image: repeating-linear-gradient(
     135deg,
-    color-mix(in srgb, var(--success) 28%, var(--surface)) 0 4px,
+    color-mix(in srgb, var(--warning) 62%, var(--surface)) 0 4px,
     transparent 4px 8px
   );
 }
@@ -1461,13 +1461,13 @@ button.machine-memory-unload-button {
   background: var(--accent);
 }
 .machine-memory-swatch-other {
-  background: color-mix(in srgb, var(--warning) 62%, var(--surface));
+  background: color-mix(in srgb, var(--success) 62%, var(--surface));
 }
 .machine-memory-swatch-cached {
   background-color: color-mix(in srgb, var(--surface) 75%, var(--panel));
   background-image: repeating-linear-gradient(
     135deg,
-    color-mix(in srgb, var(--success) 28%, var(--surface)) 0 3px,
+    color-mix(in srgb, var(--warning) 62%, var(--surface)) 0 3px,
     transparent 3px 6px
   );
 }
@@ -2437,6 +2437,26 @@ button.machine-memory-unload-button {
 
 .app-nav-menu-item.active {
   font-weight: 600;
+}
+
+.model-actions-section-label {
+  padding: 0.3rem 0.7rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.app-nav-menu-separator {
+  height: 1px;
+  margin: 0.3rem 0.45rem;
+  background: var(--border);
+}
+
+.model-vision-menu-hint {
+  margin-left: 0;
 }
 
 /* Top-nav "Updates" button — only rendered when pending-question

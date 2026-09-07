@@ -64,7 +64,8 @@
     "test:published": "node scripts/run-with-dependency-lease.mjs test:published:unleased",
     "test:published:unleased": "vitest run --config vitest.published.config.ts",
     "check:packages": "node scripts/check-package-consumers.mjs",
-    "check:npm-release-candidate": "pnpm build && node scripts/rehearse-npm-release.mjs",
+    "check:npm-release-candidate": "pnpm build && pnpm check:npm-release-candidate:unbuilt",
+    "check:npm-release-candidate:unbuilt": "node scripts/rehearse-npm-release.mjs",
     "check:release-toolchain": "node --test scripts/verify-published-npm-release.test.mjs && node scripts/check-release-toolchain.mjs",
     "check:workspace-deps": "node scripts/check-workspace-dependencies.mjs",
     "scorecard:barrel": "node scripts/gen-scorecard-barrel.mjs",
@@ -108,7 +109,7 @@
     "eval:viewer:build": "node scripts/run-with-dependency-lease.mjs eval:viewer:build:unleased",
     "eval:viewer:build:unleased": "pnpm --filter @bendyline/gezel-eval-viewer run build",
     "validate": "node scripts/validate-workspace.mjs",
-    "validate:unlocked": "pnpm check:local-links && pnpm check:workspace-deps && pnpm build && pnpm verify:npm-licenses && pnpm typecheck && pnpm lint && pnpm lint:tool-names && pnpm lint:prompts && pnpm test:ci && pnpm test:stability && pnpm test:surface && pnpm test:published && pnpm check:packages && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
+    "validate:unlocked": "pnpm check:local-links && pnpm check:workspace-deps && pnpm build && pnpm check:release-toolchain && pnpm check:npm-release-candidate:unbuilt && pnpm verify:npm-licenses && pnpm typecheck && pnpm lint && pnpm lint:tool-names && pnpm lint:prompts && pnpm test:ci && pnpm test:stability && pnpm test:surface && pnpm test:published && pnpm check:packages && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
     "all": "node scripts/validate-workspace.mjs",
     "deps:validate": "node scripts/validate-workspace.mjs --install",
     "typecheck": "node scripts/run-with-dependency-lease.mjs typecheck:unleased",
@@ -155,7 +156,8 @@
     "format": "node scripts/run-with-dependency-lease.mjs format:unleased",
     "format:unleased": "biome format --write .",
     "clean": "node scripts/run-with-dependency-lease.mjs clean:unleased",
-    "clean:unleased": "pnpm -r --filter \"@bendyline/gezel*\" --filter \"@bendyline/gezk*\" run clean"
+    "clean:unleased": "pnpm -r --filter \"@bendyline/gezel*\" --filter \"@bendyline/gezk*\" run clean",
+    "poppetje:review": "node packages/ui/scripts/poppetje-review.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

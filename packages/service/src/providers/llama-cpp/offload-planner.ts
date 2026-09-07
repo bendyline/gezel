@@ -1,5 +1,5 @@
 /**
- * Hardware-aware MoE offload planner (Phase v3 — graduated).
+ * Hardware-aware structured-weight offload planner (Phase v4 — dense FFN).
  *
  * The user's headline case: a big Mixture-of-Experts model on a
  * constrained discrete GPU (e.g. 4–12 GB VRAM + 32–64 GB system RAM).
@@ -27,7 +27,14 @@
  * `engine-flags.ts`, so it feeds straight into `buildLlamaCppEngineArgs`
  * as the lowest-precedence layer (global config + manifest still win).
  *
- * When the plan is still too optimistic (KV estimates are coarse, other
+ * Dense models get the same treatment through llama.cpp v0.4.0's
+ * `--n-cpu-ffn`: keep attention on the GPU and move only the first N
+ * blocks' dense feed-forward weights to system RAM. This is materially
+ * better than the engine's whole-layer fallback when a dense model is only
+ * somewhat larger than VRAM, but it is enabled only on a discrete-GPU host
+ * whose system-RAM budget can hold the selected prefix.
+ *
+ * When a plan is still too optimistic (KV estimates are coarse, other
  * processes hold VRAM), the launch path degrades it one step per CUDA/
  * Vulkan OOM via {@link degradeMoeOffloadDecision} and retries — see the
  * supervisor's `recoverStartup` hook.
@@ -48,6 +55,34 @@ export interface MoeExpertSplit {
   nonExpertBytes: number;
   /** Routed-expert bytes per block, indexed by `blk.N` (0 for dense blocks). */
   expertBytesByLayer: number[];
+}
+
+export interface DenseFfnSplit {
+  /** Bytes `--n-cpu-ffn` leaves on the GPU (attention, embeddings, norms, output). */
+  nonFfnBytes: number;
+  /** Dense FFN bytes per block, indexed by `blk.N`. */
+  ffnBytesByLayer: number[];
+}
+
+export interface DenseFfnOffloadInput {
+  /** Dense-FFN offload deliberately does not apply to MoE models. */
+  isMoE: boolean;
+  /** Largest single-GPU VRAM pool in bytes (0 = no discrete GPU). */
+  vramBytes: number;
+  /** Exact per-tensor dense-FFN/non-FFN sums from the GGUF header. */
+  split?: DenseFfnSplit;
+  /** `<arch>.block_count` — bounds `--n-cpu-ffn N`. */
+  blockCount?: number;
+  /** KV bytes resident on the GPU at the selected context and slot count. */
+  kvReserveBytes?: number;
+  /** Projector or other weights not represented by the primary GGUF split. */
+  additionalGpuBytes?: number;
+  /** Capacity-policy share of system RAM available to local engines. */
+  ramBudgetBytes?: number;
+  /** Live reclaimable system RAM. Used as a second, stricter safety gate. */
+  freeSystemRamBytes?: number;
+  /** Headroom to leave free in each memory pool; defaults to 1 GiB. */
+  marginBytes?: number;
 }
 
 export interface MoeOffloadInput {
@@ -82,12 +117,93 @@ export interface MoeOffloadDecision {
   cpuMoe?: boolean;
   /** `--n-cpu-moe N` — keep blocks `0..N-1`'s experts in system RAM. */
   nCpuMoe?: number;
+  /** `--n-cpu-ffn N` — keep blocks `0..N-1`'s dense FFN weights in RAM. */
+  nCpuFfn?: number;
   /** Human-readable rationale for the decision log (never emitted as a flag). */
   reason?: string;
 }
 
 function gib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
+/**
+ * Plan llama.cpp v0.4.0's dense-FFN split on suitable discrete-GPU hosts.
+ *
+ * There is intentionally no estimate-only fallback. The decision pins
+ * `-ngl all`, so it must be based on the exact tensors the accompanying
+ * override moves; an approximate split could turn the optimization into a
+ * startup OOM. If the non-FFN GPU residue or the CPU prefix cannot fit its
+ * respective pool, leave the launch to llama.cpp's conservative `--fit`
+ * whole-layer strategy.
+ */
+export function planDenseFfnOffload(input: DenseFfnOffloadInput): MoeOffloadDecision {
+  const margin = input.marginBytes ?? DEFAULT_MARGIN_BYTES;
+  if (input.isMoE) return {};
+  if (!input.vramBytes || input.vramBytes <= 0) {
+    return { reason: 'no discrete GPU pool detected — leaving dense offload to the engine' };
+  }
+  if (!input.split || input.split.ffnBytesByLayer.length === 0) return {};
+
+  const layers = input.split.ffnBytesByLayer;
+  const blockCount = Math.max(input.blockCount ?? layers.length, layers.length);
+  const ffnTotal = layers.reduce((sum, value) => sum + value, 0);
+  if (ffnTotal <= 0 || blockCount <= 0) return {};
+
+  const kvReserve = Math.max(0, input.kvReserveBytes ?? 0);
+  const additionalGpu = Math.max(0, input.additionalGpuBytes ?? 0);
+  const reserves = margin + kvReserve + COMPUTE_RESERVE_BYTES + additionalGpu;
+  const weightsTotal = input.split.nonFfnBytes + ffnTotal;
+  if (weightsTotal + reserves <= input.vramBytes) {
+    return {
+      reason: `dense model fits VRAM (weights ${gib(weightsTotal)} + reserves ${gib(reserves)} ≤ ${gib(input.vramBytes)}) — full GPU residency`,
+    };
+  }
+
+  const ffnBudget = input.vramBytes - reserves - input.split.nonFfnBytes;
+  if (ffnBudget < 0) {
+    return {
+      reason: `dense non-FFN residue ${gib(input.split.nonFfnBytes)} + reserves ${gib(reserves)} exceed VRAM ${gib(input.vramBytes)} — leaving whole-layer fit to the engine`,
+    };
+  }
+
+  // `--n-cpu-ffn N` moves blocks 0..N-1 to CPU, so pack the largest
+  // trailing suffix in VRAM and offload the prefix that remains.
+  let gpuLayers = 0;
+  let gpuFfnBytes = 0;
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layerBytes = layers[i] ?? 0;
+    if (gpuFfnBytes + layerBytes > ffnBudget) break;
+    gpuFfnBytes += layerBytes;
+    gpuLayers += 1;
+  }
+  const nCpuFfn = Math.max(0, blockCount - gpuLayers);
+  if (nCpuFfn === 0) {
+    return {
+      reason: `all ${blockCount} dense FFN layers fit the ${gib(ffnBudget)} FFN budget — full GPU residency`,
+    };
+  }
+
+  const cpuFfnBytes = layers
+    .slice(0, Math.min(nCpuFfn, layers.length))
+    .reduce((sum, value) => sum + value, 0);
+  const ramLimit = Math.min(
+    input.ramBudgetBytes ?? Number.POSITIVE_INFINITY,
+    input.freeSystemRamBytes ?? Number.POSITIVE_INFINITY,
+  );
+  if (cpuFfnBytes + margin > ramLimit) {
+    return {
+      reason: `dense FFN split needs ${gib(cpuFfnBytes)} system RAM + ${gib(margin)} headroom, above the safe ${gib(ramLimit)} pool — leaving whole-layer fit to the engine`,
+    };
+  }
+
+  return {
+    nGpuLayers: -1,
+    nCpuFfn,
+    reason:
+      `dense FFN of ${gpuLayers}/${blockCount} layers fits VRAM (${gib(gpuFfnBytes)} of ${gib(ffnTotal)}, ` +
+      `non-FFN ${gib(input.split.nonFfnBytes)}, reserves ${gib(reserves)}) — --n-cpu-ffn ${nCpuFfn}`,
+  };
 }
 
 /**
@@ -221,6 +337,30 @@ export function degradeMoeOffloadDecision(
       cpuMoe: true,
       reason:
         'GPU OOM at launch — retrying with --cpu-moe and the GPU layer count left to the engine',
+    };
+  }
+  return null;
+}
+
+/** Dense counterpart of {@link degradeMoeOffloadDecision}. */
+export function degradeDenseFfnOffloadDecision(
+  decision: MoeOffloadDecision | undefined,
+  blockCount: number | undefined,
+): MoeOffloadDecision | null {
+  if (!decision || typeof decision.nCpuFfn !== 'number') return null;
+  const allLayers = Math.max(blockCount ?? 0, decision.nCpuFfn);
+  if (allLayers > decision.nCpuFfn) {
+    return {
+      nGpuLayers: -1,
+      nCpuFfn: allLayers,
+      reason: 'GPU OOM at launch — retrying with every dense FFN layer in system RAM (--n-cpu-ffn)',
+    };
+  }
+  if (decision.nGpuLayers !== undefined) {
+    return {
+      nCpuFfn: decision.nCpuFfn,
+      reason:
+        'GPU OOM at launch — keeping dense FFN weights in RAM and leaving the GPU layer count to the engine',
     };
   }
   return null;

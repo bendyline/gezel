@@ -12,7 +12,7 @@ describe('DS4 DSpark policy', () => {
   it('drafts under auto on a CUDA host with a fully resident model', () => {
     const d = resolveDs4Dspark(eligible());
     expect(d.enabled).toBe(true);
-    expect(ds4DsparkArgs(d)).toEqual(['--dspark', '--mtp', SUPPORT]);
+    expect(ds4DsparkArgs(d)).toEqual(['--dspark', '--mtp-model', SUPPORT]);
   });
 
   it('does not draft under auto on Metal, where it measured net-negative', () => {

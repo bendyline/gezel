@@ -27,6 +27,11 @@ import { basename } from 'node:path';
 import { awakeNow, createLogger } from '@bendyline/gezel';
 import { listProcessSnapshots } from '@bendyline/gezel-client/node';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import {
+  type NativeCapacityLease,
+  type NativeCapacityOptions,
+  acquireNativeCapacity,
+} from './device-capacity.js';
 
 const log = createLogger('native');
 
@@ -148,6 +153,7 @@ export interface NativeEngineLifecycleSnapshot {
 }
 
 export interface NativeEngineSupervisorOptions {
+  capacity?: NativeCapacityOptions;
   /**
    * Resolves to the launch spec on demand. Called each time the
    * supervisor needs to start the engine, so the caller can observe
@@ -337,6 +343,53 @@ export function __resetLiveEnginePidsForTest(): void {
 }
 
 export class NativeEngineSupervisor {
+  private readonly capacity?: NativeCapacityOptions;
+  private capacityLease: NativeCapacityLease | undefined;
+  private capacityAbort: AbortController | undefined;
+  private startFlight: Promise<void> | undefined;
+  private activeRequests = 0;
+  private stopFlight: Promise<void> | undefined;
+  private yieldFlight: Promise<void> | undefined;
+
+  get coordinatesCapacity(): boolean {
+    return this.capacity !== undefined;
+  }
+
+  async withRequest<T>(run: () => Promise<T>): Promise<T> {
+    await this.yieldForWaitingCapacity();
+    this.activeRequests++;
+    try {
+      return await run();
+    } finally {
+      this.activeRequests--;
+      this.markUsed();
+    }
+  }
+
+  /** Stop accepting fresh GPU work while an older memory claim needs this model to drain. */
+  async yieldForWaitingCapacity(signal?: AbortSignal): Promise<void> {
+    if (this.yieldFlight) return this.yieldFlight;
+    if (!this.capacityLease) return;
+    const flight = (async () => {
+      if (!(await this.capacityLease?.shouldYield())) return;
+      const started = awakeNow();
+      while (this.engineBusy() && this.state.kind === 'running') {
+        signal?.throwIfAborted();
+        if (awakeNow() - started > 5 * 60_000)
+          throw new Error('Engine is busy serving requests while another model waits for memory.');
+        await sleep(100);
+      }
+      signal?.throwIfAborted();
+      if (this.state.kind !== 'running') return;
+      this.onLog(`${this.logPrefix} releasing idle engine for a waiting memory request`);
+      await this.runFreeze();
+      await this.stop('memory-pressure');
+    })().finally(() => {
+      if (this.yieldFlight === flight) this.yieldFlight = undefined;
+    });
+    this.yieldFlight = flight;
+    return flight;
+  }
   private state: State = { kind: 'stopped' };
   private readonly resolveLaunch: () => Promise<NativeEngineLaunch>;
   private readonly idleTimeoutMs: number;
@@ -425,6 +478,7 @@ export class NativeEngineSupervisor {
   private readonly exitListeners = new Set<(snapshot: NativeEngineExitSnapshot) => void>();
 
   constructor(opts: NativeEngineSupervisorOptions) {
+    this.capacity = opts.capacity;
     this.resolveLaunch = opts.resolveLaunch;
     // 30 min by default — aligns with `OLLAMA_TURN_TIMEOUT_MS` in chat/manager.ts,
     // the accepted ceiling for a single local-engine turn. The previous 10-min
@@ -577,9 +631,11 @@ export class NativeEngineSupervisor {
    * already running, no-op. Rejects if the restart budget is exhausted.
    */
   async ensureRunning(): Promise<NativeEngineLaunch> {
+    if (this.stopFlight) await this.stopFlight;
     this.lastUsedAt = Date.now();
     this.lastUsedAwakeAt = awakeNow();
     this.pressureDeadlineAt = undefined;
+    if (this.startFlight) await this.startFlight;
     if (this.state.kind === 'running') {
       this.resetIdleTimer();
       return this.state.launch;
@@ -630,9 +686,24 @@ export class NativeEngineSupervisor {
     this.lastUsedAwakeAt = awakeNow();
     this.pressureDeadlineAt = undefined;
     this.resetIdleTimer();
+    if (this.capacityLease) void this.pressureProbe();
   }
 
-  async stop(reason: 'stop' | 'idle' | 'memory-pressure' = 'stop'): Promise<void> {
+  async stop(
+    reason: 'stop' | 'idle' | 'memory-pressure' | 'health-restart' = 'stop',
+  ): Promise<void> {
+    if (this.stopFlight) return this.stopFlight;
+    const flight = this.stopChild(reason).finally(() => {
+      if (this.stopFlight === flight) this.stopFlight = undefined;
+    });
+    this.stopFlight = flight;
+    return flight;
+  }
+
+  private async stopChild(reason: string): Promise<void> {
+    this.capacityAbort?.abort(new Error(`${this.logPrefix} engine start cancelled`));
+    this.startupAbort?.abort(new Error(`${this.logPrefix} engine start cancelled`));
+    await this.startFlight?.catch(() => {});
     this.clearIdleTimer();
     this.clearFreezeTimer();
     this.clearHealthTimer();
@@ -644,7 +715,18 @@ export class NativeEngineSupervisor {
     await killGracefully(child);
   }
 
-  private async startFresh(isRetry = false, recoveryAttempt = 0): Promise<void> {
+  private async startFresh(): Promise<void> {
+    if (this.startFlight) return this.startFlight;
+    this.capacityAbort = new AbortController();
+    const flight = this.startFreshAttempt().finally(() => {
+      if (this.startFlight === flight) this.startFlight = undefined;
+      this.capacityAbort = undefined;
+    });
+    this.startFlight = flight;
+    return flight;
+  }
+
+  private async startFreshAttempt(isRetry = false, recoveryAttempt = 0): Promise<void> {
     const now = Date.now();
     this.recentStarts = this.recentStarts.filter((t) => now - t < RESTART_WINDOW_MS);
     if (this.recentStarts.length >= RESTART_BUDGET) {
@@ -653,8 +735,6 @@ export class NativeEngineSupervisor {
         `${this.logPrefix} crashed too many times; stopping restart attempts for a minute`,
       );
     }
-    this.recentStarts.push(now);
-
     const launch = normalizeNativeEngineLaunch(await this.resolveLaunch());
     // First spawn of this process? Sweep up any matching orphans from
     // previous app launches that didn't get a chance to clean up
@@ -670,6 +750,31 @@ export class NativeEngineSupervisor {
         );
       });
     }
+    this.capacityAbort?.signal.throwIfAborted();
+    if (this.capacity) {
+      this.capacityLease = await acquireNativeCapacity(
+        this.capacity,
+        launch,
+        this.capacityAbort!.signal,
+        (message) => {
+          const line = `${this.logPrefix} memory-admission: ${message}`;
+          this.onLog(line);
+          try {
+            this.onRawLine?.(line);
+          } catch {
+            /* progress cannot abort admission */
+          }
+          for (const listener of this.logListeners) {
+            try {
+              listener(line);
+            } catch {
+              /* progress cannot abort admission */
+            }
+          }
+        },
+      );
+    }
+    this.recentStarts.push(Date.now());
     let child: ChildProcess;
     try {
       child = this.spawn(launch.command, launch.args, {
@@ -682,6 +787,7 @@ export class NativeEngineSupervisor {
         ...windowsHeadlessSpawnOptions(),
       });
     } catch (err) {
+      await this.releaseCapacity();
       throw nativeSpawnError(this.logPrefix, launch, err);
     }
     // Register the child as a live, owned engine so no sibling
@@ -785,7 +891,16 @@ export class NativeEngineSupervisor {
     this.state = { kind: 'starting', launch, child, readyPromise };
 
     try {
-      await readyPromise;
+      const lease = this.capacityLease;
+      await Promise.all([
+        readyPromise,
+        child.pid !== undefined ? lease?.bind(child.pid) : Promise.resolve(),
+      ]);
+      await lease?.ready();
+      this.startupAbort?.signal.throwIfAborted();
+      this.capacityAbort?.signal.throwIfAborted();
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`${this.logPrefix} child exited before becoming ready`);
       this.currentReachedReady = true;
       this.state = { kind: 'running', launch, child, healthFails: 0 };
       this.resetIdleTimer();
@@ -808,6 +923,7 @@ export class NativeEngineSupervisor {
         this.expectedExitReason ??= 'startup-abort';
         await killGracefully(child);
       }
+      await this.releaseCapacity();
       this.state = { kind: 'stopped' };
       // Singleton-conflict recovery: a hard-singleton engine (ds4-server)
       // refuses to start while an owner-less orphan from a prior launch still
@@ -825,7 +941,7 @@ export class NativeEngineSupervisor {
             `${this.logPrefix} cleared ${cleared} blocking orphan(s) after a failed start — retrying once`,
           );
           this.startupAbort = null;
-          return await this.startFresh(true, recoveryAttempt);
+          return await this.startFreshAttempt(true, recoveryAttempt);
         }
       }
       // Owner-driven recovery: give the launch resolver a chance to degrade
@@ -850,7 +966,7 @@ export class NativeEngineSupervisor {
             `${this.logPrefix} start failed (${panicKind ?? 'no panic classified'}) — owner degraded the launch plan, retrying (${recoveryAttempt + 1}/${MAX_STARTUP_RECOVERIES})`,
           );
           this.startupAbort = null;
-          return await this.startFresh(isRetry, recoveryAttempt + 1);
+          return await this.startFreshAttempt(isRetry, recoveryAttempt + 1);
         }
       }
       throw err;
@@ -1097,6 +1213,7 @@ export class NativeEngineSupervisor {
   }
 
   private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+    void this.releaseCapacity();
     const priorState = this.state;
     const exitedAt = Date.now();
     const expectedReason = this.expectedExitReason;
@@ -1223,7 +1340,7 @@ export class NativeEngineSupervisor {
 
   private engineBusy(): boolean {
     try {
-      return this.isBusy?.() === true;
+      return this.activeRequests > 0 || this.isBusy?.() === true;
     } catch (error) {
       this.onLog(
         `${this.logPrefix} busy predicate failed: ${error instanceof Error ? error.message : error}`,
@@ -1233,10 +1350,19 @@ export class NativeEngineSupervisor {
   }
 
   private async pressureProbe(): Promise<void> {
-    if (!this.memoryPressure || this.pressureCheckInFlight || this.state.kind !== 'running') return;
+    if (
+      (!this.memoryPressure && !this.capacityLease) ||
+      this.pressureCheckInFlight ||
+      this.state.kind !== 'running'
+    )
+      return;
     this.pressureCheckInFlight = true;
     try {
-      const pressure = await this.memoryPressure();
+      const requested = (await this.capacityLease?.shouldYield()) ?? false;
+      if (requested && this.yieldFlight) return;
+      const pressure = requested
+        ? { pressured: true, detail: 'another engine is waiting for memory' }
+        : ((await this.memoryPressure?.()) ?? { pressured: false });
       if (!pressure.pressured || this.state.kind !== 'running') {
         this.pressureDeadlineAt = undefined;
         this.pressureHeldSince = undefined;
@@ -1247,7 +1373,7 @@ export class NativeEngineSupervisor {
       if (this.pressureHeldSince === undefined) this.pressureHeldSince = now;
       this.pressureDeadlineAt = this.lastUsedAwakeAt + this.pressureIdleTimeoutMs;
       const busy = this.engineBusy();
-      if (now < this.pressureDeadlineAt || busy) {
+      if ((!requested && now < this.pressureDeadlineAt) || busy) {
         // The only lever here is "stop MY engine once MY engine is idle", and
         // a busy one is out of reach of it. Saying so beats the silence that
         // preceded it: a four-hour turn on an oversubscribed card ran this
@@ -1269,10 +1395,18 @@ export class NativeEngineSupervisor {
         }
         return;
       }
+      if (requested) {
+        // Use the same gate as incoming requests, including while flushing.
+        // A new request must not enter the engine between idle detection and
+        // the awaited cache flush that precedes releasing its memory.
+        await this.yieldForWaitingCapacity();
+        return;
+      }
       this.onLog(
         `${this.logPrefix} memory pressure${pressure.detail ? ` (${pressure.detail})` : ''} — flushing and stopping idle engine`,
       );
       await this.runFreeze();
+      if (this.engineBusy()) return;
       await this.stop('memory-pressure');
     } catch (error) {
       this.onLog(
@@ -1281,6 +1415,14 @@ export class NativeEngineSupervisor {
     } finally {
       this.pressureCheckInFlight = false;
     }
+  }
+
+  private async releaseCapacity(): Promise<void> {
+    const lease = this.capacityLease;
+    this.capacityLease = undefined;
+    await lease
+      ?.release()
+      .catch((error) => this.onLog(`${this.logPrefix} memory lease release failed: ${error}`));
   }
 
   private async healthProbe(): Promise<void> {
@@ -1300,12 +1442,9 @@ export class NativeEngineSupervisor {
     this.state.healthFails++;
     if (this.state.healthFails >= HEALTH_FAIL_THRESHOLD) {
       this.onLog(`${this.logPrefix} ${HEALTH_FAIL_THRESHOLD} health failures — restarting`);
-      const child = this.state.child;
-      this.expectedExitReason = 'health-restart';
-      this.state = { kind: 'stopped' };
-      await killGracefully(child);
+      await this.stop('health-restart');
       try {
-        await this.startFresh();
+        await this.ensureRunning();
       } catch (err) {
         this.onLog(`${this.logPrefix} restart failed: ${err instanceof Error ? err.message : err}`);
       }

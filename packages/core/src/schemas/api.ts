@@ -112,6 +112,7 @@ import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
 import { CraftbookSuggestionSchema } from './craftbook.js';
 import { DiffpackSummarySchema } from './diffpack.js';
+import { Ds4ConfigSchema } from './ds4-config.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
@@ -125,6 +126,7 @@ import {
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
 import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
+import { LlamaCppV4ConfigResetSchema, LlamaCppV4ConfigSchema } from './llama-cpp-config.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { NativeEngineNameSchema } from './native-engines.js';
 import {
@@ -1074,7 +1076,7 @@ export const GezelConfigSchema = z.object({
    * granted a larger context window. Worth it for, say, a night-shift model
    * that will never be handed a screenshot.
    *
-   * Off by default because an mmproj-backed llama-server 501s on slot
+   * Enabled by default even though an mmproj-backed llama-server 501s on slot
    * save/restore, so gezel cannot persist that model's KV to disk. Scope
    * that precisely, because it is narrower than it first reads: llama-server's
    * own in-request prefix reuse (`cache_prompt` + `id_slot`, which
@@ -1085,8 +1087,9 @@ export const GezelConfigSchema = z.object({
    * a fresh session for the same gezel skip the system-prompt prefill. The
    * cost lands on cold starts, not on every turn.
    *
-   * llama.cpp only. MLX has no slot save/restore to lose (and no vision path
-   * yet — see `MLX_VISION_SUPPORTED`).
+   * The cold-start trade applies to llama.cpp's mmproj path. ds4 uses this
+   * same per-model preference for its `--vision` encoder, while MLX has no
+   * vision path yet — see `MLX_VISION_SUPPORTED`.
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —
@@ -1395,67 +1398,7 @@ export const GezelConfigSchema = z.object({
    * window, and memory admission may grant less.
    */
   modelContextOverrides: z.record(z.string(), z.number().int().positive()).optional(),
-  /**
-   * ds4-only: base URL of an already-running `ds4-server` to talk to
-   * instead of supervising the bundled binary. Mirrors `llamaCppBaseUrl`
-   * — the testable dev path (`ds4-server --model … --port 8000`). Env
-   * override: `GEZEL_DS4_SERVER_URL`.
-   */
-  ds4BaseUrl: z.string().optional(),
-  /**
-   * ds4-only: explicit GGUF path passed to `ds4-server --model`. Only
-   * antirez's DeepSeek-V4 GGUFs load (ds4 is not a general GGUF runner).
-   * Env override: `GEZEL_DS4_MODEL`.
-   */
-  ds4ModelPath: z.string().optional(),
-  /**
-   * ds4-only: context window (tokens) `ds4-server` boots with (`--ctx`).
-   * DeepSeek V4 supports up to 1M; the server offloads cold KV to SSD via
-   * its own `--kv-disk-dir`. Unset → 128K on ordinary workstations and
-   * 256K only on machines with at least 192 GiB of memory.
-   */
-  ds4NumCtx: z.number().int().positive().optional(),
-  /**
-   * ds4-only: stream MoE expert weights from SSD instead of full residency
-   * (`--ssd-streaming`). Streaming is the safe default. `false` is honored
-   * only when the selected GGUF plus a fixed runtime/OS reserve fits a local
-   * unified-memory target; otherwise the service keeps streaming enabled.
-   */
-  ds4SsdStreaming: z.boolean().optional(),
-  /**
-   * ds4-only: routed-expert SSD-streaming cache budget in GiB
-   * (`--ssd-streaming-cache-experts NGB`). The working-set ceiling that
-   * decouples ds4's resident footprint from the on-disk weight size — and
-   * what the capacity broker bills for this engine. Unset → the selected
-   * model's catalog recommendation. Manual values are clamped to preserve
-   * runtime/OS headroom.
-   */
-  ds4CacheExpertsGb: z.number().positive().optional(),
-  /**
-   * ds4-only: DSpark speculative decoding (`--dspark --mtp <support.gguf>`).
-   *
-   * - `off`  — never draft.
-   * - `on`   — draft whenever a support model resolves and the engine allows it.
-   * - `auto` — draft only where it has been shown to pay: a CUDA host running
-   *            a fully resident model. Default.
-   *
-   * `auto` deliberately excludes Metal. Measured 2026-08-26 on an M5 Max
-   * (DeepSeek V4 Flash IQ2_XXS, full residency, seed-pinned A/B/C/A): baseline
-   * 38.4 tok/s, opportunistic 38.5, exact 36.7, and ds4's own
-   * `DS4_DSPARK_STATS` accounting reported net_saved of -1301 ms and -1038 ms
-   * respectively. Verification of a 5-token block through a 284B MoE costs more
-   * than the single-token decodes it skips. Apple Silicon reports
-   * `gpuMemoryKind: 'unified'` exactly like GB10 does, so residency/unified
-   * memory is NOT a sufficient predicate — the backend is.
-   */
-  ds4Dspark: z.enum(['off', 'on', 'auto']).optional(),
-  /**
-   * ds4-only: absolute path to a DSpark support GGUF, overriding whatever the
-   * installed model carries. The escape hatch for evaluating DSpark on hardware
-   * before any catalog entry declares a `draftModel` (which would make it a
-   * mandatory download for every install of that entry).
-   */
-  ds4DsparkModelPath: z.string().optional(),
+  ...Ds4ConfigSchema.shape,
   /**
    * llama-cpp-only: mid-stream idle cap (seconds). After this many
    * seconds with no SSE chunk arriving, the in-flight chat completion
@@ -1536,6 +1479,7 @@ export const GezelConfigSchema = z.object({
    * auto-detect because the trade-off is workload-specific.
    */
   llamaCppMlock: z.boolean().optional(),
+  ...LlamaCppV4ConfigSchema.shape,
   /**
    * Flash Attention mode for llama-server (`--flash-attn on|off|auto`).
    * On modern Metal/CUDA/Vulkan builds FA is meaningfully faster
@@ -1566,7 +1510,7 @@ export const GezelConfigSchema = z.object({
    * on the GPU. The lever for running a big MoE (qwen3.6-35b-a3b,
    * gpt-oss-120b, …) on a constrained-VRAM discrete GPU. Pair with
    * `llamaCppNGpuLayers: -1`. For a partial split use `llamaCppNCpuMoe`
-   * instead. Default unset (off). Phase v2's offload planner sets this
+   * instead. Default unset (off). The hardware offload planner sets this
    * automatically when a model won't otherwise fit VRAM.
    */
   llamaCppCpuMoe: z.boolean().optional(),
@@ -1632,7 +1576,7 @@ export const GezelConfigSchema = z.object({
    * lossless, but experimental model/backend pairs must still be A/B tested.
    * `ngram-mod`/`ngram-simple` need no draft model; `draft-mtp`/
    * `draft-eagle3` use a model prediction head; `draft-simple` needs a
-   * separate `llamaCppDraftModelPath`. Default unset (off).
+   * separate `llamaCppDraftModelPath`. Unset auto-selects `draft-mtp` only for a confirmed MTP head; otherwise it stays off.
    */
   llamaCppSpecType: z
     .enum([
@@ -2953,6 +2897,7 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
     .nullable()
     .optional(),
   llamaCppCpuMoe: z.boolean().nullable().optional(),
+  ...LlamaCppV4ConfigResetSchema.shape,
   llamaCppSwaFull: z.boolean().nullable().optional(),
   // MLX Advanced overrides the Settings UI can reset to their default —
   // same reset-on-null contract as the llama-cpp fields above.

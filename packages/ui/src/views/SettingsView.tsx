@@ -2584,7 +2584,7 @@ export function SettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'ds4' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('ds4')}
-                      title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2). Streams the experts from disk so a frontier-class model runs on this device."
+                      title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2/5.3). Streams the experts from disk so a frontier-class model runs on this device."
                     >
                       {ds4TabLabel}
                     </button>

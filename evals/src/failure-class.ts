@@ -123,7 +123,13 @@ function countInLog(input: ClassifyTrialInput, pattern: RegExp): number {
 // Shape contract with the product: ProviderPool logs
 // `capacity broker denied <key>: <reason>` at both deny sites via
 // capacityDenialLogLine (packages/service/src/providers/native/provider-pool.ts).
-const CAPACITY_DENIAL = /capacity broker denied [^\n]*budget exhausted/;
+// The broker has two terminal shapes. An immediate over-budget refusal emits
+// the structured log line below; a temporarily unavailable host waits for its
+// bounded admission window and then surfaces the user-facing retry message.
+// The latter can be wrapped by the harness's repair-aborted/model-stuck text,
+// but no provider request was made, so it is still infrastructure capacity.
+const CAPACITY_DENIAL =
+  /capacity broker denied [^\n]*budget exhausted|Not enough memory became available for this model\. Current engine work is still protected/;
 const CONTEXT_OVERFLOW =
   /On-device model ran out of working memory|context overflow: [\d,]+ tokens|exceeds the available context size/;
 const ENGINE_HUNG_REASON = /engine appears hung|no daemon activity for|image render wedged/;

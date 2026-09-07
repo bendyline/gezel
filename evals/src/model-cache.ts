@@ -90,7 +90,11 @@ async function removeIfDangling(path: string): Promise<void> {
  * each fresh trial re-hits the same poisoned state. Wiping the partial
  * pre-install forces a clean download.
  *
- * No-op when the directory doesn't exist or contains no partials.
+ * No-op when the directory doesn't exist or contains no partials. Callers
+ * must not use this for ds4: its artifacts are routinely 90-200+ GiB and the
+ * shared model downloader deliberately resumes verified HTTP/Xet partials.
+ * Throwing that progress away turns an interrupted eval into another
+ * multi-hour transfer.
  */
 async function purgeStalePartials(dir: string, log: (line: string) => void): Promise<void> {
   let entries: string[];
@@ -113,7 +117,7 @@ async function purgeStalePartials(dir: string, log: (line: string) => void): Pro
   }
 }
 
-export type EngineKey = 'llama-cpp' | 'sd-cpp' | 'mlx';
+export type EngineKey = 'llama-cpp' | 'sd-cpp' | 'mlx' | 'ds4';
 
 /**
  * Default warm-cache root. Lives outside `~/.gezel` so a clean install of
@@ -219,6 +223,7 @@ export async function staleInstallReason(opts: {
     sha256?: string;
     huggingfaceRepo?: string;
     weightsFilename?: string;
+    visionEncoderFilename?: string;
   };
   try {
     installed = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
@@ -252,6 +257,12 @@ export async function staleInstallReason(opts: {
   // just-downloaded model stale, re-evicting and refetching it every run.
   if (expected.draftFilename && !existsSync(join(dir, basename(expected.draftFilename)))) {
     return `missing draft (MTP) weights ${basename(expected.draftFilename)} added by catalog`;
+  }
+  if (
+    expected.visionEncoderFilename &&
+    !existsSync(join(dir, basename(expected.visionEncoderFilename)))
+  ) {
+    return `missing vision encoder ${basename(expected.visionEncoderFilename)} added by catalog`;
   }
   if (
     expected.catalogVersion &&
@@ -379,7 +390,13 @@ export async function ensureWarmModel(opts: {
   // before re-invoking install. Without this, sd-cpp's SDXL warm path
   // sees the partial, declines to overwrite it, and reports `done` on a
   // never-finished file — leaving the cache permanently broken.
-  await purgeStalePartials(modelDirInHome(cacheRoot, engine, modelId), log);
+  // Preserve ds4's resumable partials. The older cleanup exists for image and
+  // llama.cpp caches whose historical installers could leave poisoned files;
+  // ds4 uses the current byte-range/Xet downloader and its models are far too
+  // large to restart unconditionally.
+  if (engine !== 'ds4') {
+    await purgeStalePartials(modelDirInHome(cacheRoot, engine, modelId), log);
+  }
 
   log(`[cache] warming ${engine}/${modelId} (this can take several minutes on first use)…`);
   const spawned = await spawnTrialDaemon({
@@ -387,7 +404,12 @@ export async function ensureWarmModel(opts: {
     ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
     ...(opts.sdBin ? { sdBin: opts.sdBin } : {}),
     stderrLogPath: join(cacheRoot, `warm-${engine}-stderr.log`),
-    timeoutMs: 60_000,
+    // Gilde's full local checkout includes the large community tier; a cold
+    // validator/index boot can legitimately exceed the old 60s cap before
+    // the download request is even issued. Match the normal trial-daemon
+    // startup budget so warm-up doesn't misclassify catalog boot as a model
+    // failure.
+    timeoutMs: 120_000,
   });
 
   try {
@@ -398,6 +420,12 @@ export async function ensureWarmModel(opts: {
       await spawned.client.updateConfig({
         provider: 'llama-cpp',
         defaultModel: { 'llama-cpp': modelId },
+        firstRunCompleted: true,
+      });
+    } else if (engine === 'ds4') {
+      await spawned.client.updateConfig({
+        provider: 'ds4',
+        defaultModel: { ds4: modelId },
         firstRunCompleted: true,
       });
     } else {
@@ -456,6 +484,11 @@ export async function ensureWarmModel(opts: {
       await spawned.client.installLlamaCppModel(modelId, handler, opts.signal, {
         skipCompanion: true,
       });
+    } else if (engine === 'ds4') {
+      // ds4's vision encoder is part of the model's declared payload rather
+      // than an optional product companion, so the normal install downloads
+      // and verifies it alongside the text weights.
+      await spawned.client.installDs4Model(modelId, handler, opts.signal);
     } else {
       await spawned.client.pullImageModel(modelId, handler, opts.signal);
     }

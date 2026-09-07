@@ -33,6 +33,14 @@ const failures = [];
 
 const rootPkg = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
 const devDeps = rootPkg.devDependencies ?? {};
+const validateSteps = (rootPkg.scripts?.['validate:unlocked'] ?? '').split(' && ');
+
+if (!validateSteps.includes('pnpm check:release-toolchain')) {
+  failures.push('validate:unlocked must run the npm release-toolchain preflight');
+}
+if (!validateSteps.includes('pnpm check:npm-release-candidate:unbuilt')) {
+  failures.push('validate:unlocked must rehearse release-stamped npm tarballs after building');
+}
 
 const EXACT = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -175,8 +183,8 @@ try {
   if (!workflow.includes('pnpm install --lockfile-only --frozen-lockfile')) {
     failures.push('publish-npm.yml must verify frozen lockfile consistency after release');
   }
-  if (!workflow.includes('node scripts/rehearse-npm-release.mjs')) {
-    failures.push('publish-npm.yml must rehearse release-stamped tarballs before publishing');
+  if (!workflow.includes('xvfb-run -a pnpm validate')) {
+    failures.push('publish-npm.yml must run the canonical validation gate before publishing');
   }
   if (!workflow.includes('node scripts/verify-published-npm-release.mjs')) {
     failures.push('publish-npm.yml must verify exact registry artifacts after publishing');

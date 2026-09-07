@@ -26,11 +26,11 @@ export const ProviderNameSchema = z.enum([
   'ollama',
   'llama-cpp',
   'mlx',
-  // DwarfStar/ds4 — antirez's DeepSeek-V4-specific engine. Like llama-cpp/mlx
-  // it serves an OpenAI-compatible HTTP API from a supervised native binary,
-  // but it only loads antirez's DeepSeek-V4 GGUFs and streams MoE experts from
-  // SSD so a 284B model fits a 64GB Mac. GPU-only (Metal/CUDA); see the ds4
-  // provider for the availability gating.
+  // DwarfStar/ds4 — antirez's specialized DeepSeek/GLM MoE engine. Like
+  // llama-cpp/mlx it serves an OpenAI-compatible HTTP API from a supervised
+  // native binary, but it only loads GGUF layouts the engine explicitly
+  // supports. GPU-only (Metal/CUDA/ROCm upstream); see the ds4 provider for
+  // Gezel's platform availability gating.
   'ds4',
   // Inference hosted on another paired gezel daemon ("remote models"). A
   // single enum arm fronts a family of paired servers; the specific server is

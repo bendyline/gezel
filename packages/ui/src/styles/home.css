@@ -337,7 +337,9 @@
   color: var(--accent-selection-ink);
 }
 
-.gezel-chat-session-menu .gz-select-item[data-highlighted] .session-row-meta {
+.gezel-chat-session-menu
+  .gz-select-item[data-highlighted]
+  :is(.session-row-meta, .session-row-action) {
   color: inherit;
 }
 

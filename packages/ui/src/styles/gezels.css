@@ -531,3 +531,23 @@
   letter-spacing: 0.06em;
   color: #888;
 }
+
+/* Hair choices use the accessory tiles, with native radio keyboard behavior. */
+.hair-choice {
+  position: relative;
+  cursor: pointer;
+}
+.hair-choice input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.hair-choice:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.hair-choice[data-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}

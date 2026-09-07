@@ -95,6 +95,26 @@ describe('PoppetjeManager.set', () => {
     expect(read?.hat).toBe('beanie');
   });
 
+  it('keeps styling choices across restart and rename without changing the wood key', async () => {
+    const initial = await manager.get('imara', 'Imara');
+    const styled = {
+      ...initial,
+      hairShape: 'extra-long' as const,
+      bangs: 'curtain' as const,
+      hairPart: 'right' as const,
+    };
+    await manager.set('imara', 'Imara', styled);
+    const restarted = new PoppetjeManager({ home });
+    expect(await restarted.get('imara', 'New name')).toEqual({ ...styled, name: 'New name' });
+    const raw = JSON.parse(await readFile(join(gezelDir(home, 'imara'), 'poppetje.json'), 'utf8'));
+    expect(raw).toMatchObject({
+      key: 'imara',
+      hairShape: 'extra-long',
+      bangs: 'curtain',
+      hairPart: 'right',
+    });
+  });
+
   it('forces the key field to the gezel id', async () => {
     const initial = await manager.get('imara', 'Imara');
     const tampered = { ...initial, key: 'attacker-id' };

@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { type JSX, useId } from 'react';
 import { feltForSkin, mixHex } from './color.js';
+import { CarvedHair } from './flowing-hair.js';
 import { archFor, buildBodyPath, resolveLayout, scaleFor, whorlRing } from './geometry.js';
 import { type ItemCtx, renderAccessory, renderDress, renderHatCrown, renderHood } from './items.js';
 
@@ -20,7 +21,7 @@ export type PoppetjeVariant = 'full' | 'headshot' | 'icon';
 interface PoppetjeProps {
   poppetje: PoppetjeStruct;
   variant?: PoppetjeVariant;
-  /** Pixel dimension of the rendered SVG's longest axis. */
+  /** Pixel width; height follows the chosen viewBox's aspect ratio. */
   size?: number;
   /** Wood-grain treatment — default `wavy`. Use `none` to skip the filter (perf). */
   grainStyle?: GrainStyle;
@@ -57,16 +58,16 @@ interface GrainCharacterProfile {
 
 const GRAIN_CHARACTER_PROFILES: Record<GrainCharacter, GrainCharacterProfile> = {
   fine: {
-    fiberFrequency: 1.42,
+    fiberFrequency: 1.65,
     waveFrequency: 1.18,
     displacement: 0.42,
     opacity: 1.08,
     soften: 0.78,
   },
   flowing: {
-    fiberFrequency: 0.68,
+    fiberFrequency: 0.58,
     waveFrequency: 0.72,
-    displacement: 1.85,
+    displacement: 3.6,
     opacity: 1.2,
     soften: 1.08,
   },
@@ -132,10 +133,10 @@ export function Poppetje({
   const [presetStreakX = 0.12, presetStreakY = 0.016] = (preset.streakFreq ?? '0.12 0.016')
     .split(' ')
     .map(Number);
-  const fiberWidthVariation = 0.86 + (grainSeed % 9) * 0.035;
+  const fiberWidthVariation = 0.7 + (grainSeed % 9) * 0.075;
   const waveVariation = 0.9 + (grainSeed % 7) * 0.033;
-  const opacityVariation = 0.9 + (grainSeed % 9) * 0.025;
-  const softenVariation = 0.9 + (Math.floor(grainSeed / 2) % 7) * 0.03;
+  const opacityVariation = 0.72 + (Math.floor(grainSeed / 11) % 9) * 0.09;
+  const softenVariation = 0.72 + (Math.floor(grainSeed / 2) % 7) * 0.08;
   const displacementVariation = 0.86 + (Math.floor(grainSeed / 3) % 8) * 0.04;
   const grainWaveFrequency = `${(0.022 * waveVariation * grainProfile.waveFrequency).toFixed(
     4,
@@ -143,7 +144,7 @@ export function Poppetje({
   const grainStreakFrequency = `${(
     presetStreakX * fiberWidthVariation * grainProfile.fiberFrequency
   ).toFixed(4)} ${(presetStreakY / fiberWidthVariation).toFixed(4)}`;
-  const grainOpacity = (preset.opacity ?? 0.12) * opacityVariation * grainProfile.opacity;
+  const grainOpacity = (preset.opacity ?? 0.12) * opacityVariation * grainProfile.opacity * 0.88;
   const grainSoften = (preset.soften ?? 0.35) * softenVariation * grainProfile.soften;
   const grainDisplacement =
     (preset.dispScale ?? 0) * displacementVariation * grainProfile.displacement;
@@ -161,10 +162,10 @@ export function Poppetje({
           : 1
         : 0
       : Math.max(0, Math.floor(whorls));
-  const whorlOpacity = Math.min(0.38, 0.17 + grainOpacity * 0.58);
+  const whorlOpacity = Math.min(0.46, 0.22 + grainOpacity * 0.65);
   // Explicit cathedral contours supplement the stronger filter texture, but
   // stay translucent enough to avoid reading as a leaf-shaped shirt graphic.
-  const cathedralOpacity = Math.min(0.12, 0.035 + grainOpacity * 0.24);
+  const cathedralOpacity = Math.min(0.24, 0.09 + grainOpacity * 0.45);
 
   const hat = g.hat ?? null;
   const dress = g.dress ?? null;
@@ -174,6 +175,7 @@ export function Poppetje({
   const expression = g.expression ?? 'smile';
   const pattern = g.shirtPattern ?? 'plain';
   const showHair = !hat;
+  const flowingHair = ['bob', 'medium', 'long', 'extra-long', 'braids'].includes(g.hairShape);
 
   const { skin, skin2, shirt, shirtAccent } = g;
 
@@ -182,14 +184,14 @@ export function Poppetje({
   // that paint reacts to one consistent, warm studio light. Asymmetric light
   // is the strongest cue that the simple SVG silhouettes are turned objects
   // rather than flat badges.
-  const bodyLight = mixHex(shirt, '#fff2d4', 0.14);
+  const bodyLight = mixHex(shirt, '#fff2d4', 0.23);
   const bodyMid = mixHex(shirt, shirtAccent, 0.08);
-  const bodyShadow = mixHex(shirtAccent, '#24160d', 0.22);
-  const bodyRim = mixHex(shirtAccent, '#120c08', 0.34);
-  const skinLight = mixHex(skin, '#fff1d8', 0.2);
+  const bodyShadow = mixHex(shirt, '#33251d', 0.32);
+  const bodyRim = mixHex(shirtAccent, '#241b16', 0.2);
+  const skinLight = mixHex(skin, '#fff1d8', 0.26);
   const skinMid = mixHex(skin, skin2, 0.1);
   const skinShadow = mixHex(skin2, '#2b190f', 0.18);
-  const skinRim = mixHex(skin2, '#130d09', 0.32);
+  const skinRim = mixHex(skin2, '#382219', 0.16);
   const hairLight = mixHex(g.hair, '#f0cf9b', 0.1);
   const hairShadow = mixHex(g.hair, '#090705', 0.32);
 
@@ -220,7 +222,7 @@ export function Poppetje({
     eyeR: 1.55 + (Math.floor(grainSeed / 4) % 4) * 0.1, // 1.55 … 1.85
     mouthDY: (Math.floor(grainSeed / 8) % 3) - 1, // -1 … 1
     mouthW: 0.92 + (Math.floor(grainSeed / 16) % 3) * 0.09, // 0.92 … 1.10
-    blush: 0.12 + (Math.floor(grainSeed / 2) % 3) * 0.04,
+    blush: 0.22 + (Math.floor(grainSeed / 2) % 3) * 0.035,
   };
   const mY = 10 + fv.mouthDY;
 
@@ -240,6 +242,9 @@ export function Poppetje({
     scarfBandFill: `url(#${id}-scarf-band)`,
     shirtFill: `url(#${id}-body)`,
     shirtAccentFill: `url(#${id}-accent)`,
+    linenFill: `url(#${id}-linen)`,
+    strawFill: `url(#${id}-straw)`,
+    hoodFill: `url(#${id}-hood)`,
     hasHat: !!hat,
   };
 
@@ -250,20 +255,23 @@ export function Poppetje({
   const headTop = L.headCY - L.headR;
   const headSize = L.headR * 2;
   const shoulderSpan = (L.baseY - L.shoulderY) * 0.35;
-  // Hats are drawn inside the scaled head group and reach past the head
-  // ellipse — the straw brim is the widest (29 units) and the beanie pompom
-  // the tallest (35.3). A head-and-shoulders crop budgeted for the head alone
-  // shears them off the moment a frame clips this overflow:visible SVG, so the
-  // headshot makes room for whatever the figure is wearing.
+  // The surrounding UI clips avatars. Budget for the worn silhouette in
+  // BOTH crops: a face-only box shears off pompoms, buns, and straw brims.
   const headUnit = L.headR / 22;
-  const hatHalfW = hat ? 30 * headUnit : 0;
-  const hatTopReach = hat ? 36 * headUnit : 0;
-  const headshotHalfW = Math.max(26, L.headR + 4, hatHalfW + 1);
-  const headshotTop = L.headCY - Math.max(L.headR, hatTopReach) - 4;
+  const hairTop = g.hairShape === 'bun' ? 32 : flowingHair ? 30 : g.hairShape === 'bald' ? 23 : 28;
+  const crownTop = (hat ? 36 : Math.max(hairTop, accessory === 'headphones' ? 29 : 28)) * headUnit;
+  const crownHalfW = (hat ? 30 : accessory === 'headphones' || flowingHair ? 27 : 24) * headUnit;
+  // Long lengths continue below portrait crops; fitting waist-length hair
+  // into a tiny avatar would make the face unreadably small.
+  const crownBottom = (!hat && flowingHair ? 33 : 25) * headUnit;
+  const iconSide = Math.max(crownHalfW * 2, crownTop + crownBottom) + 4;
+  const iconTop = L.headCY + (crownBottom - crownTop - iconSide) / 2;
+  const headshotHalfW = Math.max(26, crownHalfW + 2);
+  const headshotTop = L.headCY - crownTop - 3;
   const headshotBottom = headTop + headSize + 4 + shoulderSpan;
   const viewBox =
     variant === 'icon'
-      ? `${40 - L.headR - 4} ${headTop - 4} ${headSize + 8} ${headSize + 8}`
+      ? `${40 - iconSide / 2} ${iconTop} ${iconSide} ${iconSide}`
       : variant === 'headshot'
         ? `${40 - headshotHalfW} ${headshotTop} ${headshotHalfW * 2} ${headshotBottom - headshotTop}`
         : `0 0 ${W} ${H}`;
@@ -294,10 +302,9 @@ export function Poppetje({
         <linearGradient id={`${id}-body`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor={bodyRim} />
           <stop offset="0.08" stopColor={bodyShadow} />
-          <stop offset="0.28" stopColor={bodyMid} />
-          <stop offset="0.43" stopColor={bodyLight} />
-          <stop offset="0.58" stopColor={shirt} />
-          <stop offset="0.82" stopColor={bodyMid} />
+          <stop offset="0.25" stopColor={bodyLight} />
+          <stop offset="0.48" stopColor={shirt} />
+          <stop offset="0.72" stopColor={bodyMid} />
           <stop offset="0.94" stopColor={bodyShadow} />
           <stop offset="1" stopColor={bodyRim} />
         </linearGradient>
@@ -315,10 +322,10 @@ export function Poppetje({
           <stop offset="0.49" stopColor="#fff7e8" stopOpacity="0.025" />
           <stop offset="0.7" stopColor="#fff7e8" stopOpacity="0" />
         </linearGradient>
-        <radialGradient id={`${id}-head`} cx="0.31" cy="0.22" r="0.8" fx="0.27" fy="0.18">
+        <radialGradient id={`${id}-head`} cx="0.36" cy="0.3" r="0.72" fx="0.32" fy="0.25">
           <stop offset="0" stopColor={skinLight} />
-          <stop offset="0.3" stopColor={skinMid} />
-          <stop offset="0.66" stopColor={skin} />
+          <stop offset="0.42" stopColor={skin} />
+          <stop offset="0.7" stopColor={skinMid} />
           <stop offset="0.88" stopColor={skinShadow} />
           <stop offset="1" stopColor={skinRim} />
         </radialGradient>
@@ -327,13 +334,24 @@ export function Poppetje({
           <stop offset="0.42" stopColor={g.hair} />
           <stop offset="1" stopColor={hairShadow} />
         </radialGradient>
-        <linearGradient id={`${id}-felt`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor={feltShadow} />
-          <stop offset="0.32" stopColor={felt.felt} />
-          <stop offset="0.46" stopColor={feltLight} />
-          <stop offset="0.72" stopColor={felt.felt} />
+        <radialGradient
+          id={`${id}-hair-flow`}
+          gradientUnits="userSpaceOnUse"
+          cx={-12}
+          cy={-24}
+          r={58}
+          fx={-14}
+          fy={-25}
+        >
+          <stop offset="0" stopColor={mixHex(g.hair, '#f0cf9b', 0.22)} />
+          <stop offset="0.5" stopColor={g.hair} />
+          <stop offset="1" stopColor={hairShadow} />
+        </radialGradient>
+        <radialGradient id={`${id}-felt`} cx="0.32" cy="0.18" r="0.85">
+          <stop offset="0" stopColor={feltLight} />
+          <stop offset="0.5" stopColor={felt.felt} />
           <stop offset="1" stopColor={feltShadow} />
-        </linearGradient>
+        </radialGradient>
         <linearGradient id={`${id}-felt-band`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor={feltBandShadow} />
           <stop offset="0.42" stopColor={feltBandLight} />
@@ -349,11 +367,34 @@ export function Poppetje({
           <stop offset="0.42" stopColor={scarfBandLight} />
           <stop offset="1" stopColor={scarfBandShadow} />
         </linearGradient>
+        {hat === 'hood' && (
+          <radialGradient id={`${id}-hood`} gradientUnits="userSpaceOnUse" cx={-10} cy={-22} r={51}>
+            <stop offset="0" stopColor={mixHex(shirtAccent, shirt, 0.5)} />
+            <stop offset="0.55" stopColor={shirtAccent} />
+            <stop offset="1" stopColor={mixHex(shirtAccent, '#241b16', 0.28)} />
+          </radialGradient>
+        )}
         <linearGradient id={`${id}-accent`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor={bodyRim} />
           <stop offset="0.42" stopColor={mixHex(shirtAccent, '#fff0d0', 0.16)} />
           <stop offset="1" stopColor={bodyShadow} />
         </linearGradient>
+        <linearGradient id={`${id}-linen`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#c6b895" />
+          <stop offset="0.3" stopColor="#f6edd6" />
+          <stop offset="0.65" stopColor="#e6dabb" />
+          <stop offset="1" stopColor="#b4a17f" />
+        </linearGradient>
+        <radialGradient id={`${id}-straw`} cx="0.32" cy="0.2" r="0.9">
+          <stop offset="0" stopColor="#efcf89" />
+          <stop offset="0.55" stopColor="#cda75d" />
+          <stop offset="1" stopColor="#966832" />
+        </radialGradient>
+        <radialGradient id={`${id}-ground`}>
+          <stop offset="0" stopColor="#21170f" stopOpacity="0.24" />
+          <stop offset="0.55" stopColor="#21170f" stopOpacity="0.13" />
+          <stop offset="1" stopColor="#21170f" stopOpacity="0" />
+        </radialGradient>
         <radialGradient id={`${id}-whorl-patch`} cx="0.5" cy="0.5" r="0.5">
           <stop offset="0" stopColor={skin} stopOpacity="0.7" />
           <stop offset="0.55" stopColor={skin} stopOpacity="0.5" />
@@ -459,17 +500,22 @@ export function Poppetje({
       </defs>
 
       {showShadow && (
-        <ellipse cx={40} cy={L.baseY + 7} rx={arch.baseW * 0.58} ry={3} fill="rgba(0,0,0,0.16)" />
+        <ellipse
+          cx={41}
+          cy={L.baseY + 4.5}
+          rx={arch.baseW * 0.67}
+          ry={5.5}
+          fill={`url(#${id}-ground)`}
+        />
       )}
       {showBase && (
         <>
           <ellipse
             cx={40}
-            cy={L.baseY + 2.2}
-            rx={arch.baseW * 0.54}
-            ry={3.8}
-            fill={bodyRim}
-            opacity={0.82}
+            cy={L.baseY + 3}
+            rx={arch.baseW * 0.495}
+            ry={2.4}
+            fill={`url(#${id}-body)`}
           />
           <ellipse
             cx={39}
@@ -489,8 +535,6 @@ export function Poppetje({
           the figure read as one carved, painted object. */}
       <g {...grainAttr}>
         <path d={bodyPath} fill={`url(#${id}-body)`} />
-        <path d={bodyPath} fill={`url(#${id}-body-depth)`} />
-        <path d={bodyPath} fill={`url(#${id}-body-glaze)`} />
         {/* Cathedral grain is the broad, nested flame figure found around
             growth transitions. It is deliberately sparse so it reads as a
             different cut of wood, not another garment pattern. */}
@@ -499,23 +543,81 @@ export function Poppetje({
             clipPath={`url(#${id}-bodyclip)`}
             fill="none"
             stroke="#3a1d0d"
-            strokeWidth={0.48}
+            strokeWidth={0.7}
             strokeLinecap="round"
             opacity={cathedralOpacity}
             transform={`translate(${((grainSeed % 5) - 2) * 1.4} 0)`}
           >
             {[0, 1, 2, 3].map((i) => {
-              const top = L.chestY + 24 - i * 6;
-              const bottom = L.baseY - 24 + i * 5;
+              const top = L.chestY + 20 - i * 9;
+              const bottom = L.baseY + 14;
               const width = 5 + i * 3.7;
               const drift = (((grainSeed + i * 3) % 5) - 2) * 0.7;
               return (
                 <path
                   key={i}
-                  d={`M ${40 + drift - width * 0.45} ${bottom}
-                      C ${40 + drift - width} ${bottom - 18}, ${40 + drift - width * 0.84} ${top + 9}, ${40 + drift} ${top}
-                      C ${40 + drift + width * 0.7} ${top + 10}, ${40 + drift + width * 1.05} ${bottom - 16}, ${40 + drift + width * 0.38} ${bottom}`}
+                  d={`M ${40 + drift - width * 0.9} ${bottom}
+                      C ${40 + drift - width} ${bottom - 26}, ${40 + drift - width * 0.84} ${top + 9}, ${40 + drift} ${top}
+                      C ${40 + drift + width * 0.7} ${top + 10}, ${40 + drift + width * 1.05} ${bottom - 28}, ${40 + drift + width * 0.72} ${bottom}`}
                 />
+              );
+            })}
+          </g>
+        )}
+        {/* Broad flow lines and elongated side-grain knots remain readable
+            when the sheet is reduced. Noise alone collapses to straight bands. */}
+        {applyGrain && grainCharacter === 'flowing' && (
+          <g
+            clipPath={`url(#${id}-bodyclip)`}
+            fill="none"
+            stroke="#3a1d0d"
+            strokeWidth={0.65}
+            opacity={cathedralOpacity * 0.8}
+          >
+            {[0, 1, 2, 3].map((i) => {
+              const x = 22 + i * 10 + (grainSeed % 5);
+              const bend = 5 + (grainSeed % 4) * 1.2;
+              return (
+                <path
+                  key={i}
+                  d={`M ${x} ${L.shoulderY - 4}
+                C ${x - bend} ${L.chestY}, ${x + bend} ${L.waistY}, ${x + 2} ${L.hipY}
+                S ${x - bend} ${L.baseY - 8}, ${x + 1} ${L.baseY + 5}`}
+                />
+              );
+            })}
+          </g>
+        )}
+        {applyGrain && whorlCount > 0 && (
+          <g clipPath={`url(#${id}-bodyclip)`}>
+            {Array.from({ length: whorlCount }, (_, i) => {
+              const seed = grainSeed + i * 47;
+              const side = i === 0 ? -1 : 1;
+              const x = 40 + side * (arch.waistW * 0.2 + (seed % 3));
+              const y = L.waistY + (i === 0 ? 16 : -4) + (seed % 5);
+              const radius = 3.2 + (seed % 4) * 0.45;
+              return (
+                <g
+                  key={seed}
+                  transform={`translate(${x} ${y}) rotate(${(seed % 17) - 8})`}
+                  opacity={whorlOpacity * 0.8}
+                >
+                  <g fill="none" stroke="#3a1d0d" strokeWidth={0.6}>
+                    {[1, 0.65, 0.32].map((ring) => (
+                      <path
+                        key={ring}
+                        d={whorlRing(radius * ring, radius * 2.1 * ring, 3, 0.045, seed * 0.317)}
+                      />
+                    ))}
+                    <path
+                      opacity={0.65}
+                      d={`M -1 ${-radius * 2.1}
+                      C ${-radius * 2} -17, -2 -23, -3 -31
+                      M 1 ${radius * 2.1} C ${radius * 1.6} 15, -1 23, 1 32`}
+                    />
+                  </g>
+                  <ellipse rx={0.65} ry={1.5} fill="#3a1d0d" />
+                </g>
               );
             })}
           </g>
@@ -549,14 +651,12 @@ export function Poppetje({
             {[0, 1, 2, 3, 4].map((i) => {
               const step = (L.baseY - 6 - L.chestY) / 5;
               return (
-                <rect
+                <path
                   key={i}
-                  x={4}
-                  y={L.chestY + i * step}
-                  width={72}
-                  height={step * 0.42}
-                  fill={shirtAccent}
-                  opacity={0.55}
+                  d={`M 4 ${L.chestY + i * step} Q 40 ${L.chestY + i * step + 6}, 76 ${L.chestY + i * step}
+                     L 76 ${L.chestY + i * step + step * 0.42} Q 40 ${L.chestY + i * step + step * 0.42 + 6}, 4 ${L.chestY + i * step + step * 0.42} Z`}
+                  fill={`url(#${id}-accent)`}
+                  opacity={0.65}
                 />
               );
             })}
@@ -569,7 +669,7 @@ export function Poppetje({
                   L ${40 - arch.shoulderW * 0.5 + 8} ${L.shoulderY - 1.5}
                   L ${40 + arch.hipW * 0.32 + 4} ${L.baseY - 5}
                   L ${40 + arch.hipW * 0.32 - 4.5} ${L.baseY - 3.5} Z`}
-              fill={shirtAccent}
+              fill={`url(#${id}-accent)`}
               opacity={0.72}
             />
           </g>
@@ -581,7 +681,7 @@ export function Poppetje({
                   L ${40 + arch.shoulderW * 0.5 + 3} ${L.shoulderY - 4}
                   L ${40 + arch.chestW * 0.46} ${L.chestY + 3}
                   Q 40 ${L.chestY + 11}, ${40 - arch.chestW * 0.46} ${L.chestY + 3} Z`}
-              fill={shirtAccent}
+              fill={`url(#${id}-accent)`}
               opacity={0.72}
             />
             <circle cx={40} cy={L.chestY + 6.5} r={1} fill="#241b12" opacity={0.55} />
@@ -589,7 +689,14 @@ export function Poppetje({
         )}
         {pattern === 'twotone' && (
           <g clipPath={`url(#${id}-bodyclip)`}>
-            <rect x={0} y={L.waistY + 2} width={W} height={H} fill={shirtAccent} opacity={0.55} />
+            <rect
+              x={0}
+              y={L.waistY + 2}
+              width={W}
+              height={H}
+              fill={`url(#${id}-accent)`}
+              opacity={0.55}
+            />
             <line
               x1={0}
               y1={L.waistY + 2}
@@ -601,6 +708,9 @@ export function Poppetje({
             />
           </g>
         )}
+        {/* Light crosses garment paint too, so the bands wrap the turned body. */}
+        <path d={bodyPath} fill={`url(#${id}-body-depth)`} />
+        <path d={bodyPath} fill={`url(#${id}-body-glaze)`} />
       </g>
 
       {/* The head is turned from the same blank, but a shallow contact shadow
@@ -631,7 +741,7 @@ export function Poppetje({
           rx={22}
           ry={23}
           fill="#160e09"
-          opacity={0.16}
+          opacity={0.08}
           filter={`url(#${id}-blur)`}
         />
         <ellipse cx={0} cy={0} rx={22} ry={23} fill={`url(#${id}-head)`} {...grainAttr} />
@@ -640,7 +750,7 @@ export function Poppetje({
             the middle of the forehead read as a bruise. Clipped to the
             head so the push outward can't spill onto the background. */}
         <g clipPath={`url(#${id}-headclip)`}>
-          {Array.from({ length: whorlCount }, (_, i) => {
+          {Array.from({ length: applyGrain ? whorlCount : 0 }, (_, i) => {
             const s = grainSeed + i * 47;
             const side = whorlCount > 1 ? (i === 0 ? -1 : 1) : s % 2 === 0 ? -1 : 1;
             const wx = side * (14 + (s % 4) * 0.55);
@@ -660,7 +770,7 @@ export function Poppetje({
                   ry={wr * 1.25}
                   fill={`url(#${id}-whorl-patch)`}
                 />
-                <g fill="none" stroke="#3a1d0d" strokeWidth={0.32} strokeLinejoin="round">
+                <g fill="none" stroke="#3a1d0d" strokeWidth={0.6} strokeLinejoin="round">
                   <path
                     d={whorlRing(wr, wr * 0.72, lobes, amp, phase)}
                     opacity={whorlOpacity * 0.72}
@@ -691,18 +801,6 @@ export function Poppetje({
           })}
         </g>
 
-        {/* Painted wood has a broad satin bloom, not the pin-point highlight
-            of plastic. Keep it warm, soft, and off-axis. */}
-        <ellipse
-          cx={-7.5}
-          cy={-9.5}
-          rx={7.5}
-          ry={4.2}
-          fill="rgba(255,239,208,0.09)"
-          filter={`url(#${id}-blur)`}
-        />
-        <ellipse cx={-9.2} cy={-11.2} rx={2.4} ry={1.15} fill="rgba(255,248,226,0.12)" />
-
         {/* Cathedral figures also show offset growth rings across the turned
             head. Fine/flowing figures rely on fibers; knotty figures use the
             organic whorl above, keeping the material signatures distinct. */}
@@ -710,8 +808,8 @@ export function Poppetje({
           <g
             fill="none"
             stroke="#3a1d0d"
-            strokeOpacity={cathedralOpacity * 0.76}
-            strokeWidth={0.38}
+            strokeOpacity={cathedralOpacity * 0.5}
+            strokeWidth={0.48}
             transform={`translate(${((grainSeed % 7) - 3) * 0.6} ${((grainSeed % 5) - 2) * 0.5})`}
           >
             <ellipse cx={0} cy={0} rx={20} ry={21} />
@@ -724,97 +822,17 @@ export function Poppetje({
         {/* HAIR + HATS — painted wood, so they share the grain pass. */}
         <g {...grainAttr}>
           {/* HAIR — drawn below hats. */}
-          {showHair && g.hairShape === 'halo' && (
-            /* Halo is a soft curly cushion: the hull hugs the crown and a
-               row of scallop curls bumps down along the fringe — that
-               fringe is what separates it from `short`, which used to be
-               a near-identical helmet. */
-            <>
-              <path
-                d="M -21 0 C -23 -18, -12 -27, 0 -27 C 12 -27, 23 -18, 21 0 C 17 -8, 10 -13, 0 -13 C -10 -13, -17 -8, -21 0 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <circle cx={-13.5} cy={-6.5} r={3.1} fill={`url(#${id}-hair)`} />
-              <circle cx={-7} cy={-10.5} r={3.3} fill={`url(#${id}-hair)`} />
-              <circle cx={0} cy={-12} r={3.4} fill={`url(#${id}-hair)`} />
-              <circle cx={7} cy={-10.5} r={3.3} fill={`url(#${id}-hair)`} />
-              <circle cx={13.5} cy={-6.5} r={3.1} fill={`url(#${id}-hair)`} />
-            </>
-          )}
-          {showHair && g.hairShape === 'short' && (
-            /* Cropped cut — hairline sits high on the forehead, ending in
-               small sideburn points at the temples. */
-            <path
-              d="M -20 -5 C -21.5 -19, -10 -25.5, 0 -25.5 C 10 -25.5, 21.5 -19, 20 -5 C 19 -8.5, 17 -10.5, 15 -11.5 C 9 -14.5, -9 -14.5, -15 -11.5 C -17 -10.5, -19 -8.5, -20 -5 Z"
-              fill={`url(#${id}-hair)`}
+          {showHair && g.hairShape !== 'bald' && g.hairShape !== 'shaved' && (
+            <CarvedHair
+              style={g.hairShape}
+              bangs={g.bangs ?? null}
+              part={g.hairPart ?? 'none'}
+              id={id}
+              fill={`url(#${id}-hair-flow)`}
+              highlight={mixHex(g.hair, '#f7dfb6', 0.42)}
+              shadow={hairShadow}
+              tie={shirtAccent}
             />
-          )}
-          {showHair && g.hairShape === 'long' && (
-            /* One closed path: cap + side strands, physically continuous —
-               no seam at the temple. Face shows in the forehead window. */
-            <path
-              d="M -21 18
-                 C -23 12, -22 4, -21 -2
-                 C -22 -22, -12 -28, 0 -28
-                 C 12 -28, 22 -22, 21 -2
-                 C 22 4, 23 12, 21 18
-                 C 21 24, 18 24, 18 20
-                 L 18 -2
-                 C 16 -8, 14 -13, 10 -16
-                 C 4 -19, -4 -19, -10 -16
-                 C -14 -13, -16 -8, -18 -2
-                 L -18 20
-                 C -18 24, -21 24, -21 18
-                 Z"
-              fill={`url(#${id}-hair)`}
-            />
-          )}
-          {showHair && g.hairShape === 'bun' && (
-            /* Bun + scalp drawn as one continuous shape; the bun is a real
-               topknot now (the old r≈5 version read as a stray bead). */
-            <>
-              <path
-                d="M -21 -2 C -21 -18, -11 -23, 0 -23 C 11 -23, 21 -18, 21 -2 C 15 -11, 8 -15, 0 -15 C -8 -15, -15 -11, -21 -2 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <path
-                d="M -4.5 -22 C -4.5 -24, 4.5 -24, 4.5 -22 L 4.5 -19.5 C 4.5 -18.5, -4.5 -18.5, -4.5 -19.5 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <ellipse cx={0} cy={-25.5} rx={7} ry={5.6} fill={`url(#${id}-hair)`} />
-              {/* Tie band at the base of the knot. */}
-              <ellipse cx={0} cy={-20.6} rx={4.6} ry={1.4} fill={shirtAccent} opacity={0.9} />
-            </>
-          )}
-          {showHair && g.hairShape === 'braids' && (
-            /* Cap + a plaited braid down each side. Chevron strokes give
-               the strands their plait texture — without them the braids
-               read as flat slabs of hair. */
-            <>
-              <path
-                d="M -22 -2 C -23 -21, -12 -28, 0 -28 C 12 -28, 23 -21, 22 -2 C 16 -11, 8 -16, 0 -16 C -8 -16, -16 -11, -22 -2 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <path
-                d="M -19 -16 C -23 -8, -23 8, -22 19 C -21 24, -20 27, -19 29 L -14 29 C -16 17, -16 4, -15 -8 C -14.5 -13, -16 -16, -19 -16 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <path
-                d="M 19 -16 C 23 -8, 23 8, 22 19 C 21 24, 20 27, 19 29 L 14 29 C 16 17, 16 4, 15 -8 C 14.5 -13, 16 -16, 19 -16 Z"
-                fill={`url(#${id}-hair)`}
-              />
-              <g fill="none" stroke="rgba(255,255,255,0.13)" strokeWidth={1} strokeLinecap="round">
-                {[-2, 6, 14, 22].map((y) => (
-                  <path key={`l${y}`} d={`M -20.5 ${y} L -18 ${y + 2.4} L -15.8 ${y - 0.4}`} />
-                ))}
-                {[-2, 6, 14, 22].map((y) => (
-                  <path key={`r${y}`} d={`M 20.5 ${y} L 18 ${y + 2.4} L 15.8 ${y - 0.4}`} />
-                ))}
-              </g>
-              {/* Braid ties — small dots in the shirt accent color. */}
-              <circle cx={-16.5} cy={28} r={1.5} fill={shirtAccent} />
-              <circle cx={16.5} cy={28} r={1.5} fill={shirtAccent} />
-            </>
           )}
           {showHair && g.hairShape === 'shaved' && (
             <path
@@ -883,16 +901,16 @@ export function Poppetje({
             <ellipse
               cx={-(fv.eyeGap + 4.5)}
               cy={fv.eyeY + 4}
-              rx={2.5}
-              ry={1.5}
-              fill={`rgba(201,117,83,${fv.blush})`}
+              rx={3.1}
+              ry={2}
+              fill={`rgba(220,128,91,${fv.blush})`}
             />
             <ellipse
               cx={fv.eyeGap + 4.5}
               cy={fv.eyeY + 4}
-              rx={2.5}
-              ry={1.5}
-              fill={`rgba(201,117,83,${fv.blush})`}
+              rx={3.1}
+              ry={2}
+              fill={`rgba(220,128,91,${fv.blush})`}
             />
           </>
         )}

@@ -5,7 +5,7 @@ import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.j
 import type { Ds4CacheAdapter } from './cache-adapter.js';
 
 /**
- * ds4 (DwarfStar) provider — antirez's DeepSeek-V4-specific inference
+ * ds4 (DwarfStar) provider — antirez's specialized DeepSeek-V4/GLM inference
  * engine. `ds4-server` speaks the *identical* OpenAI-compatible
  * `/v1/chat/completions` SSE dialect as `llama-server`, and ds4 models
  * are GGUF, so rather than duplicate the ~4000-line llama.cpp turn loop

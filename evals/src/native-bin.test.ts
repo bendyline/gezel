@@ -3,12 +3,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ds4HelpSupportsVision,
   installedAppRoots,
   pinnedLlamaRevision,
   resolveLlamaBinary,
   resolveSdBinary,
   shouldProbeLlamaBackend,
 } from './native-bin.ts';
+
+describe('ds4HelpSupportsVision', () => {
+  it('recognizes the dedicated encoder option without matching prose', () => {
+    expect(ds4HelpSupportsVision('  --vision FILE   Vision encoder\n')).toBe(true);
+    expect(ds4HelpSupportsVision('A vision-capable server without the option')).toBe(false);
+  });
+});
 
 /**
  * A stub binary plus the `gezel-llama-build.json` sidecar that `build.sh`

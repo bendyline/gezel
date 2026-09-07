@@ -61,37 +61,48 @@ describe('SessionSwitcher', () => {
     stream.reset();
   });
 
-  it('scopes the empty state to the gezel when a name is provided', async () => {
+  it('names the empty destination as a new thread', async () => {
     mockSessions([]);
     render(
       <SessionSwitcher
         gezelId="g1"
         projectId="p1"
         sessionId={undefined}
-        gezelName="Metehan"
         onSessionIdChange={vi.fn()}
       />,
     );
     await waitFor(() => {
-      expect(
-        screen.getByText('No threads with Metehan yet — a message starts one'),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toHaveDisplayValue('New thread');
     });
   });
 
-  it('falls back to the generic empty label without a name', async () => {
-    mockSessions([]);
+  it('hides redundant new-thread actions while the composer is already fresh', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
     render(
       <SessionSwitcher
         gezelId="g1"
         projectId="p1"
         sessionId={undefined}
+        autoPickNewest={false}
         onSessionIdChange={vi.fn()}
       />,
     );
-    await waitFor(() => {
-      expect(screen.getByText('No threads yet')).toBeInTheDocument();
-    });
+
+    await screen.findByRole('option', { name: /Landing page plan/ });
+    expect(screen.getByRole('combobox')).toHaveDisplayValue('New thread');
+    expect(screen.getByRole('combobox')).toBeEnabled();
+    expect(screen.getByRole('button', { name: '+ New thread' })).toBeDisabled();
+    expect(screen.getAllByRole('option', { name: 'New thread' })).toHaveLength(1);
+    expect(screen.getByRole('option', { name: 'New thread' })).toHaveValue('');
   });
 
   it('auto-picks the most recent thread when the scope has sessions', async () => {
@@ -119,7 +130,6 @@ describe('SessionSwitcher', () => {
         gezelId="g1"
         projectId="p1"
         sessionId={undefined}
-        gezelName="Ada Lovelace"
         onSessionIdChange={onSessionIdChange}
       />,
     );
@@ -146,7 +156,6 @@ describe('SessionSwitcher', () => {
         gezelId="g1"
         projectId="p1"
         sessionId={undefined}
-        gezelName="Ada Lovelace"
         autoPickNewest={false}
         onSessionIdChange={onSessionIdChange}
       />,
@@ -174,7 +183,6 @@ describe('SessionSwitcher', () => {
         gezelId="g1"
         projectId="p1"
         sessionId={undefined}
-        gezelName="Ada Lovelace"
         autoPickNewest={false}
         onSessionIdChange={vi.fn()}
       />,
@@ -463,6 +471,43 @@ describe('SessionSwitcher', () => {
     expect(api.createChatSession).not.toHaveBeenCalled();
   });
 
+  it('starts a fresh thread from the button beside the picker', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    const onSessionIdChange = vi.fn();
+    const onDraftSelect = vi.fn();
+    const onFreshThread = vi.fn();
+
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-old"
+        activeDraftId="draft-in-old-thread"
+        onSessionIdChange={onSessionIdChange}
+        onDraftSelect={onDraftSelect}
+        onFreshThread={onFreshThread}
+      />,
+    );
+
+    await screen.findByRole('option', { name: /Landing page plan/ });
+    expect(screen.getByRole('button', { name: '+ New thread' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '+ New thread' }));
+
+    expect(onDraftSelect).toHaveBeenCalledWith(undefined);
+    expect(onSessionIdChange).toHaveBeenCalledWith(undefined);
+    expect(onFreshThread).toHaveBeenCalledOnce();
+    expect(api.createChatSession).not.toHaveBeenCalled();
+  });
+
   it('meters the active thread against its own context window', async () => {
     mockSessions([
       {
@@ -660,6 +705,7 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(option).toHaveValue('draft:2026-09-03-0001');
     // The row says what it is before the user commits to it.
     expect(option.textContent).toContain('draft');
+    expect(screen.queryByText('No threads yet')).not.toBeInTheDocument();
   });
 
   it('clears the thread before handing the draft over, never both at once', async () => {

@@ -96,6 +96,33 @@ describe('describeCatalogPayload', () => {
     expect(described?.files.find((file) => file.name === 'draft.gguf')?.optional).toBeUndefined();
   });
 
+  it('treats a ds4 vision encoder as a required part of the payload', () => {
+    const described = describeCatalogPayload(
+      manifest({
+        ds4: {
+          huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+          filename: 'GLM-5.3-Flash-Q2.gguf',
+          sha256: SHA_A,
+          approxSizeBytes: 100,
+          visionEncoder: {
+            filename: 'GLM-5.3-Flash-Vision-Encoder.gguf',
+            sha256: SHA_B,
+            sizeBytes: 20,
+          },
+        },
+      } as Partial<ChatModelManifest>),
+      'ds4',
+    );
+
+    expect(described?.files.map((file) => file.name)).toEqual([
+      'GLM-5.3-Flash-Q2.gguf',
+      'GLM-5.3-Flash-Vision-Encoder.gguf',
+    ]);
+    expect(
+      described?.files.find((file) => file.name.includes('Vision-Encoder'))?.optional,
+    ).toBeUndefined();
+  });
+
   it('marks MLX tokenizer_config as transformed only when a template may be injected', () => {
     const plain = describeCatalogPayload(
       manifest({

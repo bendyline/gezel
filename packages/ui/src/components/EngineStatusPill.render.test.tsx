@@ -892,6 +892,19 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GB')).toBeInTheDocument();
     expect(screen.getByText('Model & file cache 20.0 GB')).toBeInTheDocument();
+    expect(Array.from(strip.children).map((segment) => segment.className)).toEqual([
+      expect.stringContaining('machine-memory-segment-gezel'),
+      expect.stringContaining('machine-memory-segment-cached'),
+      expect.stringContaining('machine-memory-segment-other'),
+    ]);
+    const legend = screen.getByText('Gezel 76.0 GB').parentElement;
+    expect(legend).toHaveClass('machine-memory-legend');
+    expect(Array.from(legend?.children ?? []).map((entry) => entry.textContent)).toEqual([
+      'Gezel 76.0 GB',
+      'Model & file cache 20.0 GB',
+      'Other 24.0 GB',
+      'Free 8.0 GB',
+    ]);
     expect(strip).toHaveAccessibleName(
       /model and file cache 20\.0 GB, reclaimable by the operating system/i,
     );

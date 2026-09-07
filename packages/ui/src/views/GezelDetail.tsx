@@ -14,9 +14,12 @@ import type {
 } from '@bendyline/gezel';
 import {
   ACCESSORY_OPTIONS,
+  BANGS_OPTIONS,
   DRESS_OPTIONS,
   GEZEL_CHAT_FONTS,
   GROWTH_COSMETICS,
+  HAIR_PART_OPTIONS,
+  HAIR_SHAPES,
   HAT_OPTIONS,
   normalizeCodexPermissionMode,
 } from '@bendyline/gezel';
@@ -509,14 +512,14 @@ function AppearancePanel({
               className="link-btn"
               onClick={() => setShowAccessories(true)}
               disabled={!poppetje}
-              title="Add or remove worn items (hat, garment, accessory)"
+              title="Choose hair, bangs, part, and worn items"
             >
-              Accessories…
+              Accessories & hair…
             </button>
           </div>
           <span className="muted small">
-            Reroll redraws everything (body, face, hair). Accessories let you toggle just the worn
-            items.
+            Reroll redraws everything (body, face, hair). Accessories & hair lets you style this
+            figure.
           </span>
           {gezel.icon && (
             <label className="gezel-appearance-toggle">
@@ -551,6 +554,79 @@ function AppearancePanel({
         </span>
       </section>
     </>
+  );
+}
+
+const HAIR_LABELS = {
+  halo: 'Curly',
+  short: 'Short',
+  bob: 'Bob',
+  medium: 'Medium',
+  long: 'Long',
+  'extra-long': 'Extra long',
+  bun: 'Bun',
+  braids: 'Braids',
+  shaved: 'Shaved',
+  bald: 'Bald',
+};
+const BANGS_LABELS = {
+  none: 'None',
+  straight: 'Straight',
+  'side-swept': 'Side-swept',
+  curtain: 'Curtain',
+  short: 'Short',
+};
+const PART_LABELS = { none: 'None', center: 'Center', left: 'Left', right: 'Right' };
+
+/** Native radios retain keyboard navigation while sharing the existing art tiles. */
+function HairTiles<K extends 'hairShape' | 'bangs' | 'hairPart'>({
+  label,
+  slot,
+  poppetje,
+  options,
+  labels,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  slot: K;
+  poppetje: PoppetjeStruct;
+  options: readonly PoppetjeStruct[K][];
+  labels: Record<string, string>;
+  disabled: boolean;
+  onChange: (value: PoppetjeStruct[K]) => void;
+}) {
+  return (
+    <div className="accessory-section">
+      <h4 className="accessory-section-title">{label}</h4>
+      <div className="accessory-tiles" role="radiogroup" aria-label={label}>
+        {options.map((option) => {
+          const value = option ?? 'none';
+          const selected = (poppetje[slot] ?? 'none') === value;
+          const preview = { ...poppetje, hat: null, accessory: null, [slot]: option };
+          return (
+            <label
+              key={value}
+              className={`accessory-tile hair-choice${selected ? ' selected' : ''}`}
+              data-disabled={disabled}
+            >
+              <input
+                type="radio"
+                name={`${poppetje.key}-${slot}`}
+                value={value}
+                checked={selected}
+                disabled={disabled}
+                onChange={() => onChange(option)}
+              />
+              <span className="accessory-tile-art" aria-hidden="true">
+                <Poppetje poppetje={preview} variant="icon" size={52} grainStyle="none" />
+              </span>
+              <span className="accessory-tile-label">{labels[value]}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -739,14 +815,8 @@ function lockedForSlot<T extends string>(
   return out;
 }
 
-/**
- * Toggle a gezel's worn items — hat, garment, and face accessory — without
- * touching physical features. Each change persists immediately via the
- * poppetje PUT route and the live preview (plus the detail hero) updates
- * because we propagate the new struct up through `onUpdated`. Physical
- * attributes (body, skin, hair, facial hair, marks) are deliberately
- * absent here; the only way to change those is a reroll.
- */
+/** Hair styling and worn items persist through the same poppetje route;
+ * body, skin, hair color, and facial features remain untouched. */
 function AccessoriesDialog({
   open,
   gezel,
@@ -789,11 +859,10 @@ function AccessoriesDialog({
         <Dialog.Overlay />
         <Dialog.Content className="accessories-dialog">
           <Dialog.Title asChild>
-            <h3>{gezel.name}'s accessories</h3>
+            <h3>{gezel.name}'s accessories & hair</h3>
           </Dialog.Title>
           <Dialog.Description className="muted small">
-            Add or remove worn items. Physical features — face, hair, skin, body — only change when
-            you reroll.
+            Choose a hairstyle and worn items. Changes save automatically.
           </Dialog.Description>
           <div className="accessories-body">
             <div className="accessories-preview" aria-label={`${gezel.name} preview`}>
@@ -804,6 +873,44 @@ function AccessoriesDialog({
               )}
             </div>
             <div className="accessories-controls">
+              {poppetje && (
+                <>
+                  <HairTiles
+                    label="Hair style"
+                    slot="hairShape"
+                    poppetje={poppetje}
+                    options={HAIR_SHAPES}
+                    labels={HAIR_LABELS}
+                    disabled={saving}
+                    onChange={(hairShape) => void applyPatch({ hairShape })}
+                  />
+                  <HairTiles
+                    label="Bangs"
+                    slot="bangs"
+                    poppetje={poppetje}
+                    options={[null, ...BANGS_OPTIONS]}
+                    labels={BANGS_LABELS}
+                    disabled={
+                      saving || poppetje.hairShape === 'bald' || poppetje.hairShape === 'shaved'
+                    }
+                    onChange={(bangs) => void applyPatch({ bangs })}
+                  />
+                  <HairTiles
+                    label="Hair part"
+                    slot="hairPart"
+                    poppetje={poppetje}
+                    options={HAIR_PART_OPTIONS}
+                    labels={PART_LABELS}
+                    disabled={
+                      saving || poppetje.hairShape === 'bald' || poppetje.hairShape === 'shaved'
+                    }
+                    onChange={(hairPart) => void applyPatch({ hairPart })}
+                  />
+                  <p className="muted small">
+                    Left and right match the preview. Hats cover the hairstyle.
+                  </p>
+                </>
+              )}
               <SlotTiles<HatOption>
                 slot="hat"
                 label="Hat"

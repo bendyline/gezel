@@ -251,7 +251,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
       llamaCppFlashAttn: config.llamaCppFlashAttn,
       llamaCppSpecType: config.llamaCppSpecType,
       llamaCppCpuMoe: config.llamaCppCpuMoe,
+      llamaCppNCpuFfn: config.llamaCppNCpuFfn,
+      llamaCppMlock: config.llamaCppMlock,
+      llamaCppLoadMode: config.llamaCppLoadMode,
+      llamaCppLazyMode: config.llamaCppLazyMode,
+      llamaCppReasoningPreserve: config.llamaCppReasoningPreserve,
       llamaCppSwaFull: config.llamaCppSwaFull,
+      ds4BaseUrl: config.ds4BaseUrl,
+      ds4ModelPath: config.ds4ModelPath,
+      ds4VisionEncoderPath: config.ds4VisionEncoderPath,
+      ds4NumCtx: config.ds4NumCtx,
+      ds4SsdStreaming: config.ds4SsdStreaming,
+      ds4CacheExpertsGb: config.ds4CacheExpertsGb,
+      nativeVision: config.nativeVision,
       mlxBaseUrl: config.mlxBaseUrl,
       mlxModelPath: config.mlxModelPath,
       mlxPackageSpec: config.mlxPackageSpec,
@@ -527,14 +539,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
       'codexCli',
       'securityPolicy',
     ];
-    // `defaultModel` / `defaultReasoningEffort` also need a reset because
+    // Model preferences and native-vision launch inputs also need a reset because
     // live session objects bake the model in at construction — a plain
     // config write won't flow through to an already-resumed session until
     // the in-memory state is rebuilt. But these are pure preferences: the
     // engines are still valid, so we defer teardown of any session that's
     // mid-turn (e.g. holding an in-flight `generate_video` MCP call) until
     // it goes idle, rather than severing it. See ChatManager.resetClient.
-    const modelPrefFields: Array<keyof typeof body> = ['defaultModel', 'defaultReasoningEffort'];
+    const modelPrefFields: Array<keyof typeof body> = [
+      'defaultModel',
+      'defaultReasoningEffort',
+      'nativeVision',
+      'ds4VisionEncoderPath',
+    ];
     const nightShiftModelPreferenceChanged =
       body.nightShift !== undefined &&
       JSON.stringify(previous.nightShift?.modelOverride ?? null) !==
@@ -732,7 +749,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
       llamaCppFlashAttn: updated.llamaCppFlashAttn,
       llamaCppSpecType: updated.llamaCppSpecType,
       llamaCppCpuMoe: updated.llamaCppCpuMoe,
+      llamaCppNCpuFfn: updated.llamaCppNCpuFfn,
+      llamaCppMlock: updated.llamaCppMlock,
+      llamaCppLoadMode: updated.llamaCppLoadMode,
+      llamaCppLazyMode: updated.llamaCppLazyMode,
+      llamaCppReasoningPreserve: updated.llamaCppReasoningPreserve,
       llamaCppSwaFull: updated.llamaCppSwaFull,
+      ds4BaseUrl: updated.ds4BaseUrl,
+      ds4ModelPath: updated.ds4ModelPath,
+      ds4VisionEncoderPath: updated.ds4VisionEncoderPath,
+      ds4NumCtx: updated.ds4NumCtx,
+      ds4SsdStreaming: updated.ds4SsdStreaming,
+      ds4CacheExpertsGb: updated.ds4CacheExpertsGb,
+      nativeVision: updated.nativeVision,
       mlxBaseUrl: updated.mlxBaseUrl,
       mlxModelPath: updated.mlxModelPath,
       mlxPackageSpec: updated.mlxPackageSpec,

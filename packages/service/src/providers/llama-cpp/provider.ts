@@ -1914,6 +1914,7 @@ export class LlamaCppProvider implements LLMProvider {
     onWait?: (info: { aheadOf: number }) => void,
   ): Promise<() => void> {
     if (signal?.aborted) throw engineRequestAbortError(label);
+    if (this.supervisor?.coordinatesCapacity) await this.supervisor.yieldForWaitingCapacity(signal);
 
     const waitStartedAt = Date.now();
     if (this.engineRequestsActive < this.engineRequestWidth) {

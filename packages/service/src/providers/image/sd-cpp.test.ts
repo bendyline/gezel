@@ -224,6 +224,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
     let logListener: ((line: string) => void) | undefined;
     const fakeSupervisor = {
+      withRequest: <T>(run: () => Promise<T>) => run(),
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -276,6 +277,7 @@ describe('StableDiffusionCppProvider.generate', () => {
       acquireLease: vi.fn(async () => release),
     };
     const fakeSupervisor = {
+      withRequest: <T>(run: () => Promise<T>) => run(),
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -313,6 +315,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     const stop = vi.fn(async () => {});
     const calls: Array<{ body: Record<string, unknown> }> = [];
     const fakeSupervisor = {
+      withRequest: <T>(run: () => Promise<T>) => run(),
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -352,6 +355,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     const launchState = { modelId: 'krea-2-turbo-q4' as string | undefined };
     const stop = vi.fn(async () => {});
     const fakeSupervisor = {
+      withRequest: <T>(run: () => Promise<T>) => run(),
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],

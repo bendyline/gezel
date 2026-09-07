@@ -34,6 +34,9 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   { file: 'tool_call_stream_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_fuzz_test.py', ranMarker: /PASS / },
+  // Contract assertions are stdlib-only; grammar compilation runs too when
+  // the local MLX venv's llguidance package is available.
+  { file: 'tool_grammar_test.py', ranMarker: /PASS / },
   // cache_seed_test.py predates this runner and was never executed by
   // anything — its own docstring says "No pytest harness is wired for the
   // MLX python sidecar". It is pure stdlib, so it can simply gate.

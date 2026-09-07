@@ -192,6 +192,17 @@ export function describeCatalogPayload(
       optional: true,
     });
   }
+  const ds4 = engine === 'ds4' ? manifest.ds4 : undefined;
+  if (ds4?.visionEncoder) {
+    // A ds4 encoder is part of the selected model's advertised capability and
+    // the installer always fetches it. Missing it is a genuine stale/incomplete
+    // payload, not a legitimate text-only variant of the same catalog entry.
+    files.push({
+      name: basename(ds4.visionEncoder.filename),
+      sha256: ds4.visionEncoder.sha256,
+      sizeBytes: ds4.visionEncoder.sizeBytes,
+    });
+  }
   return files.length > 0 ? { huggingfaceRepo: src.huggingfaceRepo, files } : null;
 }
 

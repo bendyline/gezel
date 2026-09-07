@@ -1,0 +1,146 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  home: '',
+  runtime: vi.fn(),
+  inspect: vi.fn(),
+  fetch: vi.fn(),
+  local: vi.fn(),
+}));
+vi.mock('@bendyline/gezel-client/node', async (original) => ({
+  ...(await original<typeof import('@bendyline/gezel-client/node')>()),
+  systemServiceHome: () => mocks.home,
+  readSystemServiceRuntime: mocks.runtime,
+}));
+vi.mock('../../machine-engine/bridge.js', () => ({ inspectMachineRuntime: mocks.inspect }));
+vi.mock('../../remotes/pinned-fetch.js', () => ({
+  createPinnedFetch: () => Object.assign(mocks.fetch, { close: async () => {} }),
+}));
+vi.mock('./device-capacity-ledger.js', () => ({
+  DeviceCapacityLedger: class {
+    execute = mocks.local;
+  },
+}));
+vi.mock('./measured-budget.js', () => ({
+  measuredCapacityBudget: async () => ({ kind: 'unified', fastBytes: 96 * 1024 ** 3 }),
+}));
+
+import { acquireNativeCapacity, estimateNativeLaunchMemory } from './device-capacity.js';
+
+const dirs: string[] = [];
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.home = `/test-machine-${randomUUID()}`;
+  mocks.inspect.mockResolvedValue({ pinnedIdentityFingerprint: 'stable-device' });
+  mocks.runtime.mockResolvedValue({
+    serviceRole: 'machine-engine',
+    cert: 'cert-1',
+    token: 'token-1',
+    baseUrl: 'https://127.0.0.1:6228',
+  });
+  mocks.fetch.mockImplementation(
+    async () => new Response(JSON.stringify({ state: 'granted', releaseRequested: false })),
+  );
+  mocks.local.mockResolvedValue({ state: 'granted', releaseRequested: false });
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+const acquire = () =>
+  acquireNativeCapacity(
+    { home: '/isolated-eval', requirement: () => ({ bytes: 1024 ** 3 }) },
+    { command: 'fake-model', args: [], baseUrl: 'http://127.0.0.1:9999' },
+    new AbortController().signal,
+    () => {},
+  );
+
+describe('native capacity broker discovery', () => {
+  it('coordinates isolated eval inference through the installed broker', async () => {
+    vi.stubEnv('GEZEL_DISABLE_MACHINE_ENGINE', '1');
+    const lease = await acquire();
+    const [url, init] = mocks.fetch.mock.calls[0]!;
+    expect(url).toContain('/v1/remote/manage/native-capacity');
+    expect(init.headers.authorization).toBe('Bearer token-1');
+    expect(JSON.parse(init.body)).toMatchObject({ action: 'acquire', ownerPid: process.pid });
+    expect(mocks.local).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
+  it('refreshes rotated credentials and re-verifies the same identity after broker restart', async () => {
+    const lease = await acquire();
+    mocks.runtime.mockResolvedValue({
+      serviceRole: 'machine-engine',
+      cert: 'cert-2',
+      token: 'token-2',
+      baseUrl: 'https://127.0.0.1:6228',
+    });
+    await lease.bind(process.pid);
+    expect(mocks.inspect).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch.mock.calls.at(-1)![1].headers.authorization).toBe('Bearer token-2');
+    mocks.runtime.mockResolvedValue({
+      serviceRole: 'machine-engine',
+      cert: 'cert-3',
+      token: 'token-3',
+      baseUrl: 'https://127.0.0.1:6228',
+    });
+    mocks.inspect.mockResolvedValue({ pinnedIdentityFingerprint: 'different-device' });
+    await expect(lease.ready()).rejects.toThrow(/identity changed/);
+  });
+
+  it('does not create a second ledger when the broker temporarily disappears', async () => {
+    const lease = await acquire();
+    mocks.runtime.mockResolvedValue(null);
+    await expect(lease.shouldYield()).rejects.toThrow(/restore memory coordination/);
+    await expect(acquire()).rejects.toThrow(/restore memory coordination/);
+    expect(mocks.local).not.toHaveBeenCalled();
+  });
+
+  it('requires an older broker to update instead of bypassing admission', async () => {
+    mocks.fetch.mockImplementation(async () => new Response('', { status: 404 }));
+    await expect(acquire()).rejects.toThrow(/needs an update/);
+    expect(mocks.local).not.toHaveBeenCalled();
+  });
+
+  it('preserves an actionable capacity denial from the broker', async () => {
+    mocks.fetch.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: 'Working set exceeds safe device capacity.' }), {
+          status: 409,
+        }),
+    );
+    await expect(acquire()).rejects.toThrow('Working set exceeds safe device capacity.');
+  });
+
+  it('uses the account ledger when no broker is installed', async () => {
+    mocks.runtime.mockResolvedValue(null);
+    const lease = await acquire();
+    expect(mocks.local).toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    await lease.release();
+  });
+});
+
+it('prices recognition projectors and image text encoders as well as main weights', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'gezel-weight-estimate-'));
+  dirs.push(dir);
+  const model = join(dir, 'model');
+  await mkdir(model);
+  await writeFile(join(model, 'weights.safetensors'), Buffer.alloc(100));
+  await writeFile(join(model, 'config.json'), Buffer.alloc(999));
+  const projector = join(dir, 'projector.gguf');
+  const encoder = join(dir, 'encoder.gguf');
+  await writeFile(projector, Buffer.alloc(200));
+  await writeFile(encoder, Buffer.alloc(300));
+  expect(
+    await estimateNativeLaunchMemory({
+      command: 'engine',
+      args: ['--model', model, '--mmproj', projector, '--llm', encoder, '--accelerator', 'cpu'],
+      baseUrl: '',
+    }),
+  ).toEqual({ bytes: 900 + 1024 ** 3, gpuBytes: 0 });
+});

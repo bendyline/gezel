@@ -49,6 +49,7 @@ export interface ChatModelInstallIdentity {
   huggingfaceRepo?: string;
   weightsFilename?: string;
   draftFilename?: string;
+  visionEncoderFilename?: string;
 }
 
 interface EngineBlock {
@@ -57,6 +58,7 @@ interface EngineBlock {
   sha256?: string;
   disabledReason?: unknown;
   draftModel?: { filename?: string };
+  visionEncoder?: { filename?: string };
 }
 
 interface IndexedModel {
@@ -138,6 +140,9 @@ export function chatModelInstallIdentity(
     ...(block.huggingfaceRepo ? { huggingfaceRepo: block.huggingfaceRepo } : {}),
     ...(block.filename ? { weightsFilename: block.filename } : {}),
     ...(block.draftModel?.filename ? { draftFilename: block.draftModel.filename } : {}),
+    ...(block.visionEncoder?.filename
+      ? { visionEncoderFilename: block.visionEncoder.filename }
+      : {}),
   };
 }
 

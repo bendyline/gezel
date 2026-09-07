@@ -715,7 +715,6 @@ function ProjectChatBody({
                       gezelId={selectedGezel.id}
                       projectId={project.id}
                       sessionId={sessionId || undefined}
-                      gezelName={selectedName}
                       {...(activeTask ? { taskRef: activeTask.ref } : {})}
                       {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}

@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import {
   ACCESSORY_OPTIONS,
+  BANGS_OPTIONS,
   BODY_SHAPE_KEYS,
   DRESS_OPTIONS,
   EXPRESSION_OPTIONS,
   FACIAL_HAIR_OPTIONS,
   FIGURE_SCALE_KEYS,
+  HAIR_PART_OPTIONS,
   HAIR_SHAPES,
   HAT_OPTIONS,
   MARK_OPTIONS,
@@ -61,6 +63,9 @@ export const PoppetjeSchema = z.preprocess(
 
     hair: z.string(),
     hairShape: z.enum(HAIR_SHAPES),
+    /** Optional styling choices; older files retain an open, unparted hairline. */
+    bangs: z.enum(BANGS_OPTIONS).nullable().optional().default(null),
+    hairPart: z.enum(HAIR_PART_OPTIONS).optional().default('none'),
 
     /** Replaces hair when set; 'hood' renders at body level. */
     hat: z.enum(HAT_OPTIONS).nullable().optional().default(null),

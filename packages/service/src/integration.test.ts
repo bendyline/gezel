@@ -164,6 +164,27 @@ describe('operational API surface', () => {
     }
   });
 
+  it('round-trips ds4 vision launch settings and rebuilds cached providers', async () => {
+    const visionSettings = {
+      ds4VisionEncoderPath: '/tmp/integration-ds4-vision-encoder.gguf',
+      nativeVision: { '__integration-ds4-vision__': false },
+    };
+    const resetClient = vi.spyOn(svc.context.chat, 'resetClient');
+
+    try {
+      const update = await api('PUT', '/api/config', visionSettings);
+      expect(update.status).toBe(200);
+      expect((await update.json()) as Record<string, unknown>).toMatchObject(visionSettings);
+      expect(resetClient).toHaveBeenCalledWith({ deferBusy: true });
+
+      const read = await api('GET', '/api/config');
+      expect(read.status).toBe(200);
+      expect((await read.json()) as Record<string, unknown>).toMatchObject(visionSettings);
+    } finally {
+      resetClient.mockRestore();
+    }
+  });
+
   it('round-trips the per-engine default media models through PUT and GET', async () => {
     // Same whitelist bug class as the Codex case above: the video panel's
     // active-model radio and confirmation tray were saved to config.json but
@@ -195,6 +216,11 @@ describe('operational API surface', () => {
       llamaCppFlashAttn: 'on',
       llamaCppSpecType: 'ngram-simple',
       llamaCppCpuMoe: true,
+      llamaCppNCpuFfn: 12,
+      llamaCppMlock: true,
+      llamaCppLoadMode: 'mmap+mlock',
+      llamaCppLazyMode: 'on',
+      llamaCppReasoningPreserve: true,
       llamaCppSwaFull: true,
     };
     const update = await api('PUT', '/api/config', overrides);
@@ -212,6 +238,11 @@ describe('operational API surface', () => {
       llamaCppFlashAttn: null,
       llamaCppSpecType: null,
       llamaCppCpuMoe: null,
+      llamaCppNCpuFfn: null,
+      llamaCppMlock: null,
+      llamaCppLoadMode: null,
+      llamaCppLazyMode: null,
+      llamaCppReasoningPreserve: null,
       llamaCppSwaFull: null,
     });
     expect(cleared.status).toBe(200);
@@ -220,6 +251,11 @@ describe('operational API surface', () => {
     expect(clearedBody.llamaCppFlashAttn).toBeUndefined();
     expect(clearedBody.llamaCppSpecType).toBeUndefined();
     expect(clearedBody.llamaCppCpuMoe).toBeUndefined();
+    expect(clearedBody.llamaCppNCpuFfn).toBeUndefined();
+    expect(clearedBody.llamaCppMlock).toBeUndefined();
+    expect(clearedBody.llamaCppLoadMode).toBeUndefined();
+    expect(clearedBody.llamaCppLazyMode).toBeUndefined();
+    expect(clearedBody.llamaCppReasoningPreserve).toBeUndefined();
     expect(clearedBody.llamaCppSwaFull).toBeUndefined();
   });
 

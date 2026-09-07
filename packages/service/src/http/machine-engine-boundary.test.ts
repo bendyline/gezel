@@ -87,6 +87,41 @@ describe('machine-engine service boundary', () => {
     expect(inference.status).toBe(200);
     expect(management.status).toBe(403);
     await expect(management.json()).resolves.toEqual({ error: 'missing_scope:machine-models' });
+    const capacity = await httpFetch(`${baseUrl}/v1/remote/manage/native-capacity`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${paired.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'status', id: '00000000-0000-4000-8000-000000000001' }),
+    });
+    expect(capacity.status).toBe(403);
+  });
+
+  it('coordinates isolated local engines with inference-only resource claims', async () => {
+    const id = '00000000-0000-4000-8000-000000000002';
+    const command = {
+      action: 'acquire',
+      id,
+      ownerPid: process.pid,
+      label: 'test recognition',
+      bytes: 256 * 1024 ** 2,
+      gpuBytes: 256 * 1024 ** 2,
+      exclusive: false,
+    };
+    const post = (body: unknown) =>
+      machineFetch('/v1/remote/manage/native-capacity', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    try {
+      const response = await post(command);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ state: 'granted' });
+      // No executable paths or product state may enter this new surface.
+      expect((await post({ ...command, command: '/tmp/arbitrary-program' })).status).toBe(422);
+      expect((await post({ ...command, bytes: -1 })).status).toBe(422);
+    } finally {
+      await post({ action: 'release', id });
+    }
   });
 
   it('does not mount product data, terminals, grants, or the UI', async () => {

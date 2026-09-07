@@ -23,6 +23,8 @@
 import type { EnginePhaseEvent } from '../streaming-session.js';
 
 export function classifyMlxStartupLine(line: string): EnginePhaseEvent | null {
+  if (line.includes('memory-admission:'))
+    return { provider: 'mlx', phase: 'starting', detail: 'Waiting for available memory' };
   const lower = line.toLowerCase();
 
   // ── Process starting ──

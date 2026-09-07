@@ -87,13 +87,18 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   // read-only input. The guard must be read after the steer.
   PromptSourceFilesReadOnly as Behavior<unknown>,
   PromptTerseVisibleReply as Behavior<unknown>,
-  // LAST of the prompt-append block on purpose. The cookbook tells models
+  // Last format-specific prompt block on purpose. The cookbook tells models
   // "never write tool-use markup … real calls go through the function-calling
   // channel", which is false on MLX (there is no such channel — salvage is the
   // only path). For a model with no decode-time grammar this block has to be
-  // the one that lands last, or the cookbook's rule wins and the model
+  // later than the cookbook, or the cookbook's rule wins and the model
   // suppresses the only syntax that works.
   PromptNativeToolCallFormat as Behavior<unknown>,
+  // Format-neutral and deliberately after the native example: the chat
+  // template/example says HOW to call; this final reminder says which schema
+  // fields the call must contain. Usually only one of these behaviors is
+  // enabled, but their ordering remains coherent if a profile carries both.
+  ToolsMlxGrammar as Behavior<unknown>,
   ReasoningStripThinkTags as Behavior<unknown>,
   ReasoningStripChannelTags as Behavior<unknown>,
   ReasoningCapturePreToolProse as Behavior<unknown>,
@@ -114,7 +119,6 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   ProviderMergeSystemMessages as Behavior<unknown>,
   SupervisionKeurmeester as Behavior<unknown>,
   ToolsGezelsAsRoles as Behavior<unknown>,
-  ToolsMlxGrammar as Behavior<unknown>,
   ToolsMlxTemplateFix as Behavior<unknown>,
   ValidateInlineJsParses as Behavior<unknown>,
 ];

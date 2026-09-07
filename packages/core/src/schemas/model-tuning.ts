@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import { LlamaCppLazyModeSchema, LlamaCppLoadModeSchema } from './llama-cpp-config.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
 /**
@@ -245,6 +246,20 @@ export const LlamaCppEngineConfigSchema = z
       .min(0)
       .optional()
       .describe('`--n-cpu-moe N`: keep the first N layers’ MoE experts in RAM. Partial split.'),
+    nCpuFfn: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        '`--n-cpu-ffn N`: keep the first N layers’ dense FFN weights in RAM. 0 disables the hardware planner.',
+      ),
+    loadMode: LlamaCppLoadModeSchema.optional().describe(
+      'llama.cpp v0.4.0 `--load-mode` override for this model.',
+    ),
+    lazyMode: LlamaCppLazyModeSchema.optional().describe(
+      'llama.cpp v0.4.0 on-demand tensor loading mode.',
+    ),
     cacheReuse: z
       .number()
       .int()
