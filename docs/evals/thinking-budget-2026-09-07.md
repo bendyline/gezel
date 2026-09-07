@@ -2,8 +2,15 @@
 
 **Finding:** Gezel's 96-token Gemma thinking cap can end the reasoning channel
 inside a sentence, exposing its continuation as ordinary chat text. The reported
-31B incident has direct runtime evidence; historical E4B conversations show the
-same visible symptom. **Budget selection remains pending controlled results.**
+31B incident has direct runtime evidence; controlled E4B and 26B runs reproduce
+the same class of channel continuation. **Decision: raise E4B, 26B and 31B from
+96 to 2,048 thinking tokens.** This is a practical default supported by the
+ordinary-task comparisons and repeated E4B tests. Raising it further to 4,096
+did not demonstrate a quality advantage on the harder paired planning holdout.
+
+**12B follow-up:** both Q4 and Q8 now use the same 2,048-token default, up from
+256, after a configuration sanity check. This is an extrapolation from the
+measured Gemma siblings; no 12B inference trials were run.
 
 ## Reported conversation and cause
 
@@ -47,7 +54,7 @@ since its initial content import. No 31B-specific experiment establishing 96 as
 optimal was found. DeepSeek's [recorded unrestricted-thinking failure](../../packages/catalog/src/chat-model-manifest-lint.ts)
 supports a finite cap, not a claim that 512 is the best finite value.
 
-The [historical audit](../../evals/runs/thinking-budget-2026-09-07/historical-audit/README.md)
+The historical audit (`evals/runs/thinking-budget-2026-09-07/historical-audit/README.md`, local run output)
 manually reviewed 22 non-synthetic 31B messages, 29 for 26B, and a balanced sample
 of 30 E4B messages from completed core matrices. It found **two explicit E4B
 continuations across channels**: one completed an unfinished sentence about tool
@@ -86,7 +93,7 @@ are held constant within each comparison. Experiments started only after the
 existing E4B core suite finished, as requested.
 
 The campaign uses the
-[isolated runtime](../../evals/runs/thinking-budget-2026-09-07/runtime-provenance.json)
+isolated runtime (recorded in `evals/runs/thinking-budget-2026-09-07/runtime-provenance.json`)
 and the same native upstream revision as the incident, on an AMD Radeon AI PRO
 R9700 through Vulkan. All paired arms use f16 KV cache; the original incident
 used q8_0. The follow-up is a diagnostic replay with fresh assistant/project
@@ -129,7 +136,7 @@ The replay retains the earlier conversation text but omits original tool records
 This limits interpretation of differences in replayed file actions.
 This is a targeted budget investigation, not a full tuning scorecard or a
 measurement of factual knowledge. The
-[campaign plan](../../evals/runs/thinking-budget-2026-09-07/PLAN.md) describes the
+campaign plan (`evals/runs/thinking-budget-2026-09-07/PLAN.md`) describes the
 acceptance criteria.
 
 ## Controlled results
@@ -213,17 +220,67 @@ An independent eight-topic scheduling holdout is checked against an exhaustive
 40,320-permutation oracle with exactly one solution. E4B's initial 512 and 2,048
 schedules were both wrong, and both exhausted their budgets before answering.
 The later forced report-write recovery violated the no-tools request, but does
-not explain the already incorrect schedules. **In progress:** 31B/26B holdouts
-and a paired 2,048/4,096 comparison wherever 2,048 still exhausts.
+not explain the already incorrect schedules.
+
+31B repeated its incorrect simple shipping-time calculation at 96 with seed 1;
+512 and 2,048 were correct. On the agenda holdout, 512 gave the wrong schedule
+while 2,048 gave the correct schedule with only a partial uniqueness rationale;
+both forced a reasoning close. 26B's simple arithmetic failure did not recur
+with seed 1. Its agenda at 512 directly continued a reasoning list in the visible
+channel and emitted more than 16,000 characters of scratch work before the
+no-action guard aborted it. The saved aborted message lost its reasoning field;
+the event recording preserves the exact cross-channel continuation. At 2,048,
+26B gave the correct schedule with a partial justification, still after a forced
+close, followed by a framework-induced report write.
+
+The E4B headroom pair then compared 2,048 and 4,096 at seed 2. Both exhausted
+their initial thinking allowance and failed the full task, without tools or
+recovery confounds. At 2,048 the response eventually found the correct order
+after conflicting visible drafts; at 4,096 the final schedule violated the
+Launch-before-Handoff rule and its justification was false. Completion tokens
+rose from 3,360 to 4,714 and native decode time from 30.84 to 40.30 seconds.
+This pair supplies no support for increasing E4B's default to 4,096. It also
+shows why choosing a budget solely to eliminate a cutoff or to pass one puzzle
+would be unreliable.
+
+31B's seed-2 headroom pair likewise supplied no clear benefit from 4,096. Both
+caps forced a close and gave the same correct schedule with a partial uniqueness
+construction. The longer 4,096 response additionally triggered a report-write
+recovery despite the no-tools request; 2,048 needed no recovery. Its greater
+whole-cell time includes that framework work and cannot be interpreted as a
+pure inference-speed comparison.
+
+26B's seed-2 headroom pair also failed to support 4,096. At 2,048 it eventually
+found the correct order after contradictory visible drafts. At 4,096 it again
+exhausted thinking, emitted more than 16,000 characters of scratch work into the
+visible response, and hit the prose-length guard without a clean completion.
+There was no demonstrated benefit sufficient to justify the larger default.
+
+The main campaign therefore contains **122 diagnostic cells**, including
+expected failing baselines and the explicitly documented framework/input
+confounds; the earlier scouts and startup failures are separate. The result does
+not establish a universal optimum or show that larger caps are always worse.
+It establishes that 96 is too restrictive for all three tested Gemmas, that 512
+still exposes the original failure class, and that 2,048 has the strongest
+support among these tested default candidates.
+
+Any finite cap can still force a premature close on sufficiently long thinking.
+The new default reduces that exposure on the ordinary probes; the harder agenda
+cases show that budget tuning alone does not guarantee a clean transition or a
+correct answer. Preventing continuation from leaking after *every* forced close
+requires separate runtime handling. Parameter count alone is not a sufficient
+basis for the cap: smaller E4B also needs substantially more than 96 for ordinary
+planning, and its repeated boundary failures are directly observed.
 
 ## Source changes and scope
 
-The current candidate changes only the root Gemma E4B, 26B and 31B catalog
+The initial adopted catalog change modifies the root Gemma E4B, 26B and 31B catalog
 thinking budgets from 96 to 2,048, plus the generated chat-model index. All five
 profiles per model inherit the base budget. Per-profile resolution checks verify
 all 15 effective budgets reach the request, leave output room, and allow an
-explicit 4,096-token user override to win. E2B, both 12B quantizations and
-DeepSeek R1 8B remain unchanged because their weights were unavailable locally.
+explicit 4,096-token user override to win. E2B and DeepSeek R1 8B remain unchanged
+because their weights were unavailable locally. Both 12B quantizations were
+initially deferred for the same reason; the follow-up below records their change.
 Other finite family defaults are mostly 2,048–8,192; there is no evidence here
 for a blanket increase outside Gemma.
 
@@ -234,7 +291,7 @@ role profiles. Nemotron3 Nano 30B's ordinary general profile is the exception:
 its effective budget becomes the authored 4,096 instead of the launch base's
 8,192. **These non-Gemma effects were not empirically validated in this campaign**;
 no non-Gemma catalog values were changed. The full
-[profile impact audit](../../evals/runs/thinking-budget-2026-09-07/profile-budget-impact.md)
+profile impact audit (`evals/runs/thinking-budget-2026-09-07/profile-budget-impact.md`)
 separates this configuration-correctness change from measured Gemma calibration.
 
 These are local source edits in Gezel and its sibling Gilde checkout. The bundled
@@ -243,13 +300,54 @@ dependencies were relinked, and no installed app/service was updated. The runtim
 under test was built separately so ongoing development and installed services
 were preserved.
 
+## 12B follow-up sanity check
+
+At the user's request, both `gemma4-12b-q4` and `gemma4-12b-q8` now inherit
+2,048 thinking tokens across all five profiles, replacing their 256-token cap.
+Neither variant is installed in the available machine or user model stores,
+so this is a provisional family default informed by the earlier E4B/26B/31B
+results, not a measured 12B quality improvement. Parameter count alone does not
+establish an optimal thinking allowance.
+
+The check found that each manifest declared only 2,048 total output tokens for
+`thinking-general` and `thinking-coding`. Those two declared limits are raised
+to 4,096 so reasoning cannot consume the entire authored response allowance.
+The current runtime already lifts thinking profiles to the model's 8,192-token
+base output ceiling, so this catalog correction does not further increase their
+effective output limit. Other sampling settings are unchanged. The resulting
+wire settings in both quantizations are:
+
+| Profile | Thinking cap | Effective total output cap |
+|---|---:|---:|
+| thinking-general | 2,048 | 8,192 |
+| thinking-coding | 2,048 | 8,192 |
+| thinking-precise | 2,048 | 8,192 |
+| instruct | 2,048 | 4,096 |
+| creative | 2,048 | 8,192 |
+
+All ten profile checks confirmed the inherited budget reaches llama.cpp, leaves
+answer room, and respects an explicit user budget override. The two root
+manifests and generated index are updated; authoring recipes and released model
+files are untouched because normal generation preserves root-manifest tuning.
+This follow-up does not change the 122-cell campaign's results or add 12B cells.
+
+Follow-up validation passed: 16 catalog service tests against the updated Gilde
+content, all ten effective-profile checks and both user-override checks, five
+manifest-assembly tests (including preservation through provider refresh), full
+schema validation, authoring checks, index freshness, model lint, page-demo
+checks, and both repositories' whitespace checks. The 12B diff contains exactly
+the three described value changes per quantization, plus the generated index.
+
 ## Validation and evidence
+
+The following checks describe the initial three-model campaign; the additional
+12B checks are recorded above.
 
 - 303 focused production tests passed for tuning, reasoning launch, llama.cpp and
   DS4 providers; service typecheck passed.
 - 59 harness tests and the two isolated daemon-entry tests passed; evals typecheck
   and Biome passed.
-- 16 catalog service tests passed against the candidate content, plus the 15
+- 16 catalog service tests passed against the updated content, plus the 15
   effective-profile checks and user-override assertions.
 - Gilde's schema validation (29,130 files), authoring, formatting, index,
   model-lint and page-demo checks passed. All 14 existing tool tests passed,
@@ -258,7 +356,7 @@ were preserved.
   invoking its dependency installation step.
 
 Raw runs, prompts, native traces, model outputs and manual sidecars are under
-[`evals/runs/thinking-budget-2026-09-07`](../../evals/runs/thinking-budget-2026-09-07/).
+`evals/runs/thinking-budget-2026-09-07` (local run output; `evals/runs/` is not checked in).
 The `summarize.mjs` helper reads immutable per-cell logs and recomputes recovery
 counts; early `results.json` files used an incomplete recovery-marker detector,
 so their stored zero counts must not be treated as proof of no recovery.
