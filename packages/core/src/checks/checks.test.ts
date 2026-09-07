@@ -853,6 +853,28 @@ describe('prose checks', () => {
 });
 
 describe('valuesSubsetOf (transform value conservation)', () => {
+  it('treats an HTML non-breaking space as the space the source has', () => {
+    // A correct invitation writes `August&nbsp;15, 2026`; event.json holds
+    // `Saturday, August 15, 2026`. Without folding, faithful copying reads as
+    // invention.
+    const r = valuesSubsetOf(
+      '<div class="value">Saturday, August&nbsp;15, 2026</div>',
+      ['{"date": "Saturday, August 15, 2026"}'],
+      { pattern: '((?:January|August|December)(?:\\s|&nbsp;)+\\d{1,2},?(?:\\s|&nbsp;)+\\d{4})' },
+    );
+    expect(r.invented).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('still catches an invented value when only the spacing differs', () => {
+    const r = valuesSubsetOf(
+      '<div>August&nbsp;16, 2026</div>',
+      ['{"date": "Saturday, August 15, 2026"}'],
+      { pattern: '(August(?:\\s|&nbsp;)+\\d{1,2},?(?:\\s|&nbsp;)+\\d{4})' },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.invented).toHaveLength(1);
+  });
   const ID = String.raw`\b([A-Z]-\d{3})\b`;
   const sources = ['id,email\nA-001,x@a.com\nA-002,y@a.com', 'id\nB-003'];
 

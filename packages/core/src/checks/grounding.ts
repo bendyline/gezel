@@ -374,9 +374,25 @@ export function valuesSubsetOf(
   // roster with no `Dear` — and then flagged every genuinely-grounded
   // value as invented (wild-caught across 4 craftbook evals, 2026-07-24).
   const caseInsensitive = flags.includes('i');
-  const sourceHaystacks = sourceTexts.map((t) => (caseInsensitive ? t.toLowerCase() : t));
+  // Second encoding-mismatch class, same shape as the one above: an HTML
+  // deliverable writes `August&nbsp;15, 2026` — correct typography for a date
+  // — while the source JSON holds `August 15, 2026`, so a verbatim substring
+  // test calls a faithfully-copied value invented. Fold every
+  // whitespace-equivalent encoding to a single space on BOTH sides before
+  // comparing. Like the glob handling above this only ever WIDENS the allowed
+  // set, so it cannot turn a genuinely invented value into a pass.
+  const foldSpace = (t: string): string =>
+    t
+      .replace(/&nbsp;|&#160;|&#xa0;|&#xA0;/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ');
+  const normalize = (t: string): string => {
+    const folded = foldSpace(t);
+    return caseInsensitive ? folded.toLowerCase() : folded;
+  };
+  const sourceHaystacks = sourceTexts.map(normalize);
   const appearsInSources = (value: string): boolean => {
-    const needle = caseInsensitive ? value.toLowerCase() : value;
+    const needle = normalize(value);
     return sourceHaystacks.some((t) => t.includes(needle));
   };
   const seen = new Set<string>();
