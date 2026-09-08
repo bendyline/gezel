@@ -84,6 +84,12 @@ const ctx = vi.hoisted(() => ({
     nativeBinDir: '/mock/native-bin',
     reason: 'verified Electron native release test',
   } as { reused: boolean; nativeBinDir?: string; reason: string },
+  compatibilityIssue: null as null | {
+    source: 'machine-engine';
+    capability: 'native-capacity-v1';
+    serviceHome: string;
+    installedVersion: string | null;
+  },
   logLines: [] as string[],
 }));
 
@@ -109,12 +115,25 @@ vi.mock('./extract-bundle.js', () => ({
   extractBundleIfNeeded: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./native-bin.js', () => ({
-  resolveNativeBinaryPath: vi.fn((binaryName: string, _mainMetaUrl: string, variant?: string) =>
-    binaryName === 'llama-server' && variant
-      ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
-      : null,
+  resolveNativeBinaryPath: vi.fn(
+    (
+      binaryName: string,
+      _mainMetaUrl: string,
+      variant?: string,
+      options?: { accept?: (path: string) => boolean },
+    ) => {
+      const candidate =
+        binaryName === 'llama-server' && variant
+          ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
+          : null;
+      return candidate && (!options?.accept || options.accept(candidate)) ? candidate : null;
+    },
   ),
   nativeBinDir: () => ctx.nativeRoot,
+  verifyLlamaBinaryAgainstCheckoutPin: vi.fn(() => ({
+    compatible: true,
+    reason: 'mock checkout pin match',
+  })),
 }));
 // Probe + cache-bust key live in core (`@bendyline/gezel/native`)
 // because the supervisor needs to static-import them BEFORE the
@@ -179,6 +198,9 @@ vi.mock('./log-rotator.js', () => ({
     close = vi.fn().mockResolvedValue(undefined);
   },
 }));
+vi.mock('./machine-engine-compat.js', () => ({
+  inspectMachineEngineCompatibility: vi.fn(() => Promise.resolve(ctx.compatibilityIssue)),
+}));
 vi.mock('@bendyline/gezel-client/node', () => ({
   GezelClient: class MockGezelClient {
     constructor(private readonly connection: { baseUrl: string; token: string }) {}
@@ -238,7 +260,9 @@ vi.mock('@bendyline/gezel-service', () => ({
 const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, stopProcessByPid } =
   await import('./index.js');
 const { resolveMode } = await import('./mode.js');
-const { resolveNativeBinaryPath } = await import('./native-bin.js');
+const { resolveNativeBinaryPath, verifyLlamaBinaryAgainstCheckoutPin } = await import(
+  './native-bin.js'
+);
 const {
   discoverOrSpawn,
   stopOwnedDaemon,
@@ -265,6 +289,8 @@ const ENV_KEYS = [
   'GEZEL_UV_BIN',
   'GEZEL_NATIVE_BIN_DIR',
   'GEZEL_SHARED_ASSETS_DIR',
+  'GEZEL_DISABLE_MACHINE_ENGINE',
+  'GEZEL_NATIVE_CAPACITY_AUTHORITY',
 ];
 let envSnapshot: Record<string, string | undefined>;
 let testHome: string;
@@ -294,6 +320,7 @@ beforeEach(async () => {
     nativeBinDir: ctx.nativeRoot,
     reason: 'verified Electron native release test',
   };
+  ctx.compatibilityIssue = null;
   ctx.logLines = [];
   // "We can't read our own bundle version" is the default, which makes every
   // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
@@ -1028,6 +1055,55 @@ describe('Branch 3 — embedded', () => {
     await svc.shutdown();
   });
 
+  it('offers self-hosted infrastructure before an incompatible broker can fail a turn', async () => {
+    ctx.compatibilityIssue = {
+      source: 'machine-engine',
+      capability: 'native-capacity-v1',
+      serviceHome: '/var/lib/gezel',
+      installedVersion: '1.26244.63',
+    };
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+    const choose = vi.fn().mockResolvedValue('self-hosted' as const);
+
+    const svc = await connectOrStart(
+      baseOpts({ forceEmbedded: true, onInstalledServiceIncompatible: choose }),
+    );
+
+    expect(choose).toHaveBeenCalledWith({
+      source: 'machine-engine',
+      installedVersion: '1.26244.63',
+      appVersion: null,
+    });
+    expect(process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY).toBe('local');
+    expect(process.env.GEZEL_DISABLE_MACHINE_ENGINE).toBe('1');
+    expect(startService).toHaveBeenCalledWith(
+      expect.objectContaining({ machineEngineDiscovery: false }),
+    );
+    await svc.shutdown();
+  });
+
+  it('does not start the embedded service when the user quits the compatibility choice', async () => {
+    ctx.compatibilityIssue = {
+      source: 'machine-engine',
+      capability: 'native-capacity-v1',
+      serviceHome: '/var/lib/gezel',
+      installedVersion: '1.26244.63',
+    };
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+
+    await expect(
+      connectOrStart(
+        baseOpts({
+          forceEmbedded: true,
+          onInstalledServiceIncompatible: vi.fn().mockResolvedValue('quit'),
+        }),
+      ),
+    ).rejects.toMatchObject({ name: 'InstalledServiceCompatibilityDeclinedError' });
+    expect(installNodeIfNeeded).not.toHaveBeenCalled();
+    expect(installPnpmIfNeeded).not.toHaveBeenCalled();
+    expect(startService).not.toHaveBeenCalled();
+  });
+
   it('uses a native payload that exists in the development checkout', async () => {
     ctx.nativeRoot = join(testHome, 'native-bin');
     ctx.nativeReuse = {
@@ -1143,6 +1219,19 @@ describe('native llama-server selection', () => {
     );
     expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
     expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(resolveNativeBinaryPath).toHaveBeenCalledWith(
+      'llama-server',
+      expect.any(String),
+      'vulkan',
+      expect.objectContaining({
+        preferDevelopmentBuild: true,
+        accept: expect.any(Function),
+      }),
+    );
+    expect(verifyLlamaBinaryAgainstCheckoutPin).toHaveBeenCalledWith(
+      '/mock/native-bin/linux-x64-vulkan/gezel-llama-server',
+      expect.any(String),
+    );
     const llamaVariants = vi
       .mocked(resolveNativeBinaryPath)
       .mock.calls.filter(([name]) => name === 'llama-server')
@@ -1859,8 +1948,82 @@ describe('store-connect', () => {
 
     expect(svc.mode).toBe('embedded');
     expect(svc.fallbackReason?.code).toBe('store-service-incompatible');
-    // The reason has to name something the user can act on, not an opcode.
-    expect(svc.fallbackReason?.message).toMatch(/generation/i);
+    expect(svc.fallbackReason?.message).toMatch(/cannot use shared services together/i);
+    await svc.shutdown();
+  });
+
+  it('offers a Store user local infrastructure when the installed service is incompatible', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy({ apiCompat: { floor: 7, current: 9 } }));
+    const choose = vi.fn().mockResolvedValue('self-hosted' as const);
+
+    const svc = await connectOrStart(
+      baseOpts({
+        packaged: true,
+        storeProfile: true,
+        appVersion: '1.26300.4',
+        onInstalledServiceIncompatible: choose,
+      }),
+    );
+
+    expect(choose).toHaveBeenCalledWith({
+      source: 'store-service',
+      installedVersion: '1.26240.3',
+      appVersion: '1.26300.4',
+    });
+    expect(process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY).toBe('local');
+    expect(process.env.GEZEL_DISABLE_MACHINE_ENGINE).toBe('1');
+    expect(startService).toHaveBeenCalledWith(
+      expect.objectContaining({ machineEngineDiscovery: false }),
+    );
+    expect(svc.fallbackReason?.message).toContain('1.26240.3');
+    expect(svc.fallbackReason?.message).toContain('1.26300.4');
+    await svc.shutdown();
+  });
+
+  it('does not start a Store service when the user chooses to update or quit', async () => {
+    vi.mocked(resolveMode).mockResolvedValue(storeMode);
+    ctx.health = () => Promise.resolve(healthy({ apiCompat: { floor: 7, current: 9 } }));
+
+    await expect(
+      connectOrStart(
+        baseOpts({
+          packaged: true,
+          storeProfile: true,
+          appVersion: '1.26300.4',
+          onInstalledServiceIncompatible: vi.fn().mockResolvedValue('quit'),
+        }),
+      ),
+    ).rejects.toMatchObject({ name: 'InstalledServiceCompatibilityDeclinedError' });
+    expect(startService).not.toHaveBeenCalled();
+  });
+
+  it('checks the installed machine engine before a Store build starts embedded', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+    ctx.compatibilityIssue = {
+      source: 'machine-engine',
+      capability: 'native-capacity-v1',
+      serviceHome: '/var/lib/gezel',
+      installedVersion: '1.26244.63',
+    };
+    const choose = vi.fn().mockResolvedValue('self-hosted' as const);
+
+    const svc = await connectOrStart(
+      baseOpts({
+        packaged: true,
+        storeProfile: true,
+        appVersion: '1.26300.4',
+        onInstalledServiceIncompatible: choose,
+      }),
+    );
+
+    expect(choose).toHaveBeenCalledWith({
+      source: 'machine-engine',
+      installedVersion: '1.26244.63',
+      appVersion: '1.26300.4',
+    });
+    expect(svc.mode).toBe('embedded');
+    expect(process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY).toBe('local');
     await svc.shutdown();
   });
 

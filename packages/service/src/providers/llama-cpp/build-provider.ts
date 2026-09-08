@@ -1306,6 +1306,7 @@ export async function buildLlamaCppProvider(opts: {
       }
     },
     onExit: (snapshot) => {
+      providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
       // A build that dies by SIGILL before it ever answers /health has

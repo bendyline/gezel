@@ -33,3 +33,18 @@ export function reasoningLaunchOverridesFromEnv(env: NodeJS.ProcessEnv = process
     budgetTokens: parseReasoningBudgetEnv(env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS),
   };
 }
+
+/** Keep launch-time experiment overrides authoritative on request budgets too. */
+export function applyLlamaCppReasoningBudgetOverride(
+  body: Record<string, unknown>,
+  supportsReasoningBudget: boolean,
+  rawBudget: string | undefined = process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS,
+): void {
+  // DS4 shares the llama.cpp turn loop but does not accept this budget field.
+  if (!supportsReasoningBudget) {
+    delete body.reasoning_budget_tokens;
+    return;
+  }
+  const budgetTokens = parseReasoningBudgetEnv(rawBudget);
+  if (budgetTokens !== undefined) body.reasoning_budget_tokens = budgetTokens;
+}

@@ -98,6 +98,7 @@ import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { applyLlamaCppReasoningBudgetOverride } from './reasoning-launch.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
 // the same text-form abort, and existing tests import them from here.
@@ -1206,14 +1207,15 @@ type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
  */
 
 export interface LlamaCppReasoningRequestDiagnostic {
+  reasoningBudgetTokens?: number;
   enableThinking?: boolean;
   reasoningEffort?: string | number | boolean;
   reasoningStrength?: string | number | boolean;
 }
 
 /**
- * Extract only the non-sensitive reasoning controls that will reach the chat
- * template. Keeping this at the final request-body boundary lets evals prove
+ * Extract only the non-sensitive reasoning controls that will reach the engine.
+ * Keeping this at the final request-body boundary lets evals prove
  * an effort arm did not collapse after profile resolution or constrained-turn
  * rewriting, without logging prompts, messages, or tool arguments.
  */
@@ -1221,9 +1223,12 @@ export function llamaCppReasoningRequestDiagnostic(
   body: Record<string, unknown>,
 ): LlamaCppReasoningRequestDiagnostic | null {
   const raw = body.chat_template_kwargs;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const kwargs = raw as Record<string, unknown>;
+  const kwargs =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const diagnostic: LlamaCppReasoningRequestDiagnostic = {};
+  if (typeof body.reasoning_budget_tokens === 'number') {
+    diagnostic.reasoningBudgetTokens = body.reasoning_budget_tokens;
+  }
   if (typeof kwargs.enable_thinking === 'boolean') {
     diagnostic.enableThinking = kwargs.enable_thinking;
   }
@@ -2691,6 +2696,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         stream: false,
       };
       if (this.deps.tuning) applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
+      applyLlamaCppReasoningBudgetOverride(
+        body,
+        this.deps.disableThinkingRequestShape === 'chat-template',
+      );
       // After tuning so a catalog `maxTokens` can't re-widen the decode.
       body.max_tokens = 1;
       if (tools.length > 0) body.tools = tools;
@@ -3156,6 +3165,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         if (this.deps.tuning) {
           applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
         }
+        applyLlamaCppReasoningBudgetOverride(
+          body,
+          this.deps.disableThinkingRequestShape === 'chat-template',
+        );
         // Continuation-iteration output cap — see SendAndWaitOpts.
         // Iteration 0 keeps the catalog cap so a tool call is never cut
         // off before it starts; wrap-up iterations get the tight cap.

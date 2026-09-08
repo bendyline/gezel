@@ -33,9 +33,17 @@ import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 import { readHomeUsageSignals, readHostingPin, writeHostingPin } from './home-signals.js';
 import { LogRotator } from './log-rotator.js';
+import {
+  type MachineEngineCompatibilityIssue,
+  inspectMachineEngineCompatibility,
+} from './machine-engine-compat.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
-import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
+import {
+  nativeBinDir,
+  resolveNativeBinaryPath,
+  verifyLlamaBinaryAgainstCheckoutPin,
+} from './native-bin.js';
 import {
   inBundleServiceTree,
   resolveRuntimeInPlace,
@@ -72,6 +80,29 @@ export interface ConnectOptions {
    * src/store-build.ts.
    */
   storeProfile?: boolean;
+  /** User-visible app version, supplied by Electron for compatibility copy. */
+  appVersion?: string;
+  /**
+   * Startup recovery for an installed service this app cannot safely share.
+   * Electron owns the user-facing choice; the supervisor owns applying it
+   * before the embedded service starts.
+   */
+  onInstalledServiceIncompatible?: (
+    issue: InstalledServiceCompatibilityIssue,
+  ) => Promise<'self-hosted' | 'quit'>;
+}
+
+export interface InstalledServiceCompatibilityIssue {
+  source: 'machine-engine' | 'store-service';
+  installedVersion: string | null;
+  appVersion: string | null;
+}
+
+export class InstalledServiceCompatibilityDeclinedError extends Error {
+  constructor() {
+    super('The installed Gezel service is incompatible and local startup was declined.');
+    this.name = 'InstalledServiceCompatibilityDeclinedError';
+  }
 }
 
 interface LocalAdoptRuntime {
@@ -964,6 +995,70 @@ export class SupervisedService extends EventEmitter {
 
 export type Connection = SupervisedService;
 
+async function useLocalInfrastructureForCompatibility(
+  opts: ConnectOptions,
+  issue: MachineEngineCompatibilityIssue | Omit<InstalledServiceCompatibilityIssue, 'appVersion'>,
+): Promise<void> {
+  if (!opts.onInstalledServiceIncompatible) return;
+  const decision = await opts.onInstalledServiceIncompatible({
+    source: issue.source,
+    installedVersion: issue.installedVersion,
+    appVersion: opts.appVersion ?? (await shippedServiceVersion()),
+  });
+  if (decision !== 'self-hosted') throw new InstalledServiceCompatibilityDeclinedError();
+  // Deliberately process-local and non-persistent. The next launch probes
+  // again, so installing a compatible retail service heals automatically.
+  process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY = 'local';
+  process.env.GEZEL_DISABLE_MACHINE_ENGINE = '1';
+  opts.logger?.warn?.(
+    '[supervisor] user selected local infrastructure without shared services for this app run',
+  );
+}
+
+async function prepareDevelopmentMachineInfrastructure(opts: ConnectOptions): Promise<void> {
+  // Normal development runs embed the service built from this checkout. They
+  // intentionally skip installed-broker inference, but the service's capacity
+  // layer still consults that broker so two engine owners cannot overcommit the
+  // device. Detect an older broker before provisioning runtimes or starting the
+  // service, then let Electron offer an explicit per-run escape hatch.
+  //
+  // Keep this scoped to forced embedded development: an adopted/spawned daemon
+  // has its own environment, and a packaged installation must resolve its
+  // broker through the installer/update lifecycle rather than silently
+  // splitting resource authority.
+  if (
+    opts.packaged ||
+    !opts.forceEmbedded ||
+    !opts.onInstalledServiceIncompatible ||
+    process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local'
+  ) {
+    return;
+  }
+
+  const issue = await inspectMachineEngineCompatibility({ logger: opts.logger });
+  if (!issue) return;
+  opts.logger?.warn?.(
+    `[supervisor] installed machine engine${issue.installedVersion ? ` v${issue.installedVersion}` : ''} lacks ${issue.capability}`,
+  );
+  await useLocalInfrastructureForCompatibility(opts, issue);
+}
+
+async function prepareStoreMachineInfrastructure(opts: ConnectOptions): Promise<void> {
+  if (
+    !opts.storeProfile ||
+    !opts.onInstalledServiceIncompatible ||
+    process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local'
+  ) {
+    return;
+  }
+  const issue = await inspectMachineEngineCompatibility({ logger: opts.logger });
+  if (!issue) return;
+  opts.logger?.warn?.(
+    `[supervisor] installed machine engine${issue.installedVersion ? ` v${issue.installedVersion}` : ''} lacks ${issue.capability}`,
+  );
+  await useLocalInfrastructureForCompatibility(opts, issue);
+}
+
 /**
  * Resolve a mode, then establish the connection. For branches we don't own
  * (`remote`, `local-adopt`), verify the daemon is reachable before
@@ -971,6 +1066,8 @@ export type Connection = SupervisedService;
  * silent drift into embedded mode.
  */
 export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedService> {
+  await prepareDevelopmentMachineInfrastructure(opts);
+
   // Most Electron E2Es use a fresh home and the system Node/pnpm already
   // running the checkout. Reinstalling and repeatedly hashing the ~110 MB
   // bundled runtimes for every spec only tests cold provisioning over and
@@ -1148,7 +1245,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
   if (!process.env.GEZEL_SD_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('sd-server', import.meta.url);
+    const bin = resolveNativeBinaryPath('sd-server', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_SD_SERVER_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled sd-server: ${bin}`);
@@ -1192,9 +1291,36 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // resolution entirely — so spawn and embedded launches would keep
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
+    const checkoutLlamaCompatibility = new Map<
+      string,
+      ReturnType<typeof verifyLlamaBinaryAgainstCheckoutPin>
+    >();
     const resolved = resolveAvailableLlamaBinary(
       probe.backend,
-      (backend) => resolveNativeBinaryPath('llama-server', import.meta.url, backend),
+      (backend) =>
+        resolveNativeBinaryPath('llama-server', import.meta.url, backend, {
+          preferDevelopmentBuild: !opts.packaged,
+          ...(!opts.packaged
+            ? {
+                accept: (path: string) => {
+                  let compatibility = checkoutLlamaCompatibility.get(path);
+                  if (!compatibility) {
+                    compatibility = verifyLlamaBinaryAgainstCheckoutPin(path, import.meta.url);
+                    checkoutLlamaCompatibility.set(path, compatibility);
+                    const message = `${path}: ${compatibility.reason}`;
+                    if (compatibility.compatible) {
+                      opts.logger?.info?.(`[supervisor] verified checkout llama-server ${message}`);
+                    } else {
+                      opts.logger?.warn?.(
+                        `[supervisor] ignoring stale dev llama-server ${message}`,
+                      );
+                    }
+                  }
+                  return compatibility.compatible;
+                },
+              }
+            : {}),
+        }),
       override === undefined || override === 'auto',
       quarantine.length > 0
         ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
@@ -1228,7 +1354,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
   if (!process.env.GEZEL_WHISPER_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url);
+    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_WHISPER_SERVER_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled whisper-server: ${bin}`);
@@ -1239,7 +1367,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // Python-based feature). The service's UvRuntime prefers this
     // bundled binary so packaged builds never probe macOS's developer-
     // tools `python3` shim. System runtimes are source/dev fallbacks.
-    const bin = resolveNativeBinaryPath('uv', import.meta.url);
+    const bin = resolveNativeBinaryPath('uv', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
     if (bin) {
       process.env.GEZEL_UV_BIN = bin;
       opts.logger?.info?.(`[supervisor] bundled uv: ${bin}`);
@@ -1305,6 +1435,12 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     logger: opts.logger,
     ...(opts.storeProfile ? { storeProfile: true } : {}),
   });
+
+  // A Store build with no adoptable product daemon starts its own service,
+  // which may still discover the separately installed machine engine. Apply
+  // the same compatibility choice before that embedded service can route a
+  // model request to an older broker.
+  if (mode.kind === 'embedded') await prepareStoreMachineInfrastructure(opts);
 
   return connectResolved(opts, mode, { inheritedReason: null, allowMachineRecheck: true });
 }
@@ -2039,10 +2175,15 @@ async function connectStoreService(
   const verdict = evaluateStoreCompat(health);
   if (!verdict.compatible) {
     opts.logger?.info?.(`[supervisor] declining the installed Gezel service: ${verdict.reason}`);
+    await useLocalInfrastructureForCompatibility(opts, {
+      source: 'store-service',
+      installedVersion: health.version,
+    });
+    const appVersion = opts.appVersion ?? (await shippedServiceVersion());
     return buildEmbedded(opts, {
       code: 'store-service-incompatible',
       sourceMode: 'store-connect',
-      message: `This app started its own Gezel service because ${verdict.reason}.`,
+      message: `The installed Gezel service${health.version ? ` is version ${health.version}` : ''}${appVersion ? ` and this app is version ${appVersion}` : ''}. They cannot use shared services together, so this app is running without them.`,
     });
   }
 
@@ -2474,7 +2615,9 @@ async function startEmbeddedRaw(
     // Dev must exercise the provider code that `pnpm app` just built. The
     // installed release broker is deliberately opt-in for compatibility and
     // machine-boundary testing, not an implicit shadow runtime.
-    machineEngineDiscovery: opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1',
+    machineEngineDiscovery:
+      process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1' &&
+      (opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1'),
     onRestartRequested,
   });
   const scheme = running.cert ? 'https' : 'http';

@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
@@ -23,6 +24,21 @@ import { redirectAsarToUnpacked } from './extract-bundle.js';
 
 const PLATFORM_KEY = resolvePlatformKey();
 
+export interface ResolveNativeBinaryOptions {
+  /** Prefer `native/build/` over the fetched/package-staging `native-bin/` tree. */
+  preferDevelopmentBuild?: boolean;
+  /** Skip candidates that do not satisfy a caller-owned compatibility check. */
+  accept?: (path: string) => boolean;
+}
+
+export interface LlamaCheckoutCompatibility {
+  compatible: boolean;
+  reason: string;
+  version?: string;
+  build?: number;
+  revision?: string;
+}
+
 /**
  * Resolve the on-disk path of a bundled native binary.
  *
@@ -38,6 +54,7 @@ export function resolveNativeBinaryPath(
   binaryName: 'sd-server' | 'llama-server' | string,
   mainMetaUrl: string,
   variant?: string,
+  options: ResolveNativeBinaryOptions = {},
 ): string | null {
   if (!PLATFORM_KEY) return null;
   const ext = process.platform === 'win32' ? '.exe' : '';
@@ -58,29 +75,156 @@ export function resolveNativeBinaryPath(
   // Secondary fallback: `<repo>/native/build/<platform>[-<variant>]/`
   // — the output dir of `native/engines/*/build.{sh,ps1}` for devs
   // who built an engine locally instead of fetching prebuilt.
-  const devRoot = dirname(fileURLToPath(mainMetaUrl)); // packages/app/dist
-  const repoRoot = resolve(devRoot, '..', '..', '..');
-  const devBuild = join(repoRoot, 'native', 'build');
+  const devBuild = developmentNativeBinDir(mainMetaUrl);
+  const roots = options.preferDevelopmentBuild ? [devBuild, asarRoot] : [asarRoot, devBuild];
 
   if (variant) {
     const variantKey = `${PLATFORM_KEY}-${variant}`;
-    dirs.push(join(asarRoot, variantKey));
-    dirs.push(join(devBuild, variantKey));
+    for (const root of roots) dirs.push(join(root, variantKey));
   }
   // Variant-less fallback covers single-variant engines (sd-cpp) and
   // platforms where only one variant exists (Mac always picks Metal).
-  dirs.push(join(asarRoot, PLATFORM_KEY));
-  dirs.push(join(devBuild, PLATFORM_KEY));
+  for (const root of roots) dirs.push(join(root, PLATFORM_KEY));
 
   // Directory precedence is the outer loop; within each dir the gezel-
   // prefixed name wins over the legacy bare name.
   for (const dir of dirs) {
     for (const fileName of fileNames) {
       const p = join(dir, fileName);
-      if (existsSync(p)) return p;
+      if (existsSync(p) && (!options.accept || options.accept(p))) return p;
     }
   }
   return null;
+}
+
+/** `native/build/` in the source checkout containing the Electron main bundle. */
+export function developmentNativeBinDir(mainMetaUrl: string): string {
+  const mainDir = dirname(fileURLToPath(mainMetaUrl)); // packages/app/dist
+  const repoRoot = resolve(mainDir, '..', '..', '..');
+  return join(repoRoot, 'native', 'build');
+}
+
+/**
+ * Prove that a candidate llama-server was built from the pin in THIS checkout.
+ *
+ * Dev builds may have two payloads on disk: a previously fetched native
+ * release in `packages/app/native-bin/`, and a just-compiled binary in
+ * `native/build/`. App source can begin passing new flags before the next
+ * native release is published, so accepting the older fetched payload merely
+ * because it is signed makes the dev app fail at first model launch. Check the
+ * executable's own `--version` output and its sidecar against VERSION before
+ * exposing it to the in-process service.
+ */
+export function verifyLlamaBinaryAgainstCheckoutPin(
+  binaryPath: string,
+  mainMetaUrl: string,
+  runVersion: (path: string) => {
+    status: number | null;
+    stdout?: string | Buffer | null;
+    stderr?: string | Buffer | null;
+    error?: Error;
+  } = defaultLlamaVersionRunner,
+): LlamaCheckoutCompatibility {
+  try {
+    const repoRoot = resolve(developmentNativeBinDir(mainMetaUrl), '..', '..');
+    const pinText = readFileSync(
+      join(repoRoot, 'native', 'engines', 'llama-cpp', 'VERSION'),
+      'utf8',
+    );
+    const tag = pinText.match(/^tag=(\S+)\s*$/m)?.[1];
+    const buildText = pinText.match(/^build=(\d+)\s*$/m)?.[1];
+    const revision = pinText.match(/^commit=([0-9a-f]{40})\s*$/m)?.[1]?.toLowerCase();
+    if (!tag || !buildText || !revision) {
+      return { compatible: false, reason: 'checkout llama.cpp VERSION pin is incomplete' };
+    }
+
+    const sidecar = JSON.parse(
+      readFileSync(join(dirname(binaryPath), 'gezel-llama-build.json'), 'utf8'),
+    ) as { engine?: unknown; revision?: unknown };
+    if (sidecar.engine !== 'llama-cpp' || typeof sidecar.revision !== 'string') {
+      return { compatible: false, reason: 'llama build sidecar is missing its source identity' };
+    }
+    if (sidecar.revision.toLowerCase() !== revision) {
+      return {
+        compatible: false,
+        reason: `sidecar revision ${sidecar.revision} does not match checkout pin ${revision}`,
+      };
+    }
+
+    const result = runVersion(binaryPath);
+    if (result.error) {
+      return { compatible: false, reason: `could not run --version: ${result.error.message}` };
+    }
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    if (result.status !== 0) {
+      return {
+        compatible: false,
+        reason: `--version exited with status ${result.status}${output.trim() ? `: ${output.trim()}` : ''}`,
+      };
+    }
+    const match = output.match(
+      /\bversion:\s*(\S+)\s+\(\s*build\s+(\d+)\s*,\s*commit\s+([0-9a-f]{7,40})\s*\)/i,
+    );
+    if (!match) {
+      return { compatible: false, reason: '--version returned no recognizable source identity' };
+    }
+
+    const actualVersion = match[1]!;
+    const actualBuild = Number.parseInt(match[2]!, 10);
+    const actualRevision = match[3]!.toLowerCase();
+    const expectedVersion = tag.match(/^v(.+)$/)?.[1];
+    if (expectedVersion && actualVersion !== expectedVersion) {
+      return {
+        compatible: false,
+        reason: `executable version ${actualVersion} does not match checkout pin ${expectedVersion}`,
+      };
+    }
+    if (actualBuild !== Number.parseInt(buildText, 10)) {
+      return {
+        compatible: false,
+        reason: `executable build ${actualBuild} does not match checkout pin ${buildText}`,
+      };
+    }
+    if (!revision.startsWith(actualRevision)) {
+      return {
+        compatible: false,
+        reason: `executable revision ${actualRevision} does not match checkout pin ${revision}`,
+      };
+    }
+
+    return {
+      compatible: true,
+      reason: `llama.cpp ${actualVersion} build ${actualBuild}, revision ${actualRevision}`,
+      version: actualVersion,
+      build: actualBuild,
+      revision: actualRevision,
+    };
+  } catch (error) {
+    return {
+      compatible: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function defaultLlamaVersionRunner(path: string): {
+  status: number | null;
+  stdout?: string | Buffer | null;
+  stderr?: string | Buffer | null;
+  error?: Error;
+} {
+  const result = spawnSync(path, ['--version'], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    timeout: 60_000,
+    windowsHide: true,
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 /**

@@ -71,6 +71,15 @@ describe('native capacity broker discovery', () => {
     await lease.release();
   });
 
+  it('uses the local ledger after an explicit self-hosted startup choice', async () => {
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'local');
+    const lease = await acquire();
+    expect(mocks.local).toHaveBeenCalled();
+    expect(mocks.runtime).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
   it('refreshes rotated credentials and re-verifies the same identity after broker restart', async () => {
     const lease = await acquire();
     mocks.runtime.mockResolvedValue({

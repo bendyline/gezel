@@ -311,6 +311,142 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     expect(restoreCall).toBeDefined();
   });
 
+  it('restores a saved session after engine exit even when the restarted engine uses the same URL', async () => {
+    const { calls, fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:8080',
+      slotCount: 1,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await writeFile(join(tmp, 'sess-conversation.bin'), 'saved conversation');
+    const restores = () => calls.filter((c) => c.url.includes('action=restore'));
+
+    await a.prepareForSend('conversation');
+    await a.prepareForSend('conversation');
+    expect(restores()).toHaveLength(1);
+
+    // Stage-1 freeze saves the slot while the engine stays resident. A
+    // subsequent send should keep using that resident cache without restoring.
+    expect(await a.flushAll()).toBe(1);
+    await a.prepareForSend('conversation');
+    expect(restores()).toHaveLength(1);
+
+    // The adapter outlives the child. Exit must discard the resident binding,
+    // but preserve the file so turn 2 can restore into the new process.
+    a.resetEngineState();
+    expect(await a.flushAll()).toBe(0);
+    expect(await readdir(tmp)).toContain('sess-conversation.bin');
+    await a.prepareForSend('conversation');
+    expect(restores()).toHaveLength(2);
+    expect(restores()[1]).toMatchObject({
+      url: 'http://127.0.0.1:8080/slots/0?action=restore',
+      body: { filename: 'sess-conversation.bin' },
+    });
+
+    await a.prepareForSend('conversation');
+    expect(restores()).toHaveLength(2);
+  });
+
+  it('keeps concurrent restored sessions on distinct slots after engine exit', async () => {
+    const { calls, fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:8080',
+      slotCount: 2,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await writeFile(join(tmp, 'sess-alpha.bin'), 'alpha');
+    await writeFile(join(tmp, 'sess-beta.bin'), 'beta');
+    await Promise.all([a.prepareForSend('alpha'), a.prepareForSend('beta')]);
+    a.resetEngineState();
+    calls.length = 0;
+
+    await Promise.all([a.prepareForSend('beta'), a.prepareForSend('alpha')]);
+
+    expect(a.buildRequestExtras('beta').id_slot).toBe(0);
+    expect(a.buildRequestExtras('alpha').id_slot).toBe(1);
+    expect(calls).toEqual([
+      {
+        url: 'http://127.0.0.1:8080/slots/0?action=restore',
+        method: 'POST',
+        body: { filename: 'sess-beta.bin' },
+      },
+      {
+        url: 'http://127.0.0.1:8080/slots/1?action=restore',
+        method: 'POST',
+        body: { filename: 'sess-alpha.bin' },
+      },
+    ]);
+  });
+
+  it('ignores a delayed restore failure from the exited engine without binding or disabling the new engine', async () => {
+    await writeFile(join(tmp, 'sess-conversation.bin'), 'saved conversation');
+    let startRestore!: () => void;
+    const restoreStarted = new Promise<void>((resolve) => {
+      startRestore = resolve;
+    });
+    let finishRestore!: (response: Response) => void;
+    const restoreResponse = new Promise<Response>((resolve) => {
+      finishRestore = resolve;
+    });
+    let restores = 0;
+    const fetchImpl = (async (url: string) => {
+      if (String(url).includes('action=restore') && ++restores === 1) {
+        startRestore();
+        return restoreResponse;
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:8080',
+      slotCount: 1,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+
+    const oldPrepare = a.prepareForSend('conversation');
+    const stopped = expect(oldPrepare).rejects.toThrow(/engine stopped/i);
+    await restoreStarted;
+    a.resetEngineState();
+    finishRestore(new Response('not supported by multimodal', { status: 501 }));
+    await stopped;
+
+    // The late response must neither recreate the old slot binding nor latch
+    // disk persistence off for the replacement engine.
+    expect(await a.flushAll()).toBe(0);
+    await a.prepareForSend('conversation');
+    expect(restores).toBe(2);
+    expect(await a.flushAll()).toBe(1);
+  });
+
+  it('preserves layered prefix identities across an engine exit', async () => {
+    const { calls, fetchImpl } = makeFetchSpy();
+    const layers = { gezel: 'IDENTITY', project: 'IDENTITY+PROJECT' };
+    const { gp } = llamaLayerPrefixIds(layers);
+    await writeFile(join(tmp, `${gp}.bin`), 'shared prefix');
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:8080',
+      slotCount: 1,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await a.prepareForSend('conversation', undefined, layers);
+    a.resetEngineState();
+    calls.length = 0;
+
+    // No re-registration here: prefix identity belongs to the conversation,
+    // while only its resident slot assignment belongs to the child process.
+    await a.prepareForSend('conversation');
+    expect(calls).toEqual([
+      {
+        url: 'http://127.0.0.1:8080/slots/0?action=restore',
+        method: 'POST',
+        body: { filename: `${gp}.bin` },
+      },
+    ]);
+  });
+
   it('reserves distinct slots when two sessions prepare concurrently', async () => {
     await writeFile(join(tmp, 'sess-alpha.bin'), 'fake');
     await writeFile(join(tmp, 'sess-beta.bin'), 'fake');

@@ -182,8 +182,10 @@ function evalLlamaKvCacheOverride(): GezelConfig['llamaCppKvCacheType'] | undefi
   return raw as GezelConfig['llamaCppKvCacheType'];
 }
 
-function evalLlamaSpecTypeOverride(): GezelConfig['llamaCppSpecType'] | undefined {
-  const raw = process.env.GEZEL_EVAL_LLAMA_SPEC_TYPE?.trim();
+export function evalLlamaSpecTypeOverride(
+  env: NodeJS.ProcessEnv = process.env,
+): GezelConfig['llamaCppSpecType'] | undefined {
+  const raw = env.GEZEL_EVAL_LLAMA_SPEC_TYPE?.trim();
   if (!raw) return undefined;
   const allowed = new Set<NonNullable<GezelConfig['llamaCppSpecType']>>([
     'none',

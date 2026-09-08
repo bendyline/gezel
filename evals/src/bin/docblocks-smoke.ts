@@ -32,6 +32,7 @@ async function connect() {
       '--allow-write',
       artifacts,
     ],
+    env: process.env.SQUISQ_FFMPEG ? { SQUISQ_FFMPEG: process.env.SQUISQ_FFMPEG } : undefined,
     stderr: 'pipe',
   });
   transport.stderr?.on('data', (chunk) => process.stderr.write(chunk));
