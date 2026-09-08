@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareGezelVersions,
+  isUnstampedDevBuild,
   maxMinGezelVersion,
   satisfiesMinGezelVersion,
 } from './gezel-version.js';
@@ -114,5 +115,20 @@ describe('maxMinGezelVersion', () => {
   it('prefers a well-formed floor over a malformed one', () => {
     expect(maxMinGezelVersion('garbage', '1.26221')).toBe('1.26221');
     expect(maxMinGezelVersion('1.26221', 'garbage')).toBe('1.26221');
+  });
+});
+
+describe('isUnstampedDevBuild', () => {
+  it('recognises the checkout placeholder the release stamper overwrites', () => {
+    expect(isUnstampedDevBuild('0.0.0')).toBe(true);
+    expect(isUnstampedDevBuild('1.26251.69')).toBe(false);
+    expect(isUnstampedDevBuild('1.0.0')).toBe(false);
+  });
+
+  it('answers a question version ordering gets backwards', () => {
+    // A checkout carries code no release has, yet sorts below all of them.
+    // Anything asking "is this build ahead" must use the flag, not compare.
+    expect(compareGezelVersions('0.0.0', '1.26251.69')).toBeLessThan(0);
+    expect(isUnstampedDevBuild('0.0.0')).toBe(true);
   });
 });
