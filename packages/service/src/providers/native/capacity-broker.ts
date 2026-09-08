@@ -857,13 +857,32 @@ export function llamaCppSlotCeiling(opts: {
 }
 
 /**
- * Physical memory held back from the live-RAM half of the context clamp:
- * the OS, the desktop shell, and whatever the user is actually doing.
- * Deliberately small — `freeSystemRamBytes` is already net of everything
- * resident, so this only guards against the engine consuming the last
- * gigabytes and pushing the machine into the pagefile.
+ * Physical memory held back from every live-availability decision: the OS,
+ * the desktop shell, and whatever the user is actually doing.
+ *
+ * ONE function because there used to be two, and they disagreed by gigabytes.
+ * The context clamp held back a flat 2 GiB from
+ * {@link availableSystemRamBytes}; the device admission ledger held back
+ * `min(4 GiB, 10% of RAM)` from a stricter darwin-only sample that counted
+ * neither inactive nor speculative pages. On a 16 GiB Mac the planner read
+ * 9.3 GiB available and the admitter 4.3 GiB from the same `vm_stat` seconds
+ * apart, so a launch the planner sized at 9.7 GiB sat in the admission queue
+ * for its full five-minute budget and then failed — on a host that was never
+ * going to free 5 GiB, because nothing was holding it but the estimate.
+ * Planning and admission must read one number.
  */
-const CTX_CLAMP_OS_RESERVE_BYTES = 2 * GIB;
+export function liveRamOsReserveBytes(totalRamBytes: number = totalmem()): number {
+  return Math.min(4 * GIB, Math.max(2 * GIB, totalRamBytes * 0.1));
+}
+
+/**
+ * Extra headroom the PLANNER holds back on top of
+ * {@link liveRamOsReserveBytes}, so a launch is never sized to the exact
+ * admission boundary. The two sample the host a moment apart; a plan that
+ * only just fit would spend the whole admission wait losing a race to
+ * whatever allocated in between.
+ */
+const CTX_PLANNING_MARGIN_BYTES = 512 * 1024 ** 2;
 
 /**
  * Minimum useful per-turn context for Gezel's standing prompt + tool surface
@@ -1107,6 +1126,14 @@ export interface CtxMemoryClampInput {
    */
   vramBytes: number;
   minPerTurnCtxTokens?: number;
+  /**
+   * Held back from `freeSystemRamBytes`. Defaults to
+   * {@link liveRamOsReserveBytes} plus the planner's margin — i.e. always at
+   * least what device admission will hold back, so a plan this clamp accepts
+   * is one admission accepts too. Tests pass it explicitly; production does
+   * not, and must not lower it below the admission reserve.
+   */
+  osReserveBytes?: number;
 }
 
 export interface CtxMemoryClampResult {
@@ -1153,11 +1180,11 @@ export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryCl
   }
   const committedOther = Math.max(0, input.committedOtherBytes ?? 0);
   const budgetCap = input.budgetBytes - committedOther;
+  const osReserve = input.osReserveBytes ?? liveRamOsReserveBytes() + CTX_PLANNING_MARGIN_BYTES;
   const liveCap =
     input.freeSystemRamBytes === undefined
       ? null
-      : Math.max(0, input.vramBytes) +
-        Math.max(0, input.freeSystemRamBytes - CTX_CLAMP_OS_RESERVE_BYTES);
+      : Math.max(0, input.vramBytes) + Math.max(0, input.freeSystemRamBytes - osReserve);
   const cap = liveCap === null ? budgetCap : Math.min(budgetCap, liveCap);
   const kvAllowance = (cap - input.weightsResidentBytes) * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
   const maxTotalTokens = kvAllowance > 0 ? kvAllowance / input.kvBytesPerToken : 0;

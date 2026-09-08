@@ -396,6 +396,7 @@ export class ProviderPool {
     if (this.retiring) {
       throw new Error('local engine pool retired after machine engine adoption');
     }
+    await this.sweepFailedStarts();
     const key = makeEngineKey(provider, modelId, replicaIdx);
     const hit = this.entries.get(key);
     if (hit && !hit.draining) {
@@ -584,6 +585,46 @@ export class ProviderPool {
   /** Returns true if the pool currently holds an entry for `key`. */
   has(key: string): boolean {
     return this.entries.has(key);
+  }
+
+  /**
+   * Drop entries whose engine failed to start, releasing the budget they hold.
+   *
+   * The reservation is taken when the builder returns — before the engine
+   * process exists, because the engine starts lazily on the first turn. A
+   * start that then fails (memory admission refused, spawn error, panic
+   * guard) leaves an entry that owns its whole `residentBytes` while running
+   * nothing, and it is never reclaimed on its own: the idle timer that would
+   * eventually release it is only ever armed by an engine that reached
+   * `running`. Observed as a 9.7 GB reservation on a machine whose engine
+   * process count was zero, against an 11.2 GB budget.
+   *
+   * Eviction is the whole repair. The next `ensure` rebuilds, which re-plans
+   * the context window against memory as it stands then rather than handing
+   * back a provider that will fail the same way.
+   */
+  private async sweepFailedStarts(): Promise<void> {
+    const dead: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (entry.draining || isBusy(entry)) continue;
+      const lifecycle = (
+        entry.provider as LLMProvider & {
+          engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
+        }
+      ).engineLifecycleSnapshot?.();
+      if (lifecycle?.startFailedAt !== undefined && !lifecycle.running) dead.push(key);
+    }
+    for (const key of dead) {
+      try {
+        log.info(`releasing ${key}: engine never started`);
+        await this.evict(key);
+      } catch (err) {
+        // A racing turn made it busy — the next sweep gets it.
+        log.warn(
+          `sweepFailedStarts: ${key} not released: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 
   /**

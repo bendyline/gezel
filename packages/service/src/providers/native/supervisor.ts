@@ -150,6 +150,15 @@ export interface NativeEngineLifecycleSnapshot {
   unloadAt: number | null;
   idleTimeoutMs: number;
   releaseReason: 'idle' | 'memory-pressure' | null;
+  /**
+   * When the last start attempt failed, and why. Cleared by the next start
+   * that reaches ready. An engine that never started still holds its pool
+   * reservation, and no idle timer is armed for it (the timer is only ever
+   * reset by a RUNNING engine), so nothing would ever give that memory back
+   * — see `ProviderPool.sweepFailedStarts`.
+   */
+  startFailedAt?: number;
+  startFailure?: string;
 }
 
 export interface NativeEngineSupervisorOptions {
@@ -461,6 +470,8 @@ export class NativeEngineSupervisor {
   // fresh start.
   private startupAbort: AbortController | null = null;
   private idleTimer?: NodeJS.Timeout;
+  private lastStartFailureAt?: number;
+  private lastStartFailure?: string;
   private healthTimer?: NodeJS.Timeout;
   private currentStartedAt = 0;
   private currentPid?: number;
@@ -561,6 +572,12 @@ export class NativeEngineSupervisor {
       unloadAt: usePressure ? pressureDeadline : idleDeadline,
       idleTimeoutMs: this.idleTimeoutMs,
       releaseReason: usePressure ? 'memory-pressure' : idleDeadline !== null ? 'idle' : null,
+      ...(this.lastStartFailureAt !== undefined
+        ? {
+            startFailedAt: this.lastStartFailureAt,
+            ...(this.lastStartFailure ? { startFailure: this.lastStartFailure } : {}),
+          }
+        : {}),
     };
   }
 
@@ -718,10 +735,21 @@ export class NativeEngineSupervisor {
   private async startFresh(): Promise<void> {
     if (this.startFlight) return this.startFlight;
     this.capacityAbort = new AbortController();
-    const flight = this.startFreshAttempt().finally(() => {
-      if (this.startFlight === flight) this.startFlight = undefined;
-      this.capacityAbort = undefined;
-    });
+    const flight = this.startFreshAttempt()
+      .then((result) => {
+        this.lastStartFailureAt = undefined;
+        this.lastStartFailure = undefined;
+        return result;
+      })
+      .catch((err: unknown) => {
+        this.lastStartFailureAt = Date.now();
+        this.lastStartFailure = err instanceof Error ? err.message : String(err);
+        throw err;
+      })
+      .finally(() => {
+        if (this.startFlight === flight) this.startFlight = undefined;
+        this.capacityAbort = undefined;
+      });
     this.startFlight = flight;
     return flight;
   }

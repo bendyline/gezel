@@ -153,3 +153,71 @@ it('prices recognition projectors and image text encoders as well as main weight
     }),
   ).toEqual({ bytes: 900 + 1024 ** 3, gpuBytes: 0 });
 });
+
+describe('admission wait ceilings', () => {
+  const waitFor = async (
+    replies: () => { state: string; releaseRequested: boolean; [k: string]: unknown },
+  ) => {
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'local');
+    mocks.local.mockImplementation(async (command: { action: string }) =>
+      command.action === 'acquire' ? replies() : { state: 'released', releaseRequested: false },
+    );
+    const started = Date.now();
+    const flight = acquireNativeCapacity(
+      { home: '/isolated-eval', requirement: () => ({ bytes: 1024 ** 3 }) },
+      { command: 'fake-model', args: [], baseUrl: 'http://127.0.0.1:9999' },
+      new AbortController().signal,
+      () => {},
+    ).then(
+      () => ({ ok: true as const, elapsed: Date.now() - started }),
+      (err: Error) => ({ ok: false as const, error: err, elapsed: Date.now() - started }),
+    );
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    return flight;
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('gives up in seconds when no engine is holding the memory', async () => {
+    const result = await waitFor(() => ({
+      state: 'waiting',
+      releaseRequested: false,
+      externalShortfall: true,
+      requiredBytes: 9.7 * 1024 ** 3,
+      availableBytes: 4.29 * 1024 ** 3,
+    }));
+    expect(result.ok).toBe(false);
+    expect(result.elapsed).toBeLessThan(30_000);
+    const message = (result as { error: Error }).error.message;
+    // Names both numbers and says whose memory it is — the old wording
+    // described protecting engine work that, in this branch, does not exist.
+    expect(message).toContain('9.7 GB');
+    expect(message).toContain('4.3 GB');
+    expect(message).toContain('other applications');
+  });
+
+  it('still waits out the full budget behind another engine', async () => {
+    const result = await waitFor(() => ({ state: 'waiting', releaseRequested: false }));
+    expect(result.ok).toBe(false);
+    expect(result.elapsed).toBeGreaterThanOrEqual(5 * 60_000);
+    expect((result as { error: Error }).error.message).toContain('still protected');
+  });
+
+  it('forgives a transient shortfall that clears before the ceiling', async () => {
+    let calls = 0;
+    const result = await waitFor(() => {
+      calls += 1;
+      if (calls <= 4)
+        return {
+          state: 'waiting',
+          releaseRequested: false,
+          externalShortfall: true,
+          requiredBytes: 4 * 1024 ** 3,
+          availableBytes: 3 * 1024 ** 3,
+        };
+      return { state: 'granted', releaseRequested: false };
+    });
+    expect(result.ok).toBe(true);
+  });
+});

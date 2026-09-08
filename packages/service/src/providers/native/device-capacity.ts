@@ -12,8 +12,11 @@ import {
 import { readSystemServiceRuntime, systemServiceHome } from '@bendyline/gezel-client/node';
 import { ConfigStore } from '../../fs/config-store.js';
 import { createPinnedFetch } from '../../remotes/pinned-fetch.js';
-import { sampleDarwinSystemMemory } from '../../system/darwin-memory.js';
-import { CapacityDeniedError, availableSystemRamBytes } from './capacity-broker.js';
+import {
+  CapacityDeniedError,
+  availableSystemRamBytes,
+  liveRamOsReserveBytes,
+} from './capacity-broker.js';
 import { DeviceCapacityLedger, type DeviceCapacitySample } from './device-capacity-ledger.js';
 import { measuredCapacityBudget } from './measured-budget.js';
 import type { NativeEngineLaunch } from './supervisor.js';
@@ -21,6 +24,18 @@ import type { NativeEngineLaunch } from './supervisor.js';
 const GIB = 1024 ** 3;
 const POLL_MS = 500;
 const WAIT_MS = 5 * 60_000;
+/**
+ * Ceiling for the case where the ledger reports `externalShortfall` — the
+ * request leads the queue and fits the budget, and nothing this protocol
+ * governs is holding the memory. Queueing behind another engine is worth the
+ * full {@link WAIT_MS}, because that engine will finish. Queueing behind the
+ * user's browser is not: a request that needs 9.7 GB on a host with 4.3 GB
+ * free waits out the entire budget and then reports "not enough memory became
+ * available" — five minutes to say what was knowable in the first second.
+ * Short rather than zero because a just-released engine's pages take a moment
+ * to come back, and makeRoom's retry deserves to see them.
+ */
+const EXTERNAL_SHORTFALL_WAIT_MS = 20_000;
 // Once an installed broker owns this process's reservations, its disappearance
 // is an outage, never permission to create a competing local ledger.
 const observedMachineAuthorities = new Set<string>();
@@ -68,12 +83,16 @@ export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacit
       ? config.localEngineMemoryGb * GIB
       : budget.budgetBytes;
   const budgetBytes = Math.min(configuredBytes, budget.budgetBytes);
-  const darwin = await sampleDarwinSystemMemory({ totalBytes: ram });
-  const availableRam = darwin ? darwin.freeBytes + darwin.cachedBytes : availableSystemRamBytes();
   // The ledger's RAM ceiling and the OS's currently reclaimable RAM answer
   // different questions. Checking both catches tenants outside this protocol.
+  //
+  // This MUST be the same reading the context planner sized the launch
+  // against — see liveRamOsReserveBytes. It used to be a darwin-only sample
+  // that counted neither inactive nor speculative pages, which made admission
+  // roughly 5 GiB stricter than planning on a 16 GiB Mac and refused launches
+  // the host could serve.
   const availableBytes =
-    Math.max(0, availableRam - Math.min(4 * GIB, ram * 0.1)) + budget.vramBytes;
+    Math.max(0, availableSystemRamBytes() - liveRamOsReserveBytes(ram)) + budget.vramBytes;
   let availableGpuBytes: number | undefined;
   if (budget.kind === 'discrete-gpu') {
     const { createSystemDeviceHealthProbe } = await import('@bendyline/gezel/native');
@@ -240,6 +259,24 @@ export async function estimateNativeLaunchMemory(
   return { bytes: reservation, ...(cpu ? { gpuBytes: 0 } : {}) };
 }
 
+/**
+ * The refusal a person can act on: which two numbers disagreed, and that the
+ * memory is held by their other applications rather than by Gezel. The old
+ * wording ("current engine work is still protected") described a queue that,
+ * in this branch, has nothing in it.
+ */
+function formatHostMemoryShortfall(reply: NativeCapacityReply): string {
+  const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  if (reply.requiredBytes === undefined || reply.availableBytes === undefined)
+    return 'Not enough free memory on this device to start this model right now. Close some applications and retry, or choose a smaller model.';
+  return [
+    'Not enough free memory on this device to start this model: it needs about ',
+    `${gb(reply.requiredBytes)}, and ${gb(reply.availableBytes)} is available right now. `,
+    'The rest is in use by other applications, not by Gezel — closing some and retrying ',
+    'will help, as will choosing a smaller model.',
+  ].join('');
+}
+
 export async function acquireNativeCapacity(
   options: NativeCapacityOptions,
   launch: NativeEngineLaunch,
@@ -268,6 +305,7 @@ export async function acquireNativeCapacity(
   });
   const started = awakeNow();
   let lastReport = Number.NEGATIVE_INFINITY;
+  let externalSince: number | undefined;
   try {
     for (;;) {
       signal.throwIfAborted();
@@ -275,6 +313,13 @@ export async function acquireNativeCapacity(
       const reply = await execute(request);
       signal.throwIfAborted();
       if (reply.state === 'granted') break;
+      if (reply.externalShortfall) {
+        externalSince ??= awakeNow();
+        if (awakeNow() - externalSince >= EXTERNAL_SHORTFALL_WAIT_MS)
+          throw new CapacityDeniedError(formatHostMemoryShortfall(reply));
+      } else {
+        externalSince = undefined;
+      }
       if (awakeNow() - started >= WAIT_MS)
         throw new CapacityDeniedError(
           'Not enough memory became available for this model. Current engine work is still protected; retry when it finishes.',

@@ -34,6 +34,10 @@ interface Claim {
   phase: 'waiting' | 'loading' | 'ready';
 }
 
+function gb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
 export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -142,6 +146,10 @@ export class DeviceCapacityLedger {
         request.gpuBytes > 0 &&
         active.some((c) => c.gpuBytes > 0 && (c.exclusive || request.exclusive))
       );
+    // Set only when the ONLY thing in the way is memory this protocol does
+    // not govern: the request leads the queue, fits the budget, and no other
+    // claim is loading or resident. Waiting cannot help — see the waiter.
+    let shortfall: { requiredBytes: number; availableBytes: number } | undefined;
     if (own === first && fits(own)) {
       const loading = active.filter((c) => c.phase === 'loading');
       const memoryAvailable =
@@ -158,6 +166,13 @@ export class DeviceCapacityLedger {
           older.bypasses = (older.bypasses ?? 0) + 1;
           save.run(JSON.stringify(older), older.id);
         }
+      } else if (active.length === 0) {
+        // `loadSlot` can only be false behind a loading claim, so reaching
+        // here with no active claims means the host itself is short.
+        if (!memoryAvailable && sample.availableBytes !== undefined)
+          shortfall = { requiredBytes: own.bytes, availableBytes: sample.availableBytes };
+        else if (!gpuAvailable && sample.availableGpuBytes !== undefined)
+          shortfall = { requiredBytes: own.gpuBytes, availableBytes: sample.availableGpuBytes };
       }
     }
     save.run(JSON.stringify(own), own.id);
@@ -175,9 +190,18 @@ export class DeviceCapacityLedger {
       state: own.phase === 'waiting' ? 'waiting' : 'granted',
       releaseRequested,
       ...(own.phase === 'waiting'
-        ? {
-            reason: `Waiting for memory to load ${own.label}; another engine or application is using the available capacity.`,
-          }
+        ? shortfall
+          ? {
+              reason:
+                `Waiting for memory to load ${own.label}: it needs ${gb(shortfall.requiredBytes)} ` +
+                `and this device has ${gb(shortfall.availableBytes)} available.`,
+              externalShortfall: true,
+              requiredBytes: shortfall.requiredBytes,
+              availableBytes: shortfall.availableBytes,
+            }
+          : {
+              reason: `Waiting for memory to load ${own.label}; another engine or application is using the available capacity.`,
+            }
         : {}),
     };
   }
