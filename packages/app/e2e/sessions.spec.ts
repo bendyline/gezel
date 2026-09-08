@@ -151,16 +151,22 @@ test("sessions — the picker's New thread row starts a fresh thread", async () 
 
   const { app, page } = await launch();
   try {
-    // Snapshot the current session trigger text so we can confirm it changes.
+    // The picker renders its "New thread" placeholder before the async
+    // session list restores the most recent thread. Wait for that restore so
+    // a slow CI host cannot sample the placeholder, click after auto-pick,
+    // and then compare "New thread" with itself.
     const sessionTrigger = page.locator('.gezel-chat-session-select').first();
-    const before = (await sessionTrigger.textContent()) ?? '';
+    await expect(sessionTrigger.locator('.session-row-title')).toHaveText(
+      deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`),
+      { timeout: 10_000 },
+    );
 
     // A fresh thread is a destination in the picker, not a button — the
     // toolbar's own button drafts a second message inside the open thread.
     // Scope to the menu: the trigger renders the same row as its placeholder.
     await sessionTrigger.click();
     await page.locator('.gezel-chat-session-menu .session-row-action').click();
-    await expect(sessionTrigger).not.toHaveText(before, { timeout: 10_000 });
+    await expect(sessionTrigger).toHaveText('New thread', { timeout: 10_000 });
     await captureScreenshot(page, {
       path: join(screenshotDir, 'sessions-05-new-session.png'),
       fullPage: true,
