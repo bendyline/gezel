@@ -17,7 +17,12 @@ import spec_decode  # noqa: E402
 
 
 def _req(**kw):
-    defaults = dict(temperature=None, repetition_penalty=None, top_k=None)
+    defaults = dict(
+        temperature=None,
+        repetition_penalty=None,
+        top_k=None,
+        disable_speculation=False,
+    )
     defaults.update(kw)
     return types.SimpleNamespace(**defaults)
 
@@ -167,6 +172,10 @@ def test_spec_mode():
     assert m == "assisted", m
     m, _ = spec_decode.spec_mode(_req(repetition_penalty=1.05), None)
     assert m == "assisted", m
+    m, why = spec_decode.spec_mode(
+        _req(temperature=0.7, disable_speculation=True), object()
+    )
+    assert m is None and "grammar-contract violation" in why, (m, why)
     os.environ["GEZEL_MLX_SPEC"] = "greedy-only"
     try:
         m, why = spec_decode.spec_mode(_req(temperature=0.7), None)

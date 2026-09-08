@@ -454,6 +454,9 @@ def spec_mode(request, grammar) -> Tuple[Optional[str], str]:
     temp 0.6–1.0 with top_k 20–40 on every profile, so a greedy-only gate
     reaches ~0% of product traffic.
     """
+    if bool(getattr(request, "disable_speculation", False)):
+        return None, "request disabled speculative decoding after a grammar-contract violation"
+
     t = getattr(request, "temperature", None)
     greedy = t in (None, 0, 0.0)
     has_procs = (
@@ -728,4 +731,3 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
             return
         if emitted % 256 == 0:
             mx.clear_cache()
-

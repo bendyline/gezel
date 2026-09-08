@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { npmPackFiles } from './npm-pack-output.mjs';
+import { npmPackFiles, npmPackPayload } from './npm-pack-output.mjs';
 
 const packageName = '@bendyline/gezel-service';
 const options = { packageName, payloadLabel: 'service' };
@@ -10,6 +10,7 @@ const payload = {
 };
 
 test('reads the npm 12 package-keyed JSON shape', () => {
+  assert.deepEqual(npmPackPayload(JSON.stringify({ [packageName]: payload }), options), payload);
   assert.deepEqual(npmPackFiles(JSON.stringify({ [packageName]: payload }), options), [
     'dist/index.js',
     'package.json',

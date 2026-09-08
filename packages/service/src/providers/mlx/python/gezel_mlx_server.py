@@ -2713,6 +2713,13 @@ class ChatRequest(BaseModel):
     # function name of any tool call to the known tools — see
     # `build_tool_grammar_processor`. Shape: {"format": "...", "mode": "name-only"}.
     tool_grammar: Optional[Dict[str, Any]] = None
+    # Per-request circuit breaker for a session that observed the assisted
+    # speculative path violate a required-argument grammar. The TS provider
+    # latches this after the first impossible call and leaves the drafter
+    # resident for unaffected sessions; only this request takes the ordinary
+    # BatchGenerator path. This is the request-scoped equivalent of the
+    # operator's GEZEL_MLX_SPEC=greedy-only A/B arm.
+    disable_speculation: bool = False
     # Per-request chat-template override (gezel extension). Swaps the
     # model's stored Jinja template for a curated one without reinstalling.
     chat_template_override: Optional[str] = None

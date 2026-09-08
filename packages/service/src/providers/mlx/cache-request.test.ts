@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MlxCacheAdapter } from './cache-adapter.js';
 import { MlxProvider } from './provider.js';
+import { missingTopLevelRequiredToolArgs } from './tool-call-protocol.js';
 
 function completionResponse(
   content = 'ok',
@@ -16,6 +17,40 @@ function completionResponse(
     `data: ${JSON.stringify({
       choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }],
       ...(usage ? { usage } : {}),
+    })}`,
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  return new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+function toolCallResponse(name: string, args: Record<string, unknown>): Response {
+  const sse = [
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call-1',
+                type: 'function',
+                function: { name, arguments: JSON.stringify(args) },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    })}`,
+    '',
+    `data: ${JSON.stringify({
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
     })}`,
     '',
     'data: [DONE]',
@@ -225,5 +260,93 @@ describe('MlxProvider cache request wiring', () => {
     expect(adapterRequests).toEqual([
       { url: `http://mlx.test/v1/cache/${cacheId}`, method: 'DELETE' },
     ]);
+  });
+});
+
+describe('MLX required-argument grammar fallback', () => {
+  it('detects only absent declared top-level fields', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        language: { type: 'string' },
+      },
+      required: ['title', 'title'],
+    };
+
+    expect(missingTopLevelRequiredToolArgs(schema, { language: 'en' })).toEqual(['title']);
+    expect(missingTopLevelRequiredToolArgs(schema, { title: '', language: 'en' })).toEqual([]);
+    expect(missingTopLevelRequiredToolArgs({ type: 'object' }, {})).toEqual([]);
+  });
+
+  it('routes the retry through sequential decoding after an impossible assisted call', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      return bodies.length === 1
+        ? toolCallResponse('wikipedia_read', { language: 'en', maxChars: 20_000 })
+        : completionResponse('Recovered.');
+    }) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const session = await provider.createSession({
+      systemMessage: 'system',
+      profile: {
+        catalogId: 'qwen-test',
+        tier: 'large',
+        style: { family: 'qwen', reasoningFormat: 'think', toolCallFormat: 'function-call' },
+        behaviors: [{ id: 'tools.mlx-grammar', config: undefined, behavior: {} as never }],
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+          stop: () => Promise<void>;
+        };
+      };
+    };
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        {
+          name: 'wikipedia_read',
+          description: 'Read an article.',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              language: { type: 'string' },
+              maxChars: { type: 'number' },
+            },
+            required: ['title'],
+          },
+        },
+      ],
+      hasTool: (name) => name === 'wikipedia_read',
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        return 'ERROR: Input rejected by validator: missing required field: title';
+      },
+      stop: async () => {},
+    };
+
+    await expect(
+      session.sendAndWait('Read the Ibiza article.', { timeoutMs: 5_000 }),
+    ).resolves.toBe('Recovered.');
+
+    expect(calls).toEqual([]);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.tool_grammar).toEqual({ format: 'hermes', mode: 'name-and-params' });
+    expect(bodies[0]?.disable_speculation).toBeUndefined();
+    expect(bodies[1]?.disable_speculation).toBe(true);
+    await session.disconnect();
   });
 });
