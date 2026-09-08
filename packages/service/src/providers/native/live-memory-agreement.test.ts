@@ -17,6 +17,15 @@
 import { totalmem } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 
+// Every number below is the incident host's: a 16 GiB Mac. The reserve both
+// sides hold back scales with physical RAM, so leaving it to the runner makes
+// this a different scenario per machine — on a 64 GiB+ workstation the same
+// plan clamps to 21504 tokens instead of 80896 and the assertion flips.
+vi.mock('node:os', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:os')>()),
+  totalmem: () => 16 * 1024 ** 3,
+}));
+
 const mocks = vi.hoisted(() => ({ available: 0 }));
 vi.mock('./capacity-broker.js', async (original) => ({
   ...(await original<typeof import('./capacity-broker.js')>()),
