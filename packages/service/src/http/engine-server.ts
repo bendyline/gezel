@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { createLogger } from '@bendyline/gezel';
+import {
+  GEZEL_API_GENERATION,
+  GEZEL_API_GENERATION_FLOOR,
+  GEZEL_VERSION,
+  createLogger,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import {
@@ -84,6 +89,21 @@ export function buildEngineApp(
     );
     return c.json({ error: 'internal_error', requestId }, 500);
   });
+  // Installer health checks predate the product/engine composition split and
+  // are intentionally shared by both service roles. Keep this broker-specific
+  // response small: it proves that the TLS listener is ready and identifies
+  // the process without mounting any product API or exposing machine state.
+  app.get('/api/health', (c) =>
+    c.json({
+      ok: true as const,
+      version: GEZEL_VERSION,
+      apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
+      serviceRole: ctx.serviceRole,
+      startedAt: ctx.startedAt,
+      nodeVersion: process.versions.node,
+      platform: process.platform,
+    }),
+  );
   app.route('/v1/identity', v1IdentityRoutes(ctx));
   app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/remote/*', requireScope('remote-inference'));

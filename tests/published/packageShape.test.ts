@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { npmPackPayload } from '../../scripts/npm-pack-output.mjs';
 import {
   RELEASE_IGNORED_PACKAGE_PATHS,
   REPO_ROOT,
@@ -71,7 +72,7 @@ afterAll(() => {
   for (const dir of caches) rmSync(dir, { recursive: true, force: true });
 });
 
-function dryRunPack(directory: string): PackResult {
+function dryRunPack(directory: string, packageName: string): PackResult {
   const cache = mkdtempSync(join(tmpdir(), 'gezel-pack-cache-'));
   caches.push(cache);
   const packArgs = [
@@ -99,10 +100,10 @@ function dryRunPack(directory: string): PackResult {
       `npm pack failed in ${directory} (status=${result.status}, signal=${result.signal}):\n${detail}`,
     );
   }
-  const parsed = JSON.parse(result.stdout);
-  const packed = Array.isArray(parsed) ? parsed[0] : parsed;
-  if (!packed?.files) throw new Error(`npm pack returned no package for ${directory}`);
-  return packed as PackResult;
+  return npmPackPayload(result.stdout, {
+    packageName,
+    payloadLabel: `package for ${directory}`,
+  }) as PackResult;
 }
 
 const packages = loadPublishedPackages();
@@ -198,7 +199,7 @@ describe('published package manifests', () => {
 });
 
 describe('published package payloads', () => {
-  const packed = new Map(packages.map((p) => [p.name, dryRunPack(p.path)] as const));
+  const packed = new Map(packages.map((p) => [p.name, dryRunPack(p.path, p.name)] as const));
 
   it.each(packages)('$name ships the workspace MIT license text', ({ name, path }) => {
     // Each package carries its own copy rather than leaning on the package

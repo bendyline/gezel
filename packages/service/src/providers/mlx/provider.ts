@@ -143,6 +143,17 @@ import {
   classifyMlxFatalErrorLine,
   classifyMlxStartupLine,
 } from './stdout-parser.js';
+import {
+  APPEND_TO_FILE_CONTINUATION_TOOL,
+  type ChatCompletionTool,
+  MlxToolCallAccumulator,
+  type ToolCallDelta,
+  chatCompletionToolName,
+  hermesRequiredArgGrammarRequested,
+  missingTopLevelRequiredToolArgs,
+  toChatCompletionsTools,
+  validatorReportedMissingRequiredArgs,
+} from './tool-call-protocol.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
 
 export {
@@ -219,31 +230,6 @@ const MAX_CAP_TRUNCATION_STEERS = LOCAL_TURN_LIMITS.capTruncation;
 // instead (wild-caught tankcombat: a 5.8 KB game truncated at the former
 // short output budget and the model never continued it).
 const MAX_IMMEDIATE_WRITE_CONTINUATIONS = LOCAL_TURN_LIMITS.writeContinuations;
-// Minimal `append_to_file` surfaced ONLY during a write-continuation. The
-// base immediate-write surface is write_file-only; on truncation we add
-// this so the model can emit the file's missing tail instead of
-// re-writing the whole thing (which would just truncate again).
-// Constructed inline so it doesn't depend on the role-filtered bridge
-// surface, which deliberately hides append_to_file from builders.
-const APPEND_TO_FILE_CONTINUATION_TOOL: ChatCompletionTool = {
-  type: 'function',
-  function: {
-    name: 'append_to_file',
-    description:
-      'Append text to the END of an existing workspace file. Use this to write the remaining tail of a file whose previous write_file was truncated mid-content. Do not repeat content already on disk — start exactly where the file currently ends.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Workspace-relative path of the file to append to.' },
-        content: {
-          type: 'string',
-          description: 'Text appended verbatim at the current end of the file.',
-        },
-      },
-      required: ['path', 'content'],
-    },
-  },
-};
 const IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX =
   '\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `write_file` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]';
 
@@ -267,18 +253,6 @@ interface ChatMessage {
   }>;
   tool_call_id?: string;
   images?: string[];
-}
-
-interface ChatCompletionTool {
-  type: 'function';
-  function: { name: string; description: string; parameters: unknown };
-}
-
-interface ToolCallDelta {
-  index: number;
-  id?: string;
-  type?: 'function';
-  function?: { name?: string; arguments?: string };
 }
 
 interface ChatCompletionChunk {
@@ -308,10 +282,6 @@ interface ChatCompletionChunk {
     /** Prompt tokens actually served from the MLX KV cache. */
     cached_tokens?: number;
   };
-}
-
-function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
-  return tool.function.name;
 }
 
 function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
@@ -1008,6 +978,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   private readonly externalToolNames: Set<string>;
   private capturedCalls: ExternalToolCall[] = [];
+  /**
+   * Session-scoped quarantine for the assisted MTP route. Once an emitted
+   * Hermes call proves that decode-time required-field enforcement diverged,
+   * every later grammar-armed request from this live session uses ordinary
+   * sequential BatchGenerator decoding. The latch preserves speculation for
+   * healthy sessions while ensuring one bad call cannot become a five-retry
+   * validator loop.
+   */
+  private forceSequentialToolGrammar = false;
 
   constructor(private readonly deps: MlxSessionDeps) {
     super();
@@ -1641,6 +1620,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
           if (grammarHint) body.tool_grammar = grammarHint;
+        }
+        if (this.forceSequentialToolGrammar && hermesRequiredArgGrammarRequested(body)) {
+          body.disable_speculation = true;
         }
         // Per-family chat-template fix (opt-in via `tools.mlx-template-fix`).
         // Swaps the model's stored Jinja template for a curated one at
@@ -3625,17 +3607,53 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             advertisedBridgeToolNames.has(call.function.name) &&
             this.deps.bridges.hasTool(call.function.name)
           ) {
-            try {
-              const budgetChars = computeToolBudgetChars(
-                this.deps.numCtx,
-                this.estimatePromptChars(),
+            const missingRequired = missingTopLevelRequiredToolArgs(
+              toolArgSchemas.get(call.function.name),
+              args,
+            );
+            const grammarContractViolation =
+              missingRequired.length > 0 &&
+              hermesRequiredArgGrammarRequested(body) &&
+              !this.forceSequentialToolGrammar;
+            if (grammarContractViolation) {
+              this.forceSequentialToolGrammar = true;
+              log.warn(
+                `turn#${seq}.${turn} required-argument grammar contract violation tool=${call.function.name} missing=${missingRequired.join(',')} — latching this session to sequential decode`,
               );
-              output = await this.deps.bridges.callTool(call.function.name, args, {
-                budgetChars,
-                numCtxTokens: this.deps.numCtx,
-              });
-            } catch (err) {
-              output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              // Do not send a call that the advertised schema proves cannot
+              // pass validation. Keeping it out of the bridge also avoids
+              // poisoning the session-wide unresolved-failure ledger before
+              // the sequential retry gets a chance to recover.
+              output = `ERROR: ${call.function.name} was not executed because the constrained decoder omitted required fields: ${missingRequired.join(', ')}. The runtime switched this session to sequential decoding; retry the call once.`;
+            } else {
+              try {
+                const budgetChars = computeToolBudgetChars(
+                  this.deps.numCtx,
+                  this.estimatePromptChars(),
+                );
+                output = await this.deps.bridges.callTool(call.function.name, args, {
+                  budgetChars,
+                  numCtxTokens: this.deps.numCtx,
+                });
+              } catch (err) {
+                output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              }
+              // Defense in depth for a schema skew between the model-facing
+              // roster and the authoritative MCP validator. The local presence
+              // check above catches the normal case before execution; this arm
+              // catches a validator that knows about a required key absent from
+              // the advertised schema. Sequential decode may still recover on
+              // the next iteration, and the log now makes the skew explicit.
+              if (
+                validatorReportedMissingRequiredArgs(output) &&
+                hermesRequiredArgGrammarRequested(body) &&
+                !this.forceSequentialToolGrammar
+              ) {
+                this.forceSequentialToolGrammar = true;
+                log.warn(
+                  `turn#${seq}.${turn} MCP validator reported a required-argument violation not visible in the emitted call for tool=${call.function.name} — latching this session to sequential decode`,
+                );
+              }
             }
             // Successful ask_user_question (output not an ERROR
             // and not the suppression sentinel above) → arm the
@@ -3933,52 +3951,4 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       /* ignore */
     }
   }
-}
-
-/** Same contract as LlamaCppProvider's ToolCallAccumulator — OpenAI's
- *  streaming tool-call shape is identical. Kept private to this module
- *  rather than reaching into the llama-cpp file. */
-class MlxToolCallAccumulator {
-  private readonly byIndex = new Map<number, { id: string; name: string; arguments: string }>();
-
-  size(): number {
-    return this.byIndex.size;
-  }
-
-  ingest(delta: ToolCallDelta): void {
-    const idx = delta.index;
-    let entry = this.byIndex.get(idx);
-    if (!entry) {
-      entry = { id: '', name: '', arguments: '' };
-      this.byIndex.set(idx, entry);
-    }
-    if (delta.id) entry.id = delta.id;
-    if (delta.function?.name) entry.name = delta.function.name;
-    if (delta.function?.arguments) entry.arguments += delta.function.arguments;
-  }
-
-  finalize(): Array<{
-    id: string;
-    type: 'function';
-    function: { name: string; arguments: string };
-  }> {
-    return Array.from(this.byIndex.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([, v]) => ({
-        id: v.id,
-        type: 'function' as const,
-        function: { name: v.name, arguments: v.arguments },
-      }));
-  }
-}
-
-function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTool[] {
-  return bridges.getOpenAITools().map((t) => ({
-    type: 'function' as const,
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-    },
-  }));
 }

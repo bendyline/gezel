@@ -1,6 +1,7 @@
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GEZEL_VERSION } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningEngineService, startService } from '../service.js';
@@ -38,11 +39,18 @@ function machineFetch(path: string, init: RequestInit = {}): Promise<Response> {
 }
 
 describe('machine-engine service boundary', () => {
-  it('publishes its role in discovery and public identity', async () => {
+  it('publishes the installer health contract, runtime role, and public identity', async () => {
     expect(service.context.serviceRole).toBe('machine-engine');
     await expect(readFile(join(home, 'runtime', 'service-role'), 'utf8')).resolves.toBe(
       'machine-engine\n',
     );
+    const health = await httpFetch(`${baseUrl}/api/health`);
+    expect(health.status).toBe(200);
+    await expect(health.json()).resolves.toMatchObject({
+      ok: true,
+      version: GEZEL_VERSION,
+      serviceRole: 'machine-engine',
+    });
     const identity = await httpFetch(`${baseUrl}/v1/identity`);
     expect(identity.status).toBe(200);
     await expect(identity.json()).resolves.toMatchObject({ serviceRole: 'machine-engine' });

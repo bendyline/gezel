@@ -55,6 +55,20 @@ describe('MLX MTP speculative-decoding contract', () => {
     expect(SPEC).toContain('GEZEL_MLX_SPEC');
   });
 
+  it('supports a request-scoped sequential fallback after a grammar violation', () => {
+    // A session that observes a call missing a model-facing required field
+    // must not spend the rest of its retry budget on the same assisted path.
+    // The provider latches the incident; the sidecar routes that request to
+    // ordinary BatchGenerator decoding while leaving MTP available globally.
+    expect(SIDECAR).toContain('disable_speculation: bool = False');
+    expect(SPEC).toContain('disable_speculation');
+    expect(SPEC).toContain('grammar-contract violation');
+    const provider = readFileSync(join(HERE, 'provider.ts'), 'utf8');
+    expect(provider).toContain('forceSequentialToolGrammar');
+    expect(provider).toContain('body.disable_speculation = true');
+    expect(provider).toContain('required-argument grammar contract violation');
+  });
+
   it('routes requests by mode and never hands processors to upstream spec', () => {
     // Upstream speculation applies per-sequence processors to the first
     // token only, then silently drops them (measured). Processor-armed
