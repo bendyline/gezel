@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import type { FileTurnIntent } from '@bendyline/gezel';
+import type { FileTurnIntent, MapRepoResponse } from '@bendyline/gezel';
 import {
   type AIEngagementMode,
   type AwakeBudget,
@@ -1684,23 +1684,28 @@ export class ChatManager extends LocalEngineRuntime {
   }
   /** Per-project gestalt block cache — mapRepo reads the whole files table,
    *  so don't pay it on every prompt rebuild. */
-  private readonly gestaltCache = new Map<string, { at: number; block: string }>();
+  private readonly gestaltCache = new Map<string, { at: number; map: MapRepoResponse | null }>();
 
-  private async buildWorkspaceGestalt(projectId: string): Promise<string> {
+  private async buildWorkspaceGestalt(
+    projectId: string,
+    availableTools: ReadonlySet<string>,
+  ): Promise<string> {
     const index = this.contentIndexRef;
     if (!index) return '';
     const project = await this.store.getProject(projectId).catch(() => null);
     if (project?.indexingEnabled === false) return '';
     const cached = this.gestaltCache.get(projectId);
-    if (cached && Date.now() - cached.at < 60_000) return cached.block;
-    let block = '';
-    try {
-      block = renderWorkspaceGestalt(await index.mapRepo(projectId));
-    } catch {
-      block = '';
+    if (cached && Date.now() - cached.at < 60_000) {
+      return cached.map ? renderWorkspaceGestalt(cached.map, availableTools) : '';
     }
-    this.gestaltCache.set(projectId, { at: Date.now(), block });
-    return block;
+    try {
+      const map = await index.mapRepo(projectId);
+      this.gestaltCache.set(projectId, { at: Date.now(), map });
+      return renderWorkspaceGestalt(map, availableTools);
+    } catch {
+      this.gestaltCache.set(projectId, { at: Date.now(), map: null });
+      return '';
+    }
   }
 
   /** Paired servers used to resolve `remote:<id>/<model>` providers. */
@@ -7432,11 +7437,12 @@ export class ChatManager extends LocalEngineRuntime {
       }
       if (projectRetrieval) {
         promptForTurn = `${projectRetrieval.prompt}\n\n${promptForTurn}`;
-        // Stamp the consulted sources on the stored user message — citations
-        // only (source/path/line/score), never the retrieved text — so the
-        // UI can show what this turn consulted instead of the retrieval
-        // being invisible machinery.
+        // Stamp the exact RAG byte size and per-source excerpts on the stored
+        // user message so the UI can show both what this turn consulted and
+        // what the model actually saw. The outer byte count also includes the
+        // trust-boundary header/footer and provenance rows in the prompt.
         userMessage.retrieval = {
+          injectedBytes: projectRetrieval.injectedBytes,
           hits: projectRetrieval.hits.map((hit) => ({
             source: hit.source,
             ...(hit.projectId ? { projectId: hit.projectId } : {}),
@@ -7444,6 +7450,12 @@ export class ChatManager extends LocalEngineRuntime {
             ...(hit.line ? { line: hit.line } : {}),
             ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
             score: hit.score,
+            ...(hit.uri ? { uri: hit.uri } : {}),
+            ...(hit.title ? { title: hit.title } : {}),
+            ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
+            ...(hit.catalogVersion ? { catalogVersion: hit.catalogVersion } : {}),
+            injectedText: hit.excerpt,
+            injectedBytes: Buffer.byteLength(hit.excerpt, 'utf8'),
           })),
         };
         log.info(
@@ -13341,10 +13353,8 @@ export class ChatManager extends LocalEngineRuntime {
     // retrieval-first steer, both marker behaviors resolved here and
     // rendered/gated inside buildInstructions.
     const retrievalFirstActive = profileHasBehavior(modelProfile, 'prompt.retrieval-first');
-    const workspaceGestalt =
-      project && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt')
-        ? await this.buildWorkspaceGestalt(record.projectId)
-        : '';
+    const workspaceGestaltActive =
+      Boolean(project) && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
     const documentDescriptions =
       documentFiles.length > 0 &&
       libraryProjectId &&
@@ -13769,6 +13779,12 @@ export class ChatManager extends LocalEngineRuntime {
       );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
+    const workspaceGestalt = workspaceGestaltActive
+      ? await this.buildWorkspaceGestalt(
+          record.projectId,
+          new Set(availableBuiltinTools.map((tool) => tool.name)),
+        )
+      : '';
 
     // Layered prefix caching is a LOCAL-ENGINE optimization: it moves the
     // volatile band into a second `system` message that only the llama-cpp /
@@ -15151,6 +15167,14 @@ export class ChatManager extends LocalEngineRuntime {
       },
     });
     const constrainedAllowlist = withheldWhileDrafting(bridgeSurface.allowlist);
+    if (opts.mcpServer && constrainedAllowlist) {
+      // Bridge-backed providers enforce this allowlist in McpBridgePool while
+      // keeping the child MCP server broadly registered. Pass the same
+      // authorization into the child for internal corrective reroutes (for
+      // example grep_artifact -> grep_files), which otherwise cannot see the
+      // pool-level gate. This variable does not alter tools/list.
+      opts.mcpServer.env.GEZEL_MCP_AUTHORIZED_TOOLS = [...constrainedAllowlist].sort().join(',');
+    }
     if (record.providerName === 'codex-cli' && opts.mcpServer && constrainedAllowlist) {
       // Script-tool names ride outside the role allowlist vocabulary; union
       // them in or the strict GEZEL_MCP_ALLOW filter would drop them.

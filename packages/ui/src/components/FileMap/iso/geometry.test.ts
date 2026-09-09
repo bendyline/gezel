@@ -4,6 +4,7 @@ import type { Camera } from '../camera.js';
 import {
   buildingAnchorScreen,
   buildingsForBlock,
+  geomInView,
   geometryForModel,
   hitTestIso,
   hitTestIsoBuilding,
@@ -57,6 +58,22 @@ function liveBlock(id: string, x: number, y: number): MapBlock {
 }
 
 describe('geometry cache', () => {
+  it('keeps a tall symbol visible and pickable above its low parent parcel', () => {
+    const parent = {
+      ...liveBlock('src/a.ts', 10, 10),
+      rect: { x: 10, y: 10, w: 8, h: 8 },
+      levels: 1,
+      buildingCount: 1,
+    };
+    const mini = building('large', 10, 10, 1);
+    const m = { ...blockModel([parent]), buildings: [mini] };
+    const geom = geometryForModel(m);
+    const anchor = buildingAnchorScreen(CAM, mini);
+    expect(hitTestIso(geom, CAM, anchor.x, anchor.y + 0.2)?.id).toBe(parent.id);
+    expect(hitTestIso(geom, CAM, anchor.x, anchor.y + 0.2, false)).toBeNull();
+    expect(geomInView({ ...CAM, offsetY: anchor.y - 0.5 }, geom.geoms[0]!, 30, 1)).toBe(true);
+    expect(geom.maxHIso).toBeGreaterThanOrEqual(miniHIso(1) + PODIUM_HISO);
+  });
   it('resolves each live block’s architecture once, on the model', () => {
     const m = blockModel([liveBlock('src/a.ts', 0, 0), liveBlock('src/b.ts', 40, 0)]);
     const geom = geometryForModel(m);

@@ -1,6 +1,7 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdownSnippet.js';
 import { highlightTokens } from './highlight-tokens.js';
 import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, groupResults, resultToActions } from './search-nav.js';
@@ -130,7 +131,14 @@ export function SearchResultsOverlay() {
                       )}
                       {item.snippet && (
                         <span className="search-results-snippet">
-                          {highlightTokens(item.snippet, query)}
+                          <SearchMarkdownSnippet
+                            markdown={item.snippet}
+                            query={query}
+                            formatMarkdown={searchSnippetIsMarkdown(
+                              item.kind,
+                              item.path ?? item.title,
+                            )}
+                          />
                         </span>
                       )}
                     </button>

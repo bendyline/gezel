@@ -729,13 +729,15 @@ export const ChatMessageSchema = z.object({
   referencedTasks: z.array(z.string()).optional(),
   /**
    * Indexed-context sources consulted for THIS user turn (proactive
-   * retrieval). Citations only — source/path/line/score, never the retrieved
-   * text (which lives solely in the provider prompt). Lets the UI render a
-   * "consulted N sources" row so proactive RAG is visible diligence instead
-   * of invisible machinery.
+   * retrieval). `injectedBytes` is the exact UTF-8 size of the complete RAG
+   * block prepended to the provider prompt, including its trust-boundary
+   * framing. Newer messages also keep each hit's exact injected excerpt so
+   * the UI can disclose what the model saw; older citation-only messages
+   * remain valid.
    */
   retrieval: z
     .object({
+      injectedBytes: z.number().int().nonnegative().optional(),
       hits: z.array(
         z.object({
           source: RetrievalSourceSchema,
@@ -744,6 +746,15 @@ export const ChatMessageSchema = z.object({
           line: z.number().int().positive().optional(),
           lineEnd: z.number().int().positive().optional(),
           score: z.number(),
+          /** Knowledge-catalog provenance for non-file retrieval hits. */
+          uri: z.string().optional(),
+          title: z.string().optional(),
+          catalogId: z.string().optional(),
+          catalogVersion: z.string().optional(),
+          /** Exact source excerpt included in the provider prompt. */
+          injectedText: z.string().optional(),
+          /** UTF-8 size of `injectedText`; avoids character/byte ambiguity. */
+          injectedBytes: z.number().int().nonnegative().optional(),
         }),
       ),
     })

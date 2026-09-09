@@ -313,6 +313,15 @@ function isBusy(entry: PoolEntry): boolean {
   return snap.running + snap.queuedInteractive + snap.queuedBackground > 0;
 }
 
+/** Native-child state for providers backed by a supervised local engine. */
+function engineLifecycle(entry: PoolEntry): NativeEngineLifecycleSnapshot | undefined {
+  return (
+    entry.provider as LLMProvider & {
+      engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
+    }
+  ).engineLifecycleSnapshot?.();
+}
+
 /** Drop recent-hit timestamps older than the demand window. */
 function pruneHits(entry: PoolEntry, now: number): void {
   const cutoff = now - DEMAND_WINDOW_MS;
@@ -485,7 +494,29 @@ export class ProviderPool {
       log.error(capacityDenialLogLine(key, measured.reason));
       throw new CapacityDeniedError(measured.message);
     }
-    const built = await this.withGpuLoadSlot(() => builder({ modelId, replicaIdx }));
+    let built: Awaited<ReturnType<ProviderBuilder>>;
+    try {
+      built = await this.withGpuLoadSlot(() => builder({ modelId, replicaIdx }));
+    } catch (err) {
+      if (!(err instanceof CapacityDeniedError)) throw err;
+
+      // A supervised child may have released its physical memory while its
+      // provider entry deliberately retained a worst-case reservation for a
+      // lazy restart. Usually that paper guarantee is harmless. It must not,
+      // however, make a NEW model's context planner conclude the machine is
+      // full before ProviderPool gets the builder's context-inclusive byte
+      // estimate and can run its ordinary makeRoom pass.
+      //
+      // Reclaim stopped, idle entries only after a real capacity denial, then
+      // retry the non-binding build once. Running/warm engines stay intact;
+      // an intrinsically too-large target simply returns the retried denial.
+      const reclaimed = await this.reclaimReleasedReservations();
+      if (reclaimed <= 0) throw err;
+      log.info(
+        `reclaimed ${gb(reclaimed)} of released model reservations for ${key}; retrying admission`,
+      );
+      built = await this.withGpuLoadSlot(() => builder({ modelId, replicaIdx }));
+    }
     // The builder's actual residentBytes wins if it differs from the
     // pre-flight estimate (e.g. catalog override). Reserve the truth.
     const finalBytes = built.residentBytes;
@@ -607,11 +638,7 @@ export class ProviderPool {
     const dead: string[] = [];
     for (const [key, entry] of this.entries) {
       if (entry.draining || isBusy(entry)) continue;
-      const lifecycle = (
-        entry.provider as LLMProvider & {
-          engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
-        }
-      ).engineLifecycleSnapshot?.();
+      const lifecycle = engineLifecycle(entry);
       if (lifecycle?.startFailedAt !== undefined && !lifecycle.running) dead.push(key);
     }
     for (const key of dead) {
@@ -625,6 +652,45 @@ export class ProviderPool {
         );
       }
     }
+  }
+
+  /**
+   * Evict pool entries whose supervised native child has already stopped.
+   * Their bytes are capacity guarantees, not physical residency. Keeping the
+   * wrapper cached is useful until another model actually needs that promise;
+   * a capacity denial is the pressure signal that makes the released entries
+   * expendable.
+   */
+  private async reclaimReleasedReservations(): Promise<number> {
+    const candidates: Array<{ key: string; bytes: number }> = [];
+    for (const [key, entry] of this.entries) {
+      if (entry.draining || isBusy(entry)) continue;
+      const lifecycle = engineLifecycle(entry);
+      if (lifecycle && !lifecycle.running) {
+        candidates.push({ key, bytes: entry.residentBytes });
+      }
+    }
+    if (candidates.length === 0) return 0;
+
+    const reclaimed = await Promise.all(
+      candidates.map(async ({ key, bytes }) => {
+        try {
+          return (await this.unloadIdle(key)) ? bytes : 0;
+        } catch (err) {
+          // A new turn may have claimed the provider after the lifecycle
+          // sample. Never drain that racing work merely to repair accounting;
+          // leave the entry resident and let the retried denial describe what
+          // is still unavailable.
+          log.warn(
+            `released reservation ${key} could not be reclaimed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          return 0;
+        }
+      }),
+    );
+    return reclaimed.reduce((sum, bytes) => sum + bytes, 0);
   }
 
   /**
@@ -1114,11 +1180,7 @@ export class ProviderPool {
     const committed = this.broker.committed();
     const entries: PoolEntrySnapshot[] = [];
     for (const [key, e] of this.entries) {
-      const lifecycle = (
-        e.provider as LLMProvider & {
-          engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
-        }
-      ).engineLifecycleSnapshot?.();
+      const lifecycle = engineLifecycle(e);
       entries.push({
         key,
         provider: e.parsed.provider,

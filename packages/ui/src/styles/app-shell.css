@@ -698,6 +698,28 @@
   overflow-wrap: anywhere;
 }
 
+/* Search excerpts flatten block Markdown into a compact line while retaining
+   the inline cues that make it readable. Links stay non-interactive because
+   the containing result row is already a button. */
+.search-results-snippet code,
+.search-option-snippet code,
+.documents-search-snippet code {
+  padding: 0 0.2em;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text, currentColor) 8%, transparent);
+  font-size: 0.94em;
+}
+
+.search-markdown-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.search-markdown-quote {
+  font-style: italic;
+}
+
 /* Query-term emphasis. One recipe for every surface that lists results —
    the palette, the full overlay, and the Documents library — so the same
    query never looks like two different matches. */

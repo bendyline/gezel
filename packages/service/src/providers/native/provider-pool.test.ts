@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
-import { CapacityBroker } from './capacity-broker.js';
+import { CapacityBroker, CapacityDeniedError } from './capacity-broker.js';
 import { makeEngineKey } from './engine-key.js';
 import {
   type ProviderBuilder,
@@ -1243,5 +1243,57 @@ describe('ProviderPool failed-start reclamation', () => {
     expect(pool.has(makeEngineKey('mlx', 'healthy', 0))).toBe(true);
     expect(pool.has(makeEngineKey('mlx', 'idle-retained', 0))).toBe(true);
     expect(broker.committed().committedBytes).toBe(12 * GB);
+  });
+});
+
+describe('ProviderPool released-reservation reclamation', () => {
+  it('evicts released engines and retries a new model denied by their paper reservations', async () => {
+    const made: LifecycleFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 12 * GB });
+    const builder = vi.fn<ProviderBuilder>(async ({ modelId, replicaIdx }) => {
+      if (modelId === 'new' && broker.committed().committedBytes > 0) {
+        throw new CapacityDeniedError('released reservations leave too little context memory');
+      }
+      const provider = new LifecycleFakeProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return {
+        provider,
+        residentBytes: modelId === 'released' ? 10 * GB : 5 * GB,
+      };
+    });
+    const pool = new ProviderPool({ broker, builders: { mlx: builder } });
+
+    await pool.ensure('mlx', 'released', 0, 10 * GB);
+    expect(pool.snapshot().entries[0]?.lifecycle?.running).toBe(false);
+
+    // The router's preliminary 1 GB estimate fits, but the builder's exact
+    // context plan does not. This is the ordering that stranded Gemma behind
+    // four already-released MLX reservations on a 128 GB Mac.
+    await expect(pool.ensure('mlx', 'new', 0, 1 * GB)).resolves.toBeDefined();
+
+    expect(pool.has(makeEngineKey('mlx', 'released', 0))).toBe(false);
+    expect(made[0]!.shutdownCalls).toBe(1);
+    expect(builder).toHaveBeenCalledTimes(3); // released + denied new + retried new
+    expect(broker.committed().committedBytes).toBe(5 * GB);
+  });
+
+  it('does not reclaim or retry against a running engine', async () => {
+    const made: LifecycleFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 12 * GB });
+    const builder = vi.fn<ProviderBuilder>(async ({ modelId, replicaIdx }) => {
+      if (modelId === 'new') throw new CapacityDeniedError('still genuinely occupied');
+      const provider = new LifecycleFakeProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return { provider, residentBytes: 10 * GB };
+    });
+    const pool = new ProviderPool({ broker, builders: { mlx: builder } });
+
+    await pool.ensure('mlx', 'running', 0, 10 * GB);
+    made[0]!.running = true;
+
+    await expect(pool.ensure('mlx', 'new', 0, 1 * GB)).rejects.toThrow('still genuinely occupied');
+    expect(pool.has(makeEngineKey('mlx', 'running', 0))).toBe(true);
+    expect(made[0]!.shutdownCalls).toBe(0);
+    expect(builder).toHaveBeenCalledTimes(2); // running + one denied new attempt
   });
 });

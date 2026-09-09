@@ -43,8 +43,8 @@ const MAX_TICKS = 400;
 const TROLLEY = { length: 5.5, width: 1.9, height: 2.4 };
 const CART = { length: 2.4, width: 1.2, height: 1.1 };
 const HORSE = { length: 1.4, width: 0.6, height: 1.2, lead: 2.1 };
-/** Iso height of a lamp post (~two thirds of a storey) and a trolley pole. */
-const LAMP_H = 1.3;
+/** Iso heights of a street lantern and a trolley pole. */
+const LAMP_H = 2.5;
 const POLE_H = 2.2;
 
 export function drawIsoStreets(ctx: CanvasRenderingContext2D, s: IsoRenderState): void {
@@ -165,19 +165,30 @@ function drawSurfaceDetail(
       break;
     }
     case 'cobble': {
-      // Setts: a course line down the middle and cross joints every few
-      // units, alternately offset so the carriageway never reads as a ladder.
+      // Staggered setts resolve as masonry instead of a ladder down the lane.
       ctx.strokeStyle = s.palette.curb;
-      ctx.globalAlpha = 0.3;
-      ctx.lineWidth = Math.max(0.5, 0.2 * scale);
+      ctx.globalAlpha = 0.46;
+      ctx.lineWidth = Math.max(0.5, 0.12 * scale);
       ctx.beginPath();
-      segment(ctx, s, at(g.a0 + 0.5, 0), at(g.a1 - 0.5, 0));
-      const n = Math.min(MAX_TICKS, Math.floor(g.length / COBBLE_STEP));
-      for (let i = 0; i < n; i++) {
-        const along = g.a0 + COBBLE_STEP * (i + 0.5);
-        if (i % 2 === 0) segment(ctx, s, at(along, -half * 0.85), at(along, 0));
-        else segment(ctx, s, at(along, 0), at(along, half * 0.85));
+      const courses = Math.max(2, Math.min(6, Math.floor(g.carriagewayWidth / 0.9)));
+      const n = Math.min(Math.floor(MAX_TICKS / courses), Math.floor(g.length / COBBLE_STEP));
+      for (let row = 0; row < courses; row++) {
+        const lo = -half + (g.carriagewayWidth * row) / courses;
+        const hi = lo + g.carriagewayWidth / courses;
+        if (row > 0) segment(ctx, s, at(g.a0, lo), at(g.a1, lo));
+        for (let i = 0; i < n; i++) {
+          const along = g.a0 + COBBLE_STEP * (i + 0.25 + (row % 2) * 0.5);
+          segment(ctx, s, at(along, lo), at(along, hi));
+        }
       }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = s.palette.sidewalk;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = Math.max(0.6, 0.12 * scale);
+      ctx.beginPath();
+      segment(ctx, s, at(g.a0, -half + 0.3), at(g.a1, -half + 0.3));
+      segment(ctx, s, at(g.a0, half - 0.3), at(g.a1, half - 0.3));
       ctx.stroke();
       ctx.globalAlpha = 1;
       break;
@@ -240,7 +251,7 @@ function drawFurniture(ctx: CanvasRenderingContext2D, s: IsoRenderState, g: Stre
 
   if (g.lamps.length > 0) {
     const h = LAMP_H * scale;
-    const headR = Math.max(0.8, 0.3 * scale);
+    const headR = Math.max(0.8, 0.25 * scale);
     const posts: ScreenPt[] = [];
     for (const lamp of g.lamps) {
       const pt = screenPt(s, lamp.x, lamp.y);
@@ -269,9 +280,18 @@ function drawFurniture(ctx: CanvasRenderingContext2D, s: IsoRenderState, g: Stre
       ctx.stroke();
       ctx.fillStyle = p.street.lampGlow;
       for (const pt of posts) {
+        const y = pt.y - h;
+        ctx.fillRect(pt.x - headR, y - headR, headR * 2, headR * 2.2);
+        ctx.strokeRect(pt.x - headR, y - headR, headR * 2, headR * 2.2);
+        ctx.fillStyle = p.street.lampPost;
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y - h, headR, 0, Math.PI * 2);
+        ctx.moveTo(pt.x - headR * 1.4, y - headR);
+        ctx.lineTo(pt.x, y - headR * 2);
+        ctx.lineTo(pt.x + headR * 1.4, y - headR);
+        ctx.closePath();
         ctx.fill();
+        ctx.fillRect(pt.x - headR * 0.6, pt.y - headR, headR * 1.2, headR);
+        ctx.fillStyle = p.street.lampGlow;
       }
     }
   }
@@ -320,7 +340,7 @@ function drawFurniture(ctx: CanvasRenderingContext2D, s: IsoRenderState, g: Stre
     for (const t of g.trees) {
       const pt = screenPt(s, t.x, t.y);
       if (!onScreen(s, pt)) continue;
-      const size = t.size * scale * 2;
+      const size = t.size * scale * 2.8;
       const src = s.atlas.index[t.sprite] * s.atlas.cell;
       ctx.drawImage(
         s.atlas.canvas,

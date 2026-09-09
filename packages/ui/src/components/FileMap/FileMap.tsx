@@ -276,7 +276,13 @@ export function FileMap({
       if (mode === 'iso') {
         // exact prism picking, front-to-back (tall buildings clickable on
         // their upper floors; short foreground beats tall background)
-        return hitTestIso(geometryForModel(model), cam, sx, sy);
+        return hitTestIso(
+          geometryForModel(model),
+          cam,
+          sx,
+          sy,
+          !ageLens && lodTier(cam.scale) !== 'city',
+        );
       }
       const wx = screenToWorldX(cam, sx);
       const wy = screenToWorldY(cam, sy);
@@ -294,7 +300,7 @@ export function FileMap({
       }
       return null;
     },
-    [model, mode],
+    [model, mode, ageLens],
   );
 
   const hitTestBuilding = useCallback(

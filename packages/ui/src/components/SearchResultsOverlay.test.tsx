@@ -20,7 +20,7 @@ const RESULTS: UnifiedSearchResult[] = [
     kind: 'content',
     id: 'content:p1:notes.md:4',
     title: 'notes.md',
-    snippet: 'Workshop launch checklist',
+    snippet: '## **Workshop** launch checklist',
     projectId: 'p1',
     path: 'notes.md',
     source: 'workspace',
@@ -51,6 +51,11 @@ describe('SearchResultsOverlay', () => {
       maxResults: 100,
     });
     expect(screen.getAllByText(/space|workshop/i, { selector: 'mark' })).toHaveLength(3);
+    const snippetMatch = screen
+      .getAllByText('Workshop', { selector: 'mark' })
+      .find((match) => match.closest('.search-results-snippet'));
+    expect(snippetMatch?.closest('strong')).not.toBeNull();
+    expect(screen.queryByText('##', { exact: false })).toBeNull();
   });
 
   it('runs a new search on Enter and closes with Escape', async () => {

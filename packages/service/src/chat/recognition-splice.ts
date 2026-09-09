@@ -8,10 +8,12 @@ import type {
 /**
  * Rendering and splicing of image digests into model-visible text.
  *
- * The chat model sees a pasted image as a bare markdown ref
- * (`![](attachments/9f3.png)`). When the model can't decode images, this is
- * what stands in for the pixels — so it has to survive everywhere the message
- * does, and it has to be unmistakably *data* rather than instruction.
+ * The persisted chat message keeps the original markdown ref so the UI can
+ * render the thumbnail. Once local recognition has actually described that
+ * image, the model-facing copy substitutes an opaque attachment label. The
+ * artifact path is an implementation detail at that point, and exposing it
+ * invites a blind model to inspect the screenshot with artifact tools instead
+ * of using the transcription already in its prompt.
  *
  * Two consumers, and they must agree byte-for-byte or local engines re-prefill
  * the whole turn instead of hitting their KV cache:
@@ -129,7 +131,8 @@ export function toMessageDigest(
 export function renderDigestBlock(digests: ReadonlyArray<MessageImageDigest>): string {
   if (digests.length === 0) return '';
   const blocks = digests.map(
-    (d) => `${OPEN} ref="${defuse(d.ref)}">\n${defuse(d.digest)}\n${CLOSE}`,
+    (d, index) =>
+      `${OPEN} ref="${defuse(modelVisibleImageRef(d, index))}">\n${defuse(d.digest)}\n${CLOSE}`,
   );
   return [
     'Automatic transcription of the image(s) above, produced on this device.',
@@ -144,8 +147,35 @@ export function spliceIntoText(
   digests: ReadonlyArray<MessageImageDigest> | undefined,
 ): string {
   if (!digests || digests.length === 0) return text;
+  const modelVisibleText = redactTranscribedImageRefs(text, digests);
   const block = renderDigestBlock(digests);
-  return text.trim().length > 0 ? `${text}\n\n${block}` : block;
+  return modelVisibleText.trim().length > 0 ? `${modelVisibleText}\n\n${block}` : block;
+}
+
+function hasSuccessfulTranscription(digest: MessageImageDigest): boolean {
+  return digest.status === 'ok' || digest.status === 'partial';
+}
+
+function modelVisibleImageRef(digest: MessageImageDigest, index: number): string {
+  return hasSuccessfulTranscription(digest) ? `attached-image-${index + 1}` : digest.ref;
+}
+
+/**
+ * Replace every occurrence, rather than only markdown destinations: clients
+ * can serialize pasted-image refs in slightly different markdown shapes, and
+ * the privacy/routing property we want is simply that a successfully
+ * transcribed artifact path never reaches the blind model.
+ */
+function redactTranscribedImageRefs(
+  text: string,
+  digests: ReadonlyArray<MessageImageDigest>,
+): string {
+  let redacted = text;
+  for (const [index, digest] of digests.entries()) {
+    if (!hasSuccessfulTranscription(digest) || !digest.ref) continue;
+    redacted = redacted.replaceAll(digest.ref, modelVisibleImageRef(digest, index));
+  }
+  return redacted;
 }
 
 /**

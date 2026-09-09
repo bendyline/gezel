@@ -655,11 +655,15 @@ async function createWindow(): Promise<void> {
   // render a context menu for them. Install one at the window boundary so
   // every editable surface (including Squisq's Tiptap editor) gets native
   // replacements, a persistent dictionary action, and the standard edit
-  // commands without coupling browser-only editor code to Electron.
+  // commands. Image contexts also get the decoded-bitmap copy action Electron
+  // exposes, including images embedded inside an editor.
   const contextMenuWindow = mainWindow;
   const contextMenuWebContents = contextMenuWindow.webContents;
   contextMenuWebContents.on('context-menu', (_event, params) => {
     const template = buildEditableContextMenuTemplate(params, {
+      copyImageAt: (x, y) => {
+        contextMenuWebContents.copyImageAt(x, y);
+      },
       replaceMisspelling: (suggestion) => {
         contextMenuWebContents.replaceMisspelling(suggestion);
       },
@@ -1848,7 +1852,7 @@ ipcMain.handle('gezel:open-logs-folder', async (): Promise<string> => {
 
 /**
  * Open an arbitrary folder in the OS file manager. Used by Settings →
- * Folders' "Open" buttons so the user can reveal each data folder.
+ * Folders' "Open in …" buttons so the user enters each data folder itself.
  * Returns an empty string on success, an error message otherwise
  * (matches Electron's `shell.openPath` semantics).
  */
@@ -1865,8 +1869,7 @@ ipcMain.handle('gezel:open-path', async (_event, target: string): Promise<string
     const targetPath = await realpath(target);
     if (!isExactApprovedPath(targetPath, approved)) return 'path is not an approved Gezel folder';
     if (!(await stat(targetPath)).isDirectory()) return 'path is not a directory';
-    shell.showItemInFolder(targetPath);
-    return '';
+    return await shell.openPath(targetPath);
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }

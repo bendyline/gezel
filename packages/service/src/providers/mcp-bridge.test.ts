@@ -381,6 +381,20 @@ describe('McpBridge', () => {
     expect(wrongRead).toContain('workspace file exists');
     expect(wrongRead).toContain('read_file');
 
+    const reroutedGrep = await bridge.callTool('grep_artifact', {
+      path: 'surface',
+      pattern: 'belongs to the project workspace',
+      caseInsensitive: false,
+      contextLines: 1,
+      maxMatches: 7,
+    });
+    expect(reroutedGrep).not.toMatch(/ERROR:/);
+    expect(reroutedGrep).toContain('Rerouted grep_artifact');
+    expect(reroutedGrep).toContain(
+      'grep_files({"path":"surface","pattern":"belongs to the project workspace","caseInsensitive":false,"contextLines":1,"maxResults":7})',
+    );
+    expect(reroutedGrep).toContain('surface/bug_report.md:3:');
+
     const wrongWrite = await bridge.callTool('write_artifact', {
       path: 'surface/bug_report.md',
       content: '# Wrong drawer\n',
@@ -392,6 +406,34 @@ describe('McpBridge', () => {
     const readBack = await bridge.callTool('read_file', { path: 'surface/bug_report.md' });
     expect(readBack).toContain('# Workspace report');
     expect(readBack).toContain('This belongs to the project workspace.');
+  });
+
+  it('does not cross pool authorization when workspace grep is registered but hidden', async () => {
+    const restricted = new McpBridge();
+    await restricted.start({
+      command: 'node',
+      args: [mcpPath],
+      env: { ...bridgeEnv, GEZEL_MCP_AUTHORIZED_TOOLS: 'grep_artifact' },
+    });
+    try {
+      expect(restricted.hasTool('grep_artifact')).toBe(true);
+      // Bridge-backed providers keep a broad child-server registration, then
+      // hide and reject out-of-role tools at the pool layer. The child must
+      // still honor that separate authorization for internal reroutes.
+      expect(restricted.hasTool('grep_files')).toBe(true);
+      const out = await restricted.callTool('grep_artifact', {
+        path: 'surface',
+        pattern: 'workspace',
+      });
+      expect(out).toMatch(/ERROR:/);
+      expect(out).toContain('grep_files is not authorized for this session');
+      expect(out).toContain('Retryable: false');
+      expect(out).toContain(
+        'grep_files({"path":"surface","pattern":"workspace","caseInsensitive":true,"contextLines":0,"maxResults":20})',
+      );
+    } finally {
+      await restricted.stop();
+    }
   });
 
   it('redirects source deliverables written to artifacts into the workspace', async () => {

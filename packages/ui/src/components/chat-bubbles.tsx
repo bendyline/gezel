@@ -282,12 +282,13 @@ export interface MessageBubbleProps {
   referencedTasks?: string[];
   /**
    * Indexed-context sources this USER turn consulted (proactive retrieval) —
-   * citations only, never the retrieved text. Renders as a collapsed
-   * "Consulted N sources" row so the RAG pipeline reads as visible diligence
-   * rather than invisible machinery. Rows with a path deep-link through the
-   * same nav actions as search results (line-anchored).
+   * including the exact excerpt injected by newer daemons. Renders as a
+   * collapsed "Consulted N sources" row with a byte count and nested source
+   * disclosures. Rows with a path deep-link through the same nav actions as
+   * search results (line-anchored). Older citation-only sessions still render.
    */
   retrieval?: {
+    injectedBytes?: number;
     hits: ReadonlyArray<{
       source: string;
       projectId?: string;
@@ -295,6 +296,12 @@ export interface MessageBubbleProps {
       line?: number;
       lineEnd?: number;
       score: number;
+      uri?: string;
+      title?: string;
+      catalogId?: string;
+      catalogVersion?: string;
+      injectedText?: string;
+      injectedBytes?: number;
     }>;
   };
   /**
@@ -463,6 +470,34 @@ export interface MessageBubbleProps {
    * session-debug bundle.
    */
   warnings?: WarningValue[];
+}
+
+type RetrievalDisplayHit = NonNullable<MessageBubbleProps['retrieval']>['hits'][number];
+
+function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString()} ${bytes === 1 ? 'byte' : 'bytes'}`;
+}
+
+function openRetrievalSource(hit: RetrievalDisplayHit, activeProjectId?: string): void {
+  if (!hit.path) return;
+  if (hit.source === 'shared') {
+    runNavActions([openTabAction({ kind: 'document', path: hit.path })]);
+    return;
+  }
+  const targetProject = hit.projectId ?? activeProjectId;
+  if (!targetProject) return;
+  const intent = {
+    projectId: targetProject,
+    path: hit.path,
+    source: (hit.source === 'artifacts' ? 'artifacts' : 'workspace') as 'artifacts' | 'workspace',
+    ...(hit.line ? { line: hit.line } : {}),
+    ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
+  };
+  runNavActions([
+    { kind: 'open-file', intent },
+    openTabAction({ kind: 'project', id: targetProject }),
+    { kind: 'event', type: 'gezel:open-file', detail: intent },
+  ]);
 }
 
 /**
@@ -720,52 +755,90 @@ export function MessageBubble({
   // one row per citation, path rows deep-linking through the same
   // queue-then-dispatch nav actions as titlebar search results (E1-anchored).
   const retrievalHits = retrieval?.hits ?? [];
+  const retrievalByteLabel =
+    retrieval?.injectedBytes !== undefined
+      ? ` · ${formatExactBytes(retrieval.injectedBytes)} injected`
+      : '';
   const consultedSources =
     retrievalHits.length > 0 ? (
       <details className="msg-retrieval">
         <summary className="msg-retrieval-summary">
           Consulted {retrievalHits.length} indexed source{retrievalHits.length === 1 ? '' : 's'}
+          {retrievalByteLabel}
         </summary>
+        {retrieval?.injectedBytes !== undefined && (
+          <p className="msg-retrieval-note">
+            Turn total includes source labels and safety framing. Retrieved excerpts are untrusted
+            evidence.
+          </p>
+        )}
         <ul className="msg-retrieval-list">
           {retrievalHits.map((hit, i) => {
             const label = hit.path
-              ? `${hit.path}${hit.line ? `:${hit.line}` : ''}`
-              : 'remembered note';
+              ? `${hit.path}${
+                  hit.line
+                    ? `:${hit.line}${
+                        hit.lineEnd && hit.lineEnd !== hit.line ? `-${hit.lineEnd}` : ''
+                      }`
+                    : ''
+                }`
+              : (hit.title ?? hit.uri ?? 'remembered note');
             const key = `${hit.source}:${hit.path ?? 'memory'}:${hit.line ?? i}`;
-            if (!hit.path) {
+            const excerptAvailable = hit.injectedText !== undefined;
+            const excerptBytes =
+              hit.injectedBytes ??
+              (hit.injectedText !== undefined
+                ? new TextEncoder().encode(hit.injectedText).byteLength
+                : undefined);
+            const sourceLabel = `[${hit.source}] ${label}`;
+            if (!excerptAvailable) {
               return (
                 <li key={key} className="msg-retrieval-item">
-                  [{hit.source}] {label}
+                  {hit.path ? (
+                    <button
+                      type="button"
+                      className="msg-ref-chip"
+                      onClick={() => openRetrievalSource(hit, projectId)}
+                      title={hit.path}
+                    >
+                      {sourceLabel}
+                    </button>
+                  ) : (
+                    sourceLabel
+                  )}
                 </li>
               );
             }
-            const open = () => {
-              if (hit.source === 'shared') {
-                runNavActions([openTabAction({ kind: 'document', path: hit.path! })]);
-                return;
-              }
-              const targetProject = hit.projectId ?? projectId;
-              if (!targetProject) return;
-              const intent = {
-                projectId: targetProject,
-                path: hit.path!,
-                source: (hit.source === 'artifacts' ? 'artifacts' : 'workspace') as
-                  | 'artifacts'
-                  | 'workspace',
-                ...(hit.line ? { line: hit.line } : {}),
-                ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
-              };
-              runNavActions([
-                { kind: 'open-file', intent },
-                openTabAction({ kind: 'project', id: targetProject }),
-                { kind: 'event', type: 'gezel:open-file', detail: intent },
-              ]);
-            };
             return (
               <li key={key} className="msg-retrieval-item">
-                <button type="button" className="msg-ref-chip" onClick={open} title={hit.path}>
-                  [{hit.source}] {label}
-                </button>
+                <details className="msg-retrieval-source">
+                  <summary className="msg-retrieval-source-summary">
+                    <span className="msg-retrieval-source-label">{sourceLabel}</span>
+                    {excerptBytes !== undefined && (
+                      <span className="msg-retrieval-source-bytes">
+                        {formatExactBytes(excerptBytes)} from source
+                      </span>
+                    )}
+                  </summary>
+                  <div className="msg-retrieval-source-body">
+                    {hit.injectedText ? (
+                      <pre className="msg-retrieval-excerpt">{hit.injectedText}</pre>
+                    ) : (
+                      <p className="msg-retrieval-empty">
+                        Citation metadata only; no source text was injected.
+                      </p>
+                    )}
+                    {hit.path && (
+                      <button
+                        type="button"
+                        className="msg-retrieval-open"
+                        onClick={() => openRetrievalSource(hit, projectId)}
+                      >
+                        Open source
+                      </button>
+                    )}
+                  </div>
+                </details>
               </li>
             );
           })}

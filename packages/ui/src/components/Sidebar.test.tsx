@@ -88,6 +88,7 @@ describe('Sidebar', () => {
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
+    vi.mocked(api.readDocument).mockResolvedValue({ content: '' } as never);
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
   });
 
@@ -762,6 +763,34 @@ describe('Sidebar', () => {
       }),
     );
     window.removeEventListener('gezel:document-renamed', renamed);
+  });
+
+  it('relinks companion images when a document is renamed from the sidebar', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        { name: 'notes.md', path: 'notes.md', isDirectory: false },
+        { name: 'notes_files', path: 'notes_files', isDirectory: true },
+        { name: 'hero.png', path: 'notes_files/hero.png', isDirectory: false },
+      ],
+    } as never);
+    vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.readDocument).mockResolvedValue({
+      content: '# Notes\n\n![Hero](notes_files/hero.png)\n',
+    } as never);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename notes.md' }));
+    const nameInput = await screen.findByPlaceholderText('New name');
+    fireEvent.change(nameInput, { target: { value: 'meeting-notes' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith(
+        'meeting-notes.md',
+        '# Notes\n\n![Hero](meeting-notes_files/hero.png)\n',
+      );
+    });
   });
 
   it('confirms before deleting a document from the sidebar row menu', async () => {

@@ -178,6 +178,7 @@ describe('DocumentsView', () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
     vi.mocked(api.deleteDocument).mockResolvedValue({ ok: true } as never);
     vi.mocked(api.writeDocument).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.readDocument).mockResolvedValue({ content: '' } as never);
     vi.mocked(api.createDocumentFolder).mockResolvedValue({ ok: true } as never);
     vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
     // Reset localStorage between tests so a stale selectedPath from a
@@ -564,6 +565,35 @@ describe('DocumentsView', () => {
       ['mission_files', 'brief_files'],
       ['mission.md', 'brief.md'],
     ]);
+  });
+
+  it('relinks images after renaming a Markdown document and its companion', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        ...FAKE_ENTRIES,
+        { path: 'mission_files', name: 'mission_files', isDirectory: true },
+        { path: 'mission_files/hero.png', name: 'hero.png', isDirectory: false },
+      ],
+    } as never);
+    vi.mocked(api.readDocument).mockResolvedValue({
+      content: '# Mission\n\n![Hero](mission_files/hero.png)\n',
+    } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByTestId('rename-mission.md'));
+    const user = userEvent.setup();
+    const nameInput = await screen.findByRole('textbox', { name: 'Name' });
+    await user.clear(nameInput);
+    await user.type(nameInput, 'brief');
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith(
+        'brief.md',
+        '# Mission\n\n![Hero](brief_files/hero.png)\n',
+      );
+    });
   });
 
   it('deletes a Markdown companion with its visible document', async () => {

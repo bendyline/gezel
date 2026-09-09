@@ -662,9 +662,9 @@
   font-size: 0.82rem;
 }
 
-/* "Consulted N indexed sources" — collapsed provenance row under a user
-   turn that received proactive indexed context. Reads as quiet diligence:
-   muted summary line, chip rows only when expanded. */
+/* "Consulted N indexed sources" — nested disclosures under a user turn that
+   received proactive indexed context. The first fold stays quiet; each
+   source opens onto the exact plain-text excerpt sent to the model. */
 .msg-retrieval {
   margin: 0.3rem 0 0.1rem;
   font-size: 0.78rem;
@@ -680,6 +680,12 @@
   color: inherit;
 }
 
+.msg-retrieval-note {
+  margin: 0.25rem 0 0;
+  color: var(--muted, #888);
+  font-size: 0.72rem;
+}
+
 .msg-retrieval-list {
   list-style: none;
   margin: 0.25rem 0 0;
@@ -691,6 +697,100 @@
 
 .msg-retrieval-item {
   color: var(--muted, #888);
+}
+
+.msg-retrieval-source {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface, transparent);
+  overflow: hidden;
+}
+
+.msg-retrieval-source-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text);
+}
+
+.msg-retrieval-source-summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-retrieval-source-summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+
+.msg-retrieval-source[open] > .msg-retrieval-source-summary::before {
+  transform: rotate(90deg);
+}
+
+.msg-retrieval-source-summary:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.msg-retrieval-source-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.msg-retrieval-source-bytes {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted, #888);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.msg-retrieval-source-body {
+  padding: 0 0.45rem 0.45rem;
+}
+
+.msg-retrieval-excerpt {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0.2rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.msg-retrieval-empty {
+  margin: 0.35rem 0 0;
+  color: var(--muted, #888);
+  font-style: italic;
+}
+
+.msg-retrieval-open {
+  appearance: none;
+  margin-top: 0.4rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.msg-retrieval-open:hover {
+  text-decoration: underline;
 }
 
 .msg-refs-label {

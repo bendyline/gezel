@@ -15,6 +15,7 @@
  *   GEZEL_HOME       — path to ~/.gezel (for direct memory access)
  *   GEZEL_ROLE_BASED_NAME_ONLY_MODE — 1/0 naming presentation inherited by new tasks
  *   GEZEL_CRAFTBOOK_ID — explicit craftbook-editor context (loads step surgery)
+ *   GEZEL_MCP_AUTHORIZED_TOOLS — role-authorized built-ins (may exceed registered tools)
  *   GEZEL_MCP_LEGACY_TOOLS=1 — expose compatibility aliases during migration
  */
 
@@ -39,6 +40,8 @@ import {
   ProviderNameSchema,
   type ReadWorkspaceFilesResponse,
   type ScriptMeta,
+  type SearchFilesRequest,
+  type SearchFilesResponse,
   type StepDeliverable,
   StepGateUnionSchema,
   type StepPatch,
@@ -573,6 +576,17 @@ const allowedToolNames =
     ? null
     : new Set(
         allowEnv
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(canonicalToolName),
+      );
+const authorizedEnv = process.env.GEZEL_MCP_AUTHORIZED_TOOLS;
+const authorizedToolNames =
+  authorizedEnv === undefined
+    ? null
+    : new Set(
+        authorizedEnv
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean)
@@ -3856,6 +3870,119 @@ async function workspaceCollisionForArtifactPath(
   return null;
 }
 
+function toolIsAuthorizedForThisSession(name: string): boolean {
+  const canonical = canonicalToolName(name);
+  // Bridge-backed providers can register a broad child-server surface and
+  // enforce the role allowlist in McpBridgePool. ChatManager passes that
+  // effective authorization separately so an internal corrective reroute
+  // cannot bypass the pool. Direct MCP clients fall back to the registration
+  // filters because no second enforcement layer exists there.
+  if (authorizedToolNames !== null) return authorizedToolNames.has(canonical);
+  return (
+    !excludedToolNames.has(canonical) &&
+    (allowedToolNames === null || allowedToolNames.has(canonical))
+  );
+}
+
+function equivalentWorkspaceGrepArgs(
+  path: string,
+  pattern: string,
+  options: {
+    caseInsensitive?: boolean;
+    contextLines?: number;
+    maxMatches?: number;
+  },
+): SearchFilesRequest {
+  return {
+    path,
+    pattern,
+    // grep_artifact defaults to insensitive while grep_files defaults to
+    // sensitive, so this must be explicit for a truly equivalent retry.
+    caseInsensitive: options.caseInsensitive ?? true,
+    contextLines: Math.min(options.contextLines ?? 0, 5),
+    maxResults: options.maxMatches ?? 20,
+  };
+}
+
+function renderExactToolCall(name: string, args: Record<string, unknown>): string {
+  return `${name}(${JSON.stringify(args)})`;
+}
+
+function workspaceGrepResult(args: SearchFilesRequest, res: SearchFilesResponse, notice = '') {
+  const prefix = notice ? `${notice}\n\n` : '';
+  const truncation = res.truncated
+    ? `\nResults truncated (${res.truncationReason ?? 'limit'}).${
+        res.nextCursor !== undefined
+          ? ` Continue with cursor=${res.nextCursor}, or narrow path/includeGlobs/pattern.`
+          : ' Narrow path/includeGlobs/pattern.'
+      }`
+    : '';
+  if (res.mode === 'count') {
+    const qualifier = res.truncated ? 'at least ' : '';
+    const summary = `${qualifier}${res.count} matching line${res.count === 1 ? '' : 's'} (engine=${res.engine}).`;
+    return okResult(
+      SearchToolOutputSchema,
+      {
+        summary,
+        query: args.pattern,
+        matches: [],
+        count: res.count,
+        truncated: res.truncated,
+        engine: res.engine,
+        mode: res.mode,
+        ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+      },
+      { text: `${prefix}${summary}${truncation}` },
+    );
+  }
+  if (res.mode === 'files') {
+    const header = `${res.files.length} matching file${res.files.length === 1 ? '' : 's'} (engine=${res.engine})`;
+    return okResult(
+      SearchToolOutputSchema,
+      {
+        summary: `${header}.`,
+        query: args.pattern,
+        matches: res.files.map((path) => ({ path })),
+        count: res.files.length,
+        truncated: res.truncated,
+        engine: res.engine,
+        mode: res.mode,
+        ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+      },
+      { text: `${prefix}${header}\n${res.files.join('\n') || '(none)'}${truncation}` },
+    );
+  }
+  const lines = res.matches.flatMap((match, index) => {
+    const block = [
+      ...(match.before ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
+      `${match.path}:${match.line}:${match.text}`,
+      ...(match.after ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
+    ];
+    if (index < res.matches.length - 1 && (match.before?.length || match.after?.length)) {
+      block.push('--');
+    }
+    return block;
+  });
+  const header = `${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} (engine=${res.engine})`;
+  return okResult(
+    SearchToolOutputSchema,
+    {
+      summary: `${header}.`,
+      query: args.pattern,
+      matches: res.matches,
+      count: res.matches.length,
+      truncated: res.truncated,
+      engine: res.engine,
+      mode: res.mode,
+      ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+      ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+    },
+    { text: `${prefix}${header}\n${lines.join('\n') || '(no matches)'}${truncation}` },
+  );
+}
+
 /**
  * Find an exact same-path artifact after a workspace read misses. This is a
  * redirect hint only: deliberately do not return artifact content from the
@@ -4105,16 +4232,34 @@ server.tool(
     if (res.kind === 'missing') {
       const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
       if (workspaceCollision) {
-        const tool = workspaceCollision.kind === 'dir' ? 'list_dir' : 'read_file';
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Artifact "${path}" not found, but a workspace ${workspaceCollision.kind} exists at "${workspaceCollision.path}". grep_artifact only searches artifacts; use ${tool}({ path: "${workspaceCollision.path}" }) or workspace search tools if available, or delegate to a gezel with workspace read access.`,
-            },
-          ],
-          isError: true,
-        };
+        const workspaceArgs = equivalentWorkspaceGrepArgs(workspaceCollision.path, pattern, {
+          caseInsensitive,
+          contextLines,
+          maxMatches,
+        });
+        const exactCall = renderExactToolCall('grep_files', workspaceArgs);
+        if (toolIsAuthorizedForThisSession('grep_files')) {
+          try {
+            const workspaceResult = await api.toolSearchFiles(projectId, workspaceArgs);
+            return workspaceGrepResult(
+              workspaceArgs,
+              workspaceResult,
+              `Rerouted grep_artifact to the equivalent workspace call because "${path}" is a workspace ${workspaceCollision.kind}, not an artifact:\n${exactCall}`,
+            );
+          } catch (err) {
+            return errorResult(
+              `Artifact "${path}" was not found and its automatic workspace fallback failed: ${unwrapApiError(err)}`,
+              { retryable: true, hint: exactCall },
+            );
+          }
+        }
+        return errorResult(
+          `Artifact "${path}" not found, but a workspace ${workspaceCollision.kind} exists at "${workspaceCollision.path}". grep_files is not authorized for this session.`,
+          {
+            retryable: false,
+            hint: `Delegate to a gezel with workspace search access to run ${exactCall}`,
+          },
+        );
       }
       return {
         content: [
@@ -10762,77 +10907,7 @@ server.tool(
   async (args) => {
     try {
       const res = await api.toolSearchFiles(projectId, args);
-      const truncation = res.truncated
-        ? `\nResults truncated (${res.truncationReason ?? 'limit'}).${
-            res.nextCursor !== undefined
-              ? ` Continue with cursor=${res.nextCursor}, or narrow path/includeGlobs/pattern.`
-              : ' Narrow path/includeGlobs/pattern.'
-          }`
-        : '';
-      if (res.mode === 'count') {
-        const qualifier = res.truncated ? 'at least ' : '';
-        const summary = `${qualifier}${res.count} matching line${res.count === 1 ? '' : 's'} (engine=${res.engine}).`;
-        return okResult(
-          SearchToolOutputSchema,
-          {
-            summary,
-            query: args.pattern,
-            matches: [],
-            count: res.count,
-            truncated: res.truncated,
-            engine: res.engine,
-            mode: res.mode,
-            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-          },
-          { text: `${summary}${truncation}` },
-        );
-      }
-      if (res.mode === 'files') {
-        const header = `${res.files.length} matching file${res.files.length === 1 ? '' : 's'} (engine=${res.engine})`;
-        return okResult(
-          SearchToolOutputSchema,
-          {
-            summary: `${header}.`,
-            query: args.pattern,
-            matches: res.files.map((path) => ({ path })),
-            count: res.files.length,
-            truncated: res.truncated,
-            engine: res.engine,
-            mode: res.mode,
-            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-          },
-          { text: `${header}\n${res.files.join('\n') || '(none)'}${truncation}` },
-        );
-      }
-      const lines = res.matches.flatMap((match, index) => {
-        const block = [
-          ...(match.before ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
-          `${match.path}:${match.line}:${match.text}`,
-          ...(match.after ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
-        ];
-        if (index < res.matches.length - 1 && (match.before?.length || match.after?.length)) {
-          block.push('--');
-        }
-        return block;
-      });
-      const header = `${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} (engine=${res.engine})`;
-      return okResult(
-        SearchToolOutputSchema,
-        {
-          summary: `${header}.`,
-          query: args.pattern,
-          matches: res.matches,
-          count: res.matches.length,
-          truncated: res.truncated,
-          engine: res.engine,
-          mode: res.mode,
-          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-          ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-        },
-        { text: `${header}\n${lines.join('\n') || '(no matches)'}${truncation}` },
-      );
+      return workspaceGrepResult(args, res);
     } catch (err) {
       const msg = unwrapApiError(err);
       return errorResult(`grep_files failed: ${msg}`);

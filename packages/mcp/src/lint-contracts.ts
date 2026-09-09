@@ -29,6 +29,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
     'GEZEL_MCP_NO_MAIN',
     'GEZEL_MCP_SCHEMA_LINT',
     'GEZEL_MCP_ALLOW',
+    'GEZEL_MCP_AUTHORIZED_TOOLS',
     'GEZEL_MCP_EXCLUDE',
     'GEZEL_MCP_LEGACY_TOOLS',
     'GEZEL_MCP_TOOL_NAMING',
@@ -44,6 +45,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
   process.env.GEZEL_MCP_NO_MAIN = '1';
   process.env.GEZEL_MCP_SCHEMA_LINT = '1';
   delete process.env.GEZEL_MCP_ALLOW;
+  delete process.env.GEZEL_MCP_AUTHORIZED_TOOLS;
   delete process.env.GEZEL_MCP_EXCLUDE;
   delete process.env.GEZEL_MCP_LEGACY_TOOLS;
   delete process.env.GEZEL_MCP_TOOL_NAMING;

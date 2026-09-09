@@ -57,9 +57,10 @@ function buildAtlas(p: CityPalette, scale: number): SpriteAtlas | null {
   }
   if (!ctx) return null;
 
-  const treeA = p.dark ? 'hsl(135 28% 30%)' : 'hsl(120 35% 52%)';
-  const treeB = p.dark ? 'hsl(150 30% 24%)' : 'hsl(95 38% 45%)';
-  const shrub = p.dark ? 'hsl(140 24% 27%)' : 'hsl(110 30% 60%)';
+  const treeA = p.dark ? 'hsl(138 22% 29%)' : 'hsl(106 25% 40%)';
+  const treeB = p.dark ? 'hsl(152 24% 23%)' : 'hsl(142 22% 32%)';
+  const leafLight = p.dark ? '#566d47' : '#8f9f61';
+  const shrub = p.dark ? 'hsl(140 24% 27%)' : 'hsl(108 22% 48%)';
   const trunk = p.dark ? 'hsl(30 25% 25%)' : 'hsl(30 35% 40%)';
   const weed = p.dark ? 'hsl(60 20% 28%)' : 'hsl(65 35% 55%)';
   const dry = p.dark ? 'hsl(38 25% 30%)' : 'hsl(42 45% 70%)';
@@ -84,31 +85,72 @@ function buildAtlas(p: CityPalette, scale: number): SpriteAtlas | null {
     c.fill();
   };
 
-  const tree = (c: CanvasRenderingContext2D, canopy: string, r: number): void => {
+  const tree = (c: CanvasRenderingContext2D, narrow: boolean): void => {
+    c.fillStyle = p.dark ? 'rgba(0,0,0,0.22)' : 'rgba(62,67,39,0.16)';
+    c.beginPath();
+    c.ellipse(1, 9, narrow ? 3.8 : 7.5, 1.7, 0, 0, Math.PI * 2);
+    c.fill();
     c.fillStyle = trunk;
-    c.fillRect(-1, 2, 2, 6);
-    c.fillStyle = canopy;
-    circle(c, 0, -1, r);
-    c.fillStyle = 'rgba(255, 255, 255, 0.14)';
-    circle(c, -r * 0.3, -1 - r * 0.3, r * 0.45);
+    c.fillRect(-0.8, 1, 1.6, 8);
+    c.strokeStyle = trunk;
+    c.lineWidth = 0.9;
+    c.beginPath();
+    c.moveTo(0, 5);
+    c.lineTo(-3.5, -1);
+    c.moveTo(0, 4);
+    c.lineTo(4, -2);
+    c.stroke();
+    const lobes = narrow
+      ? [
+          [0, -7.5, 3],
+          [-1.8, -4.5, 3.3],
+          [1.5, -3.8, 3.2],
+          [-1.5, -0.5, 3.5],
+          [1.5, 0.8, 3.5],
+        ]
+      : [
+          [-5.2, -0.5, 4],
+          [3.8, 0, 4.5],
+          [0.4, -5.5, 4.7],
+          [-4, -5, 4.2],
+          [4.8, -4.2, 3.4],
+          [0, 0.5, 5],
+        ];
+    c.fillStyle = treeB;
+    for (const [x, y, r] of lobes) circle(c, x!, y!, r!);
+    c.fillStyle = treeA;
+    for (const [x, y, r] of lobes) circle(c, x! - 0.6, y! - 1, r! * 0.82);
+    c.fillStyle = leafLight;
+    c.globalAlpha = 0.5;
+    for (const [x, y, r] of lobes.slice(0, 4)) circle(c, x! - 1.2, y! - 1.9, r! * 0.64);
+    c.globalAlpha = 1;
   };
 
-  at(index.tree1, (c) => tree(c, treeA, 7));
-  at(index.tree2, (c) => tree(c, treeB, 6));
+  at(index.tree1, (c) => tree(c, false));
+  at(index.tree2, (c) => tree(c, true));
   at(index.tree3, (c) => {
-    // conifer: stacked triangles
     c.fillStyle = trunk;
     c.fillRect(-1, 5, 2, 4);
-    c.fillStyle = treeB;
     for (const [w, y] of [
       [7, 5],
       [5.5, 1],
       [4, -3],
     ] as const) {
+      c.fillStyle = treeB;
       c.beginPath();
       c.moveTo(0, y - 6);
-      c.lineTo(-w, y);
-      c.lineTo(w, y);
+      c.lineTo(-w * 0.6, y - 2);
+      c.lineTo(-w * 0.48, y - 1.7);
+      c.lineTo(-w, y + 0.4);
+      c.quadraticCurveTo(0, y + 2, w, y + 0.4);
+      c.lineTo(w * 0.52, y - 2);
+      c.closePath();
+      c.fill();
+      c.fillStyle = treeA;
+      c.beginPath();
+      c.moveTo(0, y - 6);
+      c.lineTo(-w, y + 0.4);
+      c.lineTo(-0.8, y);
       c.closePath();
       c.fill();
     }

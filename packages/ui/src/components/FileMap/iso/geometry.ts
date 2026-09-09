@@ -1,5 +1,6 @@
 import type { FileMapResponse, MapBlock, MapBuilding } from '@bendyline/gezel';
 import type { Camera } from '../camera.js';
+import { hasSymbolCampus } from '../file-use.js';
 import { styleForModel } from '../town-cache.js';
 import { depthOrder } from './depth.js';
 import {
@@ -11,7 +12,7 @@ import {
   miniHIso,
   townRoofRiseIso,
 } from './projection.js';
-import type { TownStyle } from './town-style.js';
+import { type TownStyle, townStyleForSymbol } from './town-style.js';
 
 /**
  * Per-model iso geometry: prism heights, iso AABBs, and the memoized painter
@@ -20,6 +21,7 @@ import type { TownStyle } from './town-style.js';
  */
 
 export interface BlockGeom {
+  campus?: Array<{ building: MapBuilding; roofFactor: number }>;
   block: MapBlock;
   /** World height of the prism (0 = flat: tombstones and city-tier lots). */
   hWorld: number;
@@ -64,7 +66,15 @@ function buildGeometry(model: FileMapResponse): GeometryCache {
       block.state === 'tombstoned' || style?.archetype === 'field' || style?.archetype === 'park';
     const hWorld = flat ? 0 : heightOf(levelsFor(block));
     const hIso = hWorld * HZ;
+    const campus =
+      block.state === 'live' && !block.phantom && hasSymbolCampus(block)
+        ? buildingsForBlock(model, block.id).map((building) => ({
+            building,
+            roofFactor: townStyleForSymbol(building, block).roofFactor ?? 1,
+          }))
+        : [];
     return {
+      ...(campus.length ? { campus } : {}),
       block,
       hWorld,
       hIso,
@@ -77,7 +87,11 @@ function buildGeometry(model: FileMapResponse): GeometryCache {
     geoms.map((g) => ({ rect: g.block.rect, u0: g.aabb.u0, u1: g.aabb.u1 })),
   );
   let maxHIso = 0;
-  for (const g of geoms) if (g.hIso > maxHIso) maxHIso = g.hIso;
+  for (const g of geoms) {
+    maxHIso = Math.max(maxHIso, g.hIso);
+    for (const mini of g.campus ?? [])
+      maxHIso = Math.max(maxHIso, PODIUM_HISO + miniHIso(mini.building.height));
+  }
   return { geoms, order, maxHIso };
 }
 
@@ -100,7 +114,18 @@ export function roofHeadroom(g: BlockGeom, scale: number): number {
 
 /** True when a geom's projected box intersects the viewport. */
 export function geomInView(cam: Camera, g: BlockGeom, viewW: number, viewH: number): boolean {
-  const roof = roofHeadroom(g, cam.scale);
+  let roof = roofHeadroom(g, cam.scale);
+  // A small file can contain a tall symbol. Budget its actual silhouette,
+  // otherwise the courtyard disappears while its upper floors are visible.
+  for (const mini of g.campus ?? []) {
+    roof = Math.max(
+      roof,
+      PODIUM_HISO +
+        miniHIso(mini.building.height) -
+        g.hIso +
+        townRoofRiseIso(mini.building.rect, cam.scale, true) * mini.roofFactor,
+    );
+  }
   const sx0 = (g.aabb.u0 - cam.offsetX) * cam.scale;
   const sx1 = (g.aabb.u1 - cam.offsetX) * cam.scale;
   const sy0 = (g.aabb.v0 - roof - cam.offsetY) * cam.scale;
@@ -153,9 +178,18 @@ export function hitTestIsoBuilding(
   const u = sx / cam.scale + cam.offsetX;
   const v = sy / cam.scale + cam.offsetY + PODIUM_HISO;
   const minis = buildingsForBlock(model, blockId);
+  const parent = model.blocks?.find((block) => block.id === blockId);
   for (let i = minis.length - 1; i >= 0; i--) {
     const b = minis[i]!;
-    if (hitsPrism(u, v, b.rect, miniHIso(b.height) + townRoofRiseIso(b.rect, cam.scale, true))) {
+    const roofFactor = parent ? (townStyleForSymbol(b, parent).roofFactor ?? 1) : 1;
+    if (
+      hitsPrism(
+        u,
+        v,
+        b.rect,
+        miniHIso(b.height) + townRoofRiseIso(b.rect, cam.scale, true) * roofFactor,
+      )
+    ) {
       return b;
     }
   }
@@ -172,11 +206,29 @@ export function hitTestIso(
   cam: Camera,
   sx: number,
   sy: number,
+  campuses = true,
 ): MapBlock | null {
   const u = sx / cam.scale + cam.offsetX;
   const v = sy / cam.scale + cam.offsetY;
   for (let i = geom.order.length - 1; i >= 0; i--) {
     const g = geom.geoms[geom.order[i]!]!;
+    if (campuses && g.campus?.length) {
+      for (let j = g.campus.length - 1; j >= 0; j--) {
+        const mini = g.campus[j]!;
+        if (
+          hitsPrism(
+            u,
+            v + PODIUM_HISO,
+            mini.building.rect,
+            miniHIso(mini.building.height) +
+              townRoofRiseIso(mini.building.rect, cam.scale, true) * mini.roofFactor,
+          )
+        )
+          return g.block;
+      }
+      if (hitsPrism(u, v, g.block.rect, PODIUM_HISO)) return g.block;
+      continue;
+    }
     if (hitsPrism(u, v, g.block.rect, g.hIso + roofHeadroom(g, cam.scale))) return g.block;
   }
   return null;

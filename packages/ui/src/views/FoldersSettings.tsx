@@ -1,6 +1,7 @@
 import type {
   FolderBackupSnapshot,
   FolderMovePlan,
+  FolderMovePolicy,
   FolderMoveStatus,
   FolderScope,
   FoldersStatusResponse,
@@ -8,6 +9,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { openInFileManagerLabel } from '../components/file-manager-label.js';
 
 const SCOPES: { id: FolderScope; label: string; help: string }[] = [
   {
@@ -31,7 +33,7 @@ interface PendingPick {
   scope: FolderScope;
   destPath: string;
   plan: FolderMovePlan;
-  conflictPolicy: 'overwrite-all' | 'skip-all';
+  conflictPolicy: FolderMovePolicy;
 }
 
 export function FoldersSettings() {
@@ -40,11 +42,13 @@ export function FoldersSettings() {
   const [pending, setPending] = useState<PendingPick | null>(null);
   const [activeJob, setActiveJob] = useState<FolderMoveStatus | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const openLabel = openInFileManagerLabel(window.__GEZEL__?.platform);
 
   const refresh = useCallback(async () => {
     try {
       const next = await api.getFolders();
       setStatus(next);
+      if (next.job) setActiveJob(next.job);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -107,7 +111,7 @@ export function FoldersSettings() {
         scope,
         destPath: dest,
         plan,
-        conflictPolicy: plan.conflicts > 0 ? 'overwrite-all' : 'overwrite-all',
+        conflictPolicy: 'overwrite-all',
       });
     } catch (err) {
       setError((err as Error).message);
@@ -129,6 +133,7 @@ export function FoldersSettings() {
         scope: pending.scope,
         sourcePath: pending.plan.sourcePath,
         destPath: pending.destPath,
+        conflictPolicy: pending.conflictPolicy,
         status: 'queued',
         filesDone: 0,
         totalFiles: pending.plan.files,
@@ -151,6 +156,7 @@ export function FoldersSettings() {
           scope,
           sourcePath: status?.current[scope] ?? '',
           destPath: status?.defaults[scope] ?? '',
+          conflictPolicy: 'overwrite-all',
           status: 'queued',
           filesDone: 0,
           totalFiles: 0,
@@ -201,14 +207,28 @@ export function FoldersSettings() {
     );
   }
 
+  const moveInProgress =
+    activeJob?.status === 'queued' || activeJob?.status === 'running' || status.activeJob;
+  const restartPending =
+    activeJob?.status === 'done' && activeJob.restartRequired ? activeJob : null;
+  const displayedCurrent = { ...status.current };
+  const displayedExternalized = { ...status.externalized };
+  if (restartPending) {
+    displayedCurrent[restartPending.scope] = restartPending.destPath;
+    displayedExternalized[restartPending.scope] =
+      restartPending.destPath === status.defaults[restartPending.scope]
+        ? null
+        : restartPending.destPath;
+  }
+
   return (
     <section className="settings-section">
       <h2>Folders</h2>
       <p className="muted small">
         Move parts of your gezel data to a folder of your choosing — for example a OneDrive, iCloud
         Drive, or Dropbox folder so it syncs across machines and gets backed up. Before any move
-        runs, a copy of the source is written to <code>{status.backups.path}</code> so the move can
-        be undone by hand if something goes wrong.
+        that copies files, a snapshot of the source is written to <code>{status.backups.path}</code>{' '}
+        so the move can be undone by hand if something goes wrong.
       </p>
 
       {error && (
@@ -220,61 +240,85 @@ export function FoldersSettings() {
         </p>
       )}
 
+      {activeJob && <MoveProgress job={activeJob} onRestart={onRestart} />}
+
       <div className="folders-rows">
         {SCOPES.map((scope) => (
           <ScopeRow
             key={scope.id}
             label={scope.label}
             help={scope.help}
-            currentPath={status.current[scope.id]}
-            externalized={status.externalized[scope.id]}
-            disabled={status.activeJob || activeJob !== null}
+            currentPath={displayedCurrent[scope.id]}
+            externalized={displayedExternalized[scope.id]}
+            restartRequired={restartPending?.scope === scope.id}
+            disabled={moveInProgress || restartPending !== null}
             onPick={() => onPick(scope.id, scope.label)}
             onReset={() => onReset(scope.id)}
-            onOpen={() => onOpen(status.current[scope.id])}
+            onOpen={() => onOpen(displayedCurrent[scope.id])}
+            openLabel={openLabel}
           />
         ))}
       </div>
 
-      {status.backups.count > 0 && <SnapshotList backups={status.backups} onOpen={onOpen} />}
-
-      {activeJob && <MoveProgress job={activeJob} onRestart={onRestart} />}
+      {status.backups.count > 0 && (
+        <SnapshotList backups={status.backups} onOpen={onOpen} openLabel={openLabel} />
+      )}
 
       <ConfirmDialog
         open={pending !== null}
-        title={pending ? `Move ${pending.plan.files} files?` : ''}
+        title={
+          pending
+            ? pending.conflictPolicy === 'use-destination'
+              ? 'Use this folder without moving files?'
+              : `Move ${pending.plan.files} files?`
+            : ''
+        }
         message={
           pending && (
-            <>
-              <p>
+            <span className="folders-move-dialog-copy">
+              <span className="folders-move-dialog-line">
                 <strong>From:</strong> <code>{pending.plan.sourcePath}</code>
-              </p>
-              <p>
+              </span>
+              <span className="folders-move-dialog-line">
                 <strong>To:</strong> <code>{pending.destPath}</code>
-              </p>
-              <p>
-                {pending.plan.files.toLocaleString()} files ({formatBytes(pending.plan.bytes)}) will
-                be copied. A backup snapshot will be saved before the move.
-              </p>
+              </span>
+              <span className="folders-move-dialog-line">
+                {pending.conflictPolicy === 'use-destination' ? (
+                  <>
+                    {pending.plan.files.toLocaleString()} files ({formatBytes(pending.plan.bytes)})
+                    will stay in the current folder. Nothing will be copied, overwritten, or
+                    deleted.
+                  </>
+                ) : (
+                  <>
+                    {pending.plan.files.toLocaleString()} files ({formatBytes(pending.plan.bytes)})
+                    will be copied. A backup snapshot will be saved before the move.
+                  </>
+                )}
+              </span>
               {pending.plan.conflicts > 0 && (
-                <p>
+                <span className="folders-move-dialog-line">
                   <strong>{pending.plan.conflicts}</strong> file
                   {pending.plan.conflicts === 1 ? '' : 's'} already exist at the destination.
-                  <ConflictPolicyPicker
-                    value={pending.conflictPolicy}
-                    onChange={(v) =>
-                      setPending((prev) => (prev ? { ...prev, conflictPolicy: v } : prev))
-                    }
-                  />
-                </p>
+                </span>
               )}
-              <p>
-                The gezel service will need to restart afterwards. Sessions on disk are preserved.
-              </p>
-            </>
+              <MovePolicyPicker
+                value={pending.conflictPolicy}
+                onChange={(v) =>
+                  setPending((prev) => (prev ? { ...prev, conflictPolicy: v } : prev))
+                }
+              />
+              <span className="folders-move-dialog-line">
+                {pending.conflictPolicy === 'use-destination'
+                  ? 'After restart, Gezel will use only the selected folder. Files left in the current folder will remain on disk, but won’t be available in Gezel from this location.'
+                  : 'When the move finishes, you’ll be asked to restart Gezel so it can start using the new location. Sessions on disk are preserved.'}
+              </span>
+            </span>
           )
         }
-        confirmLabel="Start move"
+        confirmLabel={
+          pending?.conflictPolicy === 'use-destination' ? 'Use this folder' : 'Start move'
+        }
         cancelLabel="Cancel"
         onConfirm={onConfirmMove}
         onCancel={() => setPending(null)}
@@ -288,19 +332,23 @@ function ScopeRow({
   help,
   currentPath,
   externalized,
+  restartRequired,
   disabled,
   onPick,
   onReset,
   onOpen,
+  openLabel,
 }: {
   label: string;
   help: string;
   currentPath: string;
   externalized: string | null;
+  restartRequired: boolean;
   disabled: boolean;
   onPick: () => void;
   onReset: () => void;
   onOpen: () => void;
+  openLabel: string;
 }) {
   return (
     <div className="folders-row" style={{ marginTop: 24 }}>
@@ -308,7 +356,10 @@ function ScopeRow({
         <strong>{label}</strong>
       </div>
       <p className="muted small">{help}</p>
-      <div className="muted small">{externalized ? 'External' : 'Default location'}</div>
+      <div className="muted small">
+        {externalized ? 'External' : 'Default location'}
+        {restartRequired ? ' — restart required' : ''}
+      </div>
       <code className="folders-row-path">{currentPath}</code>
       <div className="folders-row-actions" style={{ marginTop: 16 }}>
         <button type="button" className="primary" onClick={onPick} disabled={disabled}>
@@ -316,7 +367,7 @@ function ScopeRow({
         </button>
         {window.__GEZEL__?.openPath && (
           <button type="button" onClick={onOpen}>
-            Open
+            {openLabel}
           </button>
         )}
         {externalized && (
@@ -332,9 +383,11 @@ function ScopeRow({
 function SnapshotList({
   backups,
   onOpen,
+  openLabel,
 }: {
   backups: FoldersStatusResponse['backups'];
   onOpen: (path: string) => void;
+  openLabel: string;
 }) {
   return (
     <div className="folders-snapshots" style={{ marginTop: 24 }}>
@@ -355,7 +408,7 @@ function SnapshotList({
             </div>
             {window.__GEZEL__?.openPath && (
               <button type="button" onClick={() => onOpen(snapshot.path)}>
-                Open
+                {openLabel}
               </button>
             )}
           </li>
@@ -378,34 +431,47 @@ function describeScopes(scopes: FolderScope[]): string {
   return scopes.map((scope) => SCOPES.find((s) => s.id === scope)?.label ?? scope).join(', ');
 }
 
-function ConflictPolicyPicker({
+function MovePolicyPicker({
   value,
   onChange,
 }: {
-  value: 'overwrite-all' | 'skip-all';
-  onChange: (next: 'overwrite-all' | 'skip-all') => void;
+  value: FolderMovePolicy;
+  onChange: (next: FolderMovePolicy) => void;
 }) {
   return (
-    <div style={{ marginTop: 8 }}>
-      <label style={{ display: 'block', marginBottom: 4 }}>
+    <span
+      className="folders-conflict-policy"
+      role="radiogroup"
+      aria-label="How to use the selected folder"
+    >
+      <label className="folders-conflict-policy-option">
         <input
           type="radio"
           name="conflictPolicy"
           checked={value === 'overwrite-all'}
           onChange={() => onChange('overwrite-all')}
-        />{' '}
-        Overwrite destination files
+        />
+        <span>Move files, replacing destination conflicts</span>
       </label>
-      <label style={{ display: 'block' }}>
+      <label className="folders-conflict-policy-option">
         <input
           type="radio"
           name="conflictPolicy"
           checked={value === 'skip-all'}
           onChange={() => onChange('skip-all')}
-        />{' '}
-        Skip conflicting files (keep destination)
+        />
+        <span>Move files, keeping destination conflicts</span>
       </label>
-    </div>
+      <label className="folders-conflict-policy-option">
+        <input
+          type="radio"
+          name="conflictPolicy"
+          checked={value === 'use-destination'}
+          onChange={() => onChange('use-destination')}
+        />
+        <span>Don’t move files (use destination as-is)</span>
+      </label>
+    </span>
   );
 }
 
@@ -419,32 +485,53 @@ function MoveProgress({
   const pct =
     job.totalFiles > 0 ? Math.min(100, Math.round((job.filesDone / job.totalFiles) * 100)) : 0;
   const phaseLabel = describePhase(job);
+  const working = job.status === 'running' || job.status === 'queued';
+  const determinate = job.phase === 'copy' && job.totalFiles > 0 && job.filesDone > 0;
+  const locationOnly = job.conflictPolicy === 'use-destination';
   return (
-    <div className="folders-progress" style={{ marginTop: 16 }}>
+    <section className={`folders-progress folders-progress-${job.status}`} aria-live="polite">
       <div className="folders-progress-head">
         <strong>
-          Moving {job.scope} → <code>{job.destPath}</code>
+          {job.status === 'done'
+            ? locationOnly
+              ? 'Location updated'
+              : 'Move complete'
+            : locationOnly
+              ? `Updating ${scopeLabel(job.scope)} location`
+              : `Moving ${scopeLabel(job.scope)}`}
         </strong>
         <span className="muted small">{phaseLabel}</span>
       </div>
-      {job.status === 'running' || job.status === 'queued' ? (
-        <div className="ollama-pull-bar">
-          <div className="ollama-pull-bar-fill" style={{ width: `${pct}%` }} />
-          <span className="ollama-pull-bar-label">{pct}%</span>
+      <code className="folders-progress-path">{job.destPath}</code>
+      {working ? (
+        <div
+          className={`ollama-pull-bar${determinate ? '' : ' ollama-pull-bar-indeterminate'}`}
+          aria-hidden="true"
+        >
+          <div className="ollama-pull-bar-fill" style={determinate ? { width: `${pct}%` } : {}} />
+          {determinate && <span className="ollama-pull-bar-label">{pct}%</span>}
         </div>
       ) : null}
       {job.status === 'error' && <p className="error small">Error: {job.error ?? 'unknown'}</p>}
       {job.status === 'done' && job.restartRequired && (
-        <p style={{ marginTop: 8 }}>
-          Move complete.{' '}
+        <div className="folders-progress-complete">
+          <p className="small">
+            {locationOnly
+              ? 'Restart Gezel to use this location. Files in the previous folder were left untouched.'
+              : 'Restart Gezel to start using this location. Your sessions are preserved.'}
+          </p>
           <button type="button" className="primary" onClick={onRestart}>
             Restart now
           </button>
-        </p>
+        </div>
       )}
       {job.status === 'cancelled' && <p className="muted small">Cancelled.</p>}
-    </div>
+    </section>
   );
+}
+
+function scopeLabel(scope: FolderScope): string {
+  return SCOPES.find((candidate) => candidate.id === scope)?.label ?? scope;
 }
 
 function describePhase(job: FolderMoveStatus): string {

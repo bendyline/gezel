@@ -83,6 +83,20 @@ function failingChecks(
 }
 
 /**
+ * Provider aborts contain a corrective prompt written for the model's next
+ * turn. It is useful in logs, but exposing the whole second-person instruction
+ * in a badge tooltip makes internal harness copy look like a user-facing error.
+ * The stable lead clause tells us what the check actually learned: the model
+ * could not finish a small, constrained task.
+ */
+function userFacingFailureReason(detail: string): string {
+  if (/emitted\s+\d+\s+characters of prose this turn|\bStop planning\b/i.test(detail)) {
+    return 'Could not complete basic tasks';
+  }
+  return detail;
+}
+
+/**
  * Speed bands for an admitted model, fastest first. They determine severity
  * and the plain-language tooltip while the badge itself shows the two numbers
  * users experience: startup latency and loaded-context decode speed.
@@ -184,11 +198,12 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     // With no failing axis that actually ran there is nothing honest to name.
     // Falling back to `checks.spawn` here printed "engine spawned and served
     // the probe session" as the reason a check FAILED.
-    const reason = cause
+    const rawReason = cause
       ? record.checks[cause.key].detail
       : record.checks.spawn.ok
         ? 'the probe stopped before it could say why — run it again'
         : record.checks.spawn.detail;
+    const reason = userFacingFailureReason(rawReason);
     return {
       tier: 'warn',
       label: 'fitness check failed',

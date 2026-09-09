@@ -2,29 +2,49 @@ import type { ContextMenuParams, MenuItemConstructorOptions } from 'electron';
 
 type EditableContextMenuParams = Pick<
   ContextMenuParams,
-  'dictionarySuggestions' | 'editFlags' | 'isEditable' | 'misspelledWord'
+  | 'dictionarySuggestions'
+  | 'editFlags'
+  | 'hasImageContents'
+  | 'isEditable'
+  | 'mediaType'
+  | 'misspelledWord'
+  | 'x'
+  | 'y'
 >;
 
 export interface EditableContextMenuActions {
   addToDictionary(word: string): void;
+  copyImageAt(x: number, y: number): void;
   replaceMisspelling(suggestion: string): void;
 }
 
 /**
- * Build the native menu for text-editing surfaces.
+ * Build the native menu for editable surfaces and images.
  *
  * Chromium performs the spellcheck in the renderer, but Electron deliberately
  * leaves presentation of its suggestions to the host application. Keeping the
  * template here makes that host responsibility apply equally to Squisq,
- * ordinary inputs, and any future contenteditable surface.
+ * ordinary inputs, and any future contenteditable surface. Chromium also
+ * exposes the decoded bitmap under an image context, which lets the same native
+ * menu copy an inline editor image without involving that editor's document
+ * model or storage provider.
  */
 export function buildEditableContextMenuTemplate(
   params: EditableContextMenuParams,
   actions: EditableContextMenuActions,
 ): MenuItemConstructorOptions[] {
-  if (!params.isEditable) return [];
-
   const template: MenuItemConstructorOptions[] = [];
+
+  if (params.mediaType === 'image' && params.hasImageContents) {
+    template.push({
+      label: 'Copy Image',
+      click: () => actions.copyImageAt(params.x, params.y),
+    });
+  }
+
+  if (!params.isEditable) return template;
+
+  if (template.length > 0) template.push({ type: 'separator' });
   const misspelledWord = params.misspelledWord.trim();
 
   if (misspelledWord) {

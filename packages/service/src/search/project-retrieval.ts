@@ -90,6 +90,8 @@ export interface ProjectRetrievalResult {
   queryHash: string;
   policy: ResolvedRetrievalPolicy;
   prompt: string;
+  /** Exact UTF-8 size of the complete indexed-context prompt block. */
+  injectedBytes: number;
   estimatedTokens: number;
   hits: ProjectRetrievalHit[];
   truncated: boolean;
@@ -275,6 +277,7 @@ export async function retrieveProjectContext(args: {
     queryHash,
     policy,
     prompt: rendered.prompt,
+    injectedBytes: Buffer.byteLength(rendered.prompt, 'utf8'),
     estimatedTokens: estimateTokens(rendered.prompt),
     hits: rendered.hits,
     truncated: found.truncated || rendered.hits.length < hits.length,

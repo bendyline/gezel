@@ -21,7 +21,10 @@ const PURPOSE_CAP = 200;
 /** Health renders only past this coverage — partial-sweep averages mislead. */
 const HEALTH_MIN_COVERAGE = 0.5;
 
-export function renderWorkspaceGestalt(map: MapRepoResponse): string {
+export function renderWorkspaceGestalt(
+  map: MapRepoResponse,
+  availableTools: ReadonlySet<string> = new Set(),
+): string {
   if (!map.indexed) return '';
   const areasWithPurpose = map.areas.filter((a) => a.purpose?.trim());
   if (!map.architecture?.trim() && areasWithPurpose.length === 0) return '';
@@ -50,11 +53,20 @@ export function renderWorkspaceGestalt(map: MapRepoResponse): string {
   const h = map.health;
   if (h && h.eligibleFiles > 0 && h.reviewedFiles >= HEALTH_MIN_COVERAGE * h.eligibleFiles) {
     const issues =
-      h.majorIssues > 0 ? `; ${h.majorIssues} major issues — \`list_file_issues\` to see them` : '';
+      h.majorIssues > 0
+        ? availableTools.has('list_file_issues')
+          ? `; ${h.majorIssues} major issues — \`list_file_issues\` to see them`
+          : `; ${h.majorIssues} major issues`
+        : '';
     parts.push(`\n\nHealth: avg ${h.avgHealth}/10 (${h.reviewedFiles} files reviewed)${issues}.`);
   }
+  const guidance: string[] = [];
+  if (availableTools.has('map_repo')) guidance.push('use `map_repo` for the full picture');
+  if (availableTools.has('search')) {
+    guidance.push('use `search` to locate specifics across project knowledge');
+  }
   parts.push(
-    '\n\nOrient from this map; use `map_repo` for the full picture and `search` to locate specifics across project knowledge.',
+    `\n\nOrient from this map${guidance.length > 0 ? `; ${guidance.join(' and ')}` : ''}.`,
   );
   return parts.join('');
 }

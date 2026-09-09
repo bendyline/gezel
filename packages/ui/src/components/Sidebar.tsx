@@ -36,10 +36,12 @@ import {
   isMarkdownDocumentPath,
   markdownCompanionDirectory,
   moveFileWithCompanion,
+  rewriteDocumentCompanionRefs,
 } from './SquisqIntegration/document-companion.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
+import { fileManagerLabel } from './file-manager-label.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
@@ -90,9 +92,7 @@ async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
 }
 
 function documentsFolderContextLabel(platform?: string): string {
-  const fileManager =
-    platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'file manager';
-  return `Open Documents folder in ${fileManager}`;
+  return `Open Documents folder in ${fileManagerLabel(platform)}`;
 }
 
 function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
@@ -774,6 +774,33 @@ export function Sidebar({
             ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
             : null,
         );
+        if (oldLayout && nextLayout && hasCompanion && companionListing) {
+          const { relinkMovedOutsideInCompanion } = await import(
+            './SquisqIntegration/outside-in.js'
+          );
+          await relinkMovedOutsideInCompanion({
+            from: oldLayout,
+            to: nextLayout,
+            filePaths: companionListing.files
+              .filter((candidate) => !candidate.isDirectory)
+              .map((candidate) => candidate.path),
+            rename: (fromPath, nextPath) =>
+              api.renameDocument(fromPath, nextPath).then(() => undefined),
+            read: async (path) => (await api.readDocument(path)).content,
+            write: async (path, content) => {
+              await api.writeDocument(path, content);
+            },
+          });
+        } else if (
+          hasCompanion &&
+          !entry.isDirectory &&
+          isMarkdownDocumentPath(entry.path) &&
+          isMarkdownDocumentPath(toPath)
+        ) {
+          const response = await api.readDocument(toPath);
+          const relinked = rewriteDocumentCompanionRefs(response.content, entry.path, toPath);
+          if (relinked !== response.content) await api.writeDocument(toPath, relinked);
+        }
         window.dispatchEvent(
           new CustomEvent('gezel:document-renamed', {
             detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },

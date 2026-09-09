@@ -65,22 +65,20 @@ interface MaterialTone {
   satMul: number;
   /** Lightness shift, applied EQUALLY to roof and facade. */
   litDelta: number;
-  /** The material's own hue, mixed toward per `hueMix`. */
+  /** The material's own hue. */
   hue: number;
-  /** How far a surface pulls toward `hue` (0 = keep the language hue). */
-  hueMix: number;
 }
 
 const MATERIAL: Record<MaterialKey, MaterialTone> = {
-  brick: { satMul: 0.9, litDelta: -4, hue: 14, hueMix: 0.82 },
-  stucco: { satMul: 0.62, litDelta: 6, hue: 42, hueMix: 0.45 },
-  timber: { satMul: 0.7, litDelta: -2, hue: 28, hueMix: 0.82 },
-  stone: { satMul: 0.34, litDelta: 2, hue: 40, hueMix: 0.78 },
-  slate: { satMul: 0.34, litDelta: -8, hue: 220, hueMix: 0.4 },
-  tile: { satMul: 0.72, litDelta: -1, hue: 18, hueMix: 0.5 },
-  thatch: { satMul: 0.5, litDelta: 4, hue: 44, hueMix: 0.7 },
-  glass: { satMul: 0.55, litDelta: 10, hue: 196, hueMix: 0.5 },
-  iron: { satMul: 0.35, litDelta: -10, hue: 210, hueMix: 0.55 },
+  brick: { satMul: 0.9, litDelta: -4, hue: 14 },
+  stucco: { satMul: 0.62, litDelta: 6, hue: 42 },
+  timber: { satMul: 0.7, litDelta: -2, hue: 28 },
+  stone: { satMul: 0.34, litDelta: 2, hue: 40 },
+  slate: { satMul: 0.34, litDelta: -8, hue: 220 },
+  tile: { satMul: 0.72, litDelta: -1, hue: 18 },
+  thatch: { satMul: 0.5, litDelta: 4, hue: 44 },
+  glass: { satMul: 0.55, litDelta: 10, hue: 196 },
+  iron: { satMul: 0.35, litDelta: -10, hue: 210 },
 };
 
 /** Wall / roof material candidates per register. Village walls are limewash and
@@ -167,9 +165,9 @@ export function wallLitDelta(wall: MaterialKey, roof: MaterialKey): number {
 }
 
 /**
- * Apply a material to a surface's HSL. `hueKeep` is how much of the language
- * hue survives — 1 keeps it entirely (roofs), lower values pull toward the
- * material (walls in the dense core). `litDelta` overrides the material's own
+ * Apply a material to a surface's HSL. `hueKeep = 1` preserves the language
+ * hue on roofs; lower values admit only a trace of tint into the material
+ * hue on walls. `litDelta` overrides the material's own
  * lightness shift, which is how walls stay anchored to their roof.
  */
 export function applyMaterial(
@@ -179,7 +177,11 @@ export function applyMaterial(
   litDelta = MATERIAL[material].litDelta,
 ): Hsl {
   const m = MATERIAL[material];
-  const pull = m.hueMix * (1 - Math.max(0, Math.min(1, hueKeep)));
+  const keep = Math.max(0, Math.min(1, hueKeep));
+  // Interpolating a blue language hue toward red brick around the hue wheel
+  // passes through magenta. Walls need a material hue with only a small tint;
+  // roofs (keep = 1) retain the exact language key.
+  const pull = keep === 1 ? 0 : 1 - keep * 0.12;
   return {
     h: mixHue(base.h, m.hue, pull),
     s: Math.max(0, Math.min(100, base.s * m.satMul)),
@@ -196,8 +198,8 @@ export function hsl({ h, s, l }: Hsl): string {
 
 /**
  * How much of the language hue a WALL keeps, by urbanity. The one place the
- * continuous field feeds color: a hamlet wall is essentially language-hued
- * limewash, a city wall is mostly brick or stone.
+ * continuous field feeds color: a hamlet admits a little more tint into its
+ * material than the neutral masonry in the core.
  */
 export function wallHueKeep(urbanity: number): number {
   const t = Math.max(0, Math.min(1, urbanity));

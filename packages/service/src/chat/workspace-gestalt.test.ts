@@ -32,6 +32,7 @@ describe('renderWorkspaceGestalt', () => {
         ],
         entryPoints: ['src/main.ts'],
       }),
+      new Set(['map_repo', 'search']),
     );
     expect(block).toContain('### Workspace map');
     expect(block).toContain('A small shop simulator');
@@ -40,6 +41,21 @@ describe('renderWorkspaceGestalt', () => {
     expect(block).not.toContain('assets'); // no purpose → no line
     expect(block).toContain('Entry points: `src/main.ts`');
     expect(block).toContain('`search`');
+    expect(block).toContain('`map_repo`');
+  });
+
+  it('mentions only retrieval tools that are available this turn', () => {
+    const withoutMapRepo = renderWorkspaceGestalt(
+      map({ architecture: 'A small service.' }),
+      new Set(['search']),
+    );
+    expect(withoutMapRepo).toContain('`search`');
+    expect(withoutMapRepo).not.toContain('`map_repo`');
+
+    const withoutRetrievalTools = renderWorkspaceGestalt(map({ architecture: 'A small service.' }));
+    expect(withoutRetrievalTools).toContain('Orient from this map.');
+    expect(withoutRetrievalTools).not.toContain('`map_repo`');
+    expect(withoutRetrievalTools).not.toContain('`search`');
   });
 
   it('caps areas and entry points', () => {

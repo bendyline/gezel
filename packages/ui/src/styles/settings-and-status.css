@@ -8,6 +8,31 @@
      every tab — the list gets its own scrollbar (see `.settings-nav ul`). */
   height: 100%;
   min-height: 0;
+  /* Settings is application chrome, not a document: dragging across headings,
+     labels, descriptions, or controls should not paint an accidental text
+     selection. Values people may reasonably copy opt back in below. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.settings-layout
+  :where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    [contenteditable="true"],
+    code,
+    pre,
+    .gz-selectable-text
+  ) {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .settings-nav {
@@ -863,10 +888,122 @@
   }
 }
 
+.folders-row-path {
+  display: block;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: var(--space-xs);
+  padding: 0.3rem 0.5rem;
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  color: var(--text);
+  cursor: text;
+  line-height: 1.4;
+  white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.folders-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-lg) 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.folders-progress-done {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 7%, var(--panel));
+}
+
+.folders-progress-error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.folders-progress-head,
+.folders-progress-complete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.folders-progress-path {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.folders-progress .ollama-pull-bar {
+  margin-top: var(--space-sm);
+}
+
+.folders-progress-complete p,
+.folders-progress > p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .folders-progress-head,
+  .folders-progress-complete {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .folders-row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.folders-move-dialog-copy,
+.folders-conflict-block,
+.folders-conflict-policy {
+  display: flex;
+  flex-direction: column;
+}
+
+.folders-move-dialog-copy {
+  gap: var(--space-md);
+}
+
+.folders-conflict-block,
+.folders-conflict-policy {
+  gap: var(--space-sm);
+}
+
+.folders-move-dialog-line {
+  display: block;
+}
+
+/* The shared dialog field rule makes labeled text inputs full-width. Native
+   radios must keep their intrinsic width so their dots stay beside the copy. */
+.gz-dialog .folders-conflict-policy-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.gz-dialog .folders-conflict-policy-option input[type="radio"] {
+  display: inline-block;
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .folders-snapshot-list {

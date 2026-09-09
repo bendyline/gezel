@@ -71,6 +71,10 @@ pacing of a transition. If a first-time user can't quite put a finger on
   [Typography](#typography) below; read it before styling any text.
 - **Density** is moderate. We're not Linear-tight and not Notion-loose.
   Line-height is comfortable; gaps between related controls are ~0.5rem.
+- **Text selection** belongs to content, not application chrome. Settings and
+  dialogs keep headings, descriptions, labels, and control text non-selectable;
+  editable fields plus copyable values such as paths, commands, and code opt
+  back into selection explicitly.
 - **No emojis in committed UI** (repeating the rule from CLAUDE.md). The
   ⭐ Meester badge is the single sanctioned exception.
 
@@ -1155,7 +1159,7 @@ stack, application-crop rules, and PNG quality workflow are documented in
 ## The Village: a codebase as a settlement
 
 The project **Village** tab (`FileMap` in code) draws a folder tree as a
-settlement from roughly **1890–1915** — never a modern skyline. Its architecture
+settlement from roughly **1890–1925** — never a modern skyline. Its architecture
 should feel compatible with the guild world: gabled cottages, shopfronts and
 inns, civic halls with cupolas, brick workshops, rail depots, and
 sawtooth-roofed foundries. Avoid glass towers, rooftop HVAC fields, neon, and
@@ -1238,6 +1242,18 @@ building's projected area, so moving hue onto walls in the dense core would kill
 the language field exactly where the map carries the most information. Walls
 instead mix toward their material (brick, stucco, timber, stone) by however
 urban the ground is.
+
+Roof slopes shade the roof material, never the wall color: a slate roof over
+brick must not acquire a purple slope. Brick, limewash, and weatherboard own
+the facade color, with only a trace of language tint. Separately seeded front
+details (stepped shop gables, pediments, sash windows, shutters, bay windows,
+and striped canvas awnings) distinguish neighbors without reshuffling their
+architectural families. Symbol buildings need habitable-looking storeys and
+steep roofs, with culling and picking using those same heights. Their shared
+courtyard is worn paving inside a low stone curb, not a colored platform.
+Street trees use layered broadleaf, columnar, and cedar silhouettes; cobbles
+use staggered courses and lamps use small framed lanterns. All fine detail
+stays in the street tier and out of the age lens.
 
 ### Stability is the constraint
 
