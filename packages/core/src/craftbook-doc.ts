@@ -11,6 +11,7 @@ import {
   nearestMatch,
   slugifyStepId,
   sniffCraftbookDocFormat,
+  stepOnEnterProducesAdvanceFile,
   validateCraftbookFanout,
   validateCraftbookGraph,
   validateCraftbookScriptRefs,
@@ -158,6 +159,60 @@ export type CraftbookFromDocResult =
   | { ok: false; errors: CraftbookDocError[] };
 
 /**
+ * Cross-field authoring checks that JSON Schema cannot express. These run at
+ * craftbook write/conversion time rather than persisted-task parse time, so a
+ * newly discovered contract bug does not make historical task snapshots
+ * unreadable.
+ */
+export function craftbookStepContractErrors(doc: CraftbookDoc): CraftbookDocError[] {
+  const errors: CraftbookDocError[] = [];
+  const inspect = (steps: CraftbookDoc['steps'], prefix: string): void => {
+    steps.forEach((step, index) => {
+      const label = step.id ? `${prefix}[${index}] (id "${step.id}")` : `${prefix}[${index}]`;
+      if (stepOnEnterProducesAdvanceFile(step)) {
+        const surface = step.advanceWhen?.artifact ? 'artifact' : 'workspace';
+        if (step.toolPolicy?.outputMedium === surface) {
+          errors.push({
+            where: `${label} → toolPolicy.outputMedium`,
+            message: `the step's onEnter hook produces advanceWhen.file, so that ${surface} file is runtime-owned input/evidence, not the model's output.`,
+            fix: `set outputMedium to the model-owned result (${surface === 'artifact' ? 'for example task-note' : 'for example task-note or artifact'}), or to none when the step only asks the model to advance; never tell the model to rewrite the hook output.`,
+          });
+        }
+      }
+      for (const [inputIndex, input] of (step.consumes ?? []).entries()) {
+        if (input.artifact && /^\.?\/?artifacts\//i.test(input.file)) {
+          errors.push({
+            where: `${label} → consumes[${inputIndex}].file`,
+            message:
+              'artifact input paths are relative to the artifact root and must not include an `artifacts/` prefix.',
+            fix: `change ${JSON.stringify(input.file)} to ${JSON.stringify(input.file.replace(/^\.?\/?artifacts\/+/, ''))}.`,
+          });
+        }
+      }
+      const prompt = step.prompt ?? '';
+      if (/\bread_file\s*\(\s*\{[^}]*["']?path["']?\s*:\s*["']artifacts\//is.test(prompt)) {
+        errors.push({
+          where: `${label} → prompt`,
+          message: '`read_file` is called with an artifact-prefixed path.',
+          fix: 'use `read_artifact` and pass the path relative to the artifact root.',
+        });
+      }
+      if (/\bread_artifact\s*\(\s*\{[^}]*["']?path["']?\s*:\s*["']artifacts\//is.test(prompt)) {
+        errors.push({
+          where: `${label} → prompt`,
+          message:
+            '`read_artifact` examples must use artifact-root-relative paths without an `artifacts/` prefix.',
+          fix: 'remove the leading `artifacts/` from the example path.',
+        });
+      }
+    });
+  };
+  inspect(doc.steps, 'steps');
+  if (doc.spawn) inspect(doc.spawn.steps, 'spawn.steps');
+  return errors;
+}
+
+/**
  * Turn a schema-valid doc into the runtime `Craftbook`: expand each
  * step's `deliverable` sugar into its enforced gate, default the entry
  * step, and run the shared graph + script-ref validators. Errors come
@@ -173,6 +228,7 @@ export function craftbookFromDoc(
   const entryStepId = doc.entryStepId ?? steps[0]!.id;
 
   const errors: CraftbookDocError[] = [];
+  errors.push(...craftbookStepContractErrors(doc));
   if (!stepIds.includes(entryStepId)) {
     const near = nearestMatch(entryStepId, stepIds);
     errors.push({

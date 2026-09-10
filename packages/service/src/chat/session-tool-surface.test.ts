@@ -608,6 +608,35 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
+  it('withholds artifact writes when onEnter owns the watched file', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'gezel/74', stepId: 'scope' }),
+      tier: 'medium',
+      activeStep: {
+        onEnter: {
+          name: 'publishCorpusBatches',
+          scope: 'standard',
+          inputs: { outFile: 'tasks/74/pr-review/batches.json' },
+        },
+        advanceWhen: { file: 'tasks/74/pr-review/batches.json', artifact: true },
+        gate: {
+          at: 'completion',
+          scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+        },
+        toolPolicy: { outputMedium: 'artifact' },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_artifact')).toBe(false);
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('read_artifacts')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
   it('keeps task-note writes implied by an older generated file policy', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

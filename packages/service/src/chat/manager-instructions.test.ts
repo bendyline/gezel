@@ -286,7 +286,7 @@ describe('buildInstructions connected data', () => {
     }).full;
     expect(withBindings).toContain('### Connected data');
     expect(withBindings).toContain(
-      '**Work Gmail** (mail-gmail, synced 2026-08-08): `artifacts/data/work-gmail/`',
+      '**Work Gmail** (mail-gmail, synced 2026-08-08): artifact path `data/work-gmail/`',
     );
     expect(withBindings).not.toContain('linear-issues'); // disabled bindings hidden
     expect(withBindings).toContain('read-only mirrors');
@@ -334,6 +334,56 @@ describe('buildInstructions linked projects', () => {
 });
 
 describe('buildInstructions structured step inputs', () => {
+  it('describes the model-owned task note instead of an onEnter-owned artifact', () => {
+    const step = {
+      id: 'scope',
+      name: 'Scope PR',
+      prompt: 'Read the batches, write one task note, then advance.',
+      onEnter: {
+        name: 'publishCorpusBatches',
+        scope: 'standard',
+        inputs: { outFile: 'tasks/98/pr-review/batches.json' },
+      },
+      consumes: [{ file: 'tasks/98/pr-review/batches.json', artifact: true }],
+      advanceWhen: { file: 'tasks/98/pr-review/batches.json', artifact: true },
+      gate: {
+        at: 'completion',
+        scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+      },
+      toolPolicy: { outputMedium: 'artifact' },
+      createdAt: '2026-09-10T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Koray',
+      role: 'Reviewer',
+      about: 'Review pull requests.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: [
+        'read_file',
+        'read_artifact',
+        'read_artifacts',
+        'write_task_note',
+        'advance_task_step',
+      ].map((name) => ({ name, description: `${name} tool` })),
+      task: {
+        task: {
+          ref: 'gezel/98',
+          title: 'Pull Request Review',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'koray' },
+          craftbook: { steps: [step], entryStepId: 'scope' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('Write the primary result with `write_task_note`.');
+    expect(rendered).not.toContain(
+      'Write the primary result `tasks/98/pr-review/batches.json` in the **artifacts drawer**',
+    );
+  });
+
   it('renders artifact provenance and makes read_artifact the first small-model action', () => {
     const step = {
       id: 'audit',

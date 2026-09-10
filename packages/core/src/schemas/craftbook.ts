@@ -1035,6 +1035,31 @@ export const NewCraftbookStepSchema = z.object({
 export type NewCraftbookStep = z.infer<typeof NewCraftbookStepSchema>;
 
 /**
+ * True when step activation deterministically publishes the same file later
+ * watched by `advanceWhen`. That file is runtime-owned evidence/input, not a
+ * result the model should be told to rewrite. Script inputs are intentionally
+ * open records, but `outFile` is the standard-library convention shared by
+ * publishCorpusBatches, mergeCorpusCoverage, and other file-producing hooks.
+ */
+export function stepOnEnterProducesAdvanceFile(step: {
+  onEnter?: ScriptRefList;
+  advanceWhen?: { file: string };
+}): boolean {
+  const target = step.advanceWhen?.file;
+  if (!target) return false;
+  const normalize = (value: string) =>
+    value
+      .replace(/\\/g, '/')
+      .replace(/^\.?\/+/, '')
+      .replace(/\/+$/, '');
+  const expected = normalize(target);
+  return normalizeScriptRefs(step.onEnter).some((ref) => {
+    const outFile = ref.inputs?.outFile;
+    return typeof outFile === 'string' && normalize(outFile) === expected;
+  });
+}
+
+/**
  * Create a new local-source craftbook template. The service writes it
  * under `~/.gezel/craftbook-templates/{prefix}/{id}/` mirroring the
  * bundled catalog layout.

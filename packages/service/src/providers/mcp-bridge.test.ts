@@ -377,9 +377,9 @@ describe('McpBridge', () => {
     });
 
     const wrongRead = await bridge.callTool('read_artifact', { path: 'surface/bug_report.md' });
-    expect(wrongRead).toMatch(/ERROR:/);
-    expect(wrongRead).toContain('workspace file exists');
-    expect(wrongRead).toContain('read_file');
+    expect(wrongRead).not.toMatch(/ERROR:/);
+    expect(wrongRead).toContain('[Rerouted read_artifact → read_file]');
+    expect(wrongRead).toContain('This belongs to the project workspace.');
 
     const reroutedGrep = await bridge.callTool('grep_artifact', {
       path: 'surface',
@@ -436,6 +436,51 @@ describe('McpBridge', () => {
     }
   });
 
+  it('does not cross pool authorization when a read is routed to the other drawer', async () => {
+    await bridge.callTool('write_file', {
+      path: 'surface/workspace-only.md',
+      content: '# Workspace only\n',
+    });
+    await bridge.callTool('write_artifact', {
+      path: 'surface/artifact-only.md',
+      content: '# Artifact only\n',
+    });
+
+    const artifactOnly = new McpBridge();
+    await artifactOnly.start({
+      command: 'node',
+      args: [mcpPath],
+      env: { ...bridgeEnv, GEZEL_MCP_AUTHORIZED_TOOLS: 'read_artifact' },
+    });
+    try {
+      const out = await artifactOnly.callTool('read_artifact', {
+        path: 'surface/workspace-only.md',
+      });
+      expect(out).toMatch(/ERROR:/);
+      expect(out).toContain('read_file is not authorized for this session');
+      expect(out).toContain('Retryable: false');
+    } finally {
+      await artifactOnly.stop();
+    }
+
+    const workspaceOnly = new McpBridge();
+    await workspaceOnly.start({
+      command: 'node',
+      args: [mcpPath],
+      env: { ...bridgeEnv, GEZEL_MCP_AUTHORIZED_TOOLS: 'read_file' },
+    });
+    try {
+      const out = await workspaceOnly.callTool('read_file', {
+        path: 'surface/artifact-only.md',
+      });
+      expect(out).toMatch(/ERROR:/);
+      expect(out).toContain('read_artifact is not authorized for this session');
+      expect(out).toContain('Retryable: false');
+    } finally {
+      await workspaceOnly.stop();
+    }
+  });
+
   it('redirects source deliverables written to artifacts into the workspace', async () => {
     const redirected = await bridge.callTool('write_artifact', {
       path: 'index.html',
@@ -450,8 +495,9 @@ describe('McpBridge', () => {
     expect(workspaceFile).toContain('<h1>Pet shop</h1>');
 
     const missingArtifact = await bridge.callTool('read_artifact', { path: 'index.html' });
-    expect(missingArtifact).toMatch(/ERROR:/);
-    expect(missingArtifact).toContain('workspace file exists');
+    expect(missingArtifact).not.toMatch(/ERROR:/);
+    expect(missingArtifact).toContain('[Rerouted read_artifact → read_file]');
+    expect(missingArtifact).toContain('<h1>Pet shop</h1>');
   });
 
   it('keeps per-task folder writes in the artifacts drawer even with code-like extensions', async () => {
@@ -528,8 +574,9 @@ describe('McpBridge', () => {
       const missingArtifact = await expectedBridge.callTool('read_artifact', {
         path: 'reports/release-notes.md',
       });
-      expect(missingArtifact).toMatch(/ERROR:/);
-      expect(missingArtifact).toContain('workspace file exists');
+      expect(missingArtifact).not.toMatch(/ERROR:/);
+      expect(missingArtifact).toContain('[Rerouted read_artifact → read_file]');
+      expect(missingArtifact).toContain('Second workspace pass');
     } finally {
       await expectedBridge.stop();
     }

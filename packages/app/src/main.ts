@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
 const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
 import { execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -62,6 +62,7 @@ import {
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import * as installedServiceCompatibility from './installed-service-compatibility.js';
+import { createLoopbackCertificatePin } from './loopback-certificate-pin.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
@@ -103,6 +104,7 @@ import {
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const loopbackCertificatePin = createLoopbackCertificatePin();
 
 let connection: Connection | null = null;
 let mainWindow: Electron.BrowserWindow | null = null;
@@ -2920,31 +2922,6 @@ function installMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/**
- * Pinned base64 SHA-256 of the daemon's loopback cert. Updated whenever
- * the supervisor swaps the underlying daemon (initial connect + every
- * restart). Compared against `request.certificate.fingerprint` (which
- * Chromium reports as `sha256/<base64>`) inside the verify proc. `null`
- * means "no daemon TLS to trust" — verifier rejects all loopback HTTPS.
- */
-let pinnedLoopbackFingerprint: string | null = null;
-
-function pinLoopbackCert(certPem: string | null): void {
-  if (!certPem) {
-    pinnedLoopbackFingerprint = null;
-    return;
-  }
-  // Derive Chromium's fingerprint shape from the cert PEM. Chromium
-  // reports `sha256/<base64-of-DER-digest>`; we strip the prefix in
-  // the verifier and compare base64 to base64.
-  const derBody = certPem
-    .split('\n')
-    .filter((l) => !l.startsWith('-----') && l.trim().length > 0)
-    .join('');
-  const der = Buffer.from(derBody, 'base64');
-  pinnedLoopbackFingerprint = createHash('sha256').update(der).digest('base64');
-}
-
 app.whenReady().then(async () => {
   // Release CI launches the final electron-builder output with this flag.
   // The early assertions catch an unpacked/dev executable or a stale
@@ -2982,26 +2959,7 @@ app.whenReady().then(async () => {
   // populated below after `connectOrStart`; before then the verifier
   // refuses everything, which is what we want — no requests should fly
   // before the supervisor has resolved.
-  session.defaultSession.setCertificateVerifyProc((req, callback) => {
-    const isLoopback =
-      req.hostname === '127.0.0.1' || req.hostname === '::1' || req.hostname === 'localhost';
-    if (!isLoopback) {
-      // Defer to Chromium's normal validation for any non-loopback host
-      // — passing -3 means "use the default verification result".
-      callback(-3);
-      return;
-    }
-    if (!pinnedLoopbackFingerprint) {
-      // Loopback request with no pin yet — refuse rather than trust
-      // blindly. This window is tiny (closes once `connectOrStart`
-      // returns) but a third-party page reaching our renderer during
-      // it shouldn't get a free pass to talk to localhost.
-      callback(-2);
-      return;
-    }
-    const got = req.certificate.fingerprint.replace(/^sha256\//, '');
-    callback(got === pinnedLoopbackFingerprint ? 0 : -2);
-  });
+  loopbackCertificatePin.install(session.defaultSession);
 
   // CSP is the first renderer egress boundary. This hook is an independent,
   // daemon-authorized sink: even if authored markup finds a CSP bypass, no
@@ -3201,7 +3159,7 @@ app.whenReady().then(async () => {
 
   // Pin the daemon's TLS cert so the verify proc registered above will
   // accept the loopback HTTPS connection the renderer is about to open.
-  pinLoopbackCert(connection.cert);
+  loopbackCertificatePin.setCertificate(connection.cert);
 
   // Build the main-process API client (used by the tray to read/write the
   // engagement mode). Cert-aware, mirroring the supervisor's own client.
@@ -3216,7 +3174,7 @@ app.whenReady().then(async () => {
   // too — re-pin before the reload so the new daemon's TLS chain is trusted
   // from the first request.
   connection.onRestart(() => {
-    pinLoopbackCert(connection?.cert ?? null);
+    loopbackCertificatePin.setCertificate(connection?.cert ?? null);
     // Token/cert rotated with the new daemon — rebuild the tray's client.
     apiClient = buildApiClient();
     invalidateRendererNetworkPermission();
@@ -3237,7 +3195,7 @@ app.whenReady().then(async () => {
   // Its fresh preload receives `null` from current-connection, so the stopped
   // daemon's bearer token cannot remain in the renderer generation.
   connection.onFatal((failure) => {
-    pinLoopbackCert(null);
+    loopbackCertificatePin.setCertificate(null);
     apiClient = null;
     invalidateRendererNetworkPermission();
     stopTrayActivityMonitoring();

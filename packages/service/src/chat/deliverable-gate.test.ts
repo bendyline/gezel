@@ -3,6 +3,7 @@ import {
   type DeliverableWrite,
   deliverableWrittenThisTurn,
   evaluateDeliverableGate,
+  hookOwnedAdvanceHasModelOutput,
   normalizeWorkspacePath,
 } from './deliverable-gate.js';
 
@@ -71,6 +72,24 @@ describe('deliverableWrittenThisTurn', () => {
     ]) {
       expect(deliverableWrittenThisTurn([write({ name, path: file })], file)).toBe(true);
     }
+  });
+});
+
+describe('hookOwnedAdvanceHasModelOutput', () => {
+  it('holds a hook-owned file until the model writes the required task note', () => {
+    expect(
+      hookOwnedAdvanceHasModelOutput(true, true, [
+        { name: 'read_artifact', path: 'tasks/98/pr-review/batches.json', success: true },
+      ]),
+    ).toBe(false);
+    expect(
+      hookOwnedAdvanceHasModelOutput(true, true, [{ name: 'write_task_note', success: true }]),
+    ).toBe(true);
+  });
+
+  it('allows pure runtime steps and ordinary model-owned files', () => {
+    expect(hookOwnedAdvanceHasModelOutput(true, false, [])).toBe(true);
+    expect(hookOwnedAdvanceHasModelOutput(false, true, [])).toBe(true);
   });
 });
 

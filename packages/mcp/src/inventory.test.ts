@@ -142,14 +142,15 @@ function readBuiltinToolsetGroups(): Map<string, string[]> {
 
 /**
  * Discover every literal `server.tool("name", …)` registration directly
- * from the implementation, including registrations nested behind env gates.
+ * from the implementation modules, including registrations nested behind env gates.
  * Runtime `tools/list` cannot reveal a newly added conditional whose env var
  * is not yet known to the inventory; this source projection closes that gap.
  */
 function readStaticServerToolRegistrations(): string[] {
-  const sourcePath = resolve(__dirname, 'server.ts');
-  const text = readFileSync(sourcePath, 'utf8');
-  const source = ts.createSourceFile(sourcePath, text, ts.ScriptTarget.Latest, true);
+  const sourcePaths = [
+    resolve(__dirname, 'server.ts'),
+    resolve(__dirname, 'cross-drawer-read-tools.ts'),
+  ];
   const names: string[] = [];
   function visit(node: ts.Node): void {
     if (
@@ -179,7 +180,10 @@ function readStaticServerToolRegistrations(): string[] {
     }
     ts.forEachChild(node, visit);
   }
-  visit(source);
+  for (const sourcePath of sourcePaths) {
+    const text = readFileSync(sourcePath, 'utf8');
+    visit(ts.createSourceFile(sourcePath, text, ts.ScriptTarget.Latest, true));
+  }
   return names;
 }
 
@@ -534,6 +538,11 @@ describe('MCP tool input schemas', () => {
     },
     { tool: 'list_artifacts', valid: {} },
     { tool: 'read_artifact', valid: { path: 'r.md' }, invalid: {} },
+    {
+      tool: 'read_artifacts',
+      valid: { files: [{ path: 'a.md' }, { path: 'b.md', startLine: 4, endLine: 9 }] },
+      invalid: { paths: [] },
+    },
     { tool: 'write_artifact', valid: { path: 'r.md', content: 'x' }, invalid: { path: 'r.md' } },
     { tool: 'list_documents', valid: {} },
     { tool: 'list_gezels', valid: {} },

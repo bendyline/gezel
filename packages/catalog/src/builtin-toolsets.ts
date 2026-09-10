@@ -168,7 +168,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     name: 'Project Artifacts',
     description:
       'Project-scoped read-write outputs (reports, scratch files, scripts a gezel produces, and large outputs auto-saved by tools that exceed the inline cap).',
-    tools: ['list_artifacts', 'read_artifact', 'write_artifact', 'grep_artifact'],
+    tools: ['list_artifacts', 'read_artifact', 'read_artifacts', 'write_artifact', 'grep_artifact'],
   },
   {
     id: 'data-tables',

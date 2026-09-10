@@ -157,7 +157,12 @@ export interface StepKit {
  * separate: exposing both write channels is exactly what made models put a
  * gated workspace file in the drawer (or an artifact in the workspace).
  */
-const ARTIFACT_READ_TOOLS: readonly string[] = ['list_artifacts', 'read_artifact', 'grep_artifact'];
+const ARTIFACT_READ_TOOLS: readonly string[] = [
+  'list_artifacts',
+  'read_artifact',
+  'read_artifacts',
+  'grep_artifact',
+];
 const ARTIFACT_WRITE_TOOLS: readonly string[] = ['write_artifact'];
 
 /**
@@ -168,7 +173,10 @@ const ARTIFACT_WRITE_TOOLS: readonly string[] = ['write_artifact'];
  * to `write_artifact`, and an artifact step cannot mutate the workspace.
  */
 export function stepToolKit(
-  step: Pick<CraftbookStep, 'advanceWhen' | 'gate' | 'onExit' | 'toolPolicy' | 'consumes'>,
+  step: Pick<
+    CraftbookStep,
+    'advanceWhen' | 'gate' | 'onEnter' | 'onExit' | 'toolPolicy' | 'consumes'
+  >,
 ): StepKit | null {
   const kind = deliverableKindForStep(step);
   if (!kind) return null;

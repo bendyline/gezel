@@ -54,11 +54,13 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
+  requiredOutputMediaForGate,
   resolveExecutionDensity,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
   stepDeliverablePath,
+  stepOnEnterProducesAdvanceFile,
   tierAtLeast,
   turnCancelledMessage,
   validateScriptInput,
@@ -67,7 +69,10 @@ import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
-import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
+import {
+  outputMediumForStep,
+  toolsetIdsExplicitlyDisabledForStep,
+} from '../craftbook/step-toolsets.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
@@ -259,7 +264,11 @@ import {
   ContextCompactor,
 } from './context-compaction.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
-import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
+import {
+  deliverableWrittenThisTurn,
+  evaluateDeliverableGate,
+  hookOwnedAdvanceHasModelOutput,
+} from './deliverable-gate.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -2194,6 +2203,23 @@ export class ChatManager extends LocalEngineRuntime {
           : (step.suggestedGezelId ??
             (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
       if (owner !== gezelId) continue;
+
+      // A hook-owned `advanceWhen.file` is evidence prepared by the runtime,
+      // not proof that the model completed every other required output. Pull
+      // Request Review's scope step is the wild-caught case: onEnter wrote the
+      // immutable batches file, while the model still owed a task note. A
+      // failed read-only turn therefore satisfied the file observable and
+      // burned a gate attempt before the note could exist. Hold automatic
+      // progression until this turn produces the model-owned task-note
+      // surface. Pure runtime steps such as coverage collection still advance
+      // from their hook-owned file because they declare no model output.
+      const hookOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
+      const taskNoteIsModelOutput =
+        outputMediumForStep(step) === 'task-note' ||
+        requiredOutputMediaForGate(step.gate).has('task-note');
+      if (!hookOwnedAdvanceHasModelOutput(hookOwnsAdvanceFile, taskNoteIsModelOutput, drained)) {
+        continue;
+      }
 
       // A drafting task's workspace deliverable lives in the diffpack
       // overlay — judge the proposed tree, not the untouched real one.
@@ -14310,40 +14336,50 @@ export class ChatManager extends LocalEngineRuntime {
       // surface the touched files. Derive a compact args preview the UI
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
       const sc = info.structuredContent;
-      const batchedWorkspaceRead =
-        info.name === 'read_files' || info.name === 'read_multiple_files';
+      const batchedRead =
+        info.name === 'read_files' ||
+        info.name === 'read_multiple_files' ||
+        info.name === 'read_artifacts';
       const structuredReadPaths =
-        batchedWorkspaceRead && Array.isArray(sc?.results)
+        batchedRead && Array.isArray(sc?.results)
           ? sc.results
-              .filter((result): result is { path: string; status: 'ok' } =>
-                Boolean(
-                  result &&
-                    typeof result === 'object' &&
-                    (result as { status?: unknown }).status === 'ok' &&
-                    typeof (result as { path?: unknown }).path === 'string',
-                ),
+              .filter(
+                (
+                  result,
+                ): result is {
+                  path: string;
+                  resolvedPath?: string;
+                  status: 'ok';
+                } =>
+                  Boolean(
+                    result &&
+                      typeof result === 'object' &&
+                      (result as { status?: unknown }).status === 'ok' &&
+                      typeof (result as { path?: unknown }).path === 'string',
+                  ),
               )
-              .map((result) => result.path)
+              .map((result) =>
+                typeof result.resolvedPath === 'string' ? result.resolvedPath : result.path,
+              )
           : [];
       const paths = [...new Set(structuredReadPaths)];
       const rawPath = info.args?.path;
-      const artifactResolutionTool = info.name === 'read_artifact' || info.name === 'grep_artifact';
-      const resolvedArtifactPath =
-        artifactResolutionTool && typeof sc?.resolvedPath === 'string'
-          ? sc.resolvedPath
-          : undefined;
-      const artifactFuzzy =
-        artifactResolutionTool && typeof sc?.fuzzy === 'boolean' ? sc.fuzzy : undefined;
-      const requestedArtifactPath =
-        artifactResolutionTool && typeof sc?.requestedPath === 'string'
+      const resolutionAwareRead =
+        info.name === 'read_file' || info.name === 'read_artifact' || info.name === 'grep_artifact';
+      const resolvedReadPath =
+        resolutionAwareRead && typeof sc?.resolvedPath === 'string' ? sc.resolvedPath : undefined;
+      const readFuzzy =
+        resolutionAwareRead && typeof sc?.fuzzy === 'boolean' ? sc.fuzzy : undefined;
+      const requestedReadPath =
+        resolutionAwareRead && typeof sc?.requestedPath === 'string'
           ? sc.requestedPath
           : typeof rawPath === 'string'
             ? rawPath
             : undefined;
-      // Artifact reads report their canonical resolution separately from the
-      // model-supplied path. Persist and render the file that was actually
-      // opened; keep the requested spelling in argsFull/history for audit.
-      const path = resolvedArtifactPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
+      // Cross-drawer and fuzzy reads report their canonical resolution
+      // separately from the model-supplied path. Persist and render the file
+      // that was actually opened; keep the request in argsFull/history.
+      const path = resolvedReadPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
       const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
@@ -14475,9 +14511,9 @@ export class ChatManager extends LocalEngineRuntime {
             success: info.success,
             ...(path ? { path } : {}),
             ...(paths.length > 0 ? { paths } : {}),
-            ...(resolvedArtifactPath ? { resolvedPath: resolvedArtifactPath } : {}),
-            ...(requestedArtifactPath ? { requestedPath: requestedArtifactPath } : {}),
-            ...(artifactFuzzy !== undefined ? { fuzzy: artifactFuzzy } : {}),
+            ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
+            ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),
+            ...(readFuzzy !== undefined ? { fuzzy: readFuzzy } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
@@ -16661,6 +16697,7 @@ const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'stat',
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'list_packages',
   'list_documents',
   'read_document',

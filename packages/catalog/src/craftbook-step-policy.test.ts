@@ -110,6 +110,50 @@ describe('craftbook step policy defaults', () => {
     expect(step.toolPolicy?.additionalOutputMedia).toEqual(['task-note']);
   });
 
+  it('treats an onEnter-published advance file as runtime input, not model output', () => {
+    const scope = applyDefaultCraftbookStepPolicies({
+      name: 'PR review',
+      steps: [
+        {
+          name: 'Scope',
+          prompt: 'Write the scope with `write_task_note`, then advance.',
+          onEnter: {
+            name: 'publishCorpusBatches',
+            scope: 'standard',
+            inputs: { outFile: 'tasks/9/pr-review/batches.json' },
+          },
+          advanceWhen: { file: 'tasks/9/pr-review/batches.json', artifact: true },
+          gate: {
+            at: 'completion',
+            scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+          },
+          toolPolicy: { outputMedium: 'artifact' },
+        },
+      ],
+    }).steps[0]!;
+    expect(scope.toolPolicy?.outputMedium).toBe('task-note');
+    expect(scope.toolPolicy?.additionalOutputMedia).toBeUndefined();
+
+    const collect = applyDefaultCraftbookStepPolicies({
+      name: 'PR review',
+      steps: [
+        {
+          name: 'Collect',
+          prompt: 'The runtime produced the ledger. Call advance_task_step.',
+          onEnter: {
+            name: 'mergeCorpusCoverage',
+            scope: 'standard',
+            inputs: { outFile: 'tasks/9/pr-review-coverage.json' },
+          },
+          advanceWhen: { file: 'tasks/9/pr-review-coverage.json', artifact: true },
+          toolPolicy: { outputMedium: 'artifact' },
+        },
+      ],
+    }).steps[0]!;
+    expect(collect.toolPolicy?.outputMedium).toBe('none');
+    expect(collect.toolPolicy?.additionalOutputMedia).toBeUndefined();
+  });
+
   it('turns a contradictory none policy into the output required by its gate', () => {
     const doc: CraftbookDoc = {
       name: 'Approval',

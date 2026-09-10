@@ -157,6 +157,7 @@ const WORKSPACE_SURFACE_TOOLS = new Set([
 const ARTIFACT_SURFACE_TOOLS = new Set([
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'grep_artifact',
   'write_artifact',
   'copy_artifact_to_workspace',
@@ -191,6 +192,7 @@ function renderWorkspaceArtifactGuidance(tools: ReadonlyArray<AvailableToolInfo>
     workspaceOps.length > 0 ? workspaceOps.join(' / ') : 'the workspace file tools';
   const artifactOps: string[] = [];
   if (names.has('read_artifact')) artifactOps.push('`read_artifact`');
+  if (names.has('read_artifacts')) artifactOps.push('`read_artifacts`');
   if (names.has('write_artifact')) artifactOps.push('`write_artifact`');
   if (names.has('grep_artifact')) artifactOps.push('`grep_artifact`');
   const artifactPhrase = artifactOps.length > 0 ? artifactOps.join(' / ') : 'artifact tools';

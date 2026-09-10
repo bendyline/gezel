@@ -488,6 +488,36 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(Date.parse(callAt!)).toBeLessThanOrEqual(Date.parse(assistantMsg!.at));
   }, 30_000);
 
+  it('persists every resolved path returned by read_artifacts', async () => {
+    await Promise.all([
+      store.writeProjectArtifact('default', 'reviews/pr-42/manifest.json', '{"pr":42}\n'),
+      store.writeProjectArtifact('default', 'reviews/pr-42/batches.json', '["batch-1"]\n'),
+    ]);
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptToolCalls([
+      {
+        name: 'read_artifacts',
+        arguments: {
+          paths: ['reviews/pr-42/manifest.json', 'reviews/pr-42/batches.json'],
+        },
+      },
+    ]);
+    mock.script('Loaded the staged review inputs.');
+
+    await manager.send(session.id, 'load the pull-request review inputs');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsg = disk?.messages.find(
+      (message) => message.content === 'Loaded the staged review inputs.',
+    );
+    expect(assistantMsg?.toolCalls?.[0]).toMatchObject({
+      name: 'read_artifacts',
+      path: 'reviews/pr-42/manifest.json',
+      paths: ['reviews/pr-42/manifest.json', 'reviews/pr-42/batches.json'],
+      success: true,
+    });
+  }, 30_000);
+
   it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
     const session = await manager.createSession({ gezelId: 'ada' });

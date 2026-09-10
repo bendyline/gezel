@@ -257,7 +257,7 @@ describe('launch prep', () => {
     ]);
     expect(result.params).toEqual({
       number: '52',
-      corpusScope: 'artifacts/data/github-pulls/pr-52',
+      corpusScope: 'data/github-pulls/pr-52',
     });
     expect(result.summary).toContain('PR #52');
   });

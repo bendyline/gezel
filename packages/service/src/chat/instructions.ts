@@ -16,6 +16,7 @@ import {
   pronounsForGender,
 } from '@bendyline/gezel';
 import { canonicalToolName } from '@bendyline/gezel-mcp';
+import { outputMediaForStep, outputMediumForStep } from '../craftbook/step-toolsets.js';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
 import { SQUISQ_DIALECT_BRIEF } from '../prompts/squisq-dialect.js';
 import type { ProviderName } from '../providers/types.js';
@@ -635,7 +636,12 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     'advance_task_step',
     'write_task_note',
   ]);
-  const artifactTools = toolsFrom(['list_artifacts', 'read_artifact', 'write_artifact']);
+  const artifactTools = toolsFrom([
+    'list_artifacts',
+    'read_artifact',
+    'read_artifacts',
+    'write_artifact',
+  ]);
   const routingTail = `\n\n**Things you should never try:**\n\n- "I'll just write the file myself" / "Let me create that for you" → no. Even if writing the file feels faster, the answer is to delegate. The user's session with you is the lobby; the work happens in the project.\n- Searching the tool catalog for a workaround when a tool was denied. A denial is a signal that you're outside your role, not a puzzle to solve. Stop, route, hand off.\n- Naming or fabricating tools that are not in the Available tools list for this turn.\n\n**Things you DO do yourself:**\n\n- Talk to the user. Ask clarifying questions. Confirm scope.\n- Use the **artifacts drawer** for plans and scratch when available (${formatToolList(artifactTools)}).\n- Manage the team with the tools actually wired this turn (${formatToolList(teamTools)}).\n- Manage projects and tasks with the tools actually wired this turn (${formatToolList(projectTaskTools)}).`;
   // Execution density is deliberately absent from the model-facing tool
   // choice. Every build enters through `start_project`; the MCP runtime
@@ -817,7 +823,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         const synced = b.lastSyncedAt
           ? `, synced ${b.lastSyncedAt.slice(0, 10)}`
           : ', not synced yet';
-        return `- **${label}** (${b.type}${synced}): \`artifacts/${corpus.replace(/\/$/, '')}/\``;
+        return `- **${label}** (${b.type}${synced}): artifact path \`${corpus.replace(/\/$/, '')}/\``;
       });
       if (bindings.length > shown.length)
         lines.push(`- …and ${bindings.length - shown.length} more`);
@@ -861,8 +867,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     const hasWriteFile = availableTools?.some((t) => t.name === 'write_file') ?? false;
     const hasListArtifacts = availableTools?.some((t) => t.name === 'list_artifacts') ?? false;
     const hasReadArtifact = availableTools?.some((t) => t.name === 'read_artifact') ?? false;
+    const hasReadArtifacts = availableTools?.some((t) => t.name === 'read_artifacts') ?? false;
     const hasWriteArtifact = availableTools?.some((t) => t.name === 'write_artifact') ?? false;
-    const hasArtifactTools = hasListArtifacts || hasReadArtifact || hasWriteArtifact;
+    const hasArtifactTools =
+      hasListArtifacts || hasReadArtifact || hasReadArtifacts || hasWriteArtifact;
     const hasSearchMemory = availableTools?.some((t) => t.name === 'search_memory') ?? false;
     const hasSaveMemory = availableTools?.some((t) => t.name === 'save_memory') ?? false;
     const hasMemoryTools = hasSearchMemory || hasSaveMemory;
@@ -1226,10 +1234,13 @@ ${artifactsLine}
       if (step.prompt && step.prompt.trim().length > 0) {
         lines.push(`#### Step procedure\n\n${step.prompt.trim()}`);
       }
-      const outputMedium = step.toolPolicy?.outputMedium;
+      const outputMedium = outputMediumForStep(step);
       if (outputMedium) {
         const target = step.advanceWhen?.file ? ` \`${step.advanceWhen.file}\`` : '';
-        const additionalMedia = step.toolPolicy?.additionalOutputMedia ?? [];
+        const allowedMedia = outputMediaForStep(step);
+        const additionalMedia = (step.toolPolicy?.additionalOutputMedia ?? []).filter(
+          (medium) => medium !== outputMedium && allowedMedia.has(medium),
+        );
         const additionalContract =
           additionalMedia.length > 0
             ? ` The procedure also authorizes these secondary write surfaces: ${additionalMedia

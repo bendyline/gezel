@@ -407,26 +407,42 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('"startLine":12');
   });
 
-  it('redirects an exact artifact collision after read_file misses without opening it', async () => {
+  it('reroutes an exact artifact collision after read_file misses', async () => {
+    let artifactCalls = 0;
     handler = (url, method) => {
       if (url.pathname === '/api/projects/project-a/workspace/read') {
         expect(method).toBe('GET');
         return { __status: 404, body: { error: 'file not found' } };
       }
       if (url.pathname === '/api/projects/project-a/artifacts/slice') {
+        artifactCalls += 1;
         expect(method).toBe('GET');
         expect(url.searchParams.get('path')).toBe('security/review-scope.md');
-        expect(url.searchParams.get('head')).toBe('0');
+        if (artifactCalls === 1) {
+          expect(url.searchParams.get('head')).toBe('0');
+          return {
+            kind: 'found',
+            content: '',
+            path: 'security/review-scope.md',
+            fuzzy: false,
+            linesReturned: 0,
+            totalLines: 1,
+            bytesReturned: 0,
+            totalBytes: 44,
+            hasMore: true,
+          };
+        }
+        expect(url.searchParams.get('head')).toBeNull();
         return {
           kind: 'found',
-          content: 'THIS CONTENT MUST NOT LEAK THROUGH read_file',
+          content: 'Artifact content recovered through read_file',
           path: 'security/review-scope.md',
           fuzzy: false,
-          linesReturned: 0,
-          totalLines: 42,
-          bytesReturned: 0,
-          totalBytes: 1024,
-          hasMore: true,
+          linesReturned: 1,
+          totalLines: 1,
+          bytesReturned: 44,
+          totalBytes: 44,
+          hasMore: false,
         };
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -437,13 +453,17 @@ describe('consolidated MCP tools', () => {
       arguments: { path: 'security/review-scope.md' },
     });
     const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? '';
-    expect(result.isError).toBe(true);
-    expect(text).toContain('A project artifact exists at "security/review-scope.md"');
-    expect(text).toContain(
-      'call read_artifact({ path: "security/review-scope.md" }) instead of read_file',
-    );
-    expect(text).toContain('The artifact was not opened automatically.');
-    expect(text).not.toContain('THIS CONTENT MUST NOT LEAK');
+    expect(result.isError).not.toBe(true);
+    expect(text).toContain('[Rerouted read_file → read_artifact]');
+    expect(text).toContain('Artifact content recovered through read_file');
+    expect(result.structuredContent).toMatchObject({
+      requestedTool: 'read_file',
+      requestedPath: 'security/review-scope.md',
+      resolvedTool: 'read_artifact',
+      resolvedSurface: 'artifact',
+      resolvedPath: 'security/review-scope.md',
+      rerouted: true,
+    });
   });
 
   it('returns readable artifact content to hosts that prefer structured results', async () => {
@@ -475,9 +495,99 @@ describe('consolidated MCP tools', () => {
       resolvedPath: 'reports/summary.md',
       fuzzy: true,
       content: '# Summary',
+      startLine: 1,
+      endLine: 1,
       linesReturned: 1,
       totalLines: 1,
       hasMore: false,
+    });
+  });
+
+  it('lists canonical artifact paths with an executable reader hint', async () => {
+    handler = (url, method) => {
+      expect(url.pathname).toBe('/api/projects/project-a/artifacts');
+      expect(method).toBe('GET');
+      expect(url.searchParams.get('recursive')).toBe('1');
+      return {
+        files: [
+          {
+            name: 'manifest.json',
+            path: 'data/pulls/pr-42/manifest.json',
+            isDirectory: false,
+          },
+        ],
+        truncated: false,
+      };
+    };
+
+    const result = await client.callTool({ name: 'list_artifacts', arguments: {} });
+    const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? '';
+    expect(text).toContain('📄 data/pulls/pr-42/manifest.json');
+    expect(text).toContain('read_artifact({"path":"data/pulls/pr-42/manifest.json"})');
+    expect(text).not.toContain('"artifacts/data/');
+    expect(result.structuredContent).toMatchObject({
+      items: [
+        {
+          path: 'data/pulls/pr-42/manifest.json',
+          surface: 'artifact',
+          readWith: 'read_artifact',
+        },
+      ],
+    });
+  });
+
+  it('reads several artifact paths with the same inclusive range shape as read_files', async () => {
+    handler = (url, method) => {
+      expect(url.pathname).toBe('/api/projects/project-a/artifacts/slice');
+      expect(method).toBe('GET');
+      const path = url.searchParams.get('path');
+      expect(url.searchParams.get('lines')).toBe('2,2');
+      return {
+        kind: 'found',
+        content: path?.endsWith('manifest.json')
+          ? '"base":"main"\n"head":"fix"'
+          : '"batch":1\n"batch":2',
+        path,
+        fuzzy: false,
+        linesReturned: 2,
+        totalLines: 4,
+        bytesReturned: 24,
+        totalBytes: 48,
+        hasMore: true,
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'read_artifacts',
+      arguments: {
+        files: [
+          { path: 'data/pulls/pr-42/manifest.json', startLine: 2, endLine: 3 },
+          { path: 'data/pulls/pr-42/batches.json', startLine: 2, endLine: 3 },
+        ],
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      results: [
+        {
+          status: 'ok',
+          path: 'data/pulls/pr-42/manifest.json',
+          resolvedPath: 'data/pulls/pr-42/manifest.json',
+          resolvedSurface: 'artifact',
+          startLine: 2,
+          endLine: 3,
+          rerouted: false,
+        },
+        {
+          status: 'ok',
+          path: 'data/pulls/pr-42/batches.json',
+          resolvedPath: 'data/pulls/pr-42/batches.json',
+          resolvedSurface: 'artifact',
+          startLine: 2,
+          endLine: 3,
+          rerouted: false,
+        },
+      ],
     });
   });
 
