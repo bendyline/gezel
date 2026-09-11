@@ -237,7 +237,6 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     (refs: Set<string>, primaryRef: string | null) => {
       selectedRefsRef.current = refs;
       setSelectedRefs(refs);
-      setCreating(null);
       setSelectedRef(primaryRef);
       // Only the standalone Tasks area persists selection across remounts;
       // task detail panels embedded inside a project tab live alongside other
@@ -256,6 +255,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
 
   const openTask = useCallback(
     (ref: string) => {
+      setCreating(null);
       selectionAnchorRef.current = ref;
       commitSelection(new Set([ref]), ref);
     },
@@ -361,6 +361,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
 
   const selectTask = useCallback(
     (ref: string, options: { toggle?: boolean; range?: boolean; additive?: boolean } = {}) => {
+      setCreating(null);
       const current = selectedRefsRef.current;
       let next: Set<string>;
       if (options.range && selectionAnchorRef.current) {

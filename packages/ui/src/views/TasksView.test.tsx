@@ -367,6 +367,28 @@ describe('TasksView', () => {
     expect(dialog).toHaveAttribute('data-mode', 'one-time');
   });
 
+  it('keeps the new-task dialog open when the initial task list finishes loading', async () => {
+    let resolveTasks!: (value: { tasks: Task[] }) => void;
+    vi.mocked(api.listTasks).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTasks = resolve;
+        }) as never,
+    );
+    render(<TasksView />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /\+ New task/ })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /\+ New task/ }));
+    expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
+
+    resolveTasks({ tasks: [makeTask({ title: 'Loaded after the dialog opened' })] });
+    expect(await screen.findByText('Loaded after the dialog opened')).toBeInTheDocument();
+    expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
+  });
+
   it('opens scheduled and Night Shift creation from the New task split menu', async () => {
     render(<TasksView />);
     const user = userEvent.setup();
