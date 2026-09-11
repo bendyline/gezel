@@ -10,7 +10,16 @@ const mocks = vi.hoisted(() => ({
   inspect: vi.fn(),
   fetch: vi.fn(),
   local: vi.fn(),
+  unstampedDev: undefined as boolean | undefined,
 }));
+vi.mock('@bendyline/gezel', async (original) => {
+  const actual = await original<typeof import('@bendyline/gezel')>();
+  return {
+    ...actual,
+    isUnstampedDevBuild: (version: string) =>
+      mocks.unstampedDev ?? actual.isUnstampedDevBuild(version),
+  };
+});
 vi.mock('@bendyline/gezel-client/node', async (original) => ({
   ...(await original<typeof import('@bendyline/gezel-client/node')>()),
   systemServiceHome: () => mocks.home,
@@ -39,6 +48,7 @@ import {
 const dirs: string[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.unstampedDev = undefined;
   mocks.home = `/test-machine-${randomUUID()}`;
   // Same build on both sides: the ordinary production shape, where the
   // installed broker is the authority. The skew suite below varies it.
@@ -256,6 +266,7 @@ describe('memory-authority version skew', () => {
   });
 
   it('uses the local ledger when a dev build meets an installed release broker', async () => {
+    mocks.unstampedDev = true;
     mocks.inspect.mockResolvedValue({
       pinnedIdentityFingerprint: 'stable-device',
       gezelVersion: '1.26251.69',
@@ -268,6 +279,7 @@ describe('memory-authority version skew', () => {
   });
 
   it('defers anyway when the operator asks for the machine authority', async () => {
+    mocks.unstampedDev = true;
     mocks.inspect.mockResolvedValue({
       pinnedIdentityFingerprint: 'stable-device',
       gezelVersion: '1.26251.69',
