@@ -22,6 +22,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
   const EditorTestContext = createContext({ replaceAll: (_source: string) => {} });
   return {
     useEditorContext: () => useContext(EditorTestContext),
+    useEditorContextMenuItems: () => {},
     EditorShell: ({
       initialMarkdown = '',
       onChange,

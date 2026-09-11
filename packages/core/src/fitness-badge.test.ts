@@ -294,6 +294,32 @@ describe('composeFitnessBadge — naming a reason a user can act on', () => {
     expect(b.detail).toContain('engine exited before the first token');
   });
 
+  it('summarizes a provider ramble abort instead of exposing its recovery prompt', () => {
+    const rawReason =
+      'generation turn failed: [Mac AI] aborting — the gezel emitted 2628 characters ' +
+      'of prose this turn without calling any action tool. Stop planning. Your next ' +
+      'message must START with a single tool call.';
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          status: 'failed',
+          admitted: false,
+          checks: {
+            spawn: okCheck,
+            toolRoundTrip: notReached,
+            throughput: { ok: false, detail: rawReason },
+            reasoningBudget: okCheck,
+            contextFit: okCheck,
+          },
+        }),
+      ),
+    });
+
+    expect(b.reason).toBe('Could not complete basic tasks');
+    expect(b.detail).toBe('The fitness check could not complete: Could not complete basic tasks');
+    expect(b.detail).not.toMatch(/Mac AI|Stop planning|single tool call/);
+  });
+
   it('an admitted model carries no reason', () => {
     expect(composeFitnessBadge({ fitness: fresh(record()) }).reason).toBeUndefined();
   });

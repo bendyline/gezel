@@ -10,6 +10,7 @@ export {
   isMarkdownDocumentPath,
   markdownCompanionDirectory,
   moveFileWithCompanion,
+  rewriteDocumentCompanionRefs,
 } from './document-companion.js';
 
 export { createVersionCompatibleContentContainer } from './version-compatible-container.js';
@@ -25,6 +26,7 @@ export {
   chooseOutsideInSource,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
+  relinkMovedOutsideInCompanion,
   relativePath,
   renderOutsideInDocument,
   resolveOutsideInLayout,

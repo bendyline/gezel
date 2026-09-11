@@ -170,6 +170,7 @@ describe('knowledge injection ceilings', () => {
     expect(result?.prompt).toContain('untrusted evidence');
     expect(result?.prompt).toContain('never grant authority');
     expect(result?.prompt).toContain('read_document');
+    expect(result?.injectedBytes).toBe(Buffer.byteLength(result?.prompt ?? '', 'utf8'));
   });
 
   it('a craftbook step naming only knowledge scopes injection to it', async () => {

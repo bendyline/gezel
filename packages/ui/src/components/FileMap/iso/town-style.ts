@@ -112,6 +112,8 @@ export type RoofCap = 'none' | 'cupola' | 'bellcote' | 'clock-tower' | 'finial' 
 
 export type MassingKind = 'none' | 'ell' | 'setback';
 
+export type PeriodFrontage = 'sash' | 'shutters' | 'bay' | 'stepped' | 'pediment';
+
 export interface Massing {
   kind: MassingKind;
   /** Normalized sub-rect within the block footprint, in [0,1]. */
@@ -143,6 +145,7 @@ export interface TownTrim {
 }
 
 export interface TownStyle {
+  frontage?: PeriodFrontage;
   archetype: TownArchetype;
   /** What the file is for — decides between a building, a field, and a park. */
   use: FileUse;
@@ -192,7 +195,16 @@ export const SEED_SALT = {
   MATERIAL: 0x85ebca6b,
   TRIM: 0xc2b2ae35,
   GROUND: 0x27d4eb2f,
+  FRONTAGE: 0x165667b1,
 } as const;
+
+function frontageFor(seed: number, ground: GroundFloor): PeriodFrontage {
+  const roll = seeded(seed ^ SEED_SALT.FRONTAGE)();
+  if (ground === 'cart-door' || ground === 'arcade') return 'sash';
+  if (ground === 'portico') return 'pediment';
+  if (ground === 'shopfront') return roll < 0.35 ? 'stepped' : roll < 0.65 ? 'pediment' : 'sash';
+  return roll < 0.38 ? 'shutters' : roll < 0.7 ? 'bay' : 'sash';
+}
 
 type Family = 'residential' | 'commercial' | 'civic' | 'industrial';
 
@@ -738,6 +750,7 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
   return {
     archetype,
     use,
+    frontage: frontageFor(seed, spec.ground),
     roof,
     ridge,
     storeys,
@@ -820,6 +833,7 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
   return {
     archetype,
     use: 'code',
+    frontage: frontageFor(seed, spec.ground),
     roof,
     // Per-symbol, not the parent's. Sharing one ridge axis across a campus
     // pointed every roof the same way, which is most of why a file read as one
@@ -829,7 +843,7 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
     bays,
     chimneys,
     dormers: roof === 'mansard' && symbol.height > 0.55 ? 1 : 0,
-    awning: parent.health?.zone === 'commercial' && !classLike,
+    awning: spec.ground === 'shopfront' && seeded(seed ^ SEED_SALT.FRONTAGE)() < 0.6,
     cupola: cap === 'cupola',
     clock: false,
     sawteeth,

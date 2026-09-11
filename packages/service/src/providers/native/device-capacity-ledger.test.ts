@@ -164,3 +164,68 @@ describe('device memory admission', () => {
     expect((await ledger.execute(request(20))).state).toBe('granted');
   });
 });
+
+describe('external memory shortfall', () => {
+  it('reports a shortfall no engine is responsible for, with both numbers', async () => {
+    // The gemma4-e4b case: 9.7 GB wanted, budget has room, nothing else is
+    // loaded — the memory belongs to the user's other applications.
+    const { ledger } = await fixture({
+      budgetBytes: 11.2 * GIB,
+      gpuBudgetBytes: 11.2 * GIB,
+      availableBytes: 4.29 * GIB,
+    });
+    const reply = await ledger.execute(request(9.7));
+    expect(reply.state).toBe('waiting');
+    expect(reply.externalShortfall).toBe(true);
+    expect(reply.requiredBytes).toBe(9.7 * GIB);
+    expect(reply.availableBytes).toBe(4.29 * GIB);
+    expect(reply.reason).toContain('9.7 GB');
+    expect(reply.reason).toContain('4.3 GB');
+  });
+
+  it('does not claim an external shortfall while another engine holds the memory', async () => {
+    const { ledger, make } = await fixture({
+      budgetBytes: 24 * GIB,
+      gpuBudgetBytes: 24 * GIB,
+      availableBytes: 10 * GIB,
+    });
+    const resident = request(9);
+    expect((await ledger.execute(resident)).state).toBe('granted');
+    // Waiting behind a real claim is worth waiting out — that engine finishes.
+    const queued = await make().execute(request(9, false, 2));
+    expect(queued.state).toBe('waiting');
+    expect(queued.externalShortfall).toBeUndefined();
+    expect(queued.requiredBytes).toBeUndefined();
+  });
+
+  it('stays silent when the budget, not the host, is what refuses', async () => {
+    // Over budget is a different refusal with different advice, and the
+    // acquire path throws on it outright rather than queueing.
+    const { ledger } = await fixture({
+      budgetBytes: 8 * GIB,
+      gpuBudgetBytes: 8 * GIB,
+      availableBytes: 32 * GIB,
+    });
+    await expect(ledger.execute(request(9))).rejects.toThrow(/safe model capacity/);
+  });
+
+  it('clears the flag once the host frees the memory', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'gezel-capacity-'));
+    dirs.push(directory);
+    let availableBytes = 4 * GIB;
+    const ledger = new DeviceCapacityLedger({
+      directory,
+      sample: async () => ({
+        budgetBytes: 16 * GIB,
+        gpuBudgetBytes: 16 * GIB,
+        availableBytes,
+        serializeLoads: false,
+      }),
+      alive: () => true,
+    });
+    const acquire = request(9);
+    expect((await ledger.execute(acquire)).externalShortfall).toBe(true);
+    availableBytes = 12 * GIB;
+    expect((await ledger.execute(acquire)).state).toBe('granted');
+  });
+});

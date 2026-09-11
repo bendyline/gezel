@@ -29,13 +29,23 @@ vi.mock('./measured-budget.js', () => ({
   measuredCapacityBudget: async () => ({ kind: 'unified', fastBytes: 96 * 1024 ** 3 }),
 }));
 
-import { acquireNativeCapacity, estimateNativeLaunchMemory } from './device-capacity.js';
+import { GEZEL_VERSION } from '@bendyline/gezel';
+import {
+  acquireNativeCapacity,
+  assessBrokerVersionSkew,
+  estimateNativeLaunchMemory,
+} from './device-capacity.js';
 
 const dirs: string[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.home = `/test-machine-${randomUUID()}`;
-  mocks.inspect.mockResolvedValue({ pinnedIdentityFingerprint: 'stable-device' });
+  // Same build on both sides: the ordinary production shape, where the
+  // installed broker is the authority. The skew suite below varies it.
+  mocks.inspect.mockResolvedValue({
+    pinnedIdentityFingerprint: 'stable-device',
+    gezelVersion: GEZEL_VERSION,
+  });
   mocks.runtime.mockResolvedValue({
     serviceRole: 'machine-engine',
     cert: 'cert-1',
@@ -152,4 +162,134 @@ it('prices recognition projectors and image text encoders as well as main weight
       baseUrl: '',
     }),
   ).toEqual({ bytes: 900 + 1024 ** 3, gpuBytes: 0 });
+});
+
+describe('admission wait ceilings', () => {
+  const waitFor = async (
+    replies: () => { state: string; releaseRequested: boolean; [k: string]: unknown },
+  ) => {
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'local');
+    mocks.local.mockImplementation(async (command: { action: string }) =>
+      command.action === 'acquire' ? replies() : { state: 'released', releaseRequested: false },
+    );
+    const started = Date.now();
+    const flight = acquireNativeCapacity(
+      { home: '/isolated-eval', requirement: () => ({ bytes: 1024 ** 3 }) },
+      { command: 'fake-model', args: [], baseUrl: 'http://127.0.0.1:9999' },
+      new AbortController().signal,
+      () => {},
+    ).then(
+      () => ({ ok: true as const, elapsed: Date.now() - started }),
+      (err: Error) => ({ ok: false as const, error: err, elapsed: Date.now() - started }),
+    );
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    return flight;
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('gives up in seconds when no engine is holding the memory', async () => {
+    const result = await waitFor(() => ({
+      state: 'waiting',
+      releaseRequested: false,
+      externalShortfall: true,
+      requiredBytes: 9.7 * 1024 ** 3,
+      availableBytes: 4.29 * 1024 ** 3,
+    }));
+    expect(result.ok).toBe(false);
+    expect(result.elapsed).toBeLessThan(30_000);
+    const message = (result as { error: Error }).error.message;
+    // Names both numbers and says whose memory it is — the old wording
+    // described protecting engine work that, in this branch, does not exist.
+    expect(message).toContain('9.7 GB');
+    expect(message).toContain('4.3 GB');
+    expect(message).toContain('other applications');
+  });
+
+  it('still waits out the full budget behind another engine', async () => {
+    const result = await waitFor(() => ({ state: 'waiting', releaseRequested: false }));
+    expect(result.ok).toBe(false);
+    expect(result.elapsed).toBeGreaterThanOrEqual(5 * 60_000);
+    expect((result as { error: Error }).error.message).toContain('still protected');
+  });
+
+  it('forgives a transient shortfall that clears before the ceiling', async () => {
+    let calls = 0;
+    const result = await waitFor(() => {
+      calls += 1;
+      if (calls <= 4)
+        return {
+          state: 'waiting',
+          releaseRequested: false,
+          externalShortfall: true,
+          requiredBytes: 4 * 1024 ** 3,
+          availableBytes: 3 * 1024 ** 3,
+        };
+      return { state: 'granted', releaseRequested: false };
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('memory-authority version skew', () => {
+  it('is not skew when the broker is the same build', () => {
+    expect(assessBrokerVersionSkew('1.26251.69', '1.26251.69')).toBeNull();
+    expect(assessBrokerVersionSkew('0.0.0', '0.0.0')).toBeNull();
+  });
+
+  it('sends a dev checkout to its own ledger, whatever the broker reports', () => {
+    // Ordering would say the opposite: 0.0.0 sorts BELOW every stamped
+    // release. The test is "unstamped", because a checkout carries code no
+    // release has yet — which is the whole reason to run it locally.
+    for (const broker of ['1.26251.69', '9.99999.999', undefined]) {
+      expect(assessBrokerVersionSkew(broker, '0.0.0')).toMatchObject({
+        takeLocalAuthority: true,
+        brokerVersion: broker ?? 'unknown',
+      });
+    }
+  });
+
+  it('never diverts a stamped build, but still reports the skew', () => {
+    const skew = assessBrokerVersionSkew('1.26251.69', '1.26252.4');
+    expect(skew).toMatchObject({ takeLocalAuthority: false, brokerVersion: '1.26251.69' });
+  });
+
+  it('uses the local ledger when a dev build meets an installed release broker', async () => {
+    mocks.inspect.mockResolvedValue({
+      pinnedIdentityFingerprint: 'stable-device',
+      gezelVersion: '1.26251.69',
+    });
+    const lease = await acquire();
+    expect(mocks.local).toHaveBeenCalled();
+    // The whole point: no admission request crosses to the older broker.
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
+  it('defers anyway when the operator asks for the machine authority', async () => {
+    mocks.inspect.mockResolvedValue({
+      pinnedIdentityFingerprint: 'stable-device',
+      gezelVersion: '1.26251.69',
+    });
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'machine');
+    const lease = await acquire();
+    expect(mocks.fetch).toHaveBeenCalled();
+    expect(mocks.local).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
+  it('still refuses a competing ledger when the broker is merely unreachable', async () => {
+    // An outage is not permission to double-book, and the diversion must not
+    // become a way to reach the local ledger by breaking identity discovery.
+    mocks.inspect.mockRejectedValue(new Error('identity returned HTTP 503'));
+    await expect(acquire()).rejects.toThrow(/HTTP 503/);
+    // The broker then goes away entirely. Claiming the authority before
+    // rethrowing above is what keeps this from quietly becoming a second
+    // ledger beside whatever the installed engine had already admitted — the
+    // diversion must not be reachable by breaking identity discovery.
+    mocks.runtime.mockResolvedValue(null);
+    await expect(acquire()).rejects.toThrow(/restore memory coordination/);
+    expect(mocks.local).not.toHaveBeenCalled();
+  });
 });

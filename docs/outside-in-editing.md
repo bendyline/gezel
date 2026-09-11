@@ -38,6 +38,12 @@ write regenerates the rendered file. The editor's media
 and version-history providers are rooted at the companion folder, so the full
 editable document travels together.
 
+Renaming or moving the visible document carries that companion folder with it.
+A stem rename also renames the canonical Markdown companion, refreshes its
+output frontmatter, and retargets explicit `<stem>_files/…` image/link
+destinations. Regular Markdown documents use the same companion-move and
+reference-rewrite contract for their media folders.
+
 HTML uses a shared player runtime. Gezel finds the nearest ancestor `_squisq`
 folder, falling back to the project root, and writes
 `_squisq/squisq-player.js`. The generated page refers to that runtime and to

@@ -143,6 +143,7 @@ describe('runMove (documents happy path)', () => {
     const after = jobs.get(job.id)!;
     expect(after.status).toBe('done');
     expect(after.restartRequired).toBe(true);
+    expect(jobs.latest()).toBe(after);
 
     // Files landed at destination
     expect(await readFile(join(dest, 'mission.md'), 'utf8')).toBe('do good work');
@@ -163,6 +164,38 @@ describe('runMove (documents happy path)', () => {
     expect(backupContents).toBe('do good work');
 
     // Config swap recorded the new external path
+    const cfg = await store.readConfig();
+    expect(cfg.externalFolders?.documents).toBe(dest);
+  });
+
+  it('can switch to the destination without moving or deleting files', async () => {
+    const store = new Store({ home });
+    await store.ensureLayout();
+    const source = join(home, 'documents');
+    await writeFile(join(source, 'source-only.md'), 'leave me here');
+    const dest = join(externalRoot, 'existing-docs');
+    await mkdir(dest, { recursive: true });
+    await writeFile(join(dest, 'destination-only.md'), 'use me as-is');
+
+    const jobs = new JobManager();
+    const job = jobs.create({
+      scope: 'documents',
+      sourcePath: source,
+      destPath: dest,
+      conflictPolicy: 'use-destination',
+    });
+    await runMove({ home, store, jobs, jobId: job.id });
+
+    const after = jobs.get(job.id)!;
+    expect(after.status).toBe('done');
+    expect(after.phase).toBe('swap');
+    expect(after.filesDone).toBe(0);
+    expect(after.restartRequired).toBe(true);
+    expect(await readFile(join(source, 'source-only.md'), 'utf8')).toBe('leave me here');
+    expect(await readFile(join(dest, 'destination-only.md'), 'utf8')).toBe('use me as-is');
+    await expect(stat(join(dest, 'source-only.md'))).rejects.toThrow();
+    await expect(stat(join(home, 'backup'))).rejects.toThrow();
+
     const cfg = await store.readConfig();
     expect(cfg.externalFolders?.documents).toBe(dest);
   });

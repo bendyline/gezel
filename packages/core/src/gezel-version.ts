@@ -29,6 +29,23 @@ export function compareGezelVersions(a: string, b: string): number {
 }
 
 /**
+ * True when this build came from a checkout rather than a release.
+ *
+ * `scripts/stamp-version.mjs` rewrites `GEZEL_VERSION` at release time, so
+ * `0.0.0` means exactly "nobody stamped this" — a dev daemon, an eval, a test.
+ *
+ * It is NOT a low version, and version ORDERING is the wrong test for "is this
+ * build ahead of that one": an unstamped checkout carries code no stamped
+ * release has yet, while sorting numerically it loses to every one of them.
+ * {@link satisfiesMinGezelVersion} short-circuits on the same value for the
+ * same reason. Callers pass the version explicitly because `GEZEL_VERSION`
+ * lives in the package index, which imports this module.
+ */
+export function isUnstampedDevBuild(version: string): boolean {
+  return version === '0.0.0';
+}
+
+/**
  * True when `current` satisfies a `minGezelVersion` floor.
  *
  * - No floor → satisfied.

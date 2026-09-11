@@ -3,13 +3,14 @@ import type { FolderScope } from './scope.js';
 
 export type MoveJobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
 export type MoveJobPhase = 'scan' | 'backup' | 'copy' | 'verify' | 'swap' | 'cleanup' | 'prune';
+export type FolderMovePolicy = 'overwrite-all' | 'skip-all' | 'use-destination';
 
 export interface MoveJob {
   id: string;
   scope: FolderScope;
   sourcePath: string;
   destPath: string;
-  conflictPolicy: 'overwrite-all' | 'skip-all';
+  conflictPolicy: FolderMovePolicy;
   status: MoveJobStatus;
   phase?: MoveJobPhase;
   filesDone: number;
@@ -53,6 +54,14 @@ export class JobManager {
 
   get(id: string): MoveJob | undefined {
     return this.jobs.get(id);
+  }
+
+  /** Most recently created job, including its terminal state. The folders
+   *  settings view uses this to recover progress after it is remounted. */
+  latest(): MoveJob | undefined {
+    let latest: MoveJob | undefined;
+    for (const job of this.jobs.values()) latest = job;
+    return latest;
   }
 
   /** True when at least one job is in `queued` or `running` state. The

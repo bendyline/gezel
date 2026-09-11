@@ -19,6 +19,7 @@ import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
+import { ComposerImageClipboard } from './ComposerImageClipboard.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
 import { createPromptDraftMediaProvider } from './PromptDraftMediaProvider.js';
@@ -538,8 +539,28 @@ export function ChatComposer({
   const liveSessionIdRef = useRef<string | null>(sessionId ?? null);
   const [liveSessionId, setLiveSessionId] = useState<string | null>(sessionId ?? null);
   useEffect(() => {
-    liveSessionIdRef.current = sessionId ?? null;
-    setLiveSessionId(sessionId ?? null);
+    const nextSessionId = sessionId ?? null;
+    const previousSessionId = liveSessionIdRef.current;
+    liveSessionIdRef.current = nextSessionId;
+    setLiveSessionId(nextSessionId);
+
+    if (previousSessionId === nextSessionId) return;
+
+    // The service turn belongs to its session, not to this mounted composer.
+    // Leave it running when the user picks another (or a fresh) thread, but
+    // detach the session-local event reader and controls from the new address.
+    // The project timeline keeps receiving the old turn through its shared
+    // event stream, and selecting that thread again rehydrates its live state
+    // through the authoritative in-flight poll below.
+    const localTurn = localTurnRef.current;
+    if (localTurn && localTurn.sessionId !== nextSessionId) {
+      localTurnRef.current = null;
+      localTurn.controller.abort();
+    }
+    setStreaming(false);
+    setServerInflight(false);
+    setQueuedAhead(null);
+    setWedged(null);
   }, [sessionId]);
 
   const createFreshSession = useCallback(async (): Promise<string> => {
@@ -1562,6 +1583,7 @@ export function ChatComposer({
           }
           toolbarSlotRight={
             <>
+              <ComposerImageClipboard onError={setError} />
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
               <ComposerNarrateButton
                 projectId={projectId}

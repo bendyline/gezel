@@ -15,6 +15,7 @@ const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'validate',
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'grep_artifact',
   'grep_files',
   'find_files',

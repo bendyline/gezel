@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   FOLDER_SCOPES,
   type FolderScope,
+  type MoveJob,
   defaultRootForScope,
   planMove,
   runMove,
@@ -21,7 +22,7 @@ const PlanRequestSchema = z.object({
 const MoveRequestSchema = z.object({
   scope: ScopeSchema,
   destPath: z.string().min(1),
-  conflictPolicy: z.enum(['overwrite-all', 'skip-all']),
+  conflictPolicy: z.enum(['overwrite-all', 'skip-all', 'use-destination']),
 });
 
 const ResetRequestSchema = z.object({
@@ -49,11 +50,13 @@ export function folderRoutes(ctx: ServiceContext) {
       projects: current.projects ?? null,
     };
     const backupSummary = await summarizeBackups(ctx.home);
+    const latestJob = ctx.folderJobs.latest();
     return c.json({
       defaults,
       current: currentResolved,
       externalized,
       activeJob: ctx.folderJobs.hasActive(),
+      job: latestJob ? serializeJob(latestJob) : null,
       backups: backupSummary,
     });
   });
@@ -112,22 +115,7 @@ export function folderRoutes(ctx: ServiceContext) {
   app.get('/move/:jobId', (c) => {
     const job = ctx.folderJobs.get(c.req.param('jobId'));
     if (!job) return c.json({ error: 'unknown-job' }, 404);
-    return c.json({
-      id: job.id,
-      scope: job.scope,
-      sourcePath: job.sourcePath,
-      destPath: job.destPath,
-      status: job.status,
-      phase: job.phase,
-      filesDone: job.filesDone,
-      totalFiles: job.totalFiles,
-      bytesDone: job.bytesDone,
-      totalBytes: job.totalBytes,
-      error: job.error,
-      restartRequired: job.restartRequired,
-      startedAt: job.startedAt,
-      endedAt: job.endedAt,
-    });
+    return c.json(serializeJob(job));
   });
 
   app.post('/move/:jobId/cancel', (c) => {
@@ -188,6 +176,26 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   return app;
+}
+
+function serializeJob(job: MoveJob) {
+  return {
+    id: job.id,
+    scope: job.scope,
+    sourcePath: job.sourcePath,
+    destPath: job.destPath,
+    conflictPolicy: job.conflictPolicy,
+    status: job.status,
+    phase: job.phase,
+    filesDone: job.filesDone,
+    totalFiles: job.totalFiles,
+    bytesDone: job.bytesDone,
+    totalBytes: job.totalBytes,
+    error: job.error,
+    restartRequired: job.restartRequired,
+    startedAt: job.startedAt,
+    endedAt: job.endedAt,
+  };
 }
 
 // Re-export FOLDER_SCOPES so the routes file is self-contained.

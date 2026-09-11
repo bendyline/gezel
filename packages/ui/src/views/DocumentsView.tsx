@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import type { FileEntry } from '../components/FileTree.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
+import {
+  SearchMarkdownSnippet,
+  searchSnippetIsMarkdown,
+} from '../components/SearchMarkdownSnippet.js';
 import { isOutsideInInternalPath } from '../components/SquisqIntegration/index.js';
 import { documentLabel } from '../components/document-label.js';
 import { useDocumentQuickList } from '../components/document-quick-list.js';
@@ -21,7 +25,6 @@ import {
   type FileViewMode,
   coerceFileViewMode,
 } from '../components/file-view-modes.js';
-import { highlightTokens } from '../components/highlight-tokens.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
 import { useDocumentSearch } from './useDocumentSearch.js';
@@ -257,7 +260,11 @@ export function DocumentsView() {
           return (
             <span className="documents-search-snippet">
               {hit.related && <span className="documents-search-related">related</span>}
-              {highlightTokens(hit.snippet, search.matchedQuery)}
+              <SearchMarkdownSnippet
+                markdown={hit.snippet}
+                query={search.matchedQuery}
+                formatMarkdown={searchSnippetIsMarkdown('content', entry.path)}
+              />
             </span>
           );
         },

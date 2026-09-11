@@ -57,6 +57,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   // Artifacts (project-scoped)
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'write_artifact',
   'grep_artifact',
   'browser_find_page_element',

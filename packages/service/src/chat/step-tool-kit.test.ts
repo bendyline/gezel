@@ -98,7 +98,36 @@ describe('stepToolKit', () => {
     });
     expect(kit?.tools.has('write_artifact')).toBe(true);
     expect(kit?.tools.has('read_artifact')).toBe(true);
+    expect(kit?.tools.has('read_artifacts')).toBe(true);
     expect(kit?.tools.has('grep_artifact')).toBe(true);
+  });
+
+  it('keeps runtime-owned artifact outputs read-only when the model owes a task note', () => {
+    const kit = stepToolKit({
+      onEnter: {
+        name: 'publishCorpusBatches',
+        scope: 'standard',
+        inputs: { outFile: 'tasks/74/pr-review/batches.json' },
+      },
+      advanceWhen: { file: 'tasks/74/pr-review/batches.json', artifact: true },
+      gate: {
+        at: 'completion',
+        checks: [
+          {
+            kind: 'corpusBatches',
+            file: 'tasks/74/pr-review/batches.json',
+            corpusDir: 'data/github-pulls/pr-58',
+            artifact: true,
+          },
+        ],
+        scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+      },
+      toolPolicy: { outputMedium: 'artifact' },
+    });
+
+    expect(kit?.tools.has('read_artifact')).toBe(true);
+    expect(kit?.tools.has('read_artifacts')).toBe(true);
+    expect(kit?.tools.has('write_artifact')).toBe(false);
   });
 
   it('workspace-targeted steps keep drawer reads but expose only the workspace writer', () => {

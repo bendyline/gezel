@@ -903,6 +903,7 @@ export interface ProviderCacheStatsResponse {
 }
 
 export type FolderScope = 'documents' | 'gezels' | 'projects';
+export type FolderMovePolicy = 'overwrite-all' | 'skip-all' | 'use-destination';
 
 /** One pre-move snapshot under `~/.gezel/backup/<timestamp>/`. */
 export interface FolderBackupSnapshot {
@@ -924,6 +925,9 @@ export interface FoldersStatusResponse {
   /** True when a folder-move job is queued or running — the UI should
    *  disable the move buttons rather than queueing parallel ops. */
   activeJob: boolean;
+  /** Latest move job in this service process. Lets the UI recover progress or
+   *  the restart prompt when the settings view is remounted. */
+  job?: FolderMoveStatus | null;
   /** Pre-move snapshot summary, newest first. */
   backups: {
     count: number;
@@ -956,6 +960,7 @@ export interface FolderMoveStatus {
   scope: FolderScope;
   sourcePath: string;
   destPath: string;
+  conflictPolicy: FolderMovePolicy;
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
   phase?: 'scan' | 'backup' | 'copy' | 'verify' | 'swap' | 'cleanup' | 'prune';
   filesDone: number;
@@ -2995,7 +3000,7 @@ export class GezelClient {
   startFolderMove(body: {
     scope: FolderScope;
     destPath: string;
-    conflictPolicy: 'overwrite-all' | 'skip-all';
+    conflictPolicy: FolderMovePolicy;
   }): Promise<{ jobId: string }> {
     return this.request('POST', '/api/folders/move', body);
   }

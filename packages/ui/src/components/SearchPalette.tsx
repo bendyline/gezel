@@ -1,5 +1,6 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { useEffect, useRef } from 'react';
+import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdownSnippet.js';
 import { highlightTokens } from './highlight-tokens.js';
 import type { SearchGroup } from './search-nav.js';
 
@@ -127,7 +128,11 @@ export function SearchPalette({
                 ) : null}
                 {item.snippet ? (
                   <span className="search-option-snippet">
-                    {highlightTokens(item.snippet, query)}
+                    <SearchMarkdownSnippet
+                      markdown={item.snippet}
+                      query={query}
+                      formatMarkdown={searchSnippetIsMarkdown(item.kind, item.path ?? item.title)}
+                    />
                   </span>
                 ) : null}
               </button>

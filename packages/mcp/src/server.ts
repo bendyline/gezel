@@ -15,6 +15,7 @@
  *   GEZEL_HOME       — path to ~/.gezel (for direct memory access)
  *   GEZEL_ROLE_BASED_NAME_ONLY_MODE — 1/0 naming presentation inherited by new tasks
  *   GEZEL_CRAFTBOOK_ID — explicit craftbook-editor context (loads step surgery)
+ *   GEZEL_MCP_AUTHORIZED_TOOLS — role-authorized built-ins (may exceed registered tools)
  *   GEZEL_MCP_LEGACY_TOOLS=1 — expose compatibility aliases during migration
  */
 
@@ -46,7 +47,6 @@ import {
   WORKSPACE_READ_MAX_FILES,
   WORKSPACE_READ_MAX_RANGE_LINES,
   type WorkspaceReadFileRequest,
-  type WorkspaceReadFileSuccess,
   applyStepPatch,
   assertCraftbookGraph,
   coerceDeliverableKind,
@@ -99,6 +99,10 @@ import {
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 import {
+  registerArtifactReadTools,
+  registerWorkspaceReadTools,
+} from './cross-drawer-read-tools.js';
+import {
   binaryDocumentCraftbookRoute,
   isBinaryDocumentOutputPath,
   normalizeDocumentOutputPath,
@@ -117,12 +121,11 @@ import {
   prefixLinkedEntry,
   resolveLinkedWorkspacePath,
 } from './linked-workspace.js';
-import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { CAP, PartialEditRegistry } from './partial-edits.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
 import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
-import { reanchorAfterEdit, withLineNumbers } from './reanchor.js';
+import { reanchorAfterEdit } from './reanchor.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
 import {
   formatScriptRunResult,
@@ -171,6 +174,11 @@ import {
   validateFile,
 } from './validate.js';
 import { formatWebSearchResponse } from './web-search-format.js';
+import {
+  equivalentWorkspaceGrepArgs,
+  renderExactToolCall,
+  workspaceGrepResult,
+} from './workspace-grep-result.js';
 import { normalizeWorkspaceWriteContent } from './workspace-write-normalization.js';
 import {
   rejectHtmlWithScriptOutsideScriptTag,
@@ -573,6 +581,17 @@ const allowedToolNames =
     ? null
     : new Set(
         allowEnv
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(canonicalToolName),
+      );
+const authorizedEnv = process.env.GEZEL_MCP_AUTHORIZED_TOOLS;
+const authorizedToolNames =
+  authorizedEnv === undefined
+    ? null
+    : new Set(
+        authorizedEnv
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean)
@@ -1530,259 +1549,20 @@ server.tool(
   },
 );
 
-server.tool(
-  'read_file',
-  'Read one project-workspace file, optionally only an inclusive line range. This tool never reads the separate artifacts drawer; use read_artifact for artifact inputs. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
-  {
-    path: z.string().min(1).max(4096).describe('File path relative to the project root.'),
-    startLine: z
-      .number()
-      .int()
-      .min(1)
-      .max(10_000_000)
-      .optional()
-      .describe('1-based first line to return (inclusive). Defaults to 1.'),
-    endLine: z
-      .number()
-      .int()
-      .min(1)
-      .max(10_000_000)
-      .optional()
-      .describe(
-        `1-based last line to return (inclusive). Maximum ${WORKSPACE_READ_MAX_RANGE_LINES} lines per ranged read; omit to read the next bounded chunk.`,
-      ),
-    raw: z
-      .boolean()
-      .optional()
-      .describe('Return the file content without `N→` line-number gutters. Default false.'),
-  },
-  async ({ path, startLine, endLine, raw }) => {
-    try {
-      const rangeError = workspaceReadRangeError({ startLine, endLine });
-      if (rangeError) throw new Error(rangeError);
-      if (raw && (startLine !== undefined || endLine !== undefined)) {
-        throw new Error(
-          '`raw: true` cannot be combined with a line range; omit `raw` for a numbered range',
-        );
-      }
-      // No range stays on the long-standing full-read route. Besides wire
-      // compatibility, raw full reads are used internally by the source-write
-      // guard and must remain byte-for-byte text without pagination metadata.
-      if (startLine === undefined && endLine === undefined) {
-        const res = await readWorkspaceFile(path);
-        return {
-          content: [
-            { type: 'text' as const, text: raw ? res.content : withLineNumbers(res.content) },
-          ],
-        };
-      }
-
-      const response = await readWorkspaceFiles([
-        {
-          path,
-          ...(startLine !== undefined ? { startLine } : {}),
-          ...(endLine !== undefined ? { endLine } : {}),
-        },
-      ]);
-      const result = response.results[0];
-      if (!result) throw new Error('ranged read returned no result');
-      if (result.status === 'error') throw new Error(`[${result.code}] ${result.error}`);
-      return {
-        content: [{ type: 'text' as const, text: formatWorkspaceRead(result, raw === true) }],
-      };
-    } catch (err) {
-      const base = unwrapApiError(err);
-      // A bare "not found" strands the model. Wild-caught on gemma4-12b ×
-      // data-wrangle: a sampler artifact mangled the dot in `customers_a.csv`
-      // eleven different ways, each attempt got back the two-word error, and
-      // 47s later the failure tracker killed the whole trial — the model was
-      // never told its path was a near-miss of a real file. Echo the path and
-      // suggest near-matches from the parent directory so a typo is
-      // self-evident from the tool result alone.
-      let text = `read_file "${path}": ${base}`;
-      if (/not found|404|no such file/i.test(base)) {
-        const artifactCollision = await artifactCollisionForWorkspacePath(path);
-        if (artifactCollision) {
-          text += `. A project artifact exists at "${artifactCollision}". The workspace and artifacts are separate drawers; call read_artifact({ path: ${JSON.stringify(artifactCollision)} }) instead of read_file. The artifact was not opened automatically.`;
-          return { content: [{ type: 'text' as const, text }], isError: true };
-        }
-        try {
-          const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-          const targetDir = await concreteWorkspaceTarget(dir);
-          const listing = await workspaceClient(targetDir).listProjectWorkspace(
-            targetDir.projectId,
-            targetDir.path,
-            false,
-          );
-          const names = listing.files
-            .filter((f) => !f.isDirectory)
-            .map((f) => f.path.split('/').pop() ?? f.path);
-          const target = path.split('/').pop() ?? path;
-          const near = closestFileNames(target, names);
-          const where = dir === '' ? 'the project root' : `${dir}/`;
-          if (near.length > 0) {
-            text += `. Nearest existing in ${where}: ${near.join(', ')}`;
-          } else if (names.length > 0) {
-            text += `. ${where} contains: ${names.slice(0, 10).join(', ')}${names.length > 10 ? ', …' : ''}`;
-          }
-        } catch {
-          // Listing failed (directory itself missing) — the base error stands.
-        }
-      }
-      return { content: [{ type: 'text' as const, text }], isError: true };
-    }
-  },
-);
-
-server.tool(
-  'read_files',
-  `Read up to ${WORKSPACE_READ_MAX_FILES} known workspace files or line ranges in one call. Pass simple \`paths\` for whole-file first chunks, or richer \`files\` entries with inclusive startLine/endLine ranges; pass exactly one of those fields. Use this for independent files you already identified and grep_files/find_files first when paths are unknown. Results stay in request order and report item-level errors without discarding successful reads.`,
-  {
-    files: z
-      .array(
-        z.object({
-          path: z.string().min(1).max(4096).describe('Workspace-relative file path.'),
-          startLine: z
-            .number()
-            .int()
-            .min(1)
-            .max(10_000_000)
-            .optional()
-            .describe('1-based first line to return (inclusive). Defaults to 1.'),
-          endLine: z
-            .number()
-            .int()
-            .min(1)
-            .max(10_000_000)
-            .optional()
-            .describe(
-              `1-based last line to return (inclusive); at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines.`,
-            ),
-        }),
-      )
-      .min(1)
-      .max(WORKSPACE_READ_MAX_FILES)
-      .optional()
-      .describe('Files/ranges to read, in the order their results should be returned.'),
-    paths: z
-      .array(z.string().min(1).max(4096))
-      .min(1)
-      .max(WORKSPACE_READ_MAX_FILES)
-      .optional()
-      .describe(
-        'Simple workspace-relative paths. Use `files` instead when any path needs a range.',
-      ),
-  },
-  async ({ files, paths }) => {
-    try {
-      if ((files === undefined) === (paths === undefined)) {
-        throw new Error('pass exactly one of `paths` or `files`');
-      }
-      const requests: WorkspaceReadFileRequest[] = files ?? paths?.map((path) => ({ path })) ?? [];
-      for (const request of requests) {
-        const rangeError = workspaceReadRangeError(request);
-        if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
-      }
-      const response = await readWorkspaceFiles(requests);
-      const index = response.results.map((result, index) => {
-        if (result.status === 'error') {
-          return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
-        }
-        const next = result.nextStartLine ? ` nextStartLine=${result.nextStartLine}` : '';
-        return `${index + 1} OK ${result.path} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}${next}`;
-      });
-      const sections = response.results.map((result) => {
-        if (result.status === 'error') {
-          return `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`;
-        }
-        const range = workspaceReadRangeLabel(result);
-        const body = withLineNumbers(result.content, result.startLine) || '(no lines returned)';
-        const hint = workspaceReadHint(result);
-        return `--- ${result.path} (${range}) ---\n${body}${hint}`;
-      });
-      const allFailed =
-        response.results.length > 0 && response.results.every((r) => r.status === 'error');
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `[read_files requested=${response.results.length} ok=${response.results.filter((r) => r.status === 'ok').length} errors=${response.results.filter((r) => r.status === 'error').length}]\n${index.join('\n')}\n\n${sections.join('\n\n')}`,
-          },
-        ],
-        // Structured-first hosts need the same file slices, pagination, and
-        // item-level errors that the formatted text exposes.
-        structuredContent: {
-          results: response.results.map((result) =>
-            result.status === 'ok'
-              ? {
-                  path: result.path,
-                  status: result.status,
-                  content: result.content,
-                  startLine: result.startLine,
-                  endLine: result.endLine,
-                  completeFile: result.completeFile,
-                  totalLines: result.totalLines,
-                  hasMore: result.hasMore,
-                  nextStartLine: result.nextStartLine,
-                }
-              : {
-                  path: result.path,
-                  status: result.status,
-                  code: result.code,
-                  error: result.error,
-                },
-          ),
-        },
-        ...(allFailed ? { isError: true } : {}),
-      };
-    } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: `read_files failed: ${unwrapApiError(err)}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-function formatWorkspaceRead(result: WorkspaceReadFileSuccess, raw: boolean): string {
-  const body = raw ? result.content : withLineNumbers(result.content, result.startLine);
-  if (raw) return body;
-  return `[read_file path=${JSON.stringify(result.path)} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}]\n${body || '(no lines returned)'}${workspaceReadHint(result)}`;
-}
-
-function workspaceReadRangeLabel(result: WorkspaceReadFileSuccess): string {
-  const total = result.totalLines === undefined ? '?' : String(result.totalLines);
-  if (result.linesReturned === 0) return `lines=none totalLines=${total}`;
-  return `lines=${result.startLine}-${result.endLine} totalLines=${total}`;
-}
-
-function workspaceReadHint(result: WorkspaceReadFileSuccess): string {
-  if (result.nextStartLine === undefined && !result.truncated) return '';
-  const parts: string[] = [];
-  if (result.nextStartLine !== undefined) {
-    const nextEnd = result.nextStartLine + WORKSPACE_READ_MAX_RANGE_LINES - 1;
-    parts.push(
-      `next: read_file({"path":${JSON.stringify(result.path)},"startLine":${result.nextStartLine},"endLine":${nextEnd}})`,
-    );
-  }
-  if (result.truncationReason) parts.push(`truncated=${result.truncationReason}`);
-  return `\n\n…[${parts.join('; ')}]`;
-}
-
-function workspaceReadRangeError(args: {
-  startLine?: number;
-  endLine?: number;
-}): string | null {
-  const start = args.startLine ?? 1;
-  if (args.endLine !== undefined && args.endLine < start) {
-    return `endLine (${args.endLine}) must be greater than or equal to startLine (${start})`;
-  }
-  if (args.endLine !== undefined && args.endLine - start + 1 > WORKSPACE_READ_MAX_RANGE_LINES) {
-    return `a read range may contain at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines`;
-  }
-  return null;
-}
-
+const crossDrawerReadDependencies = {
+  server,
+  api,
+  projectId,
+  readWorkspaceFile,
+  readWorkspaceFiles,
+  concreteWorkspaceTarget,
+  workspaceClient,
+  normalizeArtifactPath,
+  workspaceCollisionForArtifactPath,
+  toolIsAuthorized: toolIsAuthorizedForThisSession,
+  unwrapApiError,
+};
+registerWorkspaceReadTools(crossDrawerReadDependencies);
 server.tool(
   'stat',
   "Return metadata (kind, size, mtime) about a path in the project, or `missing` if it doesn't exist. Cheap existence probe before a write — use this to avoid accidentally overwriting a file. Mirrors Node's `fs.stat`.",
@@ -3856,23 +3636,18 @@ async function workspaceCollisionForArtifactPath(
   return null;
 }
 
-/**
- * Find an exact same-path artifact after a workspace read misses. This is a
- * redirect hint only: deliberately do not return artifact content from the
- * workspace tool, because that would erase the provenance boundary and could
- * make later writes land in the wrong drawer.
- */
-async function artifactCollisionForWorkspacePath(path: string): Promise<string | null> {
-  try {
-    if ((await concreteWorkspaceTarget(path)).kind === 'linked') return null;
-    const cleanPath = normalizeArtifactPath(path);
-    const result = await api.readProjectArtifactSlice(projectId, cleanPath, { head: 0 });
-    return result.kind === 'found' && !result.fuzzy ? result.path : null;
-  } catch {
-    // This helper only adds a corrective hint. Preserve read_file's ordinary
-    // near-match handling when the artifact lookup itself is unavailable.
-    return null;
-  }
+function toolIsAuthorizedForThisSession(name: string): boolean {
+  const canonical = canonicalToolName(name);
+  // Bridge-backed providers can register a broad child-server surface and
+  // enforce the role allowlist in McpBridgePool. ChatManager passes that
+  // effective authorization separately so an internal corrective reroute
+  // cannot bypass the pool. Direct MCP clients fall back to the registration
+  // filters because no second enforcement layer exists there.
+  if (authorizedToolNames !== null) return authorizedToolNames.has(canonical);
+  return (
+    !excludedToolNames.has(canonical) &&
+    (allowedToolNames === null || allowedToolNames.has(canonical))
+  );
 }
 
 const WORKSPACE_DELIVERABLE_EXTENSIONS = new Set([
@@ -3958,7 +3733,13 @@ server.tool(
     // the subtree, so the cap applies to the subtree alone.
     const wantRecursive = recursive !== false;
     const res = await api.listProjectArtifacts(projectId, subpath || undefined, wantRecursive);
-    const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+    const listing = res.files
+      .map((f) =>
+        f.isDirectory
+          ? `📁 ${f.path}`
+          : `📄 ${f.path}\n   open: ${renderExactToolCall('read_artifact', { path: f.path })}`,
+      )
+      .join('\n');
     const summary = res.files.length
       ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}${subpath ? ` under ${subpath}/` : ''}.`
       : subpath
@@ -3971,7 +3752,11 @@ server.tool(
       ListToolOutputSchema,
       {
         summary,
-        items: res.files,
+        items: res.files.map((file) => ({
+          ...file,
+          surface: 'artifact',
+          ...(!file.isDirectory ? { readWith: 'read_artifact' } : {}),
+        })),
         count: res.files.length,
         ...(res.truncated !== undefined ? { truncated: res.truncated } : {}),
       },
@@ -3979,94 +3764,7 @@ server.tool(
     );
   },
 );
-
-server.tool(
-  'read_artifact',
-  'Read a file from the artifacts drawer only (a report, script, or output returned by `list_artifacts` or explicitly described as an artifact). Not for workspace files shown under "Workspace files" — use `read_file` for those. Accepts a full path relative to the artifacts root ("reports/summary.md") or just a basename ("summary.md") — if exact misses, falls back to a case-insensitive basename search. Optional slice params for navigating large artifacts (e.g. `auto/browser_snapshot/...` files persisted by the outboard-storage wrapper): `lines: { start, count }` for a 1-indexed line range, `head: N` for the first N lines, `tail: N` for the last N. At most one slice param; omit all to get the full content. Result includes `totalLines` / `hasMore` so you can paginate without guessing.',
-  {
-    path: z
-      .string()
-      .describe(
-        'File path or basename. A redundant "artifacts/" prefix is stripped automatically.',
-      ),
-    lines: z
-      .object({
-        start: z.number().int().min(1).describe('1-indexed first line to return.'),
-        count: z.number().int().min(0).describe('Number of lines to return.'),
-      })
-      .optional()
-      .describe('Read a specific line range (mutually exclusive with `head` / `tail`).'),
-    head: z.number().int().min(0).optional().describe('Read just the first N lines.'),
-    tail: z.number().int().min(0).optional().describe('Read just the last N lines.'),
-  },
-  async ({ path, lines, head, tail }) => {
-    const opts: { lines?: { start: number; count: number }; head?: number; tail?: number } = {};
-    if (lines) opts.lines = lines;
-    else if (typeof head === 'number') opts.head = head;
-    else if (typeof tail === 'number') opts.tail = tail;
-    const clean = normalizeArtifactPath(path);
-    const res = await api.readProjectArtifactSlice(projectId, clean, opts);
-    if (res.kind === 'missing') {
-      const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
-      if (workspaceCollision) {
-        const tool = workspaceCollision.kind === 'dir' ? 'list_dir' : 'read_file';
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Artifact "${path}" not found, but a workspace ${workspaceCollision.kind} exists at "${workspaceCollision.path}". Use ${tool}({ path: "${workspaceCollision.path}" }) instead of read_artifact if that tool is available, or delegate to a gezel with workspace read access.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      // Mark the response as an error so the tool-call bubble in the
-      // UI renders as failed rather than green-checkmark success. The
-      // model still gets the "not found, call list_artifacts" hint as
-      // the error text; the `success: !isError` path in mcp-bridge
-      // flips the surface state to match the semantic outcome.
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Artifact "${path}" not found. Call list_artifacts to see what's available.`,
-          },
-        ],
-        isError: true,
-      };
-    }
-    if (res.kind === 'ambiguous') {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `"${path}" matches multiple artifacts. Call read_artifact again with a full path:\n${res.candidates.map((p) => `  • ${p}`).join('\n')}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-    const header = res.fuzzy ? `(matched ${res.path} by basename)\n` : '';
-    const sliceTail =
-      res.hasMore || res.linesReturned !== res.totalLines
-        ? `\n\n…[lines ${res.linesReturned} of ${res.totalLines}; ${res.hasMore ? 'more available' : 'this is the last slice'}. Re-call with \`lines: { start, count }\` to read more.]`
-        : '';
-    return {
-      content: [{ type: 'text' as const, text: header + res.content + sliceTail }],
-      structuredContent: {
-        requestedPath: clean,
-        resolvedPath: res.path,
-        fuzzy: res.fuzzy,
-        // Hosts may prefer structuredContent over the text blocks. Both forms
-        // must carry the requested slice, not just its lookup metadata.
-        content: res.content,
-        linesReturned: res.linesReturned,
-        totalLines: res.totalLines,
-        hasMore: res.hasMore,
-      },
-    };
-  },
-);
+registerArtifactReadTools(crossDrawerReadDependencies);
 
 server.tool(
   'grep_artifact',
@@ -4105,16 +3803,34 @@ server.tool(
     if (res.kind === 'missing') {
       const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
       if (workspaceCollision) {
-        const tool = workspaceCollision.kind === 'dir' ? 'list_dir' : 'read_file';
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Artifact "${path}" not found, but a workspace ${workspaceCollision.kind} exists at "${workspaceCollision.path}". grep_artifact only searches artifacts; use ${tool}({ path: "${workspaceCollision.path}" }) or workspace search tools if available, or delegate to a gezel with workspace read access.`,
-            },
-          ],
-          isError: true,
-        };
+        const workspaceArgs = equivalentWorkspaceGrepArgs(workspaceCollision.path, pattern, {
+          caseInsensitive,
+          contextLines,
+          maxMatches,
+        });
+        const exactCall = renderExactToolCall('grep_files', workspaceArgs);
+        if (toolIsAuthorizedForThisSession('grep_files')) {
+          try {
+            const workspaceResult = await api.toolSearchFiles(projectId, workspaceArgs);
+            return workspaceGrepResult(
+              workspaceArgs,
+              workspaceResult,
+              `Rerouted grep_artifact to the equivalent workspace call because "${path}" is a workspace ${workspaceCollision.kind}, not an artifact:\n${exactCall}`,
+            );
+          } catch (err) {
+            return errorResult(
+              `Artifact "${path}" was not found and its automatic workspace fallback failed: ${unwrapApiError(err)}`,
+              { retryable: true, hint: exactCall },
+            );
+          }
+        }
+        return errorResult(
+          `Artifact "${path}" not found, but a workspace ${workspaceCollision.kind} exists at "${workspaceCollision.path}". grep_files is not authorized for this session.`,
+          {
+            retryable: false,
+            hint: `Delegate to a gezel with workspace search access to run ${exactCall}`,
+          },
+        );
       }
       return {
         content: [
@@ -10762,77 +10478,7 @@ server.tool(
   async (args) => {
     try {
       const res = await api.toolSearchFiles(projectId, args);
-      const truncation = res.truncated
-        ? `\nResults truncated (${res.truncationReason ?? 'limit'}).${
-            res.nextCursor !== undefined
-              ? ` Continue with cursor=${res.nextCursor}, or narrow path/includeGlobs/pattern.`
-              : ' Narrow path/includeGlobs/pattern.'
-          }`
-        : '';
-      if (res.mode === 'count') {
-        const qualifier = res.truncated ? 'at least ' : '';
-        const summary = `${qualifier}${res.count} matching line${res.count === 1 ? '' : 's'} (engine=${res.engine}).`;
-        return okResult(
-          SearchToolOutputSchema,
-          {
-            summary,
-            query: args.pattern,
-            matches: [],
-            count: res.count,
-            truncated: res.truncated,
-            engine: res.engine,
-            mode: res.mode,
-            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-          },
-          { text: `${summary}${truncation}` },
-        );
-      }
-      if (res.mode === 'files') {
-        const header = `${res.files.length} matching file${res.files.length === 1 ? '' : 's'} (engine=${res.engine})`;
-        return okResult(
-          SearchToolOutputSchema,
-          {
-            summary: `${header}.`,
-            query: args.pattern,
-            matches: res.files.map((path) => ({ path })),
-            count: res.files.length,
-            truncated: res.truncated,
-            engine: res.engine,
-            mode: res.mode,
-            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-          },
-          { text: `${header}\n${res.files.join('\n') || '(none)'}${truncation}` },
-        );
-      }
-      const lines = res.matches.flatMap((match, index) => {
-        const block = [
-          ...(match.before ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
-          `${match.path}:${match.line}:${match.text}`,
-          ...(match.after ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
-        ];
-        if (index < res.matches.length - 1 && (match.before?.length || match.after?.length)) {
-          block.push('--');
-        }
-        return block;
-      });
-      const header = `${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} (engine=${res.engine})`;
-      return okResult(
-        SearchToolOutputSchema,
-        {
-          summary: `${header}.`,
-          query: args.pattern,
-          matches: res.matches,
-          count: res.matches.length,
-          truncated: res.truncated,
-          engine: res.engine,
-          mode: res.mode,
-          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
-          ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
-        },
-        { text: `${header}\n${lines.join('\n') || '(no matches)'}${truncation}` },
-      );
+      return workspaceGrepResult(args, res);
     } catch (err) {
       const msg = unwrapApiError(err);
       return errorResult(`grep_files failed: ${msg}`);

@@ -23,6 +23,7 @@ import {
   stringifyMarkdown,
 } from '@bendyline/squisq/markdown';
 import { type ContentContainer, MemoryContentContainer } from '@bendyline/squisq/storage';
+import { rewriteDocumentCompanionRefs } from './document-companion.js';
 
 // CSV is a Gezel host extension to Squisq's rendered-document outside-in set:
 // the visible source stays in the file tree, while the Markdown companion uses
@@ -131,6 +132,39 @@ export function chooseOutsideInSource(
       path.toLocaleLowerCase('en-US').endsWith('.md'),
   );
   return markdown.length === 1 ? markdown[0]! : null;
+}
+
+/**
+ * Repair the Markdown half of an outside-in document after its visible file
+ * and companion directory have moved. Canonical companions track the new stem;
+ * hand-authored companion filenames remain stable, but both forms receive the
+ * new output metadata and any explicit companion-name references are relinked.
+ */
+export async function relinkMovedOutsideInCompanion(options: {
+  from: OutsideInLayout;
+  to: OutsideInLayout;
+  filePaths: readonly string[];
+  rename: (fromPath: string, toPath: string) => Promise<void>;
+  read: (path: string) => Promise<string>;
+  write: (path: string, content: string) => Promise<void>;
+}): Promise<void> {
+  const sourceBeforeMove = chooseOutsideInSource(options.from, options.filePaths);
+  if (!sourceBeforeMove) return;
+
+  let sourcePath = `${options.to.companionDirectory}${sourceBeforeMove.slice(options.from.companionDirectory.length)}`;
+  if (sourceBeforeMove === options.from.markdownPath && sourcePath !== options.to.markdownPath) {
+    await options.rename(sourcePath, options.to.markdownPath);
+    sourcePath = options.to.markdownPath;
+  }
+
+  const content = await options.read(sourcePath);
+  const relinked = rewriteDocumentCompanionRefs(
+    content,
+    options.from.targetPath,
+    options.to.targetPath,
+  );
+  const linked = withOutsideInMetadata(relinked, options.to);
+  if (linked !== content) await options.write(sourcePath, linked);
 }
 
 export function withOutsideInMetadata(markdown: string, layout: OutsideInLayout): string {

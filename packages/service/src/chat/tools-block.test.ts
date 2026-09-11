@@ -131,6 +131,7 @@ describe('renderAvailableToolsBlock — grouping', () => {
     const out = renderAvailableToolsBlock({
       tools: [
         { name: 'write_artifact', description: 'Write an artifact.' },
+        { name: 'read_artifacts', description: 'Read several artifacts.' },
         { name: 'search_memory', description: 'Find a memory.' },
       ],
       modelTier: 'medium',
@@ -142,6 +143,8 @@ describe('renderAvailableToolsBlock — grouping', () => {
     const artifactsIdx = out.indexOf('### Project Artifacts');
     expect(memoryIdx).toBeGreaterThan(0);
     expect(artifactsIdx).toBeGreaterThan(memoryIdx);
+    expect(out).toContain('`read_artifacts`');
+    expect(out.slice(out.indexOf('### Other tools'))).not.toContain('`read_artifacts`');
   });
 
   it('renders unmapped tool names under "Other tools"', () => {

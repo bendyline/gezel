@@ -295,6 +295,7 @@ export async function inspectMachineRuntime(runtime: SystemServiceRuntime): Prom
       pinnedIdentityKey: identity.publicKeyPem,
       pinnedIdentityFingerprint: identity.fingerprint,
       tlsCertPem: identity.tlsCertPem,
+      ...(identity.gezelVersion ? { gezelVersion: identity.gezelVersion } : {}),
       scopes: ['remote-inference', 'machine-models', 'machine-knowledge-assets'],
       pairedAt: Date.now(),
       lastSeenAt: Date.now(),

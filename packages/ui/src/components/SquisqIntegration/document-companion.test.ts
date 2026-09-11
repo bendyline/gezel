@@ -4,6 +4,7 @@ import {
   documentVersionBasename,
   markdownCompanionDirectory,
   moveFileWithCompanion,
+  rewriteDocumentCompanionRefs,
 } from './document-companion.js';
 
 describe('document companion paths', () => {
@@ -17,6 +18,53 @@ describe('document companion paths', () => {
     expect(documentVersionBasename('reports/quarterly.review.md')).toBe('quarterly.review');
     expect(markdownCompanionDirectory('notes')).toBe('notes_files');
     expect(markdownCompanionDirectory('image.png')).toBeNull();
+  });
+});
+
+describe('rewriteDocumentCompanionRefs', () => {
+  it('retargets Markdown, HTML, and reference-definition destinations', () => {
+    const source = [
+      '![Hero](quarterly.review_files/hero.png)',
+      '[Appendix](<./quarterly.review_files/Appendix A.pdf>)',
+      '<img src="quarterly.review_files/chart.png">',
+      '[logo]: quarterly.review_files/logo.svg',
+    ].join('\n');
+
+    expect(
+      rewriteDocumentCompanionRefs(
+        source,
+        'reports/quarterly.review.md',
+        'reports/annual review.md',
+      ),
+    ).toBe(
+      [
+        '![Hero](annual%20review_files/hero.png)',
+        '[Appendix](<./annual review_files/Appendix A.pdf>)',
+        '<img src="annual review_files/chart.png">',
+        '[logo]: annual%20review_files/logo.svg',
+      ].join('\n'),
+    );
+  });
+
+  it('preserves percent encoding and leaves prose and fenced examples alone', () => {
+    const ticks = '```';
+    const source = [
+      'The assets live in My Notes_files/.',
+      '![real](My%20Notes_files/hero.png)',
+      ticks,
+      '![example](My Notes_files/example.png)',
+      ticks,
+    ].join('\n');
+
+    expect(rewriteDocumentCompanionRefs(source, 'My Notes.md', 'Final Notes.md')).toBe(
+      [
+        'The assets live in My Notes_files/.',
+        '![real](Final%20Notes_files/hero.png)',
+        ticks,
+        '![example](My Notes_files/example.png)',
+        ticks,
+      ].join('\n'),
+    );
   });
 });
 

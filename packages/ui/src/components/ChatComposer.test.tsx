@@ -58,6 +58,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
   const EditorTestContext = createContext({ replaceAll: (_source: string) => {} });
   return {
     useEditorContext: () => useContext(EditorTestContext),
+    useEditorContextMenuItems: () => {},
     EditorShell: ({
       initialMarkdown = '',
       placeholder,
@@ -529,6 +530,75 @@ describe('ChatComposer server-authoritative cancellation', () => {
 
     expect(await screen.findByRole('button', { name: /stop/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^send$/i })).toBeNull();
+  });
+
+  it('lets a fresh thread send while the previous thread keeps running', async () => {
+    let sessionOneRunning = false;
+    let firstStreamSignal: AbortSignal | undefined;
+    vi.mocked(api.getChatSessionInflight).mockImplementation(async (sessionId) => ({
+      inflight:
+        sessionId === 'session-1' && sessionOneRunning
+          ? {
+              userText: 'Keep working on the first thread',
+              startedAt: Date.now() - 5_000,
+              elapsedMs: 5_000,
+            }
+          : null,
+    }));
+    vi.mocked(api.sendToChatSession).mockImplementation(async (sessionId) => {
+      if (sessionId === 'session-1') sessionOneRunning = true;
+      return { accepted: true, sessionId };
+    });
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-2' } as never);
+    vi.mocked(streamChatEvents).mockImplementation((opts) => {
+      if (!firstStreamSignal) firstStreamSignal = opts.signal;
+      return (async function* waitForAbort() {
+        await new Promise<void>((_, reject) => {
+          const abort = () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (opts.signal?.aborted) abort();
+          else opts.signal?.addEventListener('abort', abort, { once: true });
+        });
+      })();
+    });
+
+    const { rerender } = render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+    await waitFor(() => expect(api.getChatSessionInflight).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    expect(await screen.findByRole('button', { name: /stop/i })).toBeTruthy();
+
+    rerender(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId={undefined} />,
+    );
+
+    const sendButton = await screen.findByRole('button', { name: /^send$/i });
+    expect(firstStreamSignal?.aborted).toBe(true);
+    expect(api.cancelChatSessionTurn).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(api.createChatSession).toHaveBeenCalledTimes(1);
+      expect(api.sendToChatSession).toHaveBeenCalledWith('session-2', {
+        message: 'Hello from the test',
+        draftId: '2026-09-03-0001',
+      });
+    });
+
+    rerender(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /stop/i }));
+    await waitFor(() => {
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+    });
   });
 
   it('Escape cancels the service turn, not just the local event stream', async () => {

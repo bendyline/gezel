@@ -44,6 +44,20 @@ export interface DeliverableWrite {
   success: boolean;
 }
 
+/**
+ * A runtime-owned observable may advance automatically only after the model
+ * has produced any separate model-owned result required by the step. Today
+ * task notes are the only non-file surface represented in completion gates.
+ */
+export function hookOwnedAdvanceHasModelOutput(
+  hookOwnsAdvanceFile: boolean,
+  taskNoteIsModelOutput: boolean,
+  calls: readonly DeliverableWrite[],
+): boolean {
+  if (!hookOwnsAdvanceFile || !taskNoteIsModelOutput) return true;
+  return calls.some((call) => call.name === 'write_task_note' && call.success);
+}
+
 export interface DeliverableGateResult {
   satisfied: boolean;
   /** Human-readable explanation — logged on advance, useful when it holds. */

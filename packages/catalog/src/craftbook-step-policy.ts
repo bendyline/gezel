@@ -4,7 +4,11 @@ import type {
   CraftbookStepWritableOutputMedium,
   NewCraftbookStep,
 } from '@bendyline/gezel';
-import { deliverableKindForStep, requiredOutputMediaForGate } from '@bendyline/gezel';
+import {
+  deliverableKindForStep,
+  requiredOutputMediaForGate,
+  stepOnEnterProducesAdvanceFile,
+} from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from './builtin-toolsets.js';
 
 const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((group) => [group.id, group]));
@@ -59,6 +63,7 @@ export function outputMediumForCraftbookBlueprint(
   step: NewCraftbookStep,
 ): CraftbookStepOutputMedium {
   const gateRequiredMedia = [...requiredOutputMediaForGate(step.gate)];
+  const runtimeOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
   if (step.toolPolicy?.outputMedium) {
     // A gate is an executable exit contract. It outranks a contradictory
     // `none` annotation, which would otherwise author a step that cannot
@@ -66,10 +71,17 @@ export function outputMediumForCraftbookBlueprint(
     if (step.toolPolicy.outputMedium === 'none' && gateRequiredMedia[0]) {
       return gateRequiredMedia[0];
     }
+    const advanceSurface = step.advanceWhen?.artifact ? 'artifact' : 'workspace';
+    if (runtimeOwnsAdvanceFile && step.toolPolicy.outputMedium === advanceSurface) {
+      return gateRequiredMedia[0] ?? 'none';
+    }
     return step.toolPolicy.outputMedium;
   }
   if (step.deliverable?.path) return step.deliverable.artifact ? 'artifact' : 'workspace';
-  if (step.advanceWhen?.file) return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+  if (step.advanceWhen?.file && !runtimeOwnsAdvanceFile) {
+    return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+  }
+  if (runtimeOwnsAdvanceFile) return gateRequiredMedia[0] ?? 'none';
   const fileCheck = gateChecks(step).find(
     (check) => typeof check.file === 'string' && check.file.length > 0,
   );

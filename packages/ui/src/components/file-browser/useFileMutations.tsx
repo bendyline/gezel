@@ -10,13 +10,13 @@ import { ConfirmDialog } from '../ConfirmDialog.js';
 import type { FileEntry } from '../FileTree.js';
 import { NewPathDialog } from '../NewPathDialog.js';
 import {
-  chooseOutsideInSource,
   importDroppedFiles,
   isMarkdownDocumentPath,
   markdownCompanionDirectory,
   moveFileWithCompanion,
+  relinkMovedOutsideInCompanion,
   resolveOutsideInLayout,
-  withOutsideInMetadata,
+  rewriteDocumentCompanionRefs,
 } from '../SquisqIntegration/index.js';
 import type { FileBrowserSource } from './source.js';
 
@@ -221,28 +221,32 @@ export function useFileMutations(options: {
           ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
           : null,
       );
-      // A rendered document's companion folder carries its editable markdown
-      // and media; it has to travel with the visible file, and the metadata
-      // inside has to be relinked or the next open resolves the old directory.
-      if (oldLayout && nextLayout) {
+      // The companion has moved; now relink the document that points into it.
+      // Rendered documents keep that source inside the companion, while a
+      // regular Markdown document carries the `<stem>_files/` references in
+      // the visible file itself.
+      if (oldLayout && nextLayout && hasCompanion) {
         const filePaths = entries
           .filter((candidate) => !candidate.isDirectory)
           .map((candidate) => candidate.path);
-        const oldSourcePath = chooseOutsideInSource(oldLayout, filePaths);
-        if (hasCompanion) {
-          if (oldSourcePath) {
-            let sourcePath = `${nextLayout.companionDirectory}${oldSourcePath.slice(oldLayout.companionDirectory.length)}`;
-            if (
-              oldSourcePath === oldLayout.markdownPath &&
-              sourcePath !== nextLayout.markdownPath
-            ) {
-              await renameAt(sourcePath, nextLayout.markdownPath);
-              sourcePath = nextLayout.markdownPath;
-            }
-            const response = await source.read(sourcePath);
-            const linked = withOutsideInMetadata(response.content, nextLayout);
-            if (linked !== response.content) await source.write(sourcePath, linked);
-          }
+        await relinkMovedOutsideInCompanion({
+          from: oldLayout,
+          to: nextLayout,
+          filePaths,
+          rename: renameAt,
+          read: async (path) => (await source.read(path)).content,
+          write: source.write,
+        });
+      } else if (
+        hasCompanion &&
+        !entry.isDirectory &&
+        isMarkdownDocumentPath(entry.path) &&
+        isMarkdownDocumentPath(toPath)
+      ) {
+        const response = await source.read(toPath);
+        const relinked = rewriteDocumentCompanionRefs(response.content, entry.path, toPath);
+        if (relinked !== response.content) {
+          await source.write(toPath, relinked);
         }
       }
       await refresh();

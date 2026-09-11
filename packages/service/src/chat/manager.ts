@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import type { FileTurnIntent } from '@bendyline/gezel';
+import type { FileTurnIntent, MapRepoResponse } from '@bendyline/gezel';
 import {
   type AIEngagementMode,
   type AwakeBudget,
@@ -54,11 +54,13 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
+  requiredOutputMediaForGate,
   resolveExecutionDensity,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
   stepDeliverablePath,
+  stepOnEnterProducesAdvanceFile,
   tierAtLeast,
   turnCancelledMessage,
   validateScriptInput,
@@ -67,7 +69,10 @@ import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
-import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
+import {
+  outputMediumForStep,
+  toolsetIdsExplicitlyDisabledForStep,
+} from '../craftbook/step-toolsets.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
@@ -259,7 +264,11 @@ import {
   ContextCompactor,
 } from './context-compaction.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
-import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
+import {
+  deliverableWrittenThisTurn,
+  evaluateDeliverableGate,
+  hookOwnedAdvanceHasModelOutput,
+} from './deliverable-gate.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -1684,23 +1693,28 @@ export class ChatManager extends LocalEngineRuntime {
   }
   /** Per-project gestalt block cache — mapRepo reads the whole files table,
    *  so don't pay it on every prompt rebuild. */
-  private readonly gestaltCache = new Map<string, { at: number; block: string }>();
+  private readonly gestaltCache = new Map<string, { at: number; map: MapRepoResponse | null }>();
 
-  private async buildWorkspaceGestalt(projectId: string): Promise<string> {
+  private async buildWorkspaceGestalt(
+    projectId: string,
+    availableTools: ReadonlySet<string>,
+  ): Promise<string> {
     const index = this.contentIndexRef;
     if (!index) return '';
     const project = await this.store.getProject(projectId).catch(() => null);
     if (project?.indexingEnabled === false) return '';
     const cached = this.gestaltCache.get(projectId);
-    if (cached && Date.now() - cached.at < 60_000) return cached.block;
-    let block = '';
-    try {
-      block = renderWorkspaceGestalt(await index.mapRepo(projectId));
-    } catch {
-      block = '';
+    if (cached && Date.now() - cached.at < 60_000) {
+      return cached.map ? renderWorkspaceGestalt(cached.map, availableTools) : '';
     }
-    this.gestaltCache.set(projectId, { at: Date.now(), block });
-    return block;
+    try {
+      const map = await index.mapRepo(projectId);
+      this.gestaltCache.set(projectId, { at: Date.now(), map });
+      return renderWorkspaceGestalt(map, availableTools);
+    } catch {
+      this.gestaltCache.set(projectId, { at: Date.now(), map: null });
+      return '';
+    }
   }
 
   /** Paired servers used to resolve `remote:<id>/<model>` providers. */
@@ -2189,6 +2203,23 @@ export class ChatManager extends LocalEngineRuntime {
           : (step.suggestedGezelId ??
             (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
       if (owner !== gezelId) continue;
+
+      // A hook-owned `advanceWhen.file` is evidence prepared by the runtime,
+      // not proof that the model completed every other required output. Pull
+      // Request Review's scope step is the wild-caught case: onEnter wrote the
+      // immutable batches file, while the model still owed a task note. A
+      // failed read-only turn therefore satisfied the file observable and
+      // burned a gate attempt before the note could exist. Hold automatic
+      // progression until this turn produces the model-owned task-note
+      // surface. Pure runtime steps such as coverage collection still advance
+      // from their hook-owned file because they declare no model output.
+      const hookOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
+      const taskNoteIsModelOutput =
+        outputMediumForStep(step) === 'task-note' ||
+        requiredOutputMediaForGate(step.gate).has('task-note');
+      if (!hookOwnedAdvanceHasModelOutput(hookOwnsAdvanceFile, taskNoteIsModelOutput, drained)) {
+        continue;
+      }
 
       // A drafting task's workspace deliverable lives in the diffpack
       // overlay — judge the proposed tree, not the untouched real one.
@@ -7432,11 +7463,12 @@ export class ChatManager extends LocalEngineRuntime {
       }
       if (projectRetrieval) {
         promptForTurn = `${projectRetrieval.prompt}\n\n${promptForTurn}`;
-        // Stamp the consulted sources on the stored user message — citations
-        // only (source/path/line/score), never the retrieved text — so the
-        // UI can show what this turn consulted instead of the retrieval
-        // being invisible machinery.
+        // Stamp the exact RAG byte size and per-source excerpts on the stored
+        // user message so the UI can show both what this turn consulted and
+        // what the model actually saw. The outer byte count also includes the
+        // trust-boundary header/footer and provenance rows in the prompt.
         userMessage.retrieval = {
+          injectedBytes: projectRetrieval.injectedBytes,
           hits: projectRetrieval.hits.map((hit) => ({
             source: hit.source,
             ...(hit.projectId ? { projectId: hit.projectId } : {}),
@@ -7444,6 +7476,12 @@ export class ChatManager extends LocalEngineRuntime {
             ...(hit.line ? { line: hit.line } : {}),
             ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
             score: hit.score,
+            ...(hit.uri ? { uri: hit.uri } : {}),
+            ...(hit.title ? { title: hit.title } : {}),
+            ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
+            ...(hit.catalogVersion ? { catalogVersion: hit.catalogVersion } : {}),
+            injectedText: hit.excerpt,
+            injectedBytes: Buffer.byteLength(hit.excerpt, 'utf8'),
           })),
         };
         log.info(
@@ -13341,10 +13379,8 @@ export class ChatManager extends LocalEngineRuntime {
     // retrieval-first steer, both marker behaviors resolved here and
     // rendered/gated inside buildInstructions.
     const retrievalFirstActive = profileHasBehavior(modelProfile, 'prompt.retrieval-first');
-    const workspaceGestalt =
-      project && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt')
-        ? await this.buildWorkspaceGestalt(record.projectId)
-        : '';
+    const workspaceGestaltActive =
+      Boolean(project) && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
     const documentDescriptions =
       documentFiles.length > 0 &&
       libraryProjectId &&
@@ -13769,6 +13805,12 @@ export class ChatManager extends LocalEngineRuntime {
       );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
+    const workspaceGestalt = workspaceGestaltActive
+      ? await this.buildWorkspaceGestalt(
+          record.projectId,
+          new Set(availableBuiltinTools.map((tool) => tool.name)),
+        )
+      : '';
 
     // Layered prefix caching is a LOCAL-ENGINE optimization: it moves the
     // volatile band into a second `system` message that only the llama-cpp /
@@ -14294,40 +14336,50 @@ export class ChatManager extends LocalEngineRuntime {
       // surface the touched files. Derive a compact args preview the UI
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
       const sc = info.structuredContent;
-      const batchedWorkspaceRead =
-        info.name === 'read_files' || info.name === 'read_multiple_files';
+      const batchedRead =
+        info.name === 'read_files' ||
+        info.name === 'read_multiple_files' ||
+        info.name === 'read_artifacts';
       const structuredReadPaths =
-        batchedWorkspaceRead && Array.isArray(sc?.results)
+        batchedRead && Array.isArray(sc?.results)
           ? sc.results
-              .filter((result): result is { path: string; status: 'ok' } =>
-                Boolean(
-                  result &&
-                    typeof result === 'object' &&
-                    (result as { status?: unknown }).status === 'ok' &&
-                    typeof (result as { path?: unknown }).path === 'string',
-                ),
+              .filter(
+                (
+                  result,
+                ): result is {
+                  path: string;
+                  resolvedPath?: string;
+                  status: 'ok';
+                } =>
+                  Boolean(
+                    result &&
+                      typeof result === 'object' &&
+                      (result as { status?: unknown }).status === 'ok' &&
+                      typeof (result as { path?: unknown }).path === 'string',
+                  ),
               )
-              .map((result) => result.path)
+              .map((result) =>
+                typeof result.resolvedPath === 'string' ? result.resolvedPath : result.path,
+              )
           : [];
       const paths = [...new Set(structuredReadPaths)];
       const rawPath = info.args?.path;
-      const artifactResolutionTool = info.name === 'read_artifact' || info.name === 'grep_artifact';
-      const resolvedArtifactPath =
-        artifactResolutionTool && typeof sc?.resolvedPath === 'string'
-          ? sc.resolvedPath
-          : undefined;
-      const artifactFuzzy =
-        artifactResolutionTool && typeof sc?.fuzzy === 'boolean' ? sc.fuzzy : undefined;
-      const requestedArtifactPath =
-        artifactResolutionTool && typeof sc?.requestedPath === 'string'
+      const resolutionAwareRead =
+        info.name === 'read_file' || info.name === 'read_artifact' || info.name === 'grep_artifact';
+      const resolvedReadPath =
+        resolutionAwareRead && typeof sc?.resolvedPath === 'string' ? sc.resolvedPath : undefined;
+      const readFuzzy =
+        resolutionAwareRead && typeof sc?.fuzzy === 'boolean' ? sc.fuzzy : undefined;
+      const requestedReadPath =
+        resolutionAwareRead && typeof sc?.requestedPath === 'string'
           ? sc.requestedPath
           : typeof rawPath === 'string'
             ? rawPath
             : undefined;
-      // Artifact reads report their canonical resolution separately from the
-      // model-supplied path. Persist and render the file that was actually
-      // opened; keep the requested spelling in argsFull/history for audit.
-      const path = resolvedArtifactPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
+      // Cross-drawer and fuzzy reads report their canonical resolution
+      // separately from the model-supplied path. Persist and render the file
+      // that was actually opened; keep the request in argsFull/history.
+      const path = resolvedReadPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
       const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
@@ -14459,9 +14511,9 @@ export class ChatManager extends LocalEngineRuntime {
             success: info.success,
             ...(path ? { path } : {}),
             ...(paths.length > 0 ? { paths } : {}),
-            ...(resolvedArtifactPath ? { resolvedPath: resolvedArtifactPath } : {}),
-            ...(requestedArtifactPath ? { requestedPath: requestedArtifactPath } : {}),
-            ...(artifactFuzzy !== undefined ? { fuzzy: artifactFuzzy } : {}),
+            ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
+            ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),
+            ...(readFuzzy !== undefined ? { fuzzy: readFuzzy } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
@@ -15151,6 +15203,14 @@ export class ChatManager extends LocalEngineRuntime {
       },
     });
     const constrainedAllowlist = withheldWhileDrafting(bridgeSurface.allowlist);
+    if (opts.mcpServer && constrainedAllowlist) {
+      // Bridge-backed providers enforce this allowlist in McpBridgePool while
+      // keeping the child MCP server broadly registered. Pass the same
+      // authorization into the child for internal corrective reroutes (for
+      // example grep_artifact -> grep_files), which otherwise cannot see the
+      // pool-level gate. This variable does not alter tools/list.
+      opts.mcpServer.env.GEZEL_MCP_AUTHORIZED_TOOLS = [...constrainedAllowlist].sort().join(',');
+    }
     if (record.providerName === 'codex-cli' && opts.mcpServer && constrainedAllowlist) {
       // Script-tool names ride outside the role allowlist vocabulary; union
       // them in or the strict GEZEL_MCP_ALLOW filter would drop them.
@@ -16637,6 +16697,7 @@ const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'stat',
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'list_packages',
   'list_documents',
   'read_document',

@@ -51,7 +51,7 @@ These override anything earlier that contradicts.
 ${browseRow}| "save / remember this" | \`save_memory({ scope, text })\` |
 | "search what we know about X" | \`search_memory({ query })\` |
 | "write a note / artifact / draft" that is not a workspace/source file | \`write_artifact({ path, content })\` |
-| "read part of a large artifact" returned by \`list_artifacts\` or a tool result | \`read_artifact({ path, lines: { start, count } })\` or \`{ head: N }\` / \`{ tail: N }\` |
+| "read one or several artifacts" returned by \`list_artifacts\` or a tool result | \`read_artifact({ path, startLine, endLine })\` or \`read_artifacts({ paths })\` — paths are artifact-root-relative (\`data/...\`, never \`artifacts/data/...\`) |
 | "find something specific in an artifact" | \`grep_artifact({ path, pattern })\` |
 | "find an element on the current browser page (button, input, link)" | \`browser_find_page_element({ description: "search input" })\` — much smaller payload than grep_artifact on a full snapshot |
 | user gives the answer to a question card | (already handled — just continue) |

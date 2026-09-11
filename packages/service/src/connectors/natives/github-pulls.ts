@@ -431,7 +431,11 @@ export function registerGitHubPullsAdapters(runtime: GitHubPullsRuntime): void {
     // checks interpolate, so a recipe never hard-codes the corpus name.
     // `corpusDir` already carries the `data/` prefix (resolveCorpusDir).
     const corpusDir = ctx.binding.corpusDir ?? 'data/github-pulls';
-    const corpusScope = `artifacts/${corpusDir.startsWith('data/') ? corpusDir : `data/${corpusDir}`}/${scope}`;
+    // Model-facing artifact paths are always relative to the artifact root.
+    // The MCP layer still strips a legacy `artifacts/` prefix for persisted
+    // tasks, but emitting that storage-label prefix here taught models to use
+    // the workspace reader on a path that looked like an ordinary directory.
+    const corpusScope = `${corpusDir.startsWith('data/') ? corpusDir : `data/${corpusDir}`}/${scope}`;
     return {
       params: { number: String(num), corpusScope },
       summary: `PR #${num} → \`${corpusScope}/\` (${result.written} record(s) written)`,

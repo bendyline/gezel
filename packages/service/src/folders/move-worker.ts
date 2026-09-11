@@ -61,6 +61,24 @@ export async function runMove(opts: RunMoveOpts): Promise<void> {
     });
     if (job.cancelRequested) return finalizeCancelled(jobs, jobId);
 
+    // Location-only mode deliberately does not touch either folder. It is
+    // useful when the destination already contains the desired library (for
+    // example after reconnecting a cloud-synced folder on another machine).
+    if (job.conflictPolicy === 'use-destination') {
+      jobs.update(jobId, { phase: 'swap' });
+      const next: Record<string, string | null> = {};
+      next[job.scope] = job.destPath;
+      await store.writeConfig({ externalFolders: next as Record<string, string | null> });
+      onConfigSwapped?.(job.scope);
+      jobs.update(jobId, {
+        status: 'done',
+        restartRequired: true,
+        endedAt: new Date().toISOString(),
+      });
+      log.info(`location updated without moving files: ${job.scope} → ${job.destPath}`);
+      return;
+    }
+
     const isoTs = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = backupRootForScope(home, job.scope, isoTs);
 

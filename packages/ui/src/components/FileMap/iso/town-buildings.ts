@@ -1,5 +1,12 @@
 import type { PrismColors } from '../palette.js';
 import { seeded } from '../seed.js';
+import {
+  drawPeriodAwning,
+  drawPeriodFacade,
+  drawPeriodGable,
+  roofShades,
+  sashBounds,
+} from './period-details.js';
 import { type PrismScreen, drawPrism, fillQuad } from './prism.js';
 import { townRoofRiseIso } from './projection.js';
 import type { IsoRenderState, ScreenPt } from './state.js';
@@ -79,6 +86,7 @@ export function drawTownBuilding(
 
   if (!options.suppressDetails && s.tier === 'street' && prism.liftPx >= 5) {
     drawFacadeDetails(ctx, s, prism, style, compact);
+    drawPeriodFacade(ctx, s, prism, style);
   }
 
   // Trim runs one tier wider than the rest of the facade: a cornice is two
@@ -93,11 +101,12 @@ export function drawTownBuilding(
     drawTrim(ctx, s, prism, style, colors);
   }
 
-  const ridge = drawRoof(ctx, s, prism, style, roofPx, colors);
+  const ridge = drawRoof(ctx, s, prism, style, roofPx, roofShades(colors));
 
   if (!options.suppressDetails && s.tier === 'street') {
     drawRoofMaterial(ctx, prism, style, ridge, colors, compact);
     drawEavesAndBargeboards(ctx, prism, style, ridge, colors, compact);
+    drawPeriodGable(ctx, s, prism, style, colors, ridge, roofPx);
 
     // Caps mount on the ridge and must fit in whatever headroom is left inside
     // the declared budget. Deriving their size from what remains — rather than
@@ -834,23 +843,7 @@ function drawFacadeDetails(
 
   drawGroundFloor(ctx, s, p, style);
 
-  if (style.awning) {
-    const awning = wallPatch(p.ts, p.te, p.gs, p.ge, 0.08, 0.92, 0.57, 0.7);
-    fillQuad(ctx, s.palette.awning, ...awning);
-    ctx.strokeStyle = s.palette.windowLit;
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = 0.7;
-    for (let i = 1; i < 4; i++) {
-      const t = i / 4;
-      const a = lerp(awning[0], awning[1], t);
-      const b = lerp(awning[3], awning[2], t);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  }
+  if (style.awning) drawPeriodAwning(ctx, s, p, style);
 }
 
 /**
@@ -877,8 +870,16 @@ function drawGroundFloor(
       // center door, transom, and masonry stallriser. The old uninterrupted
       // yellow strip was the single most modern-looking facade in the map.
       fillQuad(ctx, s.palette.sidewalk, ...wall(0.05, 0.95, 0.5, 0.59));
-      fillQuad(ctx, s.palette.windowLit, ...wall(0.06, 0.43, 0.61, 0.88));
-      fillQuad(ctx, s.palette.windowLit, ...wall(0.63, 0.94, 0.61, 0.88));
+      fillQuad(
+        ctx,
+        s.palette.dark ? s.palette.windowLit : s.palette.window,
+        ...wall(0.06, 0.43, 0.61, 0.88),
+      );
+      fillQuad(
+        ctx,
+        s.palette.dark ? s.palette.windowLit : s.palette.window,
+        ...wall(0.63, 0.94, 0.61, 0.88),
+      );
       fillQuad(ctx, s.palette.window, ...wall(0.46, 0.6, 0.64, 0.98));
       fillQuad(ctx, s.palette.windowLit, ...wall(0.46, 0.6, 0.59, 0.68));
       fillQuad(ctx, s.palette.masonry, ...wall(0.06, 0.94, 0.88, 0.98));
@@ -1170,15 +1171,15 @@ function drawWallWindows(
     wallPatch(w.ta, w.tb, w.ga, w.gb, u0, u1, v0, v1);
 
   for (let row = 0; row < rows; row++) {
-    const band = 0.72 / rows;
-    const v0 = 0.12 + row * band;
-    const v1 = Math.min(0.86, v0 + band * 0.58);
     for (let bay = 0; bay < bays; bay++) {
-      const span = 0.82 / bays;
-      // Tall, narrow sash proportions. The old 60%-of-bay opening read as a
-      // horizontal strip once projected onto an isometric wall.
-      const u0 = 0.09 + bay * span + span * 0.27;
-      const u1 = 0.09 + (bay + 1) * span - span * 0.27;
+      const { u0, u1, v0, v1 } = sashBounds(
+        Math.abs(w.tb.x - w.ta.x),
+        Math.abs(w.ga.y - w.ta.y),
+        rows,
+        bays,
+        row,
+        bay,
+      );
       const glass = color();
 
       if (fine) {

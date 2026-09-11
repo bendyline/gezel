@@ -12,6 +12,7 @@ import {
 import { type CityPalette, ageBucket, prismColors } from '../palette.js';
 import { hash32, seeded } from '../seed.js';
 import { urbanityOf } from '../urbanity.js';
+import { drawCourtyard } from './courtyard.js';
 import {
   type BlockGeom,
   buildingAnchorScreen,
@@ -127,7 +128,7 @@ export function drawIsoBlocks(ctx: CanvasRenderingContext2D, s: IsoRenderState):
         for (const d of list) {
           const iso = toIso(d.x, d.y);
           const pt = sp(s.cam, iso.u, iso.v);
-          const size = d.size * s.cam.scale * 2;
+          const size = d.size * s.cam.scale * (d.sprite.startsWith('tree') ? 2.6 : 2);
           const src = s.atlas.index[d.sprite] * s.atlas.cell;
           ctx.drawImage(
             s.atlas.canvas,
@@ -322,14 +323,7 @@ function drawOneBlock(
     // as mini-prisms. At district zoom this is a quiet silhouette preview; at
     // street zoom it gains facade details and yard decor.
     const podiumPrism = prismScreen(s.cam, b.rect, PODIUM_HISO);
-    drawPrism(ctx, podiumPrism, {
-      top: p.sidewalk,
-      wallL: colors.wallL,
-      wallR: colors.wallR,
-    });
-    ctx.globalAlpha = 0.25;
-    fillQuad(ctx, colors.top, podiumPrism.tn, podiumPrism.te, podiumPrism.ts, podiumPrism.tw);
-    ctx.globalAlpha = 1;
+    drawCourtyard(ctx, s, b, podiumPrism);
     const stacks = drawPodiumBuildings(ctx, s, minis, podiumPrism.liftPx, b, colors);
     drawIndustrialSmoke(ctx, s, b, stacks);
     return;

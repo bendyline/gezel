@@ -175,6 +175,66 @@ describe('parseCraftbookDoc — repair-grade errors', () => {
 });
 
 describe('craftbookFromDoc', () => {
+  it('rejects a runtime-owned advance file as the model output', () => {
+    const result = craftbookFromDoc(
+      {
+        name: 'Runtime-owned scope',
+        steps: [
+          {
+            id: 'scope',
+            name: 'Scope',
+            prompt: 'Write a task note, then advance.',
+            onEnter: {
+              name: 'publishCorpusBatches',
+              scope: 'standard',
+              inputs: { outFile: 'tasks/7/pr-review/batches.json' },
+            },
+            advanceWhen: {
+              file: 'tasks/7/pr-review/batches.json',
+              artifact: true,
+            },
+            toolPolicy: { outputMedium: 'artifact' },
+            terminal: true,
+          },
+        ],
+      },
+      { now: '2026-09-10T00:00:00.000Z' },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(formatCraftbookDocErrors(result.errors)).toContain('runtime-owned');
+      expect(formatCraftbookDocErrors(result.errors)).toContain('toolPolicy.outputMedium');
+    }
+  });
+
+  it('rejects wrong-family and prefixed artifact read examples', () => {
+    const result = craftbookFromDoc(
+      {
+        name: 'Mixed drawers',
+        steps: [
+          {
+            id: 'inspect',
+            name: 'Inspect',
+            consumes: [{ file: 'artifacts/data/report.md', artifact: true }],
+            prompt:
+              'Call `read_file({"path":"artifacts/data/report.md"})`, then `read_artifact({"path":"artifacts/data/other.md"})`.',
+            terminal: true,
+          },
+        ],
+      },
+      { now: '2026-09-10T00:00:00.000Z' },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const message = formatCraftbookDocErrors(result.errors);
+      expect(message).toContain('relative to the artifact root');
+      expect(message).toContain('`read_file` is called with an artifact-prefixed path');
+      expect(message).toContain('`read_artifact` examples');
+    }
+  });
+
   it('expands deliverables, defaults the entry step, and validates refs', () => {
     const res = craftbookFromDoc(
       {

@@ -371,6 +371,41 @@ describe('ChatMessageSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('keeps exact indexed-context bytes and excerpts while accepting legacy citations', () => {
+    const parsed = ChatMessageSchema.parse({
+      role: 'user',
+      content: 'What does the implementation do?',
+      at: '2026-01-01',
+      retrieval: {
+        injectedBytes: 1_337,
+        hits: [
+          {
+            source: 'workspace',
+            projectId: 'gezel',
+            path: 'src/retrieval.ts',
+            line: 42,
+            score: 321,
+            injectedText: 'const answer = "gezellig";',
+            injectedBytes: 26,
+          },
+        ],
+      },
+    });
+    expect(parsed.retrieval).toMatchObject({
+      injectedBytes: 1_337,
+      hits: [{ injectedText: 'const answer = "gezellig";', injectedBytes: 26 }],
+    });
+
+    const legacy = ChatMessageSchema.parse({
+      role: 'user',
+      content: 'An older turn',
+      at: '2025-01-01',
+      retrieval: { hits: [{ source: 'workspace', path: 'old.ts', score: 200 }] },
+    });
+    expect(legacy.retrieval?.injectedBytes).toBeUndefined();
+    expect(legacy.retrieval?.hits[0]?.injectedText).toBeUndefined();
+  });
 });
 
 describe('ChatEventSchema', () => {

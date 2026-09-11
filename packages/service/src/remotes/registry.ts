@@ -33,6 +33,13 @@ export interface PairedRemote {
   tlsCertPem?: string;
   /** Scopes the server granted (currently `['remote-inference']`). */
   scopes: string[];
+  /**
+   * `gezelVersion` from the peer's `/v1/identity`, when it reported one.
+   * Absent for a peer too old to publish it. Read by the native-capacity
+   * authority check, which must know whether the broker deciding this
+   * machine's memory is the same build as the one asking.
+   */
+  gezelVersion?: string;
   pairedAt: number;
   /** Last time A successfully reached this server (in-memory unless flushed). */
   lastSeenAt?: number;

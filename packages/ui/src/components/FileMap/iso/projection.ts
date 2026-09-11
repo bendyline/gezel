@@ -46,13 +46,14 @@ export function heightOf(levels: number): number {
 }
 
 /** Iso height of the paved podium a symbol-carrying file stands on. */
-export const PODIUM_HISO = LEVEL_H * HZ * 0.6;
+export const PODIUM_HISO = LEVEL_H * HZ * 0.18;
 
 /** Iso height of a symbol mini-building from its wire height (absolute
- *  [0,1] scale) — ~0.2 storeys for a floor-height shed up to 2 for a giant.
+ *  [0,1] scale). Vertical exaggeration gives one to three visible storeys
+ *  enough room for sash windows in the compressed dimetric projection.
  *  Shared by the draw pass and the hover hit test so they never drift. */
 export function miniHIso(height: number): number {
-  return (0.5 + height * 4.5) * LEVEL_H * HZ * 0.4;
+  return (1.5 + Math.max(0, Math.min(1, height)) * 3.5) * LEVEL_H * HZ;
 }
 
 /** Exact iso-plane rise used by the period roof renderer. Keeping this in the
@@ -66,7 +67,7 @@ export function townRoofRiseIso(r: Rect, scale: number, compact = false): number
   // Edwardian cottages and workshops need the roof to own the silhouette, so
   // both forms now approach a visually steeper 8:12-ish pitch. The cap keeps a
   // close-zoom roof from swallowing its facade.
-  const risePx = Math.max(compact ? 2 : 3, Math.min(compact ? 16 : 20, topSpanPx * 0.17));
+  const risePx = Math.max(compact ? 2 : 3, Math.min(compact ? 28 : 34, topSpanPx * 0.17));
   return risePx / safeScale;
 }
 

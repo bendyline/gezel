@@ -154,6 +154,7 @@ export interface ResolveSessionToolSurfaceOptions {
       | 'description'
       | 'advanceWhen'
       | 'gate'
+      | 'onEnter'
       | 'onExit'
       | 'completedAt'
       | 'gateAttempts'
@@ -803,6 +804,7 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'search_documents',
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'write_artifact',
   // Tail of the curated list: reached at small tier (cap == list length),
   // truncated away at tiny. `craftbook_read`'s own argument description
@@ -880,6 +882,7 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
   // Handoff briefs / scratch.
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'write_artifact',
   // The voorman owns the project record: status, about/mission edits, voorman
   // reassignment.
@@ -953,6 +956,7 @@ const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
   'find_files',
   'list_artifacts',
   'read_artifact',
+  'read_artifacts',
   'write_artifact',
   'search_memory',
   'save_memory',

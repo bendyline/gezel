@@ -102,6 +102,14 @@ export function humanizeToolCall(
           : 0;
       return count > 0 ? `Read ${count} files` : 'Read several files';
     }
+    case 'read_artifacts': {
+      const count = Array.isArray(a.paths)
+        ? a.paths.length
+        : Array.isArray(a.files)
+          ? a.files.length
+          : 0;
+      return count > 0 ? `Read ${count} notes` : 'Read several notes';
+    }
     case 'list_dir':
       return `Listed ${str('path') ?? 'the folder'}`;
     case 'write_artifact':

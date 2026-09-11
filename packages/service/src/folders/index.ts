@@ -15,6 +15,7 @@ export {
 export { type ValidationResult, validateExternalPath } from './validation.js';
 export { type MovePlan, planMove } from './plan.js';
 export {
+  type FolderMovePolicy,
   type MoveJob,
   type MoveJobPhase,
   type MoveJobStatus,

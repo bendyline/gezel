@@ -5950,6 +5950,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(create!.opts!.codexCliContext?.permissionModeOverride).toBe('reviewed');
     expect(env.GEZEL_MCP_EXCLUDE).toBeTruthy();
     expect(env.GEZEL_MCP_ALLOW).toBe([...allow].sort().join(','));
+    expect(env.GEZEL_MCP_AUTHORIZED_TOOLS).toBe([...allow].sort().join(','));
 
     await store.updateProject('default', { codexPermissionMode: 'plan' });
     mock.script('planned');

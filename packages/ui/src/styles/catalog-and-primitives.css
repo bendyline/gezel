@@ -1389,6 +1389,31 @@ a.license-button:hover {
      larger than the controls around it. Controls/labels/actions below keep
      their own sizes; this only tames untamed body copy. */
   font-size: var(--text-md);
+  /* Dialogs are transient application chrome. Keep routine copy from being
+     selected during clicks and drags; editable fields and copyable values
+     opt back in immediately below. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.gz-dialog
+  :where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    [contenteditable="true"],
+    code,
+    pre,
+    .gz-selectable-text
+  ) {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .gz-dialog[data-state="closed"] {

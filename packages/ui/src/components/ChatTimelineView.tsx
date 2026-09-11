@@ -3483,13 +3483,12 @@ export function ChatTimelineView({
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(project ? { projectLabel: project.name } : {})}
         extraClass={fade ? 'timeline-msg-faded' : undefined}
+        projectId={m.projectId}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
-        {...(m.toolCalls && m.toolCalls.length > 0
-          ? { toolCalls: m.toolCalls, projectId: m.projectId }
-          : {})}
+        {...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {})}
         {...(onOpenReference ? { onOpenReference } : {})}
         {...(m.reasoning ? { reasoning: m.reasoning } : {})}
         {...(m.reasoningDurationMs !== undefined

@@ -4,7 +4,7 @@ import type {
   NewCraftbookStep,
   TaskCraftbookStep,
 } from '@bendyline/gezel';
-import { requiredOutputMediaForGate } from '@bendyline/gezel';
+import { requiredOutputMediaForGate, stepOnEnterProducesAdvanceFile } from '@bendyline/gezel';
 import { outputMediaForCraftbookBlueprint } from '@bendyline/gezel-catalog';
 
 function escapeRegExp(value: string): string {
@@ -64,17 +64,29 @@ export function builtinToolsetIdsDisabledForStep(
  * entry has been republished with `toolPolicy.outputMedium`.
  */
 export function outputMediumForStep(
-  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate'> | undefined,
+  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate' | 'onEnter'> | undefined,
 ): CraftbookStepOutputMedium | null {
   if (!step) return null;
-  if (step.toolPolicy?.outputMedium) return step.toolPolicy.outputMedium;
-  if (step.advanceWhen?.file) return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+  const gateRequiredMedia = [...requiredOutputMediaForGate(step.gate)];
+  const runtimeOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
+  if (step.toolPolicy?.outputMedium) {
+    const advanceSurface = step.advanceWhen?.artifact ? 'artifact' : 'workspace';
+    if (runtimeOwnsAdvanceFile && step.toolPolicy.outputMedium === advanceSurface) {
+      return gateRequiredMedia[0] ?? 'none';
+    }
+    return step.toolPolicy.outputMedium;
+  }
+  if (step.advanceWhen?.file && !runtimeOwnsAdvanceFile) {
+    return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+  }
+  if (runtimeOwnsAdvanceFile) return gateRequiredMedia[0] ?? 'none';
   const gate = step.gate;
   const checks = gate && 'checks' in gate && Array.isArray(gate.checks) ? gate.checks : [];
   const fileCheck = checks.find(
     (check): check is (typeof checks)[number] & { file: string; artifact?: boolean } =>
       'file' in check && typeof check.file === 'string' && check.file.length > 0,
   );
+  if (gateRequiredMedia[0]) return gateRequiredMedia[0];
   if (fileCheck) return fileCheck.artifact ? 'artifact' : 'workspace';
   return null;
 }
@@ -93,6 +105,7 @@ export function outputMediaForStep(
           | 'advanceWhen'
           | 'gate'
           | 'consumes'
+          | 'onEnter'
           | 'onExit'
         >
       >

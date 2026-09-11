@@ -99,6 +99,8 @@ describe('ChatManager — image recognition for models that cannot see', () => {
     expect(send?.sendOpts?.attachments ?? []).toHaveLength(0);
     expect(send?.prompt).toContain('MOCK UI');
     expect(send?.prompt).toContain('<image-digest');
+    expect(send?.prompt).toContain('attached-image-1');
+    expect(send?.prompt).not.toContain(relativePath);
     // The user's own words survive alongside the digest.
     expect(send?.prompt).toContain('what is this?');
     expect(vision.calls).toHaveLength(1);
@@ -158,6 +160,8 @@ describe('ChatManager — image recognition for models that cannot see', () => {
     // Without the persisted digest this is a bare `![](attachments/….png)`
     // and the model has no idea what it is being asked about.
     expect(replayedUser?.content).toContain('MOCK UI');
+    expect(replayedUser?.content).toContain('attached-image-1');
+    expect(replayedUser?.content).not.toContain(relativePath);
     // The recognizer is not re-run on replay.
     expect(vision.calls).toHaveLength(0);
   });

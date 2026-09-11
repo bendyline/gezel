@@ -2,12 +2,13 @@ import { markdownToTiptap } from '@bendyline/squisq-editor-react';
 import { markdownDocToXlsx } from '@bendyline/squisq-formats/xlsx';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { MemoryContentContainer } from '@bendyline/squisq/storage';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDataReferenceContainer } from './data-reference-container.js';
 import {
   chooseOutsideInSource,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
+  relinkMovedOutsideInCompanion,
   renderOutsideInDocument,
   resolveOutsideInLayout,
   supportsOutsideInMarkdownEditing,
@@ -28,6 +29,41 @@ describe('outside-in project documents', () => {
     expect(chooseOutsideInSource(layout!, ['decks/Tucson_files/hand-authored.md'])).toBe(
       'decks/Tucson_files/hand-authored.md',
     );
+  });
+
+  it('renames and relinks the Markdown half after an outside-in document moves', async () => {
+    const from = resolveOutsideInLayout('decks/Tucson.pptx')!;
+    const to = resolveOutsideInLayout('decks/Atlas.pptx')!;
+    const rename = vi.fn().mockResolvedValue(undefined);
+    const read = vi.fn().mockResolvedValue(`---
+squisq-outside-in: 1
+squisq-output: ../Tucson.pptx
+squisq-output-format: pptx
+---
+
+![Map](Tucson_files/map.png)
+`);
+    const write = vi.fn().mockResolvedValue(undefined);
+
+    await relinkMovedOutsideInCompanion({
+      from,
+      to,
+      filePaths: ['decks/Tucson_files/tucson.md', 'decks/Tucson_files/map.png'],
+      rename,
+      read,
+      write,
+    });
+
+    expect(rename).toHaveBeenCalledWith(
+      'decks/Atlas_files/tucson.md',
+      'decks/Atlas_files/atlas.md',
+    );
+    expect(read).toHaveBeenCalledWith('decks/Atlas_files/atlas.md');
+    expect(write).toHaveBeenCalledWith(
+      'decks/Atlas_files/atlas.md',
+      expect.stringContaining('squisq-output: ../Atlas.pptx'),
+    );
+    expect(write.mock.calls[0]?.[1]).toContain('![Map](Atlas_files/map.png)');
   });
 
   it('imports HTML into linked Markdown and exports against the shared player', async () => {
