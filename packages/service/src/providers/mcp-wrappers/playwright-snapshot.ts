@@ -26,7 +26,7 @@
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { type McpServerSpec, isStdioSpec } from '../mcp-bridge.js';
+import { type McpServerSpec, isStdioSpec } from '../mcp-spec.js';
 import {
   extractRefIndex,
   extractUrls,

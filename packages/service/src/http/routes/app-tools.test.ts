@@ -41,7 +41,11 @@ beforeAll(async () => {
       scopes: ['product'],
     })
   ).token;
-}, 30_000);
+  // A full service boot resolves a large slice of its module graph through
+  // dynamic imports, so the cost lands inside this hook. Alone that is under
+  // a second; under full-suite pressure it has overrun 30 s (the sibling
+  // service-boot suites carry the same 60 s budget for the same reason).
+}, 60_000);
 
 afterAll(async () => {
   await svc?.stop();
@@ -71,56 +75,100 @@ async function openRelay(token = appToken): Promise<string> {
   return ((await res.json()) as { relayId: string }).relayId;
 }
 
-/** Read relay events until `stop` says we have what the test needs. */
-async function readEvents(
-  relayId: string,
-  stop: (event: AppToolRelayEvent) => boolean,
-  token = appToken,
-): Promise<{ events: AppToolRelayEvent[]; close: () => void }> {
+interface RelayStream {
+  /** Every event seen so far, in arrival order. */
+  events: AppToolRelayEvent[];
+  /** The first event matching `match`, past arrivals included. */
+  waitFor: (match: (event: AppToolRelayEvent) => boolean) => Promise<AppToolRelayEvent>;
+  close: () => void;
+}
+
+/**
+ * Attach to a relay's event stream and stay attached for the rest of the test,
+ * accumulating events in the background.
+ *
+ * Staying attached is the point. `invoke` deliberately fails fast against a
+ * relay with no sink, so a test that detaches and re-attaches has to prove the
+ * new stream landed before it drives a call — and a fixed sleep is not that
+ * proof under full-suite load. The `ready` frame is: the registry emits it
+ * immediately after it installs the sink. So callers await `ready` once and
+ * then keep the same stream.
+ */
+async function openStream(relayId: string, token = appToken): Promise<RelayStream> {
   const controller = new AbortController();
   const res = await httpFetch(`${baseUrl}/api/app-tools/relays/${relayId}/events`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: controller.signal,
   });
   expect(res.status).toBe(200);
-  const events: AppToolRelayEvent[] = [];
   const reader = res.body?.getReader();
   if (!reader) throw new Error('no event stream body');
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const pump = (async () => {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      buffer += decoder.decode(value, { stream: true });
-      let cut = buffer.indexOf('\n\n');
-      while (cut !== -1) {
-        const frame = buffer.slice(0, cut);
-        buffer = buffer.slice(cut + 2);
-        const data = frame
-          .split('\n')
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trim())
-          .join('');
-        if (data) {
-          const event = JSON.parse(data) as AppToolRelayEvent;
-          events.push(event);
-          if (stop(event)) return;
+
+  const events: AppToolRelayEvent[] = [];
+  const waiters: {
+    match: (event: AppToolRelayEvent) => boolean;
+    resolve: (event: AppToolRelayEvent) => void;
+  }[] = [];
+
+  const deliver = (event: AppToolRelayEvent): void => {
+    events.push(event);
+    for (let i = waiters.length - 1; i >= 0; i -= 1) {
+      const waiter = waiters[i];
+      if (!waiter?.match(event)) continue;
+      waiters.splice(i, 1);
+      waiter.resolve(event);
+    }
+  };
+
+  void (async () => {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        let cut = buffer.indexOf('\n\n');
+        while (cut !== -1) {
+          const frame = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+          const data = frame
+            .split('\n')
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).trim())
+            .join('');
+          if (data) deliver(JSON.parse(data) as AppToolRelayEvent);
+          cut = buffer.indexOf('\n\n');
         }
-        cut = buffer.indexOf('\n\n');
       }
+    } catch {
+      // `close()` aborts mid-read. A stream that ends is not a test failure;
+      // an event that never arrives fails as a timeout on whoever awaits it.
     }
   })();
-  await pump;
-  return { events, close: () => controller.abort() };
+
+  return {
+    events,
+    waitFor: (match) => {
+      const seen = events.find(match);
+      if (seen) return Promise.resolve(seen);
+      return new Promise<AppToolRelayEvent>((resolve) => {
+        waiters.push({ match, resolve });
+      });
+    },
+    close: () => controller.abort(),
+  };
 }
 
 describe('/api/app-tools', () => {
   it('opens a relay, announces readiness, and registers tools for a project', async () => {
     const relayId = await openRelay();
-    const stream = await readEvents(relayId, (event) => event.type === 'ready');
+    const stream = await openStream(relayId);
     try {
-      expect(stream.events[0]).toMatchObject({ type: 'ready', relayId });
+      expect(await stream.waitFor((event) => event.type === 'ready')).toMatchObject({
+        type: 'ready',
+        relayId,
+      });
 
       const registered = await api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
         token: appToken,
@@ -145,45 +193,45 @@ describe('/api/app-tools', () => {
 
   it('carries a live call to the app and takes its result back', async () => {
     const relayId = await openRelay();
-    const ready = await readEvents(relayId, (event) => event.type === 'ready');
-    ready.close();
-    await api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
-      token: appToken,
-      body: { projectId: 'default', tools: [TOOL] },
-    });
+    const stream = await openStream(relayId);
+    try {
+      // `ready` proves the sink is installed, so the call below cannot be
+      // emitted into a relay the stream has not attached to yet.
+      await stream.waitFor((event) => event.type === 'ready');
+      await api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
+        token: appToken,
+        body: { projectId: 'default', tools: [TOOL] },
+      });
 
-    // Re-attach, then drive a call through the registry as a session would.
-    const pending = readEvents(relayId, (event) => event.type === 'tool_call');
-    // Give the stream a moment to attach before the call is emitted.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const binding = svc.context.appToolRelays.listForSession({
-      projectId: 'default',
-      gezelId: 'ada',
-    })[0];
-    if (!binding) throw new Error('no binding registered');
-    const invocation = svc.context.appToolRelays.invoke(binding, {
-      tool: 'add_travel_points',
-      args: { points: 3 },
-      sessionId: 's1',
-      gezelId: 'ada',
-      projectId: 'default',
-    });
+      // Drive a call through the registry the way a session would.
+      const binding = svc.context.appToolRelays.listForSession({
+        projectId: 'default',
+        gezelId: 'ada',
+      })[0];
+      if (!binding) throw new Error('no binding registered');
+      const invocation = svc.context.appToolRelays.invoke(binding, {
+        tool: 'add_travel_points',
+        args: { points: 3 },
+        sessionId: 's1',
+        gezelId: 'ada',
+        projectId: 'default',
+      });
 
-    const stream = await pending;
-    const call = stream.events.find((event) => event.type === 'tool_call');
-    if (!call || call.type !== 'tool_call') throw new Error('no tool_call received');
-    expect(call).toMatchObject({ tool: 'add_travel_points', arguments: { points: 3 } });
+      const call = await stream.waitFor((event) => event.type === 'tool_call');
+      if (call.type !== 'tool_call') throw new Error('no tool_call received');
+      expect(call).toMatchObject({ tool: 'add_travel_points', arguments: { points: 3 } });
 
-    const posted = await api(
-      'POST',
-      `/api/app-tools/relays/${relayId}/calls/${call.callId}/result`,
-      { token: appToken, body: { ok: true, content: 'awarded 3' } },
-    );
-    expect(posted.status).toBe(200);
-    await expect(invocation).resolves.toEqual({ ok: true, content: 'awarded 3' });
-
-    stream.close();
-    await api('DELETE', `/api/app-tools/relays/${relayId}`, { token: appToken });
+      const posted = await api(
+        'POST',
+        `/api/app-tools/relays/${relayId}/calls/${call.callId}/result`,
+        { token: appToken, body: { ok: true, content: 'awarded 3' } },
+      );
+      expect(posted.status).toBe(200);
+      await expect(invocation).resolves.toEqual({ ok: true, content: 'awarded 3' });
+    } finally {
+      stream.close();
+      await api('DELETE', `/api/app-tools/relays/${relayId}`, { token: appToken });
+    }
   }, 20_000);
 
   it('refuses a session-scoped token outright', async () => {
@@ -217,8 +265,9 @@ describe('/api/app-tools', () => {
 
   it('rejects an unknown project, a reserved name, and an oversized result', async () => {
     const relayId = await openRelay();
-    const stream = await readEvents(relayId, (event) => event.type === 'ready');
+    const stream = await openStream(relayId);
     try {
+      await stream.waitFor((event) => event.type === 'ready');
       const missingProject = await api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
         token: appToken,
         body: { projectId: 'no-such-project', tools: [TOOL] },

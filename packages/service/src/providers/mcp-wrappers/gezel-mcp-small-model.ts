@@ -12,7 +12,7 @@
  * above; only the spec-detection helper survives, kept here so the
  * existing import paths keep working without churn.
  */
-import { type McpServerSpec, isStdioSpec } from '../mcp-bridge.js';
+import { type McpServerSpec, isStdioSpec } from '../mcp-spec.js';
 
 export function isGezelMcp(spec: McpServerSpec): boolean {
   // gezel-mcp only ever runs as a stdio subprocess we spawn ourselves —
