@@ -1,7 +1,7 @@
 {
   "name": "@bendyline/gezel-app-sdk",
   "version": "1.0.9",
-  "description": "Public SDK for building third-party local apps against gezel — discovery, consent, OpenAI-shaped chat, ensure-model.",
+  "description": "Public SDK for building third-party local apps against gezel \u2014 discovery, consent, OpenAI-shaped chat, ensure-model, custom app tools, and in-process hosting.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "embedding"],
   "homepage": "https://github.com/bendyline/gezel",
@@ -36,6 +36,10 @@
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
+    },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],
@@ -53,6 +57,15 @@
   "devDependencies": {
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@bendyline/gezel-service": "workspace:*"
+  },
+  "peerDependencies": {
+    "@bendyline/gezel-service": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@bendyline/gezel-service": {
+      "optional": true
+    }
   }
 }

@@ -270,6 +270,54 @@ describe('ChatComposer To line', () => {
   });
 });
 
+describe('ChatComposer route preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+  });
+
+  it('shows the daemon plan while the user is still composing', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue({
+      schemaVersion: 1,
+      intent: 'artifact',
+      route: 'craftbook',
+      confidence: 'high',
+      reason: 'exact-output-format',
+      visible: true,
+      display: {
+        label: 'Planned: PowerPoint (.pptx)',
+        detail: 'PowerPoint from Content',
+        badges: ['PPTX', 'Craftbook'],
+      },
+      output: { format: 'pptx', label: 'PowerPoint (.pptx)' },
+      craftbook: {
+        id: 'powerpoint-deck',
+        name: 'PowerPoint from Content',
+        invocation: { description: 'Please make a PowerPoint about Mongolia.' },
+      },
+      requiredTools: ['invoke_craftbook'],
+    });
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia.' },
+    });
+
+    expect(await screen.findByRole('status', { name: /planned: powerpoint/i })).toHaveTextContent(
+      'PowerPoint from Content',
+    );
+    expect(api.previewTurnIntent).toHaveBeenCalledWith({
+      message: 'Please make a PowerPoint about Mongolia.',
+      gezelId: 'tomas',
+      projectId: 'default',
+      sessionId: 'session-1',
+    });
+    expect(screen.queryByText(/docblocks/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('ChatComposer /open command', () => {
   beforeEach(() => {
     vi.clearAllMocks();

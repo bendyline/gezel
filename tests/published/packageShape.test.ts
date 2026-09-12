@@ -230,6 +230,19 @@ describe('published package payloads', () => {
     expect(references).toEqual([]);
   });
 
+  it("the app SDK's root and browser entries never reach for the service", () => {
+    // Hosting a daemon lives behind the `./host` subpath and an optional peer
+    // dependency. If the root entry ever imported the service, every consumer
+    // that only wants discovery and chat would need the whole daemon
+    // installed — and a browser bundle would break outright.
+    const appSdk = packages.find((pkg) => pkg.name === '@bendyline/gezel-app-sdk');
+    expect(appSdk, 'app-sdk missing from the published set').toBeDefined();
+    for (const entry of ['index.js', 'browser.js']) {
+      const source = readFileSync(resolve(appSdk!.dist, entry), 'utf8');
+      expect(source, `${entry} must not reference the service`).not.toContain('gezel-service');
+    }
+  });
+
   it.each(packages)('$name stays inside its packed-size budget', ({ name }) => {
     const budget = PACKED_SIZE_BUDGETS[name];
     expect(budget, `no size budget declared for ${name}`).toBeDefined();

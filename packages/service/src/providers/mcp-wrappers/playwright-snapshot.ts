@@ -26,7 +26,7 @@
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { McpServerSpec } from '../mcp-bridge.js';
+import { type McpServerSpec, isStdioSpec } from '../mcp-bridge.js';
 import {
   extractRefIndex,
   extractUrls,
@@ -57,10 +57,11 @@ export function isPlaywrightMcp(spec: McpServerSpec): boolean {
   // haystack check below never saw it and silently disabled the
   // `file:`-URL rewrite plus the local-preview tool pruning.
   if (spec.toolsetId === PLAYWRIGHT_TOOLSET_ID) return true;
-  // @playwright/mcp is a stdio subprocess; an http-mcp registry entry
-  // can't be it. Short-circuit before the haystack check so we don't
-  // dereference the stdio-specific `command`/`args` fields on an http spec.
-  if (spec.kind === 'http') return false;
+  // @playwright/mcp is a stdio subprocess; neither an http-mcp registry
+  // entry nor an in-memory relay can be it. Short-circuit before the haystack
+  // check so we don't dereference the stdio-specific `command`/`args` fields
+  // on a spec that has neither.
+  if (!isStdioSpec(spec)) return false;
   // Fallback for specs with no stamped identity: a user-configured
   // custom-mcp entry (`npx @playwright/mcp@latest`), and the slug form so
   // an unstamped managed install still matches.

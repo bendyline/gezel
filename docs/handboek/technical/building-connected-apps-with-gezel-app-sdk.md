@@ -139,6 +139,82 @@ This pairing is the supported route for a rich integration: the app SDK owns dis
 
 Ordinary third-party apps should ask the user to start Gezel when discovery reports `daemon_not_running`. The optional start-if-missing path is only for native integrations that deliberately bundle the matching `gezeld` package.
 
+## Host Gezel inside your app
+
+The flow above needs a Gezel the person already runs. An application that must
+work either way can host one itself: `@bendyline/gezel-app-sdk/host` connects to
+their Gezel when it is running, and otherwise starts a daemon inside your own
+process. Application code is the same afterwards.
+
+```ts
+import { connectOrHost } from '@bendyline/gezel-app-sdk/host';
+
+const gezel = await connectOrHost({
+  appId: 'acme.travel',
+  appName: 'Acme Travel',
+  host: { nodePath: bundledNodePath },
+});
+
+await gezel.ensureModel({ model: 'gemma4-e2b-q4' });
+const project = await gezel.ensureProject({ package: shippedGezapp, folder: travelFolder });
+const chat = await project.openChat({ role: 'travel-guide' });
+```
+
+`Gezel` is the central object — the connection, the models, the projects. Most
+work happens in the `GezelProject` it hands back, because chats and tools are
+both project-scoped, and an application that has the project never has to pass
+its id back in. `gezel.openProject(id)` reaches a project that already exists.
+
+A hosted daemon keeps its state under `~/.gezel/apps/<appId>/`, so the projects
+and gezels an application creates for itself never appear in the person's own
+workshop, and the two daemons never contend for one runtime directory. Models
+the person already installed are read from their home rather than downloaded
+again.
+
+Both `ensureModel` and `ensureProject` are idempotent and meant to run on every
+launch. `ensureModel` uses an installed model first, then a `.gezmodel` bundle
+the application ships, and only then the network — so a first run can work
+offline. `ensureProject` keeps the person's edits to seeded files and reuses the
+crew already on the roster.
+
+Hosting requires `@bendyline/gezel-service` beside the SDK; it is an optional
+peer dependency, so applications that only connect never download it. Under
+Electron, pass a real Node binary as `host.nodePath`: Gezel runs its tool server
+as a child process, and an Electron binary cannot stand in for Node.
+
+## Tools your application runs
+
+An application can offer its own tools to the gezels in its project. The model
+sees them beside Gezel's built-in tools; when one is called, the handler runs in
+the application's process and what it returns becomes the tool's output.
+
+```ts
+await project.registerTools({
+  tools: [
+    {
+      name: 'add_travel_points',
+      description: 'Award travel points to the traveller.',
+      inputSchema: {
+        type: 'object',
+        properties: { points: { type: 'number' } },
+        required: ['points'],
+      },
+      handler: async ({ points }) => awardPoints(Number(points)),
+    },
+  ],
+});
+```
+
+The registration lives as long as the connection that made it. A brief
+disconnection is held open for a grace window and reconnects on its own; a
+closed application's tools are withdrawn, because a tool whose handler is gone
+would accept a call and never answer it. Arguments are checked against the
+declared schema before they leave the daemon, a handler that throws is reported
+to the model as an ordinary tool failure, and each call has a timeout the
+application sets. Tool calls appear in the transcript and the history log like
+any other tool. This needs the `product` scope, or a daemon the application
+hosts.
+
 ## TLS, browsers, and errors
 
 The local daemon uses a per-launch self-signed certificate. The Node SDK reads the public certificate from Gezel's runtime directory and constructs a pinned `fetch`, so you should not disable TLS verification globally or replace the transport with an unpinned client.

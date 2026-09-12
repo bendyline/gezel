@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import type { FileTurnIntent, MapRepoResponse } from '@bendyline/gezel';
+import type {
+  FileTurnIntent,
+  MapRepoResponse,
+  TurnIntentPlan,
+  TurnIntentPreviewRequest,
+} from '@bendyline/gezel';
 import {
   type AIEngagementMode,
   type AwakeBudget,
@@ -32,6 +37,7 @@ import {
   type TaskNote,
   type ToolsetManifest,
   type TurnCancelReason,
+  appToolsToolsetId,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -68,6 +74,8 @@ import {
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
+import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import {
   outputMediumForStep,
@@ -350,6 +358,12 @@ import { extractToolCard } from './tool-cards.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
+import {
+  falseCapabilityDenialCorrection,
+  renderTurnIntentPrelude,
+  resolveTurnIntentPlan,
+  shouldConstrainToExactCraftbookInvocation,
+} from './turn-intent-plan.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { nativeVisionEnabledFor } from './vision-capability.js';
@@ -722,6 +736,14 @@ interface LiveSessionState {
    * serving tuning from content that is no longer active.
    */
   catalogContentSnapshot: string | null;
+  /**
+   * Identity of the app-registered tool surface for this session's project
+   * at build time. An app may register or withdraw tools at any moment, and
+   * the surface is baked into the live session's bridges and system prompt,
+   * so a change here has to rebuild on the next turn — otherwise a tool the
+   * app just registered stays invisible until the session is reset.
+   */
+  appToolsSnapshot: string;
   /** Effective Codex execution mode baked into the live CLI session. */
   codexPermissionModeSnapshot?: CodexPermissionMode;
   /** Effective Claude CLI permission mode baked into the live CLI session. */
@@ -759,6 +781,12 @@ interface LiveSessionState {
    * kickoff prompt from spending minutes serializing irrelevant tools.
    */
   projectOrchestrationConstrained: boolean;
+  /**
+   * Tiny-model exact-format turn clamp. Kept separate from the broader
+   * orchestration flag because both are true for a PPTX request, while only
+   * this one collapses the surface to the pre-resolved invoke action.
+   */
+  exactCraftbookConstrained: boolean;
   /**
    * D4 clamp lifetime: a gate rejected this session's deliverable and
    * the validator has not approved since (derived from persisted gate
@@ -938,6 +966,12 @@ export interface ChatManagerOptions {
   store: Store;
   events: ChatEventBus;
   memory: MemoryManager;
+  /**
+   * Live tools registered by connected apps (see app-tools/relay-registry).
+   * Optional so tests and headless embedders can omit it; absent simply
+   * means no app tools reach any session.
+   */
+  appToolRelays?: AppToolRelayRegistry;
   getPort: () => number;
   getToken: () => string;
   /**
@@ -1508,11 +1542,13 @@ export class ChatManager extends LocalEngineRuntime {
   readonly usageTracker = new UsageTracker();
   readonly telemetry = new SessionTelemetryTracker();
   private telemetryGpuUnsub: (() => void) | null = null;
+  private readonly appToolRelays: AppToolRelayRegistry | undefined;
 
   constructor(opts: ChatManagerOptions) {
     super(opts);
     this.store = opts.store;
     this.events = opts.events;
+    this.appToolRelays = opts.appToolRelays;
     this.externalConversations = new ExternalConversationRecorder({
       store: this.store,
       events: this.events,
@@ -7435,6 +7471,21 @@ export class ChatManager extends LocalEngineRuntime {
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
+      let turnIntentPlan: TurnIntentPlan | null = null;
+      if (messageOrigin === 'direct-user') {
+        try {
+          turnIntentPlan = await this.previewTurnIntent({
+            message: userText,
+            gezelId: state.record.gezelId,
+            projectId: state.record.projectId,
+            sessionId,
+          });
+        } catch (err) {
+          log.warn(
+            `session ${sessionId}: turn intent planning failed; continuing without a route hint: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
       const projectRetrieval = await this.resolveTurnProjectRetrieval(
         state,
         userText,
@@ -7446,12 +7497,10 @@ export class ChatManager extends LocalEngineRuntime {
       const libraryRecall = projectRetrieval
         ? []
         : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
-      const preludeForTurn = await this.resolveUserPromptPrelude(
-        state,
-        userText,
-        messageOrigin,
-        libraryRecall,
-      );
+      const plannedPrelude = turnIntentPlan ? renderTurnIntentPrelude(turnIntentPlan) : null;
+      const preludeForTurn = plannedPrelude
+        ? { behaviorId: 'turn-intent-plan', text: plannedPrelude }
+        : await this.resolveUserPromptPrelude(state, userText, messageOrigin, libraryRecall);
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -7515,6 +7564,7 @@ export class ChatManager extends LocalEngineRuntime {
         );
       }
       let continuations = 0;
+      let falseCapabilityDenialCorrected = false;
       const maxContinuations = resolveContinuationBudget(state);
       // Voorman-idle recovery is a project-level suggestion, not a broken
       // model turn that benefits from the profile's full continuation
@@ -8086,6 +8136,23 @@ export class ChatManager extends LocalEngineRuntime {
             detectorVerdict.promptForNextTurn,
             'post-turn detector',
           );
+        }
+        if (!detectorReprompt && !falseCapabilityDenialCorrected && turnIntentPlan) {
+          const correction = falseCapabilityDenialCorrection({
+            plan: turnIntentPlan,
+            assistantContent: assistantMessage.content,
+            toolCalls: toolsAcrossContinuations,
+          });
+          if (correction) {
+            falseCapabilityDenialCorrected = true;
+            detectorReprompt = correctivePromptForLiveRoster(
+              correction,
+              'turn-intent capability denial',
+            );
+            log.info(
+              `session ${sessionId}: false capability denial for route ${turnIntentPlan.reason} — re-prompting once`,
+            );
+          }
         }
         // Observable-progress auto-advance: if this gezel just produced the
         // deliverable a craftbook step is waiting on, advance the workflow
@@ -10456,6 +10523,9 @@ export class ChatManager extends LocalEngineRuntime {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
     this.telemetryGpuUnsub = null;
+    // Tell every connected app its tools are gone rather than leaving calls
+    // outstanding against a daemon that is on its way out.
+    this.appToolRelays?.closeAll('daemon_shutdown');
     // This is the single owner of the bounded background drain for direct
     // callers and service.stop(). Await work that was already admitted, but
     // do not start deferred housekeeping after beginShutdown() has closed the
@@ -11031,6 +11101,33 @@ export class ChatManager extends LocalEngineRuntime {
   /** Public wrapper around the private {@link resolveProviderName}. */
   async providerForGezel(gezelId: string, opts?: { nightShift?: boolean }): Promise<ProviderName> {
     return this.resolveProviderName(gezelId, opts);
+  }
+
+  /**
+   * Cheap, side-effect-free route preview for the composer. The send path
+   * recomputes the same plan authoritatively; this endpoint exists so users
+   * can see and tune the heuristic before committing the turn.
+   */
+  async previewTurnIntent(input: TurnIntentPreviewRequest): Promise<TurnIntentPlan> {
+    const [gezel, config] = await Promise.all([
+      this.store.getGezel(input.gezelId),
+      this.store.readConfig(),
+    ]);
+    if (!gezel) throw new Error(`gezel ${input.gezelId} not found`);
+
+    let record: ChatSession | null = null;
+    if (input.sessionId) {
+      record = await this.store.findSessionById(input.sessionId);
+      if (!record || record.gezelId !== input.gezelId || record.projectId !== input.projectId) {
+        throw new Error('turn intent preview session does not match the requested chat');
+      }
+    }
+
+    return resolveTurnIntentPlan({
+      text: input.message,
+      isMeester: config.meesterGezelId === input.gezelId,
+      role: gezel.role,
+    });
   }
 
   /**
@@ -12257,6 +12354,30 @@ export class ChatManager extends LocalEngineRuntime {
     }
   }
 
+  /** Identity of the app-tool surface for a project; '' when no app offers any. */
+  private appToolsFingerprint(projectId: string): string {
+    return this.appToolRelays?.fingerprint(projectId) ?? '';
+  }
+
+  /**
+   * App-registered tools that apply to this session.
+   *
+   * Withheld from two kinds of session. A **visitor** session (app-serve) is
+   * an untrusted guest of the project and never sees any extra toolset. A
+   * provider that runs its own tool loop outside our bridge (Copilot, the CLI
+   * providers) cannot reach an in-process server at all, so offering the tools
+   * in its prompt would advertise names it could never call.
+   */
+  private appToolBindingsFor(record: ChatSession): AppToolBinding[] {
+    if (!this.appToolRelays) return [];
+    if (record.visitorAccess) return [];
+    if (!providerUsesManagedMcpBridge(record.providerName)) return [];
+    return this.appToolRelays.listForSession({
+      projectId: record.projectId,
+      gezelId: record.gezelId,
+    });
+  }
+
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
@@ -12329,6 +12450,14 @@ export class ChatManager extends LocalEngineRuntime {
       const projectOrchestrationConstrained = gezel
         ? this.projectOrchestrationConstraintActive(existing.record, gezel, pendingUserText)
         : false;
+      const exactCraftbookConstrained = gezel
+        ? this.exactCraftbookConstraintActive(
+            existing.record,
+            gezel,
+            existing.modelTier,
+            pendingUserText,
+          )
+        : false;
       const gateRepairConstrained = await this.gateRepairConstraintActive(existing.record);
       const codexPermissionMode = gezel
         ? await this.resolveCodexPermissionMode(existing.record, gezel)
@@ -12342,10 +12471,12 @@ export class ChatManager extends LocalEngineRuntime {
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
+          this.appToolsFingerprint(existing.record.projectId) !== existing.appToolsSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
           projectOrchestrationConstrained !== existing.projectOrchestrationConstrained ||
+          exactCraftbookConstrained !== existing.exactCraftbookConstrained ||
           gateRepairConstrained !== existing.gateRepairConstrained ||
           codexPermissionMode !== existing.codexPermissionModeSnapshot ||
           claudePermissionMode !== existing.claudePermissionModeSnapshot)
@@ -12377,6 +12508,12 @@ export class ChatManager extends LocalEngineRuntime {
           log.debug(
             `tool-clamp: project orchestration session surface changed for ${existing.record.gezelId} ` +
               `(${existing.projectOrchestrationConstrained ? 'on' : 'off'} → ${projectOrchestrationConstrained ? 'on' : 'off'})`,
+          );
+        }
+        if (exactCraftbookConstrained !== existing.exactCraftbookConstrained) {
+          log.debug(
+            `tool-clamp: exact craftbook session surface changed for ${existing.record.gezelId} ` +
+              `(${existing.exactCraftbookConstrained ? 'on' : 'off'} → ${exactCraftbookConstrained ? 'on' : 'off'})`,
           );
         }
         if (gateRepairConstrained !== existing.gateRepairConstrained) {
@@ -12488,6 +12625,12 @@ export class ChatManager extends LocalEngineRuntime {
             ...(effectiveModel !== undefined ? { effectiveModel } : {}),
           }
         : undefined,
+    );
+    const exactCraftbookConstrained = this.exactCraftbookConstraintActive(
+      record,
+      gezel,
+      sessionOpts.modelTier,
+      pendingUserText,
     );
 
     // Try resume first if we have state. Fall back to fresh on failure.
@@ -12614,6 +12757,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
       catalogContentSnapshot: this.catalog.contentRoot(),
+      appToolsSnapshot: this.appToolsFingerprint(record.projectId),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
         ? {
             codexPermissionModeSnapshot: normalizeCodexPermissionMode(
@@ -12628,6 +12772,7 @@ export class ChatManager extends LocalEngineRuntime {
       directFileWorkConstrained,
       scenarioFileRepairConstrained,
       projectOrchestrationConstrained,
+      exactCraftbookConstrained,
       gateRepairConstrained,
       ...(sessionOpts.modelTier ? { modelTier: sessionOpts.modelTier } : {}),
       ...(sessionOpts.profile ? { profile: sessionOpts.profile } : {}),
@@ -12789,6 +12934,19 @@ export class ChatManager extends LocalEngineRuntime {
       role: gezel.role,
       provider: record.providerName,
       latestUserMessage,
+    });
+  }
+
+  private exactCraftbookConstraintActive(
+    record: ChatSession,
+    gezel: GezelDetail,
+    tier: LocalModelTier | undefined,
+    pendingUserText?: string,
+  ): boolean {
+    return shouldConstrainToExactCraftbookInvocation({
+      role: gezel.role,
+      tier,
+      latestUserMessage: pendingUserText ?? latestUserMessageContent(record.messages),
     });
   }
 
@@ -13641,6 +13799,14 @@ export class ChatManager extends LocalEngineRuntime {
         continue;
       }
       installedToolsetIds.add(t.toolsetId);
+    }
+
+    // Tools a connected app registered for this project. They are named in the
+    // prompt's toolset listing the same way an installed toolset is; the real
+    // tool names arrive with the post-bridge refresh, from the live server.
+    const appToolBindings = this.appToolBindingsFor(record);
+    for (const binding of appToolBindings) {
+      installedToolsetIds.add(appToolsToolsetId(binding.appId));
     }
 
     // Compute the per-gezel builtin toolset override once. The prompt-side
@@ -15032,6 +15198,36 @@ export class ChatManager extends LocalEngineRuntime {
         trustedConstrainedExtraIds.add(extraServerId);
       }
     }
+    // App-registered tools. These are served inside this daemon: the model
+    // calls them like any other tool, the daemon forwards the call to the app
+    // that registered them, and the app's answer comes back as the tool
+    // output. They are exempt from the non-builtin ceiling below because the
+    // code runs in the app's own process under a grant the user approved, and
+    // nothing but JSON arguments leaves this daemon — the ceiling exists for
+    // third-party servers Gezel itself would have to spawn and cannot confine.
+    const relays = this.appToolRelays;
+    for (const binding of relays ? appToolBindings : []) {
+      const extraServerId = reserveExtraServerId(`app-${binding.appId}`, 'app-tools');
+      const sessionRef = {
+        sessionId: record.id,
+        gezelId: record.gezelId,
+        projectId: record.projectId,
+      };
+      extras.push({
+        id: extraServerId,
+        kind: 'in-memory',
+        toolsetId: appToolsToolsetId(binding.appId),
+        label: binding.appId,
+        connect: () =>
+          createAppToolRelayTransport({
+            registry: relays as AppToolRelayRegistry,
+            binding,
+            session: sessionRef,
+          }),
+      });
+      trustedConstrainedExtraIds.add(extraServerId);
+    }
+
     // Centralized security ceiling: arbitrary third-party MCP toolsets bypass
     // the builtin tool allowlist and cannot be confined, so strict postures
     // refuse to spawn them. Exact bundled toolsets whose runtime applies

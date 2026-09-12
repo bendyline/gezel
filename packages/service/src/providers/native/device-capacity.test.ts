@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   local: vi.fn(),
   unstampedDev: undefined as boolean | undefined,
 }));
+// Release workflows stamp GEZEL_VERSION before running this same suite. Keep
+// the build classifier controllable so both authority branches remain real
+// tests instead of inheriting whichever source shape launched Vitest.
 vi.mock('@bendyline/gezel', async (original) => {
   const actual = await original<typeof import('@bendyline/gezel')>();
   return {
@@ -275,6 +278,18 @@ describe('memory-authority version skew', () => {
     expect(mocks.local).toHaveBeenCalled();
     // The whole point: no admission request crosses to the older broker.
     expect(mocks.fetch).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
+  it('keeps the installed broker authoritative when a stamped build differs', async () => {
+    mocks.unstampedDev = false;
+    mocks.inspect.mockResolvedValue({
+      pinnedIdentityFingerprint: 'stable-device',
+      gezelVersion: '1.26251.69',
+    });
+    const lease = await acquire();
+    expect(mocks.fetch).toHaveBeenCalled();
+    expect(mocks.local).not.toHaveBeenCalled();
     await lease.release();
   });
 

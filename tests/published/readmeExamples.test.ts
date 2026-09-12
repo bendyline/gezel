@@ -30,6 +30,7 @@ function diagnosticsFor(file: string): readonly ts.Diagnostic[] {
     ignoreDeprecations: '6.0',
     paths: {
       '@bendyline/gezel-app-sdk': ['packages/app-sdk/dist/index.d.ts'],
+      '@bendyline/gezel-app-sdk/host': ['packages/app-sdk/dist/host.d.ts'],
       '@bendyline/gezel-catalog': ['packages/catalog/dist/index.d.ts'],
       '@bendyline/gezel-client': ['packages/client/dist/index.d.ts'],
       '@bendyline/gezel': ['packages/core/dist/index.d.ts'],
@@ -40,6 +41,14 @@ function diagnosticsFor(file: string): readonly ts.Diagnostic[] {
     },
   });
   return ts.getPreEmitDiagnostics(program);
+}
+
+/** The block that shows a feature, wherever it sits in the README. */
+function typeScriptBlockContaining(readme: string, needle: string): string {
+  for (const match of readme.matchAll(/```ts\s*\n([\s\S]*?)\n```/g)) {
+    if (match[1]?.includes(needle)) return match[1];
+  }
+  throw new Error(`README has no TypeScript block containing "${needle}"`);
 }
 
 describe('published README examples', () => {
@@ -55,6 +64,27 @@ describe('published README examples', () => {
       getNewLine: () => '\n',
     });
     if (diagnostics.length > 0) throw new Error(formatted);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it('app-sdk hosting example typechecks', () => {
+    // The hosting quickstart is the first thing an embedding app copies, and
+    // it exercises a different entry point than the connect quickstart above.
+    const readme = readFileSync(resolve(REPO_ROOT, 'packages/app-sdk/README.md'), 'utf8');
+    const examplePath = join(temporary, 'app-sdk-host.mts');
+    const block = typeScriptBlockContaining(readme, 'connectOrHost');
+    writeFileSync(examplePath, `${block}\n`);
+
+    const diagnostics = diagnosticsFor(examplePath);
+    if (diagnostics.length > 0) {
+      throw new Error(
+        ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+          getCanonicalFileName: (fileName) => fileName,
+          getCurrentDirectory: () => REPO_ROOT,
+          getNewLine: () => '\n',
+        }),
+      );
+    }
     expect(diagnostics).toHaveLength(0);
   });
 });

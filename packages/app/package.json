@@ -54,7 +54,7 @@
     "@playwright/test": "^1.61.1",
     "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.13.3",
-    "electron": "^43.4.1",
+    "electron": "^43.7.0",
     "electron-builder": "^26.15.3",
     "playwright": "^1.61.1",
     "tar": "7.5.21",

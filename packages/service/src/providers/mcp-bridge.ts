@@ -74,10 +74,19 @@ const log = createLogger('mcp-bridge');
  *     custom keys) come from resolved toolset config the same way
  *     subprocess env vars do for stdio.
  *
+ *   - **in-memory** — an MCP server this daemon serves itself, over a
+ *     linked transport pair with no process and no socket. Used for tools a
+ *     connected app registered through the app-tool relay: the server half
+ *     forwards each call up that app's event stream. A bridge is still the
+ *     right shape for these because everything a tool surface needs —
+ *     timeouts, output caps, redaction, argument coercion, the unresolved
+ *     failure ledger, the `tool` chat event — already lives in the bridge
+ *     and pool rather than in any one transport.
+ *
  * The discriminator is `kind`; a missing `kind` is treated as
  * `'stdio'` so legacy `{command, args, env}` callers keep working.
  */
-export type McpServerSpec = StdioMcpServerSpec | HttpMcpServerSpec;
+export type McpServerSpec = StdioMcpServerSpec | HttpMcpServerSpec | InMemoryMcpServerSpec;
 
 export interface StdioMcpServerSpec {
   kind?: 'stdio';
@@ -123,8 +132,26 @@ export function isStdioSpec(spec: McpServerSpec): spec is StdioMcpServerSpec {
   return spec.kind === undefined || spec.kind === 'stdio';
 }
 
+export interface InMemoryMcpServerSpec {
+  kind: 'in-memory';
+  /** Catalog toolset id — see {@link StdioMcpServerSpec.toolsetId}. */
+  toolsetId?: string;
+  /** Short label for logs; never a secret. */
+  label: string;
+  /**
+   * Build the client half of a linked transport pair, with the server half
+   * already connected. Called once per bridge start, so a retry gets a fresh
+   * pair rather than a closed one.
+   */
+  connect: () => Transport;
+}
+
 export function isHttpSpec(spec: McpServerSpec): spec is HttpMcpServerSpec {
   return spec.kind === 'http';
+}
+
+export function isInMemorySpec(spec: McpServerSpec): spec is InMemoryMcpServerSpec {
+  return spec.kind === 'in-memory';
 }
 
 /**
@@ -1424,6 +1451,7 @@ export function redactString(input: string, secrets: Set<string>): string {
  * exercise the branching without spinning up a real server.
  */
 export function buildTransport(spec: McpServerSpec): Transport {
+  if (isInMemorySpec(spec)) return spec.connect();
   if (isHttpSpec(spec)) {
     const url = new URL(spec.url);
     const requestInit: RequestInit = {
@@ -1492,6 +1520,7 @@ function filterMcpChildEnv(src: NodeJS.ProcessEnv): Record<string, string> {
 
 /** Short string for logs. Avoids dumping headers (may contain bearer tokens). */
 export function describeSpec(spec: McpServerSpec): string {
+  if (isInMemorySpec(spec)) return `in-memory ${spec.label}`;
   if (isHttpSpec(spec)) return `${spec.transport} ${spec.url}`;
   return spec.command;
 }

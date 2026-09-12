@@ -1,4 +1,5 @@
 import type { ProviderName } from '@bendyline/gezel';
+import type { AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 
 import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
 import type { AppServeController } from '../app-serve/controller.js';
@@ -62,6 +63,12 @@ import type { EngineContext } from './engine-context.js';
 export interface ServiceContext extends EngineContext {
   store: Store;
   chatEvents: ChatEventBus;
+  /**
+   * Tools connected apps register at runtime and answer themselves. Lives in
+   * memory only: a registration is a claim the app is standing by, which no
+   * restart can carry across.
+   */
+  appToolRelays: AppToolRelayRegistry;
   chat: ChatManager;
   /** Iframe-shim runtime errors, looped back into chat preludes. */
   previewLog: PreviewLogBuffer;

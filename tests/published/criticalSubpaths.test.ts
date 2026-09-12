@@ -60,6 +60,13 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
     usedBy: 'src/daemon.ts resolveDaemonEntryFromExtension() — how the extension spawns the daemon',
   },
   {
+    specifier: '@bendyline/gezel-service',
+    from: 'app-sdk',
+    mode: 'import',
+    usedBy:
+      'src/host-service.ts loadService() — the dynamic import that starts a daemon inside a connected app',
+  },
+  {
     specifier: '@bendyline/gezel-mcp/dist/server.js',
     from: 'service',
     mode: 'require',

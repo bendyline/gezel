@@ -42,6 +42,7 @@ import {
   stepToolKitDisabled,
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
+import { shouldConstrainToExactCraftbookInvocation } from './turn-intent-plan.js';
 
 /**
  * Procedure-text scanning is lexical and re-runs on every turn of a
@@ -83,6 +84,7 @@ export function taskStepContextualBuiltinTools(
 export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
   | 'project-orchestration'
+  | 'exact-craftbook-invocation'
   | 'project-retrieval-first'
   | 'immediate-named-tool'
   | 'immediate-file-write'
@@ -181,6 +183,7 @@ export interface ResolveSessionToolSurfaceOptions {
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
   projectOrchestrationConstrained: boolean;
+  exactCraftbookConstrained: boolean;
 }
 
 const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
@@ -554,6 +557,23 @@ export async function resolveSessionToolSurface(
     opts.onClamp?.('project-orchestration');
   }
 
+  // A high-confidence exact-output turn already has its procedure selected.
+  // Tiny coordinators do materially better with one required action than a
+  // shortlist tool plus an invocation tool (the E2B PowerPoint failure was a
+  // direct-capability denial while both routing concepts competed for its
+  // small context). This is subtractive only: never grant invoke_craftbook if
+  // the role/security ceiling did not already admit it.
+  const exactCraftbookConstrained =
+    shouldConstrainToExactCraftbookInvocation({
+      role: opts.role,
+      tier: opts.tier,
+      latestUserMessage: opts.latestUserMessage,
+    }) && Boolean(allowlist?.has('invoke_craftbook'));
+  if (exactCraftbookConstrained) {
+    allowlist = new Set(['invoke_craftbook']);
+    opts.onClamp?.('exact-craftbook-invocation');
+  }
+
   const allowlistBeforeNamedTool = allowlist;
   allowlist = constrainAllowlistForImmediateNamedTool(allowlist, opts.latestUserMessage);
   if (allowlist !== allowlistBeforeNamedTool) opts.onClamp?.('immediate-named-tool');
@@ -685,7 +705,7 @@ export async function resolveSessionToolSurface(
   // to the authored step ceiling.
   allowlist = applyActiveStepToolPolicy(allowlist, opts.activeStep);
 
-  return { allowlist, projectOrchestrationConstrained };
+  return { allowlist, projectOrchestrationConstrained, exactCraftbookConstrained };
 }
 
 const MEESTER_PROJECT_ORCHESTRATION_TOOLS = [

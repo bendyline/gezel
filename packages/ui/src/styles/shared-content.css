@@ -982,6 +982,52 @@
   white-space: nowrap;
 }
 
+/* Inspectable pre-send routing: this mirrors the plan the daemon will inject
+   on Send. It reads as a compact system annotation, not another recipient
+   pill or a mode toggle. */
+.chat-turn-route-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0.25rem 0.35rem;
+  padding: 0.35rem 0.55rem;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+
+.chat-turn-route-preview-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-turn-route-preview-detail {
+  overflow: hidden;
+  min-width: 8rem;
+  max-width: 26rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-turn-route-preview-badges {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.chat-turn-route-preview-badge {
+  padding: 0.08rem 0.3rem;
+  color: color-mix(in srgb, var(--accent) 74%, var(--text));
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
 .chat-composer-to-recipient {
   display: inline-flex;
   align-items: center;
