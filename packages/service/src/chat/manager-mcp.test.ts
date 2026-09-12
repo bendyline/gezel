@@ -205,6 +205,35 @@ afterEach(async () => {
   delete process.env.GEZEL_MOCK_PROVIDER;
 });
 
+describe('ChatManager turn intent routing', () => {
+  it('injects the exact-format route and retries one false capability denial', async () => {
+    const meester = await store.createGezel({ name: 'Mila', role: 'Meester' });
+    await store.writeConfig({
+      provider: 'copilot',
+      toolFilterMode: 'never',
+      meesterGezelId: meester.id,
+    });
+    const session = await manager.createSession({
+      gezelId: meester.id,
+      projectId: 'default',
+    });
+    mock.script(
+      "I can't create a PowerPoint because I don't have a direct conversion tool.",
+      'I have started the PowerPoint procedure.',
+    );
+
+    await manager.send(session.id, 'Please create a PowerPoint about Mongolia.');
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(2);
+    expect(sends[0]?.prompt).toContain('System route for this turn');
+    expect(sends[0]?.prompt).toContain('powerpoint-deck');
+    expect(sends[0]?.prompt).not.toContain('DocBlocks');
+    expect(sends[1]?.prompt).toContain('Correction: that capability is available');
+    expect(sends[1]?.prompt).toContain('invoke_craftbook');
+  }, 30_000);
+});
+
 describe.runIf(process.platform === 'darwin')(
   'ChatManager + MCP — inline craftbook guardrail hooks',
   () => {

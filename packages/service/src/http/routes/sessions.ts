@@ -4,6 +4,7 @@ import {
   InterruptSessionRequestSchema,
   SearchSessionsRequestSchema,
   SendToSessionRequestSchema,
+  TurnIntentPreviewRequestSchema,
   UpdateQueuedMessageRequestSchema,
   createLogger,
   getEngagementMode,
@@ -80,6 +81,20 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
         (gezelId === undefined || e.gezelId === gezelId),
     );
     return c.json({ inflight: filtered });
+  });
+
+  // Register before `/:id`: this is a composer planning endpoint, not a
+  // session id. It also works before the first session exists.
+  app.post('/turn-intent-preview', async (c) => {
+    const body = TurnIntentPreviewRequestSchema.parse(await c.req.json());
+    try {
+      return c.json(await ctx.chat.previewTurnIntent(body));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('not found')) return c.json({ error: message }, 404);
+      if (message.includes('does not match')) return c.json({ error: message }, 409);
+      throw err;
+    }
   });
 
   // Register before `/:id` for the same insertion-order reason as

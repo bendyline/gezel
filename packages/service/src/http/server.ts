@@ -40,6 +40,7 @@ import { aiAppRoutes } from './routes/ai-apps.js';
 import { aiRoutes } from './routes/ai.js';
 import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
 import { appServeRoutes } from './routes/app-serve.js';
+import { appToolRoutes } from './routes/app-tools.js';
 import { askRoutes } from './routes/asks.js';
 import { audioRoutes } from './routes/audio.js';
 import { cacheRoutes } from './routes/cache.js';
@@ -549,6 +550,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/ai-apps', aiAppRoutes(ctx));
+  app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));

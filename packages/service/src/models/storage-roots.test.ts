@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { publishStagedModel } from './bundle-storage.js';
 import {
@@ -13,6 +13,7 @@ import {
   migrateLegacySystemModels,
   modelStorageRoots,
   pruneModelPayloadFiles,
+  readOnlyModelHomes,
   reclaimAbandonedModelDownloads,
   removeModelDir,
   verifyReadOnlyModelPayload,
@@ -57,6 +58,72 @@ describe('model storage overlay', () => {
 
     await writeFile(join(roots.writableRoot, 'same', 'manifest.json'), '{}');
     expect(await findModelRoot(roots, 'same')).toBe(roots.writableRoot);
+  });
+
+  it('overlays other gezel homes after the shared asset store, lowest priority last', async () => {
+    const home = await tempRoot();
+    const shared = join(home, 'public-assets');
+    const userHome = join(home, 'user-gezel');
+    const roots = modelStorageRoots({
+      home,
+      engine: 'llama-cpp',
+      env: {
+        GEZEL_SHARED_ASSETS_DIR: shared,
+        GEZEL_READONLY_MODEL_HOMES: [userHome, home].join(delimiter),
+      },
+    });
+
+    // The app's own home is the single writer; its own path never reappears as
+    // a read-only overlay entry, however it was spelled in the env.
+    expect(roots.writableRoot).toBe(join(home, 'engines', 'llama-cpp', 'models'));
+    expect(roots.readOnlyRoots).toEqual([
+      join(shared, 'models', 'llama-cpp'),
+      join(userHome, 'engines', 'llama-cpp', 'models'),
+    ]);
+  });
+
+  it("never lends a machine service someone else's home to read", async () => {
+    const home = await tempRoot();
+    const shared = join(home, 'public-assets');
+    const roots = modelStorageRoots({
+      home,
+      engine: 'llama-cpp',
+      env: {
+        GEZEL_SYSTEM_SCOPE: '1',
+        GEZEL_SHARED_ASSETS_DIR: shared,
+        GEZEL_READONLY_MODEL_HOMES: join(home, 'user-gezel'),
+      },
+    });
+    expect(roots.readOnlyRoots).toEqual([]);
+  });
+
+  it('drops relative read-only homes rather than resolving them against cwd', () => {
+    expect(readOnlyModelHomes({ GEZEL_READONLY_MODEL_HOMES: '' })).toEqual([]);
+    expect(
+      readOnlyModelHomes({
+        GEZEL_READONLY_MODEL_HOMES: ['../elsewhere', '  ', sep + join('abs', 'home')].join(
+          delimiter,
+        ),
+      }),
+    ).toEqual([sep + join('abs', 'home')]);
+  });
+
+  it('finds a model that only the borrowed home has installed', async () => {
+    const home = await tempRoot();
+    const userHome = join(home, 'user-gezel');
+    const roots = modelStorageRoots({
+      home,
+      engine: 'llama-cpp',
+      env: { GEZEL_READONLY_MODEL_HOMES: userHome },
+    });
+    const borrowed = join(userHome, 'engines', 'llama-cpp', 'models', 'gemma4-e2b-q4');
+    await mkdir(borrowed, { recursive: true });
+    await writeFile(join(borrowed, 'manifest.json'), '{}');
+
+    expect(await listOverlayModelIds(roots)).toEqual(['gemma4-e2b-q4']);
+    expect(await findModelRoot(roots, 'gemma4-e2b-q4')).toBe(
+      join(userHome, 'engines', 'llama-cpp', 'models'),
+    );
   });
 
   it('reuses precomputed digests and only hashes uncached payload files', async () => {

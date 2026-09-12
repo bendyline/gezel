@@ -6,6 +6,7 @@ import {
 import '@bendyline/squisq-editor-react/styles';
 import {
   type GezelSummary,
+  type TurnIntentPlan,
   displayName,
   parseTaskRef,
   rewritePromptDraftFileRefs,
@@ -416,6 +417,11 @@ export function ChatComposer({
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
   const [draftNonEmpty, setDraftNonEmpty] = useState(() => draftRef.current.trim().length > 0);
+  // Render-triggering draft shadow for the debounced route preview. Unlike
+  // draftNonEmpty it retains the text, but remains local-only and is never an
+  // alternate persistence path.
+  const [intentPreviewText, setIntentPreviewText] = useState(draftRef.current);
+  const [turnIntentPlan, setTurnIntentPlan] = useState<TurnIntentPlan | null>(null);
   // A non-null value means the entire single-line draft is a local `/open`
   // command. Keeping the query in state lets the suggestion tray react to
   // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
@@ -448,6 +454,7 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
+    setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
   }, [projectId]);
@@ -484,6 +491,7 @@ export function ChatComposer({
       // previous draft must not clear the text that just arrived.
       draftEditVersionRef.current += 1;
       setDraftNonEmpty(markdown.trim().length > 0);
+      setIntentPreviewText(markdown);
       setOpenCommandQuery(parseOpenChatQuery(markdown));
       setMentioned(extractMentionTokens(markdown));
       setEditorRevision((revision) => revision + 1);
@@ -562,6 +570,37 @@ export function ChatComposer({
     setQueuedAhead(null);
     setWedged(null);
   }, [sessionId]);
+
+  // The route preview is advisory until Send; the daemon recomputes the same
+  // deterministic plan authoritatively for the turn. Debounce keeps typing
+  // quiet, and a sequence guard prevents an older response repainting a newer
+  // draft after network reordering.
+  const intentPreviewSequence = useRef(0);
+  useEffect(() => {
+    const message = intentPreviewText.trim();
+    const sequence = ++intentPreviewSequence.current;
+    setTurnIntentPlan(null);
+    if (message.length < 8 || parseOpenChatQuery(intentPreviewText) !== null) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void api
+        .previewTurnIntent({
+          message: intentPreviewText,
+          gezelId,
+          projectId,
+          ...(liveSessionId ? { sessionId: liveSessionId } : {}),
+        })
+        .then((plan) => {
+          if (intentPreviewSequence.current !== sequence) return;
+          setTurnIntentPlan(plan.visible ? plan : null);
+        })
+        .catch(() => {
+          if (intentPreviewSequence.current === sequence) setTurnIntentPlan(null);
+        });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [gezelId, intentPreviewText, liveSessionId, projectId]);
 
   const createFreshSession = useCallback(async (): Promise<string> => {
     const created = await api.createChatSession({
@@ -788,6 +827,7 @@ export function ChatComposer({
       draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
+      setIntentPreviewText(source);
       setOpenCommandQuery(parseOpenChatQuery(source));
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
@@ -828,6 +868,7 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(true);
+    setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     const next = extractMentionTokens(merged);
     setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
@@ -864,6 +905,7 @@ export function ChatComposer({
     draftRef.current = '';
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
+    setIntentPreviewText('');
     setOpenCommandQuery(null);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
@@ -1509,6 +1551,25 @@ export function ChatComposer({
         {addressLineTrailing}
       </div>
       {belowAddressLine}
+      {turnIntentPlan && (
+        <output
+          className="chat-turn-route-preview"
+          aria-label={`${turnIntentPlan.display.label}. ${turnIntentPlan.display.detail ?? ''}`.trim()}
+          title="This is the route Gezel will add to the model's turn when you send."
+        >
+          <span className="chat-turn-route-preview-label">{turnIntentPlan.display.label}</span>
+          {turnIntentPlan.display.detail && (
+            <span className="chat-turn-route-preview-detail">{turnIntentPlan.display.detail}</span>
+          )}
+          <span className="chat-turn-route-preview-badges" aria-hidden="true">
+            {turnIntentPlan.display.badges.map((badge) => (
+              <span key={badge} className="chat-turn-route-preview-badge">
+                {badge}
+              </span>
+            ))}
+          </span>
+        </output>
+      )}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
           <div className="chat-open-command-menu" role="menu" aria-label="Open targets">

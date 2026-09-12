@@ -14,7 +14,7 @@ Thirteen packages, all under the `@bendyline` scope, all public API under semver
 | `@bendyline/gezel` | Core types, Zod schemas, path helpers, gezel-markdown parser |
 | `@bendyline/gezel-client` | Typed HTTP client for the daemon |
 | `@bendyline/gezel-sdk` | The preferred extension surface |
-| `@bendyline/gezel-app-sdk` | Embedding helpers for host applications |
+| `@bendyline/gezel-app-sdk` | Embedding helpers for host applications: discovery and consent from `.`, in-process daemon hosting from `./host` |
 | `@bendyline/gezel-plugin-sdk` | Legacy extension surface, kept for compatibility |
 | `@bendyline/gezel-catalog` | Catalog loader (content lives in `@bendyline/gilde`) |
 | `@bendyline/gezel-knowledge` | The `.gezk` toolchain: compiler, verified archive reader, retrieval |
@@ -266,6 +266,15 @@ Kokoro when those peers are absent. Consumers that opt into in-process memory
 embeddings or Kokoro TTS must use the safe root overrides documented in the
 service README. Complete Electron and relocatable Node artifacts merge the
 private `packages/ml-runtime` deployment, where workspace overrides do apply.
+
+The app SDK uses the same optional-peer shape for a different reason. Its
+`./host` entry starts a daemon in the consuming application's process, which
+needs `@bendyline/gezel-service` — but the ordinary consumer only connects to a
+daemon the user already runs and must not download ~37 MB to do it. The service
+is therefore an optional peer, reached through a dynamic import that fires only
+when an application actually hosts. `tests/published/optionalRuntime.test.ts`
+pins both halves: the manifest shape, and that importing `./host` under a
+resolver where the service is unavailable still works.
 
 Two overrides in that complete distribution are worth knowing by name:
 

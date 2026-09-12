@@ -738,6 +738,36 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 });
 
 describe('resolveSessionToolSurface — Meester routing precedence', () => {
+  it('gives a tiny Meester one pre-resolved craftbook action for an exact format', async () => {
+    const prompt = 'Please make a PowerPoint about Mongolia and deliver the .pptx file.';
+    const { allowlist, exactCraftbookConstrained } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'powerpoint-tiny',
+        gezelId: 'meester',
+        projectId: 'default',
+        providerName: 'llama-cpp',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-12T00:00:00.000Z' }],
+        createdAt: '2026-09-12T00:00:00.000Z',
+        lastActivityAt: '2026-09-12T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-e2b-q4',
+      parameterSize: '2.3B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'tiny',
+      latestUserMessage: prompt,
+    });
+
+    expect(exactCraftbookConstrained).toBe(true);
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
+  });
+
   it('routes an exact-format PowerPoint request through the compact craftbook front door', async () => {
     const prompt = 'Create a PowerPoint presentation about D-Day and deliver the .pptx file.';
     for (const role of ['Meester', 'Voorman']) {

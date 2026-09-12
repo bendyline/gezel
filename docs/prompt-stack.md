@@ -129,6 +129,17 @@ the `just-chat` project type, which hides the work-oriented tabs to match. Tests
 
 ## Channel two: the user-message channel
 
+- **Turn intent plan** (`chat/turn-intent-plan.ts`): a deterministic first pass shared by
+  the service, typed client, and composer. Exact requested formats (PPTX, DOCX, PDF, and
+  animated slideshow outputs) resolve to one existing craftbook id before the model runs;
+  implementation-shaped asks can resolve to a Developer handoff. The composer debounces
+  the same endpoint and shows the planned user-facing route while the prompt is still being
+  written. The plan names the craftbook/output, never the conversion engine behind it.
+  On Send its compact instruction takes precedence over profile preludes. A tiny Meester or
+  Voorman exact-format turn is further clamped to `invoke_craftbook` alone — the model gets
+  one required action, not a suggest/invoke menu. If it nevertheless denies the capability
+  without attempting that invocation, the post-turn loop supplies one corrective
+  continuation and then stops retrying this detector.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, and shared
   library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.

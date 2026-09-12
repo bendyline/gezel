@@ -6,6 +6,8 @@ Public SDK for building third-party local apps against [gezel](https://github.co
 
 If you ship a desktop app and want to use the user's locally-installed models without re-implementing model management, runtime detection, and TLS pinning — point this SDK at gezel and you're done. Apps that already target OpenAI's chat API can use gezel as a drop-in via the OpenAI-shaped envelopes.
 
+If your users may not have gezel at all, the [`/host`](#hosting-gezel-inside-your-app) entry runs one inside your own application, against a gezel home that belongs to your app. Same API either way.
+
 ## Install
 
 ```bash
@@ -171,6 +173,99 @@ not grant first-party administration of other app connections.
 
 For CI / scripted environments, the gezel daemon honors `GEZEL_AUTOAPPROVE_APPS=appId1,appId2` and auto-approves listed apps at registration time.
 
+## Hosting gezel inside your app
+
+`connect()` needs a gezel the user already runs. When your app should work whether or not they have one, use the host entry: it connects to their gezel if it is there, and otherwise starts one in your own process.
+
+```ts
+import { connectOrHost } from '@bendyline/gezel-app-sdk/host';
+
+const gezel = await connectOrHost({
+  appId: 'acme.travel',
+  appName: 'Acme Travel',
+  // Hosting is opt-in. Without `host`, a missing gezel is still an error.
+  host: { nodePath: process.execPath },
+});
+
+// Engine binary, weights, and the default-model pin, in one call.
+await gezel.ensureModel({ model: 'gemma4-e2b-q4' });
+
+// Project folder, crew, scripts and seeds from a .gezapp you ship.
+const project = await gezel.ensureProject({
+  package: '/opt/acme/travel.gezapp',
+  folder: '/Users/me/Travel',
+});
+
+const chat = await project.openChat({ role: 'travel-guide' });
+for await (const event of chat.send('Where should I eat in Utrecht?')) {
+  if (event.type === 'delta') process.stdout.write(event.content);
+}
+
+await gezel.close();
+```
+
+`Gezel` is the central object: the connection, the models, and the projects. Most work then happens in a `GezelProject`, because chats and app tools are both project-scoped — having the project means never passing its id back in. Everything after `connectOrHost` is identical whether the daemon is the user's or yours, so application code never branches on it; read `gezel.mode` if you want to tell.
+
+`ensureProject` returns the project it created. Pass no `package` and it simply binds the folder to a project, which is all an app that ships no `.gezapp` needs. For a project that already exists — one an earlier run made, or one the person made themselves — use `gezel.openProject(id)`.
+
+### What hosting does
+
+- **Its own home.** State goes under `~/.gezel/apps/<appId>/`, never the user's `~/.gezel` runtime. Your app's projects and gezels stay out of their workshop, and your daemon can never be restarted out from under you by the gezel desktop app.
+- **Their models, read-only.** Models the user already installed are found through a read-only overlay, so a 2 GB download does not happen twice. Nothing of yours is ever written there.
+- **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
+- **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
+
+Install `@bendyline/gezel-service` alongside this SDK to host — it is an optional peer dependency, so apps that only connect never download it.
+
+**Under Electron**, `process.execPath` is your app binary, not Node, and gezel runs its tool server as a child process. Ship a Node binary and pass `host: { nodePath }`; the SDK fails immediately with `node_binary_required` rather than coming up with no tools.
+
+### Shipping a model with your app
+
+`ensureModel` resolves in three steps: already installed, then a `.gezmodel` bundle you ship, then a catalog download. Export a bundle with `gezel model export <id>`, put it in your app's resources, and a first run needs no network:
+
+```ts
+await gezel.ensureModel({ model: 'gemma4-e2b-q4', bundle: '/opt/acme/gemma4-e2b-q4.gezmodel' });
+```
+
+`ensureProject` does the same for a `.gezapp`'s declared chat-model dependencies — pass `bundles: { 'gemma4-e2b-q4': '/opt/acme/gemma4-e2b-q4.gezmodel' }`.
+
+Both calls are idempotent, so the normal shape is to run them on every launch. `ensureProject` preserves the user's edits to seeded files and reuses the crew already on the roster.
+
+## Custom app tools
+
+Register tools your application runs itself. The model sees them beside gezel's own tools; when one is called, your handler runs in your process and its return value becomes the tool's output.
+
+```ts
+const registration = await project.registerTools({
+  tools: [
+    {
+      name: 'add_travel_points',
+      description: 'Award travel points to the traveller.',
+      inputSchema: {
+        type: 'object',
+        properties: { points: { type: 'number' }, reason: { type: 'string' } },
+        required: ['points'],
+      },
+      async handler({ points, reason }) {
+        await awardPoints(Number(points), String(reason ?? ''));
+        return `awarded ${points} points`;
+      },
+    },
+  ],
+});
+```
+
+Notes worth knowing:
+
+- **Registration lives with the connection.** Close the handle, or exit, and the tools are withdrawn. A brief disconnect is held for a grace window and reconnects transparently; a tool whose handler is gone would accept a call and never answer, which is worse for the model than no tool at all.
+- **Arguments are validated** against your `inputSchema` before the call leaves the daemon, so a malformed call comes back to the model as a fixable error instead of reaching your handler.
+- **A handler that throws** is an ordinary tool failure: the model is told, and the turn continues.
+- **Timeouts** default to 60 s per call (`timeoutMs`, max 300 s).
+- Names are snake_case and may not shadow a built-in gezel tool.
+- Needs the `product` scope (or a daemon your app hosts), and Node or Electron — `/api/*` is not reachable from a browser.
+
+Tools work the same against a hosted daemon and the user's own gezel; `registerTools` is also available on a plain `authorize()` result via the exported `registerAppTools`.
+
 ## Headless / browser apps
 
 The Node entry reads `~/.gezel/runtime/` to discover the daemon. In a browser (or any context without filesystem access), use the browser entry and supply `baseUrl` + an `existingToken` explicitly:
@@ -205,6 +300,22 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 | `app.revokeMyToken()` | Self-revoke (user can also revoke from Settings) |
 | `app.close()` | Release the SDK-owned transport after consuming or cancelling response streams |
 
+From `@bendyline/gezel-app-sdk/host`:
+
+| Method | Purpose |
+|---|---|
+| `connectOrHost()` | Connect to the user's gezel, or host one in this process; returns a `Gezel` |
+| `gezel.ensureModel()` | Engine binary + weights (present, bundled, or downloaded) + default pin |
+| `gezel.ensureProject()` | Bind a folder to a `GezelProject`, applying a `.gezapp` when one is given |
+| `gezel.openProject()` | A `GezelProject` for a project that already exists |
+| `gezel.client` | The full typed product API (`@bendyline/gezel-client`) |
+| `gezel.openai` | The OpenAI-shaped `GezelApp` for stateless completions |
+| `gezel.close()` | Stop a daemon this process started; release the transport either way |
+| `project.openChat()` | Open or resume a conversation, by gezel id or role |
+| `project.registerTools()` | Offer tools your application runs itself |
+| `project.gezels` | Gezel id by role template id |
+| `chat.send()` | Stream one turn as `delta` / `tool` / `complete` / `done` events |
+
 ## TLS pinning
 
 The daemon serves HTTPS with a per-launch self-signed cert at `~/.gezel/runtime/cert.pem`. The SDK reads that cert and builds a fetch that trusts it — your first integration won't fail with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The `createTrustingFetch` helper is exported in case you build your own request pipeline.
@@ -236,6 +347,14 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `embeddings_not_supported` — provider doesn't expose embeddings
 - `missing_scope:<scope>` — token is missing the requested scope
 - `provider_error` — backend provider call failed
+
+From the host entry:
+
+- `node_binary_required` — hosting under Electron without `host.nodePath`
+- `service_not_installed` — `@bendyline/gezel-service` is not installed and no `serviceModule` was passed
+- `host_already_active` — this process already hosts a daemon
+- `folder_has_other_app` — the target folder belongs to a different app's project
+- `tool_name_reserved` / `tool_name_conflict` — an app tool name collides with a built-in or another app
 
 ## OpenAPI
 
