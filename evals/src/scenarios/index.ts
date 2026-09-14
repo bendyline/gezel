@@ -27,6 +27,7 @@ import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
+import { powerpointSourceScenarios } from './powerpoint-sources.ts';
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
 import { researchVerifyT1, researchVerifyT2, researchVerifyT3 } from './research-verify.ts';
@@ -52,6 +53,7 @@ const CRAFTBOOK_SCENARIOS = Object.fromEntries(
 
 export const SCENARIOS: Record<string, EvalScenario> = {
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
+  ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
   [ticTacToeScenario.id]: ticTacToeScenario,
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,

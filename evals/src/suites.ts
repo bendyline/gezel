@@ -42,6 +42,25 @@ export const SUITES: Record<string, EvalSuite> = {
       'docblocks-narrated-slideshow',
     ],
   },
+  // The PowerPoint route across every SOURCE SHAPE the book accepts, against
+  // the deterministic DocBlocks mock. `docblocks` above proves the real
+  // conversion toolchain on ONE source shape; this proves the recipe's own
+  // input fork on five, which is where the production failures happened —
+  // the book's own test.json only ever covered a Markdown `sourcePath`.
+  // Mocked, so it is cheap enough to run at the trial counts a pass-rate
+  // claim actually needs.
+  'powerpoint-sources': {
+    id: 'powerpoint-sources',
+    description:
+      'The powerpoint-deck book across five source shapes — Word, PDF, inline content, topic-only, and a decoy beside the named source. Deterministic DocBlocks mock; measures the model and the runtime, not the converter.',
+    scenarios: [
+      'pptx-source-docx',
+      'pptx-source-pdf',
+      'pptx-source-inline',
+      'pptx-topic-only',
+      'pptx-source-decoy',
+    ],
+  },
   // ~30-60 min on a healthy medium local model. A pulse check, not a
   // scorecard — one game anchor, one tool-routing probe, one debugging
   // probe. Use before/after a risky framework change or engine bump.

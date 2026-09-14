@@ -26,6 +26,26 @@ describe('stepToolKit', () => {
     expect(kit?.tools.has('render_image')).toBe(false);
   });
 
+  // Wild-caught on the first binary-source PowerPoint trial: the researcher's
+  // sourcePath was a .docx, its step roster had read_file but no converter,
+  // and every downstream failure — invented deck facts, an unciteable review,
+  // a plateaued gate — traced back to this one missing tool.
+  it('can open a binary source document wherever it can open a text one', () => {
+    const kit = stepToolKit(expandedStep('report.md', 'markdown-report'));
+    expect(kit?.tools.has('read_file')).toBe(true);
+    expect(kit?.tools.has('read_doc_as_markdown')).toBe(true);
+  });
+
+  // A binary deliverable at a workspace path has exactly one possible writer.
+  // Wild-caught on powerpoint-deck's publish step: it converted, previewed and
+  // saved the deck correctly, then had no tool that could copy it to the
+  // requested workspace outputPath, so the run ended one call short of done.
+  it('can deliver a binary to the workspace, not just text', () => {
+    const kit = stepToolKit(expandedStep('deliverables/deck.pptx', 'slide-deck'));
+    expect(kit?.tools.has('copy_artifact_to_workspace')).toBe(true);
+    expect(kit?.tools.has('write_file')).toBe(true);
+  });
+
   it('a data-file step carries the execution channel (derive_file + sandbox)', () => {
     const kit = stepToolKit(expandedStep('out/rows.csv', 'data-file'));
     expect(kit?.kind).toBe('data-file');

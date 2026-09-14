@@ -566,7 +566,6 @@ export async function resolveSessionToolSurface(
   const exactCraftbookConstrained =
     shouldConstrainToExactCraftbookInvocation({
       role: opts.role,
-      tier: opts.tier,
       latestUserMessage: opts.latestUserMessage,
     }) && Boolean(allowlist?.has('invoke_craftbook'));
   if (exactCraftbookConstrained) {

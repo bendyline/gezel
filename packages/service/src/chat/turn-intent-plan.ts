@@ -157,14 +157,29 @@ export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIn
   };
 }
 
-/** Tiny coordinators get one pre-resolved action instead of a two-tool menu. */
+/**
+ * A coordinator on a high-confidence exact-artifact route gets ONE
+ * pre-resolved action instead of a menu, at every model tier.
+ *
+ * The gate used to be `tier === 'tiny'`, on the theory that only the smallest
+ * coordinators lose the route. A medium 27B disproved it: handed the exact
+ * `invoke_craftbook(...)` call in its prelude AND the same call again in the
+ * `suggest_craftbook` result, it browsed the 49-tool menu instead, called
+ * `ensure_gezel` eight times, reasoned itself into believing
+ * `invoke_craftbook` was not wired, and died on the repeat-loop abort with no
+ * task and no .pptx. Parameter count was never the right predictor — route
+ * confidence is. When `detectExactArtifactRoute` resolves the whole call
+ * there is nothing left for any model to choose, and a menu is only an
+ * opportunity to choose wrong.
+ *
+ * Subtractive only: the caller ANDs this with the role/security allowlist, so
+ * it can never grant `invoke_craftbook` to a session that was denied it.
+ */
 export function shouldConstrainToExactCraftbookInvocation(args: {
   role: string | undefined;
-  tier: ModelTier | undefined;
   latestUserMessage: string | undefined;
 }): boolean {
   return (
-    args.tier === 'tiny' &&
     ['meester', 'voorman'].includes(resolveRoleId(args.role) ?? '') &&
     Boolean(detectExactArtifactRoute(args.latestUserMessage ?? ''))
   );

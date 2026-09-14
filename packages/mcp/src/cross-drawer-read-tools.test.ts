@@ -87,6 +87,94 @@ describe('cross-drawer read tools', () => {
     expect(tools.names()).toEqual(['read_file', 'read_files', 'read_artifact', 'read_artifacts']);
   });
 
+  describe('binary office documents', () => {
+    // Wild-caught on the first binary-source PowerPoint trial: read_file on a
+    // .docx returned `1→PK\x03\x04…[Content_Types].xml…`, two gezels each
+    // believed they had read the brief, and the run shipped no deck.
+    function docxDependencies(tools: ReturnType<typeof captureTools>, overrides = {}) {
+      return createDependencies(tools.server, {
+        api: {
+          readProjectArtifactSlice: vi.fn(async () => ({ kind: 'missing' })),
+          toolReadDocAsMarkdown: vi.fn(async () => ({
+            found: true,
+            sourcePath: 'source/brief.docx',
+            markdownPath: 'shadow/source/brief.docx_files/brief.md',
+            markdown: '# Halvard Terminal\n\nMean boarding time fell from 21.4 to 12.8 minutes.',
+            truncated: false,
+          })),
+        } as unknown as Dependencies['api'],
+        ...overrides,
+      });
+    }
+
+    it('reroutes a DOCX read to the document converter instead of decoding bytes', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerWorkspaceReadTools(dependencies);
+
+      const result = await tools.handler('read_file')({ path: 'source/brief.docx' });
+      const text = resultText(result);
+
+      expect(text).toContain('Rerouted read_file → read_doc_as_markdown');
+      expect(text).toContain('Mean boarding time fell from 21.4 to 12.8 minutes.');
+      expect(text).not.toContain('[Content_Types]');
+      expect(dependencies.readWorkspaceFile).not.toHaveBeenCalled();
+      expect(result.structuredContent).toMatchObject({
+        requestedTool: 'read_file',
+        resolvedTool: 'read_doc_as_markdown',
+        rerouted: true,
+      });
+    });
+
+    it('reroutes every container extension, not just DOCX', async () => {
+      for (const path of ['a.pdf', 'b.pptx', 'c.xlsx', 'd.DOCX']) {
+        const tools = captureTools();
+        const dependencies = docxDependencies(tools);
+        registerWorkspaceReadTools(dependencies);
+        const text = resultText(await tools.handler('read_file')({ path }));
+        expect(text, path).toContain('read_doc_as_markdown');
+      }
+    });
+
+    it('names the right tool when the converter is not on this roster', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools, {
+        toolIsAuthorized: vi.fn((name: string) => name !== 'read_doc_as_markdown'),
+      });
+      registerWorkspaceReadTools(dependencies);
+
+      const text = resultText(await tools.handler('read_file')({ path: 'source/brief.docx' }));
+      expect(text).toContain('binary DOCX document');
+      expect(text).toContain('not authorized');
+      expect(text).not.toContain('[Content_Types]');
+    });
+
+    it('falls through to the ordinary read when conversion fails', async () => {
+      const tools = captureTools();
+      const dependencies = createDependencies(tools.server, {
+        api: {
+          readProjectArtifactSlice: vi.fn(async () => ({ kind: 'missing' })),
+          toolReadDocAsMarkdown: vi.fn(async () => ({ found: false })),
+        } as unknown as Dependencies['api'],
+      });
+      registerWorkspaceReadTools(dependencies);
+
+      await tools.handler('read_file')({ path: 'source/corrupt.docx' });
+      // The real error belongs to the real read path, not to a swallowed reroute.
+      expect(dependencies.readWorkspaceFile).toHaveBeenCalledWith('source/corrupt.docx');
+    });
+
+    it('leaves ordinary text files alone', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerWorkspaceReadTools(dependencies);
+
+      const text = resultText(await tools.handler('read_file')({ path: 'notes/brief.md' }));
+      expect(text).toContain('workspace content');
+      expect(text).not.toContain('Rerouted');
+    });
+  });
+
   it('preserves inclusive workspace ranges and returns navigation metadata', async () => {
     const tools = captureTools();
     const readWorkspaceFiles = vi.fn(async () => ({

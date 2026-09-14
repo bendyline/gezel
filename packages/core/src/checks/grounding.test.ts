@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { citationsResolve } from './grounding.js';
+import { citationsResolve, valueGrounding } from './grounding.js';
 describe('citationsResolve — fenced code blocks', () => {
   const ws = (files: Record<string, string>) => ({
     read: async (f: string) => files[f] ?? null,
@@ -152,5 +152,89 @@ describe('citationsResolve — directory context', () => {
     expect(r.ok).toBe(true);
     expect(r.urls).toEqual(['https://example.test/gezel/']);
     expect(r.unresolved).toEqual([]);
+  });
+});
+
+describe('valueGrounding — inline emphasis', () => {
+  // Wild-caught on the powerpoint-deck eval: a correct, correctly-cited slide
+  // ("Original wait: **14** minutes") failed for /14 minutes/ because the
+  // model had bolded the figure. A grounding gate judges values, not markup.
+  it('sees through inline emphasis around a value', () => {
+    const facts = [{ id: 'assist', required: ['14 minutes'] }];
+    expect(valueGrounding('Original wait: **14** minutes.', facts).ok).toBe(true);
+    expect(valueGrounding('Original wait: `14` minutes.', facts).ok).toBe(true);
+    expect(valueGrounding('Original wait: __14__ minutes.', facts).ok).toBe(true);
+  });
+
+  it('still catches a forbidden value that was merely bolded', () => {
+    // Emphasis must not become a way to smuggle a decoy past the check.
+    const result = valueGrounding('Kelby reported **33.9** minutes.', [
+      { id: 'boarding', required: ['21.4'], forbidden: ['33.9'] },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.decoysDetected).toContain('33.9');
+  });
+
+  it('leaves underscores inside identifiers alone', () => {
+    // `_` is a word character in every identifier a fact might require, so a
+    // single underscore is deliberately NOT stripped.
+    expect(valueGrounding('call read_file next', [{ id: 't', required: ['read_file'] }]).ok).toBe(
+      true,
+    );
+  });
+
+  it('keeps digit-group normalization working alongside it', () => {
+    expect(
+      valueGrounding('covered **1,180** sailings', [{ id: 's', required: ['1180'] }]).ok,
+    ).toBe(true);
+  });
+});
+
+describe('citationsResolve — task refs are not citations', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+
+  // Wild-caught on the powerpoint-deck topic-only run: the reviewer cited the
+  // workflow's real artifacts AND its own task ref; one non-resolving citation
+  // failed the whole check, the review step plateaued 3x, and the task paused
+  // with no deck produced.
+  it('ignores a backticked task ref beside real citations', async () => {
+    const report = [
+      'Reviewed `tasks/1/sources.md` for task `powerpoint-sources-pptx-topic-only/1`.',
+      'Deck checked: `powerpoint/eval/deck.md`. PASS.',
+    ].join('\n');
+    const r = await citationsResolve(
+      ws({
+        'review.md': report,
+        'tasks/1/sources.md': 'x',
+        'powerpoint/eval/deck.md': 'y',
+      }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it('still fails a genuinely fabricated path', async () => {
+    const r = await citationsResolve(
+      ws({ 'review.md': 'See `docs/does-not-exist.md` for details.', 'real.md': 'x' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toContain('docs/does-not-exist.md');
+  });
+
+  it('does not excuse a real file whose name merely ends in digits', async () => {
+    // Only a BARE numeric final segment is a task ref; `report-2024.md` is a file.
+    const r = await citationsResolve(
+      ws({ 'review.md': 'See `docs/report-2024.md`.', 'other.md': 'x' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(false);
   });
 });

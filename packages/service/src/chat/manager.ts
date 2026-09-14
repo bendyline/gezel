@@ -12451,12 +12451,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? this.projectOrchestrationConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const exactCraftbookConstrained = gezel
-        ? this.exactCraftbookConstraintActive(
-            existing.record,
-            gezel,
-            existing.modelTier,
-            pendingUserText,
-          )
+        ? this.exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await this.gateRepairConstraintActive(existing.record);
       const codexPermissionMode = gezel
@@ -12629,7 +12624,6 @@ export class ChatManager extends LocalEngineRuntime {
     const exactCraftbookConstrained = this.exactCraftbookConstraintActive(
       record,
       gezel,
-      sessionOpts.modelTier,
       pendingUserText,
     );
 
@@ -12940,12 +12934,10 @@ export class ChatManager extends LocalEngineRuntime {
   private exactCraftbookConstraintActive(
     record: ChatSession,
     gezel: GezelDetail,
-    tier: LocalModelTier | undefined,
     pendingUserText?: string,
   ): boolean {
     return shouldConstrainToExactCraftbookInvocation({
       role: gezel.role,
-      tier,
       latestUserMessage: pendingUserText ?? latestUserMessageContent(record.messages),
     });
   }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { TurnIntentPlan } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -271,32 +272,34 @@ describe('ChatComposer To line', () => {
 });
 
 describe('ChatComposer route preview', () => {
+  const powerpointPlan = {
+    schemaVersion: 1,
+    intent: 'artifact',
+    route: 'craftbook',
+    confidence: 'high',
+    reason: 'exact-output-format',
+    visible: true,
+    display: {
+      label: 'Planned: PowerPoint (.pptx)',
+      detail: 'PowerPoint from Content',
+      badges: ['PPTX', 'Craftbook'],
+    },
+    output: { format: 'pptx', label: 'PowerPoint (.pptx)' },
+    craftbook: {
+      id: 'powerpoint-deck',
+      name: 'PowerPoint from Content',
+      invocation: { description: 'Please make a PowerPoint about Mongolia.' },
+    },
+    requiredTools: ['invoke_craftbook'],
+  } satisfies TurnIntentPlan;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
   });
 
   it('shows the daemon plan while the user is still composing', async () => {
-    vi.mocked(api.previewTurnIntent).mockResolvedValue({
-      schemaVersion: 1,
-      intent: 'artifact',
-      route: 'craftbook',
-      confidence: 'high',
-      reason: 'exact-output-format',
-      visible: true,
-      display: {
-        label: 'Planned: PowerPoint (.pptx)',
-        detail: 'PowerPoint from Content',
-        badges: ['PPTX', 'Craftbook'],
-      },
-      output: { format: 'pptx', label: 'PowerPoint (.pptx)' },
-      craftbook: {
-        id: 'powerpoint-deck',
-        name: 'PowerPoint from Content',
-        invocation: { description: 'Please make a PowerPoint about Mongolia.' },
-      },
-      requiredTools: ['invoke_craftbook'],
-    });
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
     render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
@@ -305,9 +308,11 @@ describe('ChatComposer route preview', () => {
       target: { value: 'Please make a PowerPoint about Mongolia.' },
     });
 
-    expect(await screen.findByRole('status', { name: /planned: powerpoint/i })).toHaveTextContent(
-      'PowerPoint from Content',
-    );
+    const preview = await screen.findByRole('status', { name: /planned: powerpoint/i });
+    expect(preview).toHaveTextContent('PowerPoint');
+    expect(preview).not.toHaveTextContent('(.pptx)');
+    expect(preview).toHaveAttribute('title', expect.stringContaining('PowerPoint from Content'));
+    expect(preview.nextElementSibling).toBe(screen.getByRole('button', { name: 'Narrate prompt' }));
     expect(api.previewTurnIntent).toHaveBeenCalledWith({
       message: 'Please make a PowerPoint about Mongolia.',
       gezelId: 'tomas',
@@ -315,6 +320,43 @@ describe('ChatComposer route preview', () => {
       sessionId: 'session-1',
     });
     expect(screen.queryByText(/docblocks/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the confirmed plan visible until the latest preview supersedes it', async () => {
+    const latestPreview = deferred<TurnIntentPlan>();
+    vi.mocked(api.previewTurnIntent)
+      .mockResolvedValueOnce(powerpointPlan)
+      .mockReturnValueOnce(latestPreview.promise);
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    const editor = screen.getByLabelText('Message');
+    fireEvent.change(editor, {
+      target: { value: 'Can you create a PowerPoint' },
+    });
+    expect(await screen.findByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+
+    fireEvent.change(editor, {
+      target: { value: 'Can you create a PowerPoint about Mongolia' },
+    });
+    expect(screen.getByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+    await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+
+    latestPreview.resolve({
+      schemaVersion: 1,
+      intent: 'conversation',
+      route: 'none',
+      confidence: 'low',
+      reason: 'no-strong-signal',
+      visible: false,
+      display: { label: 'Conversation', badges: [] },
+      requiredTools: [],
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: /planned: powerpoint/i })).toBeNull();
+    });
   });
 });
 

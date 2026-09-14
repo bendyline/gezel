@@ -47,26 +47,44 @@ describe('turn intent planning', () => {
     ).toMatchObject({ route: 'specialist', specialist: { role: 'developer' } });
   });
 
-  it('narrows only tiny coordinator exact-format turns', () => {
+  it('narrows coordinator exact-format turns at every tier', () => {
     expect(
       shouldConstrainToExactCraftbookInvocation({
         role: 'Meester',
-        tier: 'tiny',
         latestUserMessage: 'Create a .pptx presentation for me',
       }),
     ).toBe(true);
     expect(
       shouldConstrainToExactCraftbookInvocation({
         role: 'Voorman',
-        tier: 'tiny',
         latestUserMessage: 'Create a .pptx presentation for me',
       }),
     ).toBe(true);
+  });
+
+  // A medium 27B Meester, handed the exact invoke_craftbook call twice over,
+  // browsed its 49-tool menu instead and burned the turn on ensure_gezel.
+  // Parameter count never predicted this; route confidence does.
+  it('narrows a medium-tier meester on a resolved pptx route', () => {
     expect(
       shouldConstrainToExactCraftbookInvocation({
         role: 'Meester',
-        tier: 'medium',
+        latestUserMessage: 'Can you create a PowerPoint about France',
+      }),
+    ).toBe(true);
+  });
+
+  it('leaves non-coordinators and unrouted turns alone', () => {
+    expect(
+      shouldConstrainToExactCraftbookInvocation({
+        role: 'Developer',
         latestUserMessage: 'Create a .pptx presentation for me',
+      }),
+    ).toBe(false);
+    expect(
+      shouldConstrainToExactCraftbookInvocation({
+        role: 'Meester',
+        latestUserMessage: 'What do you think of the deck so far?',
       }),
     ).toBe(false);
   });

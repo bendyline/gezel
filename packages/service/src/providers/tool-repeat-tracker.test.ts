@@ -266,6 +266,121 @@ describe('ToolRepeatTracker', () => {
     expect(hard.shouldAbort).toBe(true);
   });
 
+  // The whole France PowerPoint loop in one place: eight ensure_gezel calls,
+  // seven of them resolving to the same gezel, split across two capitalizations.
+  describe('ensure_gezel loops count the gezel, not the wording', () => {
+    const reused = (id: string, name: string) =>
+      `Reused ${name} — existing gezel, match score 1.00\nGezel id: ${id}\n\nNEXT: message_gezel(...)`;
+
+    it('collapses case variants that resolved to the same gezel', () => {
+      const t = new ToolRepeatTracker();
+      const out = reused('jericho', 'Jericho (PowerPoint Deck Producer)');
+      const counts = [
+        t.recordCall('ensure_gezel', { jobTitle: 'PowerPoint deck producer' }, out).count,
+        t.recordCall('ensure_gezel', { jobTitle: 'PowerPoint deck producer' }, out).count,
+        t.recordCall('ensure_gezel', { jobTitle: 'PowerPoint Deck Producer' }, out).count,
+        t.recordCall('ensure_gezel', { jobTitle: 'PowerPoint Deck Producer' }, out).count,
+      ];
+      expect(counts).toEqual([1, 2, 3, 4]);
+      // Before: two keys, counts of [1, 2, 1, 2] — the soft nudge never fired.
+      const third = t.recordCall('ensure_gezel', { jobTitle: 'powerpoint  DECK producer' }, out);
+      expect(third.count).toBe(5);
+      expect(third.shouldAbort).toBe(true);
+    });
+
+    it('warns at 3 even when every call spelled the role differently', () => {
+      const t = new ToolRepeatTracker();
+      const out = reused('jericho', 'Jericho (PowerPoint Deck Producer)');
+      t.recordCall('ensure_gezel', { jobTitle: 'deck producer' }, out);
+      t.recordCall('ensure_gezel', { jobTitle: 'PowerPoint person' }, out);
+      const third = t.recordCall('ensure_gezel', { jobTitle: 'slide builder' }, out);
+      expect(third.count).toBe(3);
+      expect(third.output).toContain('[runtime]');
+      expect(third.output).toContain('the same gezel 3 times');
+    });
+
+    it('keeps genuinely different gezels on separate counters', () => {
+      const t = new ToolRepeatTracker();
+      t.recordCall('ensure_gezel', { jobTitle: 'writer' }, reused('liesel', 'Liesel (Writer)'));
+      const other = t.recordCall(
+        'ensure_gezel',
+        { jobTitle: 'PowerPoint deck producer' },
+        reused('jericho', 'Jericho (PowerPoint Deck Producer)'),
+      );
+      expect(other.count).toBe(1);
+    });
+
+    it('falls back to a loose jobTitle key when no id is in the output', () => {
+      const t = new ToolRepeatTracker();
+      const err = 'ERROR: could not resolve a gezel for that role.';
+      t.recordCall('ensure_gezel', { jobTitle: 'Deck Producer' }, err);
+      const again = t.recordCall('ensure_gezel', { jobTitle: 'deck producer' }, err);
+      expect(again.count).toBe(2);
+    });
+  });
+
+  describe('abort correctives never contradict themselves', () => {
+    it('omits the looping tool from the suggestion list on a read loop', () => {
+      // The France abort fired on `ensure_gezel` and then told the model its
+      // next message MUST start with one of (… `ensure_gezel` …).
+      const msg = ToolRepeatTracker.buildAbortMessage({
+        providerLabel: 'Mac AI',
+        toolName: 'ensure_gezel',
+        count: 5,
+        registeredTools: ['ensure_gezel', 'message_gezel', 'start_project'],
+      });
+      const list = /action-tool call \(([^)]*)\)/.exec(msg)?.[1] ?? '';
+      expect(list).not.toContain('ensure_gezel');
+      expect(list).toContain('message_gezel');
+    });
+
+    it('names invoke_craftbook when the routed turn has it wired', () => {
+      const msg = ToolRepeatTracker.buildAbortMessage({
+        providerLabel: 'Mac AI',
+        toolName: 'ensure_gezel',
+        count: 5,
+        registeredTools: ['ensure_gezel', 'invoke_craftbook', 'message_gezel'],
+      });
+      expect(msg).toContain('`invoke_craftbook`');
+    });
+
+    it('drops the generic ship advice mid-craftbook-step', () => {
+      // The Valencia research step's primary result IS an artifact. The
+      // corrective used to name `write_artifact` as a required next call and
+      // then tell the model not to use it, two sentences apart.
+      const msg = ToolRepeatTracker.buildAbortMessage({
+        providerLabel: 'Mac AI',
+        toolName: 'read_task_notes',
+        count: 5,
+        registeredTools: ['read_task_notes', 'write_artifact', 'advance_task_step'],
+        activeStep: { name: 'Acquire and verify sources' },
+      });
+      expect(msg).toContain('`write_artifact`');
+      expect(msg).not.toContain('artifacts are for plans/scratch');
+      expect(msg).toContain('mid-craftbook step **Acquire and verify sources**');
+    });
+
+    it('keeps the ship advice when no craftbook step is active', () => {
+      const msg = ToolRepeatTracker.buildAbortMessage({
+        providerLabel: 'Mac AI',
+        toolName: 'read_task_notes',
+        count: 5,
+        registeredTools: ['read_task_notes', 'write_artifact', 'advance_task_step'],
+      });
+      expect(msg).toContain('artifacts are for plans/scratch');
+    });
+
+    it('leaves a clamped single-tool turn with exactly its one call', () => {
+      const msg = ToolRepeatTracker.buildAbortMessage({
+        providerLabel: 'Mac AI',
+        toolName: 'suggest_craftbook',
+        count: 5,
+        registeredTools: ['invoke_craftbook'],
+      });
+      expect(msg).toContain('`invoke_craftbook`');
+    });
+  });
+
   it('builds a user-facing abort message with provider label', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'Mac AI',

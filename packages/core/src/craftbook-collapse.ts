@@ -125,8 +125,13 @@ function collapsedPrompt(opts: {
   const job = anchor.description?.trim() || anchor.name;
   lines.push(job.endsWith('.') ? job : `${job}.`);
   if (path && kind) {
+    const firstAction = firstActionForKind(kind, path);
+    // No single call produces a binary deliverable, and a wrong first action
+    // is worse than none — the authored procedure below still says how.
     lines.push(
-      `Produce \`${path}\` — your first tool call is \`${firstActionForKind(kind, path)}\`. One tool call per turn.`,
+      firstAction
+        ? `Produce \`${path}\` — your first tool call is \`${firstAction}\`. One tool call per turn.`
+        : `Produce \`${path}\` by following the procedure below — it is a binary file, so never write it with a text-write tool. One tool call per turn.`,
     );
   }
   if (checks.length > 0) {

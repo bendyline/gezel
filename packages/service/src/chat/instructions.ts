@@ -458,24 +458,79 @@ function firstAvailableProcedureTool(
   return undefined;
 }
 
-/** True when the tool mention at `index` sits in a conditional or negated
- *  clause (see {@link firstAvailableProcedureTool}). Clause = text since
- *  the last sentence boundary; lexical on purpose — this only ever makes
- *  the anchor MORE conservative. */
-function isGuardedToolMention(procedure: string, index: number): boolean {
+/** Ends a sentence. A condition governs everything up to one of these. */
+const SENTENCE_BOUNDARIES = ['. ', '.\n', '! ', '? ', '\n'] as const;
+/** Ends a clause. A negation binds only to the phrase it opens. */
+const CLAUSE_BOUNDARIES = [...SENTENCE_BOUNDARIES, ': ', ';'] as const;
+
+const CONDITIONAL_LEAD_RE = /^(?:if|when|whenever|unless|only if|in case|otherwise|should)\b/i;
+/**
+ * `When \`<value>\` is non-empty, …` — the shape every craftbook branch on an
+ * interpolated parameter takes. Once rendered, this condition is DECIDABLE:
+ * the value is right there. Deciding it is the difference between suppressing
+ * a dead branch and suppressing the live one.
+ */
+const NON_EMPTY_CONDITION_RE = /^(?:when|if)\s+`([^`]*)`\s+is\s+non-empty\b/i;
+
+type ConditionVerdict = 'live' | 'dead' | 'undecidable';
+
+function decideInterpolatedCondition(sentence: string): ConditionVerdict {
+  const match = NON_EMPTY_CONDITION_RE.exec(sentence);
+  if (!match) return 'undecidable';
+  return match[1]?.trim() ? 'live' : 'dead';
+}
+const NEGATION_RE = /\b(?:do not|don't|never|avoid|instead of|rather than)\b[^.!?]*$/i;
+/** An inline-code span that interpolated to nothing: `` in the rendered text. */
+const EMPTY_INTERPOLATION = '``';
+
+function textSince(procedure: string, index: number, boundaries: readonly string[]): string {
   const before = procedure.slice(0, index);
-  const boundary = Math.max(
-    before.lastIndexOf('. '),
-    before.lastIndexOf('.\n'),
-    before.lastIndexOf('! '),
-    before.lastIndexOf('? '),
-    before.lastIndexOf(': '),
-    before.lastIndexOf(';'),
-    before.lastIndexOf('\n'),
-  );
-  const clause = before.slice(boundary + 1).replace(/^[\s*>-]+/, '');
-  if (/^(?:if|when|unless|only if|in case|otherwise|should)\b/i.test(clause)) return true;
-  return /\b(?:do not|don't|never|avoid|instead of|rather than)\b[^.!?]*$/i.test(clause);
+  let boundary = -1;
+  for (const b of boundaries) boundary = Math.max(boundary, before.lastIndexOf(b));
+  return before
+    .slice(boundary + 1)
+    .replace(/^[\s*>-]+/, '')
+    .replace(/^\d+[.)]\s*/, '');
+}
+
+/**
+ * True when the tool mention at `index` sits in a conditional or negated
+ * clause (see {@link firstAvailableProcedureTool}). Lexical on purpose —
+ * every rule here only ever makes the anchor MORE conservative, and no
+ * anchor is strictly better than one pointing at a branch that does not
+ * apply, because the surrounding footer already says "begin with the FIRST
+ * tool action the procedure names".
+ *
+ * A condition and a negation have different scopes, and conflating them is
+ * what let this guard fail twice. A negation binds tightly — "read X: do
+ * not call `y`" — so its lookback stops at the nearest colon or semicolon.
+ * A condition governs its whole SENTENCE, so its lookback must reach past
+ * one. Wild-caught on the powerpoint-deck research step (Valencia run): the
+ * procedure read "1. When `` is non-empty, your FIRST source action is to
+ * read that exact path: use `read_doc_as_markdown` …", with `sourcePath`
+ * interpolated to empty. The colon severed the condition from the mention,
+ * the clause reduced to "use ", and the footer ordered a topic-only run to
+ * open a document it had no path for. The researcher's own reasoning kept
+ * correctly deriving "call `search` first" and never emitted it — thirteen
+ * tool calls, none of them either tool, ending in a repeat-loop abort.
+ *
+ * The second rule is the same failure seen from the data side: a branch
+ * whose condition interpolated to `` is a branch this run does not take.
+ */
+function isGuardedToolMention(procedure: string, index: number): boolean {
+  const sentence = textSince(procedure, index, SENTENCE_BOUNDARIES);
+  const negated = () => NEGATION_RE.test(textSince(procedure, index, CLAUSE_BOUNDARIES));
+  // Decide the condition before falling back to suppressing it. A branch whose
+  // parameter IS present is the branch this run takes, and its tool is the
+  // right anchor — blanket-guarding every conditional trades a wrong anchor on
+  // the topic-only run for a wrong anchor on the named-source run, which is
+  // exactly what the first pass at this did.
+  const verdict = decideInterpolatedCondition(sentence);
+  if (verdict === 'live') return negated();
+  if (verdict === 'dead') return true;
+  if (CONDITIONAL_LEAD_RE.test(sentence)) return true;
+  if (sentence.includes(EMPTY_INTERPOLATION)) return true;
+  return negated();
 }
 
 /** Sentence-aware cap of the about body for minimal-context mode. */

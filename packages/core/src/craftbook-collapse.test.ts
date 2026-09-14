@@ -227,3 +227,51 @@ describe('collapseCraftbookForTier', () => {
 // The catalog-wide collapse sweep moved to
 // packages/catalog/src/craftbook-collapse-sweep.test.ts — it reads the
 // external gilde content package, which core cannot depend on.
+
+describe('collapseCraftbookForTier — binary deliverables', () => {
+  // Wild-caught on the first tiny-tier PowerPoint trial: the collapsed publish
+  // step read "your first tool call is `write_file({ path: "…pptx" })`", which
+  // is exactly what the book forbids ("Never send PowerPoint bytes through
+  // text-write tools"). The 3B obeyed and the run produced no deck.
+  function book(finalPath: string) {
+    const step = (id: string, name: string, file: string, minBytes: number) => ({
+      id,
+      name,
+      description: `${name}.`,
+      prompt: `Do ${id}.`,
+      advanceWhen: { file, minBytes },
+      gate: {
+        at: 'completion' as const,
+        checks: [{ kind: 'minBytes' as const, file, bytes: minBytes }],
+        onReject: id,
+      },
+    });
+    return {
+      id: 'b',
+      name: 'B',
+      entryStepId: 's1',
+      steps: [
+        step('s1', 'Research', 'sources.md', 100),
+        step('s2', 'Outline', 'outline.md', 100),
+        step('s3', 'Write', 'deck.md', 700),
+        step('s4', 'Review', 'review.md', 400),
+        step('s5', 'Publish', finalPath, 1000),
+      ],
+    } as never;
+  }
+
+  it('never tells a tiny model to text-write a binary deliverable', () => {
+    const result = collapseCraftbookForTier(book('out/deck.pptx'), { tier: 'tiny' });
+    expect(result.changed).toBe(true);
+    const text = (result.steps ?? []).map((s: { prompt?: string }) => s.prompt ?? '').join('\n');
+    expect(text).not.toMatch(/write_file\(\{ path: "[^"]*\.pptx"/);
+    expect(text).toContain('never write it with a text-write tool');
+  });
+
+  it('still names a concrete first action for a text deliverable', () => {
+    const result = collapseCraftbookForTier(book('out/report.md'), { tier: 'tiny' });
+    expect(result.changed).toBe(true);
+    const text = (result.steps ?? []).map((s: { prompt?: string }) => s.prompt ?? '').join('\n');
+    expect(text).toContain('write_file({ path: "out/report.md"');
+  });
+});

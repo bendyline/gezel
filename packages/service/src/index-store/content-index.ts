@@ -104,6 +104,7 @@ import {
   type SecuritySeverity,
   type SymbolHit,
 } from './index-store.js';
+import { searchTokens } from './query-terms.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
 import { isTransientIndexError } from './sqlite-driver.js';
@@ -2923,34 +2924,4 @@ function severityRank(s: SecuritySeverity): number {
 }
 function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
   return severityRank(b) > severityRank(a) ? b : a;
-}
-
-const SEARCH_STOP_WORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'for',
-  'how',
-  'in',
-  'is',
-  'of',
-  'on',
-  'or',
-  'the',
-  'to',
-  'with',
-]);
-
-function searchTokens(text: string): Set<string> {
-  const tokens =
-    text
-      .normalize('NFKC')
-      .toLocaleLowerCase()
-      .match(/[\p{L}\p{N}_]+/gu) ?? [];
-  return new Set(
-    tokens
-      .filter((token) => !SEARCH_STOP_WORDS.has(token))
-      .map((token) => (token.length > 4 && token.endsWith('s') ? token.slice(0, -1) : token)),
-  );
 }

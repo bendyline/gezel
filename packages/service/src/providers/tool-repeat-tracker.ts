@@ -69,10 +69,28 @@ const HARD_ABORT_AT_DEFAULT = 5;
  * `message_gezel`. `whyYouNeed` is gone now, but the jobTitle-only key
  * still guards against any remaining varying arg (e.g. `preferredName`).
  *
- * Treat those args as decorative for dedup: same `jobTitle` → same key.
+ * Treat those args as decorative for dedup. Where the tool's own result
+ * names the thing it resolved (`ensure_gezel` prints the gezel id), key on
+ * THAT instead — it is the authoritative no-progress signal, and immune to
+ * however the model rephrases its way back to the same answer.
  */
-const ARG_KEY_NORMALIZERS: Record<string, (args: Record<string, unknown>) => unknown> = {
-  ensure_gezel: ({ jobTitle }) => ({ jobTitle }),
+const ARG_KEY_NORMALIZERS: Record<
+  string,
+  (args: Record<string, unknown>, output: string) => unknown
+> = {
+  // `ensure_gezel` is idempotent and SAYS so in its own result, so the
+  // no-progress signal is the gezel it resolved, not the words typed to
+  // reach it. Wild-caught (qwen3.8 27B, France PowerPoint turn): the model
+  // alternated "PowerPoint deck producer" and "PowerPoint Deck Producer",
+  // splitting one loop across two keys with counts of 2 and 5 — the soft
+  // nudge landed two calls late and the abort fired on call 8 of 8 instead
+  // of call 6. Seven of those eight calls returned the SAME gezel id.
+  // Falls back to a case/whitespace-insensitive jobTitle when the id cannot
+  // be parsed (an error output, or a future result-format change).
+  ensure_gezel: (args, output) => {
+    const resolved = resolvedGezelId(output);
+    return resolved ? { gezel: resolved } : { jobTitle: looseKey(args.jobTitle) };
+  },
   // Rewriting the same workspace file several times in one local-model
   // turn is usually a drift loop, even when the emitted content differs.
   // Wild-caught (qwen3.6 35B MLX bookstore eval): after the
@@ -212,13 +230,14 @@ export class ToolRepeatTracker {
     // wording ("Ask the gezel to summarize…") read as user guidance
     // and didn't change the gezel's behavior on resume.
     const isWriteTool = WRITE_TOOL_NAMES.has(opts.toolName);
-    // For write-tool loops, the suggestion list should EXCLUDE the
-    // looping tool — telling a model "you already wrote write_artifact
-    // 5x, the next action MUST be write_artifact" is the contradiction
-    // that caused nemotron-nano's tankcombat run to abort.
-    const filteredRegistered = isWriteTool
-      ? filterOutTool(opts.registeredTools, opts.toolName)
-      : opts.registeredTools;
+    // The suggestion list must EXCLUDE the looping tool — telling a model
+    // "you already wrote write_artifact 5x, the next action MUST be
+    // write_artifact" is the contradiction that caused nemotron-nano's
+    // tankcombat run to abort. This used to apply to write loops only, and
+    // the read branch kept reproducing the same contradiction: the France
+    // PowerPoint abort fired on `ensure_gezel` and then listed `ensure_gezel`
+    // among the tools the next message MUST start with.
+    const filteredRegistered = filterOutTool(opts.registeredTools, opts.toolName);
     const suggestions = filterActionToolSuggestions(filteredRegistered);
     // Ship-code hint only when an obvious file-write tool is actually
     // wired this turn AND we're aborting on a read-loop (not a write
@@ -242,8 +261,16 @@ export class ToolRepeatTracker {
     const list = (visibleSuggestions.length > 0 ? visibleSuggestions : suggestions)
       .map((t) => `\`${t}\``)
       .join(', ');
-    const shipHint =
-      hasWorkspaceWrite && !isWriteTool
+    // A craftbook step's own output contract outranks the generic ship
+    // advice, and the two contradict each other outright. Wild-caught on the
+    // Valencia research step, whose primary result IS an artifact
+    // (`tasks/18/sources.md`): the corrective named `write_artifact` as a
+    // required next call and then, two sentences later, told the model not to
+    // use it because "artifacts are for plans/scratch". `stepHint` already
+    // points at the procedure, which is the authoritative answer here.
+    const shipHint = opts.activeStep
+      ? ''
+      : hasWorkspaceWrite && !isWriteTool
         ? ' If the task is to ship source or project files, call `write_file` now with the full file contents — do not narrate the plan first.'
         : sourceReadWithoutWorkspaceWrite
           ? ' You do not have workspace write access in this role, so you cannot create or edit that source file yourself. Hand off to a developer with `message_gezel`/`assign_task`, or ask the user only if no writable specialist is available.'
@@ -381,9 +408,17 @@ function filterActionToolSuggestions(
   // should have been running the step's onExit script. Wild-caught on
   // the review-craftbook spin: `read_task_notes` × 5 because the
   // gezel had no good action-tool candidates surfaced.
+  //
+  // `invoke_craftbook` sits ahead of the generic kickoff tools because the
+  // Meester's own prompt gives the craftbook route precedence over
+  // project/job kickoff, and because it was missing here entirely: on the
+  // France PowerPoint turn the abort told a routed coordinator its next call
+  // must be one of `start_project`/`ensure_gezel`/`delegate_*` and never
+  // named the one pre-resolved call the runtime had already computed for it.
   const candidates = [
     'fetch_repo',
     'fetch_diff',
+    'invoke_craftbook',
     'start_project',
     'start_job',
     'ensure_gezel',
@@ -417,6 +452,18 @@ function filterActionToolSuggestions(
   return filtered.length > 0 ? filtered : candidates;
 }
 
+/** The id line `ensure_gezel` closes its result with. */
+const RESOLVED_GEZEL_ID_RE = /^Gezel id:\s*(\S+)\s*$/m;
+
+function resolvedGezelId(output: string): string | null {
+  return RESOLVED_GEZEL_ID_RE.exec(output)?.[1] ?? null;
+}
+
+/** Case- and whitespace-insensitive key for free-text args a model rephrases. */
+function looseKey(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+}
+
 function stringifyArgs(toolName: string, args: unknown, output: string): string {
   if (args == null) return '{}';
   // An atomically rejected write_file draft never reached disk. Count a
@@ -433,7 +480,7 @@ function stringifyArgs(toolName: string, args: unknown, output: string): string 
   // a stray string/array falls back to the raw `JSON.stringify` path.
   const effective =
     normalizer && typeof args === 'object' && !Array.isArray(args)
-      ? normalizer(args as Record<string, unknown>)
+      ? normalizer(args as Record<string, unknown>, output)
       : args;
   try {
     return JSON.stringify(effective);
@@ -462,6 +509,9 @@ function repeatTargetDescription(toolName: string, args: unknown, count: number)
     const record = args as Record<string, unknown>;
     const step = typeof record.stepId === 'string' ? ` step \`${record.stepId}\`` : '';
     return `task \`${record.ref}\`${step} ${count} times`;
+  }
+  if (toolName === 'ensure_gezel') {
+    return `the same gezel ${count} times`;
   }
   return `these exact arguments ${count} times`;
 }

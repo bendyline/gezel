@@ -982,50 +982,37 @@
   white-space: nowrap;
 }
 
-/* Inspectable pre-send routing: this mirrors the plan the daemon will inject
-   on Send. It reads as a compact system annotation, not another recipient
-   pill or a mode toggle. */
-.chat-turn-route-preview {
-  display: flex;
+/* Inspectable pre-send routing, tucked into the composer action rail. This is
+   a read-only status chip rather than a mode or action; its tooltip retains
+   the full route while the face stays quiet beside narration and Send. */
+.chat-turn-intent-preview {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin: 0 0.25rem 0.35rem;
-  padding: 0.35rem 0.55rem;
-  color: var(--text-muted);
+  flex: 0 1 100px;
+  gap: 0.3rem;
+  box-sizing: border-box;
+  max-width: 100px;
+  height: 1.75rem;
+  margin: 2px;
+  padding: 0 0.45rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
   background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: var(--text-2xs);
-  line-height: 1.35;
-}
-
-.chat-turn-route-preview-label {
-  color: var(--text);
   font-weight: 600;
+  line-height: 1;
 }
 
-.chat-turn-route-preview-detail {
+.chat-turn-intent-preview svg {
+  flex: 0 0 auto;
+}
+
+.chat-turn-intent-preview span {
   overflow: hidden;
-  min-width: 8rem;
-  max-width: 26rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-turn-route-preview-badges {
-  display: inline-flex;
-  gap: 0.25rem;
-  margin-left: auto;
-}
-
-.chat-turn-route-preview-badge {
-  padding: 0.08rem 0.3rem;
-  color: color-mix(in srgb, var(--accent) 74%, var(--text));
-  background: var(--key-bg);
-  border: 1px solid var(--key-border);
-  border-radius: var(--radius-sm);
-  font-weight: 600;
 }
 
 .chat-composer-to-recipient {

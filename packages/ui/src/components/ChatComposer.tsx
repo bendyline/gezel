@@ -85,6 +85,27 @@ function CollapseDraftIcon() {
   );
 }
 
+/** A quiet routing spark for the compact pre-send intent readout. */
+function TurnIntentGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path
+        d="M7 1.75c.3 2.55 1.7 3.95 4.25 4.25C8.7 6.3 7.3 7.7 7 10.25 6.7 7.7 5.3 6.3 2.75 6 5.3 5.7 6.7 4.3 7 1.75Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="10.75" cy="10.75" r="0.75" fill="currentColor" />
+    </svg>
+  );
+}
+
+function compactTurnIntentLabel(plan: TurnIntentPlan): string {
+  const label = plan.output?.label ?? plan.specialist?.label ?? plan.display.label;
+  return label.replace(/^Planned:\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '');
+}
+
 export interface ChatComposerProps {
   gezelId: string;
   /** The primary recipient's friendly name. */
@@ -576,13 +597,24 @@ export function ChatComposer({
   // quiet, and a sequence guard prevents an older response repainting a newer
   // draft after network reordering.
   const intentPreviewSequence = useRef(0);
+  const intentPreviewAddressRef = useRef(
+    `${gezelId}\u0000${projectId}\u0000${liveSessionId ?? ''}`,
+  );
   useEffect(() => {
     const message = intentPreviewText.trim();
     const sequence = ++intentPreviewSequence.current;
-    setTurnIntentPlan(null);
+    const address = `${gezelId}\u0000${projectId}\u0000${liveSessionId ?? ''}`;
+    const addressChanged = intentPreviewAddressRef.current !== address;
+    intentPreviewAddressRef.current = address;
+
+    // A confirmed plan remains accurate enough to display while the next
+    // debounced preview is pending. Clear it immediately only when routing is
+    // impossible locally or when the conversation address has changed.
     if (message.length < 8 || parseOpenChatQuery(intentPreviewText) !== null) {
+      setTurnIntentPlan(null);
       return;
     }
+    if (addressChanged) setTurnIntentPlan(null);
     const timer = window.setTimeout(() => {
       void api
         .previewTurnIntent({
@@ -595,9 +627,9 @@ export function ChatComposer({
           if (intentPreviewSequence.current !== sequence) return;
           setTurnIntentPlan(plan.visible ? plan : null);
         })
-        .catch(() => {
-          if (intentPreviewSequence.current === sequence) setTurnIntentPlan(null);
-        });
+        // Preview is advisory. A transient failure should not flicker away a
+        // previously confirmed plan; Send will recompute it authoritatively.
+        .catch(() => {});
     }, 350);
     return () => window.clearTimeout(timer);
   }, [gezelId, intentPreviewText, liveSessionId, projectId]);
@@ -1551,25 +1583,6 @@ export function ChatComposer({
         {addressLineTrailing}
       </div>
       {belowAddressLine}
-      {turnIntentPlan && (
-        <output
-          className="chat-turn-route-preview"
-          aria-label={`${turnIntentPlan.display.label}. ${turnIntentPlan.display.detail ?? ''}`.trim()}
-          title="This is the route Gezel will add to the model's turn when you send."
-        >
-          <span className="chat-turn-route-preview-label">{turnIntentPlan.display.label}</span>
-          {turnIntentPlan.display.detail && (
-            <span className="chat-turn-route-preview-detail">{turnIntentPlan.display.detail}</span>
-          )}
-          <span className="chat-turn-route-preview-badges" aria-hidden="true">
-            {turnIntentPlan.display.badges.map((badge) => (
-              <span key={badge} className="chat-turn-route-preview-badge">
-                {badge}
-              </span>
-            ))}
-          </span>
-        </output>
-      )}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
           <div className="chat-open-command-menu" role="menu" aria-label="Open targets">
@@ -1646,6 +1659,16 @@ export function ChatComposer({
             <>
               <ComposerImageClipboard onError={setError} />
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
+              {turnIntentPlan && (
+                <output
+                  className="chat-turn-intent-preview"
+                  aria-label={`${turnIntentPlan.display.label}. ${turnIntentPlan.display.detail ?? ''}`.trim()}
+                  title={`${turnIntentPlan.display.label}${turnIntentPlan.display.detail ? ` — ${turnIntentPlan.display.detail}` : ''}. Gezel will add this route when you send.`}
+                >
+                  <TurnIntentGlyph />
+                  <span>{compactTurnIntentLabel(turnIntentPlan)}</span>
+                </output>
+              )}
               <ComposerNarrateButton
                 projectId={projectId}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}

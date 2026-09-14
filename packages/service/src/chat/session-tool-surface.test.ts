@@ -795,12 +795,12 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
         latestUserMessage: prompt,
       });
 
+      // Medium tier collapses to the same single pre-resolved action as tiny.
+      // A 27B Meester given the shortlist tool alongside the invocation tool
+      // shopped instead of invoking, looped on `ensure_gezel`, and shipped no
+      // .pptx — so route confidence, not parameter count, gates the clamp.
       expect(projectOrchestrationConstrained).toBe(true);
-      expect(allowlist?.has('suggest_craftbook')).toBe(true);
-      expect(allowlist?.has('invoke_craftbook')).toBe(true);
-      expect(allowlist?.has('message_gezel')).toBe(true);
-      expect(allowlist?.has('write_file')).toBe(false);
-      expect(allowlist!.size).toBeLessThan(25);
+      expect([...allowlist!]).toEqual(['invoke_craftbook']);
     }
   });
 

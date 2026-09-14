@@ -74,6 +74,184 @@ async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | '
   });
 }
 
+/**
+ * Wild-caught (qwen3.8 27B, France PowerPoint turn): an `artifacts/eval10/
+ * contact-sheet.jpg` hit whose index row held a clean vision description was
+ * hydrated by re-reading the JPEG, and 1155 bytes of mojibake — 27% of the
+ * whole injected block — landed directly above the turn's system route.
+ */
+describe('excerpt hydration never injects binary', () => {
+  const JPEG_BYTES =
+    `\uFFFD\uFFFD\uFFFD\uFFFDLavc62.28.102\uFFFD\uFFFDC######*'*+++****+++///777`.repeat(8);
+
+  function imageHit(path: string): UnifiedSearchResult {
+    return {
+      kind: 'content',
+      id: `content:p1:${path}:1`,
+      title: 'contact-sheet',
+      snippet: 'A contact sheet presents twelve slides about Finland.',
+      projectId: 'p1',
+      path,
+      source: 'workspace',
+      retrievalSource: 'workspace',
+      line: 1,
+      lineEnd: 5,
+      ...scoreResult('content', 0.9),
+    };
+  }
+
+  async function runWithStore(store: Store, results: UnifiedSearchResult[]) {
+    const search = {
+      searchProject: async () => ({ results, truncated: false }),
+    } as unknown as SearchService;
+    return retrieveProjectContext({
+      store,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'can you create a powerpoint about france',
+      messageOrigin: 'direct-user',
+    });
+  }
+
+  it('keeps the index snippet for an image instead of re-reading the file', async () => {
+    let reads = 0;
+    const store = {
+      ...STORE,
+      readProjectWorkspaceFile: async () => {
+        reads++;
+        return JPEG_BYTES;
+      },
+    } as unknown as Store;
+    const result = await runWithStore(store, [imageHit('artifacts/eval10/contact-sheet.jpg')]);
+    expect(reads).toBe(0);
+    expect(result?.hits[0]?.excerpt).toContain('twelve slides about Finland');
+    expect(result?.prompt).not.toContain('Lavc62.28.102');
+  });
+
+  it('applies to office docs, whose index text is a shadow conversion', async () => {
+    let reads = 0;
+    const store = {
+      ...STORE,
+      readProjectWorkspaceFile: async () => {
+        reads++;
+        return JPEG_BYTES;
+      },
+    } as unknown as Store;
+    const result = await runWithStore(store, [imageHit('notes/Lesson Plan.docx')]);
+    expect(reads).toBe(0);
+    expect(result?.prompt).not.toContain('Lavc62.28.102');
+  });
+
+  it('discards a binary read from an unrecognized extension after the fact', async () => {
+    const store = {
+      ...STORE,
+      readProjectWorkspaceFile: async () => JPEG_BYTES,
+    } as unknown as Store;
+    const result = await runWithStore(store, [imageHit('assets/capture.frame7')]);
+    expect(result?.hits[0]?.excerpt).toContain('twelve slides about Finland');
+    expect(result?.prompt).not.toContain('Lavc62.28.102');
+  });
+
+  it('still hydrates an ordinary text file from disk', async () => {
+    const result = await runWithStore(STORE, [imageHit('notes/outline.md')]);
+    expect(result?.hits[0]?.excerpt).toContain('workspace file content line one');
+  });
+});
+
+/**
+ * The relevance floor cannot reject these: relevance for every keyword arm is
+ * derived from RANK, so the top row of any arm that returned anything clears
+ * it. On the France PowerPoint turn a heading called "All About DocBlocks"
+ * was injected at relevance 0.95 and "strong" tier, matched solely on the
+ * word `about`.
+ */
+describe('keyword hits must be grounded in what they inject', () => {
+  function ftsHit(over: Partial<UnifiedSearchResult>): UnifiedSearchResult {
+    return {
+      kind: 'document',
+      id: 'document:aboutDocBlocks.md',
+      title: 'aboutDocBlocks.md',
+      snippet: 'All About DocBlocks',
+      path: 'aboutDocBlocks.md',
+      retrievalSource: 'shared',
+      arm: 'fts',
+      line: 5,
+      lineEnd: 13,
+      ...scoreResult('document', 0.95),
+      ...over,
+    } as UnifiedSearchResult;
+  }
+
+  async function runQuery(results: UnifiedSearchResult[], userText: string) {
+    const search = {
+      searchProject: async () => ({ results, truncated: false }),
+    } as unknown as SearchService;
+    return retrieveProjectContext({
+      store: {
+        ...STORE,
+        readDocumentAsMarkdown: async () => ({
+          content:
+            'A quick overview in 10 minutes\nDocBlocks pairs a writing surface\nwith Markdown',
+        }),
+      } as unknown as Store,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText,
+      messageOrigin: 'direct-user',
+    });
+  }
+
+  it('rejects a rank-0 keyword hit whose only matched token was a stopword', async () => {
+    const result = await runQuery([ftsHit({})], 'Can you create a PowerPoint about France');
+    expect(result).toBeNull();
+  });
+
+  it('keeps a keyword hit that holds a term the user actually typed', async () => {
+    const result = await runQuery(
+      [ftsHit({ snippet: 'Create PowerPoint decks from annotated sections' })],
+      'Can you create a PowerPoint about France',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+
+  it('grounds on the path too — a filename match is injected on the header line', async () => {
+    const result = await runQuery(
+      [ftsHit({ path: 'decks/france-overview.md', snippet: 'unrelated body text' })],
+      'Can you create a PowerPoint about France',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+
+  it('never gates a vector hit, which shares no words by nature', async () => {
+    const result = await runQuery(
+      [
+        ftsHit({
+          arm: 'vector',
+          kind: 'memory',
+          retrievalSource: 'project-memory',
+          path: undefined,
+          snippet: 'The deck for the Nordics session is in the artifacts drawer',
+          ...scoreResult('memory', 0.6),
+        }),
+      ],
+      'Can you create a PowerPoint about France',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+
+  it('leaves an unlabelled hit alone — older callers and knowledge catalogs', async () => {
+    const result = await runQuery(
+      [ftsHit({ arm: undefined })],
+      'Can you create a PowerPoint about France',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+});
+
 describe('resolveRetrievalPolicy', () => {
   it('default sources include knowledge (the Phase-4 switch)', () => {
     const policy = resolveRetrievalPolicy({ gezel: GEZEL, config: CONFIG });
