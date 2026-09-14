@@ -94,11 +94,8 @@ import {
   gateCheckLabel,
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
-import {
-  isExactLocalSourceRead,
-  normalizeSourcePath,
-} from './research-evidence-match.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
+import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 import {
   bumpStepActivation,

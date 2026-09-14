@@ -804,6 +804,45 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
     }
   });
 
+  // The clamp's promise is ONE pre-resolved action. It keeps that for builtins,
+  // and third-party toolset servers are wired on a separate path — which is how
+  // a routed Meester turn came to hold `invoke_craftbook` plus nineteen
+  // DocBlocks tools and no craftbook lookup. The model read `describe_template`
+  // as the lookup, got "Unknown template", and hand-built the deck instead.
+  // ChatManager withholds `extraMcpServers` whenever this clamp fires; this
+  // test pins the clamp signal that suppression keys on.
+  it('reports the exact-craftbook clamp so toolset servers can be withheld too', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'alaska',
+        gezelId: 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-14T00:00:00.000Z' }],
+        createdAt: '2026-09-14T00:00:00.000Z',
+        lastActivityAt: '2026-09-14T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'mlx',
+      modelId: 'qwen3.8-27b-q4',
+      parameterSize: '27B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'medium',
+      latestUserMessage: prompt,
+      onClamp: (kind: string) => clamps.push(kind),
+    } as never);
+
+    expect(clamps).toContain('exact-craftbook-invocation');
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
+  });
+
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {
     const prompt =
       'Create a reusable weekly procedure for reviewing project quality and invoking the right crew.';

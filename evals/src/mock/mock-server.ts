@@ -1001,7 +1001,6 @@ export function minimalPdfFixture(): Uint8Array {
   return Uint8Array.from(`${header}${body}${xref}`, (char) => char.charCodeAt(0) & 0xff);
 }
 
-
 /** Exact, `:param`-segment, or trailing-`*` path matching. */
 export function pathMatches(pattern: string, actual: string): boolean {
   if (pattern === actual) return true;

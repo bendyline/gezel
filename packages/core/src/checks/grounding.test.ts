@@ -184,9 +184,9 @@ describe('valueGrounding — inline emphasis', () => {
   });
 
   it('keeps digit-group normalization working alongside it', () => {
-    expect(
-      valueGrounding('covered **1,180** sailings', [{ id: 's', required: ['1180'] }]).ok,
-    ).toBe(true);
+    expect(valueGrounding('covered **1,180** sailings', [{ id: 's', required: ['1180'] }]).ok).toBe(
+      true,
+    );
   });
 });
 

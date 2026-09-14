@@ -427,6 +427,28 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/poisoned')).status).toBe(403);
   });
 
+  it('lets a session GET only its own record under /api/sessions', async () => {
+    // Load-bearing for invoke_craftbook duplicate suppression, which finds the
+    // root turn from the latest persisted user message. A 403 here made the
+    // caller fail open silently and one Meester turn produced four competing
+    // powerpoint-deck crews.
+    const own = 'sess-abc-123';
+    const app = sessionPolicyApp({
+      appId: `session:${own}`,
+      scopes: ['session'],
+      projectId: 'proj-a',
+      gezelId: 'gz-1',
+    });
+    expect((await app.request(`/api/sessions/${own}`)).status).toBe(200);
+    // Its own record only, and reading only.
+    expect((await app.request('/api/sessions/sess-other')).status).toBe(403);
+    expect((await app.request(`/api/sessions/${own}`, { method: 'DELETE' })).status).toBe(403);
+    expect((await app.request(`/api/sessions/${own}/debug`)).status).toBe(403);
+    expect((await app.request(`/api/sessions/${own}/tools`)).status).toBe(403);
+    // A prefix that merely starts with the id is a different session.
+    expect((await app.request(`/api/sessions/${own}-2`)).status).toBe(403);
+  });
+
   it('protects raw sessions, event streams, terminals, and unclassified admin routes', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/sessions')).status).toBe(403);

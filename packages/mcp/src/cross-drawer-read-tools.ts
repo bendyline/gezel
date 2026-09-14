@@ -176,68 +176,68 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
     unwrapApiError,
   } = dependencies;
 
-/**
- * `read_file` on an office document used to decode the container as UTF-8 and
- * hand the model line-numbered mojibake — `1→PK\x03\x04…[Content_Types].xml…`
- * for a DOCX. Wild-caught on the first binary-source PowerPoint trial: two
- * different gezels each "read" the brief this way, believed they had the
- * source, and the run produced no deck. The step prompt's "never interpret
- * binary bytes as text" is unenforceable while the tool cheerfully does it.
- *
- * Reroute rather than refuse. The sibling artifact-collision path below
- * already establishes the pattern — serve the right content and SAY what was
- * substituted — and an error would be worse here than useless: a small model
- * that gets one tends to retry the same call, which is the loop shape the
- * repeat tracker exists to kill.
- */
-async function rerouteBinaryDocumentRead(
-  dependencies: CrossDrawerReadDependencies,
-  path: string,
-): Promise<{
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent?: Record<string, unknown>;
-} | null> {
-  const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
-  if (!isBinaryDocumentPath(path)) return null;
-  const exactCall = renderExactToolCall('read_doc_as_markdown', { path });
-  if (!toolIsAuthorized('read_doc_as_markdown')) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text:
-            `read_file "${path}": this is a binary ${binaryDocumentExtension(path)?.toUpperCase() ?? 'office'} document, ` +
-            'not text. Reading it as text returns container bytes, not its content. ' +
-            `\`read_doc_as_markdown\` is not authorized for this session — hand this source to a gezel that has it (${exactCall}).`,
+  /**
+   * `read_file` on an office document used to decode the container as UTF-8 and
+   * hand the model line-numbered mojibake — `1→PK\x03\x04…[Content_Types].xml…`
+   * for a DOCX. Wild-caught on the first binary-source PowerPoint trial: two
+   * different gezels each "read" the brief this way, believed they had the
+   * source, and the run produced no deck. The step prompt's "never interpret
+   * binary bytes as text" is unenforceable while the tool cheerfully does it.
+   *
+   * Reroute rather than refuse. The sibling artifact-collision path below
+   * already establishes the pattern — serve the right content and SAY what was
+   * substituted — and an error would be worse here than useless: a small model
+   * that gets one tends to retry the same call, which is the loop shape the
+   * repeat tracker exists to kill.
+   */
+  async function rerouteBinaryDocumentRead(
+    dependencies: CrossDrawerReadDependencies,
+    path: string,
+  ): Promise<{
+    content: Array<{ type: 'text'; text: string }>;
+    structuredContent?: Record<string, unknown>;
+  } | null> {
+    const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
+    if (!isBinaryDocumentPath(path)) return null;
+    const exactCall = renderExactToolCall('read_doc_as_markdown', { path });
+    if (!toolIsAuthorized('read_doc_as_markdown')) {
+      const kind = binaryDocumentExtension(path)?.toUpperCase() ?? 'office';
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `read_file "${path}": this is a binary ${kind} document, not text. Reading it as text returns container bytes, not its content. \`read_doc_as_markdown\` is not authorized for this session — hand this source to a gezel that has it (${exactCall}).`,
+          },
+        ],
+      };
+    }
+    try {
+      const res = await api.toolReadDocAsMarkdown(projectId, { path });
+      if (!res.found) return null;
+      const notice = reroutedReadNotice('read_file', 'read_doc_as_markdown', 'workspace', path);
+      const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
+      return {
+        content: [
+          { type: 'text' as const, text: `${notice}\n\n${head}\n---\n${res.markdown ?? ''}` },
+        ],
+        structuredContent: {
+          requestedTool: 'read_file',
+          requestedPath: path,
+          resolvedTool: 'read_doc_as_markdown',
+          resolvedSurface: 'workspace',
+          resolvedPath: res.sourcePath,
+          rerouted: true,
+          content: res.markdown ?? '',
+          truncated: res.truncated ?? false,
         },
-      ],
-    };
+      };
+    } catch (error) {
+      // Conversion is best-effort. A failure falls through to the ordinary read
+      // so a corrupt or unsupported container still reports its real error.
+      void unwrapApiError(error);
+      return null;
+    }
   }
-  try {
-    const res = await api.toolReadDocAsMarkdown(projectId, { path });
-    if (!res.found) return null;
-    const notice = reroutedReadNotice('read_file', 'read_doc_as_markdown', 'workspace', path);
-    const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
-    return {
-      content: [{ type: 'text' as const, text: `${notice}\n\n${head}\n---\n${res.markdown ?? ''}` }],
-      structuredContent: {
-        requestedTool: 'read_file',
-        requestedPath: path,
-        resolvedTool: 'read_doc_as_markdown',
-        resolvedSurface: 'workspace',
-        resolvedPath: res.sourcePath,
-        rerouted: true,
-        content: res.markdown ?? '',
-        truncated: res.truncated ?? false,
-      },
-    };
-  } catch (error) {
-    // Conversion is best-effort. A failure falls through to the ordinary read
-    // so a corrupt or unsupported container still reports its real error.
-    void unwrapApiError(error);
-    return null;
-  }
-}
 
   server.tool(
     'read_file',

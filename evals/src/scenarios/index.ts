@@ -42,6 +42,8 @@ import { tankCombatScenario } from './tankcombat.ts';
 import { ticTacToeScenario } from './tictactoe.ts';
 import { toolRoutingBrowserScenario } from './tool-routing-browser.ts';
 import { toolRoutingCraftbookScenario } from './tool-routing-craftbook.ts';
+import { meesterEndToEndScenarios } from './meester-e2e.ts';
+import { toolRoutingFormatScenarios } from './tool-routing-format.ts';
 import { toolRoutingFetchUrlScenario } from './tool-routing-fetch-url.ts';
 import { toolRoutingImageScenario } from './tool-routing-image.ts';
 import { toolRoutingRetrievalScenario } from './tool-routing-retrieval.ts';
@@ -58,6 +60,8 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
+  ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
+  ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
   // Browser primitive probe: no craftbook or real Chromium. A small worker
   // must use the hermetic @playwright/mcp replacement, with successful MCP
   // calls and the real History rail both required by the gate.

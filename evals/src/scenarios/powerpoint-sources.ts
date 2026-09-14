@@ -27,7 +27,12 @@
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
 import type { CraftbookEvalGateCheck, CraftbookEvalSpec } from '../craftbooks/types.ts';
-import { type DocumentBlock, buildDocx, buildMarkdown, buildPdf } from '../fixtures/office-documents.ts';
+import {
+  type DocumentBlock,
+  buildDocx,
+  buildMarkdown,
+  buildPdf,
+} from '../fixtures/office-documents.ts';
 import type { EvalScenario } from '../types.ts';
 
 /**
@@ -37,7 +42,10 @@ import type { EvalScenario } from '../types.ts';
  */
 const BRIEF_BLOCKS: readonly DocumentBlock[] = [
   { style: 'h1', text: 'Halvard Terminal — Winter Boarding Pilot' },
-  { style: 'p', text: 'Audience: terminal operations leads. Reporting period: the 2025-26 winter timetable.' },
+  {
+    style: 'p',
+    text: 'Audience: terminal operations leads. Reporting period: the 2025-26 winter timetable.',
+  },
   { style: 'h2', text: 'Scope' },
   { style: 'bullet', text: 'Pilot ran across 4 berths at Halvard Terminal.' },
   { style: 'bullet', text: 'Covered 1,180 scheduled winter sailings.' },
@@ -64,7 +72,10 @@ const BRIEF_MARKDOWN = buildMarkdown(BRIEF_BLOCKS);
  */
 const DECOY_BLOCKS: readonly DocumentBlock[] = [
   { style: 'h1', text: 'Kelby Terminal — Summer Boarding Pilot' },
-  { style: 'p', text: 'Audience: terminal operations leads. Reporting period: the 2025 summer timetable.' },
+  {
+    style: 'p',
+    text: 'Audience: terminal operations leads. Reporting period: the 2025 summer timetable.',
+  },
   { style: 'bullet', text: 'Pilot ran across 9 berths at Kelby Terminal.' },
   { style: 'bullet', text: 'Mean boarding time fell from 33.9 minutes to 27.2 minutes.' },
   { style: 'bullet', text: 'Missed-sailing rate fell from 11.5% to 9.4%.' },
@@ -306,8 +317,7 @@ export function powerpointSourceSpecs(): CraftbookEvalSpec[] {
           path: 'source/halvard-brief.docx',
           content: BRIEF_MARKDOWN,
           contentBase64: docxBytes,
-          mimeType:
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
       ],
       history: binarySourceEvidence(),
@@ -404,8 +414,7 @@ export function powerpointSourceSpecs(): CraftbookEvalSpec[] {
           path: 'source/halvard-brief.docx',
           content: BRIEF_MARKDOWN,
           contentBase64: docxBytes,
-          mimeType:
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
         // Every decoy is `modelInput: false`. They are seeded on disk and
         // remain discoverable (list_dir, search, a wrong `read_file`), which
@@ -421,8 +430,7 @@ export function powerpointSourceSpecs(): CraftbookEvalSpec[] {
           content: buildMarkdown(DECOY_BLOCKS),
           contentBase64: decoyDocx,
           modelInput: false,
-          mimeType:
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
         // The two files the book's own step prompt warns its assignee away
         // from, present and stale, exactly as they were in the workshop
@@ -434,7 +442,8 @@ export function powerpointSourceSpecs(): CraftbookEvalSpec[] {
         },
         {
           path: 'deck.md',
-          content: `# Kelby Terminal — Summer Boarding Pilot\n\nStale deck from a previous job. Not an input.\n`,
+          content:
+            '# Kelby Terminal — Summer Boarding Pilot\n\nStale deck from a previous job. Not an input.\n',
           modelInput: false,
         },
       ],

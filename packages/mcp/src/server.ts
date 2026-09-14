@@ -53,6 +53,7 @@ import {
   contextBudgetCeiling,
   craftbookDocFormatFromEnv,
   deliverableStep,
+  deniedTaskScopedWrite,
   estimateTokens,
   expandStepDeliverable,
   formatReviewProvenance,
@@ -68,6 +69,10 @@ import {
   resolveRoleId,
   resolveSteps,
   stepInsertionIndex,
+  type TaskPathSource,
+  type TaskPathSurface,
+  taskOwnedPrefixes,
+  taskScopedWriteDeniedMessage,
   uniqueStepId,
 } from '@bendyline/gezel';
 import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
@@ -273,6 +278,44 @@ async function staleStepMutationResult() {
     transitionCompleted: sessionStepCompleted,
   });
   return rejection ? errorResult(rejection, { code: 'stale_task_step', retryable: false }) : null;
+}
+
+/**
+ * Refuse a write from a TASK-LESS session into a folder a live task owns.
+ *
+ * The complement of `staleStepMutationResult`, which polices a bound session
+ * writing outside its own step and returns early when there is no task ref at
+ * all. That is the hole this closes: a session with no task binding could
+ * write straight into a running task's declared output folder.
+ *
+ * Wild-caught on the first true end-to-end PowerPoint pass — see
+ * `task-owned-paths.ts` in core for the incident.
+ *
+ * Bound sessions pay nothing: the ref check short-circuits before any request.
+ */
+let liveTaskCache: { tasks: TaskPathSource[]; expiresAt: number } | null = null;
+
+async function taskScopedWriteRefusal(path: string, surface: TaskPathSurface) {
+  if (sessionTaskRef) return null;
+  let tasks: TaskPathSource[];
+  if (liveTaskCache && liveTaskCache.expiresAt > Date.now()) {
+    tasks = liveTaskCache.tasks;
+  } else {
+    try {
+      const res = await api.listProjectTasks(projectId);
+      tasks = res.tasks;
+    } catch {
+      // A transient read failure must not block an otherwise legal write.
+      return null;
+    }
+    liveTaskCache = { tasks, expiresAt: Date.now() + 2_000 };
+  }
+  const denial = deniedTaskScopedWrite({ path, surface, owned: taskOwnedPrefixes(tasks) });
+  if (!denial) return null;
+  return errorResult(taskScopedWriteDeniedMessage(denial, path), {
+    code: 'task_scoped_write_denied',
+    retryable: false,
+  });
 }
 
 type ConcreteWorkspaceTarget = Exclude<LinkedWorkspaceTarget, { kind: 'links-root' }>;
@@ -1741,6 +1784,8 @@ server.tool(
   async ({ source, dest }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(dest, 'workspace');
+    if (scoped) return scoped;
     try {
       const result = await api.copyArtifactToWorkspace(projectId, {
         source,
@@ -2245,6 +2290,8 @@ server.tool(
   async ({ path, content }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     const normalizedContent = normalizeWorkspaceWriteContent(path, content);
     const syntax = validateSourceContent(path, normalizedContent);
     if (syntax && !syntax.ok) {
@@ -2413,6 +2460,8 @@ server.tool(
   async ({ path, content, create }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       let prior = '';
       try {
@@ -2496,6 +2545,8 @@ server.tool(
   async ({ path, find, replace, occurrence, partial }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2568,6 +2619,8 @@ server.tool(
   async ({ path, startLine, endLine, content, partial }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2639,6 +2692,8 @@ server.tool(
   async ({ path, diff, partial }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2703,6 +2758,8 @@ server.tool(
   async ({ path, marker, content, where, partial }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       const targetApi = editClient(target);
@@ -2763,6 +2820,8 @@ server.tool(
   async ({ path, recursive }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       await editClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
@@ -2789,6 +2848,8 @@ server.tool(
   async ({ path }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'workspace');
+    if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
       await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
@@ -2816,6 +2877,10 @@ server.tool(
   async ({ fromPath, toPath }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped1 = await taskScopedWriteRefusal(fromPath, 'workspace');
+    if (scoped1) return scoped1;
+    const scoped2 = await taskScopedWriteRefusal(toPath, 'workspace');
+    if (scoped2) return scoped2;
     try {
       const [fromTarget, toTarget] = await Promise.all([
         concreteWorkspaceTarget(fromPath),
@@ -4073,6 +4138,8 @@ server.tool(
   async ({ path, content, force }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(path, 'artifacts');
+    if (scoped) return scoped;
     const clean = normalizeArtifactPath(path);
     if (isReservedShadowArtifactPath(clean)) {
       return {
@@ -4922,15 +4989,30 @@ async function currentRootTurnContext(): Promise<{
   try {
     const session = await api.getChatSession(sessionId);
     const rootTurnId = rootTurnIdFromMessages(sessionId, session.messages);
-    if (!rootTurnId) return null;
+    if (!rootTurnId) {
+      // Silence here cost four duplicate powerpoint-deck tasks from one turn:
+      // this is the ONLY thing standing between a model that emits the same
+      // invoke_craftbook four times and four competing crews.
+      process.stderr.write(
+        `[mcp] root-turn dedupe unavailable: session ${sessionId} has no user message among ${session.messages.length}\n`,
+      );
+      return null;
+    }
     const latestUser = [...session.messages].reverse().find((message) => message.role === 'user');
     return {
       rootTurnId,
       ...(latestUser?.content.trim() ? { userText: latestUser.content.trim() } : {}),
     };
-  } catch {
+  } catch (err) {
     // Fail open: inability to read the transcript must not block a legitimate
     // invocation. The ordinary task API remains the final mutation boundary.
+    // But say so — a silent fail-open here disables duplicate-invocation
+    // dedupe entirely, and the only visible symptom is N identical tasks.
+    process.stderr.write(
+      `[mcp] root-turn dedupe unavailable: cannot read session ${sessionId}: ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
     return null;
   }
 }

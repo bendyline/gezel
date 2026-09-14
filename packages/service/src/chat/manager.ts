@@ -15240,7 +15240,31 @@ export class ChatManager extends LocalEngineRuntime {
         `security: blocking ${blockedExtraCount} non-builtin MCP toolset(s) for ${record.gezelId} — external toolsets are disabled by the security policy`,
       );
     }
-    if (permittedExtras.length > 0 && !record.visitorAccess) {
+    // The exact-craftbook clamp promises ONE pre-resolved action, and it keeps
+    // that promise for builtins — but third-party toolset servers are wired
+    // separately and used to sail straight past it. On a project with DocBlocks
+    // installed, a routed Meester turn ended up holding `invoke_craftbook` plus
+    // nineteen document tools and no craftbook lookup: exactly the shopping
+    // surface the clamp exists to remove, minus the one tool that would have
+    // disambiguated. Wild-caught on "Can you create a PowerPoint about Alaska?"
+    // — the model read `describe_template` as the craftbook lookup, DocBlocks
+    // answered "Unknown template" (correctly — that is a craftbook id, not a
+    // document template), and it concluded the craftbook did not exist and
+    // hand-built the deck instead.
+    //
+    // The craftbook's own crew gets the toolsets when it dispatches them; the
+    // router does not need a single one to make the call it was handed.
+    const suppressExtrasForExactCraftbook =
+      gezel !== null &&
+      this.exactCraftbookConstraintActive(record, gezel, pendingUserText) &&
+      permittedExtras.length > 0;
+    if (suppressExtrasForExactCraftbook) {
+      log.info(
+        `tool-surface: withholding ${permittedExtras.length} toolset server(s) from ${record.gezelId} — ` +
+          'this turn is clamped to a single pre-resolved invoke_craftbook call',
+      );
+    }
+    if (permittedExtras.length > 0 && !record.visitorAccess && !suppressExtrasForExactCraftbook) {
       opts.extraMcpServers = permittedExtras;
     }
     if (knownSecretValues.size > 0) opts.knownSecretValues = knownSecretValues;
