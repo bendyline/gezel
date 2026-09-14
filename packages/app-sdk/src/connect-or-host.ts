@@ -1,8 +1,9 @@
 import { GezelClient, createTrustingFetch } from '@bendyline/gezel-client/node';
 import { GezelSdkError } from './errors.js';
-import { hostInProcess } from './host-service.js';
+import { startHostedDaemon } from './host-mode.js';
 import type { ConnectOrHostInput, DaemonConnection } from './host-types.js';
 import { authorizeLocal } from './local.js';
+import { scopeNeedsVerificationCode } from './scopes.js';
 
 /**
  * Resolve a working daemon, however this machine can provide one. Wrapped by
@@ -47,7 +48,7 @@ export async function resolveDaemon(input: ConnectOrHostInput): Promise<DaemonCo
       { code: 'daemon_not_running', ...(notRunning ? { cause: notRunning } : {}) },
     );
   }
-  return hostInProcess(input.appId, host, connectInput.fetch);
+  return startHostedDaemon(input.appId, host, connectInput.fetch);
 }
 
 /**
@@ -60,9 +61,7 @@ function canRequestConsent(
   input: ConnectOrHostInput,
   host: ConnectOrHostInput['host'],
 ): boolean {
-  const needsCode =
-    input.requireVerificationCode === true ||
-    scopes.some((scope) => scope !== 'openai' && scope !== 'remote-inference');
+  const needsCode = scopeNeedsVerificationCode(scopes, input.requireVerificationCode);
   if (!needsCode || input.onVerificationCode) return true;
   if (!host) return true; // let authorizeLocal raise the actionable error
   host.logger?.info?.(

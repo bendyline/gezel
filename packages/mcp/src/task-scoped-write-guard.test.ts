@@ -13,10 +13,7 @@ import { describe, expect, it } from 'vitest';
  * reopens the hole that destroyed a finished deck, and nothing at runtime
  * would say so — the write simply succeeds.
  */
-const source = readFileSync(
-  fileURLToPath(new URL('./server.ts', import.meta.url)),
-  'utf8',
-);
+const source = readFileSync(fileURLToPath(new URL('./server.ts', import.meta.url)), 'utf8');
 
 /** Split the server into one chunk per `server.tool(...)` registration. */
 function toolBlocks(): Array<{ name: string; body: string }> {

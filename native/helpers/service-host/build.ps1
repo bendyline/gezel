@@ -4,8 +4,29 @@ Set-StrictMode -Version Latest
 
 $helperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $helperDir '..\..\..')
-$buildDir = Join-Path $helperDir '.build\win32-x64'
-$outputDir = Join-Path $repoRoot 'native\build\win32-x64'
+# Windows ships on x64 and arm64 (Snapdragon X / WoA). This helper is plain
+# Win32 C++ with no ggml, so MSVC builds it natively on both - only the
+# developer-environment script, the required VC toolset component and the
+# output key differ.
+$targetArch = if ($env:GEZEL_TARGET_ARCH) { $env:GEZEL_TARGET_ARCH } else { $env:PROCESSOR_ARCHITECTURE }
+switch -Regex ($targetArch) {
+  '^(ARM64|aarch64)$' {
+    $platform     = 'win32-arm64'
+    $vcvarsScript = 'vcvarsarm64.bat'
+    $vcComponent  = 'Microsoft.VisualStudio.Component.VC.Tools.ARM64'
+    break
+  }
+  '^(AMD64|x64|x86_64)$' {
+    $platform     = 'win32-x64'
+    $vcvarsScript = 'vcvars64.bat'
+    $vcComponent  = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+    break
+  }
+  default { throw "unsupported Windows architecture: $targetArch (set GEZEL_TARGET_ARCH to x64 or arm64)" }
+}
+
+$buildDir = Join-Path $helperDir ".build\$platform"
+$outputDir = Join-Path $repoRoot "native\build\$platform"
 
 function Import-VsDevEnv {
   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -13,23 +34,23 @@ function Import-VsDevEnv {
     throw "vswhere not found at $vswhere. Install Visual Studio Build Tools with the 'Desktop development with C++' workload."
   }
 
-  $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  $vsPath = & $vswhere -latest -products * -requires $vcComponent -property installationPath
   if ($LASTEXITCODE -ne 0) {
     throw "vswhere failed (exit $LASTEXITCODE)"
   }
   if (-not $vsPath) {
-    throw "No Visual Studio install with the VC++ x64 toolset found. Install the 'Desktop development with C++' workload."
+    throw "No Visual Studio install with the $vcComponent toolset found. Install the 'Desktop development with C++' workload."
   }
 
-  $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\$vcvarsScript"
   if (-not (Test-Path $vcvars)) {
-    throw "vcvars64.bat not found at $vcvars - the Visual Studio install looks incomplete."
+    throw "$vcvarsScript not found at $vcvars - the Visual Studio install looks incomplete."
   }
 
-  Write-Host "[service-host] importing VS x64 dev environment from $vsPath"
+  Write-Host "[service-host] importing VS $platform dev environment from $vsPath"
   $envText = & $env:ComSpec /d /c "`"$vcvars`" >nul 2>&1 && set"
   if ($LASTEXITCODE -ne 0) {
-    throw "vcvars64.bat failed (exit $LASTEXITCODE)"
+    throw "$vcvarsScript failed (exit $LASTEXITCODE)"
   }
 
   # A parent process can contain both `Path` and `PATH`. cmd.exe then
@@ -55,7 +76,7 @@ function Import-VsDevEnv {
   }
 
   if (-not $devPath) {
-    throw "vcvars64.bat did not produce a PATH value."
+    throw "$vcvarsScript did not produce a PATH value."
   }
   [System.Environment]::SetEnvironmentVariable('Path', $devPath, 'Process')
 

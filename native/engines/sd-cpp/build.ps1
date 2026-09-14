@@ -112,25 +112,62 @@ if ($null -ne $bash) {
 }
 
 $src = Join-Path $here '.upstream'
-$platform = 'win32-x64'
+
+# -- Resolve target architecture -----------------------------------
+# Windows ships on x64 and arm64 (Snapdragon X / WoA). GEZEL_TARGET_ARCH
+# overrides the host's own architecture for cross-builds and for testing
+# this branch from an x64 machine.
+$targetArch = if ($env:GEZEL_TARGET_ARCH) {
+  $env:GEZEL_TARGET_ARCH
+} else {
+  $env:PROCESSOR_ARCHITECTURE
+}
+switch -Regex ($targetArch) {
+  '^(ARM64|aarch64)$'    { $platform = 'win32-arm64'; break }
+  '^(AMD64|x64|x86_64)$' { $platform = 'win32-x64';   break }
+  default { throw "unsupported Windows architecture: $targetArch (set GEZEL_TARGET_ARCH to x64 or arm64)" }
+}
+$isArm64 = $platform -eq 'win32-arm64'
 
 # --- 2. Resolve accelerator ---
 $backend = if ($env:SD_BACKEND) { $env:SD_BACKEND } else { 'vulkan' }
+if ($isArm64) {
+  # CPU only on Windows-on-ARM: no CUDA for WoA, and LunarG publishes no
+  # ARM64 Vulkan SDK, so there is no glslc to compile the shaders with.
+  if ($backend -notin @('vulkan', 'cpu')) {
+    throw "SD_BACKEND=$backend is not available on win32-arm64 (cpu only)"
+  }
+  $backend = 'cpu'
+}
 $cmakeFlags = @(
   '-DCMAKE_BUILD_TYPE=Release',
   # Drops the unbundled VCOMP140.DLL import ggml's default OPENMP=ON
   # bakes into ggml-base.dll + ggml-cpu.dll and into sd-server.exe
   # itself. See the longer note in native/engines/llama-cpp/build.sh.
   '-DGGML_OPENMP=OFF',
-  # stable-diffusion.cpp's generated translation unit exceeds COFF's default
-  # section count on current MSVC. /bigobj raises that object-file limit.
-  '-DCMAKE_CXX_FLAGS=/bigobj',
+  # Portable CPU code. build.sh has always passed this; build.ps1 did not,
+  # so the Windows binaries were compiled for whatever ISA the runner
+  # happened to report - the native-v0.1.29 SIGILL shape, latent on x64 and
+  # immediate on arm64, where the CI runners have SVE2 and no shipping
+  # laptop does. sd.cpp cannot take llama's GGML_BACKEND_DL dispatch route
+  # (see build.sh), so OFF plus a declared baseline is the whole defence.
+  '-DGGML_NATIVE=OFF',
   # See build.sh: upstream auto-builds the sdcpp-webui React frontend
   # whenever pnpm is on PATH, and gezel's own pnpm-workspace.yaml
   # confuses that install. Disable so the build is deterministic and
   # matches what CI ships (which never had pnpm installed either).
   '-DSD_SERVER_BUILD_FRONTEND=OFF'
 )
+if ($isArm64) {
+  # `/bigobj` below is MSVC syntax the clang driver does not accept; LLVM's
+  # COFF writer raises the section limit on its own, so arm64 needs no
+  # equivalent. The ISA baseline comes from the shared toolchain file.
+  $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$(if ($env:SD_ARM_ARCH) { $env:SD_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' })"
+} else {
+  # stable-diffusion.cpp's generated translation unit exceeds COFF's default
+  # section count on current MSVC. /bigobj raises that object-file limit.
+  $cmakeFlags += '-DCMAKE_CXX_FLAGS=/bigobj'
+}
 # NOTE: upstream removed the `SD_BUILD_SERVER` option - the server is
 # now an unconditional `add_subdirectory(server)`. Don't reintroduce it.
 switch ($backend) {
@@ -148,9 +185,21 @@ if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
 }
 
 # --- 4. Configure + build (Ninja) ---
+# arm64 goes through clang: ggml raises
+# `FATAL_ERROR "MSVC is not supported for ARM, use clang"`. Shared toolchain
+# file so llama-cpp, sd-cpp and whisper-cpp cannot drift apart on flags.
+$toolchainArgs = @()
+if ($isArm64) {
+  $toolchain = Join-Path $repoRoot 'native\cmake\arm64-windows-llvm.cmake'
+  if (-not (Test-Path $toolchain)) { throw "arm64 toolchain file not found at $toolchain" }
+  if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+    throw "clang is not on PATH; the win32-arm64 build needs the LLVM toolchain"
+  }
+  $toolchainArgs = @("-DCMAKE_TOOLCHAIN_FILE=$toolchain")
+}
 $buildDir = Join-Path $src "build-$platform-$backend"
 Reset-BuildDirIfGeneratorChanged $buildDir 'Ninja'
-& cmake -S $src -B $buildDir -G Ninja @cmakeFlags
+& cmake -S $src -B $buildDir -G Ninja @toolchainArgs @cmakeFlags
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 & cmake --build $buildDir --target sd-server -j
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }

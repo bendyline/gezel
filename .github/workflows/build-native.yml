@@ -123,6 +123,18 @@ jobs:
             artifact: gezel-device-health.exe
             needs_cuda: false
             needs_vulkan: false
+          # Windows-on-ARM. NVML and AMD ADL are dlopen'd, so a Snapdragon
+          # machine with neither reports them unavailable in `diagnostics`
+          # and still exits 0 — which is the normal case here, not a failure.
+          - engine: device-health
+            kind: helper
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-device-health.exe
+            needs_cuda: false
+            needs_vulkan: false
           - engine: device-health
             kind: helper
             platform: linux-x64
@@ -150,6 +162,15 @@ jobs:
             platform: win32-x64
             variant: ''
             runner: windows-latest
+            script: build.ps1
+            artifact: gezel-service-host.exe
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: service-host
+            kind: helper
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
             script: build.ps1
             artifact: gezel-service-host.exe
             needs_cuda: false
@@ -208,6 +229,19 @@ jobs:
             sd_backend: vulkan
             needs_cuda: false
             needs_vulkan: true
+          # win32-arm64 ships CPU: LunarG publishes no ARM64 Windows SDK
+          # (at VULKAN_SDK_VERSION_WINDOWS only the `-X64` installer exists),
+          # so there is no glslc to compile the shaders with. Same deferral as
+          # linux-arm64, and the same caveat — CPU SDXL is ~35 s/step.
+          - engine: sd-cpp
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-sd-server.exe
+            sd_backend: cpu
+            needs_cuda: false
+            needs_vulkan: false
 
           # ── llama-cpp (multi-variant on Linux+Windows, single
           #    on macOS — Phase 0 spike validated all 7 combos)
@@ -323,6 +357,27 @@ jobs:
             # devices on CUDA. Native RTX 50 / Blackwell support still requires
             # moving this Windows toolchain from CUDA 12.4 to CUDA 12.8+.
             llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90'
+          # win32-arm64: CPU only, and deliberately NOT built with
+          # GGML_CPU_ALL_VARIANTS. ggml's ARM variant table covers Linux,
+          # Android and Apple and raises
+          # `FATAL_ERROR "Unsupported ARM target OS: Windows"` otherwise, so
+          # runtime ISA dispatch is unavailable here until upstream gains a
+          # Windows arm branch. build.ps1 instead pins an explicit baseline
+          # (GGML_CPU_ARM_ARCH) that every shipping WoA part satisfies.
+          #
+          # The baseline must exclude SVE. GitHub's windows-11-arm runners are
+          # Cobalt/Neoverse-class parts that HAVE SVE2; Snapdragon X Elite
+          # (Oryon) does not. A host-tuned build is green in CI and SIGILLs on
+          # the target laptop, and no runner can catch that — which is what
+          # the "Assert win32-arm64 CPU baseline" step below is for.
+          - engine: llama-cpp
+            platform: win32-arm64
+            variant: cpu
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-llama-server.exe
+            needs_cuda: false
+            needs_vulkan: false
 
           # ── ds4 (DwarfStar / DeepSeek-V4) — Metal on darwin-arm64,
           #    CUDA on Linux. GPU-only (no CPU / Vulkan / ROCm / Windows /
@@ -412,6 +467,14 @@ jobs:
             artifact: gezel-whisper-server.exe
             needs_cuda: false
             needs_vulkan: false
+          - engine: whisper-cpp
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-whisper-server.exe
+            needs_cuda: false
+            needs_vulkan: false
 
           # ── uv (precompiled download, no GPU variants) ───────
           # Shared Python bootstrap for features that need a venv
@@ -450,6 +513,14 @@ jobs:
             platform: win32-x64
             variant: ''
             runner: windows-latest
+            script: build.ps1
+            artifact: uv.exe
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: uv
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
             script: build.ps1
             artifact: uv.exe
             needs_cuda: false
@@ -900,6 +971,36 @@ jobs:
             --library $lib `
             --expected '${{ matrix.llama_cuda_arch }}'
 
+      # ── Windows-on-ARM ISA baseline ───────────────────────────────
+      # The one gate in this workflow whose bug CI provably cannot reproduce.
+      # The windows-11-arm runners are Cobalt / Neoverse-class parts WITH
+      # SVE2; Snapdragon X Elite (Oryon), which is what these binaries ship
+      # to, has none. A host-tuned build therefore passes every other step
+      # here and SIGILLs on the target laptop. See the matrix comment on the
+      # llama-cpp win32-arm64 leg, and scripts/assert-arm64-baseline.mjs.
+      #
+      # llvm-objdump comes from the LLVM/Clang toolset preinstalled on the
+      # image; resolve it explicitly rather than trusting PATH.
+      - name: Assert win32-arm64 CPU baseline
+        if: steps.preflight.outputs.pinned == 'true' && matrix.platform == 'win32-arm64'
+        shell: bash
+        run: |
+          set -uo pipefail
+          objdump="$(command -v llvm-objdump || true)"
+          if [[ -z "$objdump" ]]; then
+            objdump="$(find '/c/Program Files/Microsoft Visual Studio' -name llvm-objdump.exe 2>/dev/null | head -1)"
+          fi
+          if [[ -z "$objdump" ]]; then
+            # Fail closed. This gate is the only defence against shipping SVE
+            # to hardware that lacks it, so a missing tool is a build failure,
+            # never a skipped check.
+            echo "::error::llvm-objdump not found — cannot verify the Windows-on-ARM ISA baseline"
+            exit 1
+          fi
+          node scripts/assert-arm64-baseline.mjs \
+            --dir "${{ steps.outdir.outputs.dir }}" \
+            --objdump "$objdump"
+
       # ── Unbundled-runtime guard ───────────────────────────────────
       # The engines are built with -DGGML_OPENMP=OFF so nothing depends
       # on libgomp.so.1 / VCOMP140.DLL, neither of which we ship. Assert
@@ -917,7 +1018,14 @@ jobs:
           bad=0
           if [[ "${{ matrix.platform }}" == win32-* ]]; then
             # dumpbin ships with the MSVC toolchain already on the runner.
-            dumpbin="$(find '/c/Program Files/Microsoft Visual Studio' -name dumpbin.exe -path '*x64*' 2>/dev/null | head -1)"
+            # The path filter selects the HOST toolchain directory, which is
+            # Hostx64 on windows-latest and Hostarm64 on windows-11-arm. Match
+            # either rather than pinning one, then fall back to any dumpbin —
+            # it reads every PE machine type regardless of the host it runs on.
+            dumpbin="$(find '/c/Program Files/Microsoft Visual Studio' -name dumpbin.exe 2>/dev/null | grep -Ei 'Host(x64|arm64)' | head -1)"
+            if [[ -z "$dumpbin" ]]; then
+              dumpbin="$(find '/c/Program Files/Microsoft Visual Studio' -name dumpbin.exe 2>/dev/null | head -1)"
+            fi
             if [[ -z "$dumpbin" ]]; then
               echo "::warning::dumpbin not found — skipping VCOMP140 import check"
               exit 0
@@ -1172,7 +1280,14 @@ jobs:
           }
           nuget install Microsoft.Trusted.Signing.Client -Version 1.0.60 `
             -OutputDirectory "${{ runner.temp }}\TrustedSigning"
-          $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\x64" -Directory | Select-Object -First 1
+          # The client nuget ships one bin/<arch> tree per host. Prefer the
+          # runner's own (windows-11-arm needs arm64) and fall back to x64,
+          # which WoA can still run under emulation.
+          $hostDir = if ($env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$') { 'arm64' } else { 'x64' }
+          $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\$hostDir" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dlibDir) {
+            $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\x64" -Directory | Select-Object -First 1
+          }
           echo "TRUSTED_SIGNING_DLIB_PATH=$($dlibDir.FullName)\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
           $metadata = @{
             Endpoint = "$env:SIGNING_ENDPOINT"
@@ -1200,10 +1315,15 @@ jobs:
             Write-Host "[sign] Trusted Signing not configured — skipping (unsigned)"
             exit 0
           }
+          # The Windows SDK lays signtool.exe down under bin/<version>/<arch>.
+          # Prefer the runner's own architecture so the windows-11-arm legs do
+          # not depend on x64 emulation, then fall back to x64 and finally to
+          # whatever is on PATH.
           $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+          $sdkArches = if ($env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$') { @('arm64', 'x64') } else { @('x64') }
           $signtool = Get-ChildItem $sdkRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -like '10.*' } | Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+            ForEach-Object { $dir = $_.FullName; $sdkArches | ForEach-Object { Join-Path $dir "$_\signtool.exe" } } |
             Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $signtool) { $signtool = 'signtool.exe' }
           $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
@@ -1484,7 +1604,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          KNOWN_PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64)
+          KNOWN_PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64)
           KNOWN_VARIANTS=(metal cuda vulkan cpu)
           for dir in native-artifacts/native-* ; do
             name=$(basename "$dir")

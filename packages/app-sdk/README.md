@@ -343,7 +343,8 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `verification_code_handler_required` — a stateful scope omitted `onVerificationCode`
 - `verification_not_supported` — the daemon did not honor an explicit code requirement
 - `model_not_found` — unknown `<provider>:<model>` prefix
-- `tool_calling_not_supported_v1` — `tools` / `tool_choice` field present (deferred to v2)
+- `tools_not_supported_for_provider` — the resolved provider runs its own tool loop and cannot take caller-executed tools
+- `tool_choice_function_not_supported_v1` — a specific function was pinned via object-form `tool_choice`
 - `embeddings_not_supported` — provider doesn't expose embeddings
 - `missing_scope:<scope>` — token is missing the requested scope
 - `provider_error` — backend provider call failed

@@ -202,7 +202,9 @@ function documentPass(opts: {
     const routed = tasks.find((t) => t.catalogIds.some((id) => opts.bookRe.test(id))) ?? tasks[0];
     const file = await findBinaryDeliverable(client, opts.extension, opts.verify);
     if (!file) {
-      const stage = routed ? `routed to ${routed.catalogIds.join(', ')}, ${opts.label} pending` : 'not routed yet';
+      const stage = routed
+        ? `routed to ${routed.catalogIds.join(', ')}, ${opts.label} pending`
+        : 'not routed yet';
       logChanged('sniff', `[scenario] ${opts.key}: ${stage}`);
       recordSniff?.({ key: opts.key, score: routed ? 1 : 0, bytes: 0 });
       return { done: false };
@@ -347,7 +349,8 @@ export const bugfixMeesterEndToEndScenario: EvalScenario = {
         reason: `cart.js was fixed at ${fixed.path} but nothing was routed — the Meester edited it itself`,
       };
     }
-    const how = tasks.length > 0 ? `task ${tasks[0]!.taskRef}` : `${delegated} specialist session(s)`;
+    const how =
+      tasks.length > 0 ? `task ${tasks[0]!.taskRef}` : `${delegated} specialist session(s)`;
     recordSniff?.({ key: 'bugfix-meester-e2e', score: 2, bytes: fixed.bytes });
     return {
       done: true,
@@ -396,14 +399,12 @@ export const codeReviewMeesterEndToEndScenario: EvalScenario = {
   successCheck: async ({ client, logChanged, recordSniff }): Promise<SuccessCheckResult> => {
     // A review that never names the file it reviewed is not grounded, which is
     // the failure mode worth catching here.
-    const review = await findTextFile(
-      client,
-      /\.(?:md|markdown)$/i,
-      /src\/pricing\.js/,
-      500,
-    );
+    const review = await findTextFile(client, /\.(?:md|markdown)$/i, /src\/pricing\.js/, 500);
     if (!review) {
-      logChanged('sniff', '[scenario] code-review-meester-e2e: no written review citing the file yet');
+      logChanged(
+        'sniff',
+        '[scenario] code-review-meester-e2e: no written review citing the file yet',
+      );
       recordSniff?.({ key: 'code-review-meester-e2e', score: 0, bytes: 0 });
       return { done: false };
     }
@@ -416,7 +417,8 @@ export const codeReviewMeesterEndToEndScenario: EvalScenario = {
         reason: `a review exists at ${review.path} but nothing was routed — the Meester wrote it itself`,
       };
     }
-    const how = tasks.length > 0 ? `task ${tasks[0]!.taskRef}` : `${delegated} specialist session(s)`;
+    const how =
+      tasks.length > 0 ? `task ${tasks[0]!.taskRef}` : `${delegated} specialist session(s)`;
     recordSniff?.({ key: 'code-review-meester-e2e', score: 2, bytes: review.bytes });
     return {
       done: true,

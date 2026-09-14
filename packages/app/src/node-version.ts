@@ -43,6 +43,7 @@ export const NODE_SHA256: Record<string, string> = {
   'linux-x64': '9f5eb6ac21845a66c493c91a253b1da32fd684e89e9b7202d4936982336be4ca',
   'linux-arm64': 'df224555a083b918e46260cc969838501b9f9a87140c1195e5b9597b56d5dae2',
   'win-x64': 'ac51903c4c111815d52280b1fdcc8da067cbb37e2fe1a765097b85c3292c8582',
+  'win-arm64': '845fc4ce00780241667f92e8f7a3a679321a655dddb3b610f2d85693b17ddf28',
 };
 
 /**
@@ -54,6 +55,9 @@ export function nodeReleaseKey(platform: NodeJS.Platform, arch: string): string 
   if (platform === 'darwin' && arch === 'x64') return 'macos-x64';
   if (platform === 'linux' && arch === 'x64') return 'linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'win32' && arch === 'x64') return 'win-x64';
+  if (platform === 'win32') {
+    if (arch === 'x64') return 'win-x64';
+    if (arch === 'arm64') return 'win-arm64';
+  }
   return null;
 }

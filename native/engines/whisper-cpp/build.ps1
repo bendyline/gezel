@@ -52,7 +52,22 @@ if ($null -ne $bash) {
 }
 
 $src = Join-Path $here '.upstream'
-$platform = 'win32-x64'
+
+# -- Resolve target architecture -----------------------------------
+# Windows ships on x64 and arm64 (Snapdragon X / WoA). GEZEL_TARGET_ARCH
+# overrides the host's own architecture for cross-builds and for testing
+# this branch from an x64 machine.
+$targetArch = if ($env:GEZEL_TARGET_ARCH) {
+  $env:GEZEL_TARGET_ARCH
+} else {
+  $env:PROCESSOR_ARCHITECTURE
+}
+switch -Regex ($targetArch) {
+  '^(ARM64|aarch64)$'    { $platform = 'win32-arm64'; break }
+  '^(AMD64|x64|x86_64)$' { $platform = 'win32-x64';   break }
+  default { throw "unsupported Windows architecture: $targetArch (set GEZEL_TARGET_ARCH to x64 or arm64)" }
+}
+$isArm64 = $platform -eq 'win32-arm64'
 
 # -- Preflight: required build tools -------------------------------
 # Without these, cmake invocations would otherwise fail mid-pipeline
@@ -73,16 +88,45 @@ $cmakeFlags = @(
   # bakes into ggml-base.dll + ggml-cpu.dll. See the longer note in
   # native/engines/llama-cpp/build.sh.
   '-DGGML_OPENMP=OFF',
+  # Portable CPU code. build.sh has always passed this; build.ps1 did not,
+  # so the Windows binaries were tuned to whatever ISA the runner reported -
+  # the native-v0.1.29 SIGILL shape. Latent on x64, immediate on arm64,
+  # where the CI runners have SVE2 and no shipping laptop does.
+  '-DGGML_NATIVE=OFF',
   '-DWHISPER_BUILD_SERVER=ON',
   '-DWHISPER_BUILD_TESTS=OFF',
   '-DWHISPER_BUILD_EXAMPLES=ON'
 )
+
+# arm64 goes through clang and Ninja: ggml raises
+# `FATAL_ERROR "MSVC is not supported for ARM, use clang"`, and the shared
+# toolchain sets CMAKE_C_COMPILER=clang, which the Visual Studio generator
+# cannot honour. Ninja is single-config, so `--config Release` must not be
+# passed on that branch.
+$configureArgs = @()
+if ($isArm64) {
+  $toolchain = Join-Path $repoRoot 'native\cmake\arm64-windows-llvm.cmake'
+  if (-not (Test-Path $toolchain)) { throw "arm64 toolchain file not found at $toolchain" }
+  foreach ($tool in @('clang', 'ninja')) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+      throw "$tool is not on PATH; the win32-arm64 build needs the LLVM toolchain and Ninja"
+    }
+  }
+  $armArch = if ($env:WHISPER_ARM_ARCH) { $env:WHISPER_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' }
+  $configureArgs = @('-G', 'Ninja', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DGEZEL_ARM_ARCH=$armArch")
+  $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$armArch"
+}
 Write-Host "[build] platform=$platform"
 
 $buildDir = Join-Path $src "build-$platform"
-& cmake -S $src -B $buildDir @cmakeFlags
+& cmake -S $src -B $buildDir @configureArgs @cmakeFlags
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
-& cmake --build $buildDir --config Release --target whisper-server -j
+$buildArgs = if ($isArm64) {
+  @('--build', $buildDir, '--target', 'whisper-server', '-j')
+} else {
+  @('--build', $buildDir, '--config', 'Release', '--target', 'whisper-server', '-j')
+}
+& cmake @buildArgs
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
 # -- 3. Locate + copy the produced binary --------------------------

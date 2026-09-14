@@ -134,6 +134,46 @@ describe('markdownHeadingsMatch', () => {
     expect(result.documentHeadings).toHaveLength(3);
   });
 
+  it('does not count the outline\u2019s own numbered prose sections as slides', async () => {
+    // Wild-caught on a meester-to-PPTX end-to-end run: an 11-slide outline
+    // opened with `## 1. Audience, occasion, takeaway`, the bare-number
+    // fallback counted it as a twelfth slide, and a correct 11-slide deck was
+    // rejected four times until the task paused for help.
+    const realOutline = [
+      '# Locked outline \u2014 task default/2',
+      '## 1. Audience, occasion, takeaway',
+      '- **Slide count:** 11.',
+      '## Slide 1 \u2014 The Story of the Lighthouse',
+      '## Slide 2 \u2014 Fire on the Headland',
+      '## Acceptance criteria',
+      '1. Every numbered outline slide becomes exactly one H1.',
+    ].join('\n');
+    const deck = ['# The Story of the Lighthouse', '- a', '# Fire on the Headland', '- b'].join(
+      '\n',
+    );
+    const result = await markdownHeadingsMatch(
+      ws({ 'notes/outline.md': realOutline, 'deck.md': deck }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.outlineHeadings).toEqual(['The Story of the Lighthouse', 'Fire on the Headland']);
+    expect(result.ok).toBe(true);
+  });
+
+  it('still accepts a bare-numbered outline that never says "Slide"', async () => {
+    const bare = ['# Outline', '## 1. Opening', '## 2. Middle', '## 3. Close'].join('\n');
+    const result = await markdownHeadingsMatch(
+      ws({
+        'notes/outline.md': bare,
+        'deck.md': ['# Opening', '-a', '# Middle', '-b', '# Close', '-c'].join('\n'),
+      }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.ok).toBe(true);
+    expect(result.outlineHeadings).toEqual(['Opening', 'Middle', 'Close']);
+  });
+
   it('names the heading LEVEL when the deck uses a title plus ## sections', async () => {
     // The deck converts with slideBreak h1, so ## slides render as one
     // slide. A bare "has 1, locks 3" reads as "add two slides" and models

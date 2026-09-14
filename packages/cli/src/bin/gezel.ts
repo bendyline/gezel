@@ -17,6 +17,7 @@ import {
   stopOwnedDaemon,
   stopProcessByPid,
 } from '@bendyline/gezel-client/node';
+import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command } from 'commander';
 import {
   CliError,
@@ -1564,7 +1565,7 @@ function resolveModelProvider(raw?: string): 'mlx' | 'llama-cpp' | 'ds4' {
     }
     return raw;
   }
-  return process.platform === 'darwin' && process.arch === 'arm64' ? 'mlx' : 'llama-cpp';
+  return resolveOnDeviceProvider(process.platform, process.arch);
 }
 
 model

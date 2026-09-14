@@ -15260,8 +15260,7 @@ export class ChatManager extends LocalEngineRuntime {
       permittedExtras.length > 0;
     if (suppressExtrasForExactCraftbook) {
       log.info(
-        `tool-surface: withholding ${permittedExtras.length} toolset server(s) from ${record.gezelId} — ` +
-          'this turn is clamped to a single pre-resolved invoke_craftbook call',
+        `tool-surface: withholding ${permittedExtras.length} toolset server(s) from ${record.gezelId} — this turn is clamped to a single pre-resolved invoke_craftbook call`,
       );
     }
     if (permittedExtras.length > 0 && !record.visitorAccess && !suppressExtrasForExactCraftbook) {

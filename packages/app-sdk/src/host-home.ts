@@ -63,41 +63,95 @@ export interface HostEnvironment {
  * here — keeps one place to look when a hosted daemon behaves unlike a normal
  * one. Everything is undone by `restore()`.
  */
+/**
+ * The variables a hosted daemon needs, as data.
+ *
+ * Kept separate from applying them because the two hosting modes need opposite
+ * things: an in-process daemon reads `process.env` of this very process, while
+ * a spawned child must be handed its own environment and must NOT have the
+ * parent's mutated underneath it. One definition of what the daemon needs,
+ * two ways to deliver it.
+ *
+ * `undefined` means "unset this variable", not "leave it alone".
+ */
+export function computeHostEnvironment(
+  appId: string,
+  opts: HostOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): { home: string; variables: Map<string, string | undefined> } {
+  const home = opts.home ?? hostedGezelHome(appId, env);
+  // Resolve what we may borrow BEFORE GEZEL_HOME is repointed at the app's
+  // own home — otherwise the default "the user's Gezel" resolves to us.
+  const borrowed = readOnlyModelHomes(opts, env, home);
+  const variables = new Map<string, string | undefined>();
+
+  variables.set('GEZEL_HOME', home);
+  variables.set('GEZEL_SERVICE_ROLE', 'user');
+  // A port or system scope inherited from a service host or a developer shell
+  // is never right for a daemon this app owns.
+  variables.set('GEZEL_PORT', undefined);
+  variables.set('GEZEL_SYSTEM_SCOPE', undefined);
+  if (!opts.systemBootstrap) variables.set('GEZEL_SKIP_SYSTEM_BOOTSTRAP', '1');
+  // A store build must refuse runtime code downloads, and the daemon reads
+  // that from the environment. Without this a store-packaged consumer has to
+  // set the variable by hand before the SDK is imported.
+  if (opts.distributionProfile) {
+    variables.set('GEZEL_DISTRIBUTION_PROFILE', opts.distributionProfile);
+  }
+
+  const nodePath = resolveNodePath(opts, env);
+  variables.set('GEZEL_NODE_PATH', nodePath);
+  // The daemon resolves some children by name, so the bundled Node has to be
+  // findable on PATH as well as by absolute path.
+  const nodeDir = dirname(nodePath);
+  if (nodeDir && !(env.PATH ?? '').split(delimiter).includes(nodeDir)) {
+    variables.set('PATH', env.PATH ? `${nodeDir}${delimiter}${env.PATH}` : nodeDir);
+  }
+  if (opts.nativeBinDir) variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
+
+  if (borrowed.length > 0) variables.set('GEZEL_READONLY_MODEL_HOMES', borrowed.join(delimiter));
+
+  return { home, variables };
+}
+
+/**
+ * Build the environment for a spawned daemon, without touching this process's.
+ */
+export function childHostEnvironment(
+  appId: string,
+  opts: HostOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): { home: string; env: NodeJS.ProcessEnv } {
+  const { home, variables } = computeHostEnvironment(appId, opts, env);
+  const childEnv: NodeJS.ProcessEnv = { ...env };
+  for (const [key, value] of variables) {
+    if (value === undefined) delete childEnv[key];
+    else childEnv[key] = value;
+  }
+  return { home, env: childEnv };
+}
+
+/**
+ * Apply the environment an in-process daemon needs, before the service is
+ * imported.
+ *
+ * The daemon and its subsystems read several of these from `process.env`
+ * rather than from `startService` options, so setting them here — and only
+ * here — keeps one place to look when a hosted daemon behaves unlike a normal
+ * one. Everything is undone by `restore()`.
+ */
 export function applyHostEnvironment(
   appId: string,
   opts: HostOptions,
   env: NodeJS.ProcessEnv = process.env,
 ): HostEnvironment {
-  const home = opts.home ?? hostedGezelHome(appId, env);
-  // Resolve what we may borrow BEFORE GEZEL_HOME is repointed at the app's
-  // own home — otherwise the default "the user's Gezel" resolves to us.
-  const borrowed = readOnlyModelHomes(opts, env, home);
+  const { home, variables } = computeHostEnvironment(appId, opts, env);
   const previous = new Map<string, string | undefined>();
-  const set = (key: string, value: string | undefined): void => {
+  for (const [key, value] of variables) {
     if (!previous.has(key)) previous.set(key, env[key]);
     if (value === undefined) delete env[key];
     else env[key] = value;
-  };
-
-  set('GEZEL_HOME', home);
-  set('GEZEL_SERVICE_ROLE', 'user');
-  // A port or system scope inherited from a service host or a developer shell
-  // is never right for a daemon this app owns.
-  set('GEZEL_PORT', undefined);
-  set('GEZEL_SYSTEM_SCOPE', undefined);
-  if (!opts.systemBootstrap) set('GEZEL_SKIP_SYSTEM_BOOTSTRAP', '1');
-
-  const nodePath = resolveNodePath(opts, env);
-  set('GEZEL_NODE_PATH', nodePath);
-  // The daemon resolves some children by name, so the bundled Node has to be
-  // findable on PATH as well as by absolute path.
-  const nodeDir = dirname(nodePath);
-  if (nodeDir && !(env.PATH ?? '').split(delimiter).includes(nodeDir)) {
-    set('PATH', env.PATH ? `${nodeDir}${delimiter}${env.PATH}` : nodeDir);
   }
-  if (opts.nativeBinDir) set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
-
-  if (borrowed.length > 0) set('GEZEL_READONLY_MODEL_HOMES', borrowed.join(delimiter));
 
   return {
     home,

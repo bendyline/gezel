@@ -124,12 +124,12 @@ export function deniedTaskScopedWrite(opts: {
  * lesson from every other corrective in this codebase.
  */
 export function taskScopedWriteDeniedMessage(denial: TaskScopedWriteDenial, path: string): string {
-  return (
-    `"${path}" belongs to task ${denial.taskRef}, whose ${denial.surface} folder is ` +
-    `"${denial.prefix}/". This session is not working that task, so it cannot write there — ` +
-    'a task\'s deliverables are only safe to edit from inside its own step, which has the ' +
-    'outline, the source packet and the rest of the context this session does not. ' +
-    `If you are meant to be doing that work, continue it from the task's step session; ` +
-    'otherwise write somewhere outside that folder.'
-  );
+  return [
+    `"${path}" belongs to task ${denial.taskRef}, whose ${denial.surface} folder is`,
+    `"${denial.prefix}/". This session is not working that task, so it cannot write there —`,
+    "a task's deliverables are only safe to edit from inside its own step, which has the",
+    'outline, the source packet and the rest of the context this session does not.',
+    `If you are meant to be doing that work, continue it from the task's step session;`,
+    'otherwise write somewhere outside that folder.',
+  ].join(' ');
 }

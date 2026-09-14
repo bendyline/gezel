@@ -28,11 +28,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const pinFile = resolve(repoRoot, 'packages', 'app', 'src', 'node-version.ts');
 
-const PLATFORMS = ['macos-arm64', 'macos-x64', 'linux-x64', 'linux-arm64', 'win-x64'];
+const PLATFORMS = ['macos-arm64', 'macos-x64', 'linux-x64', 'linux-arm64', 'win-x64', 'win-arm64'];
 
 function assetUrl(key, version) {
   const base = `https://nodejs.org/dist/v${version}`;
-  if (key === 'win-x64') return `${base}/win-x64/node.exe`;
+  if (key.startsWith('win-')) return `${base}/${key}/node.exe`;
   const dist = key.replace('macos', 'darwin');
   const stem = `node-v${version}-${dist}`;
   return `${base}/${stem}.tar.gz`;

@@ -51,7 +51,16 @@ export class Gezel {
     return new Gezel(daemon);
   }
 
-  /** The full typed product API, for anything this surface does not cover. */
+  /**
+   * The full typed product API.
+   *
+   * @deprecated Unsupported and unversioned: it is Gezel's internal client,
+   * it speaks Gezel's own vocabulary, and a minor daemon release may change
+   * any of it. Reach it through `unsafeProductClient` from
+   * `@bendyline/gezel-app-sdk/advanced`, so the dependency is visible in your
+   * imports. If you need something durable, ask for it on the supported
+   * surface instead.
+   */
   get client(): GezelClient {
     return this.daemon.client;
   }

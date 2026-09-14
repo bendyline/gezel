@@ -116,9 +116,9 @@ export const toolRoutingPptxScenario: EvalScenario = {
       log('[scenario:setup] installed the docblocks toolset (reproduces the Alaska roster)');
     } catch (err) {
       // A probe without it still tests routing, just not the regression.
+      const reason = err instanceof Error ? err.message : String(err);
       log(
-        `[scenario:setup] docblocks toolset unavailable (${err instanceof Error ? err.message : String(err)}) — ` +
-          'routing is still measured, but the document-tool confusion cannot reproduce',
+        `[scenario:setup] docblocks toolset unavailable (${reason}) — routing is still measured, but the document-tool confusion cannot reproduce`,
       );
     }
     log(`[scenario:setup] project ${created.id} ready for the routing probe`);
@@ -213,7 +213,8 @@ export const toolRoutingBugfixScenario: EvalScenario = {
       recordSniff?.({ key: 'tool-routing-bugfix', score: 0, bytes: 0 });
       return { done: false };
     }
-    const detail = tasks.length > 0 ? ` task ${tasks[0]!.taskRef}` : ` ${delegated} specialist session(s)`;
+    const detail =
+      tasks.length > 0 ? ` task ${tasks[0]!.taskRef}` : ` ${delegated} specialist session(s)`;
     logChanged('sniff', `[scenario] tool-routing-bugfix: handed off —${detail}`);
     recordSniff?.({ key: 'tool-routing-bugfix', score: signals.length, bytes: 0 });
     return {
@@ -223,7 +224,6 @@ export const toolRoutingBugfixScenario: EvalScenario = {
     };
   },
 };
-
 
 /** History tool-call names observed anywhere in the trial. */
 async function calledToolNames(client: GezelClient): Promise<Set<string>> {
@@ -237,7 +237,7 @@ async function calledToolNames(client: GezelClient): Promise<Set<string>> {
     if (typeof maybe.listHistory !== 'function') return out;
     const { entries } = await maybe.listHistory({ kind: 'tool.called', limit: 500 });
     for (const e of entries ?? []) {
-      const name = (e.details ?? {}).name;
+      const name = e.details?.name;
       if (typeof name === 'string') out.add(name);
     }
   } catch {
@@ -273,8 +273,7 @@ export const toolRoutingRepoIntakeScenario: EvalScenario = {
     'a reviewer. The meester persona says "an empty project cannot be reviewed" and the ' +
     'loop-breaker carries a fetch-first hint, but nothing measured the routing decision. ' +
     'Fast-fail probe — grades the fetch attempt, not the review.',
-  prompt:
-    `Can you review the code in ${REPO_URL} and tell me what the main quality risks are?`,
+  prompt: `Can you review the code in ${REPO_URL} and tell me what the main quality risks are?`,
   timeoutMs: 12 * 60_000,
   successCheck: async ({ client, logChanged, recordSniff }): Promise<SuccessCheckResult> => {
     const called = await calledToolNames(client);
@@ -324,7 +323,10 @@ export const toolRoutingAdviceScenario: EvalScenario = {
     const called = await calledToolNames(client);
     const overRouted = [...called].filter((name) => WORK_CREATING_TOOLS.has(name));
     if (overRouted.length > 0) {
-      logChanged('sniff', `[scenario] tool-routing-advice: over-routed via ${overRouted.join(', ')}`);
+      logChanged(
+        'sniff',
+        `[scenario] tool-routing-advice: over-routed via ${overRouted.join(', ')}`,
+      );
       recordSniff?.({ key: 'tool-routing-advice', score: 0, bytes: 0 });
       return {
         done: true,
@@ -364,7 +366,6 @@ export const toolRoutingAdviceScenario: EvalScenario = {
     return { done: true, success: true, reason: 'answered the question without creating work' };
   },
 };
-
 
 export function toolRoutingFormatScenarios(): EvalScenario[] {
   return [

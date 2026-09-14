@@ -2,7 +2,13 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GezelSdkError } from './errors.js';
-import { applyHostEnvironment, hostedGezelHome, resolveNodePath } from './host-home.js';
+import {
+  applyHostEnvironment,
+  childHostEnvironment,
+  computeHostEnvironment,
+  hostedGezelHome,
+  resolveNodePath,
+} from './host-home.js';
 
 describe('hostedGezelHome', () => {
   it("puts an app beside the user's Gezel, never inside it", () => {
@@ -95,6 +101,79 @@ describe('resolveNodePath', () => {
       expect(() => resolveNodePath({}, {})).toThrow(/host\.nodePath/);
     } finally {
       delete versions.electron;
+    }
+  });
+});
+
+describe('computeHostEnvironment', () => {
+  const base = { nodePath: '/opt/qualla/bin/node' };
+
+  it('carries the distribution profile down to the daemon', () => {
+    // A store build must refuse runtime code downloads, and the daemon reads
+    // that from the environment. Before this, a store-packaged consumer had to
+    // set the variable by hand before importing the SDK.
+    const { variables } = computeHostEnvironment(
+      'qualla',
+      { ...base, distributionProfile: 'store' },
+      { PATH: '/usr/bin' },
+    );
+    expect(variables.get('GEZEL_DISTRIBUTION_PROFILE')).toBe('store');
+  });
+
+  it('leaves the profile alone when the app does not declare one', () => {
+    const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
+    expect(variables.has('GEZEL_DISTRIBUTION_PROFILE')).toBe(false);
+  });
+
+  it('marks an inherited port and system scope for removal, not for keeping', () => {
+    const { variables } = computeHostEnvironment('qualla', base, {
+      PATH: '/usr/bin',
+      GEZEL_PORT: '6228',
+      GEZEL_SYSTEM_SCOPE: '1',
+    });
+    expect(variables.has('GEZEL_PORT')).toBe(true);
+    expect(variables.get('GEZEL_PORT')).toBeUndefined();
+    expect(variables.get('GEZEL_SYSTEM_SCOPE')).toBeUndefined();
+  });
+});
+
+describe('childHostEnvironment', () => {
+  const base = { nodePath: '/opt/qualla/bin/node' };
+
+  it('builds the child environment without touching the parent', () => {
+    // A spawned daemon gets its own environment. Mutating this process's would
+    // be wrong for the parent and pointless for the child.
+    const parent: NodeJS.ProcessEnv = {
+      PATH: '/usr/bin',
+      GEZEL_HOME: '/tmp/user-gezel',
+      GEZEL_PORT: '6228',
+    };
+    const snapshot = { ...parent };
+    const { home, env } = childHostEnvironment('qualla', base, parent);
+
+    expect(parent).toEqual(snapshot);
+    expect(env.GEZEL_HOME).toBe(home);
+    expect(env.GEZEL_SERVICE_ROLE).toBe('user');
+  });
+
+  it('unsets rather than blanks a variable the daemon must not inherit', () => {
+    const { env } = childHostEnvironment('qualla', base, {
+      PATH: '/usr/bin',
+      GEZEL_PORT: '6228',
+    });
+    // An empty string is a value; the daemon would read it and try to use it.
+    expect('GEZEL_PORT' in env).toBe(false);
+  });
+
+  it('agrees with the applied environment on every variable', () => {
+    const parent: NodeJS.ProcessEnv = { PATH: '/usr/bin', GEZEL_HOME: '/tmp/user-gezel' };
+    const child = childHostEnvironment('qualla', base, { ...parent });
+
+    const applyTarget: NodeJS.ProcessEnv = { ...parent };
+    applyHostEnvironment('qualla', base, applyTarget);
+
+    for (const key of ['GEZEL_HOME', 'GEZEL_SERVICE_ROLE', 'GEZEL_NODE_PATH', 'PATH']) {
+      expect(child.env[key], key).toBe(applyTarget[key]);
     }
   });
 });

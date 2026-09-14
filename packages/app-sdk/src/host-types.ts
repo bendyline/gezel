@@ -57,6 +57,43 @@ export interface HostOptions {
    * bot should not make the user pay for a browser it will never open.
    */
   systemBootstrap?: boolean;
+  /**
+   * How the daemon runs.
+   *
+   * - `child` spawns `gezeld` under {@link HostOptions.nodePath}. The daemon's
+   *   native dependencies then load under real Node, so an Electron consumer
+   *   needs no ABI-matched rebuild of `sqlite-vec`, `@napi-rs/keyring` and the
+   *   rest. This is what Gezel's own desktop shell does.
+   * - `in-process` imports the service into this process. Faster to start and
+   *   there is no second process to supervise, but every native dependency
+   *   must match this process's ABI.
+   *
+   * Defaults to `child` under Electron and `in-process` everywhere else, which
+   * keeps existing Node embedders on the path they already use.
+   */
+  mode?: 'child' | 'in-process';
+  /**
+   * How this build was distributed. Pass `store` from a Mac App Store or
+   * Microsoft Store build: the daemon then refuses every runtime download of
+   * executable code — engines, toolsets, the Python runtime — while still
+   * allowing data such as model weights.
+   *
+   * Without this the daemon reads the ambient `GEZEL_DISTRIBUTION_PROFILE`,
+   * which a store-packaged consumer would otherwise have to set by hand before
+   * the SDK loads.
+   */
+  distributionProfile?: 'standard' | 'store';
+  /**
+   * Absolute path to the daemon entry for `child` mode. Defaults to resolving
+   * `@bendyline/gezel-service/dist/bin/gezeld.js` from this SDK.
+   */
+  daemonEntry?: string;
+  /**
+   * How long to wait for a spawned daemon to bind and answer. Default 60s —
+   * a cold first start does more work than a restart, and a budget tuned to
+   * the warm case turns a slow machine into a failed launch.
+   */
+  startTimeoutMs?: number;
   /** Pre-loaded service module, for apps that bundle it under another name. */
   serviceModule?: HostServiceModule;
   /** Import specifier or file URL for the service module. */
@@ -69,7 +106,7 @@ export interface HostOptions {
  * How the connection was obtained. The first four come from
  * {@link LocalDaemonMode}; hosting adds two of its own.
  */
-export type ConnectionMode = LocalDaemonMode | 'hosted' | 'hosted-adopted';
+export type ConnectionMode = LocalDaemonMode | 'hosted' | 'hosted-adopted' | 'hosted-child';
 
 export interface ConnectOrHostInput extends Omit<LocalConnectInput, 'scopes'> {
   /** Defaults to `['product', 'openai']` — projects, chats, and inference. */
@@ -106,7 +143,15 @@ export interface DaemonConnection {
   close(): Promise<void>;
 }
 
-export type EnsureModelEngine = 'llama-cpp' | 'mlx';
+/**
+ * On-device engines this SDK can provision.
+ *
+ * Deliberately closed, and deliberately the daemon's own provider names: the
+ * value is used to pin the default provider, so a name this SDK invented would
+ * be rejected there. A new engine is therefore a coordinated minor release of
+ * the SDK and the daemon together, not a string a caller can pass through.
+ */
+export type EnsureModelEngine = 'llama-cpp' | 'mlx' | 'ds4';
 
 export interface EnsureModelOptions {
   /** Catalog id, e.g. `gemma4-e2b-q4`. */

@@ -49,6 +49,12 @@ export {
 } from './console-detach.js';
 export { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 export { resolvePlatformKey } from './platform-key.js';
+export {
+  SUPPORTED_ON_DEVICE_PLATFORMS,
+  isSupportedOnDevicePlatform,
+  resolveOnDeviceProvider,
+} from './on-device-platform.js';
+export type { OnDeviceProvider } from './on-device-platform.js';
 export type {
   CommandResult,
   DeviceHealthCommandRunner,

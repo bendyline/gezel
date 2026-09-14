@@ -101,8 +101,32 @@ export interface ConnectInput {
    * receives or displays the code.
    */
   onVerificationCode?(code: string): Promise<void> | void;
+  /**
+   * Gezel home to discover the daemon under, instead of
+   * `GEZEL_HOME ?? ~/.gezel`.
+   *
+   * Without this a consumer's test suite has to mutate `process.env.GEZEL_HOME`
+   * to point at a fixture daemon, which is process-wide and so breaks as soon
+   * as two suites run in parallel. Ignored when `baseUrl` is set.
+   */
+  home?: string;
   /** Override the underlying fetch (tests inject; Node default trusts the loopback cert). */
   fetch?: typeof fetch;
+}
+
+/**
+ * Per-call options common to every request.
+ *
+ * A second parameter rather than a field on the body, matching the OpenAI SDK
+ * shape — an `AbortSignal` is not part of the JSON that goes on the wire.
+ */
+export interface RequestOptions {
+  /**
+   * Abort the request. An aborted fetch rejects with the platform's
+   * `AbortError`, deliberately not wrapped in {@link GezelSdkError}, so callers
+   * that already handle OpenAI-style cancellation need no special case.
+   */
+  signal?: AbortSignal;
 }
 
 /**

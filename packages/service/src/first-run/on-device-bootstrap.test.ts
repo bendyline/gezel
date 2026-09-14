@@ -419,13 +419,15 @@ describe('isSupportedOnDevicePlatform', () => {
     expect(isSupportedOnDevicePlatform('linux', 'x64')).toBe(true);
     expect(isSupportedOnDevicePlatform('linux', 'arm64')).toBe(true);
     expect(isSupportedOnDevicePlatform('win32', 'x64')).toBe(true);
+    expect(isSupportedOnDevicePlatform('win32', 'arm64')).toBe(true);
   });
 
   it('rejects Intel Mac (intentionally dropped from the matrix)', () => {
     expect(isSupportedOnDevicePlatform('darwin', 'x64')).toBe(false);
   });
 
-  it('rejects Windows ARM (no binary shipped yet)', () => {
-    expect(isSupportedOnDevicePlatform('win32', 'arm64')).toBe(false);
+  it('routes Windows ARM to llama.cpp, not MLX', () => {
+    // win32-arm64 ships a CPU-only llama build; MLX is Apple Silicon only.
+    expect(resolveFirstRunTarget('tier-a', 'win32', 'arm64').provider).toBe('llama-cpp');
   });
 });

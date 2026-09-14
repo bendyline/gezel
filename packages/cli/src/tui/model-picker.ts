@@ -6,6 +6,7 @@ import {
   formatModelAttribution,
 } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
+import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import {
   type BootstrapChatModel,
   type BootstrapChatProvider,
@@ -191,11 +192,14 @@ export async function loadModelDownloadChoices(
     client.getMemoryProfile(),
     client.listCatalogItems('chat-model'),
   ]);
+  // The daemon may be a different machine, so the platform check is two
+  // halves: the daemon has to BE the platform whose engine we are choosing,
+  // and then the local pair decides which engine that is.
   const provider: BootstrapChatProvider =
     config.provider === 'mlx' || config.provider === 'llama-cpp'
       ? config.provider
-      : memory.platform === 'darwin' && platform === 'darwin' && arch === 'arm64'
-        ? 'mlx'
+      : memory.platform === platform
+        ? resolveOnDeviceProvider(platform, arch)
         : 'llama-cpp';
   const installed = await client.listProviderModels(provider).catch(() => ({ models: [] }));
   const installedIds = new Set(installed.models.map((model) => model.id));
