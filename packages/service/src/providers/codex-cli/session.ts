@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { normalizeCodexPermissionMode } from '@bendyline/gezel';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
+import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import { type ProviderQueue, runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
 import type {
@@ -251,7 +252,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     // path so the independent auto-reviewer sees the boundary. Plan also uses
     // prompt; paired with `--ask-for-approval never`, that denies the call.
     for (const extra of this.deps.extraMcpServers ?? []) {
-      if (extra.kind === 'http') {
+      if (isHttpSpec(extra)) {
         const envHttpHeaders: Record<string, string> = {};
         let index = 0;
         for (const [header, value] of Object.entries(extra.headers)) {
@@ -266,7 +267,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           defaultToolsApprovalMode: extraApprovalMode,
           ...(Object.keys(envHttpHeaders).length > 0 ? { envHttpHeaders } : {}),
         };
-      } else {
+      } else if (isStdioSpec(extra)) {
         mcpServers[extra.id] = {
           command: extra.command,
           args: extra.args,
@@ -275,6 +276,10 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           ...(extra.cwd ? { cwd: extra.cwd } : {}),
         };
       }
+      // Anything else (an in-memory app-tool relay) is served inside this
+      // daemon and cannot be described in Codex's config file. The chat
+      // manager already withholds those from CLI providers; this is the
+      // type-level backstop.
     }
     const config: CodexRuntimeConfig = {
       instructions: this.deps.systemMessage,

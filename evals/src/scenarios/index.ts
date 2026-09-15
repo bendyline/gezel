@@ -22,11 +22,13 @@ import { interfaceContractScenario } from './interface-contract.ts';
 import { jobHuntScenario } from './job-hunt.ts';
 import { knowledgeBenchScenario } from './knowledge-bench.ts';
 import { largePrReviewScenario } from './large-pr-review.ts';
+import { meesterEndToEndScenarios } from './meester-e2e.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
+import { powerpointSourceScenarios } from './powerpoint-sources.ts';
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
 import { researchVerifyT1, researchVerifyT2, researchVerifyT3 } from './research-verify.ts';
@@ -42,6 +44,7 @@ import { ticTacToeScenario } from './tictactoe.ts';
 import { toolRoutingBrowserScenario } from './tool-routing-browser.ts';
 import { toolRoutingCraftbookScenario } from './tool-routing-craftbook.ts';
 import { toolRoutingFetchUrlScenario } from './tool-routing-fetch-url.ts';
+import { toolRoutingFormatScenarios } from './tool-routing-format.ts';
 import { toolRoutingImageScenario } from './tool-routing-image.ts';
 import { toolRoutingRetrievalScenario } from './tool-routing-retrieval.ts';
 import { wikipediaResearchScenario } from './wikipedia-research-brief.ts';
@@ -52,10 +55,13 @@ const CRAFTBOOK_SCENARIOS = Object.fromEntries(
 
 export const SCENARIOS: Record<string, EvalScenario> = {
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
+  ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
   [ticTacToeScenario.id]: ticTacToeScenario,
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
+  ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
+  ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
   // Browser primitive probe: no craftbook or real Chromium. A small worker
   // must use the hermetic @playwright/mcp replacement, with successful MCP
   // calls and the real History rail both required by the gate.

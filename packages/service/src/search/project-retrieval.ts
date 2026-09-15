@@ -11,7 +11,10 @@ import {
   estimateTokens,
   parseTaskRef,
 } from '@bendyline/gezel';
+import { looksBinaryText } from '../fs/binary-text.js';
 import type { Store } from '../fs/store.js';
+import { hasDerivedIndexText } from '../index-store/classify.js';
+import { queryTerms, textMatchesAnyTerm } from '../index-store/query-terms.js';
 import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
 
 const MODE_BUDGET: Record<RetrievalMode, number> = {
@@ -169,6 +172,38 @@ function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
   return relevance >= floor;
 }
 
+/**
+ * Does a keyword hit actually contain what was searched for?
+ *
+ * The relevance floor above cannot answer this: relevance for every keyword
+ * arm is derived from RANK, not from match quality — RRF scores a rank-0 hit
+ * at 0.9–1.0 and `ftsRankRelevance(0)` at 0.6, against floors of 0.18–0.29.
+ * So the top rows of any arm that returned anything at all clear the floor
+ * unconditionally, and the floor can only reject an empty arm. On the France
+ * PowerPoint turn that admitted a heading called "All About DocBlocks" at
+ * relevance 0.95 and "strong" tier, on the strength of the word `about`.
+ *
+ * The fix is not a higher floor — rank 0 is rank 0 whatever the bar — but a
+ * different question, asked of the text about to be injected: does it hold a
+ * term the user actually typed? Only keyword hits are asked. A vector hit
+ * shares no words by nature, has already cleared a cosine floor at its
+ * source, and is exactly the semantic neighbour retrieval exists to find.
+ * An unlabelled hit (older caller, knowledge catalog) is left alone.
+ */
+function isGrounded(
+  result: UnifiedSearchResult,
+  excerpt: string,
+  terms: readonly string[],
+): boolean {
+  if (result.arm !== 'fts' || terms.length === 0) return true;
+  // The path and title are injected on the hit's own header line, so a
+  // filename match is grounding as much as a body match is.
+  return textMatchesAnyTerm(
+    `${result.title} ${result.path ?? ''} ${result.snippet ?? ''} ${excerpt}`,
+    terms,
+  );
+}
+
 export async function retrieveProjectContext(args: {
   store: Store;
   search: SearchService;
@@ -227,6 +262,7 @@ export async function retrieveProjectContext(args: {
 
   const diverse = diversify(found.results).filter(clearsInjectionFloor);
   if (diverse.length === 0) return null;
+  const terms = queryTerms(query);
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
   const hits: ProjectRetrievalHit[] = [];
   let knowledgeCount = 0;
@@ -256,6 +292,7 @@ export async function retrieveProjectContext(args: {
         ? tidy(result.snippet ?? result.subtitle ?? result.title, maxExcerptChars)
         : await hydrateExcerpt(args.store, args.record.projectId, result, maxExcerptChars);
     if (!excerpt) continue;
+    if (!isGrounded(result, excerpt, terms)) continue;
     hits.push({
       source,
       ...(result.projectId ? { projectId: result.projectId } : {}),
@@ -358,6 +395,17 @@ function diversify(results: readonly UnifiedSearchResult[]): UnifiedSearchResult
   return out;
 }
 
+/**
+ * Expand a hit to its surrounding lines by re-reading the source file.
+ *
+ * Only valid when the indexed text IS the file's own bytes. For an image,
+ * a recording, or an office doc the index holds a derived description,
+ * transcript, or shadow conversion — re-reading the source there yields
+ * binary decoded as UTF-8, so those keep the index's own snippet. Two
+ * guards, because the path test cannot cover an unknown extension: refuse
+ * the read up front for derived-index kinds, and discard the result after
+ * the fact if it decoded as binary anyway.
+ */
 async function hydrateExcerpt(
   store: Store,
   activeProjectId: string,
@@ -366,6 +414,7 @@ async function hydrateExcerpt(
 ): Promise<string> {
   const fallback = tidy(result.snippet ?? result.subtitle ?? result.title, maxChars);
   if (!result.path) return fallback;
+  if (hasDerivedIndexText(result.path)) return fallback;
   let content: string | null = null;
   try {
     if (result.retrievalSource === 'workspace') {
@@ -381,7 +430,7 @@ async function hydrateExcerpt(
   } catch {
     content = null;
   }
-  if (!content) return fallback;
+  if (!content || looksBinaryText(content)) return fallback;
   const lines = content.split(/\r?\n/);
   const start = Math.max(0, (result.line ?? 1) - 1);
   const requestedEnd = result.lineEnd ? Math.max(start + 1, result.lineEnd) : start + 18;

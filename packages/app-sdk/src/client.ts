@@ -11,6 +11,7 @@ import type {
   EnsureModelInput,
   EnsureModelResult,
   ModelListResponse,
+  RequestOptions,
 } from './types.js';
 
 export interface GezelAppOptions {
@@ -65,10 +66,16 @@ export class GezelApp {
    *     process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
    *   }
    */
-  async chat(req: ChatRequest & { stream: true }): Promise<ChatStream>;
-  async chat(req: ChatRequest & { stream?: false | undefined }): Promise<ChatCompletionResponse>;
-  async chat(req: ChatRequest): Promise<ChatCompletionResponse | ChatStream>;
-  async chat(req: ChatRequest): Promise<ChatCompletionResponse | ChatStream> {
+  async chat(req: ChatRequest & { stream: true }, opts?: RequestOptions): Promise<ChatStream>;
+  async chat(
+    req: ChatRequest & { stream?: false | undefined },
+    opts?: RequestOptions,
+  ): Promise<ChatCompletionResponse>;
+  async chat(req: ChatRequest, opts?: RequestOptions): Promise<ChatCompletionResponse | ChatStream>;
+  async chat(
+    req: ChatRequest,
+    opts: RequestOptions = {},
+  ): Promise<ChatCompletionResponse | ChatStream> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -77,6 +84,9 @@ export class GezelApp {
         ...(req.stream ? { Accept: 'text/event-stream' } : {}),
       },
       body: JSON.stringify(req),
+      // Aborting also tears down a streaming body, so a cancelled generation
+      // stops the provider rather than only stopping us reading it.
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
 
     if (!res.ok) {
@@ -101,7 +111,7 @@ export class GezelApp {
    * implement embeddings (most local engines today) fail with a
    * `GezelSdkError` carrying `code: 'embeddings_not_supported'`.
    */
-  async embeddings(req: EmbeddingsRequest): Promise<EmbeddingsResponse> {
+  async embeddings(req: EmbeddingsRequest, opts: RequestOptions = {}): Promise<EmbeddingsResponse> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/embeddings`, {
       method: 'POST',
       headers: {
@@ -109,15 +119,17 @@ export class GezelApp {
         Authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify(req),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
     return (await res.json()) as EmbeddingsResponse;
   }
 
   /** List selectable gezels plus models across every configured provider. */
-  async models(): Promise<ModelListResponse> {
+  async models(opts: RequestOptions = {}): Promise<ModelListResponse> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/models`, {
       headers: { Authorization: `Bearer ${this.token}` },
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
     return (await res.json()) as ModelListResponse;
@@ -128,7 +140,10 @@ export class GezelApp {
    * immediately on the `ready` branch; for downloads, returns a
    * `job_id` the caller can poll or stream events from.
    */
-  async ensureModel(input: EnsureModelInput): Promise<EnsureModelResult> {
+  async ensureModel(
+    input: EnsureModelInput,
+    opts: RequestOptions = {},
+  ): Promise<EnsureModelResult> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/models/ensure`, {
       method: 'POST',
       headers: {
@@ -136,6 +151,7 @@ export class GezelApp {
         Authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify({ model: input.model }),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
     return (await res.json()) as EnsureModelResult;
@@ -146,10 +162,16 @@ export class GezelApp {
    * orchestrator emits until the install hits a terminal `done` or
    * `error`.
    */
-  async *streamEnsureEvents(jobId: string): AsyncIterable<EnsureModelEvent> {
+  async *streamEnsureEvents(
+    jobId: string,
+    opts: RequestOptions = {},
+  ): AsyncIterable<EnsureModelEvent> {
     const res = await this.fetchFn(
       `${this.baseUrl}/v1/models/ensure/${encodeURIComponent(jobId)}/events`,
-      { headers: { Authorization: `Bearer ${this.token}` } },
+      {
+        headers: { Authorization: `Bearer ${this.token}` },
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      },
     );
     if (!res.ok) throw await errorFromResponse(res);
     if (!res.body) {
@@ -178,10 +200,11 @@ export class GezelApp {
    * token will fail authorization. Call {@link connect} again to
    * re-register and get a fresh token (the user is prompted again).
    */
-  async revokeMyToken(appId: string): Promise<void> {
+  async revokeMyToken(appId: string, opts: RequestOptions = {}): Promise<void> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/apps/${encodeURIComponent(appId)}/token`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${this.token}` },
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
   }

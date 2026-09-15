@@ -36,6 +36,7 @@ import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
 import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { createAppServeController } from './app-serve/controller.js';
+import { AppToolRelayRegistry } from './app-tools/relay-registry.js';
 
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
@@ -623,10 +624,13 @@ export async function startProductService(
     ...(bootConfig.defaultRecognitionModel ? { modelId: bootConfig.defaultRecognitionModel } : {}),
   });
 
+  const appToolRelays = new AppToolRelayRegistry();
+
   const chat = new ChatManager({
     store,
     events: chatEvents,
     memory,
+    appToolRelays,
     previewLog,
     createWorkspacePreviewUrl: async (projectId, relativePath) => {
       const entryPath = normalizePreviewPath(relativePath);
@@ -2378,6 +2382,7 @@ export async function startProductService(
     store,
     chatEvents,
     chat,
+    appToolRelays,
     previewLog,
     channels,
     memory,

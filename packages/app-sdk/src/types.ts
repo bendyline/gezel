@@ -101,8 +101,32 @@ export interface ConnectInput {
    * receives or displays the code.
    */
   onVerificationCode?(code: string): Promise<void> | void;
+  /**
+   * Gezel home to discover the daemon under, instead of
+   * `GEZEL_HOME ?? ~/.gezel`.
+   *
+   * Without this a consumer's test suite has to mutate `process.env.GEZEL_HOME`
+   * to point at a fixture daemon, which is process-wide and so breaks as soon
+   * as two suites run in parallel. Ignored when `baseUrl` is set.
+   */
+  home?: string;
   /** Override the underlying fetch (tests inject; Node default trusts the loopback cert). */
   fetch?: typeof fetch;
+}
+
+/**
+ * Per-call options common to every request.
+ *
+ * A second parameter rather than a field on the body, matching the OpenAI SDK
+ * shape — an `AbortSignal` is not part of the JSON that goes on the wire.
+ */
+export interface RequestOptions {
+  /**
+   * Abort the request. An aborted fetch rejects with the platform's
+   * `AbortError`, deliberately not wrapped in {@link GezelSdkError}, so callers
+   * that already handle OpenAI-style cancellation need no special case.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -394,4 +418,61 @@ export interface SdkError extends Error {
   code?: string;
   /** HTTP status when the error came from a route response. */
   status?: number;
+}
+
+// ── App tools (tools your application runs itself) ────────────────────────
+
+/** Context handed to a tool handler for one call. */
+export interface AppToolCallContext {
+  callId: string;
+  sessionId: string;
+  gezelId: string;
+  projectId: string;
+  /** Aborted when the daemon's deadline for this call passes. */
+  signal: AbortSignal;
+}
+
+export type AppToolHandlerResult =
+  | string
+  | {
+      content:
+        | string
+        | Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
+    }
+  // A handler that just does the thing and returns nothing is fine.
+  | undefined;
+
+export interface AppToolDefinition {
+  /** snake_case, 2-64 characters; must not collide with a built-in Gezel tool. */
+  name: string;
+  description: string;
+  /** JSON Schema for the arguments; must be an object schema. */
+  inputSchema: Record<string, unknown>;
+  /** How long the daemon waits for this handler. Default 60s, max 300s. */
+  timeoutMs?: number;
+  handler(
+    args: Record<string, unknown>,
+    context: AppToolCallContext,
+  ): Promise<AppToolHandlerResult> | AppToolHandlerResult;
+}
+
+export interface RegisterAppToolsInput {
+  projectId: string;
+  /** Limit these tools to specific gezels. Omitted means the whole project. */
+  gezelIds?: string[];
+  tools: AppToolDefinition[];
+  /** Human-readable provenance shown in Gezel's connected-app views. */
+  label?: string;
+  onStatus?(status: 'connected' | 'reconnecting' | 'closed'): void;
+  onError?(error: unknown): void;
+}
+
+export interface AppToolsRegistration {
+  readonly relayId: string;
+  /** Resolves once the daemon has accepted the registration. */
+  ready: Promise<void>;
+  /** Replace the registered tools. */
+  update(tools: AppToolDefinition[]): Promise<void>;
+  /** Withdraw the tools and stop listening. */
+  close(): Promise<void>;
 }

@@ -95,6 +95,7 @@ import {
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
+import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 import {
   bumpStepActivation,
@@ -2927,14 +2928,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
           });
           const allowed = new Set(tools);
-          const normalizePath = (value: string | undefined): string =>
-            (value ?? '')
-              .trim()
-              .replace(/\\/g, '/')
-              .replace(/^workspace\//i, '')
-              .replace(/^\.\//, '')
-              .toLocaleLowerCase();
-          const expectedPath = normalizePath(sourcePath);
+          const expectedPath = normalizeSourcePath(sourcePath);
           const matches: Array<{
             tool: string;
             path?: string;
@@ -2952,13 +2946,10 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
               : [];
             const target =
               typeof details.researchTarget === 'string' ? details.researchTarget : undefined;
-            const exactLocalRead =
-              expectedPath.length > 0 &&
-              ((tool === 'read_file' &&
-                path !== undefined &&
-                normalizePath(path) === expectedPath) ||
-                (tool === 'read_files' &&
-                  paths.some((value) => normalizePath(value) === expectedPath)));
+            const exactLocalRead = isExactLocalSourceRead(
+              { tool, ...(path !== undefined ? { path } : {}), paths },
+              expectedPath,
+            );
             let externalAcquisition = allowed.has(tool) && target !== undefined;
             if (externalAcquisition && tool === 'run_playwright_script') {
               const scriptPath = target?.startsWith('script:')

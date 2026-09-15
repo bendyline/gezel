@@ -3,10 +3,22 @@ Set-StrictMode -Version Latest
 
 $helperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $helperDir '..\..\..')
-$buildDir = Join-Path $helperDir '.build\win32-x64'
-$outputDir = Join-Path $repoRoot 'native\build\win32-x64'
+# Windows ships on x64 and arm64 (Snapdragon X / WoA). This helper is plain
+# C++ with no ggml, so unlike the engines it builds fine with MSVC on both;
+# only the generator platform and the output key change. NVML and AMD ADL are
+# dlopen'd, so an arm64 machine with neither reports them unavailable in
+# `diagnostics` and still exits 0 - the normal case there, not a failure.
+$targetArch = if ($env:GEZEL_TARGET_ARCH) { $env:GEZEL_TARGET_ARCH } else { $env:PROCESSOR_ARCHITECTURE }
+switch -Regex ($targetArch) {
+  '^(ARM64|aarch64)$'    { $platform = 'win32-arm64'; $cmakePlatform = 'ARM64'; break }
+  '^(AMD64|x64|x86_64)$' { $platform = 'win32-x64';   $cmakePlatform = 'x64';   break }
+  default { throw "unsupported Windows architecture: $targetArch (set GEZEL_TARGET_ARCH to x64 or arm64)" }
+}
 
-cmake -S $helperDir -B $buildDir -A x64 -DBUILD_TESTING=ON
+$buildDir = Join-Path $helperDir ".build\$platform"
+$outputDir = Join-Path $repoRoot "native\build\$platform"
+
+cmake -S $helperDir -B $buildDir -A $cmakePlatform -DBUILD_TESTING=ON
 cmake --build $buildDir --config Release --parallel
 ctest --test-dir $buildDir -C Release --output-on-failure
 

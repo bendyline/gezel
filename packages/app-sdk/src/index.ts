@@ -43,6 +43,8 @@ export { detectGezel, type DetectGezelOptions } from './detect.js';
 export { authorize, connect } from './connect.js';
 export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
+export { registerAppTools } from './app-tools.js';
+export { scopeNeedsVerificationCode } from './scopes.js';
 export { GezelSdkError } from './errors.js';
 export {
   createTrustingFetch,
@@ -51,6 +53,11 @@ export {
   type CreateTrustingFetchOptions,
 } from './tls.js';
 export type {
+  AppToolCallContext,
+  AppToolDefinition,
+  AppToolHandlerResult,
+  AppToolsRegistration,
+  RegisterAppToolsInput,
   DetectResult,
   ConnectInput,
   AuthorizedConnection,
@@ -75,5 +82,6 @@ export type {
   EnsureModelEvent,
   EmbeddingsRequest,
   EmbeddingsResponse,
+  RequestOptions,
   SdkError,
 } from './types.js';

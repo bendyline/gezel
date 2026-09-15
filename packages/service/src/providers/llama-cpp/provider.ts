@@ -106,6 +106,7 @@ export {
   hasSalvageableImmediateFileWriteContent,
   tryRepairMalformedWriteToolArguments,
 } from '../immediate-write-salvage.js';
+import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
@@ -5583,7 +5584,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           for (const r of coerced.repaired) {
             log.info(`[llama-cpp] repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`);
           }
-          toolCalls = coerced.calls as typeof toolCalls;
+          // After coercion, so two spellings of the same arguments compare equal.
+          const collapsed = collapseDuplicateToolCalls(coerced.calls);
+          for (const d of collapsed.dropped) {
+            log.info(
+              `[llama-cpp] collapsed ${d.count} duplicate ${d.name} call(s) emitted in this generation`,
+            );
+          }
+          toolCalls = collapsed.calls as typeof toolCalls;
         }
         // Always pull `<think>…</think>` reasoning out of the visible
         // commit and stash the captured trace so the chat bubble can

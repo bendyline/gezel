@@ -1,4 +1,6 @@
 import {
+  type AppToolRelayEvent,
+  AppToolRelayEventSchema,
   type ChatEvent,
   type ChatEventEnvelope,
   ChatEventEnvelopeSchema,
@@ -287,6 +289,21 @@ export function streamTerminalEvents(
     { keepaliveTimeoutMs: 10_000, ...opts },
     TerminalEventEnvelopeSchema,
   );
+}
+
+/**
+ * App-tool relay events for one connected app: readiness, the tool calls the
+ * daemon wants this app to run, and the close notice. Lives as long as the
+ * app wants its tools registered — the registration is scoped to this stream,
+ * so ending it withdraws the tools after the daemon's grace window.
+ *
+ * No keepalive default is imposed: the route pings on its own heartbeat and
+ * an app that registers tools may legitimately sit idle for hours.
+ */
+export function streamAppToolRelayEvents(
+  opts: SseStreamOptions,
+): AsyncGenerator<AppToolRelayEvent> {
+  return sseStream<AppToolRelayEvent>(opts, AppToolRelayEventSchema);
 }
 
 /**

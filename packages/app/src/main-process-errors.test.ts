@@ -23,7 +23,7 @@ describe('main-process error reporting', () => {
         }),
         source: 'uncaughtException',
         version: '1.26224.1',
-        electronVersion: '43.4.1',
+        electronVersion: '43.7.0',
         nodeVersion: '24.0.0',
         platform: 'win32',
         arch: 'x64',

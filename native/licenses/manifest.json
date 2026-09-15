@@ -41,7 +41,7 @@
           "version": "18.0",
           "license": "MIT",
           "source": "https://github.com/GPUOpen-LibrariesAndSDKs/display-library",
-          "platforms": ["win32-x64"],
+          "platforms": ["win32-x64", "win32-arm64"],
           "files": ["LICENSE-amd-adl-MIT.txt"]
         }
       ]

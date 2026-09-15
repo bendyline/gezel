@@ -32,6 +32,8 @@ native/
 │       ├── CMakeLists.txt
 │       ├── README.md
 │       └── build.ps1
+├── cmake/
+│   └── arm64-windows-llvm.cmake  # shared clang toolchain for the win32-arm64 legs
 ├── scripts/
 │   ├── fetch-upstream.sh       # filtered fetch + pin one engine's upstream repo
 │   └── bundle.sh               # assemble per-platform binaries into packages/app/native-bin/
@@ -69,11 +71,32 @@ Where `<platform>` is one of:
 - `linux-x64`
 - `linux-arm64` — Jetson, DGX Spark / Grace Hopper, Ampere Altra, Raspberry Pi 5 64-bit, etc.
 - `win32-x64`
+- `win32-arm64` — Windows on ARM (Snapdragon X and later)
 
 and `<variant>` is `metal` (macOS), or `cpu` / `vulkan` / `cuda`
-(Windows and Linux; no `vulkan` on `linux-arm64` — LunarG ships no
-aarch64 SDK tarball). Intel Mac (`darwin-x64`) is not built: on-device
-first-run routes those users to Copilot/OpenAI.
+(Windows and Linux; no `vulkan` on either arm64 key — LunarG ships no
+aarch64 SDK for Linux or Windows). Intel Mac (`darwin-x64`) is not built:
+on-device first-run routes those users to Copilot/OpenAI.
+
+`win32-arm64` is CPU-only and differs from every other key in two ways
+worth knowing before you touch it:
+
+- **It must be built with clang, not MSVC.** ggml's ARM branch opens with
+  `FATAL_ERROR "MSVC is not supported for ARM, use clang"`, so llama-cpp,
+  sd-cpp and whisper-cpp all go through
+  [`native/cmake/arm64-windows-llvm.cmake`](cmake/arm64-windows-llvm.cmake)
+  with the Ninja generator. The two first-party helpers are plain C++ and
+  keep MSVC.
+- **It has no runtime ISA dispatch.** ggml's `GGML_CPU_ALL_VARIANTS` table
+  covers Linux, Android and Apple only, so this leg pins one baseline via
+  `GGML_CPU_ARM_ARCH`. That baseline excludes SVE and SME deliberately:
+  GitHub's `windows-11-arm` runners have SVE2 and no shipping
+  Windows-on-ARM laptop does, so a host-tuned build is green in CI and
+  SIGILLs on the target machine.
+  [`scripts/assert-arm64-baseline.mjs`](../scripts/assert-arm64-baseline.mjs)
+  disassembles the output and fails the build if those instructions appear
+  — it is the only mechanical defence, because the build host can by
+  definition execute everything it just produced.
 
 **Which binaries a given platform key must contain is a contract, not a
 convention** — it lives in [`scripts/native-payload.mjs`](../scripts/native-payload.mjs)

@@ -42,6 +42,65 @@ export const SUITES: Record<string, EvalSuite> = {
       'docblocks-narrated-slideshow',
     ],
   },
+  // The PowerPoint route across every SOURCE SHAPE the book accepts, against
+  // the deterministic DocBlocks mock. `docblocks` above proves the real
+  // conversion toolchain on ONE source shape; this proves the recipe's own
+  // input fork on five, which is where the production failures happened —
+  // the book's own test.json only ever covered a Markdown `sourcePath`.
+  // Mocked, so it is cheap enough to run at the trial counts a pass-rate
+  // claim actually needs.
+  // The Meester's FIRST-message decisions. The craftbook rail sets
+  // `skipInitialPrompt` in workflow mode and creates the task directly, so 286
+  // of 287 craftbook specs never exercise routing at all — the rail models
+  // execution thoroughly and invocation not at all. Every wild failure so far
+  // (France, Valencia, Alaska) was an invocation failure, and the clamp change
+  // that caused Alaska altered a code path with zero eval coverage. These are
+  // fast-fail probes: they grade the handoff, not the deliverable.
+  routing: {
+    id: 'routing',
+    description:
+      "The Meester's routing decisions on a user's first message: exact-format → craftbook, " +
+      'implementation → specialist, repo URL → fetch-first, and a plain question → answered ' +
+      'without manufacturing work. Minutes per trial, not tens of minutes.',
+    scenarios: [
+      'tool-routing-pptx',
+      'tool-routing-bugfix',
+      'tool-routing-repo-intake',
+      'tool-routing-advice',
+      'tool-routing-craftbook',
+    ],
+  },
+  // The chain the routing probes and the powerpoint-sources suite each cover
+  // half of. Slow (routing + a full seven-step book), so it is its own suite
+  // rather than riding in either — but it is the only scenario that would have
+  // caught France, Valencia AND Alaska, all of which failed in the seam.
+  'meester-e2e': {
+    id: 'meester-e2e',
+    description:
+      'True end-to-end passes: one user message to the Meester, through routing and ' +
+      'execution, to a verified deliverable — .pptx, .pdf, .docx, an actually-fixed source ' +
+      'file, and a written code review. Spans the routing/execution seam nothing else ' +
+      'crosses. Slow: budget ~45 min per scenario.',
+    scenarios: [
+      'pptx-meester-e2e',
+      'pdf-meester-e2e',
+      'docx-meester-e2e',
+      'bugfix-meester-e2e',
+      'code-review-meester-e2e',
+    ],
+  },
+  'powerpoint-sources': {
+    id: 'powerpoint-sources',
+    description:
+      'The powerpoint-deck book across five source shapes — Word, PDF, inline content, topic-only, and a decoy beside the named source. Deterministic DocBlocks mock; measures the model and the runtime, not the converter.',
+    scenarios: [
+      'pptx-source-docx',
+      'pptx-source-pdf',
+      'pptx-source-inline',
+      'pptx-topic-only',
+      'pptx-source-decoy',
+    ],
+  },
   // ~30-60 min on a healthy medium local model. A pulse check, not a
   // scorecard — one game anchor, one tool-routing probe, one debugging
   // probe. Use before/after a risky framework change or engine bump.

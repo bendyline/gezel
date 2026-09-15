@@ -601,7 +601,41 @@ export function deliverableKindForStep(
  * kit for the same kind — packages/service/src/chat/step-tool-kit.ts
  * keeps the two in lockstep.
  */
-export function firstActionForKind(kind: DeliverableKind, path: string): string {
+/**
+ * Deliverables whose bytes CANNOT be produced by a text writer. Naming a
+ * first action for these is worse than naming none: the only honest answer is
+ * the book's own multi-tool procedure (convert → save → copy), which this
+ * helper has no way to express.
+ *
+ * Wild-caught on the first tiny-tier PowerPoint trial. Tier-collapse rendered
+ * the merged publish step as "Produce `deliverables/halvard-pilot.pptx` —
+ * your first tool call is `write_file({ path: "…pptx", content: … })`", which
+ * is precisely what the book forbids ("Never send PowerPoint bytes through
+ * text-write tools"). The 3B did what it was told and the run ended with no
+ * deck. Same class as the McKinley Park incident in ADR 0001: a
+ * runtime-generated hint naming a tool that cannot do the job.
+ */
+const BINARY_DELIVERABLE_KINDS: ReadonlySet<DeliverableKind> = new Set([
+  'slide-deck',
+  'audio-file',
+] as const satisfies readonly DeliverableKind[]);
+
+/**
+ * Keying on `kind` alone is not enough: a `.pptx` deliverable classifies as
+ * `generic-file`, not `slide-deck`, so the kind set misses the very case this
+ * guard exists for. The PATH is the reliable signal, and
+ * `isBinaryDocumentPath` is already the single owner of that question.
+ */
+function producesBinaryBytes(kind: DeliverableKind, path: string): boolean {
+  return BINARY_DELIVERABLE_KINDS.has(kind) || isBinaryDocumentPath(path);
+}
+
+/**
+ * The single tool call that opens work on this deliverable, or null when no
+ * single call can. Callers must omit the directive entirely on null rather
+ * than substituting a generic writer.
+ */
+export function firstActionForKind(kind: DeliverableKind, path: string): string | null {
   switch (kind) {
     case 'data-file':
     case 'json':
@@ -609,6 +643,8 @@ export function firstActionForKind(kind: DeliverableKind, path: string): string 
     case 'image-set':
       return `render_image({ prompt, saveAs: "${path}" })`;
     default:
-      return `write_file({ path: "${path}", content: ... })`;
+      return producesBinaryBytes(kind, path)
+        ? null
+        : `write_file({ path: "${path}", content: ... })`;
   }
 }

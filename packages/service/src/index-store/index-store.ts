@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { embedProfileId } from '../memory/embed-core.js';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
+import { queryTerms } from './query-terms.js';
 import { purgeSpuriousTruncationReviews } from './review-claims.js';
 import { TEXT_EMBED_DIM, applySchema } from './schema.js';
 import {
@@ -302,30 +303,6 @@ function symbolId(filePath: string, name: string): string {
   return `${filePath}#${name}`;
 }
 
-const FTS_STOP_WORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'for',
-  'how',
-  'in',
-  'is',
-  'me',
-  'my',
-  'of',
-  'on',
-  'or',
-  'our',
-  'please',
-  'the',
-  'to',
-  'we',
-  'with',
-  'you',
-  'your',
-]);
-
 /**
  * Escape user text into a recall-oriented, injection-safe FTS5 query.
  *
@@ -341,10 +318,7 @@ function ftsPhrase(query: string): string {
     const phrase = explicitlyQuoted[1]?.match(/[\p{L}\p{N}_]+/gu)?.join(' ') ?? '';
     return phrase ? `"${phrase.replace(/"/g, '""')}"` : '"__gezel_no_match__"';
   }
-  const raw = normalized.match(/[\p{L}\p{N}_]+/gu) ?? [];
-  const unique = [...new Set(raw.map((token) => token.toLocaleLowerCase()))].slice(0, 16);
-  const meaningful = unique.filter((token) => !FTS_STOP_WORDS.has(token));
-  const tokens = meaningful.length > 0 ? meaningful : unique;
+  const tokens = queryTerms(normalized);
   if (tokens.length === 0) return '"__gezel_no_match__"';
   return tokens
     .map((token) => `"${token.replace(/"/g, '""')}"${token.length >= 3 ? '*' : ''}`)

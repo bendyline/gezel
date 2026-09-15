@@ -1,6 +1,7 @@
 import { GezelApp } from './client.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import { scopeNeedsVerificationCode } from './scopes.js';
 import type { SdkTransport } from './tls.js';
 import type { AuthorizedConnection, ConnectInput } from './types.js';
 
@@ -51,9 +52,10 @@ async function authorizeWithTransport(
   input: ConnectInput,
   baseUrlAndFetch: SdkTransport & { baseUrl: string },
 ): Promise<AuthorizedConnection> {
-  const expectsVerification =
-    input.requireVerificationCode === true ||
-    input.scopes.some((scope) => scope !== 'openai' && scope !== 'remote-inference');
+  const expectsVerification = scopeNeedsVerificationCode(
+    input.scopes,
+    input.requireVerificationCode,
+  );
 
   // Try a token the caller already has (env, keychain, prior session).
   let existing =
@@ -219,7 +221,7 @@ async function resolveBaseUrlAndFetch(
       fetch: input.fetch ?? globalThis.fetch,
     };
   }
-  const discovered = await readRuntimeForConnect(undefined, input.fetch);
+  const discovered = await readRuntimeForConnect(input.home, input.fetch);
   if (!discovered) {
     throw new GezelSdkError(
       "gezel daemon not found — no runtime files under the gezel home's runtime/ directory (default ~/.gezel, GEZEL_HOME overrides). Start the gezel app or run `gezeld` first.",

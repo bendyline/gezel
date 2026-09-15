@@ -90,7 +90,10 @@ function platformKey(platform, arch) {
   if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
   if (platform === 'linux' && arch === 'x64') return 'linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+  if (platform === 'win32') {
+    if (arch === 'x64') return 'win32-x64';
+    if (arch === 'arm64') return 'win32-arm64';
+  }
   return null;
 }
 

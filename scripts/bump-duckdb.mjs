@@ -37,6 +37,7 @@ const ASSETS = {
   'linux-x64': 'duckdb_cli-linux-amd64.zip',
   'linux-arm64': 'duckdb_cli-linux-arm64.zip',
   'win32-x64': 'duckdb_cli-windows-amd64.zip',
+  'win32-arm64': 'duckdb_cli-windows-arm64.zip',
 };
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -147,6 +148,10 @@ async function main() {
   src = replaceConst(src, 'DUCKDB_VERSION', version);
   src = replaceConst(src, 'DUCKDB_COMMIT', commit);
   src = replaceConst(src, 'DUCKDB_LICENSE_SHA256', licenseSha);
+  // DUCKDB_ASSET is generated from ASSETS above rather than maintained by
+  // hand: the two are the same fact, and a silent drift between them would
+  // mean this script hashed one archive while the runtime downloaded another.
+  src = replaceTable(src, 'DUCKDB_ASSET', ASSETS);
   src = replaceTable(src, 'DUCKDB_ARCHIVE_SHA256', archiveShas);
   src = replaceTable(src, 'DUCKDB_BINARY_SHA256', binaryShas);
   await writeFile(PIN_PATH, src, 'utf8');

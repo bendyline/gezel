@@ -373,6 +373,17 @@ async function isSessionRouteAllowed(
       ? SESSION_ALLOW
       : sessionDeny('session search must be scoped to this project and gezel');
   }
+  // A session may read ITSELF, and nothing else under /api/sessions. This is
+  // not a disclosure — the subprocess serves that exact session, whose
+  // transcript is already in the prompt it was spawned for. It is load-bearing
+  // for `invoke_craftbook` duplicate suppression, which identifies the root
+  // turn by the latest persisted user message: without it a model that emits
+  // the same invocation N times gets N competing tasks (wild-caught at four
+  // powerpoint-deck crews from one Meester turn). The deny below had made that
+  // read 403, and the caller's fail-open swallowed it silently.
+  if (method === 'GET' && path === `/api/sessions/${encodeURIComponent(sessionId(auth))}`) {
+    return SESSION_ALLOW;
+  }
   if (path === '/api/sessions' || path.startsWith('/api/sessions/')) {
     return sessionDeny('raw session routes require a first-party client');
   }

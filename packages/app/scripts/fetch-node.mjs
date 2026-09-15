@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
  *   - Node's Unix releases ship as `.tar.gz`; we extract only the
  *     `bin/node` binary using the `tar` package.
  *   - Windows ships `node.exe` as a standalone binary at
- *     `/dist/vX.Y.Z/win-x64/node.exe` — no extraction.
+ *     `/dist/vX.Y.Z/win-{x64,arm64}/node.exe` — no extraction.
  *
  * Called from the app's tsup build. Idempotent: if the binary is
  * already on disk with the right version marker (and matching sha on
@@ -95,23 +95,27 @@ function releaseKey(platform, arch) {
   if (platform === 'darwin' && arch === 'x64') return 'macos-x64';
   if (platform === 'linux' && arch === 'x64') return 'linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'win32' && arch === 'x64') return 'win-x64';
+  if (platform === 'win32') {
+    if (arch === 'x64') return 'win-x64';
+    if (arch === 'arm64') return 'win-arm64';
+  }
   return null;
 }
 
 /**
  * Download asset info for a platform key. Shape mirrors fetch-pnpm's
  * single-file download with an extra branch for tarball extraction:
- *   - win-x64: one-file download (raw node.exe); sha is file-level.
+ *   - win-x64 / win-arm64: one-file download (raw node.exe); sha is
+ *     file-level.
  *   - macos/linux: tarball download + single-file extract; sha is
  *     computed on the tarball (matches what Node publishes in
  *     SHASUMS256.txt and what bump-node writes into node-version.ts).
  */
 function assetInfo(key, version) {
   const base = `https://nodejs.org/dist/v${version}`;
-  if (key === 'win-x64') {
+  if (key.startsWith('win-')) {
     return {
-      url: `${base}/win-x64/node.exe`,
+      url: `${base}/${key}/node.exe`,
       archive: null,
       outName: 'node.exe',
     };

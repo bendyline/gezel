@@ -120,7 +120,27 @@ beforeAll(async () => {
   });
 }, 30_000);
 
+/**
+ * A bridge whose session is BOUND to a task, for the `tasks/<num>/` artifact
+ * tests. An unbound session writing into a live task's own folder is refused
+ * on purpose (`taskScopedWriteRefusal`); in production a writer there is the
+ * task's own step session or one of its fanout shards, never a lobby chat.
+ */
+let taskBoundBridge: McpBridge | null = null;
+async function boundBridge(): Promise<McpBridge> {
+  if (taskBoundBridge) return taskBoundBridge;
+  const made = new McpBridge();
+  await made.start({
+    command: 'node',
+    args: [mcpPath],
+    env: { ...bridgeEnv, GEZEL_TASK_REF: 'default/1' },
+  });
+  taskBoundBridge = made;
+  return made;
+}
+
 afterAll(async () => {
+  await taskBoundBridge?.stop();
   await bridge?.stop();
   await svc?.stop();
   if (serviceHome) {
@@ -504,31 +524,34 @@ describe('McpBridge', () => {
     // tasks/<num>/ is by-construction working material: an html/css
     // deliverable there must not be redirected into the workspace the way
     // a bare index.html is (test above).
-    const written = await bridge.callTool('write_artifact', {
+    const written = await (await boundBridge()).callTool('write_artifact', {
       path: 'tasks/1/report.html',
       content: '<!doctype html><html><body><h1>Task report</h1></body></html>',
     });
     expect(written).not.toMatch(/ERROR:/);
     expect(written).not.toContain('project workspace');
 
-    const readBack = await bridge.callTool('read_artifact', { path: 'tasks/1/report.html' });
+    const readBack = await (await boundBridge()).callTool('read_artifact', {
+      path: 'tasks/1/report.html',
+    });
     expect(readBack).toContain('<h1>Task report</h1>');
   });
 
   it('preserves the previous JSON artifact when a replacement is truncated or malformed', async () => {
     const path = 'tasks/1/coverage.json';
     const complete = '{"reviewedFiles":["a.ts","b.ts"]}';
-    const first = await bridge.callTool('write_artifact', { path, content: complete });
+    const scoped = await boundBridge();
+    const first = await scoped.callTool('write_artifact', { path, content: complete });
     expect(first).not.toMatch(/ERROR:/);
 
-    const rejected = await bridge.callTool('write_artifact', {
+    const rejected = await scoped.callTool('write_artifact', {
       path,
       content: '{"reviewedFiles":["a.ts",',
     });
     expect(rejected).toContain('not valid JSON');
     expect(rejected).toContain('previous artifact was left unchanged');
 
-    const readBack = await bridge.callTool('read_artifact', { path });
+    const readBack = await scoped.callTool('read_artifact', { path });
     expect(readBack).toBe(complete);
   });
 

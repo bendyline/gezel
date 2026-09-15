@@ -1,4 +1,5 @@
 import type {
+  AppToolCallResultRequest,
   AudioEngineStatusResponse,
   AudioModelPullEvent,
   AudioSynthesizeChunk,
@@ -27,6 +28,7 @@ import type {
   KnowledgeUpdatesResponse,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
+  ListAppToolRelaysResponse,
   ListAudioCatalogResponse,
   ListAudioVoicesResponse,
   ListInstalledAudioModelsResponse,
@@ -35,6 +37,10 @@ import type {
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
   ModelContextOverridesResponse,
+  OpenAppToolRelayRequest,
+  OpenAppToolRelayResponse,
+  RegisterAppToolsRequest,
+  RegisterAppToolsResponse,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -389,6 +395,8 @@ import type {
   TraceTaintResponse,
   TransformStreamEvent,
   TransformTextRequest,
+  TurnIntentPlan,
+  TurnIntentPreviewRequest,
   UnifiedSearchResponse,
   UnifiedSearchResult,
   UpdateBoekwachterIssueRequest,
@@ -4864,6 +4872,11 @@ export class GezelClient {
     return this.request('POST', '/api/sessions', body);
   }
 
+  /** Preview the same per-turn route the daemon will inject on Send. */
+  previewTurnIntent(body: TurnIntentPreviewRequest): Promise<TurnIntentPlan> {
+    return this.request('POST', '/api/sessions/turn-intent-preview', body);
+  }
+
   getChatSession(sessionId: string): Promise<ChatSession> {
     return this.request('GET', `/api/sessions/${encodeURIComponent(sessionId)}`);
   }
@@ -5241,6 +5254,60 @@ export class GezelClient {
 
   readMemoryLessons(gezelId: string): Promise<{ content: string }> {
     return this.request('GET', `/api/memory/lessons?gezelId=${encodeURIComponent(gezelId)}`);
+  }
+
+  // ── App tools (tools a connected app runs itself) ──
+
+  /**
+   * Open a tool relay for this app. The relay is live only while its event
+   * stream is connected, so open the stream promptly after this call.
+   */
+  openAppToolRelay(body: OpenAppToolRelayRequest = {}): Promise<OpenAppToolRelayResponse> {
+    return this.request('POST', '/api/app-tools/relays', body);
+  }
+
+  /** Relays this app owns (every relay, for a first-party caller). */
+  listAppToolRelays(): Promise<ListAppToolRelaysResponse> {
+    return this.request('GET', '/api/app-tools/relays');
+  }
+
+  /** Replace this relay's tools for one project. */
+  registerAppTools(
+    relayId: string,
+    body: RegisterAppToolsRequest,
+  ): Promise<RegisterAppToolsResponse> {
+    return this.request('PUT', `/api/app-tools/relays/${encodeURIComponent(relayId)}/tools`, body);
+  }
+
+  /** Withdraw this relay's tools for one project, or for every project. */
+  unregisterAppTools(relayId: string, projectId?: string): Promise<{ ok: true }> {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    return this.request(
+      'DELETE',
+      `/api/app-tools/relays/${encodeURIComponent(relayId)}/tools${query}`,
+    );
+  }
+
+  /** Answer one tool call the relay stream delivered. */
+  postAppToolResult(
+    relayId: string,
+    callId: string,
+    body: AppToolCallResultRequest,
+  ): Promise<{ ok: true }> {
+    return this.request(
+      'POST',
+      `/api/app-tools/relays/${encodeURIComponent(relayId)}/calls/${encodeURIComponent(callId)}/result`,
+      body,
+    );
+  }
+
+  /** Close the relay and withdraw everything it registered. */
+  closeAppToolRelay(relayId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/app-tools/relays/${encodeURIComponent(relayId)}`);
+  }
+
+  appToolRelayEventsUrl(relayId: string): string {
+    return `${this.baseUrl}/api/app-tools/relays/${encodeURIComponent(relayId)}/events`;
   }
 
   sessionEventsUrl(sessionId: string): string {

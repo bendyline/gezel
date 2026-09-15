@@ -51,14 +51,27 @@ function headingLevelHint(
   return `${file} puts its ${expected} slides at \`##\`${title}, but slides are split on H1 — as written this converts to a single slide. Promote each \`## Slide\` heading to \`# \` and drop the document title.`;
 }
 
+/**
+ * Slides out of a locked outline.
+ *
+ * Two spellings are accepted, and they are NOT interchangeable. `## Slide N —
+ * Title` says "slide"; a bare `## N. Title` is the permissive fallback for an
+ * outline that only numbers its slides. Pooling them counts an outline's own
+ * numbered prose sections as slides: a correct 11-slide outline that opened
+ * with `## 1. Audience, occasion, takeaway` was read as locking 12, and a
+ * correct 11-slide deck was rejected four times until the task paused. So when
+ * the outline says "Slide" anywhere, those headings are the whole answer.
+ */
 function outlineSlideHeadings(markdown: string): string[] {
-  const headings: string[] = [];
+  const explicit: string[] = [];
+  const numberedOnly: string[] = [];
   for (const match of markdown.matchAll(/^#{2,6}\s+(.+?)\s*$/gm)) {
     const raw = match[1]!.trim();
-    const numbered = /^(?:slide\s+)?\d+(?:\s*[.:\-–—]\s*|\s+)(\S.*)$/i.exec(raw);
-    if (numbered?.[1]) headings.push(numbered[1].trim());
+    const numbered = /^(slide\s+)?\d+(?:\s*[.:\-–—]\s*|\s+)(\S.*)$/i.exec(raw);
+    if (!numbered?.[2]) continue;
+    (numbered[1] ? explicit : numberedOnly).push(numbered[2].trim());
   }
-  return headings;
+  return explicit.length > 0 ? explicit : numberedOnly;
 }
 
 /**

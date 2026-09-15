@@ -9,6 +9,7 @@ import {
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { QuotaBucket } from '../chat/usage.js';
 import { resolveCopilotCliPath } from './copilot-cli.js';
+import { isStdioSpec } from './mcp-bridge.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import {
@@ -320,8 +321,9 @@ export class CopilotProvider implements LLMProvider {
         if (extra.id === 'gezel' || mcpServers[extra.id]) continue;
         // Copilot's MCP integration only speaks stdio (`type: 'local'`);
         // hosted http-mcp entries would need a different shape we don't
-        // wire up today — skip silently.
-        if (extra.kind === 'http') continue;
+        // wire up today, and an in-memory relay bridge has no command line
+        // at all — skip both silently.
+        if (!isStdioSpec(extra)) continue;
         mcpServers[extra.id] = {
           type: 'local',
           command: extra.command,

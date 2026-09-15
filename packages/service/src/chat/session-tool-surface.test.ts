@@ -738,6 +738,36 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 });
 
 describe('resolveSessionToolSurface — Meester routing precedence', () => {
+  it('gives a tiny Meester one pre-resolved craftbook action for an exact format', async () => {
+    const prompt = 'Please make a PowerPoint about Mongolia and deliver the .pptx file.';
+    const { allowlist, exactCraftbookConstrained } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'powerpoint-tiny',
+        gezelId: 'meester',
+        projectId: 'default',
+        providerName: 'llama-cpp',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-12T00:00:00.000Z' }],
+        createdAt: '2026-09-12T00:00:00.000Z',
+        lastActivityAt: '2026-09-12T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-e2b-q4',
+      parameterSize: '2.3B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'tiny',
+      latestUserMessage: prompt,
+    });
+
+    expect(exactCraftbookConstrained).toBe(true);
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
+  });
+
   it('routes an exact-format PowerPoint request through the compact craftbook front door', async () => {
     const prompt = 'Create a PowerPoint presentation about D-Day and deliver the .pptx file.';
     for (const role of ['Meester', 'Voorman']) {
@@ -765,13 +795,52 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
         latestUserMessage: prompt,
       });
 
+      // Medium tier collapses to the same single pre-resolved action as tiny.
+      // A 27B Meester given the shortlist tool alongside the invocation tool
+      // shopped instead of invoking, looped on `ensure_gezel`, and shipped no
+      // .pptx — so route confidence, not parameter count, gates the clamp.
       expect(projectOrchestrationConstrained).toBe(true);
-      expect(allowlist?.has('suggest_craftbook')).toBe(true);
-      expect(allowlist?.has('invoke_craftbook')).toBe(true);
-      expect(allowlist?.has('message_gezel')).toBe(true);
-      expect(allowlist?.has('write_file')).toBe(false);
-      expect(allowlist!.size).toBeLessThan(25);
+      expect([...allowlist!]).toEqual(['invoke_craftbook']);
     }
+  });
+
+  // The clamp's promise is ONE pre-resolved action. It keeps that for builtins,
+  // and third-party toolset servers are wired on a separate path — which is how
+  // a routed Meester turn came to hold `invoke_craftbook` plus nineteen
+  // DocBlocks tools and no craftbook lookup. The model read `describe_template`
+  // as the lookup, got "Unknown template", and hand-built the deck instead.
+  // ChatManager withholds `extraMcpServers` whenever this clamp fires; this
+  // test pins the clamp signal that suppression keys on.
+  it('reports the exact-craftbook clamp so toolset servers can be withheld too', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'alaska',
+        gezelId: 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-14T00:00:00.000Z' }],
+        createdAt: '2026-09-14T00:00:00.000Z',
+        lastActivityAt: '2026-09-14T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'mlx',
+      modelId: 'qwen3.8-27b-q4',
+      parameterSize: '27B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'medium',
+      latestUserMessage: prompt,
+      onClamp: (kind: string) => clamps.push(kind),
+    } as never);
+
+    expect(clamps).toContain('exact-craftbook-invocation');
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
   });
 
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {

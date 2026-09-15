@@ -6,6 +6,7 @@ import {
 import '@bendyline/squisq-editor-react/styles';
 import {
   type GezelSummary,
+  type TurnIntentPlan,
   displayName,
   parseTaskRef,
   rewritePromptDraftFileRefs,
@@ -82,6 +83,27 @@ function CollapseDraftIcon() {
       />
     </svg>
   );
+}
+
+/** A quiet routing spark for the compact pre-send intent readout. */
+function TurnIntentGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path
+        d="M7 1.75c.3 2.55 1.7 3.95 4.25 4.25C8.7 6.3 7.3 7.7 7 10.25 6.7 7.7 5.3 6.3 2.75 6 5.3 5.7 6.7 4.3 7 1.75Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="10.75" cy="10.75" r="0.75" fill="currentColor" />
+    </svg>
+  );
+}
+
+function compactTurnIntentLabel(plan: TurnIntentPlan): string {
+  const label = plan.output?.label ?? plan.specialist?.label ?? plan.display.label;
+  return label.replace(/^Planned:\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '');
 }
 
 export interface ChatComposerProps {
@@ -416,6 +438,11 @@ export function ChatComposer({
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
   const [draftNonEmpty, setDraftNonEmpty] = useState(() => draftRef.current.trim().length > 0);
+  // Render-triggering draft shadow for the debounced route preview. Unlike
+  // draftNonEmpty it retains the text, but remains local-only and is never an
+  // alternate persistence path.
+  const [intentPreviewText, setIntentPreviewText] = useState(draftRef.current);
+  const [turnIntentPlan, setTurnIntentPlan] = useState<TurnIntentPlan | null>(null);
   // A non-null value means the entire single-line draft is a local `/open`
   // command. Keeping the query in state lets the suggestion tray react to
   // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
@@ -448,6 +475,7 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
+    setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
   }, [projectId]);
@@ -484,6 +512,7 @@ export function ChatComposer({
       // previous draft must not clear the text that just arrived.
       draftEditVersionRef.current += 1;
       setDraftNonEmpty(markdown.trim().length > 0);
+      setIntentPreviewText(markdown);
       setOpenCommandQuery(parseOpenChatQuery(markdown));
       setMentioned(extractMentionTokens(markdown));
       setEditorRevision((revision) => revision + 1);
@@ -562,6 +591,48 @@ export function ChatComposer({
     setQueuedAhead(null);
     setWedged(null);
   }, [sessionId]);
+
+  // The route preview is advisory until Send; the daemon recomputes the same
+  // deterministic plan authoritatively for the turn. Debounce keeps typing
+  // quiet, and a sequence guard prevents an older response repainting a newer
+  // draft after network reordering.
+  const intentPreviewSequence = useRef(0);
+  const intentPreviewAddressRef = useRef(
+    `${gezelId}\u0000${projectId}\u0000${liveSessionId ?? ''}`,
+  );
+  useEffect(() => {
+    const message = intentPreviewText.trim();
+    const sequence = ++intentPreviewSequence.current;
+    const address = `${gezelId}\u0000${projectId}\u0000${liveSessionId ?? ''}`;
+    const addressChanged = intentPreviewAddressRef.current !== address;
+    intentPreviewAddressRef.current = address;
+
+    // A confirmed plan remains accurate enough to display while the next
+    // debounced preview is pending. Clear it immediately only when routing is
+    // impossible locally or when the conversation address has changed.
+    if (message.length < 8 || parseOpenChatQuery(intentPreviewText) !== null) {
+      setTurnIntentPlan(null);
+      return;
+    }
+    if (addressChanged) setTurnIntentPlan(null);
+    const timer = window.setTimeout(() => {
+      void api
+        .previewTurnIntent({
+          message: intentPreviewText,
+          gezelId,
+          projectId,
+          ...(liveSessionId ? { sessionId: liveSessionId } : {}),
+        })
+        .then((plan) => {
+          if (intentPreviewSequence.current !== sequence) return;
+          setTurnIntentPlan(plan.visible ? plan : null);
+        })
+        // Preview is advisory. A transient failure should not flicker away a
+        // previously confirmed plan; Send will recompute it authoritatively.
+        .catch(() => {});
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [gezelId, intentPreviewText, liveSessionId, projectId]);
 
   const createFreshSession = useCallback(async (): Promise<string> => {
     const created = await api.createChatSession({
@@ -788,6 +859,7 @@ export function ChatComposer({
       draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
+      setIntentPreviewText(source);
       setOpenCommandQuery(parseOpenChatQuery(source));
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
@@ -828,6 +900,7 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(true);
+    setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     const next = extractMentionTokens(merged);
     setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
@@ -864,6 +937,7 @@ export function ChatComposer({
     draftRef.current = '';
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
+    setIntentPreviewText('');
     setOpenCommandQuery(null);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
@@ -1585,6 +1659,16 @@ export function ChatComposer({
             <>
               <ComposerImageClipboard onError={setError} />
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
+              {turnIntentPlan && (
+                <output
+                  className="chat-turn-intent-preview"
+                  aria-label={`${turnIntentPlan.display.label}. ${turnIntentPlan.display.detail ?? ''}`.trim()}
+                  title={`${turnIntentPlan.display.label}${turnIntentPlan.display.detail ? ` — ${turnIntentPlan.display.detail}` : ''}. Gezel will add this route when you send.`}
+                >
+                  <TurnIntentGlyph />
+                  <span>{compactTurnIntentLabel(turnIntentPlan)}</span>
+                </output>
+              )}
               <ComposerNarrateButton
                 projectId={projectId}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}

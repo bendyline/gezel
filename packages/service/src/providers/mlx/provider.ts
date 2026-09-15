@@ -47,6 +47,7 @@ import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
+import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import {
   appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
@@ -3038,7 +3039,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
           );
         }
-        let toolCalls = coerced.calls as typeof mergedCalls;
+        // After coercion, so two spellings of the same arguments compare equal.
+        const collapsed = collapseDuplicateToolCalls(coerced.calls);
+        for (const d of collapsed.dropped) {
+          log.info(
+            `turn#${seq}.${turn} collapsed ${d.count} duplicate ${d.name} call(s) emitted in this generation`,
+          );
+        }
+        let toolCalls = collapsed.calls as typeof mergedCalls;
         if (rambleAborted && toolCalls.length === 0) {
           // If ctrl.abort() races with mlx-vlm closing the SSE stream,
           // the for-await loop can exit cleanly instead of throwing an

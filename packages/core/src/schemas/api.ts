@@ -5521,6 +5521,14 @@ export const UnifiedSearchResultSchema = z.object({
   source: z.enum(['workspace', 'artifacts']).optional(),
   /** Corpus provenance for model-facing retrieval and audit telemetry. */
   retrievalSource: RetrievalSourceSchema.optional(),
+  /**
+   * Which retrieval arm produced the hit. `fts` means the text literally
+   * contains a query term; `vector` means it was merely a near neighbour.
+   * Proactive injection holds the two to different bars — a keyword hit has
+   * to be grounded in the text it injects, while a semantic hit has already
+   * cleared a cosine floor and shares no words by nature.
+   */
+  arm: z.enum(['vector', 'fts']).optional(),
   /** 1-based line for content/symbol hits. */
   line: z.number().int().positive().optional(),
   /** Inclusive end line when the underlying index provides a span. */

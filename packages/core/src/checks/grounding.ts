@@ -27,6 +27,27 @@ export function normalizeDigitGroups(text: string): string {
   return text.replace(/(\d)[,\s](?=\d{3}(?:\D|$))/g, '$1');
 }
 
+/**
+ * Drop inline-emphasis delimiters so a value is compared as a value, not as
+ * formatting. A deck that writes `Original wait: **14** minutes` is quoting
+ * its source exactly; the asterisks are presentation and must not decide a
+ * grounding verdict.
+ *
+ * Wild-caught on the powerpoint-deck eval: a correct, correctly-cited slide
+ * failed `valueGrounding` for /14 minutes/ because the model had bolded the
+ * figure. A gate that rejects right answers over markdown caps the pass rate
+ * of every model equally, which is the one kind of failure an eval must never
+ * manufacture.
+ *
+ * Only the UNAMBIGUOUS delimiters are stripped — `**`, `__`, and backticks.
+ * Single `*` and `_` are deliberately left alone: `_` is a word character in
+ * every identifier a fact might legitimately require (`read_file`), and `*`
+ * carries meaning in globs.
+ */
+export function normalizeInlineEmphasis(text: string): string {
+  return text.replace(/\*\*|__|`/g, '');
+}
+
 /** A single grounded fact: at least one `required` form must appear and no
  *  `forbidden` (decoy) form may. Values are regex sources, matched
  *  case-insensitively against the (optionally digit-normalized) text. */
@@ -68,7 +89,9 @@ export function valueGrounding(
   facts: readonly GroundingFact[],
   opts: { normalizeDigits?: boolean } = {},
 ): GroundingResult {
-  const haystack = opts.normalizeDigits === false ? text : normalizeDigitGroups(text);
+  const haystack = normalizeInlineEmphasis(
+    opts.normalizeDigits === false ? text : normalizeDigitGroups(text),
+  );
   const signals: string[] = [];
   const decoysDetected: string[] = [];
   let firstFailure: string | null = null;
@@ -141,13 +164,31 @@ function stripFencedBlocks(text: string): string {
     .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*$/m, '');
 }
 
+/**
+ * A gezel task ref (`<projectId>/<num>`) is slash-containing and backticked,
+ * so the inline-path form captures it as a cited file — and it never resolves,
+ * because it is an identifier, not a path.
+ *
+ * Wild-caught on the powerpoint-deck topic-only run: the reviewer cited the
+ * workflow's real artifacts AND its own task ref
+ * (`powerpoint-sources-pptx-topic-only/1`); one non-resolving citation fails
+ * the whole check, so the review step plateaued three times and the task
+ * paused with no deck. Same false-positive family the extractor's own doc
+ * calls out — "a bare filename mentioned in prose isn't mistaken for a
+ * citation" — one notch over.
+ *
+ * Deliberately narrow: the final segment must be ALL digits, which is the task
+ * ref grammar and not a shape real source files take.
+ */
+const TASK_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/\d+$/;
+
 function extractCitations(text: string, re: RegExp): string[] {
   const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
   const global = new RegExp(re.source, flags);
   const out: string[] = [];
   for (const m of stripFencedBlocks(text).matchAll(global)) {
     const cap = m.slice(1).find((x) => x !== undefined) ?? m[0];
-    if (cap) out.push(cap);
+    if (cap && !TASK_REF_RE.test(cap)) out.push(cap);
   }
   return out;
 }
