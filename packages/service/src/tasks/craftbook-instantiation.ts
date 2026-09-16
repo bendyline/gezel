@@ -53,6 +53,7 @@ export function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraf
     ...(book.triggers ? { triggers: book.triggers } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
+    ...(book.cliWorkflow ? { cliWorkflow: book.cliWorkflow } : {}),
     // Snapshot toolsets so ChatManager can derive the auto-allow tool set
     // from `task.craftbook.toolsets` without re-resolving the catalog book.
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
@@ -96,7 +97,8 @@ export function craftbookParamDefaults(
   for (const [key, raw] of Object.entries(properties)) {
     if (!raw || typeof raw !== 'object') continue;
     const value = (raw as { default?: unknown }).default;
-    if (typeof value === 'string') defaults[key] = value;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+      defaults[key] = String(value);
   }
   return defaults;
 }
@@ -300,6 +302,13 @@ export function interpolateStepsContext(
     if (step.name) step.name = interpolateContext(step.name, context);
     if (step.description) step.description = interpolateContext(step.description, context);
     if (step.prompt) step.prompt = interpolateContext(step.prompt, context);
+    if (step.suggestedGezelId)
+      step.suggestedGezelId = interpolateContext(step.suggestedGezelId, context);
+    if (step.assignee?.kind === 'gezel')
+      step.assignee = {
+        ...step.assignee,
+        gezelId: interpolateContext(step.assignee.gezelId, context),
+      };
     if (step.consumes?.length) {
       step.consumes = step.consumes.map((input) => ({
         ...input,

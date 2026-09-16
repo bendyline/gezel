@@ -22,6 +22,22 @@ $ErrorActionPreference = 'Stop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $here '..\..\..') | Select-Object -ExpandProperty Path
+$src = Join-Path $here '.upstream'
+$runtimePatch = Join-Path $here 'patches\muse-runtime.patch'
+# Recover only our exact patch after an interrupted build, preserving other edits.
+if (Test-Path (Join-Path $src '.git')) {
+  $patchApplied = & {
+    # Windows PowerShell turns native stderr into a terminating error under
+    # Stop, even when redirected. A clean checkout is an expected probe miss.
+    $ErrorActionPreference = 'Continue'
+    & git -C $src apply --reverse --check $runtimePatch 2>$null
+    $LASTEXITCODE -eq 0
+  }
+  if ($patchApplied) {
+    & git -C $src apply --reverse $runtimePatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not recover Muse runtime patch' }
+  }
+}
 
 # -- 1. Ensure upstream is cloned + pinned -------------------------
 $fetchScript = Join-Path $repoRoot 'native\scripts\fetch-upstream.sh'
@@ -49,6 +65,11 @@ if ($null -ne $bash) {
 }
 
 $src = Join-Path $here '.upstream'
+& git -C $src apply --check $runtimePatch
+if ($LASTEXITCODE -ne 0) { throw 'Muse runtime patch does not match the upstream pin' }
+& git -C $src apply $runtimePatch
+if ($LASTEXITCODE -ne 0) { throw 'Could not apply Muse runtime patch' }
+try {
 
 # -- 1b. Resolve target architecture -------------------------------
 # Windows ships on x64 and arm64 (Snapdragon X / WoA). The two legs differ
@@ -111,7 +132,7 @@ $cmakeFlags = @(
   # How the portable CPU code is then selected differs per arch - see
   # section 2b.
   '-DGGML_NATIVE=OFF',
-  '-DGGML_BACKEND_DL=ON',
+  '-DGGML_BACKEND_DL=ON'
 )
 
 # -- 2b. CPU ISA policy --------------------------------------------
@@ -386,3 +407,7 @@ if ($backend -eq 'cuda') {
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $outDir $serverName)).Hash
 Write-Host "[build] installed: $(Join-Path $outDir $serverName)"
 Write-Host "[build] sha256: $hash"
+} finally {
+  & git -C $src apply --reverse $runtimePatch
+  if ($LASTEXITCODE -ne 0) { throw 'Could not clean up Muse runtime patch' }
+}

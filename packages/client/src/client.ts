@@ -9,6 +9,7 @@ import type {
   AudioSynthesizeResponse,
   AudioTranscribeRequest,
   AudioTranscribeResponse,
+  GezelConfig,
   ImageEngineStatusResponse,
   ImageGenerationRequest,
   ImageGenerationResponse,
@@ -1474,16 +1475,7 @@ export interface ConfigResponse {
    * `sendAndWait` calls run against a given backend at once. See
    * `GezelConfig.providerConcurrency` for defaults.
    */
-  providerConcurrency?: {
-    copilot?: number;
-    openai?: number;
-    anthropic?: number;
-    'anthropic-cli'?: number;
-    'codex-cli'?: number;
-    ollama?: number;
-    'llama-cpp'?: number;
-    mlx?: number;
-  };
+  providerConcurrency?: GezelConfig['providerConcurrency'];
   /** Settings for the `anthropic-cli` provider. See `GezelConfig.anthropicCli`. */
   anthropicCli?: {
     binaryPath?: string;

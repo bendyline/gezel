@@ -4127,7 +4127,18 @@ server.tool(
       .describe(
         'File path relative to the artifacts root (e.g. "summary.md" or "reports/summary.md"). Do NOT prefix with "artifacts/" — the call is already scoped there.',
       ),
-    content: z.string().describe('File content to write'),
+    content: z
+      .union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
+      .optional()
+      .describe(
+        'File text, or a structured object/array. Supply either content or jsonContent. Prefer jsonContent for JSON reports.',
+      ),
+    jsonContent: z
+      .union([z.record(z.string(), z.unknown()), z.array(z.unknown())])
+      .optional()
+      .describe(
+        'Structured JSON object/array to serialize. Prefer this for .json reports and omit content. This separate field lets native model grammars enforce JSON structure.',
+      ),
     force: z
       .boolean()
       .optional()
@@ -4135,11 +4146,18 @@ server.tool(
         "Bypass the workspace-collision and source-code-extension guards. Only set when you deliberately want to stash a code-looking file in artifacts (rare — a mock, a scratch experiment you're not shipping).",
       ),
   },
-  async ({ path, content, force }) => {
+  async ({ path, content: rawContent, jsonContent, force }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
     const scoped = await taskScopedWriteRefusal(path, 'artifacts');
     if (scoped) return scoped;
+    if ((rawContent === undefined) === (jsonContent === undefined)) {
+      return errorResult(
+        'Supply exactly one of content or jsonContent. Use jsonContent for a structured JSON report.',
+      );
+    }
+    const value = jsonContent ?? rawContent;
+    const content = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
     const clean = normalizeArtifactPath(path);
     if (isReservedShadowArtifactPath(clean)) {
       return {

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { securityPolicyForLevel } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
@@ -69,6 +70,21 @@ async function wikipediaRead(body: Record<string, unknown>): Promise<Response> {
 }
 
 describe('web_search route', () => {
+  it('preserves actionable configuration errors at the HTTP boundary', async () => {
+    delete process.env.GEZEL_MOCK_PROVIDER;
+    await svc.context.store.writeConfig({
+      securityPolicy: {
+        ...securityPolicyForLevel('free'),
+        level: 'custom',
+        allowExternalServices: false,
+      },
+      webSearch: { provider: 'brave' },
+    });
+    const res = await webSearch({ query: 'local museum history' });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/external services/i);
+  });
+
   it('returns the normalized response shape from the mock provider', async () => {
     const res = await webSearch({ query: 'hello world', limit: 3 });
     expect(res.status).toBe(200);

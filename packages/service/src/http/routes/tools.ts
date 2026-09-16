@@ -176,11 +176,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       // so a public URL can't 30x-redirect into a private/loopback/
       // metadata target. Bounded to a small redirect budget.
       let currentUrl = body.url;
+      let finalUrl = currentUrl;
       let res: Response | null = null;
       for (let redirects = 0; redirects <= 5; redirects++) {
         if (!isAllowedHermeticEvalFetchUrl(currentUrl)) {
           await assertPublicUrl(currentUrl);
         }
+        finalUrl = currentUrl;
         res = await fetch(currentUrl, {
           method: body.method ?? 'GET',
           ...(body.headers ? { headers: body.headers } : {}),
@@ -226,6 +228,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         headers[k] = v;
       });
       const response: FetchUrlResponse = {
+        finalUrl,
         status: res.status,
         statusText: res.statusText,
         headers,
@@ -265,7 +268,9 @@ export function toolRoutes(ctx: ServiceContext): Hono {
 
     const provider = await createSearchProvider({ store: ctx.store, secrets: ctx.secrets });
     if (provider.unavailableReason) {
-      return c.json({ error: provider.unavailableReason }, 503);
+      // Configuration failures need their remediation text. The generic 5xx
+      // boundary intentionally redacts server errors before they reach the CLI.
+      return c.json({ error: provider.unavailableReason }, 409);
     }
 
     const limit = body.limit ?? config.webSearch?.defaultLimit ?? DEFAULT_WEB_SEARCH_LIMIT;

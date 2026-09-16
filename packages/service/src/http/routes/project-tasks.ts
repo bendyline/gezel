@@ -119,6 +119,19 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const { dispatchEntry, craftbookInvocationKey, ...body } = CreateTaskRequestSchema.parse(
       await c.req.json(),
     );
+    if (body.trustScripts) {
+      const auth = c.get('auth');
+      if (
+        !auth ||
+        auth.scopes.includes('session') ||
+        !auth.scopes.some((scope) => ['root', 'ui', 'cli'].includes(scope))
+      ) {
+        return c.json(
+          { error: 'Only an explicit owner or CLI launch may trust custom scripts.' },
+          403,
+        );
+      }
+    }
     let task: Task;
     try {
       if (craftbookInvocationKey) {

@@ -4574,6 +4574,8 @@ export const FetchUrlRequestSchema = z.object({
 export type FetchUrlRequest = z.infer<typeof FetchUrlRequestSchema>;
 
 export const FetchUrlResponseSchema = z.object({
+  /** URL actually fetched after redirect validation; used for evidence provenance. */
+  finalUrl: z.string().optional(),
   status: z.number().int(),
   statusText: z.string(),
   headers: z.record(z.string(), z.string()),

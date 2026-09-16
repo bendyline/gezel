@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -340,6 +340,12 @@ export class ScriptRunner {
       opts.scriptName,
       opts.inlineSource !== undefined,
     );
+    const cliTrusted = await this.isCliTrustedSource(opts, source);
+    if (cliTrusted && !provenanceTrusted) {
+      log.info(
+        `[scripts] CLI-authorized custom script ${opts.scriptName}: using best-effort network isolation`,
+      );
+    }
     const trustedReadOnlyStandard =
       scope === 'standard' &&
       provenanceTrusted &&
@@ -350,7 +356,7 @@ export class ScriptRunner {
       const result = await this.runSandbox({
         scratch,
         scriptName: opts.scriptName,
-        provenanceTrusted,
+        provenanceTrusted: provenanceTrusted || cliTrusted,
         trustedReadOnlyStandard,
         init: {
           input: validatedInput,
@@ -555,6 +561,23 @@ export class ScriptRunner {
       return false;
     }
     return false;
+  }
+
+  /** A model cannot grant trust by editing a script or supplying an invocation argument. */
+  private async isCliTrustedSource(opts: RunScriptOptions, source: string): Promise<boolean> {
+    if (
+      opts.scope !== 'craftbook' ||
+      opts.trigger.kind !== 'step' ||
+      opts.inlineSource === undefined
+    )
+      return false;
+    const [projectId, num] = opts.trigger.taskRef.split('/');
+    if (projectId !== opts.projectId || !num || !/^\d+$/.test(num)) return false;
+    const task = await this.store.readTask(projectId, Number(num));
+    return (
+      task?.cliTrustedScriptHashes?.includes(createHash('sha256').update(source).digest('hex')) ===
+      true
+    );
   }
 
   private async vendorSdk(scratch: string): Promise<void> {

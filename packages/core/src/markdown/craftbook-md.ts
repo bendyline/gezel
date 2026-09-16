@@ -75,6 +75,7 @@ const FRONTMATTER_KEYS = [
   'toolsets',
   'connectors',
   'paramSchema',
+  'cliWorkflow',
   'hooks',
   // Whole-book declarations that are NOT step fields. Omitting one here is
   // worse than dropping it: the parser reports `unknown key "spawn"` and

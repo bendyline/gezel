@@ -823,6 +823,19 @@ export const CraftbookBasedOnSchema = z.object({
 });
 export type CraftbookBasedOn = z.infer<typeof CraftbookBasedOnSchema>;
 
+/** Explicit CLI-only repository orchestration; never evaluated by model/session tools. */
+export const CraftbookCliWorkflowSchema = z.object({
+  module: z
+    .string()
+    .min(1)
+    .refine(
+      (path) =>
+        /^(?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+\.mjs$/.test(path) &&
+        !path.split('/').some((part) => part === '..' || part === '.'),
+      'cliWorkflow.module must be a workspace-relative .mjs path without traversal',
+    ),
+});
+
 /**
  * Cross-check step script refs against the embedded scripts map: every
  * `scope: 'craftbook'` ref (onEnter / onExit / gate.scripts) must name a
@@ -893,6 +906,8 @@ export const CraftbookSchema = z
      * boundary. Absent = parameterless (the command is injected directly).
      */
     paramSchema: z.record(z.string(), z.unknown()).optional(),
+    /** A trusted repository module orchestrates this book when explicitly launched by `gezel do`. */
+    cliWorkflow: CraftbookCliWorkflowSchema.optional(),
     /**
      * CLI token the launcher stages into the terminal and that the
      * terminal recognizes. Defaults to `id` when absent — e.g. the

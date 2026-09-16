@@ -42,6 +42,7 @@ const FULL_BOOK: Craftbook = {
   commands: [{ scope: 'script', name: 'test' }],
   connectors: [{ typeId: 'github' }],
   paramSchema: { type: 'object', properties: { region: { type: 'string' } } },
+  cliWorkflow: { module: '.gezel/workflows/batch.mjs' },
   hooks: [{ phase: 'PreToolUse', matcher: 'write_file', script: { name: 'guard' } }],
   scripts: { guard: 'export {};\n' },
   diffpackCapable: true,

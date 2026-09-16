@@ -549,6 +549,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     const modelPrefFields: Array<keyof typeof body> = [
       'defaultModel',
       'defaultReasoningEffort',
+      'providerConcurrency',
       'nativeVision',
       'ds4VisionEncoderPath',
     ];

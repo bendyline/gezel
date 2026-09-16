@@ -1123,6 +1123,18 @@ export class TaskManager {
       assignee,
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
       craftbook,
+      ...(input.trustScripts
+        ? {
+            cliTrustedScriptHashes: [
+              ...new Set(
+                [
+                  ...Object.values(craftbook.scripts ?? {}),
+                  ...Object.values(spawnsCraftbook?.scripts ?? {}),
+                ].map((source) => createHash('sha256').update(source).digest('hex')),
+              ),
+            ],
+          }
+        : {}),
       ...(spawnsCraftbook ? { spawnsCraftbook } : {}),
       ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
       ...(Object.keys(effectiveCraftbookParams).length > 0
@@ -4282,6 +4294,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       status: 'active',
       assignee: inheritedAssignee,
       craftbook: childCraftbook,
+      ...(parent.cliTrustedScriptHashes
+        ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }
+        : {}),
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
       // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):

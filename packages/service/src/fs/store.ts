@@ -1,4 +1,8 @@
 import { ConfigStore } from './config-store.js';
+import {
+  readProjectCraftbookDocument,
+  updateProjectCraftbookDocument,
+} from './project-craftbook-document.js';
 export { ConfigCorruptionError } from './config-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -6880,6 +6884,8 @@ export class Store {
     if (versions.length === 0) return null;
     const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
     if (!versions.includes(chosen)) return null;
+    const document = await readProjectCraftbookDocument(join(versionsDir, chosen), id, chosen);
+    if (document !== undefined) return document;
     let parsedRaw: unknown;
     try {
       parsedRaw = JSON.parse(await readFile(join(versionsDir, chosen, 'manifest.json'), 'utf8'));
@@ -6923,6 +6929,7 @@ export class Store {
     const version = book.version ?? '1.0.0';
     const versionDir = join(dir, 'versions', version);
     await mkdir(versionDir, { recursive: true });
+    if (await updateProjectCraftbookDocument(versionDir, book)) return;
     const identityFile = join(dir, 'manifest.json');
     let writeIdentity = true;
     try {

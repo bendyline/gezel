@@ -85,6 +85,53 @@ describe('consolidated MCP tools', () => {
     };
   });
 
+  it('serializes structured artifact reports without losing nested values or quotes', async () => {
+    const writes: Record<string, unknown>[] = [];
+    handler = (url, method, body) => {
+      if (url.pathname === '/api/projects/project-a/tasks') return { tasks: [] };
+      if (url.pathname === '/api/projects/project-a/artifacts/write' && method === 'PUT') {
+        writes.push(body!);
+        return { ok: true, path: body!.path };
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+    for (const content of [
+      {
+        claims: [
+          { quote: 'A "quoted" line\nwith a backslash \\', evidence: [{ supported: true }] },
+        ],
+        issues: [],
+        missing: null,
+      },
+      [{ title: 'Story', count: 3 }],
+    ]) {
+      const result = await client.callTool({
+        name: 'write_artifact',
+        arguments: { path: 'reports/review.json', jsonContent: content, force: true },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.parse(writes.at(-1)!.content as string)).toEqual(content);
+      expect(writes.at(-1)).toMatchObject({ gezelId: 'meester', sessionId: 'session-a' });
+    }
+    const malformed = await client.callTool({
+      name: 'write_artifact',
+      arguments: {
+        path: 'reports/review.json',
+        content: '{"claims":[]}},"writing":{}}',
+        force: true,
+      },
+    });
+    expect(malformed.isError).toBe(true);
+    for (const arguments_ of [
+      { path: 'reports/review.json', force: true },
+      { path: 'reports/review.json', content: '{}', jsonContent: {}, force: true },
+    ]) {
+      const result = await client.callTool({ name: 'write_artifact', arguments: arguments_ });
+      expect(result.isError).toBe(true);
+    }
+    expect(writes).toHaveLength(2);
+  });
+
   it('advertises compact handoff hints instead of the internal completion-gate union', async () => {
     const { tools } = await client.listTools();
     for (const name of [

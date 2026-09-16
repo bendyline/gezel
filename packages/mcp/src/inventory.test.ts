@@ -543,7 +543,26 @@ describe('MCP tool input schemas', () => {
       valid: { files: [{ path: 'a.md' }, { path: 'b.md', startLine: 4, endLine: 9 }] },
       invalid: { paths: [] },
     },
-    { tool: 'write_artifact', valid: { path: 'r.md', content: 'x' }, invalid: { path: 'r.md' } },
+    {
+      tool: 'write_artifact',
+      valid: { path: 'r.md', content: 'x' },
+      invalid: { path: 'r.md', content: 42 },
+    },
+    {
+      tool: 'write_artifact',
+      valid: { path: 'r.json', jsonContent: { claims: [] } },
+      invalid: { path: 'r.json', jsonContent: '{}' },
+    },
+    {
+      tool: 'write_artifact',
+      valid: { path: 'r.json', content: { claims: [{ supported: true, quote: '"Quoted" text' }] } },
+      invalid: { path: 'r.json', content: 42 },
+    },
+    {
+      tool: 'write_artifact',
+      valid: { path: 'r.json', content: [{ title: 'Story', issues: [] }] },
+      invalid: { path: 'r.json', content: null },
+    },
     { tool: 'list_documents', valid: {} },
     { tool: 'list_gezels', valid: {} },
     { tool: 'list_projects', valid: {} },

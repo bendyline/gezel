@@ -8,11 +8,12 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { resolveSecurityPolicy } from '@bendyline/gezel';
 import {
   type DiscoverOrSpawnResult,
   GezelClient,
@@ -133,6 +134,204 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     expect(typeof health.version).toBe('string');
   });
 
+  it('sets, lists, and removes write-only provider credentials through the built CLI', async () => {
+    const value = 'integration-only-credential-value';
+    const saved = await execFileAsync(
+      process.execPath,
+      [
+        cliEntry,
+        '--home',
+        gezelHome,
+        'secret',
+        'set',
+        'braveSearchApiKey',
+        '--env',
+        'GEZEL_TEST_SECRET_INPUT',
+        '--use-for-search',
+        '--json',
+      ],
+      {
+        env: childEnv({
+          GEZEL_HOME: gezelHome,
+          GEZEL_MOCK_PROVIDER: '1',
+          GEZEL_TEST_SECRET_INPUT: value,
+        }),
+        timeout: 25_000,
+      },
+    );
+    expect(JSON.parse(saved.stdout)).toEqual({
+      name: 'braveSearchApiKey',
+      configured: true,
+      searchProvider: 'brave',
+    });
+    const config = await client.getConfig();
+    expect(config.hasBraveSearchApiKey).toBe(true);
+    expect(config.webSearch?.provider).toBe('brave');
+    const listed = await runCli('secret', 'list', '--json');
+    expect(JSON.parse(listed.stdout).credentials).toContainEqual({
+      name: 'braveSearchApiKey',
+      configured: true,
+    });
+    expect(saved.stdout + saved.stderr + listed.stdout + listed.stderr).not.toContain(value);
+    const piped = execFileAsync(
+      process.execPath,
+      [cliEntry, '--home', gezelHome, 'secret', 'set', 'tavilyApiKey', '--stdin', '--json'],
+      {
+        env: childEnv({ GEZEL_HOME: gezelHome, GEZEL_MOCK_PROVIDER: '1' }),
+        timeout: 25_000,
+      },
+    );
+    piped.child.stdin?.end(`${value}\r\n`);
+    expect(JSON.parse((await piped).stdout)).toEqual({ name: 'tavilyApiKey', configured: true });
+    await runCli('secret', 'remove', 'braveSearchApiKey');
+    await runCli('secret', 'remove', 'tavilyApiKey');
+    expect((await client.getConfig()).hasBraveSearchApiKey).toBe(false);
+    expect((await client.getConfig()).hasTavilyApiKey).toBe(false);
+    await client.updateConfig({ webSearch: { provider: 'mock' } });
+  });
+
+  it('runs parameterized project craftbooks and workflow modules through the built Windows CLI', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'gezel-cli-craftbook-'));
+    try {
+      const dir = join(folder, '.gezel', 'craftbooks', 'batch-smoke');
+      await mkdir(join(dir, 'versions', '1.0.0'), { recursive: true });
+      await writeFile(
+        join(dir, 'manifest.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          kind: 'craftbook-template',
+          id: 'batch-smoke',
+          name: 'Batch Smoke',
+          description: 'Deterministic CLI integration fixture.',
+          tags: [],
+          maintainer: { name: 'Tests' },
+        }),
+      );
+      await writeFile(
+        join(dir, 'versions', '1.0.0', 'craftbook.json'),
+        JSON.stringify({
+          id: 'batch-smoke',
+          name: 'Batch Smoke',
+          version: '1.0.0',
+          releasedAt: '2026-09-16T00:00:00Z',
+          entryStepId: 'write',
+          defaultAssignee: { kind: 'user' },
+          paramSchema: {
+            type: 'object',
+            required: ['region'],
+            properties: { region: { type: 'string' }, count: { type: 'integer', default: 3 } },
+          },
+          steps: [
+            {
+              id: 'write',
+              name: 'Write marker',
+              terminal: true,
+              onEnter: {
+                name: 'marker',
+                scope: 'craftbook',
+                inputs: { region: '{{region}}', count: '{{count}}' },
+                autoAdvanceOnSuccess: true,
+              },
+            },
+          ],
+          scripts: {
+            marker: `import { gezel, defineScript } from '@bendyline/gezel-sdk';
+export const meta = defineScript({ name: 'marker', description: 'Write an input marker.', requires: ['artifacts.write'], inputs: { region: { type: 'string', description: 'region' }, count: { type: 'string', description: 'count' } } });
+await gezel.artifacts.write('cli-marker.json', JSON.stringify(gezel.input));
+gezel.output({ ok: true });`,
+          },
+        }),
+      );
+      const invoked = await runCli(
+        '--project',
+        folder,
+        'do',
+        'Batch',
+        'Smoke',
+        'c23n',
+        '--wait',
+        '--json',
+      ).catch((error) => {
+        throw new Error(`${error.message}\n${error.stdout}`);
+      });
+      const completed = JSON.parse(invoked.stdout);
+      expect(completed.outcome).toBe('complete');
+      expect(completed.task.craftbookParams).toMatchObject({ region: 'c23n', count: '3' });
+      expect(completed.task.cliTrustedScriptHashes).toHaveLength(1);
+      const artifact = await client.readProjectArtifact(
+        completed.task.projectId,
+        'cli-marker.json',
+      );
+      expect(JSON.parse(artifact.content)).toEqual({ region: 'c23n', count: '3' });
+      await mkdir(join(folder, '.gezel', 'workflows'), { recursive: true });
+      await writeFile(
+        join(folder, '.gezel', 'workflows', 'smoke.mjs'),
+        `export async function run({ args, runCraftbook }) { return runCraftbook('batch-smoke', { region: args[0] }); }`,
+      );
+      const workflow = await runCli('--project', folder, 'workflow', 'smoke', 'c23', '--json');
+      expect(JSON.parse(workflow.stdout).outcome).toBe('complete');
+      const metaDir = join(folder, '.gezel', 'craftbooks', 'batch-meta');
+      await mkdir(join(metaDir, 'versions', '1.0.0'), { recursive: true });
+      await writeFile(
+        join(metaDir, 'manifest.json'),
+        JSON.stringify({ id: 'batch-meta', name: 'Batch Meta' }),
+      );
+      await writeFile(
+        join(metaDir, 'versions', '1.0.0', 'craftbook.json'),
+        JSON.stringify({
+          id: 'batch-meta',
+          name: 'Batch Meta',
+          version: '1.0.0',
+          cliWorkflow: { module: '.gezel/workflows/meta.mjs' },
+          paramSchema: {
+            type: 'object',
+            required: ['region'],
+            properties: { region: { type: 'string' } },
+          },
+          defaultAssignee: { kind: 'user' },
+          steps: [{ id: 'batch', name: 'Batch', terminal: true }],
+        }),
+      );
+      await writeFile(
+        join(folder, '.gezel', 'workflows', 'meta.mjs'),
+        `
+export async function run({ client, projectId, craftbook, params, runCraftbook }) {
+  const parent = await client.createTask(projectId, { title: 'Batch parent', description: 'Run a linked child and finish only after its output passes.', craftbookId: craftbook.id, craftbookSourceId: 'project', craftbookParams: params });
+  const child = await runCraftbook('batch-smoke', { region: params.region }, { parentTaskRef: parent.ref, title: 'Write dp04 subject' });
+  if (child.exitCode) return child;
+  await client.completeTaskStep(projectId, parent.num, parent.activeStepId);
+  return { parentRef: parent.ref, childRef: child.task.ref, exitCode: 0 };
+}`,
+      );
+      const meta = JSON.parse(
+        (await runCli('--project', folder, 'do', 'batch-meta', 'dp04', '--wait', '--json')).stdout,
+      );
+      expect((await client.getTaskByRef(meta.parentRef)).status).toBe('complete');
+      expect((await client.getTaskByRef(meta.childRef)).parentTaskRef).toBe(meta.parentRef);
+      expect((await client.getTaskByRef(meta.childRef)).title).toBe('Write dp04 subject');
+      expect((await client.getTaskByRef(meta.childRef)).craftbookParams?.region).toBe('dp04');
+      await expect(
+        runCli('--project', folder, 'do', 'batch-meta', 'dp04', '--strict-sandbox'),
+      ).rejects.toMatchObject({ code: 1 });
+      if (process.platform !== 'darwin') {
+        await expect(
+          runCli(
+            '--project',
+            folder,
+            'do',
+            'batch-smoke',
+            'c2',
+            '--strict-sandbox',
+            '--wait',
+            '--json',
+          ),
+        ).rejects.toMatchObject({ code: 2 });
+      }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   it('rejects requests with no auth token', async () => {
     // Daemon serves HTTPS with a self-signed loopback cert; use the
     // trusting fetch built from the cert that `discoverOrSpawn` read
@@ -234,6 +433,73 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     expect(after.provider).toBe('copilot');
     // Idempotent round-trip.
     await client.updateConfig({ provider: before.provider });
+  });
+
+  it('sets, reads, and clears model context through the CLI without changing other models', async () => {
+    await client.updateModelContextOverride('llama-cpp', 'unrelated-model', 98304);
+    const args = ['model', 'context', 'test-model'];
+    const set = JSON.parse(
+      (await runCli(...args, '65536', '--provider', 'llama-cpp', '--json')).stdout,
+    );
+    expect(set).toEqual({ provider: 'llama-cpp', modelId: 'test-model', contextTokens: 65536 });
+    expect(JSON.parse((await runCli(...args, '--provider', 'llama-cpp', '--json')).stdout)).toEqual(
+      set,
+    );
+    await expect(runCli(...args, '1e5')).rejects.toMatchObject({ code: 1 });
+    await expect(runCli(...args, '1024')).rejects.toMatchObject({ code: 1 });
+    await runCli(...args, 'auto', '--provider', 'llama-cpp');
+    expect((await client.getModelContextOverrides('llama-cpp')).overrides).toEqual({
+      'unrelated-model': 98304,
+    });
+    await client.updateModelContextOverride('llama-cpp', 'unrelated-model', null);
+  });
+
+  it('sets and clears inference concurrency while preserving other providers', async () => {
+    const before = await client.getConfig();
+    try {
+      await client.updateConfig({
+        providerConcurrency: { ...before.providerConcurrency, openai: 7 },
+      });
+      const args = ['model', 'concurrency'];
+      expect(
+        JSON.parse((await runCli(...args, '1', '--provider', 'llama-cpp', '--json')).stdout),
+      ).toEqual({ provider: 'llama-cpp', slots: 1 });
+      expect(
+        JSON.parse((await runCli(...args, '--provider', 'llama-cpp', '--json')).stdout).slots,
+      ).toBe(1);
+      await expect(runCli(...args, '0')).rejects.toMatchObject({ code: 1 });
+      await expect(runCli(...args, '1.5')).rejects.toMatchObject({ code: 1 });
+      await runCli(...args, 'auto', '--provider', 'llama-cpp');
+      expect((await client.getConfig()).providerConcurrency).toEqual({
+        ...before.providerConcurrency,
+        openai: 7,
+      });
+    } finally {
+      await client.updateConfig({ providerConcurrency: before.providerConcurrency ?? {} });
+    }
+  });
+
+  it('configures external services and project indexing through explicit CLI settings', async () => {
+    const before = await client.getConfig();
+    try {
+      const result = await runCli('security', 'external-services', 'on', '--json');
+      expect(JSON.parse(result.stdout)).toEqual({ allowExternalServices: true });
+      const after = await client.getConfig();
+      expect(after.securityPolicy?.allowExternalServices).toBe(true);
+      expect(after.securityPolicy?.allowFileEdits).toBe(
+        resolveSecurityPolicy(before).allowFileEdits,
+      );
+      await expect(runCli('security', 'external-services', 'yes')).rejects.toMatchObject({
+        stderr: expect.stringContaining('Use on or off'),
+      });
+      const indexing = JSON.parse((await runCli('env', 'indexing', 'off', '--json')).stdout);
+      expect(indexing.indexingEnabled).toBe(false);
+      expect((await client.getProject(indexing.projectId)).indexingEnabled).toBe(false);
+      await runCli('env', 'indexing', 'on');
+    } finally {
+      if (before.securityPolicy)
+        await client.updateConfig({ securityPolicy: before.securityPolicy });
+    }
   });
 
   it('drives status and doctor through the installed CLI entry point', async () => {

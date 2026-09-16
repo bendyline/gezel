@@ -21,10 +21,20 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$here/../../.." && pwd)"
+src="$here/.upstream"
+runtime_patch="$here/patches/muse-runtime.patch"
+
+# Undo only our exact compatibility patch left by an interrupted build before
+# fetching a newer pin. Never discard unrelated changes in the source checkout.
+if [[ -d "$src/.git" ]] && git -C "$src" apply --reverse --check "$runtime_patch" 2>/dev/null; then
+  git -C "$src" apply --reverse "$runtime_patch"
+fi
 
 # ── 1. Ensure upstream is cloned + pinned ──────────────────────────
 "$repo_root/native/scripts/fetch-upstream.sh" llama-cpp
-src="$here/.upstream"
+git -C "$src" apply --check "$runtime_patch"
+git -C "$src" apply "$runtime_patch"
+trap 'git -C "$src" apply --reverse "$runtime_patch"' EXIT
 
 # ── 2. Resolve target platform ─────────────────────────────────────
 os="$(uname -s)"

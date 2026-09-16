@@ -24,6 +24,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { runtimeCraftbookFromTemplate } from '../../craftbook/resolve.js';
 import { suggestCraftbooks } from '../../craftbook/suggest.js';
 import {
   deleteCraftbookScriptSource,
@@ -93,39 +94,23 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
     if (sourceParam === 'local') {
       return ctx.store.getLocalCraftbookTemplate(id, version);
     }
-    if (projectId) {
-      const project = await ctx.store.getProjectCraftbook(projectId, id, version).catch(() => null);
-      if (project) return project;
+    if (sourceParam !== 'bundled') {
+      if (projectId) {
+        const project = await ctx.store
+          .getProjectCraftbook(projectId, id, version)
+          .catch(() => null);
+        if (project) return project;
+      }
+      const local = await ctx.store.getLocalCraftbookTemplate(id, version).catch(() => null);
+      if (local) return local;
     }
-    const local = await ctx.store.getLocalCraftbookTemplate(id, version).catch(() => null);
-    if (local) return local;
-    const detail = await ctx.catalog.get('craftbook-template', id, version).catch(() => null);
+    const detail = await ctx.catalog
+      .get('craftbook-template', id, undefined, version)
+      .catch(() => null);
     if (!detail || detail.manifest.kind !== 'craftbook-template') return null;
     const m = detail.manifest;
     const scripts = await readBundledCraftbookScripts(ctx.catalog, m).catch(() => undefined);
-    return {
-      id: m.id,
-      name: m.name,
-      ...(detail.about
-        ? { description: detail.about }
-        : m.description
-          ? { description: m.description }
-          : {}),
-      version: m.version,
-      ...(m.basedOn ? { basedOn: m.basedOn } : {}),
-      ...(m.plan ? { plan: m.plan } : {}),
-      ...(m.defaultAssignee ? { defaultAssignee: m.defaultAssignee } : {}),
-      steps: m.steps,
-      entryStepId: m.entryStepId,
-      ...(m.triggers ? { triggers: m.triggers } : {}),
-      ...(m.hooks ? { hooks: m.hooks } : {}),
-      ...(m.toolsets ? { toolsets: m.toolsets } : {}),
-      ...(m.recommends ? { recommends: m.recommends } : {}),
-      ...(m.runModes ? { runModes: m.runModes } : {}),
-      ...(scripts ? { scripts } : {}),
-      createdAt: m.releasedAt,
-      updatedAt: m.releasedAt,
-    };
+    return runtimeCraftbookFromTemplate(m, detail.about, scripts);
   }
 
   app.get('/', async (c) => {

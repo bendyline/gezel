@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectGezelId, nowIso, projectGezelId } from '@bendyline/gezel';
@@ -122,6 +122,39 @@ describe('project-local @project gezel', () => {
 });
 
 describe('project-local craftbooks', () => {
+  it('loads inline sources from a document, keeps edits there, and does not fall back when it is invalid', async () => {
+    const project = await store.createProject({ name: 'Document project' });
+    const ws = await store.projectWorkspaceDir(project.id);
+    const dir = join(ws, '.gezel', 'craftbooks', 'document');
+    const versionDir = join(dir, 'versions', '1.0.0');
+    await mkdir(versionDir, { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ id: 'document', name: 'Document' }),
+    );
+    await writeFile(
+      join(versionDir, 'manifest.json'),
+      JSON.stringify({ steps: [{ id: 'legacy', name: 'Stale' }], entryStepId: 'legacy' }),
+    );
+    const doc = {
+      id: 'document',
+      name: 'Document',
+      steps: [{ id: 'work', name: 'Work', terminal: true }],
+      scripts: { custom: 'export const value = 1;' },
+    };
+    const file = join(versionDir, 'craftbook.json');
+    await writeFile(file, JSON.stringify(doc));
+    const book = await store.getProjectCraftbook(project.id, 'document');
+    expect(book?.scripts?.custom).toBe(doc.scripts.custom);
+    expect(book?.version).toBe('1.0.0');
+    if (!book) throw new Error('Document not loaded');
+    await store.writeProjectCraftbook(project.id, { ...book, name: 'Edited document' });
+    expect((await store.getProjectCraftbook(project.id, 'document'))?.name).toBe('Edited document');
+    expect(JSON.parse(await readFile(file, 'utf8')).name).toBe('Edited document');
+    await writeFile(file, '{invalid');
+    expect(await store.getProjectCraftbook(project.id, 'document')).toBeNull();
+  });
+
   it('writes, reads, and lists a project craftbook', async () => {
     const project = await store.createProject({ name: 'CB' });
     const now = nowIso();
