@@ -17,9 +17,7 @@ async function chooseInstalledServiceCompatibilityFallback(
   const installed = issue.installedVersion
     ? `The installed Gezel service is version ${issue.installedVersion}. `
     : 'The installed Gezel service is not compatible with this app. ';
-  const current = issue.appVersion
-    ? `This Gezel app is version ${issue.appVersion}. `
-    : 'This Gezel app is a newer version. ';
+  const current = describeCurrentAppVersion(issue.appVersion);
   const messageBoxOptions: Electron.MessageBoxOptions = {
     type: 'warning',
     title: 'Installed Gezel service is not compatible',
@@ -39,6 +37,11 @@ async function chooseInstalledServiceCompatibilityFallback(
     return 'quit';
   }
   return result.response === 0 ? 'self-hosted' : 'quit';
+}
+
+export function describeCurrentAppVersion(version: string | null): string {
+  if (version === '0.0.0') return 'This Gezel app is a development build (0.0.0). ';
+  return version ? `This Gezel app is version ${version}. ` : 'This Gezel app is a newer version. ';
 }
 
 export function options(
