@@ -1600,6 +1600,37 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(rec!.craftbook.steps[0]!.redriveCount ?? 0).toBe(0);
   });
 
+  it('does not let an unanswered notification card freeze unrelated task re-drives', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    await store.writeQuestion({
+      id: 'q-old-paused-task',
+      projectId: 'cron',
+      gezelId: 'leo',
+      sessionId: '',
+      prompt: 'An older task paused for help.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      taskRef: 'cron/999',
+      intent: {
+        kind: 'task-paused',
+        taskRef: 'cron/999',
+        stepId: 'old-step',
+        reason: 'gate_plateau',
+      },
+      createdAt: now.toISOString(),
+    });
+
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+
+    expect(chat.delivered).toHaveLength(1);
+    const rec = await store.readTask('cron', num);
+    expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
+  });
+
   it('auto-advances (no model turn) when the deliverable already clears the gate', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setProjectVoorman('leo');

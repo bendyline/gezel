@@ -4,9 +4,12 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
 
 const PROJECT_NAME = 'Large PR Review Eval';
 const REVIEWER_NAME = 'Rina';
-const PR_NUMBER = 52;
-const TOTAL_FILES = 120;
-const CORPUS = `data/github-pulls/pr-${PR_NUMBER}`;
+export const LARGE_PR_NUMBER = 52;
+export const LARGE_PR_TOTAL_FILES = 120;
+export const LARGE_PR_CORPUS = `data/github-pulls/pr-${LARGE_PR_NUMBER}`;
+const PR_NUMBER = LARGE_PR_NUMBER;
+const TOTAL_FILES = LARGE_PR_TOTAL_FILES;
+const CORPUS = LARGE_PR_CORPUS;
 const REPORT = 'pr-review.md';
 const COVERAGE = 'pr-review-coverage.json';
 
@@ -14,26 +17,26 @@ export const API_USE_PATH = 'src/api/use-assured-api.ts';
 export const API_DEFINITION_PATH = 'src/api/assured-api.ts';
 export const LATE_DEFECT_PATH = 'src/security/late-authorization.ts';
 
-const API_USE = `import { assuredApi } from './assured-api.js';
+export const API_USE = `import { assuredApi } from './assured-api.js';
 
 export function loadWidget(id: string): string {
   return assuredApi(id);
 }
 `;
 
-const API_DEFINITION = `export function assuredApi(id: string): string {
+export const API_DEFINITION = `export function assuredApi(id: string): string {
   return \`widget:\${id}\`;
 }
 `;
 
-const LATE_DEFECT = `export function canDeleteProject(userId: string, ownerId: string): boolean {
+export const LATE_DEFECT = `export function canDeleteProject(userId: string, ownerId: string): boolean {
   if (!userId) return false;
   // Regression: any authenticated user can delete another owner's project.
   return true;
 }
 `;
 
-interface ArtifactFixture {
+export interface ArtifactFixture {
   path: string;
   content: string;
 }
@@ -146,7 +149,7 @@ export function buildLargePrArtifacts(): ArtifactFixture[] {
   ];
 }
 
-function parsePathFrontmatter(content: string): string {
+export function parsePathFrontmatter(content: string): string {
   return /^path:\s*(.+)$/m.exec(content)?.[1]?.trim() ?? '';
 }
 

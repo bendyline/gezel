@@ -26,6 +26,7 @@
  * packages exist.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -438,6 +439,7 @@ export class MlxProvider implements LLMProvider {
     onAbort?: () => void;
   }> = [];
   private readonly batchMaxConcurrency: number;
+  private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
     supervisor?: NativeEngineSupervisor;
@@ -574,6 +576,12 @@ export class MlxProvider implements LLMProvider {
     return this.engineGateActive > 0 || this.engineGateWaiters.length > 0;
   }
 
+  /** Hold startup demand through the first request, before the engine gate exists. */
+  async withEngineTurn<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!this.supervisor?.coordinatesCapacity || this.turnProtection.getStore()) return run();
+    return this.supervisor.withRequest(() => this.turnProtection.run(true, run), signal);
+  }
+
   engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
     return this.supervisor?.lifecycleSnapshot();
   }
@@ -582,10 +590,12 @@ export class MlxProvider implements LLMProvider {
     label: string,
     signal?: AbortSignal,
     onWait?: (info: { aheadOf: number }) => void,
+    capacityProtected = false,
   ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
-    if (this.supervisor?.coordinatesCapacity) await this.supervisor.yieldForWaitingCapacity(signal);
+    if (this.supervisor?.coordinatesCapacity && !capacityProtected)
+      await this.supervisor.yieldForWaitingCapacity(signal);
 
     const width = this.batchMaxConcurrency;
     const waitStartedAt = Date.now();
@@ -1241,7 +1251,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // server's BatchEngine and its memory-aware admission still enforce
     // the configured generation width, so bypassing the TS-side FIFO only
     // loses the queue's affinity scoring, not safety.
-    return runOnLiveProvider(this.deps.provider, opts, () => this.sendAndWaitInner(prompt, opts));
+    return runOnLiveProvider(this.deps.provider, opts, () =>
+      this.deps.provider.withEngineTurn(
+        () => this.sendAndWaitInner(prompt, opts),
+        opts?.queue?.signal,
+      ),
+    );
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
@@ -1340,6 +1355,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const knownToolNames = new Set(
       (tools ?? []).map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
     );
+    const requiresToolCall =
+      this.deps.tuning?.toolChoice === 'required' && knownToolNames.size > 0;
     // Tool-name → declared input schema, so salvaged calls can have
     // structural arguments the markup formats flattened into strings
     // reinterpreted before anything else reads them. The Hermes /
@@ -1801,6 +1818,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // To the user, waiting for the queue and waiting for the engine
             // gate are one state: this turn has not started yet.
             opts?.queue?.onQueueWait,
+            true,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
@@ -3470,6 +3488,34 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 });
           this.messages.push({ role: 'user', content: nudge });
           continue;
+        }
+        if (toolCalls.length === 0 && requiresToolCall) {
+          if (this.turnPolicy.retry('noProgress')) {
+            const attempt = this.turnPolicy.count('noProgress');
+            log.info(
+              `turn#${seq}.${turn} required tool call missing — retrying ` +
+                `(${attempt}/${LOCAL_TURN_LIMITS.noProgress})`,
+            );
+            // The first decode is not a valid answer to a required-tool
+            // request. Keep it in provider history as the assistant output
+            // being corrected, but do not leak it into the eventual visible
+            // reply when the retry succeeds.
+            if (turnContent.length > 0) {
+              this.messages.push({ role: 'assistant', content: turnContent });
+              fullText = fullText.slice(0, -turnContent.length);
+            }
+            this.messages.push({
+              role: 'user',
+              content:
+                `[system] This turn requires an actual structured tool call, but no tool ran. ` +
+                `Emit exactly one real function call now using one of: ${formatToolMenu(knownToolNames)}. ` +
+                `Do not explain, narrate, or print tool-call markup as text.`,
+            });
+            continue;
+          }
+          throw new Error(
+            `The model did not emit a required tool call after ${LOCAL_TURN_LIMITS.noProgress} corrective retries. No tool ran.`,
+          );
         }
         if (toolCalls.length === 0) {
           this.messages.push({ role: 'assistant', content: turnContent });

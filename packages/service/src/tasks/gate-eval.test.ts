@@ -18,6 +18,70 @@ const splitReader = (
 });
 
 describe('evaluateGate', () => {
+  it('corpusBatchObservations accepts equivalent heading levels and requires every assigned path', async () => {
+    const batchesFile = 'pr-review/batches.json';
+    const file = 'pr-review/observations-1.md';
+    const batches = JSON.stringify([{ batchNumber: 1, paths: ['src/a.ts', 'src/b.ts'] }]);
+    const check = { kind: 'corpusBatchObservations' as const, batchesFile, batchNumber: '1', file, artifact: true };
+    const complete = await evaluateGate([check], splitReader({}, {
+      [batchesFile]: batches,
+      [file]: '# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n### `src/b.ts` — finding\nMajor issue.\n',
+    }));
+    expect(complete.pass).toBe(true);
+    const partial = await evaluateGate([check], splitReader({}, {
+      [batchesFile]: batches,
+      [file]: '## Batch 1\n\n### src/a.ts\nVerified OK.\n',
+    }));
+    expect(partial.pass).toBe(false);
+    expect(partial.checks[0]?.remaining).toBe(1);
+    expect(partial.failures[0]).toContain('src/b.ts');
+    const placeholder = await evaluateGate([check], splitReader({}, {
+      [batchesFile]: batches,
+      [file]: '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:new-side-line — major — Maybe broken.\n\n## src/b.ts\nVerified OK.\n',
+    }));
+    expect(placeholder.pass).toBe(false);
+    expect(placeholder.failures[0]).toContain('actual integer new-side line');
+    const anchored = await evaluateGate([check], splitReader({}, {
+      [batchesFile]: batches,
+      [file]: '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:42 — major — Concrete defect.\n\n## src/b.ts\nVerified OK.\n',
+    }));
+    expect(anchored.pass).toBe(true);
+    expect((await evaluateGate([check], splitReader({}, {
+      [batchesFile]: '{',
+      [file]: '# Batch 1\n## src/a.ts\n## src/b.ts',
+    }))).pass).toBe(false);
+  });
+
+  it('corpusReadEvidence requires service-observed complete reads of each exact batch record', async () => {
+    const batchesFile = 'pr-review/batches.json';
+    const records = ['data/pr/files/a.md', 'data/pr/files/b.md'];
+    const r = splitReader({}, {
+      [batchesFile]: JSON.stringify([{ batchNumber: 1, records }]),
+    });
+    const check = { kind: 'corpusReadEvidence' as const, batchesFile, batchNumber: '1', artifact: true };
+    const partial = await evaluateGate([check], r, {
+      corpusReadEvidence: async () => ({ observable: true, slices: [
+        { path: records[0]!, startLine: 1, endLine: 10, totalLines: 20 },
+        { path: records[0]!, startLine: 12, endLine: 20, totalLines: 20 },
+        { path: records[1]!, startLine: 1, endLine: 8, totalLines: 8 },
+      ] }),
+    });
+    expect(partial.pass).toBe(false);
+    expect(partial.checks[0]?.remaining).toBe(1);
+    expect(partial.failures[0]).toContain(records[0]);
+    const complete = await evaluateGate([check], r, {
+      corpusReadEvidence: async () => ({ observable: true, slices: [
+        { path: records[0]!, startLine: 1, endLine: 10, totalLines: 20 },
+        { path: records[0]!, startLine: 11, endLine: 20, totalLines: 20 },
+        { path: records[1]!, startLine: 1, endLine: 8, totalLines: 8 },
+      ] }),
+    });
+    expect(complete.pass).toBe(true);
+    expect((await evaluateGate([check], r, {
+      corpusReadEvidence: async () => ({ observable: false, slices: [] }),
+    })).pass).toBe(false);
+  });
+
   it('totalMinBytes: passes over the floor, fails with a concrete gap', async () => {
     const ok = await evaluateGate(
       [{ kind: 'totalMinBytes', files: ['index.html', 'game.js'], bytes: 20 }],

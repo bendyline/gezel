@@ -26,15 +26,14 @@ import type { NativeEngineLaunch } from './supervisor.js';
 
 const GIB = 1024 ** 3;
 const POLL_MS = 500;
-const WAIT_MS = 5 * 60_000;
 /**
  * Ceiling for the case where the ledger reports `externalShortfall` — the
  * request leads the queue and fits the budget, and nothing this protocol
- * governs is holding the memory. Queueing behind another engine is worth the
- * full {@link WAIT_MS}, because that engine will finish. Queueing behind the
- * user's browser is not: a request that needs 9.7 GB on a host with 4.3 GB
- * free waits out the entire budget and then reports "not enough memory became
- * available" — five minutes to say what was knowable in the first second.
+ * governs is holding the memory. Engine work can legitimately take longer
+ * than five minutes, so governed contention stays queued until it can run or
+ * the caller cancels. Queueing behind the user's browser is different: a
+ * request that needs 9.7 GB on a host with 4.3 GB free should report the
+ * shortfall promptly.
  * Short rather than zero because a just-released engine's pages take a moment
  * to come back, and makeRoom's retry deserves to see them.
  */
@@ -395,7 +394,6 @@ export async function acquireNativeCapacity(
     ),
     exclusive: requirement.exclusive ?? options.exclusive ?? false,
   });
-  const started = awakeNow();
   let lastReport = Number.NEGATIVE_INFINITY;
   let externalSince: number | undefined;
   try {
@@ -412,10 +410,6 @@ export async function acquireNativeCapacity(
       } else {
         externalSince = undefined;
       }
-      if (awakeNow() - started >= WAIT_MS)
-        throw new CapacityDeniedError(
-          'Not enough memory became available for this model. Current engine work is still protected; retry when it finishes.',
-        );
       if (awakeNow() - lastReport >= 15_000) {
         onWait(reply.reason ?? 'Waiting for memory.');
         lastReport = awakeNow();

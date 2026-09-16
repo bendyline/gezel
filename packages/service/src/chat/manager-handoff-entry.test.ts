@@ -110,6 +110,42 @@ afterEach(async () => {
 });
 
 describe('single-channel kickoff (D1)', () => {
+  it('repeats a tiny fixed-action entry procedure after the generic completion sentence', async () => {
+    const procedure =
+      'FIRST call read_artifacts with the exact assigned record. Only after it returns, call advance_task_step.';
+    const task = await tasks.create('p1', {
+      title: 'Open one review record',
+      description:
+        'A fixed-action entry fixture that must read one artifact before its completion gate can pass.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        {
+          name: 'Open record',
+          prompt: procedure,
+          toolPolicy: {
+            outputMedium: 'none',
+            allowTools: ['read_artifact', 'read_artifacts'],
+          },
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+
+    mock.script('ok');
+    await dispatchTaskEntry({ store, taskRunner: runner, history }, task);
+    await runner.tick();
+    await manager.drainBackground();
+    const summary = (await store.listSessions({ gezelId: 'worker' })).find(
+      (session) => session.taskRef === task.ref,
+    );
+    const full = summary ? await store.getSession('worker', summary.id) : null;
+    const seed = full?.messages[0]?.content ?? '';
+    expect(seed).toContain('FIXED-ACTION ENTRY');
+    expect(seed).toContain(procedure);
+    expect(seed).toContain('runtime evaluates the declared evidence');
+    expect(seed).not.toContain('When the step is done');
+  });
+
   it('dispatched entry lands in a task-scoped session with the contract in-prompt and step-1 routing', async () => {
     const task = await tasks.create('p1', {
       title: 'Build the landing page',
@@ -234,6 +270,83 @@ describe('handoff seed wording', () => {
     expect(seed).toContain('Koray has handed step `report`');
   });
 
+  it('retries two failed asynchronous handoff turns while the task step is still active', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Retry a transient review handoff',
+      description:
+        'Exercise bounded recovery when a provider fails after the task runner has accepted a handoff.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.scriptSendFailure('transient required-tool envelope failure');
+    mock.scriptSendFailure('second transient required-tool envelope failure');
+    mock.script('Recovered review result.');
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    const full = await store.getSession('worker', sessionId);
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(3);
+    expect(mock.calls.filter((call) => call.kind === 'create')).toHaveLength(3);
+    expect(full?.messages.some((message) => message.content === 'Recovered review result.')).toBe(
+      true,
+    );
+    expect(
+      full?.messages.some((message) =>
+        message.content.includes('automatic handoff turn failed before this active step completed'),
+      ),
+    ).toBe(true);
+  });
+
+  it('retries a fixed-action handoff that returns text without publishing its checkpoint', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Publish a review checkpoint',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        {
+          id: 'review',
+          name: 'Review',
+          prompt: 'Analyze the assigned record and call write_artifact for observations.md.',
+          terminal: true,
+          toolPolicy: { outputMedium: 'artifact', allowTools: ['write_artifact'] },
+          advanceWhen: { file: 'observations.md', artifact: true, minBytes: 20 },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'observations.md', artifact: true, bytes: 20 }],
+            onReject: 'review',
+            maxAttempts: 3,
+          },
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    mock.script('I reviewed the record but did not publish it.');
+    mock.script('I still have not used the checkpoint tool.');
+    mock.script('The analysis is complete in prose only.');
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(3);
+    expect(sends[1]?.prompt).toContain('ended before fixed-action step');
+    expect(sends[1]?.prompt).toContain('Do not call `read_task_notes` or `advance_task_step`');
+    expect((await store.readTask('p1', task.num))?.activeStepId).toBe('review');
+  });
+
   it('keeps peer task steps under the task root while recording the immediate handoff', async () => {
     const meester = await store.createGezel({ name: 'Meester', role: 'Meester' });
     const koray = await store.createGezel({ name: 'Koray', role: 'Researcher' });
@@ -309,6 +422,89 @@ describe('handoff seed wording', () => {
     expect(seed).toContain('Please continue');
   });
 
+  it('carries verified tool evidence into an adjacent step owned by the same gezel', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Review one assigned patch batch',
+      description:
+        'Open the immutable patch evidence first, then write a review checkpoint from those exact bytes.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        {
+          name: 'Open evidence',
+          prompt: 'Read the assigned patch record with read_artifacts.',
+          toolPolicy: {
+            outputMedium: 'none',
+            allowTools: ['read_artifact', 'read_artifacts'],
+          },
+        },
+        {
+          name: 'Review evidence',
+          prompt: 'Write the grounded review checkpoint with write_artifact.',
+          toolPolicy: {
+            outputMedium: 'artifact',
+            allowTools: ['read_artifact', 'write_artifact'],
+          },
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    const openStep = task.craftbook.steps[0]!;
+    const reviewStep = task.craftbook.steps[1]!;
+    await tasks.completeStep('p1', task.num, openStep.id);
+
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: openStep.id,
+    });
+    prior.messages.push({
+      role: 'assistant',
+      content: 'Opened the assigned immutable patch record.',
+      at: new Date().toISOString(),
+      toolCalls: [
+        {
+          name: 'read_artifacts',
+          durationMs: 5,
+          success: true,
+          path: 'data/github-pull-requests/pr-60/records/0001.json',
+          resultText: 'PATCH EVIDENCE: packages/service/src/chat/manager.ts +42 -7',
+        },
+      ],
+    });
+    prior.lastActivityAt = new Date().toISOString();
+    await store.writeSession(prior);
+
+    mock.script('Review checkpoint saved.');
+    const handoff = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: reviewStep.id,
+    });
+    await manager.drainBackground();
+
+    expect(handoff.sessionId).toBe(prior.id);
+    const sessions = (await store.listSessions({ gezelId: 'worker', projectId: 'p1' })).filter(
+      (session) => session.taskRef === task.ref,
+    );
+    expect(sessions).toHaveLength(1);
+    const carried = await store.getSession('worker', prior.id);
+    expect(carried?.stepId).toBe(reviewStep.id);
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create?.opts?.toolAllowlist?.has('write_artifact')).toBe(true);
+    expect(create?.opts?.toolAllowlist?.has('read_artifacts')).toBe(false);
+    expect(create?.opts?.priorMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          content: expect.stringContaining('PATCH EVIDENCE'),
+        }),
+      ]),
+    );
+  });
+
   it('falls back to the anonymous wording without a previous gezel', async () => {
     const seed = await seedFor({});
     expect(seed).toContain('The previous step has been completed and handed step `report`');
@@ -377,6 +573,89 @@ describe('handoff seed wording', () => {
     );
     expect(full?.parentSession).toBeUndefined();
     expect(full?.handoffFrom).toBeUndefined();
+  });
+
+  it('continues an adjacent evidence session when restart lands between task advance and relabel', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Resume review after opening evidence',
+      description: 'A two-step fixture for the post-advance restart window.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        {
+          name: 'Open evidence',
+          prompt: 'Read the immutable patch record.',
+          toolPolicy: { outputMedium: 'none', allowTools: ['read_artifacts'] },
+        },
+        {
+          name: 'Review evidence',
+          prompt: 'Write the grounded review checkpoint.',
+          toolPolicy: {
+            outputMedium: 'artifact',
+            allowTools: ['read_artifact', 'write_artifact'],
+          },
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    const openStep = task.craftbook.steps[0]!;
+    const reviewStep = task.craftbook.steps[1]!;
+    await tasks.completeStep('p1', task.num, openStep.id);
+
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: openStep.id,
+    });
+    prior.messages.push({
+      role: 'assistant',
+      content: 'Opened the assigned patch before the service stopped.',
+      at: new Date().toISOString(),
+      toolCalls: [
+        {
+          name: 'read_artifacts',
+          durationMs: 5,
+          success: true,
+          path: 'data/github-pull-requests/pr-60/records/0001.json',
+          resultText: 'RECOVERED PATCH: packages/service/src/chat/manager.ts +42 -7',
+        },
+      ],
+    });
+    prior.lastActivityAt = new Date().toISOString();
+    await store.writeSession(prior);
+
+    mock.script('Recovered review checkpoint saved.');
+    const resumed = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: reviewStep.id,
+      resumeExisting: true,
+    });
+    await manager.drainBackground();
+
+    expect(resumed.sessionId).toBe(prior.id);
+    const sessions = (await store.listSessions({ gezelId: 'worker', projectId: 'p1' })).filter(
+      (candidate) => candidate.taskRef === task.ref,
+    );
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.stepId).toBe(reviewStep.id);
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create?.opts?.toolAllowlist?.has('write_artifact')).toBe(true);
+    expect(create?.opts?.toolAllowlist?.has('read_artifacts')).toBe(false);
+    expect(create?.opts?.priorMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          content: expect.stringContaining('RECOVERED PATCH'),
+        }),
+      ]),
+    );
+    const full = await store.getSession('worker', prior.id);
+    expect(full?.messages.some((message) => message.content.includes('service restarted'))).toBe(
+      true,
+    );
   });
 
   /**

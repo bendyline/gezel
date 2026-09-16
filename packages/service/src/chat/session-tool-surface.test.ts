@@ -683,6 +683,64 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
+  it('exact per-step disallows remove artifact search without removing exact reads', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'doc-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'review-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          disallowTools: ['list_artifacts', 'grep_artifact', 'read_doc_as_markdown'],
+          outputMedium: 'artifact',
+        },
+      },
+    });
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('list_artifacts')).toBe(false);
+    expect(allowlist!.has('grep_artifact')).toBe(false);
+    expect(allowlist!.has('read_doc_as_markdown')).toBe(false);
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('read_artifacts')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps a fixed patch-open roster distinct from the later observations writer', async () => {
+    const open = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'code-intel', 'security-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'open-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          allowTools: ['read_artifact', 'read_artifacts'],
+          outputMedium: 'none',
+        },
+      },
+    });
+    expect([...open.allowlist!].sort()).toEqual(['read_artifact', 'read_artifacts']);
+
+    const review = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'code-intel', 'security-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'review-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          allowTools: ['read_artifact', 'read_artifacts', 'write_artifact'],
+          outputMedium: 'artifact',
+        },
+      },
+    });
+    expect([...review.allowlist!].sort()).toEqual([
+      'read_artifact', 'read_artifacts', 'write_artifact',
+    ]);
+  });
+
   it('load-bearing floor keeps step tools alive even under the tiny cap', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

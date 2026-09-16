@@ -771,6 +771,10 @@ export async function startProductService(
       getProvider: (name) => chat.getProviderIfReady(name),
       ensureProvider: (name) =>
         name === 'remote' ? Promise.resolve(null) : chat.getProvider(name),
+      getPooledProviderQueueSummary: (name) => {
+        if (name !== 'llama-cpp' && name !== 'mlx' && name !== 'ds4') return null;
+        return chat.localEngineQueueSummaries().get(name) ?? null;
+      },
     },
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),
@@ -1147,7 +1151,7 @@ export async function startProductService(
     );
   };
 
-  tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep }) => {
+  tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
     // ── Automated ACTIVATION gate ───────────────────────────────────────
     // When the newly-activated step declares an activation-moment gate
     // (legacy GateSpec, or a StepGate with `at: 'activation'`), the
@@ -1432,6 +1436,7 @@ export async function startProductService(
       ...(newStep.lastActivatedAt ? { activationAt: newStep.lastActivatedAt } : {}),
       ...(fromGezel?.name ? { fromGezelName: fromGezel.name } : {}),
       ...(prevGezelId ? { fromGezelId: prevGezelId } : {}),
+      ...(kind === 'entry' ? { kind: 'entry' as const } : {}),
     });
   });
 
@@ -1440,13 +1445,12 @@ export async function startProductService(
   // it here. We create a task from the craftbook with the supplied
   // params, assign the role-matched gezel for the entry step, and start
   // it. Kept alongside the other cross-manager wiring; injected into the
-  // TerminalManager below. NOTE: `tasks.create` fires only
-  // `onTaskCreated` (not `onStepActivated`), so it does NOT auto-start
-  // the entry step — the explicit `dispatchTaskEntry` call is the
-  // single kickoff. Its OTHER call site is the create route's
-  // `dispatchEntry` flag (routes/project-tasks.ts, the meester macros'
-  // path). If a future change auto-starts the entry step on create,
-  // drop both call sites to avoid a double start.
+  // TerminalManager below. NOTE: an ordinary entry step is NOT sent
+  // through `onStepActivated`, so `dispatchTaskEntry` is its single
+  // kickoff. Deterministic entry setup may auto-advance; that later phase
+  // uses `onStepActivated`, and the entry helper refuses to dispatch it a
+  // second time. Its OTHER call site is the create route's `dispatchEntry`
+  // flag (routes/project-tasks.ts, the meester macros' path).
   const craftbookInvoker: CraftbookInvoker = async ({ projectId, craftbookId, params }) => {
     // Resolve through the task resolver's chain, not the catalog alone: a
     // project-local book (`.gezel/craftbooks/`, usually converted from a

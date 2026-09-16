@@ -514,6 +514,8 @@ export interface ToolCallEvent {
    * into a short full response or a deterministic summary before persistence.
    */
   resultText?: string;
+  /** True when the bridge clipped the provider-visible text after the MCP tool returned. */
+  deliveredResultTruncated?: boolean;
   /**
    * Image artifacts the tool returned (Playwright `browser_*` screenshots,
    * etc.) — already written to disk by the bridge's image persister, paths

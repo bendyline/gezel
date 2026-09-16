@@ -29,6 +29,7 @@ import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
 import { powerpointSourceScenarios } from './powerpoint-sources.ts';
+import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflow.ts';
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
 import { researchVerifyT1, researchVerifyT2, researchVerifyT3 } from './research-verify.ts';
@@ -123,6 +124,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [selfCorrectionScenario.id]: selfCorrectionScenario,
   [squisqReviewScenario.id]: squisqReviewScenario,
   [largePrReviewScenario.id]: largePrReviewScenario,
+  [pullRequestReviewWorkflowScenario.id]: pullRequestReviewWorkflowScenario,
   // Three "push-harder" scenarios added — each exercises a
   // capability dimension the legacy trio doesn't cover: multi-file
   // planning + execution, structured-output validation, and dense

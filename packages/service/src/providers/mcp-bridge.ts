@@ -1075,6 +1075,10 @@ export class McpBridge {
       voice?: string;
     }> = [];
     let structuredContent: Record<string, unknown> | undefined;
+    let redactedText = '';
+    let cap = 0;
+    let capped = '';
+    let deliveredResultTruncated = false;
     try {
       // PreToolUse hooks: gating the call before any wrapper sees
       // it. A deny short-circuits like a wrapper reject — synthetic
@@ -1261,6 +1265,19 @@ export class McpBridge {
           log.warn('audioPersister threw:', err);
         }
       }
+      // Compute the provider-visible text BEFORE emitting read evidence.
+      // An event describing a complete structured read must not claim the
+      // model saw lines the adaptive output cap later dropped.
+      if (!isError) {
+        redactedText = redactString(combined || '(empty)', this.knownSecretValues);
+        cap = opts?.budgetChars ?? MAX_TOOL_OUTPUT_CHARS;
+        capped = capToolOutput(
+          redactedText,
+          cap,
+          opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : undefined,
+        );
+        deliveredResultTruncated = capped.length !== redactedText.length;
+      }
       if (this.onToolCall) {
         try {
           const redactedArgs = redactObject(callArgs, this.knownSecretValues);
@@ -1285,6 +1302,7 @@ export class McpBridge {
             startedAtMs: start,
             durationMs: Date.now() - start,
             success: !isError,
+            ...(deliveredResultTruncated ? { deliveredResultTruncated: true } : {}),
             ...(redactedError ? { errorMessage: redactedError } : {}),
             ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
@@ -1320,19 +1338,12 @@ export class McpBridge {
     // tool can't directly pass a token into the model's context, but
     // it CAN echo one in an error body, a git-config dump, or an
     // HTTP response. Scrub any substrings we know are secrets.
-    const redactedText = redactString(combined || '(empty)', this.knownSecretValues);
     // Cap the tool output before handing it off so a single tool call
     // can't single-handedly blow the model's context window. When the
     // caller passed `budgetChars` (adaptive budget from a provider
     // that tracks remaining context headroom), use that; otherwise
     // fall back to the fixed ceiling.
-    const cap = opts?.budgetChars ?? MAX_TOOL_OUTPUT_CHARS;
-    const capped = capToolOutput(
-      redactedText,
-      cap,
-      opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : undefined,
-    );
-    if (capped.length !== redactedText.length) {
+    if (deliveredResultTruncated) {
       log.warn(
         `call_tool ${toolName} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
       );

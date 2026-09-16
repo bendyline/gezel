@@ -486,6 +486,31 @@ describe('artifact-surface escalation nudges', () => {
   });
 });
 
+describe('read-evidence escalation nudges', () => {
+  const bullets = '- Batch 1: 1/1 records lack full read evidence. Read data/pr/files/001.md';
+
+  it('classifies corpus read receipts separately from file deliverables', () => {
+    expect(deliverableSurface({
+      checks: [{ kind: 'corpusReadEvidence', batchesFile: 'batches.json' }],
+      failedChecks: ['corpusReadEvidence batches.json batch=1'],
+    })).toBe('evidence');
+  });
+
+  it('asks for the exact read without triggering edit or rewrite clamps', () => {
+    const nudge = buildStageOneNudge({
+      failingBullets: bullets,
+      frozen: false,
+      surface: 'evidence',
+    });
+    expect(nudge).toContain('GATE_EVIDENCE_REQUIRED:');
+    expect(nudge).toContain('read_artifact/read_artifacts');
+    expect(nudge).toContain('advance_task_step once');
+    expect(nudge).not.toContain('GATE_TARGETED_EDIT:');
+    expect(nudge).not.toContain('replace_in_file');
+    expect(nudge).not.toContain('write_artifact');
+  });
+});
+
 describe('buildPlateauDiagnosisNote', () => {
   it('lists the trail with frozen markers and the last verdict', () => {
     const note = buildPlateauDiagnosisNote({

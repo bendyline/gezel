@@ -20,7 +20,10 @@ describe('standard script contracts', () => {
       'ensureIndexFresh.ts',
       'mergeCorpusCoverage.ts',
       'publishCorpusBatches.ts',
+      'publishCorpusCoverageShard.ts',
       'storeRecords.ts',
+      'summarizePullRequestCorpus.ts',
+      'summarizePullRequestObservations.ts',
     ]);
   });
 

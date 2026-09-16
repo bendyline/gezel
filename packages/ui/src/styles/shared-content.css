@@ -742,7 +742,7 @@
   overflow-wrap: anywhere;
 }
 
-.msg-retrieval-source-bytes {
+.msg-retrieval-source-tokens {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--muted, #888);

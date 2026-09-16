@@ -186,6 +186,33 @@ export class DeviceCapacityLedger {
       (!fits(first) ||
         (sample.availableBytes !== undefined && first.bytes > sample.availableBytes) ||
         (sample.availableGpuBytes !== undefined && first.gpuBytes > sample.availableGpuBytes));
+    const waitingReason = (() => {
+      if (own.phase !== 'waiting') return undefined;
+      if (own !== first) {
+        const ahead = waiting.indexOf(own);
+        return `Queued behind ${ahead} earlier model request${ahead === 1 ? '' : 's'}.`;
+      }
+      if (!fits(own)) {
+        const committed = active.reduce((sum, claim) => sum + claim.bytes, 0);
+        const committedGpu = active.reduce((sum, claim) => sum + claim.gpuBytes, 0);
+        const gpuLimited = own.gpuBytes + committedGpu > sample.gpuBudgetBytes;
+        return (
+          `Waiting for model capacity: ${gb(gpuLimited ? own.gpuBytes : own.bytes)} requested, ` +
+          `${gb(gpuLimited ? committedGpu : committed)} reserved by ${active.length} ` +
+          `running or loading engine${active.length === 1 ? '' : 's'} of ` +
+          `${gb(gpuLimited ? sample.gpuBudgetBytes : sample.budgetBytes)} safe capacity.`
+        );
+      }
+      if (active.some((claim) => claim.phase === 'loading'))
+        return 'Waiting for another model load to finish before starting this model.';
+      if (sample.availableBytes !== undefined)
+        return (
+          `Waiting for reclaimable device memory: ${gb(own.bytes)} planned, ` +
+          `${gb(sample.availableBytes)} available while ${active.length} ` +
+          `engine${active.length === 1 ? ' is' : 's are'} resident.`
+        );
+      return `Waiting for memory to load ${own.label}; another engine is using the available capacity.`;
+    })();
     return {
       state: own.phase === 'waiting' ? 'waiting' : 'granted',
       releaseRequested,
@@ -200,7 +227,7 @@ export class DeviceCapacityLedger {
               availableBytes: shortfall.availableBytes,
             }
           : {
-              reason: `Waiting for memory to load ${own.label}; another engine or application is using the available capacity.`,
+              reason: waitingReason ?? 'Waiting for model capacity.',
             }
         : {}),
     };

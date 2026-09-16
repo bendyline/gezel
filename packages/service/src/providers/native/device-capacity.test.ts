@@ -220,11 +220,28 @@ describe('admission wait ceilings', () => {
     expect(message).toContain('other applications');
   });
 
-  it('still waits out the full budget behind another engine', async () => {
-    const result = await waitFor(() => ({ state: 'waiting', releaseRequested: false }));
-    expect(result.ok).toBe(false);
-    expect(result.elapsed).toBeGreaterThanOrEqual(5 * 60_000);
-    expect((result as { error: Error }).error.message).toContain('still protected');
+  it('keeps an engine claim queued past five minutes and releases it on cancellation', async () => {
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'local');
+    mocks.local.mockImplementation(async (command: { action: string }) =>
+      command.action === 'acquire'
+        ? { state: 'waiting', releaseRequested: false }
+        : { state: 'released', releaseRequested: false },
+    );
+    const controller = new AbortController();
+    let settled = false;
+    const flight = acquireNativeCapacity(
+      { home: '/isolated-eval', requirement: () => ({ bytes: 1024 ** 3 }) },
+      { command: 'fake-model', args: [], baseUrl: 'http://127.0.0.1:9999' },
+      controller.signal,
+      () => {},
+    ).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(settled).toBe(false);
+    controller.abort();
+    await expect(flight).rejects.toThrow();
+    expect(mocks.local.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'release' });
   });
 
   it('forgives a transient shortfall that clears before the ceiling', async () => {

@@ -201,6 +201,22 @@ export interface TaskRunnerDispatcher {
    * conservative one-wide admission fallback. Optional for test dispatchers.
    */
   ensureProvider?(name: ProviderName): Promise<LLMProvider | null>;
+
+  /**
+   * Read-only capacity for pool-routed local providers. Their model-specific
+   * provider queues are not addressable through `getProvider(name)`, but the
+   * resident pool can fold those queues into one provider-level summary.
+   */
+  getPooledProviderQueueSummary?(name: ProviderName): {
+    running: number;
+    runningBackground: number;
+    queuedInteractive: number;
+    queuedBackground: number;
+    backgroundConcurrency: number;
+    maxConcurrency: number;
+    active: Array<{ sessionId?: string }>;
+    pending: Array<{ sessionId?: string }>;
+  } | null;
 }
 
 export interface TaskRunnerOptions {
@@ -544,6 +560,20 @@ export class TaskRunner {
         if (!task.activeStepId) continue;
         const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
         if (!step) continue;
+        // Preserve the fanout barrier enforced by product-service's normal
+        // activation hook. Reconciliation is a second entrance to the same
+        // lifecycle and must not enqueue the parent collect/report step while
+        // its children are still producing the shards that make the gate
+        // satisfiable. The last child's settle hook redispatches the parent.
+        if (
+          task.spawnsCraftbook &&
+          !step.spawnFanout &&
+          tasks.some(
+            (candidate) => candidate.parentTaskRef === task.ref && candidate.status === 'active',
+          )
+        ) {
+          continue;
+        }
         const assigneeId = stepOwnerGezelId(task, step);
         if (!assigneeId) continue;
         // Only a real restart counts. The night-shift and per-project
@@ -794,16 +824,41 @@ export class TaskRunner {
           continue;
         }
       } else if (this.dispatcher.ensureProvider) {
-        // Pool-routed local engines and per-model remotes cannot expose
-        // a singleton queue by provider name. Treat that as a conservative
-        // one-wide lane across ticks, rather than restoring the old unlimited
-        // cold-provider fanout race. Queue-less test dispatchers omit
-        // ensureProvider and retain their lightweight unconditional behavior.
+        // Pool-routed local engines cannot expose a singleton queue by provider
+        // name, but a live pool can report its folded capacity. Use that safe
+        // engine width (including its foreground reservation) instead of
+        // hard-clamping every large fanout to one serial turn. Before the pool
+        // exists, or for a remote without a summary, retain the conservative
+        // one-wide cold-start fallback.
         const activeForProvider = [...this.activeDispatches.values()].filter(
           (dispatch) => dispatch.providerName === providerName,
-        ).length;
+        );
         const inFlight = inTickDispatches.get(providerName) ?? 0;
-        if (activeForProvider + inFlight >= 1) {
+        const pooled = this.dispatcher.getPooledProviderQueueSummary?.(providerName) ?? null;
+        let atCapacity: boolean;
+        if (pooled && pooled.maxConcurrency > 0 && pooled.backgroundConcurrency > 0) {
+          const reflectedSessionIds = new Set(
+            [...pooled.active, ...pooled.pending]
+              .map((entry) => entry.sessionId)
+              .filter((id): id is string => typeof id === 'string'),
+          );
+          const unreflectedReservations = activeForProvider.filter(
+            (dispatch) => !reflectedSessionIds.has(dispatch.sessionId),
+          ).length;
+          // Every successful dispatch is inserted into activeDispatches before
+          // this loop considers the next item, including dispatches made in
+          // the current tick. `inFlight` therefore overlaps this count; adding
+          // both would halve a three-wide background lane to two.
+          const reservations = unreflectedReservations;
+          const totalOccupied = pooled.running + pooled.queuedInteractive + pooled.queuedBackground;
+          const backgroundOccupied = pooled.runningBackground + pooled.queuedBackground;
+          atCapacity =
+            totalOccupied + reservations >= pooled.maxConcurrency ||
+            backgroundOccupied + reservations >= pooled.backgroundConcurrency;
+        } else {
+          atCapacity = activeForProvider.length + inFlight >= 1;
+        }
+        if (atCapacity) {
           handoff.heldFor = 'provider-busy';
           keep.push(handoff);
           continue;

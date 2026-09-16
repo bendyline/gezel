@@ -51,6 +51,7 @@ import {
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
   normalizeScriptRefs,
+  normalizeStepGate,
   nowIso,
   parseGezelMentionId,
   parseTaskRef,
@@ -265,6 +266,7 @@ export interface WorkspaceFileSource {
   readFiles(projectId: string): Promise<Array<{ path: string }>>;
 }
 import { extractReferencedTasks } from '../references/task-references.js';
+import { artifactReadSlices } from './artifact-read-evidence.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import {
   CONTEXT_COMPACT_RATIO,
@@ -2201,6 +2203,8 @@ export class ChatManager extends LocalEngineRuntime {
     drained: ChatMessageToolCall[],
     sessionId: string,
   ): Promise<{
+    /** The active step completed and ownership moved; this session must yield. */
+    autoAdvanced?: true;
     unmetEditGate?: { taskRef: string; file: string };
     gateRejected?: {
       taskRef: string;
@@ -2228,10 +2232,30 @@ export class ChatManager extends LocalEngineRuntime {
     // false-"done" re-prompt can fire (the active half of the gate).
     let unmetEditGate: { taskRef: string; file: string } | undefined;
     for (const task of tasks) {
+      // A task-scoped handoff may share its gezel with the host and dozens of
+      // fanout siblings. Its tool trace is evidence only for that task. The
+      // older assignment-only fallback remains for ordinary project sessions,
+      // but a pinned session must never advance some other task merely because
+      // the same reviewer owns both (wild-caught when a child read made the PR
+      // review host spend its collect-gate attempt early).
+      if (state.record.taskRef && task.ref !== state.record.taskRef) continue;
       if (task.status !== 'active' || !task.activeStepId) continue;
       const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
       const adv = step?.advanceWhen;
-      if (!step || !adv || step.terminal) continue;
+      if (!step) continue;
+      // `terminal` means that completing this step completes the task. It is
+      // not an instruction to bypass observable-progress handling. In fact,
+      // terminal artifact steps are the most important place to do this: the
+      // provider stops after the checkpoint write, then the completion gate
+      // must validate that write and finish (or repair) the task.
+      const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
+      const readEvidenceOnly =
+        !adv &&
+        normalizedGate?.at === 'completion' &&
+        normalizedGate.checks.length > 0 &&
+        normalizedGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+        normalizedGate.scripts.length === 0;
+      if (!adv && !readEvidenceOnly) continue;
       // Only this gezel's step (step assignee → suggested → task assignee).
       const owner =
         step.assignee?.kind === 'gezel'
@@ -2239,6 +2263,53 @@ export class ChatManager extends LocalEngineRuntime {
           : (step.suggestedGezelId ??
             (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
       if (owner !== gezelId) continue;
+
+      // A fixed-action evidence step intentionally hides
+      // `advance_task_step`: the only useful model action is opening the
+      // exact records, and the completion gate can prove that from service
+      // History. Once the turn has a successful artifact read, try the gate
+      // automatically. Partial/truncated reads stay held and feed the exact
+      // missing ranges back through the normal rejection loop.
+      if (readEvidenceOnly) {
+        const attemptedRead = drained.some(
+          (call) =>
+            call.success && (call.name === 'read_artifact' || call.name === 'read_artifacts'),
+        );
+        if (!attemptedRead) continue;
+        log.info(
+          `session ${sessionId}: read evidence observed on ${task.ref} step "${step.id}" — auto-advancing`,
+        );
+        const outcome = await this.taskAdvancer(projectId, task.num, step.id).catch((err) => {
+          log.error('[chat] read-evidence auto-advance failed:', err);
+          return null;
+        });
+        if (outcome && outcome.status === 'held') {
+          return {
+            gateRejected: {
+              taskRef: task.ref,
+              stepId: step.id,
+              message: outcome.message,
+              fingerprint: outcome.messageFingerprint,
+              ...(outcome.paused !== undefined ? { paused: outcome.paused } : {}),
+              ...(outcome.infrastructureError !== undefined
+                ? { infrastructureError: outcome.infrastructureError }
+                : {}),
+              ...(outcome.hook !== undefined ? { hook: outcome.hook } : {}),
+              ...(outcome.unsatisfiable !== undefined
+                ? { unsatisfiable: outcome.unsatisfiable }
+                : {}),
+              ...(outcome.scriptRuns !== undefined ? { scriptRuns: outcome.scriptRuns } : {}),
+              ...(outcome.escalationStage !== undefined
+                ? { escalationStage: outcome.escalationStage }
+                : {}),
+            },
+          };
+        }
+        return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
+      }
+
+      // From here the ordinary observable is a persisted deliverable.
+      if (!adv) continue;
 
       // A hook-owned `advanceWhen.file` is evidence prepared by the runtime,
       // not proof that the model completed every other required output. Pull
@@ -2320,7 +2391,7 @@ export class ChatManager extends LocalEngineRuntime {
           },
         };
       }
-      return {}; // at most one auto-advance per turn
+      return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
     }
     return unmetEditGate ? { unmetEditGate } : {};
   }
@@ -3822,8 +3893,15 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * Spin up a fresh session for the next gezel in a task step handoff
-   * and kick off the first turn in the background. Used by
+   * Start the next gezel in a task step handoff and kick off its first turn
+   * in the background. A handoff to a different gezel opens a fresh session.
+   * Adjacent steps owned by the same gezel keep one task-scoped session so a
+   * deterministic evidence step (for example, opening an assigned patch)
+   * remains in context for the reasoning step that consumes it. The session
+   * is re-pinned and rebuilt only after the prior turn is idle, because each
+   * step may expose a different exact tool surface.
+   *
+   * Used by
    * `TaskManager.completeStep`'s auto-handoff hook so advancing a step
    * doesn't just flip state — it actually puts the assignee to work.
    *
@@ -3968,9 +4046,97 @@ export class ChatManager extends LocalEngineRuntime {
         ) &&
         (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
     );
-    const handoffFrom: SessionLink | undefined = previous
-      ? { sessionId: previous.id, gezelId: previous.gezelId }
-      : undefined;
+    const selfHandoff =
+      (args.fromGezelId !== undefined && args.fromGezelId === args.gezelId) ||
+      (args.fromGezelId === undefined &&
+        previous?.gezelId === args.gezelId &&
+        previous.stepId !== dispatchStepId);
+    const desiredModel =
+      dispatchGezel?.parsed.frontmatter.model ??
+      configuredNightShiftModel ??
+      routed?.model ??
+      dispatchConfig.defaultModel?.[dispatchProviderName];
+
+    // Preserve the transcript across adjacent same-gezel steps. This is
+    // particularly important for fixed-action evidence steps: their durable
+    // History receipt proves the read happened, while the provider transcript
+    // carries the actual bytes into the following review/drafting step. A
+    // fresh session kept the proof but discarded the evidence itself.
+    //
+    // Model/provider/night-shift changes still get a fresh session. We also
+    // decline reuse when a send is already queued behind the current turn;
+    // that queued input was authored against the old step's prompt/tool set.
+    let reusedAcrossSteps = false;
+    let resumedExisting = false;
+    let session: ChatSession | null = null;
+    if (
+      args.kind !== 'entry' &&
+      args.kind !== 'retry' &&
+      !args.resumeExisting &&
+      selfHandoff &&
+      previous?.gezelId === args.gezelId &&
+      previous.stepId !== dispatchStepId &&
+      (this.pendingSends.get(previous.id)?.length ?? 0) === 0
+    ) {
+      const prior = await this.store.getSession(args.gezelId, previous.id);
+      if (
+        prior &&
+        prior.providerName === dispatchProviderName &&
+        (desiredModel === undefined || prior.model === desiredModel) &&
+        Boolean(prior.nightShift) === Boolean(args.nightShift) &&
+        (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode
+      ) {
+        session = prior;
+        reusedAcrossSteps = true;
+      }
+    }
+    if (args.resumeExisting) {
+      const summaries = await this.store.listSessions({
+        gezelId: args.gezelId,
+        projectId: args.projectId,
+      });
+      const exact = summaries.find(
+        (candidate) =>
+          !candidate.archived &&
+          candidate.taskRef === args.taskRef &&
+          candidate.stepId === dispatchStepId,
+      );
+      if (exact) {
+        session = await this.store.getSession(args.gezelId, exact.id);
+        resumedExisting = session !== null;
+      } else {
+        // A fixed-action step can advance its task before the provider turn
+        // that produced the evidence has fully unwound and relabelled the
+        // shared session. If the service exits in that narrow interval, the
+        // task persists the successor step while its only transcript still
+        // names the predecessor. Resume that compatible adjacent transcript
+        // and let the ordinary cross-step reset below rebuild the exact prompt
+        // and tool surface; otherwise the restart manufactures an empty
+        // review session and discards the patch bytes it was meant to judge.
+        const adjacent = summaries.find(
+          (candidate) =>
+            !candidate.archived &&
+            candidate.taskRef === args.taskRef &&
+            candidate.stepId !== dispatchStepId,
+        );
+        const prior = adjacent ? await this.store.getSession(args.gezelId, adjacent.id) : null;
+        if (
+          prior &&
+          prior.providerName === dispatchProviderName &&
+          (desiredModel === undefined || prior.model === desiredModel) &&
+          Boolean(prior.nightShift) === Boolean(args.nightShift) &&
+          (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode
+        ) {
+          session = prior;
+          resumedExisting = true;
+          reusedAcrossSteps = true;
+        }
+      }
+    }
+    const handoffFrom: SessionLink | undefined =
+      previous && !reusedAcrossSteps
+        ? { sessionId: previous.id, gezelId: previous.gezelId }
+        : undefined;
 
     // Workflow steps are peers beneath the session that launched the task.
     // Keep the immediate step-to-step edge separately in `handoffFrom` so
@@ -4011,44 +4177,26 @@ export class ChatManager extends LocalEngineRuntime {
           };
     }
 
-    let resumedExisting = false;
-    let session: ChatSession | null = null;
-    if (args.resumeExisting) {
-      const summaries = await this.store.listSessions({
-        gezelId: args.gezelId,
-        projectId: args.projectId,
-      });
-      const prior = summaries.find(
-        (candidate) =>
-          !candidate.archived &&
-          candidate.taskRef === args.taskRef &&
-          candidate.stepId === dispatchStepId,
-      );
-      if (prior) {
-        session = await this.store.getSession(args.gezelId, prior.id);
-        resumedExisting = session !== null;
-        if (session) {
-          let lineageChanged = false;
-          if (
-            parentSession &&
-            (session.parentSession?.sessionId !== parentSession.sessionId ||
-              session.parentSession.gezelId !== parentSession.gezelId ||
-              session.parentSession.kind !== parentSession.kind)
-          ) {
-            session.parentSession = parentSession;
-            lineageChanged = true;
-          }
-          if (
-            handoffFrom &&
-            (session.handoffFrom?.sessionId !== handoffFrom.sessionId ||
-              session.handoffFrom.gezelId !== handoffFrom.gezelId)
-          ) {
-            session.handoffFrom = handoffFrom;
-            lineageChanged = true;
-          }
-          if (lineageChanged) await this.store.writeSession(session);
-        }
+    if (resumedExisting && session) {
+      let lineageChanged = false;
+      if (
+        parentSession &&
+        (session.parentSession?.sessionId !== parentSession.sessionId ||
+          session.parentSession.gezelId !== parentSession.gezelId ||
+          session.parentSession.kind !== parentSession.kind)
+      ) {
+        session.parentSession = parentSession;
+        lineageChanged = true;
       }
+      if (
+        handoffFrom &&
+        (session.handoffFrom?.sessionId !== handoffFrom.sessionId ||
+          session.handoffFrom.gezelId !== handoffFrom.gezelId)
+      ) {
+        session.handoffFrom = handoffFrom;
+        lineageChanged = true;
+      }
+      if (lineageChanged) await this.store.writeSession(session);
     }
     session ??= await this.createSession({
       gezelId: args.gezelId,
@@ -4134,7 +4282,6 @@ export class ChatManager extends LocalEngineRuntime {
     // previous step (a craftbook whose steps collapse onto one specialist).
     // Naming them as their own sender — "Koray has handed step `report` to
     // you" — reads as a bug to the user and as a second party to the model.
-    const selfHandoff = args.fromGezelId !== undefined && args.fromGezelId === args.gezelId;
     const previousGezel =
       !selfHandoff && args.fromGezelId
         ? await this.store.getGezel(args.fromGezelId).catch(() => null)
@@ -4201,40 +4348,174 @@ export class ChatManager extends LocalEngineRuntime {
             : explicitOutputMedium === 'none'
               ? ' This step has no persisted output; inspect or route as instructed without creating a file, artifact, or task note.'
               : ' Append focused notes with `write_task_note` as you go.';
+    // A tiny fixed-action entry step is especially vulnerable to the
+    // generic seed's final "advance when done" sentence: local instruct
+    // models sometimes jump straight to the completion tool without doing
+    // the one read/routing action in the system band. Repeat only this
+    // bounded procedure at the END of the user-visible seed, where recency
+    // makes the required first action unambiguous. Larger/output-producing
+    // steps keep the non-duplicated prompt.
+    const exactStepAutoAdvances =
+      (dispatchStep?.toolPolicy?.allowTools?.length ?? 0) > 0 &&
+      !dispatchStep?.toolPolicy?.allowTools?.includes('advance_task_step');
+    const dispatchGate = dispatchStep?.gate ? normalizeStepGate(dispatchStep.gate) : undefined;
+    const fixedEvidenceOutcome =
+      dispatchStep?.toolPolicy?.outputMedium === 'none' &&
+      dispatchGate?.at === 'completion' &&
+      dispatchGate.checks.length > 0 &&
+      dispatchGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+      dispatchGate.scripts.length === 0;
+    const artifactCheckpointOutcome =
+      dispatchStep?.toolPolicy?.outputMedium === 'artifact' &&
+      dispatchStep.advanceWhen?.artifact === true &&
+      dispatchGate?.at === 'completion';
+    const requiresExactOutcome = fixedEvidenceOutcome || artifactCheckpointOutcome;
+    const completionClause = exactStepAutoAdvances
+      ? ' The runtime evaluates the declared evidence after your required action and advances the step when it passes; `advance_task_step` is intentionally unavailable.'
+      : " When the step is done, call `advance_task_step` to hand off to whoever's next.";
+    const fixedEntryProcedure =
+      args.kind === 'entry' &&
+      explicitOutputMedium === 'none' &&
+      (dispatchStep?.toolPolicy?.allowTools?.length ?? 0) > 0 &&
+      dispatchStep?.prompt?.trim()
+        ? `\n\nFIXED-ACTION ENTRY — call the procedure's named tool now. The runtime will end this turn and evaluate its durable evidence after the first successful action; do not narrate, repeat the call, or call \`advance_task_step\`:\n${dispatchStep.prompt.trim()}`
+        : '';
+    const retrySeed =
+      exactStepAutoAdvances && dispatchStep?.prompt?.trim()
+        ? `Task ${args.taskRef} is still active on fixed-action step \`${dispatchStepId}\`. The previous provider turn failed before its required action completed. Call the procedure's named tool now; the runtime will evaluate its durable evidence and advance automatically. Do not call \`read_task_notes\` or \`advance_task_step\` — neither is available on this exact step:\n\n${dispatchStep.prompt.trim()}`
+        : `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`;
     const seed =
       args.kind === 'retry'
-        ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
+        ? retrySeed
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause} Call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
           : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}${fixedEntryProcedure}`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
                     : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause} When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
     // UI, not as a tool-call error in the voorman's chat. Retry on "already
     // in flight" so the handoff lands even if the next gezel was mid-turn.
+    const handoffSession = session;
     this.trackBackground(
-      this.sendWithBusyRetry(session.id, seed, {
-        messageOrigin: 'system',
-        ...(args.lane ? { lane: args.lane } : {}),
-        ...(args.ambient ? { ambient: true } : {}),
-      }).catch((err) => {
-        log.error(`[chat] handoff send failed for session ${session.id} (${args.gezelId}):`, err);
+      (async () => {
+        if (reusedAcrossSteps) {
+          // Step completion can enqueue its successor before the provider turn
+          // that produced the evidence has fully unwound. Never change the
+          // prompt or bridge beneath that live turn; park until its slot is
+          // released, then rebuild from the persisted transcript.
+          await new Promise<void>((resolve) =>
+            this.runAfterSessionIdle(handoffSession.id, resolve),
+          );
+          const live = this.states.get(handoffSession.id);
+          const record =
+            live?.record ??
+            (await this.store.getSession(handoffSession.gezelId, handoffSession.id));
+          if (!record || record.taskRef !== args.taskRef || record.gezelId !== args.gezelId) {
+            throw new Error(
+              `cannot carry task session ${handoffSession.id} into ${args.taskRef}/${dispatchStepId}: session scope changed`,
+            );
+          }
+          await this.reset(handoffSession.id);
+          const previousStepId = record.stepId ?? '(unpinned)';
+          record.stepId = dispatchStepId;
+          record.lastActivityAt = nowIso();
+          await this.store.writeSession(record);
+          if (live) live.record = record;
+          this.cacheController?.invalidate(handoffSession.id);
+          log.info(
+            `[chat] task-session continuity: reusing ${handoffSession.id.slice(0, 8)} for ${args.taskRef} ` +
+              `step "${previousStepId}" → "${dispatchStepId}"; rebuilding the step prompt and exact tool surface`,
+          );
+        }
+        const sendOptions = {
+          messageOrigin: 'system' as const,
+          ...(args.lane ? { lane: args.lane } : {}),
+          ...(args.ambient ? { ambient: true } : {}),
+        };
+        // startHandoffSession is intentionally fire-and-forget, so a provider
+        // failure happens after TaskRunner has accepted the dispatch and
+        // removed it from the pending queue. Without bounded retries the task
+        // remains active forever with no work queued — exactly what local
+        // required-tool envelope failures exposed in large-PR fanout. Three
+        // total sends still fail permanently instead of looping, but make one
+        // bad child across dozens of batches far less likely to strand the
+        // host after the provider has already spent its own corrective turns.
+        const maxHandoffSendAttempts = 3;
+        for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
+          const message =
+            attempt === 1
+              ? seed
+              : requiresExactOutcome && dispatchStep?.prompt?.trim()
+                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
+                : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
+          try {
+            await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            if (requiresExactOutcome) {
+              const parsed = parseTaskRef(args.taskRef);
+              const afterSend = parsed
+                ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
+                : null;
+              if (afterSend?.status === 'active' && afterSend.activeStepId === dispatchStepId) {
+                throw new Error(
+                  `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
+                );
+              }
+            }
+            break;
+          } catch (error) {
+            if (attempt === maxHandoffSendAttempts) throw error;
+            const parsed = parseTaskRef(args.taskRef);
+            const currentTask = parsed
+              ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
+              : null;
+            if (
+              !currentTask ||
+              currentTask.status !== 'active' ||
+              currentTask.activeStepId !== dispatchStepId
+            ) {
+              throw error;
+            }
+            // Required-tool failures can poison a warm local-provider cache:
+            // another send against the same KV state tends to reproduce the
+            // malformed envelope token-for-token. Rebuild from the durable
+            // transcript before retrying. Successful read results survive via
+            // tool-evidence replay; failed empty turns do not get privileged
+            // merely because they occupied a cache slot.
+            await this.reset(handoffSession.id).catch((resetError) => {
+              log.warn(
+                `[chat] could not reset failed handoff session ${handoffSession.id.slice(0, 8)} before retry: ` +
+                  `${resetError instanceof Error ? resetError.message : String(resetError)}`,
+              );
+            });
+            log.warn(
+              `[chat] handoff turn failed for ${args.taskRef}/${dispatchStepId}; retrying ` +
+                `${attempt}/${maxHandoffSendAttempts - 1} in session ${handoffSession.id.slice(0, 8)}: ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      })().catch((err) => {
+        log.error(
+          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}):`,
+          err,
+        );
       }),
     );
-    return { sessionId: session.id };
+    return { sessionId: handoffSession.id };
   }
 
   /**
    * Lightweight "ping another gezel" path. Unlike `startHandoffSession`
-   * (which is anchored to a task + phase and always opens a fresh session),
+   * (which is anchored to a task + phase and opens a fresh session when the
+   * assignee changes),
    * `messageGezel` drops a message into the target gezel's *active* project
    * session via `ensureOrCreateSession`, so the continuity of their thread
    * is preserved. Internal task re-drives may also pass `taskRef` + `stepId`
@@ -8115,12 +8396,29 @@ export class ChatManager extends LocalEngineRuntime {
         // gate is gone because behavior opt-in via the manifest now
         // controls applicability.
         const cfgForDetector = await this.store.readConfig().catch(() => null);
+        const verifiedPriorArtifactRead = Boolean(
+          state.record.taskRef &&
+            state.record.messages.some(
+              (message) =>
+                message !== assistantMessage &&
+                message.role === 'assistant' &&
+                message.toolCalls?.some(
+                  (call) =>
+                    call.success &&
+                    (call.name === 'read_artifact' || call.name === 'read_artifacts') &&
+                    call.resultTruncated !== true &&
+                    typeof call.resultText === 'string' &&
+                    call.resultText.length > 0,
+                ),
+            ),
+        );
         const detectorVerdict = runPostTurnDetectors(state, {
           sessionId,
           isMeester: cfgForDetector?.meesterGezelId === state.record.gezelId,
           messageOrigin,
           userText,
           drained: toolsAcrossContinuations,
+          verifiedPriorArtifactRead,
           assistantContent: assistantMessage.content,
           continuationCount: continuations,
         });
@@ -8389,6 +8687,18 @@ export class ChatManager extends LocalEngineRuntime {
         if (drained.some((call) => call.name === 'advance_task_step' && call.success)) {
           log.info(
             `session ${sessionId}: advance_task_step succeeded — ending predecessor turn and yielding to the active step`,
+          );
+          break;
+        }
+        // Observable progression is the same ownership boundary as an
+        // explicit advance_task_step call. In particular, a fixed-action
+        // evidence step ends with a successful read and usually no prose;
+        // letting generic stall recovery inspect that shape would spend an
+        // extra model turn asking the predecessor to keep working after the
+        // task has already moved to its successor step/session.
+        if (advanceOutcome.autoAdvanced) {
+          log.info(
+            `session ${sessionId}: observable task advance succeeded — ending predecessor turn and yielding to the active step`,
           );
           break;
         }
@@ -14263,6 +14573,67 @@ export class ChatManager extends LocalEngineRuntime {
         ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
         ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
       };
+      const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
+      const fixedEvidenceAction =
+        step.toolPolicy?.outputMedium === 'none' &&
+        (step.toolPolicy.allowTools?.length ?? 0) > 0 &&
+        normalizedGate?.at === 'completion' &&
+        normalizedGate.checks.length > 0 &&
+        normalizedGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+        normalizedGate.scripts.length === 0;
+      const artifactCheckpointAction =
+        step.toolPolicy?.outputMedium === 'artifact' &&
+        step.advanceWhen?.artifact === true &&
+        normalizedGate?.at === 'completion';
+      if (fixedEvidenceAction || artifactCheckpointAction) {
+        // The completion gate, not another generation, decides whether the
+        // action was sufficient. Ending the provider's internal tool loop on
+        // its first successful exact action avoids five identical reads (and
+        // five full prefills) before ChatManager gets a chance to evaluate
+        // the durable History evidence.
+        opts.terminalToolPolicy = {
+          toolNames: fixedEvidenceAction ? [...step.toolPolicy!.allowTools!] : ['write_artifact'],
+          fallbackText: fixedEvidenceAction
+            ? 'Assigned records opened.'
+            : 'Checkpoint written for validation.',
+          maxClosingChars: 120,
+        };
+        if (fixedEvidenceAction) {
+          // This is a mechanical capability invocation, not a reasoning
+          // task. Dual-mode local models otherwise occasionally spend their
+          // entire thinking budget explaining the required read and finish
+          // without calling it, leaving a large fanout stalled for the
+          // scheduler's retry window. Keep the model's ordinary reasoning
+          // profile for the review step; only the evidence action gets the
+          // compact instruct-shaped request.
+          opts.tuning = {
+            ...resolvedTuning,
+            sampling: {
+              ...resolvedTuning.sampling,
+              maxTokens: Math.min(resolvedTuning.sampling.maxTokens ?? 512, 512),
+            },
+            reasoning: {
+              ...resolvedTuning.reasoning,
+              enableThinking: false,
+              thinkingBudget: undefined,
+            },
+            toolChoice: 'required',
+          };
+        } else {
+          // A checkpoint step may need substantial private reasoning, but its
+          // public/durable outcome is the artifact write. Requiring at least
+          // one tool call prevents a local model from spending the whole
+          // generation budget narrating that analysis and returning at
+          // `finish_reason=length` without ever publishing the checkpoint.
+          // Unlike the evidence-only branch above, preserve the model's
+          // ordinary reasoning and token budget; only constrain the outcome
+          // shape.
+          opts.tuning = {
+            ...resolvedTuning,
+            toolChoice: 'required',
+          };
+        }
+      }
     }
     // Craftbook hooks: when this session's active task carries a
     // craftbook with `hooks?: HookSpec[]`, install them on the bridge.
@@ -14494,6 +14865,10 @@ export class ChatManager extends LocalEngineRuntime {
       // surface the touched files. Derive a compact args preview the UI
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
       const sc = info.structuredContent;
+      const readSlices =
+        info.success && info.deliveredResultTruncated !== true
+          ? artifactReadSlices(info.name, sc)
+          : [];
       const batchedRead =
         info.name === 'read_files' ||
         info.name === 'read_multiple_files' ||
@@ -14544,7 +14919,21 @@ export class ChatManager extends LocalEngineRuntime {
       // the UI's expand + copy so a handoff's real content is verifiable.
       const argsSummary = humanizeToolCall(info.name, info.args) ?? summarizeToolArgs(info.args);
       const argsFull = renderFullToolArgs(info.args);
-      const result = summarizeToolResult(info.resultText);
+      // Read-heavy task steps intentionally carry their evidence into a
+      // successor step or across a restart. The ordinary 4 KB UI/history cap
+      // would keep only the beginning and end of a batched patch read, so a
+      // rebuilt review session could truthfully prove every file was opened
+      // while having none of the middle patches available to judge. Preserve
+      // task-scoped artifact reads up to the same bounded budget the replay
+      // path can actually volunteer; ordinary chat/tool output keeps the
+      // compact default.
+      const taskArtifactRead =
+        Boolean(record.taskRef) &&
+        (info.name === 'read_artifact' || info.name === 'read_artifacts');
+      const result = summarizeToolResult(
+        info.resultText,
+        taskArtifactRead ? toolEvidenceBudgetChars(record.contextWindow) : undefined,
+      );
       // Layer 4 surgical-edit tools surface `{diff, addedLines,
       // removedLines}` via MCP structuredContent. Pull the known fields
       // onto the persisted ChatMessageToolCall so the inline diff
@@ -14667,11 +15056,13 @@ export class ChatManager extends LocalEngineRuntime {
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
+            ...(info.deliveredResultTruncated === true ? { deliveredResultTruncated: true } : {}),
             ...(path ? { path } : {}),
             ...(paths.length > 0 ? { paths } : {}),
             ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
             ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),
             ...(readFuzzy !== undefined ? { fuzzy: readFuzzy } : {}),
+            ...(readSlices.length > 0 ? { artifactReadSlices: readSlices } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
@@ -15702,6 +16093,7 @@ function runPostTurnDetectors(
     messageOrigin: TurnMessageOrigin;
     userText: string;
     drained: ChatMessageToolCall[];
+    verifiedPriorArtifactRead: boolean;
     assistantContent: string;
     continuationCount: number;
   },
@@ -15717,6 +16109,7 @@ function runPostTurnDetectors(
     availableToolNames: liveTurnToolNames(state.session),
     userText: args.userText,
     drained: args.drained,
+    verifiedPriorArtifactRead: args.verifiedPriorArtifactRead,
     assistantContent: args.assistantContent,
     continuationCount: args.continuationCount,
   };

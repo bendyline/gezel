@@ -1046,6 +1046,10 @@ describe('TaskManager spawn craftbooks & children', () => {
   });
 
   it('spawnChild clones spawn-craftbook steps with fresh ids and sets parentTaskRef', async () => {
+    const activations: Array<{ kind?: string; stepId: string }> = [];
+    tasks.setStepActivatedHook(async ({ kind, newStep }) => {
+      activations.push({ kind, stepId: newStep.id });
+    });
     const parent = await tasks.create('website', {
       title: 'Write story',
       assignee: { kind: 'user' },
@@ -1061,6 +1065,7 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(child.activeStepId).toBe(child.craftbook.steps[0]!.id);
     // First-step assignee was a suggestion — child should inherit.
     expect(child.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
+    expect(activations).toEqual([{ kind: 'entry', stepId: child.craftbook.steps[0]!.id }]);
   });
 
   it('copies scheduled craftbook parameters onto each spawned child', async () => {

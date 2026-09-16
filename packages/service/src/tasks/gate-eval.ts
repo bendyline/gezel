@@ -133,6 +133,11 @@ export interface GateEvalDeps {
     observable: boolean;
     matches: Array<{ tool: string; path?: string; target?: string; at?: string }>;
   }>;
+  /** Service-written successful artifact read ranges for the current task step. */
+  corpusReadEvidence?: () => Promise<{
+    observable: boolean;
+    slices: Array<{ path: string; startLine: number; endLine: number; totalLines: number }>;
+  }>;
   /**
    * Run receipts for `commandEvidence`. The task manager scopes this to
    * the current task, step, and activation timestamp, reading the
@@ -315,6 +320,10 @@ export function gateCheckLabel(c: GateCheck): string {
       return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
     case 'corpusCoverage':
       return `corpusCoverage ${c.file} ${c.corpusDir}`;
+    case 'corpusReadEvidence':
+      return `corpusReadEvidence ${c.batchesFile} batch=${c.batchNumber}`;
+    case 'corpusBatchObservations':
+      return `corpusBatchObservations ${c.file} batch=${c.batchNumber}`;
     case 'corpusBatches':
       return `corpusBatches ${c.file} ${c.corpusDir}`;
     case 'markdownHeadingsMatch':
@@ -1010,6 +1019,125 @@ async function evalCheckInner(
       return {
         ok: true,
         detail: `Fanout batches complete: ${actual.length} batch(es), ${seen.size} path(s), matching artifacts/${manifestPath}`,
+      };
+    }
+    case 'corpusReadEvidence': {
+      const raw = await reader.read(c.batchesFile);
+      if (raw === null) return { ok: false, detail: `${c.batchesFile} not found (fail-closed).` };
+      let batches: unknown;
+      try {
+        batches = JSON.parse(raw);
+      } catch {
+        return { ok: false, detail: `${c.batchesFile} is not valid JSON (fail-closed).` };
+      }
+      const number = Number(c.batchNumber);
+      if (!Number.isSafeInteger(number) || number < 1 || !Array.isArray(batches)) {
+        return { ok: false, detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).` };
+      }
+      const batch = batches.find((item) =>
+        item && typeof item === 'object' && !Array.isArray(item) &&
+        (item as Record<string, unknown>).batchNumber === number,
+      ) as Record<string, unknown> | undefined;
+      const records = batch?.records;
+      if (!Array.isArray(records) || records.length === 0 || records.some((path) => typeof path !== 'string')) {
+        return { ok: false, detail: `${c.batchesFile}: batch ${number} has no exact record paths (fail-closed).` };
+      }
+      if (!deps?.corpusReadEvidence) {
+        return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
+      }
+      const observed = await deps.corpusReadEvidence();
+      if (!observed.observable) {
+        return { ok: false, detail: 'Artifact read history is not observable (fail-closed).' };
+      }
+      const missing = (records as string[]).filter((path) => {
+        const slices = observed.slices.filter((slice) => slice.path === path);
+        if (slices.length === 0) return true;
+        const total = slices[0]!.totalLines;
+        if (!Number.isSafeInteger(total) || total < 1 || slices.some((slice) => slice.totalLines !== total)) return true;
+        const ranges = slices
+          .filter((slice) => Number.isSafeInteger(slice.startLine) && Number.isSafeInteger(slice.endLine) && slice.startLine >= 1 && slice.endLine <= total && slice.endLine >= slice.startLine)
+          .sort((a, b) => a.startLine - b.startLine);
+        let next = 1;
+        for (const range of ranges) {
+          if (range.startLine > next) break;
+          next = Math.max(next, range.endLine + 1);
+          if (next > total) return false;
+        }
+        return true;
+      });
+      return {
+        ok: missing.length === 0,
+        detail: missing.length === 0
+          ? `Batch ${number}: full artifact reads verified for all ${records.length} records.`
+          : `Batch ${number}: ${missing.length}/${records.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
+        evidence: { expectedRecords: records.length, missingRecords: missing.slice(0, 10) },
+        remaining: missing.length,
+      };
+    }
+    case 'corpusBatchObservations': {
+      const [batchesRaw, observations] = await Promise.all([
+        reader.read(c.batchesFile),
+        reader.read(c.file),
+      ]);
+      if (batchesRaw === null || observations === null) {
+        return {
+          ok: false,
+          detail: `${batchesRaw === null ? c.batchesFile : c.file} not found (fail-closed).`,
+        };
+      }
+      let batches: unknown;
+      try {
+        batches = JSON.parse(batchesRaw);
+      } catch {
+        return { ok: false, detail: `${c.batchesFile} is not valid JSON (fail-closed).` };
+      }
+      const number = Number(c.batchNumber);
+      if (!Number.isSafeInteger(number) || number < 1 || !Array.isArray(batches)) {
+        return { ok: false, detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).` };
+      }
+      const batch = batches.find((item) =>
+        item && typeof item === 'object' && !Array.isArray(item) &&
+        (item as Record<string, unknown>).batchNumber === number,
+      ) as Record<string, unknown> | undefined;
+      const paths = batch?.paths;
+      if (!Array.isArray(paths) || paths.length === 0 || paths.some((path) => typeof path !== 'string' || path.length === 0)) {
+        return { ok: false, detail: `${c.batchesFile}: batch ${number} has no assigned changed paths (fail-closed).` };
+      }
+      const batchTitle = observations.split(/\r?\n/).some((line) =>
+        /^#{1,3}\s+Batch\s+\d+\b/i.test(line) &&
+        Number(/^#{1,3}\s+Batch\s+(\d+)\b/i.exec(line)?.[1]) === number,
+      );
+      const headings = observations.split(/\r?\n/)
+        .filter((line) => /^\s*#{1,6}\s+/.test(line))
+        .map((line) => line.replace(/^\s*#{1,6}\s+/, '').replace(/`/g, ''));
+      const missing = (paths as string[]).filter((path) =>
+        !headings.some((heading) => heading === path || heading.startsWith(`${path} `) || heading.startsWith(`${path} —`) || heading.startsWith(`${path} -`)),
+      );
+      const findingLines = observations
+        .split(/\r?\n/)
+        .filter((line) => /^\s*B\d+-\d+\s*:/i.test(line));
+      const invalidFindings = findingLines.filter((line) => {
+        const id = /^\s*B(\d+)-\d+\s*:/i.exec(line);
+        if (Number(id?.[1]) !== number) return true;
+        return !(paths as string[]).some((path) => {
+          const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`${escaped}:\\d+\\b`).test(line);
+        });
+      });
+      const literalAnchorPlaceholders = observations
+        .split(/\r?\n/)
+        .filter((line) => /(?:new[- ]side[- ]line|:\s*(?:new\s+)?line\b)/i.test(line));
+      const invalidCount = invalidFindings.length + literalAnchorPlaceholders.length;
+      return {
+        ok: batchTitle && missing.length === 0 && invalidCount === 0,
+        detail: !batchTitle
+          ? `${c.file}: add a Batch ${number} Markdown heading (#, ##, or ###).`
+          : missing.length > 0
+            ? `${c.file}: ${missing.length}/${paths.length} assigned path(s) lack their own Markdown heading: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ' …' : ''}`
+            : invalidCount > 0
+              ? `${c.file}: every B${number}-N finding must cite an assigned path with an actual integer new-side line (for example src/a.ts:42); replace literal placeholders and drop speculative findings without a concrete patch anchor. Invalid: ${[...invalidFindings, ...literalAnchorPlaceholders].slice(0, 3).join(' | ')}`
+              : `Batch ${number}: observations include headings for all ${paths.length} assigned path(s) and concrete anchors for every numbered finding.`,
+        remaining: missing.length + invalidCount + (batchTitle ? 0 : 1),
       };
     }
     case 'corpusCoverage': {

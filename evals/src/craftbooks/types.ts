@@ -211,6 +211,13 @@ export interface CraftbookEvalSpec {
    * instead of being generated through the generic adapter.
    */
   existingScenarioId?: string;
+  /**
+   * Explicit exception for a hand-authored scenario that proves the same
+   * runtime invariants as the generic workflow rail. Keep rare: the scenario
+   * must dispatch an attributed craftbook task and grade terminal progress,
+   * not merely inspect a craftbook-shaped artifact.
+   */
+  handAuthoredWorkflowProof?: true;
   /** Prompt sent by the generic scenario adapter to the Meester or configured worker. */
   prompt?: string;
   setup?: CraftbookEvalSetup;

@@ -106,6 +106,15 @@ describe('summarizeToolResult — bounded response details', () => {
     expect(summary.text.length).toBeLessThan(result.length);
   });
 
+  it('can retain task evidence up to a caller-provided replay budget', () => {
+    const result = `FIRST\n${'patch line\n'.repeat(1_000)}LAST`;
+    expect(result.length).toBeGreaterThan(4_000);
+    expect(summarizeToolResult(result, 60_000)).toEqual({
+      text: result,
+      truncated: false,
+    });
+  });
+
   it('omits empty responses', () => {
     expect(summarizeToolResult(undefined)).toBeUndefined();
     expect(summarizeToolResult('   \n')).toBeUndefined();

@@ -329,6 +329,80 @@ describe('MlxProvider immediate write_file rescue tuning', () => {
   });
 });
 
+describe('MlxProvider required-tool recovery', () => {
+  it('immediately retries a required-tool turn that decodes as text only', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      call++;
+      if (call === 1) {
+        return new Response(
+          [
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '<tool_call>\n{\"name\"' }, finish_reason: 'stop' }] })}`,
+            '',
+            'data: [DONE]',
+            '',
+          ].join('\n'),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      const args = { path: 'data/record.md' };
+      return new Response(
+        [
+          `data: ${JSON.stringify({
+            choices: [{
+              index: 0,
+              delta: { tool_calls: [{
+                index: 0,
+                id: 'call_read',
+                type: 'function',
+                function: { name: 'read_artifact', arguments: JSON.stringify(args) },
+              }] },
+              finish_reason: 'tool_calls',
+            }],
+          })}`,
+          '',
+          'data: [DONE]',
+          '',
+        ].join('\n'),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      );
+    }) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const session = await provider.createSession({
+      systemMessage: 'system',
+      externalTools: [{
+        name: 'read_artifact',
+        description: 'read one artifact',
+        parameters: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+        },
+      }],
+      tuning: {
+        sampling: { maxTokens: 512 },
+        reasoning: { enableThinking: false },
+        output: {},
+        toolChoice: 'required',
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+
+    await session.sendAndWait('Open the exact record.', { timeoutMs: 5_000 });
+
+    expect(call).toBe(2);
+    expect(session.capturedToolCalls?.()).toEqual([
+      { id: 'call_read', name: 'read_artifact', arguments: '{"path":"data/record.md"}' },
+    ]);
+    const retryMessages = bodies[1]?.messages as Array<{ role: string; content: string }>;
+    expect(retryMessages.at(-1)?.content).toContain('requires an actual structured tool call');
+    expect(retryMessages.at(-1)?.content).toContain('read_artifact');
+  });
+});
+
 describe('MlxProvider tool salvage', () => {
   it('does not promote hidden tools that were not advertised this turn', async () => {
     const fetchImpl = (async () => {

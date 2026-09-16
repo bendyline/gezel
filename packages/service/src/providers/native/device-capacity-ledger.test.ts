@@ -56,6 +56,19 @@ describe('device memory admission', () => {
     expect((await make().execute(other)).state).toBe('granted');
   });
 
+  it('names the active reservation when a model fits the host but not alongside another engine', async () => {
+    const { ledger, sample } = await fixture({ availableBytes: 80 * GIB });
+    const resident = request(70);
+    await ledger.execute(resident);
+    await ledger.execute({ action: 'ready', id: resident.id });
+    sample.availableBytes = 60 * GIB;
+    const queued = await ledger.execute(request(50, false, 2));
+    expect(queued.state).toBe('waiting');
+    expect(queued.externalShortfall).toBeUndefined();
+    expect(queued.reason).toContain('70.0 GB reserved');
+    expect(queued.reason).toContain('96.0 GB safe capacity');
+  });
+
   it('makes full residency exclusive even when a larger machine budget would fit both', async () => {
     const { ledger } = await fixture({ budgetBytes: 240 * GIB, gpuBudgetBytes: 192 * GIB });
     await ledger.execute(request(96, true));

@@ -31,10 +31,11 @@ describe('craftbook eval audit', () => {
     );
   });
 
-  it('does not let ignored spawn metadata turn a linked custom scenario into workflow proof', () => {
+  it('requires linked custom workflow scenarios to declare their proof contract explicitly', () => {
     const linked = CRAFTBOOK_EVAL_SPECS.find((spec) => spec.craftbookId === 'pull-request-review');
-    expect(linked?.existingScenarioId).toBe('large-pr-review');
-    expect(linked?.mode).toBe('artifact-task');
+    expect(linked?.existingScenarioId).toBe('pull-request-review-workflow');
+    expect(linked?.mode).toBe('workflow');
+    expect(linked?.handAuthoredWorkflowProof).toBe(true);
   });
 
   it('ties validation proof to the explicit eval mode', () => {

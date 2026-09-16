@@ -364,8 +364,9 @@ export class NativeEngineSupervisor {
     return this.capacity !== undefined;
   }
 
-  async withRequest<T>(run: () => Promise<T>): Promise<T> {
-    await this.yieldForWaitingCapacity();
+  async withRequest<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    await this.yieldForWaitingCapacity(signal);
+    signal?.throwIfAborted();
     this.activeRequests++;
     try {
       return await run();

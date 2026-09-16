@@ -452,9 +452,14 @@ export function validateCraftbookEvalSpecs(templates: CraftbookTemplateSummary[]
     if (spec.coverage.status !== 'planned' && !spec.existingScenarioId && !spec.prompt) {
       errors.push(`implemented generic spec "${spec.scenarioId}" needs a prompt`);
     }
-    if (spec.mode === 'workflow' && spec.existingScenarioId) {
+    if (spec.mode === 'workflow' && spec.existingScenarioId && !spec.handAuthoredWorkflowProof) {
       errors.push(
-        `workflow spec "${spec.scenarioId}" cannot link a custom scenario that bypasses the generic workflow proof rail`,
+        `workflow spec "${spec.scenarioId}" cannot link a custom scenario without an explicit hand-authored workflow proof contract`,
+      );
+    }
+    if (spec.handAuthoredWorkflowProof && (!spec.existingScenarioId || spec.mode !== 'workflow')) {
+      errors.push(
+        `spec "${spec.scenarioId}" records hand-authored workflow proof without a linked workflow scenario`,
       );
     }
     if (spec.coverage.validatedMode && spec.coverage.status !== 'validated') {

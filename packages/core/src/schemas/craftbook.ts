@@ -196,7 +196,14 @@ export function requiredOutputMediaForGate(
  *
  * `disallowToolsets` targets installed catalog/MCP ids (for example
  * `docblocks`). `disallowBuiltinToolsets` targets Gezel's stable built-in
- * group ids (for example `code-execution` or `workspace-fs-write`). These
+ * group ids (for example `code-execution` or `workspace-fs-write`).
+ * `allowTools` is an exact, subtractive ceiling for small fixed-action steps;
+ * it never grants a tool that the session does not already have and does not
+ * add implicit lifecycle tools. Completion must be named explicitly or ride
+ * observable-progress auto-advance.
+ * `disallowTools` targets exact model-facing tool names when a broad group
+ * still contains both needed and distracting tools (for example artifact
+ * reads and artifact search). These
  * are intentionally NOT the broad catalog categories, whose classification
  * is heuristic and therefore unsuitable for runtime authority.
  */
@@ -204,6 +211,8 @@ export const CraftbookStepToolPolicySchema = z
   .object({
     disallowToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
     disallowBuiltinToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
+    allowTools: z.array(z.string().trim().min(1)).min(1).optional(),
+    disallowTools: z.array(z.string().trim().min(1)).min(1).optional(),
     outputMedium: CraftbookStepOutputMediumSchema.optional(),
     /**
      * Other intentional write surfaces used while producing the primary
@@ -235,6 +244,46 @@ export const CraftbookStepToolPolicySchema = z
     }
     const media = new Set([policy.outputMedium, ...additional]);
     const denied = new Set(policy.disallowBuiltinToolsets ?? []);
+    const allowedTools = policy.allowTools ? new Set(policy.allowTools) : null;
+    const deniedTools = new Set(policy.disallowTools ?? []);
+    if (allowedTools) {
+      for (const name of allowedTools) {
+        if (deniedTools.has(name)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['allowTools'],
+            message: `${name} cannot be both allowed and disallowed`,
+          });
+        }
+      }
+      for (const [medium, tool] of [['artifact', 'write_artifact'], ['task-note', 'write_task_note']] as const) {
+        if (media.has(medium) && !allowedTools.has(tool)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['allowTools'],
+            message: `${medium} output needs ${tool} in the exact allowlist`,
+          });
+        }
+      }
+    }
+    for (const safetyTool of ['advance_task_step', 'set_task_status', 'ask_user_question']) {
+      if (deniedTools.has(safetyTool)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['disallowTools'],
+          message: `${safetyTool} is a workflow safety tool and cannot be disallowed`,
+        });
+      }
+    }
+    for (const [medium, tool] of [['artifact', 'write_artifact'], ['task-note', 'write_task_note']] as const) {
+      if (media.has(medium) && deniedTools.has(tool)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['disallowTools'],
+          message: `${medium} output conflicts with disallowing ${tool}`,
+        });
+      }
+    }
     if (media.has('workspace') && denied.has('workspace-fs-write')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
