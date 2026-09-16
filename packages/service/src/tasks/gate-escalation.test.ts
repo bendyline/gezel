@@ -490,10 +490,12 @@ describe('read-evidence escalation nudges', () => {
   const bullets = '- Batch 1: 1/1 records lack full read evidence. Read data/pr/files/001.md';
 
   it('classifies corpus read receipts separately from file deliverables', () => {
-    expect(deliverableSurface({
-      checks: [{ kind: 'corpusReadEvidence', batchesFile: 'batches.json' }],
-      failedChecks: ['corpusReadEvidence batches.json batch=1'],
-    })).toBe('evidence');
+    expect(
+      deliverableSurface({
+        checks: [{ kind: 'corpusReadEvidence', batchesFile: 'batches.json' }],
+        failedChecks: ['corpusReadEvidence batches.json batch=1'],
+      }),
+    ).toBe('evidence');
   });
 
   it('asks for the exact read without triggering edit or rewrite clamps', () => {

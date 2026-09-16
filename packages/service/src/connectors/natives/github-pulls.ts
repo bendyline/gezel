@@ -65,8 +65,7 @@ export function partitionPullReviewFiles(
     const chars = Math.max(file.patch?.length ?? 0, file.filename.length + 256);
     if (
       paths.length > 0 &&
-      (paths.length >= REVIEW_MAX_FILES_PER_BATCH ||
-        patchChars + chars > REVIEW_TARGET_PATCH_CHARS)
+      (paths.length >= REVIEW_MAX_FILES_PER_BATCH || patchChars + chars > REVIEW_TARGET_PATCH_CHARS)
     ) {
       flush();
     }

@@ -211,7 +211,13 @@ export function applyActiveStepToolPolicy(
   const exactAllowedTools = step?.toolPolicy?.allowTools;
   const disabledTools = step?.toolPolicy?.disallowTools ?? [];
   const explicitMedium = step?.toolPolicy?.outputMedium;
-  if (disabledGroups.size === 0 && !exactAllowedTools && disabledTools.length === 0 && !explicitMedium) return allowlist;
+  if (
+    disabledGroups.size === 0 &&
+    !exactAllowedTools &&
+    disabledTools.length === 0 &&
+    !explicitMedium
+  )
+    return allowlist;
 
   const next = allowlist ? new Set(allowlist) : allModelFacingBuiltinTools();
   for (const name of expandToolsetGroups([...disabledGroups])) next.delete(name);

@@ -18,6 +18,25 @@ import { captureScreenshot } from './helpers/screenshot.js';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Wait for the app to actually be sitting on the freshly created project.
+ *
+ * Creating a typed project is one server-owned operation (crew, scripts,
+ * seeded files, craftbooks, schedules) and the view only switches once it
+ * commits; on a loaded CI runner the embedded service shares Electron's
+ * single main-process event loop with the previous test's background work,
+ * so that commit has been seen to take far longer than a dashboard render.
+ * Asserting the switch separately — and against the page rather than the
+ * preview iframe — keeps a slow or failed create from being reported as a
+ * missing string inside the PREVIOUS project's still-mounted dashboard,
+ * which is what the failure looked like the one time this flaked.
+ */
+async function expectProjectSelected(page: Page, name: string): Promise<void> {
+  await expect(page.locator('.project-rail-name.active')).toContainText(name, {
+    timeout: 45_000,
+  });
+}
+
 let gezelHome: string;
 let app: ElectronApplication;
 let page: Page;
@@ -74,6 +93,7 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
   // seeded form is enough — no manual param entry needed.
   await page.getByPlaceholder(/Pet Shop|prototype/).fill('Learn Spanish');
   await page.getByRole('button', { name: /^Create/ }).click();
+  await expectProjectSelected(page, 'Learn Spanish');
 
   // After creation the project view shows the Output pane pinned to the
   // type's dashboard (served from the type source). The dashboard renders
@@ -114,6 +134,7 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
   );
 
   await page.getByRole('button', { name: /^Create/ }).click();
+  await expectProjectSelected(page, 'Software Engineer Job Hunt');
 
   // The pinned dashboard is the pipeline board: one column per stage, seeded
   // empty, with the coach-voiced empty state and no template placeholders.

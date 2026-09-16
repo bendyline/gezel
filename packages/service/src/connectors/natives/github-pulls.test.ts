@@ -7,9 +7,9 @@ import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { sha8 } from '../writer.js';
 import {
   GitHubPullsAdapter,
+  type GitHubPullsRuntime,
   REVIEW_MAX_FILES_PER_BATCH,
   REVIEW_TARGET_PATCH_CHARS,
-  type GitHubPullsRuntime,
   partitionPullReviewFiles,
   pullNumberFromScope,
   pullScope,
@@ -121,7 +121,13 @@ describe('scope naming', () => {
 
 describe('review batching', () => {
   const file = (number: number, patch?: string): GitHubPullFile =>
-    ({ filename: `src/file-${number}.ts`, status: 'modified', additions: 1, deletions: 0, patch }) as GitHubPullFile;
+    ({
+      filename: `src/file-${number}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      patch,
+    }) as GitHubPullFile;
 
   it('caps file count even for tiny patches', () => {
     const files = Array.from({ length: REVIEW_MAX_FILES_PER_BATCH * 2 + 3 }, (_, index) =>

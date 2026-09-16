@@ -37,7 +37,13 @@ export interface EntryDispatchResult {
   enqueued: boolean;
   gezelId?: string;
   assigneeName?: string;
-  reason?: 'not-active' | 'no-active-step' | 'entry-advanced' | 'spawn-host' | 'no-entry-gezel' | 'project-inactive';
+  reason?:
+    | 'not-active'
+    | 'no-active-step'
+    | 'entry-advanced'
+    | 'spawn-host'
+    | 'no-entry-gezel'
+    | 'project-inactive';
 }
 
 /**

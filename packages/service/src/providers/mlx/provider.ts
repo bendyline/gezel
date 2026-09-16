@@ -127,6 +127,12 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import {
+  asyncHandoffClosing,
+  immediateFileWriteClosing,
+  isSuccessfulAsyncHandoff,
+} from './async-file-handoff.js';
+export { isSuccessfulAsyncHandoff };
 import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
@@ -293,35 +299,6 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
     return;
   }
   body.chat_template_kwargs = { [key]: value };
-}
-
-/**
- * A successful async handoff is the terminal action for this sender.
- * Role-typed `delegate_*` tools share `message_gezel`'s parked-delivery
- * contract: the recipient cannot start until this provider turn releases the
- * session. The provider executes the whole emitted tool-call batch before
- * checking this predicate, so one response can still fan out to several
- * recipients. Continuing with another model generation after that batch both
- * delays every assignee and invites duplicate handoffs from the model.
- */
-export function isSuccessfulAsyncHandoff(toolName: string, output: string): boolean {
-  return (
-    !output.startsWith('ERROR:') &&
-    (toolName === 'message_gezel' || toolName.startsWith('delegate_'))
-  );
-}
-
-function asyncHandoffClosing(count: number): string {
-  return count === 1
-    ? 'I sent the handoff and ended my turn so the recipient can use the provider queue. Their reply will arrive asynchronously.'
-    : `I sent ${count} handoffs and ended my turn so the recipients can use the provider queue. Their replies will arrive asynchronously.`;
-}
-
-function immediateFileWriteClosing(paths: string[]): string {
-  const unique = [...new Set(paths.filter((path) => path.trim().length > 0))];
-  if (unique.length === 0) return 'I wrote the requested file to the workspace.';
-  if (unique.length === 1) return `I wrote \`${unique[0]}\` to the workspace.`;
-  return `I wrote ${unique.map((path) => `\`${path}\``).join(', ')} to the workspace.`;
 }
 
 export class MlxProvider implements LLMProvider {
@@ -1355,8 +1332,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const knownToolNames = new Set(
       (tools ?? []).map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
     );
-    const requiresToolCall =
-      this.deps.tuning?.toolChoice === 'required' && knownToolNames.size > 0;
+    const requiresToolCall = this.deps.tuning?.toolChoice === 'required' && knownToolNames.size > 0;
     // Tool-name → declared input schema, so salvaged calls can have
     // structural arguments the markup formats flattened into strings
     // reinterpreted before anything else reads them. The Hermes /
@@ -3506,10 +3482,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
             this.messages.push({
               role: 'user',
-              content:
-                `[system] This turn requires an actual structured tool call, but no tool ran. ` +
-                `Emit exactly one real function call now using one of: ${formatToolMenu(knownToolNames)}. ` +
-                `Do not explain, narrate, or print tool-call markup as text.`,
+              content: `[system] This turn requires an actual structured tool call, but no tool ran. Emit exactly one real function call now using one of: ${formatToolMenu(knownToolNames)}. Do not explain, narrate, or print tool-call markup as text.`,
             });
             continue;
           }

@@ -153,18 +153,29 @@ describe('McpBridge', () => {
   it('flags a structured artifact read when the provider-visible text was capped', async () => {
     const path = 'tests/truncated-read-evidence.md';
     await svc.context.store.writeProjectArtifact('default', path, 'line\n'.repeat(5_000));
-    const events: Array<{ deliveredResultTruncated?: boolean; structuredContent?: Record<string, unknown> }> = [];
+    const events: Array<{
+      deliveredResultTruncated?: boolean;
+      structuredContent?: Record<string, unknown>;
+    }> = [];
     const previous = bridge.onToolCall;
-    bridge.onToolCall = (info) => { if (info.name === 'read_artifact') events.push(info); };
+    bridge.onToolCall = (info) => {
+      if (info.name === 'read_artifact') events.push(info);
+    };
     try {
       const clipped = await bridge.callToolRich('read_artifact', { path }, { budgetChars: 1_000 });
       expect(clipped.text).toContain('tool output truncated');
       expect(events.at(-1)?.deliveredResultTruncated).toBe(true);
       expect(events.at(-1)?.structuredContent?.totalLines).toBeGreaterThan(1_000);
-      const ranged = await bridge.callToolRich('read_artifact', { path, startLine: 1, endLine: 10 }, { budgetChars: 1_000 });
+      const ranged = await bridge.callToolRich(
+        'read_artifact',
+        { path, startLine: 1, endLine: 10 },
+        { budgetChars: 1_000 },
+      );
       expect(ranged.text).not.toContain('tool output truncated');
       expect(events.at(-1)?.deliveredResultTruncated).toBeUndefined();
-    } finally { bridge.onToolCall = previous; }
+    } finally {
+      bridge.onToolCall = previous;
+    }
   });
   it('lists the expected gezel-mcp tools', () => {
     const tools = bridge.getOpenAITools();

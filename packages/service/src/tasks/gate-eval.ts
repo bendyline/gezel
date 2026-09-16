@@ -1032,15 +1032,28 @@ async function evalCheckInner(
       }
       const number = Number(c.batchNumber);
       if (!Number.isSafeInteger(number) || number < 1 || !Array.isArray(batches)) {
-        return { ok: false, detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).` };
+        return {
+          ok: false,
+          detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).`,
+        };
       }
-      const batch = batches.find((item) =>
-        item && typeof item === 'object' && !Array.isArray(item) &&
-        (item as Record<string, unknown>).batchNumber === number,
+      const batch = batches.find(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          (item as Record<string, unknown>).batchNumber === number,
       ) as Record<string, unknown> | undefined;
       const records = batch?.records;
-      if (!Array.isArray(records) || records.length === 0 || records.some((path) => typeof path !== 'string')) {
-        return { ok: false, detail: `${c.batchesFile}: batch ${number} has no exact record paths (fail-closed).` };
+      if (
+        !Array.isArray(records) ||
+        records.length === 0 ||
+        records.some((path) => typeof path !== 'string')
+      ) {
+        return {
+          ok: false,
+          detail: `${c.batchesFile}: batch ${number} has no exact record paths (fail-closed).`,
+        };
       }
       if (!deps?.corpusReadEvidence) {
         return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
@@ -1053,9 +1066,21 @@ async function evalCheckInner(
         const slices = observed.slices.filter((slice) => slice.path === path);
         if (slices.length === 0) return true;
         const total = slices[0]!.totalLines;
-        if (!Number.isSafeInteger(total) || total < 1 || slices.some((slice) => slice.totalLines !== total)) return true;
+        if (
+          !Number.isSafeInteger(total) ||
+          total < 1 ||
+          slices.some((slice) => slice.totalLines !== total)
+        )
+          return true;
         const ranges = slices
-          .filter((slice) => Number.isSafeInteger(slice.startLine) && Number.isSafeInteger(slice.endLine) && slice.startLine >= 1 && slice.endLine <= total && slice.endLine >= slice.startLine)
+          .filter(
+            (slice) =>
+              Number.isSafeInteger(slice.startLine) &&
+              Number.isSafeInteger(slice.endLine) &&
+              slice.startLine >= 1 &&
+              slice.endLine <= total &&
+              slice.endLine >= slice.startLine,
+          )
           .sort((a, b) => a.startLine - b.startLine);
         let next = 1;
         for (const range of ranges) {
@@ -1067,9 +1092,10 @@ async function evalCheckInner(
       });
       return {
         ok: missing.length === 0,
-        detail: missing.length === 0
-          ? `Batch ${number}: full artifact reads verified for all ${records.length} records.`
-          : `Batch ${number}: ${missing.length}/${records.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
+        detail:
+          missing.length === 0
+            ? `Batch ${number}: full artifact reads verified for all ${records.length} records.`
+            : `Batch ${number}: ${missing.length}/${records.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
         evidence: { expectedRecords: records.length, missingRecords: missing.slice(0, 10) },
         remaining: missing.length,
       };
@@ -1093,25 +1119,49 @@ async function evalCheckInner(
       }
       const number = Number(c.batchNumber);
       if (!Number.isSafeInteger(number) || number < 1 || !Array.isArray(batches)) {
-        return { ok: false, detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).` };
+        return {
+          ok: false,
+          detail: `${c.batchesFile}: invalid batch ${c.batchNumber} (fail-closed).`,
+        };
       }
-      const batch = batches.find((item) =>
-        item && typeof item === 'object' && !Array.isArray(item) &&
-        (item as Record<string, unknown>).batchNumber === number,
+      const batch = batches.find(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          (item as Record<string, unknown>).batchNumber === number,
       ) as Record<string, unknown> | undefined;
       const paths = batch?.paths;
-      if (!Array.isArray(paths) || paths.length === 0 || paths.some((path) => typeof path !== 'string' || path.length === 0)) {
-        return { ok: false, detail: `${c.batchesFile}: batch ${number} has no assigned changed paths (fail-closed).` };
+      if (
+        !Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.some((path) => typeof path !== 'string' || path.length === 0)
+      ) {
+        return {
+          ok: false,
+          detail: `${c.batchesFile}: batch ${number} has no assigned changed paths (fail-closed).`,
+        };
       }
-      const batchTitle = observations.split(/\r?\n/).some((line) =>
-        /^#{1,3}\s+Batch\s+\d+\b/i.test(line) &&
-        Number(/^#{1,3}\s+Batch\s+(\d+)\b/i.exec(line)?.[1]) === number,
-      );
-      const headings = observations.split(/\r?\n/)
+      const batchTitle = observations
+        .split(/\r?\n/)
+        .some(
+          (line) =>
+            /^#{1,3}\s+Batch\s+\d+\b/i.test(line) &&
+            Number(/^#{1,3}\s+Batch\s+(\d+)\b/i.exec(line)?.[1]) === number,
+        );
+      const headings = observations
+        .split(/\r?\n/)
         .filter((line) => /^\s*#{1,6}\s+/.test(line))
         .map((line) => line.replace(/^\s*#{1,6}\s+/, '').replace(/`/g, ''));
-      const missing = (paths as string[]).filter((path) =>
-        !headings.some((heading) => heading === path || heading.startsWith(`${path} `) || heading.startsWith(`${path} —`) || heading.startsWith(`${path} -`)),
+      const missing = (paths as string[]).filter(
+        (path) =>
+          !headings.some(
+            (heading) =>
+              heading === path ||
+              heading.startsWith(`${path} `) ||
+              heading.startsWith(`${path} —`) ||
+              heading.startsWith(`${path} -`),
+          ),
       );
       const findingLines = observations
         .split(/\r?\n/)

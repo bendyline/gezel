@@ -2991,16 +2991,33 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             kinds: ['tool.called'],
             ...(step.createdAt ? { from: step.createdAt } : {}),
           });
-          const slices: Array<{ path: string; startLine: number; endLine: number; totalLines: number }> = [];
+          const slices: Array<{
+            path: string;
+            startLine: number;
+            endLine: number;
+            totalLines: number;
+          }> = [];
           for (const event of events) {
             const details = event.details as Record<string, unknown> | undefined;
-            if (!details || details.success !== true || details.taskRef !== task.ref || details.stepId !== step.id) continue;
+            if (
+              !details ||
+              details.success !== true ||
+              details.taskRef !== task.ref ||
+              details.stepId !== step.id
+            )
+              continue;
             const reads = details.artifactReadSlices;
             if (!Array.isArray(reads)) continue;
             for (const value of reads) {
               if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
               const read = value as Record<string, unknown>;
-              if (typeof read.path !== 'string' || !Number.isSafeInteger(read.startLine) || !Number.isSafeInteger(read.endLine) || !Number.isSafeInteger(read.totalLines)) continue;
+              if (
+                typeof read.path !== 'string' ||
+                !Number.isSafeInteger(read.startLine) ||
+                !Number.isSafeInteger(read.endLine) ||
+                !Number.isSafeInteger(read.totalLines)
+              )
+                continue;
               slices.push({
                 path: read.path,
                 startLine: read.startLine as number,
@@ -3221,9 +3238,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // See the frozen path: a passing deliverable is not the thing to
     // rewrite, and a note surface has no file to name at all.
     const deliverableFile =
-      rejectSurface === 'note' || rejectSurface === 'evidence'
-        ? undefined
-        : step.advanceWhen?.file;
+      rejectSurface === 'note' || rejectSurface === 'evidence' ? undefined : step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
     // Converging-loop rejection: the same checks fail, but on fewer
     // outstanding items than last attempt. `signature` already carries the

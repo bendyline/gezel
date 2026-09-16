@@ -737,7 +737,9 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       },
     });
     expect([...review.allowlist!].sort()).toEqual([
-      'read_artifact', 'read_artifacts', 'write_artifact',
+      'read_artifact',
+      'read_artifacts',
+      'write_artifact',
     ]);
   });
 

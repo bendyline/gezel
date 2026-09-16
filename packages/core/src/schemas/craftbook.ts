@@ -256,7 +256,10 @@ export const CraftbookStepToolPolicySchema = z
           });
         }
       }
-      for (const [medium, tool] of [['artifact', 'write_artifact'], ['task-note', 'write_task_note']] as const) {
+      for (const [medium, tool] of [
+        ['artifact', 'write_artifact'],
+        ['task-note', 'write_task_note'],
+      ] as const) {
         if (media.has(medium) && !allowedTools.has(tool)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -275,7 +278,10 @@ export const CraftbookStepToolPolicySchema = z
         });
       }
     }
-    for (const [medium, tool] of [['artifact', 'write_artifact'], ['task-note', 'write_task_note']] as const) {
+    for (const [medium, tool] of [
+      ['artifact', 'write_artifact'],
+      ['task-note', 'write_task_note'],
+    ] as const) {
       if (media.has(medium) && deniedTools.has(tool)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

@@ -339,7 +339,7 @@ describe('MlxProvider required-tool recovery', () => {
       if (call === 1) {
         return new Response(
           [
-            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '<tool_call>\n{\"name\"' }, finish_reason: 'stop' }] })}`,
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '<tool_call>\n{"name"' }, finish_reason: 'stop' }] })}`,
             '',
             'data: [DONE]',
             '',
@@ -351,16 +351,22 @@ describe('MlxProvider required-tool recovery', () => {
       return new Response(
         [
           `data: ${JSON.stringify({
-            choices: [{
-              index: 0,
-              delta: { tool_calls: [{
+            choices: [
+              {
                 index: 0,
-                id: 'call_read',
-                type: 'function',
-                function: { name: 'read_artifact', arguments: JSON.stringify(args) },
-              }] },
-              finish_reason: 'tool_calls',
-            }],
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_read',
+                      type: 'function',
+                      function: { name: 'read_artifact', arguments: JSON.stringify(args) },
+                    },
+                  ],
+                },
+                finish_reason: 'tool_calls',
+              },
+            ],
           })}`,
           '',
           'data: [DONE]',
@@ -372,15 +378,17 @@ describe('MlxProvider required-tool recovery', () => {
     const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
     const session = await provider.createSession({
       systemMessage: 'system',
-      externalTools: [{
-        name: 'read_artifact',
-        description: 'read one artifact',
-        parameters: {
-          type: 'object',
-          properties: { path: { type: 'string' } },
-          required: ['path'],
+      externalTools: [
+        {
+          name: 'read_artifact',
+          description: 'read one artifact',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+            required: ['path'],
+          },
         },
-      }],
+      ],
       tuning: {
         sampling: { maxTokens: 512 },
         reasoning: { enableThinking: false },
