@@ -48,9 +48,11 @@ import {
   resolveSteps,
   stepInsertionIndex,
   summarizePlanDocument,
+  taskEffectiveStatus,
   uniqueStepId,
   unmetConnectors,
   unmetToolsets,
+  withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
@@ -286,6 +288,13 @@ export type TaskSettledHook = (ctx: {
   outcome: 'complete' | 'canceled';
 }) => Promise<void> | void;
 
+/** Fired after the durable status changes, including draft activation. */
+export type TaskStatusChangedHook = (ctx: {
+  projectId: string;
+  task: Task;
+  previousStatus: TaskStatus;
+}) => Promise<void> | void;
+
 export type TaskNeedsHelpReason =
   | 'gate_exhausted'
   | 'gate_plateau'
@@ -446,6 +455,7 @@ export class TaskManager {
   private onCurrentTurnStepReactivated?: CurrentTurnStepReactivatedHook;
   private onTaskCreated?: TaskCreatedHook;
   private onTaskSettled?: TaskSettledHook;
+  private onTaskStatusChanged?: TaskStatusChangedHook;
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
   private readonly autoPreparedConnectorTypes = new Set<string>();
@@ -507,11 +517,17 @@ export class TaskManager {
       const project = await this.store.getProject(projectId);
       const status = project?.status ?? 'active';
       if (status !== 'active') return;
-      const tasks = await this.store.listProjectTasks(projectId);
+      const tasks = withEffectiveTaskStatuses(await this.store.listProjectTasks(projectId));
       // A draft is pending work (a plan waiting to be activated), so it
       // blocks stabilization just like an active task — otherwise a project
       // whose only task is a fresh draft would go `stable` and stop nudging.
-      if (tasks.length > 0 && !tasks.some((t) => t.status === 'active' || t.status === 'draft')) {
+      if (
+        tasks.length > 0 &&
+        !tasks.some((t) => {
+          const status = taskEffectiveStatus(t);
+          return status === 'active' || status === 'draft';
+        })
+      ) {
         await this.store.updateProject(projectId, { status: 'stable' });
       }
     } catch (err) {
@@ -642,6 +658,10 @@ export class TaskManager {
     this.onTaskSettled = fn;
   }
 
+  setTaskStatusChangedHook(fn: TaskStatusChangedHook): void {
+    this.onTaskStatusChanged = fn;
+  }
+
   setTaskNeedsHelpHook(fn: TaskNeedsHelpHook): void {
     this.onTaskNeedsHelp = fn;
   }
@@ -695,6 +715,15 @@ export class TaskManager {
         `[tasks] terminal hook failed for ${task.ref}:`,
         err instanceof Error ? err.message : err,
       );
+    }
+  }
+
+  private async notifyTaskStatusChanged(task: Task, previousStatus: TaskStatus): Promise<void> {
+    if (!this.onTaskStatusChanged) return;
+    try {
+      await this.onTaskStatusChanged({ projectId: task.projectId, task, previousStatus });
+    } catch (err) {
+      log.error(`[tasks] status-changed hook failed for ${task.ref}:`, err);
     }
   }
 
@@ -1224,7 +1253,7 @@ export class TaskManager {
         );
         activatedTask = entrance.task;
         if (entrance.status === 'failed') {
-          return activatedTask;
+          return this.withEffectiveStatus(activatedTask);
         }
       }
     }
@@ -1243,14 +1272,15 @@ export class TaskManager {
         (s) => s.id === activatedTask.activeStepId,
       );
       if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, activatedTask, entryStep))) {
-        return { ...activatedTask, status: 'paused' };
+        return this.withEffectiveStatus({ ...activatedTask, status: 'paused' });
       }
     }
-    return activatedTask;
+    return this.withEffectiveStatus(activatedTask);
   }
 
   async get(projectId: string, num: number): Promise<Task | null> {
-    return this.store.readTask(projectId, num);
+    const task = await this.store.readTask(projectId, num);
+    return task ? this.withEffectiveStatus(task) : null;
   }
 
   async getByRef(ref: string): Promise<Task | null> {
@@ -1266,11 +1296,12 @@ export class TaskManager {
       assigneeGezelId?: string;
     } = {},
   ): Promise<Task[]> {
-    const tasks = filter.projectId
+    const stored = filter.projectId
       ? await this.store.listProjectTasks(filter.projectId)
       : await this.store.listAllTasks();
+    const tasks = withEffectiveTaskStatuses(stored);
     return tasks.filter((t) => {
-      if (filter.status && t.status !== filter.status) return false;
+      if (filter.status && taskEffectiveStatus(t) !== filter.status) return false;
       if (filter.assigneeGezelId) {
         if (
           t.origin?.kind === 'system-job' &&
@@ -1378,7 +1409,7 @@ export class TaskManager {
       }
       changed.push('spawnsCraftbookParams');
     }
-    if (changed.length === 0) return task;
+    if (changed.length === 0) return this.withEffectiveStatus(task);
     await this.store.writeTask(next);
     // Editing a task (retitle, re-plan, reassign, cron/fanout) is live
     // work that isn't closing/completing — wake a stable project.
@@ -1418,7 +1449,7 @@ export class TaskManager {
         details: { ref: next.ref, changed: remainingChanged, patch },
       });
     }
-    return next;
+    return this.withEffectiveStatus(next);
   }
 
   // ── Workflow ────────────────────────────────────────────────────
@@ -1450,7 +1481,7 @@ export class TaskManager {
       if (status === 'complete' || status === 'canceled') {
         await this.maybeStabilizeProject(projectId);
       }
-      return task;
+      return this.withEffectiveStatus(task);
     }
     const now = nowIso();
     let craftbook = task.craftbook;
@@ -1487,6 +1518,7 @@ export class TaskManager {
     } else {
       await this.reactivateProject(projectId);
     }
+    await this.notifyTaskStatusChanged(next, task.status);
     await this.history?.log({
       kind: status === 'canceled' ? 'task.canceled' : 'task.status.changed',
       projectId,
@@ -1497,7 +1529,7 @@ export class TaskManager {
     if (status === 'complete' || status === 'canceled') {
       await this.notifyTaskSettled(next, status);
     }
-    return next;
+    return this.withEffectiveStatus(next);
   }
 
   /**
@@ -1551,6 +1583,7 @@ export class TaskManager {
     }
     await this.store.writeTask(next);
     await this.reactivateProject(projectId);
+    await this.notifyTaskStatusChanged(next, task.status);
     await this.history?.log({
       kind: 'task.activated',
       projectId,
@@ -2034,8 +2067,10 @@ export class TaskManager {
     projectId: string,
     num: number,
   ): Promise<'advanced' | 'held' | 'held-frozen' | 'not-ready'> {
-    const task = await this.store.readTask(projectId, num).catch(() => null);
-    if (!task || task.status !== 'active' || !task.activeStepId) return 'not-ready';
+    const task = await this.get(projectId, num).catch(() => null);
+    if (!task || taskEffectiveStatus(task) !== 'active' || !task.activeStepId) {
+      return 'not-ready';
+    }
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const adv = step?.advanceWhen;
     if (!step || step.terminal || !adv || adv.requireChange) return 'not-ready';
@@ -2263,6 +2298,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       );
     }
 
+    const effectiveStatus = await this.effectiveStatusFor(task);
+    if (effectiveStatus !== 'active') {
+      throw new Error(
+        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}`,
+      );
+    }
+
     // ── Completion gate guard ─────────────────────────────────────────
     // Skipped when: no gate / activation-moment gate (the service hook
     // owns that), the user forced completion, or the runtime itself is
@@ -2474,6 +2516,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         summary: `Task ${updated.ref} → complete`,
         details: { ref: updated.ref, status: 'complete', previous: task.status },
       });
+      await this.notifyTaskStatusChanged(updated, task.status);
       await this.notifyTaskSettled(updated, 'complete');
       return { status: 'advanced', task: updated };
     }
@@ -4038,7 +4081,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   /** Prepare the current activation before a retry or another dispatch path. */
   async ensureActiveStepEntered(projectId: string, num: number): Promise<StepEntranceOutcome> {
     const task = await this.requireTask(projectId, num);
-    if (task.status !== 'active' || !task.activeStepId) {
+    if ((await this.effectiveStatusFor(task)) !== 'active' || !task.activeStepId) {
       return { status: 'not-active', task };
     }
     const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
@@ -4138,9 +4181,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   ): Promise<Task[]> {
     const parsed = parseTaskRef(parentRef);
     if (!parsed) return [];
-    const all = await this.store.listProjectTasks(parsed.projectId);
+    const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(parsed.projectId));
     let children = all.filter((t) => t.parentTaskRef === parentRef);
-    if (opts.status) children = children.filter((t) => t.status === opts.status);
+    if (opts.status) {
+      children = children.filter((t) => taskEffectiveStatus(t) === opts.status);
+    }
     children.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (opts.limit && opts.limit > 0) children = children.slice(0, opts.limit);
     return children;
@@ -4165,7 +4210,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   async redispatchActiveStep(projectId: string, num: number, reason: string): Promise<void> {
     if (!this.onStepActivated) return;
     const task = await this.get(projectId, num);
-    if (!task || task.status !== 'active' || !task.activeStepId) return;
+    if (!task || taskEffectiveStatus(task) !== 'active' || !task.activeStepId) return;
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     if (!step) return;
     log.info(`[tasks] ${task.ref}: re-dispatching active step "${step.id}" — ${reason}`);
@@ -4190,6 +4235,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   async spawnChild(parentRef: string, variation?: TaskVariation): Promise<Task> {
     const parent = await this.getByRef(parentRef);
     if (!parent) throw new Error(`task ${parentRef} not found`);
+    if (taskEffectiveStatus(parent) !== 'active') {
+      throw new Error(
+        `task ${parentRef}: cannot spawn a child while its effective status is ${taskEffectiveStatus(parent)}`,
+      );
+    }
     if (!parent.spawnsCraftbook) {
       throw new Error(`task ${parentRef} has no spawn craftbook`);
     }
@@ -4363,7 +4413,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     });
 
     const entrance = await this.runActivatedStepOnEnter(child.projectId, child, firstStep, 0);
-    if (entrance.status !== 'ready') return entrance.task;
+    if (entrance.status !== 'ready') return this.withEffectiveStatus(entrance.task);
     const preparedChild = entrance.task;
     const preparedFirstStep = preparedChild.craftbook.steps.find(
       (step) => step.id === activeStepId,
@@ -4382,7 +4432,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         log.error('[tasks] onStepActivated hook failed on spawnChild:', err);
       }
     }
-    return preparedChild;
+    return this.withEffectiveStatus(preparedChild);
   }
 
   /**
@@ -4501,5 +4551,31 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const task = await this.store.readTask(projectId, num);
     if (!task) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
     return task;
+  }
+
+  private async withEffectiveStatus(task: Task): Promise<Task> {
+    let effectiveStatus = task.status;
+    let parentRef = task.parentTaskRef;
+    const visited = new Set([task.ref]);
+    while (parentRef && !visited.has(parentRef)) {
+      visited.add(parentRef);
+      const parsed = parseTaskRef(parentRef);
+      if (!parsed) break;
+      const parent = await this.store.readTask(parsed.projectId, parsed.num);
+      if (!parent) break;
+      if (
+        parent.status === 'paused' ||
+        parent.status === 'complete' ||
+        parent.status === 'canceled'
+      ) {
+        effectiveStatus = parent.status;
+      }
+      parentRef = parent.parentTaskRef;
+    }
+    return { ...task, effectiveStatus };
+  }
+
+  private async effectiveStatusFor(task: Task): Promise<TaskStatus> {
+    return taskEffectiveStatus(await this.withEffectiveStatus(task));
   }
 }

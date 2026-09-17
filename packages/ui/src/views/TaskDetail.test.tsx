@@ -196,6 +196,20 @@ describe('TaskDetail', () => {
     ).toEqual(['Active', 'Paused']);
   });
 
+  it('shows a child effective status without independent lifecycle controls', () => {
+    const child = {
+      ...TASK,
+      parentTaskRef: 'pj-alpha/40',
+      status: 'active',
+      effectiveStatus: 'paused',
+    } as Task;
+    render(<TaskDetail task={child} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+
+    expect(screen.getByText('paused · follows parent')).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Task status' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   it('reassigning to user dispatches setTaskAssignee with kind:user', async () => {
     vi.mocked(api.setTaskAssignee).mockResolvedValue({ ...TASK } as never);
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);

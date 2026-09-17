@@ -1,4 +1,10 @@
-import type { GezelSummary, Project, Task, TaskStatus } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  type Project,
+  type Task,
+  type TaskStatus,
+  taskEffectiveStatus,
+} from '@bendyline/gezel';
 import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -118,8 +124,11 @@ function BulkTaskDetail({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sharedStatus = tasks.every((task) => task.status === tasks[0]?.status)
-    ? (tasks[0]?.status ?? 'draft')
+  const includesChild = tasks.some((task) => task.parentTaskRef);
+  const sharedStatus = tasks.every(
+    (task) => taskEffectiveStatus(task) === taskEffectiveStatus(tasks[0]!),
+  )
+    ? taskEffectiveStatus(tasks[0]!)
     : 'draft';
   const availableStatuses = tasks.some((task) => task.origin?.kind === 'system-job')
     ? TASK_STATUS_KEY_ORDER.filter((status) => status === 'active' || status === 'paused')
@@ -160,15 +169,21 @@ function BulkTaskDetail({
         <div>
           <span className="task-detail-ref">{tasks.length} tasks selected</span>
           <h3>Selected tasks</h3>
-          <p>Change the status for every selected task.</p>
+          <p>
+            {includesChild
+              ? 'Child task status follows its parent.'
+              : 'Change the status for every selected task.'}
+          </p>
         </div>
-        <TaskStatusKeys
-          value={sharedStatus}
-          options={availableStatuses}
-          disabled={busy}
-          ariaLabel="Set status for selected tasks"
-          onChange={(status) => void setStatus(status)}
-        />
+        {!includesChild && (
+          <TaskStatusKeys
+            value={sharedStatus}
+            options={availableStatuses}
+            disabled={busy}
+            ariaLabel="Set status for selected tasks"
+            onChange={(status) => void setStatus(status)}
+          />
+        )}
       </header>
 
       {error && <p className="error">{error}</p>}
@@ -178,15 +193,15 @@ function BulkTaskDetail({
         {tasks.map((task) => (
           <li key={task.ref} className="task-bulk-item">
             <span
-              className={`task-status-dot task-status-${task.status}`}
-              title={task.status}
-              aria-label={task.status}
+              className={`task-status-dot task-status-${taskEffectiveStatus(task)}`}
+              title={taskEffectiveStatus(task)}
+              aria-label={taskEffectiveStatus(task)}
             />
             <span className="task-row-body">
               <strong>{task.title}</strong>
               <span className="task-row-meta">
                 <span className="task-ref">{task.ref}</span>
-                <span className="task-bulk-current-status">{task.status}</span>
+                <span className="task-bulk-current-status">{taskEffectiveStatus(task)}</span>
               </span>
             </span>
           </li>
@@ -636,9 +651,9 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                       {...selectionPropsFor(g.parent.ref)}
                     >
                       <span
-                        className={`task-status-dot task-status-${g.parent.status}`}
-                        title={g.parent.status}
-                        aria-label={g.parent.status}
+                        className={`task-status-dot task-status-${taskEffectiveStatus(g.parent)}`}
+                        title={taskEffectiveStatus(g.parent)}
+                        aria-label={taskEffectiveStatus(g.parent)}
                       />
                       <span className="task-row-body">
                         <span className="task-title" title={g.parent.title}>
@@ -682,9 +697,9 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                             {...selectionPropsFor(c.ref)}
                           >
                             <span
-                              className={`task-status-dot task-status-${c.status}`}
-                              title={c.status}
-                              aria-label={c.status}
+                              className={`task-status-dot task-status-${taskEffectiveStatus(c)}`}
+                              title={taskEffectiveStatus(c)}
+                              aria-label={taskEffectiveStatus(c)}
                             />
                             <span className="task-row-body">
                               <span className="task-title" title={c.title}>

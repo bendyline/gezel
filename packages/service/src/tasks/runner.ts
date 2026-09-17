@@ -51,6 +51,8 @@ import {
   getEngagementMode,
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
+  taskEffectiveStatus,
+  withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
@@ -549,9 +551,11 @@ export class TaskRunner {
       // pending handoffs from an inactive project auto-resuming after
       // the service restarts.
       if (!projectAllowsAmbientWork(proj)) continue;
-      const tasks = await this.store.listProjectTasks(proj.id).catch(() => []);
+      const tasks = withEffectiveTaskStatuses(
+        await this.store.listProjectTasks(proj.id).catch(() => []),
+      );
       for (const task of tasks) {
-        if (task.status !== 'active') continue;
+        if (taskEffectiveStatus(task) !== 'active') continue;
         // Cron/fanout records are schedule hosts, not worker tasks. Their
         // children dispatch through the scheduler's spawn path; rehydrating
         // the host itself would make its inert "wait" step run as real work.
@@ -569,7 +573,8 @@ export class TaskRunner {
           task.spawnsCraftbook &&
           !step.spawnFanout &&
           tasks.some(
-            (candidate) => candidate.parentTaskRef === task.ref && candidate.status === 'active',
+            (candidate) =>
+              candidate.parentTaskRef === task.ref && taskEffectiveStatus(candidate) === 'active',
           )
         ) {
           continue;
@@ -666,6 +671,20 @@ export class TaskRunner {
     const normalItems: PendingHandoff[] = [];
     const nightItems: PendingHandoff[] = [];
     const taskByHandoffId = new Map<number, Task>();
+    const effectiveTasksByProject = new Map<string, Promise<Map<number, Task>>>();
+    const effectiveTask = async (projectId: string, num: number): Promise<Task | null> => {
+      let pending = effectiveTasksByProject.get(projectId);
+      if (!pending) {
+        pending = this.store
+          .listProjectTasks(projectId)
+          .then(
+            (tasks) => new Map(withEffectiveTaskStatuses(tasks).map((task) => [task.num, task])),
+          )
+          .catch(() => new Map<number, Task>());
+        effectiveTasksByProject.set(projectId, pending);
+      }
+      return (await pending).get(num) ?? null;
+    };
     const seenSnapshotKeys = new Set<string>();
     // One quota verdict per provider per tick: several night handoffs on
     // the same provider shouldn't each re-read config / re-probe a CLI.
@@ -678,8 +697,8 @@ export class TaskRunner {
       if (!projectId || !Number.isFinite(num)) {
         continue; // malformed — drop.
       }
-      let task = await this.store.readTask(projectId, num).catch(() => null);
-      if (!task || task.status !== 'active' || task.activeStepId !== handoff.stepId) {
+      let task = await effectiveTask(projectId, num);
+      if (!task || taskEffectiveStatus(task) !== 'active' || task.activeStepId !== handoff.stepId) {
         continue;
       }
       let currentStep = task.craftbook.steps.find((step) => step.id === handoff.stepId);
@@ -695,7 +714,11 @@ export class TaskRunner {
           if (entrance.status === 'advanced') continue;
           task = entrance.task;
           currentStep = task.craftbook.steps.find((step) => step.id === handoff.stepId);
-          if (task.status !== 'active' || task.activeStepId !== handoff.stepId || !currentStep) {
+          if (
+            taskEffectiveStatus(task) !== 'active' ||
+            task.activeStepId !== handoff.stepId ||
+            !currentStep
+          ) {
             continue;
           }
         } catch (err) {
@@ -941,17 +964,28 @@ export class TaskRunner {
   }
 
   private async pruneActiveDispatches(): Promise<void> {
+    const effectiveTasksByProject = new Map<string, Promise<Map<number, Task>>>();
+    const effectiveTask = async (projectId: string, num: number): Promise<Task | null> => {
+      let pending = effectiveTasksByProject.get(projectId);
+      if (!pending) {
+        pending = this.store
+          .listProjectTasks(projectId)
+          .then(
+            (tasks) => new Map(withEffectiveTaskStatuses(tasks).map((task) => [task.num, task])),
+          )
+          .catch(() => new Map<number, Task>());
+        effectiveTasksByProject.set(projectId, pending);
+      }
+      return (await pending).get(num) ?? null;
+    };
     for (const [key, dispatch] of this.activeDispatches) {
       const [projectId, numText] = dispatch.taskRef.split('/');
       const num = Number(numText);
-      const task =
-        projectId && Number.isFinite(num)
-          ? await this.store.readTask(projectId, num).catch(() => null)
-          : null;
+      const task = projectId && Number.isFinite(num) ? await effectiveTask(projectId, num) : null;
       const step = task?.craftbook.steps.find((candidate) => candidate.id === dispatch.stepId);
       const stale =
         !task ||
-        task.status !== 'active' ||
+        taskEffectiveStatus(task) !== 'active' ||
         task.activeStepId !== dispatch.stepId ||
         (dispatch.activationAt !== undefined && step?.lastActivatedAt !== dispatch.activationAt);
       if (stale) {

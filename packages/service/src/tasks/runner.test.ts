@@ -615,6 +615,75 @@ describe('TaskRunner — dispatch + FIFO', () => {
 });
 
 describe('TaskRunner — cancellation via task status', () => {
+  it('drops and cancels child work from the parent effective state, then rehydrates on resume', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const activatedAt = new Date().toISOString();
+    const parent = {
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 'parent',
+      status: 'paused' as const,
+      assignee: { kind: 'user' as const },
+      craftbook: fixtureCraftbook([{ id: 'wait', name: 'wait', createdAt: activatedAt }]),
+      activeStepId: 'wait',
+      cron: { expression: '* * * * *', nextTickAt: '2099-01-01T00:00:00Z' },
+      createdAt: activatedAt,
+      updatedAt: activatedAt,
+      createdBy: { kind: 'user' as const },
+    };
+    const child = {
+      projectId: 'p1',
+      num: 2,
+      ref: 'p1/2',
+      title: 'child',
+      status: 'active' as const,
+      assignee: { kind: 'gezel' as const, gezelId: 'bea' },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'work',
+          name: 'work',
+          assignee: { kind: 'gezel' as const, gezelId: 'bea' },
+          lastActivatedAt: activatedAt,
+          createdAt: activatedAt,
+        },
+      ]),
+      activeStepId: 'work',
+      parentTaskRef: parent.ref,
+      createdAt: activatedAt,
+      updatedAt: activatedAt,
+      createdBy: { kind: 'user' as const },
+    };
+    await store.writeTask(parent);
+    await store.writeTask(child);
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({
+      taskRef: child.ref,
+      stepId: 'work',
+      gezelId: 'bea',
+      projectId: 'p1',
+      activationAt: activatedAt,
+    });
+
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+    expect(runner.snapshot().pendingCount).toBe(0);
+
+    await store.writeTask({ ...parent, status: 'active' });
+    const resumed = await runner.rehydrateFromStore({ projectId: 'p1' });
+    expect(resumed.taskRefs).toEqual([child.ref]);
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+
+    await store.writeTask(parent);
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual(['session-1']);
+  });
+
   it('cancels an already-dispatched handoff when the task pauses', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

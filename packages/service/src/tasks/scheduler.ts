@@ -13,6 +13,7 @@ import {
   localDateKey,
   projectAllowsAmbientWork,
   projectManagedWorkspaceWritable,
+  taskEffectiveStatus,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
@@ -784,7 +785,7 @@ export class TaskScheduler {
       // Best-effort — without the task list the task-driven gates simply
       // don't trigger, and the remaining gates decide.
     }
-    const activeTasks = projectTasks.filter((t) => t.status === 'active');
+    const activeTasks = projectTasks.filter((task) => taskEffectiveStatus(task) === 'active');
 
     // A freshly-created project has a voorman but no job yet. Ambient
     // check-ins are meant to resume owned work, not turn an empty project
@@ -809,7 +810,7 @@ export class TaskScheduler {
       // A draft is pending work awaiting the user's activation, not a
       // finished project: don't stabilize it, and don't nudge the voorman
       // about a plan that isn't running yet — just skip this tick.
-      if (projectTasks.some((t) => t.status === 'draft')) {
+      if (projectTasks.some((task) => taskEffectiveStatus(task) === 'draft')) {
         trace(
           'skip meester nudge — only draft task(s) await activation; not nudging or stabilizing',
         );

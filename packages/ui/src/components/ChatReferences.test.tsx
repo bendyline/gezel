@@ -343,6 +343,35 @@ describe('ChatReferences task picker', () => {
     ).toBeVisible();
   });
 
+  it('renders a child task status as read-only', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue({
+      ...task('project-1/2', 'Child task'),
+      parentTaskRef: 'project-1/1',
+      effectiveStatus: 'canceled',
+    } as Task);
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/2')}>
+            Add child task
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add child task' }));
+    expect(
+      await screen.findByLabelText('Task status: Canceled. Follows parent task project-1/1'),
+    ).toHaveTextContent('Canceled · follows parent');
+    expect(
+      screen.queryByRole('button', { name: /Task status: .*Change status/ }),
+    ).not.toBeInTheDocument();
+    expect(apiMocks.setTaskStatus).not.toHaveBeenCalled();
+  });
+
   it('replaces legacy generated ISO titles with the craftbook name', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

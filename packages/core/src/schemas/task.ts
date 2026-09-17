@@ -367,9 +367,11 @@ export type Outcome = z.infer<typeof OutcomeSchema>;
 /* ─── Task ────────────────────────────────────────────────────────────── */
 
 /**
- * Persisted task shape. `description` is permissive on read; the create
+ * Task aggregate shape. `description` is permissive on read; the create
  * request enforces the min-40 length. `plan` is the voorman's evolving
  * approach — distinct from per-step notes and not every task needs one.
+ * `effectiveStatus` is the sole derived/API field and is stripped before
+ * persistence; every other field is the durable task record.
  *
  * Three shapes, derived from fields:
  *   - Regular task: `craftbook` set with own steps; `spawnsCraftbook` unset; `activeStepId` set.
@@ -394,6 +396,13 @@ export const TaskSchema = z.object({
    */
   outcomes: z.array(OutcomeSchema).optional(),
   status: TaskStatusSchema,
+  /**
+   * Runtime lifecycle after parent inheritance. A child whose parent (or
+   * any ancestor) is paused, complete, or canceled implicitly has that
+   * status without overwriting its own durable `status`. Omitted on disk and
+   * on legacy callers; task read/list surfaces populate it.
+   */
+  effectiveStatus: TaskStatusSchema.optional(),
   assignee: TaskAssigneeSchema,
   /**
    * The assignee was derived, not chosen — it mirrors whoever the ENTRY
@@ -533,6 +542,47 @@ export const TaskSchema = z.object({
   createdBy: TaskAssigneeSchema,
 });
 export type Task = z.infer<typeof TaskSchema>;
+
+const PARENT_OWNED_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'paused',
+  'complete',
+  'canceled',
+]);
+
+/** Read the runtime status when present, with a safe fallback for old data. */
+export function taskEffectiveStatus(task: Pick<Task, 'status' | 'effectiveStatus'>): TaskStatus {
+  return task.effectiveStatus ?? task.status;
+}
+
+/**
+ * Decorate a task collection with parent-aware runtime statuses.
+ *
+ * The parent's own effective status is used, so inheritance is recursive.
+ * Active/draft ancestors do not mask a child's own status. Missing parents
+ * and malformed cycles fail closed to each task's durable status.
+ */
+export function withEffectiveTaskStatuses(tasks: readonly Task[]): Task[] {
+  const byRef = new Map(tasks.map((task) => [task.ref, task]));
+  const memo = new Map<string, TaskStatus>();
+  const resolving = new Set<string>();
+
+  const resolve = (task: Task): TaskStatus => {
+    const cached = memo.get(task.ref);
+    if (cached) return cached;
+    if (resolving.has(task.ref)) return task.status;
+
+    resolving.add(task.ref);
+    const parent = task.parentTaskRef ? byRef.get(task.parentTaskRef) : undefined;
+    const parentStatus = parent ? resolve(parent) : undefined;
+    const effective =
+      parentStatus && PARENT_OWNED_TASK_STATUSES.has(parentStatus) ? parentStatus : task.status;
+    resolving.delete(task.ref);
+    memo.set(task.ref, effective);
+    return effective;
+  };
+
+  return tasks.map((task) => ({ ...task, effectiveStatus: resolve(task) }));
+}
 
 /* ─── Create / update requests ────────────────────────────────────────── */
 
@@ -873,8 +923,9 @@ export type TaskWaitReason = z.infer<typeof TaskWaitReasonSchema>;
 
 /**
  * Runtime queue position for one task, as the TaskRunner sees it right
- * now. Deliberately NOT part of {@link TaskSchema}: that is the on-disk
- * shape, and this exists only while a daemon is running.
+ * now. Deliberately NOT part of {@link TaskSchema}: unlike its stable
+ * aggregate fields (including the recomputable `effectiveStatus`), this
+ * exists only while a daemon is running.
  *
  * Carried as a sibling of `tasks` for the same reason `terminalEntries`
  * rides beside `messages` on the timeline response — chat-only consumers
