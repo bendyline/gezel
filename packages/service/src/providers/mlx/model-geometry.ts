@@ -26,6 +26,11 @@ const log = createLogger('mlx');
  *   window-capped layer with a synthetic 1024-token window — the right
  *   order of magnitude, and the full-attention layers dominate either
  *   way. Pricing such a hybrid with full math overstates ~4×.
+ * - Qwen4-Exp / Qwen3.8 Flash Next: its QSA layers (`full_attention` in the
+ *   released config, `qwen_sparse_attention` in some converted configs) retain
+ *   ordinary K/V plus raw sparse-indexer keys, compressed block keys, and
+ *   MRoPE positions. The latter are folded into the global key width so
+ *   context admission doesn't under-price the checkpoint's auxiliary cache.
  *
  * Returns undefined (never guesses) when the layer count or head dims
  * are unreadable — callers fall back to the heuristic.
@@ -82,6 +87,30 @@ export function readMlxModelGeometry(
   }
   const globalHeadDim = num('global_head_dim') ?? headDim;
   const globalKvHeads = num('num_global_key_value_heads') ?? headCountKv;
+  const modelType = String(cfg.model_type ?? raw.model_type ?? '');
+  const rootModelType = String(raw.model_type ?? '');
+  const isQwen4Exp =
+    modelType === 'qwen4_exp' || modelType === 'qwen4_exp_text' || rootModelType === 'qwen4_exp';
+  // Released Qwen3.8 Flash Next configs call these `full_attention`; the
+  // implementation class/cache calls them QSA. Accept the class-oriented
+  // spelling too for converted checkpoints that expose it directly.
+  const hasQwenSparseAttention = layerTypes.some(
+    (type) =>
+      String(type) === 'qwen_sparse_attention' || (isQwen4Exp && String(type) === 'full_attention'),
+  );
+  let globalKeyLength = globalHeadDim;
+  if (isQwen4Exp && hasQwenSparseAttention) {
+    const indexerKvHeads = num('indexer_kv_heads') ?? 1;
+    const indexerHeadDim = num('indexer_head_dim') ?? 128;
+    const indexerCompressRatio = num('indexer_compress_ratio') ?? 4;
+    // QSAKVCache keeps one raw index key per token and one normalized block
+    // key per `indexerCompressRatio` tokens. The 0.7.1 tower constructs
+    // position ids as int64 and multimodal inputs can carry three MRoPE axes,
+    // hence twelve f16-equivalent elements per token in the worst case.
+    const auxiliaryF16ElementsPerToken =
+      indexerKvHeads * indexerHeadDim * (1 + 1 / indexerCompressRatio) + 12;
+    globalKeyLength += Math.ceil(auxiliaryF16ElementsPerToken / globalKvHeads);
+  }
   const LINEAR_STATE_WINDOW_TOKENS = 1024;
   const slidingWindow = num('sliding_window') ?? LINEAR_STATE_WINDOW_TOKENS;
   return {
@@ -90,7 +119,7 @@ export function readMlxModelGeometry(
     headCountKvPerLayer: pattern.map((bounded) => (bounded ? headCountKv : globalKvHeads)),
     slidingWindow,
     slidingWindowPattern: pattern,
-    keyLength: globalHeadDim,
+    keyLength: globalKeyLength,
     valueLength: globalHeadDim,
     keyLengthSwa: headDim,
     valueLengthSwa: headDim,

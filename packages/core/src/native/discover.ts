@@ -29,7 +29,7 @@
  *
  * Cross-platform note: same code on Windows, macOS, and Linux. The
  * `resolvePlatformKey` helper handles the per-OS subdirectory naming
- * (`win32-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`).
+ * (`win32-x64`, `win32-arm64`, `darwin-arm64`, `linux-x64`, `linux-arm64`).
  */
 
 import { existsSync } from 'node:fs';

@@ -26,6 +26,7 @@
  * packages exist.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -47,6 +48,7 @@ import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
+import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import {
   appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
@@ -125,6 +127,12 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import {
+  asyncHandoffClosing,
+  immediateFileWriteClosing,
+  isSuccessfulAsyncHandoff,
+} from './async-file-handoff.js';
+export { isSuccessfulAsyncHandoff };
 import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
@@ -293,35 +301,6 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
   body.chat_template_kwargs = { [key]: value };
 }
 
-/**
- * A successful async handoff is the terminal action for this sender.
- * Role-typed `delegate_*` tools share `message_gezel`'s parked-delivery
- * contract: the recipient cannot start until this provider turn releases the
- * session. The provider executes the whole emitted tool-call batch before
- * checking this predicate, so one response can still fan out to several
- * recipients. Continuing with another model generation after that batch both
- * delays every assignee and invites duplicate handoffs from the model.
- */
-export function isSuccessfulAsyncHandoff(toolName: string, output: string): boolean {
-  return (
-    !output.startsWith('ERROR:') &&
-    (toolName === 'message_gezel' || toolName.startsWith('delegate_'))
-  );
-}
-
-function asyncHandoffClosing(count: number): string {
-  return count === 1
-    ? 'I sent the handoff and ended my turn so the recipient can use the provider queue. Their reply will arrive asynchronously.'
-    : `I sent ${count} handoffs and ended my turn so the recipients can use the provider queue. Their replies will arrive asynchronously.`;
-}
-
-function immediateFileWriteClosing(paths: string[]): string {
-  const unique = [...new Set(paths.filter((path) => path.trim().length > 0))];
-  if (unique.length === 0) return 'I wrote the requested file to the workspace.';
-  if (unique.length === 1) return `I wrote \`${unique[0]}\` to the workspace.`;
-  return `I wrote ${unique.map((path) => `\`${path}\``).join(', ')} to the workspace.`;
-}
-
 export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
   readonly queue: ProviderQueue;
@@ -437,6 +416,7 @@ export class MlxProvider implements LLMProvider {
     onAbort?: () => void;
   }> = [];
   private readonly batchMaxConcurrency: number;
+  private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
     supervisor?: NativeEngineSupervisor;
@@ -573,6 +553,12 @@ export class MlxProvider implements LLMProvider {
     return this.engineGateActive > 0 || this.engineGateWaiters.length > 0;
   }
 
+  /** Hold startup demand through the first request, before the engine gate exists. */
+  async withEngineTurn<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!this.supervisor?.coordinatesCapacity || this.turnProtection.getStore()) return run();
+    return this.supervisor.withRequest(() => this.turnProtection.run(true, run), signal);
+  }
+
   engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
     return this.supervisor?.lifecycleSnapshot();
   }
@@ -581,10 +567,12 @@ export class MlxProvider implements LLMProvider {
     label: string,
     signal?: AbortSignal,
     onWait?: (info: { aheadOf: number }) => void,
+    capacityProtected = false,
   ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
-    if (this.supervisor?.coordinatesCapacity) await this.supervisor.yieldForWaitingCapacity(signal);
+    if (this.supervisor?.coordinatesCapacity && !capacityProtected)
+      await this.supervisor.yieldForWaitingCapacity(signal);
 
     const width = this.batchMaxConcurrency;
     const waitStartedAt = Date.now();
@@ -1240,7 +1228,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // server's BatchEngine and its memory-aware admission still enforce
     // the configured generation width, so bypassing the TS-side FIFO only
     // loses the queue's affinity scoring, not safety.
-    return runOnLiveProvider(this.deps.provider, opts, () => this.sendAndWaitInner(prompt, opts));
+    return runOnLiveProvider(this.deps.provider, opts, () =>
+      this.deps.provider.withEngineTurn(
+        () => this.sendAndWaitInner(prompt, opts),
+        opts?.queue?.signal,
+      ),
+    );
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
@@ -1339,6 +1332,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const knownToolNames = new Set(
       (tools ?? []).map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
     );
+    const requiresToolCall = this.deps.tuning?.toolChoice === 'required' && knownToolNames.size > 0;
     // Tool-name → declared input schema, so salvaged calls can have
     // structural arguments the markup formats flattened into strings
     // reinterpreted before anything else reads them. The Hermes /
@@ -1800,6 +1794,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // To the user, waiting for the queue and waiting for the engine
             // gate are one state: this turn has not started yet.
             opts?.queue?.onQueueWait,
+            true,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
@@ -3038,7 +3033,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
           );
         }
-        let toolCalls = coerced.calls as typeof mergedCalls;
+        // After coercion, so two spellings of the same arguments compare equal.
+        const collapsed = collapseDuplicateToolCalls(coerced.calls);
+        for (const d of collapsed.dropped) {
+          log.info(
+            `turn#${seq}.${turn} collapsed ${d.count} duplicate ${d.name} call(s) emitted in this generation`,
+          );
+        }
+        let toolCalls = collapsed.calls as typeof mergedCalls;
         if (rambleAborted && toolCalls.length === 0) {
           // If ctrl.abort() races with mlx-vlm closing the SSE stream,
           // the for-await loop can exit cleanly instead of throwing an
@@ -3462,6 +3464,31 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 });
           this.messages.push({ role: 'user', content: nudge });
           continue;
+        }
+        if (toolCalls.length === 0 && requiresToolCall) {
+          if (this.turnPolicy.retry('noProgress')) {
+            const attempt = this.turnPolicy.count('noProgress');
+            log.info(
+              `turn#${seq}.${turn} required tool call missing — retrying ` +
+                `(${attempt}/${LOCAL_TURN_LIMITS.noProgress})`,
+            );
+            // The first decode is not a valid answer to a required-tool
+            // request. Keep it in provider history as the assistant output
+            // being corrected, but do not leak it into the eventual visible
+            // reply when the retry succeeds.
+            if (turnContent.length > 0) {
+              this.messages.push({ role: 'assistant', content: turnContent });
+              fullText = fullText.slice(0, -turnContent.length);
+            }
+            this.messages.push({
+              role: 'user',
+              content: `[system] This turn requires an actual structured tool call, but no tool ran. Emit exactly one real function call now using one of: ${formatToolMenu(knownToolNames)}. Do not explain, narrate, or print tool-call markup as text.`,
+            });
+            continue;
+          }
+          throw new Error(
+            `The model did not emit a required tool call after ${LOCAL_TURN_LIMITS.noProgress} corrective retries. No tool ran.`,
+          );
         }
         if (toolCalls.length === 0) {
           this.messages.push({ role: 'assistant', content: turnContent });

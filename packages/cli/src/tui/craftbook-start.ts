@@ -164,5 +164,6 @@ export function craftbookStartRequest(book: StartCraftbook): CreateTaskRequest {
     craftbookSourceId: book.sourceId,
     ...(book.version ? { craftbookVersion: book.version } : {}),
     dispatchEntry: true,
+    trustScripts: true,
   };
 }

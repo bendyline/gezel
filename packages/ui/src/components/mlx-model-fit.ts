@@ -1,16 +1,16 @@
-import type { ChatModelManifest } from '@bendyline/gezel';
+import { type ChatModelManifest, estimateMlxResidentBytes } from '@bendyline/gezel';
 
 type MlxSizing = Pick<NonNullable<ChatModelManifest['mlx']>, 'approxSizeBytes' | 'residentBytes'>;
-
-/** Matches the native capacity broker's MLX fallback when no measured peak is cataloged. */
-export const MLX_FALLBACK_RESIDENT_FACTOR = 1.3;
 
 /**
  * Prefer the catalog's measured/estimated working set over download size.
  * Download bytes alone do not account for the live model and inference buffers.
  */
 export function mlxResidentBytes(mlx: MlxSizing): number {
-  return mlx.residentBytes ?? Math.round(mlx.approxSizeBytes * MLX_FALLBACK_RESIDENT_FACTOR);
+  // This must stay byte-identical to CapacityBroker. A stale 1.30x UI-only
+  // multiplier used to reject Qwen3.8 Flash Next's 112 GB MLX conversion on
+  // a 128 GiB Mac even though the measured daemon formula admits it.
+  return mlx.residentBytes ?? estimateMlxResidentBytes(mlx.approxSizeBytes);
 }
 
 export function mlxFitsMemoryBudget(mlx: MlxSizing, usableBytes: number): boolean {

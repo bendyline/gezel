@@ -7,20 +7,30 @@ type ChatBlock = ChatDoc['blocks'][number];
  * Squisq deliberately gives automatic templates a strong visual opinion. In
  * chat, preserve that richness while resolving an ambiguous signal in favour
  * of the authored structure: a list containing a short year/stat fragment is
- * still a list, not one giant statistic with the rows flattened beneath it.
+ * still a list, not one giant statistic or an implicit section header with
+ * the rows flattened beneath it.
  *
- * Explicit `{[statHighlight]}` annotations are untouched. This only corrects
- * Squisq's ephemeral auto-selection on a block whose whole body is a list.
+ * Explicit template annotations are untouched. This only corrects Squisq's
+ * ephemeral auto-selection (or its unmarked default section-header fallback)
+ * on a block whose whole body is a list.
  */
 function preferStructuredListTemplates(blocks: ChatBlock[]): void {
   for (const block of blocks) {
     const soleBodyNode = block.contents?.length === 1 ? block.contents[0] : undefined;
-    if (block.autoTemplate && block.template === 'statHighlight' && soleBodyNode?.type === 'list') {
+    const hasAuthoredTemplate = Boolean(
+      block.sourceHeading?.templateAnnotation?.template || block.promotedBodyAnnotation,
+    );
+    const isImplicitListFlatteningTemplate =
+      (block.autoTemplate === true && block.template === 'statHighlight') ||
+      (block.template === 'sectionHeader' && !hasAuthoredTemplate);
+
+    if (isImplicitListFlatteningTemplate && soleBodyNode?.type === 'list') {
       const listInputs = deriveTemplateInputs('list', block.title ?? '', block.contents, {
         preserveSourceHeading: true,
       });
       if (listInputs) {
         block.template = 'list';
+        block.autoTemplate = true;
         block.templateData = listInputs;
       }
     }

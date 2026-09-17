@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSuccessfulAsyncHandoff } from './provider.js';
+import { isSuccessfulAsyncHandoff } from './async-file-handoff.js';
 
 describe('isSuccessfulAsyncHandoff', () => {
   it('terminates after a successful role-typed delegate file handoff', () => {

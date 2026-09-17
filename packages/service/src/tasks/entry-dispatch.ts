@@ -9,9 +9,10 @@
  * - `POST /api/projects/:id/tasks` with `dispatchEntry: true` (the
  *   meester macros' path).
  *
- * NOTE: `TaskManager.create` fires only `onTaskCreated` (never
- * `onStepActivated`), so this explicit enqueue IS the single kickoff —
- * see the double-start comment at the craftbookInvoker in service.ts.
+ * NOTE: ordinary entry steps still need this explicit enqueue.
+ * `TaskManager.create` invokes `onStepActivated` only when deterministic
+ * entry setup auto-advances into a later phase; this helper detects that
+ * case and refuses to double-dispatch it.
  * Durability comes from the runner: if the daemon dies between enqueue
  * and dispatch, `TaskRunner.rehydrateFromStore` backfills on next boot
  * (recovery the old chat-notify never had).
@@ -36,7 +37,13 @@ export interface EntryDispatchResult {
   enqueued: boolean;
   gezelId?: string;
   assigneeName?: string;
-  reason?: 'not-active' | 'no-active-step' | 'spawn-host' | 'no-entry-gezel' | 'project-inactive';
+  reason?:
+    | 'not-active'
+    | 'no-active-step'
+    | 'entry-advanced'
+    | 'spawn-host'
+    | 'no-entry-gezel'
+    | 'project-inactive';
 }
 
 /**
@@ -60,6 +67,12 @@ export async function dispatchTaskEntry(
   const stepId = task.activeStepId;
   if (!stepId) {
     return { enqueued: false, reason: 'no-active-step' };
+  }
+  if (stepId !== task.craftbook.entryStepId) {
+    // Create-time setup may auto-advance. The new phase already went
+    // through onStepActivated (including runtime-owned fanout/barriers), so
+    // this entry-only helper must not enqueue a duplicate or stale turn.
+    return { enqueued: false, reason: 'entry-advanced' };
   }
   const step = task.craftbook.steps.find((s) => s.id === stepId);
   const gezelId = step ? stepOwnerGezelId(task, step) : undefined;

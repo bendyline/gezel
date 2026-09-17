@@ -1,6 +1,7 @@
 /**
  * pin-revisions — backfill the `revision` (commit SHA) pin onto every
- * chat-model manifest's `mlx` / `llamaCpp` source block.
+ * chat-model manifest's `mlx` / `llamaCpp` / `ds4` source block, including
+ * a ds4 vision encoder whose model-matched weights live in another repo.
  *
  * Why: downloads resolve from `huggingface.co/<repo>/resolve/<rev>/…`.
  * Without a pinned revision we fetch from the moving `main` tip, so an
@@ -125,8 +126,13 @@ function pinnedFiles(key: SourceBlock['key'], src: Record<string, unknown>): Pin
   }
   const mmproj = src.mmproj as { filename: string; sha256: string } | undefined;
   if (mmproj) out.push({ path: mmproj.filename, sha256: mmproj.sha256 });
-  const visionEncoder = src.visionEncoder as { filename: string; sha256: string } | undefined;
-  if (visionEncoder) out.push({ path: visionEncoder.filename, sha256: visionEncoder.sha256 });
+  const visionEncoder = src.visionEncoder as
+    | { huggingfaceRepo?: string; filename: string; sha256: string }
+    | undefined;
+  // A separately-published ds4 encoder is verified as its own source below.
+  if (visionEncoder && !visionEncoder.huggingfaceRepo) {
+    out.push({ path: visionEncoder.filename, sha256: visionEncoder.sha256 });
+  }
   const draftModel = src.draftModel as { filename: string; sha256: string } | undefined;
   if (draftModel) out.push({ path: draftModel.filename, sha256: draftModel.sha256 });
   return out;
@@ -143,6 +149,22 @@ function readSources(manifest: Record<string, unknown>): SourceBlock[] {
       revision: typeof src.revision === 'string' ? src.revision : undefined,
       files: pinnedFiles(key, src),
     });
+    if (key === 'ds4') {
+      const encoder = src.visionEncoder as Record<string, unknown> | undefined;
+      if (
+        encoder &&
+        typeof encoder.huggingfaceRepo === 'string' &&
+        typeof encoder.filename === 'string' &&
+        typeof encoder.sha256 === 'string'
+      ) {
+        out.push({
+          key,
+          repo: encoder.huggingfaceRepo,
+          revision: typeof encoder.revision === 'string' ? encoder.revision : undefined,
+          files: [{ path: encoder.filename, sha256: encoder.sha256 }],
+        });
+      }
+    }
   }
   return out;
 }

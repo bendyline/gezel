@@ -1,4 +1,8 @@
 import { ConfigStore } from './config-store.js';
+import {
+  readProjectCraftbookDocument,
+  updateProjectCraftbookDocument,
+} from './project-craftbook-document.js';
 export { ConfigCorruptionError } from './config-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -3301,8 +3305,13 @@ export class Store {
     );
   }
 
-  /** Per-project lock serializing {@link touchProject}'s metadata bumps. */
-  private readonly touchChains = new KeyedLock();
+  /**
+   * Per-project lock shared by {@link updateProject} and activity touches.
+   * Project classification and HTTP/CLI settings both funnel through
+   * `updateProject`; without a lock around that full read-patch-write cycle,
+   * whichever atomic rename lands last silently drops the other's fields.
+   */
+  private readonly projectUpdateLocks = new KeyedLock();
 
   async touchProject(id: string): Promise<void> {
     // Serialized per project AND best-effort. Every workspace write ends in
@@ -3312,7 +3321,7 @@ export class Store {
     // rename holds), silently-lost bumps elsewhere. And the caller's actual
     // write already succeeded by the time we run: a failed TIMESTAMP bump
     // must never convert that success into a 500.
-    await this.touchChains.run(id, async () => {
+    await this.projectUpdateLocks.run(id, async () => {
       try {
         const meta = await this.tryGetProjectMeta(id);
         if (!meta) return;
@@ -3442,6 +3451,13 @@ export class Store {
        */
       properties?: Record<string, string>;
     },
+  ): Promise<ProjectDetail> {
+    return this.projectUpdateLocks.run(id, () => this.updateProjectUnlocked(id, patch));
+  }
+
+  private async updateProjectUnlocked(
+    id: string,
+    patch: Parameters<Store['updateProject']>[1],
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
@@ -6880,6 +6896,8 @@ export class Store {
     if (versions.length === 0) return null;
     const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
     if (!versions.includes(chosen)) return null;
+    const document = await readProjectCraftbookDocument(join(versionsDir, chosen), id, chosen);
+    if (document !== undefined) return document;
     let parsedRaw: unknown;
     try {
       parsedRaw = JSON.parse(await readFile(join(versionsDir, chosen, 'manifest.json'), 'utf8'));
@@ -6923,6 +6941,7 @@ export class Store {
     const version = book.version ?? '1.0.0';
     const versionDir = join(dir, 'versions', version);
     await mkdir(versionDir, { recursive: true });
+    if (await updateProjectCraftbookDocument(versionDir, book)) return;
     const identityFile = join(dir, 'manifest.json');
     let writeIdentity = true;
     try {

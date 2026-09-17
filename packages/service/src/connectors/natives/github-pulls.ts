@@ -39,7 +39,42 @@ const DEFAULT_MAX_PULLS = 20;
 /** GitHub caps one PR at 3,000 changed files; overview adds one record. */
 const TASK_PR_RECORD_LIMIT = 3_001;
 /** Bump when persisted corpus metadata must be refreshed for unchanged PRs. */
-const CURSOR_SCHEMA = 'v2';
+const CURSOR_SCHEMA = 'v3';
+/** A child reviewer should have one small, finishable unit of work. */
+export const REVIEW_MAX_FILES_PER_BATCH = 8;
+/** Patch text, rather than file count alone, bounds local-model context growth. */
+export const REVIEW_TARGET_PATCH_CHARS = 24_000;
+
+export function partitionPullReviewFiles(
+  files: readonly GitHubPullFile[],
+): Array<{ start: number; end: number; paths: string[]; patchChars: number }> {
+  const batches: Array<{ start: number; end: number; paths: string[]; patchChars: number }> = [];
+  let paths: string[] = [];
+  let patchChars = 0;
+  let start = 1;
+  const flush = () => {
+    if (paths.length === 0) return;
+    batches.push({ start, end: start + paths.length - 1, paths, patchChars });
+    start += paths.length;
+    paths = [];
+    patchChars = 0;
+  };
+  for (const file of files) {
+    // A missing patch still needs one review record; count its metadata so
+    // binary/no-patch changes do not accumulate into an unbounded batch.
+    const chars = Math.max(file.patch?.length ?? 0, file.filename.length + 256);
+    if (
+      paths.length > 0 &&
+      (paths.length >= REVIEW_MAX_FILES_PER_BATCH || patchChars + chars > REVIEW_TARGET_PATCH_CHARS)
+    ) {
+      flush();
+    }
+    paths.push(file.filename);
+    patchChars += chars;
+  }
+  flush();
+  return batches;
+}
 
 function pullFileRecordId(num: number, filename: string): string {
   return `pr-${num}-file-${filename}`;
@@ -231,9 +266,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
 
   private overviewRecord(num: number, bundle: PullBundle): NormalizedRecord {
     const { detail, files, comments, diff } = bundle;
-    const batches = Array.from({ length: Math.ceil(files.length / 25) }, (_, index) => {
-      const start = index * 25;
-      const slice = files.slice(start, start + 25);
+    const batches = partitionPullReviewFiles(files).map((batch, index) => {
       return {
         number: index + 1,
         // Fanout name-collision guard. A declarative fanout lands each
@@ -244,16 +277,18 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         // everywhere the child meant its own batch. `number` stays for
         // existing readers; `batchNumber` is what a fanout addresses.
         batchNumber: index + 1,
-        start: start + 1,
-        end: start + slice.length,
-        paths: slice.map((file) => file.filename),
+        start: batch.start,
+        end: batch.end,
+        paths: batch.paths,
+        patchChars: batch.patchChars,
       };
     });
     const manifest = {
       schemaVersion: 1,
       pullRequest: num,
       totalFiles: files.length,
-      batchSize: 25,
+      batchSize: REVIEW_MAX_FILES_PER_BATCH,
+      batchTargetPatchChars: REVIEW_TARGET_PATCH_CHARS,
       batches,
       files: files.map((file, index) => ({
         ordinal: index + 1,

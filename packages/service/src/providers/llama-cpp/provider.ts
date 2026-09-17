@@ -106,6 +106,7 @@ export {
   hasSalvageableImmediateFileWriteContent,
   tryRepairMalformedWriteToolArguments,
 } from '../immediate-write-salvage.js';
+import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
@@ -1193,6 +1194,38 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 }
 
 type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
+type ReasoningEffortRequestShape = 'none' | 'ds4';
+
+/**
+ * Seed ds4-server's request-scoped reasoning control from the Gezel/session
+ * setting. Keep the chat-template form as the source of truth because Qwen's
+ * catalog profiles already use it, then mirror it to the top-level
+ * OpenAI-compatible field immediately before the request is sent.
+ */
+function applySessionReasoningEffort(
+  body: Record<string, unknown>,
+  shape: ReasoningEffortRequestShape,
+  reasoningEffort: string | undefined,
+): void {
+  if (shape !== 'ds4' || !reasoningEffort) return;
+  setChatTemplateKwarg(body, 'reasoning_effort', reasoningEffort);
+}
+
+/**
+ * Keep ds4-server's two accepted effort shapes identical after constrained
+ * turn rewriting. The rewrite may lower a catalog/session effort to `low`, so
+ * this must run at the final wire boundary rather than only after tuning.
+ */
+function syncReasoningEffortRequest(
+  body: Record<string, unknown>,
+  shape: ReasoningEffortRequestShape,
+): void {
+  if (shape !== 'ds4') return;
+  const kwargs = body.chat_template_kwargs;
+  if (!kwargs || typeof kwargs !== 'object' || Array.isArray(kwargs)) return;
+  const effort = (kwargs as Record<string, unknown>).reasoning_effort;
+  if (typeof effort === 'string') body.reasoning_effort = effort;
+}
 
 /**
  * Reasoning-depth handling now lives in `../reasoning-depth.ts` so both local
@@ -1462,6 +1495,8 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private readonly visionEnabled: boolean;
   private readonly disableThinkingRequestShape: DisableThinkingRequestShape;
+  /** Request-scoped effort shape for compatible wrappers such as ds4-server. */
+  private readonly reasoningEffortRequestShape: ReasoningEffortRequestShape;
   /** Engine batch width; see the `batchMaxConcurrency` constructor opt. */
   private readonly batchMaxConcurrency: number;
   /**
@@ -1609,6 +1644,12 @@ export class LlamaCppProvider implements LLMProvider {
      * needs DeepSeek-compatible top-level thinking fields.
      */
     disableThinkingRequestShape?: DisableThinkingRequestShape;
+    /**
+     * Forward `SessionOpts.reasoningEffort` on each request. DS4 accepts both
+     * the top-level OpenAI field and Qwen-style chat-template kwargs; ordinary
+     * llama-server providers retain their existing catalog-only behavior.
+     */
+    reasoningEffortRequestShape?: ReasoningEffortRequestShape;
     concurrency?: number;
     /**
      * Keep the queue's normal spare background lane. Defaults to true because
@@ -1708,6 +1749,7 @@ export class LlamaCppProvider implements LLMProvider {
     this.replayReasoningContent = opts.replayReasoningContent ?? false;
     this.visionEnabled = opts.visionEnabled ?? false;
     this.disableThinkingRequestShape = opts.disableThinkingRequestShape ?? 'chat-template';
+    this.reasoningEffortRequestShape = opts.reasoningEffortRequestShape ?? 'none';
     this.classifyLine = opts.classifyLine ?? classifyStartupLine;
     // 5-minute defaults match Ollama. Generous enough to cover a 30B
     // model's cold load + prefill on a single-GPU consumer box, tight
@@ -2072,6 +2114,8 @@ export class LlamaCppProvider implements LLMProvider {
       replayReasoningContent: this.replayReasoningContent,
       visionEnabled: this.visionEnabled,
       disableThinkingRequestShape: this.disableThinkingRequestShape,
+      reasoningEffortRequestShape: this.reasoningEffortRequestShape,
+      ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
       systemMessage: opts.systemMessage,
       ...(opts.systemPromptLayers ? { systemPromptLayers: opts.systemPromptLayers } : {}),
       ...(opts.volatileContext ? { volatileContext: opts.volatileContext } : {}),
@@ -2339,6 +2383,10 @@ interface LlamaCppSessionDeps {
   visionEnabled?: boolean;
   /** See {@link LlamaCppProvider.disableThinkingRequestShape}. */
   disableThinkingRequestShape: DisableThinkingRequestShape;
+  /** See {@link LlamaCppProvider.reasoningEffortRequestShape}. */
+  reasoningEffortRequestShape: ReasoningEffortRequestShape;
+  /** Request-scoped reasoning effort selected for this session. */
+  reasoningEffort?: string;
   /**
    * Context window (tokens) the underlying llama-server booted with.
    * Surfaced on the session as `numCtx` so {@link ChatManager.checkContextPressure}
@@ -2696,6 +2744,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         stream: false,
       };
       if (this.deps.tuning) applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
+      applySessionReasoningEffort(
+        body,
+        this.deps.reasoningEffortRequestShape,
+        this.deps.reasoningEffort,
+      );
       applyLlamaCppReasoningBudgetOverride(
         body,
         this.deps.disableThinkingRequestShape === 'chat-template',
@@ -2714,6 +2767,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
         }
       }
+      syncReasoningEffortRequest(body, this.deps.reasoningEffortRequestShape);
       const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3165,6 +3219,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         if (this.deps.tuning) {
           applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
         }
+        applySessionReasoningEffort(
+          body,
+          this.deps.reasoningEffortRequestShape,
+          this.deps.reasoningEffort,
+        );
         applyLlamaCppReasoningBudgetOverride(
           body,
           this.deps.disableThinkingRequestShape === 'chat-template',
@@ -4273,6 +4332,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         let res: Response;
         const requestStartedAt = Date.now();
         try {
+          // Constrained-turn rewrites above can lower the nested effort. Sync
+          // only at the final boundary so the top-level field cannot retain a
+          // stale, more expensive value.
+          syncReasoningEffortRequest(body, this.deps.reasoningEffortRequestShape);
           const reasoningDiagnostic = llamaCppReasoningRequestDiagnostic(body);
           if (reasoningDiagnostic) {
             log.debug(
@@ -5583,7 +5646,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           for (const r of coerced.repaired) {
             log.info(`[llama-cpp] repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`);
           }
-          toolCalls = coerced.calls as typeof toolCalls;
+          // After coercion, so two spellings of the same arguments compare equal.
+          const collapsed = collapseDuplicateToolCalls(coerced.calls);
+          for (const d of collapsed.dropped) {
+            log.info(
+              `[llama-cpp] collapsed ${d.count} duplicate ${d.name} call(s) emitted in this generation`,
+            );
+          }
+          toolCalls = collapsed.calls as typeof toolCalls;
         }
         // Always pull `<think>…</think>` reasoning out of the visible
         // commit and stash the captured trace so the chat bubble can

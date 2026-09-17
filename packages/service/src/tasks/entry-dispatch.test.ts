@@ -137,6 +137,21 @@ describe('dispatchTaskEntry', () => {
     expect(
       await dispatchTaskEntry(d, fixtureTask({ activeStepId: undefined as never })),
     ).toMatchObject({ enqueued: false, reason: 'no-active-step' });
+    expect(
+      await dispatchTaskEntry(
+        d,
+        fixtureTask({
+          activeStepId: 'later',
+          craftbook: {
+            ...fixtureTask().craftbook,
+            steps: [
+              ...fixtureTask().craftbook.steps,
+              { id: 'later', name: 'Later', createdAt: new Date().toISOString() },
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject({ enqueued: false, reason: 'entry-advanced' });
     expect(await dispatchTaskEntry(d, fixtureTask({ assignee: { kind: 'user' } }))).toMatchObject({
       enqueued: false,
       reason: 'no-entry-gezel',

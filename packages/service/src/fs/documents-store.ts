@@ -6,6 +6,7 @@ import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
 import { convertDocToMarkdown, isConvertibleDoc } from '../index-store/docs.js';
 import { writeFileAtomic } from './atomic.js';
+import { looksBinaryText } from './binary-text.js';
 import { DocumentAuditCoalescer } from './document-audit.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
@@ -18,17 +19,6 @@ import {
   walkDir,
   walkDirDetailed,
 } from './tree.js';
-
-/**
- * A utf8 decode of binary bytes yields replacement characters rather than
- * failing, so "did this read produce text?" has to be answered after the fact.
- */
-function looksBinary(text: string): boolean {
-  const sample = text.slice(0, 4096);
-  if (sample.includes('\u0000')) return true;
-  const replacements = sample.match(/�/g)?.length ?? 0;
-  return replacements > sample.length * 0.02;
-}
 
 export interface DocumentsStoreOptions {
   home: string;
@@ -164,7 +154,7 @@ export class DocumentsStore {
     }
     const text = await safeReadTextFile(this.documentsDir(), filePath);
     if (text === null) return null;
-    if (looksBinary(text)) {
+    if (looksBinaryText(text)) {
       return {
         content: `read_document: '${filePath}' is a binary file (${mimeTypeForFilename(
           filePath,

@@ -270,3 +270,86 @@ describe('GezelApp.revokeMyToken', () => {
     expect(calls[0]?.init.method).toBe('DELETE');
   });
 });
+
+describe('GezelApp cancellation', () => {
+  /** Record the RequestInit each call receives, so we can assert on `signal`. */
+  function recordingFetch(response: () => Response): {
+    fetch: typeof fetch;
+    calls: RequestInit[];
+  } {
+    const calls: RequestInit[] = [];
+    const impl = (async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return response();
+    }) as unknown as typeof fetch;
+    return { fetch: impl, calls };
+  }
+
+  const options = (fetchImpl: typeof fetch) => ({
+    baseUrl: 'https://127.0.0.1:1',
+    token: 't',
+    fetch: fetchImpl,
+  });
+
+  it('passes the signal through on every request-shaped method', async () => {
+    const controller = new AbortController();
+    const cases: Array<[string, (app: GezelApp) => Promise<unknown>]> = [
+      ['chat', (app) => app.chat({ model: 'm', messages: [] }, { signal: controller.signal })],
+      [
+        'embeddings',
+        (app) => app.embeddings({ model: 'm', input: 'x' }, { signal: controller.signal }),
+      ],
+      ['models', (app) => app.models({ signal: controller.signal })],
+      ['ensureModel', (app) => app.ensureModel({ model: 'm' }, { signal: controller.signal })],
+      ['revokeMyToken', (app) => app.revokeMyToken('a', { signal: controller.signal })],
+    ];
+
+    for (const [name, run] of cases) {
+      const { fetch: impl, calls } = recordingFetch(() => jsonResponse(200, {}));
+      await run(new GezelApp(options(impl)));
+      expect(calls[0]?.signal, name).toBe(controller.signal);
+    }
+  });
+
+  it('omits the signal entirely when the caller passes none', async () => {
+    // An explicit `signal: undefined` is not the same as no signal at all to
+    // every fetch implementation, so the field must simply be absent.
+    const { fetch: impl, calls } = recordingFetch(() => jsonResponse(200, {}));
+    await new GezelApp(options(impl)).models();
+    expect('signal' in (calls[0] ?? {})).toBe(false);
+  });
+
+  it('aborts a streamed generation rather than only stopping the read', async () => {
+    // A cancelled draft has to stop the provider too; a generation that keeps
+    // running after the user hit Stop is still occupying the device.
+    const controller = new AbortController();
+    const impl = (async (_url: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      return sseResponse('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n');
+    }) as unknown as typeof fetch;
+
+    controller.abort();
+    await expect(
+      new GezelApp(options(impl)).chat(
+        { model: 'm', messages: [], stream: true },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('does not wrap an abort in a GezelSdkError', async () => {
+    // Callers that already handle OpenAI-style cancellation should need no
+    // special case for this SDK.
+    const controller = new AbortController();
+    const impl = (async () => {
+      throw new DOMException('Aborted', 'AbortError');
+    }) as unknown as typeof fetch;
+    controller.abort();
+
+    const error = await new GezelApp(options(impl))
+      .models({ signal: controller.signal })
+      .catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(GezelSdkError);
+    expect((error as Error).name).toBe('AbortError');
+  });
+});

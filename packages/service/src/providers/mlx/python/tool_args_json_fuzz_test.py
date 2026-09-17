@@ -96,9 +96,12 @@ def reference(body: str, tools=TOOLS):
             sys.path.insert(0, os.path.join(root, "site-packages"))
             break
     try:
-        from mlx_vlm.tool_parsers import qwen3_coder  # type: ignore
-    except Exception as exc:  # mlx not installed (CI): skip, do not fail
-        raise _ReferenceUnavailable(str(exc)) from exc
+        from mlx_vlm.tools.parsers import qwen3_coder  # type: ignore
+    except Exception:
+        try:
+            from mlx_vlm.tool_parsers import qwen3_coder  # type: ignore
+        except Exception as exc:  # mlx not installed (CI): skip, do not fail
+            raise _ReferenceUnavailable(str(exc)) from exc
 
     return qwen3_coder.parse_tool_call(f"<function={body}", tools)
 

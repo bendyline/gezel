@@ -1,4 +1,4 @@
-import type { ProjectDetail } from '@bendyline/gezel';
+import type { GitHubPullFile, ProjectDetail } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
 import type { SecretStore } from '../../secrets/types.js';
@@ -8,6 +8,9 @@ import { sha8 } from '../writer.js';
 import {
   GitHubPullsAdapter,
   type GitHubPullsRuntime,
+  REVIEW_MAX_FILES_PER_BATCH,
+  REVIEW_TARGET_PATCH_CHARS,
+  partitionPullReviewFiles,
   pullNumberFromScope,
   pullScope,
   registerGitHubPullsAdapters,
@@ -113,6 +116,43 @@ describe('scope naming', () => {
     expect(pullNumberFromScope('pr-52')).toBe(52);
     expect(pullNumberFromScope('inbox')).toBeNull();
     expect(pullNumberFromScope('pr-0')).toBeNull();
+  });
+});
+
+describe('review batching', () => {
+  const file = (number: number, patch?: string): GitHubPullFile =>
+    ({
+      filename: `src/file-${number}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      patch,
+    }) as GitHubPullFile;
+
+  it('caps file count even for tiny patches', () => {
+    const files = Array.from({ length: REVIEW_MAX_FILES_PER_BATCH * 2 + 3 }, (_, index) =>
+      file(index + 1, '+small'),
+    );
+    const batches = partitionPullReviewFiles(files);
+    expect(batches.map((batch) => batch.paths.length)).toEqual([
+      REVIEW_MAX_FILES_PER_BATCH,
+      REVIEW_MAX_FILES_PER_BATCH,
+      3,
+    ]);
+    expect(batches.map((batch) => [batch.start, batch.end])).toEqual([
+      [1, REVIEW_MAX_FILES_PER_BATCH],
+      [REVIEW_MAX_FILES_PER_BATCH + 1, REVIEW_MAX_FILES_PER_BATCH * 2],
+      [REVIEW_MAX_FILES_PER_BATCH * 2 + 1, REVIEW_MAX_FILES_PER_BATCH * 2 + 3],
+    ]);
+  });
+
+  it('splits on patch size and isolates a single oversized record', () => {
+    const half = 'x'.repeat(REVIEW_TARGET_PATCH_CHARS / 2);
+    const files = [file(1, half), file(2, half), file(3, 'x'.repeat(35_000)), file(4)];
+    const batches = partitionPullReviewFiles(files);
+    expect(batches.map((batch) => batch.paths.length)).toEqual([2, 1, 1]);
+    expect(batches.flatMap((batch) => batch.paths)).toEqual(files.map((entry) => entry.filename));
+    expect(batches[1]?.patchChars).toBe(35_000);
   });
 });
 

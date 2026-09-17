@@ -86,6 +86,7 @@ describe('fetch_url route', () => {
     const res = await fetchUrl({ url: 'https://fixture.example/articles/42' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
+      finalUrl: 'https://fixture.example/articles/42',
       status: 200,
       statusText: 'OK',
       headers: {
@@ -167,7 +168,11 @@ describe('fetch_url route', () => {
 
     const res = await fetchUrl({ url: 'https://fixture.example/downloads/start' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ status: 200, body: 'redirected' });
+    expect(await res.json()).toMatchObject({
+      status: 200,
+      body: 'redirected',
+      finalUrl: 'https://fixture.example/downloads/final',
+    });
     expect(assertPublicUrl).toHaveBeenNthCalledWith(1, 'https://fixture.example/downloads/start');
     expect(assertPublicUrl).toHaveBeenNthCalledWith(2, 'https://fixture.example/downloads/final');
     expect(outboundFetch).toHaveBeenCalledTimes(2);

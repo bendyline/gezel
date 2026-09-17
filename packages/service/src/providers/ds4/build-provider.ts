@@ -13,6 +13,7 @@ import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
 import { nativeVisionEnabledFor } from '../vision-capability.js';
 import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
+import { ds4MtpArgs, resolveDs4Mtp } from './mtp.js';
 import { Ds4Provider } from './provider.js';
 
 const log = createLogger('chat');
@@ -88,6 +89,23 @@ export function ds4VisionArgs(vision: {
   return vision.enabled && vision.visionEncoderPath ? ['--vision', vision.visionEncoderPath] : [];
 }
 
+/** Model-specific memory/graph flags that must stay aligned with residency policy. */
+export function ds4RuntimeArgs(opts: {
+  ssdStreaming: boolean;
+  cacheExpertsGb?: number | undefined;
+  prefillChunk?: number | undefined;
+}): string[] {
+  const args: string[] = [];
+  if (opts.ssdStreaming) {
+    args.push('--ssd-streaming');
+    if (opts.cacheExpertsGb && opts.cacheExpertsGb > 0) {
+      args.push('--ssd-streaming-cache-experts', `${opts.cacheExpertsGb}GB`);
+    }
+  }
+  if (opts.prefillChunk) args.push('--prefill-chunk', String(opts.prefillChunk));
+  return args;
+}
+
 /**
  * Build a ds4 (DwarfStar) provider. `ds4-server` is wire-compatible with
  * `llama-server` (OpenAI `/v1/chat/completions` SSE), so this returns a
@@ -95,10 +113,11 @@ export function ds4VisionArgs(vision: {
  * external ds4-server (`config.ds4BaseUrl` / `GEZEL_DS4_SERVER_URL`) or a
  * supervised bundled `ds4-server` (`GEZEL_DS4_SERVER_BIN`).
  *
- * ds4 is not a general GGUF runner: it loads the specific DeepSeek-V4 and
- * GLM 5.2/5.3 quants its engine was built for, detecting the family at load time
- * from the GGUF's `general.architecture`. Models reach the supervised path
- * through the catalog's `ds4` source block, or an EXPLICIT GGUF via
+ * ds4 is not a general GGUF runner: it loads the specific DeepSeek V4/V4.1,
+ * GLM 5.2/5.3, and Qwen3.8 Flash Next quants its engine was built for,
+ * detecting the family at load time from the GGUF's `general.architecture`.
+ * Models reach the supervised path through the catalog's `ds4` source block,
+ * or an EXPLICIT GGUF via
  * `config.ds4ModelPath` / `GEZEL_DS4_MODEL`. GPU-only: `--metal` on darwin,
  * `--cuda` on linux (ds4's CPU path crashes the macOS kernel, so we never fall
  * back to it). Readiness probes `GET /v1/models` because ds4 has no `/health`
@@ -151,6 +170,11 @@ export async function buildDs4Provider(opts: {
     // ds4-server emits per-turn token usage only when the request asks via
     // stream_options.include_usage — opt in so usage/tok-s telemetry works.
     includeUsageInStream: true,
+    // Reasoning is a per-request server control. Mirror Gezel's selected
+    // effort into both the OpenAI-compatible field and Qwen-style template
+    // kwargs; the standalone agent's launch-time control is intentionally not
+    // part of the server argv.
+    reasoningEffortRequestShape: 'ds4' as const,
     // ds4-server replays assistant turns as `<think>{reasoning_content}</think>`
     // and keeps per-call DSML by tool-call id. Echoing the captured reasoning
     // back keeps the re-rendered history byte-identical to what was generated,
@@ -265,6 +289,11 @@ export async function buildDs4Provider(opts: {
       .then((st) => st.size)
       .catch(() => undefined);
   }
+  // Some ds4 GGUFs deliberately contain very large tables that never become
+  // resident: Qwen3.8 n-grams and DeepSeek V4.1 Engrams are read row-wise from
+  // disk in every mode. Charge the full-residency gate only for the weights
+  // that can actually enter RAM; older catalog entries fall back to file size.
+  const residentWeightBytes = ds4Source?.residentWeightBytes ?? modelSizeBytes;
 
   // The supervised launch may resolve its model by scanning installed models
   // (resolveDefaultModel above), so re-read the override against the id that
@@ -312,7 +341,10 @@ export async function buildDs4Provider(opts: {
   );
   const ssdStreaming = shouldUseDs4SsdStreaming({
     configured: config.ds4SsdStreaming,
-    modelSizeBytes,
+    ...(ds4Source?.ssdStreamingSupported !== undefined
+      ? { ssdStreamingSupported: ds4Source.ssdStreamingSupported }
+      : {}),
+    modelSizeBytes: residentWeightBytes,
     totalRamBytes,
     ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
   });
@@ -320,6 +352,11 @@ export async function buildDs4Provider(opts: {
     log.warn(
       `[ds4] ignored unsafe full-residency override for ${effectiveModelId ?? modelPath}; ` +
         `model=${modelSizeBytes ?? 'unknown'} bytes, system=${Math.round(totalRamGb)} GiB`,
+    );
+  }
+  if (config.ds4SsdStreaming === true && ds4Source?.ssdStreamingSupported === false) {
+    log.warn(
+      `[ds4] ignored SSD-streaming override for ${effectiveModelId ?? modelPath}; this model keeps its lookup tables on disk but does not implement routed-expert streaming`,
     );
   }
 
@@ -342,7 +379,7 @@ export async function buildDs4Provider(opts: {
       .catch(() => undefined);
     dsparkCompanionBytes = companionBytes ?? 0;
     companionFitsMemory = canUseDs4FullResidency({
-      modelSizeBytes,
+      modelSizeBytes: residentWeightBytes,
       totalRamBytes,
       ...(companionBytes !== undefined || visionResidentBytes > 0
         ? { companionBytes: (companionBytes ?? 0) + visionResidentBytes }
@@ -357,6 +394,27 @@ export async function buildDs4Provider(opts: {
     ...(dsparkSupportPath ? { supportModelPath: dsparkSupportPath } : {}),
   });
   if (dspark.unmetRequest) log.warn(`[ds4] ${dspark.unmetRequest}`);
+
+  // Model-embedded MTP (Qwen3.8 / GLM 5.3) is independent of DSpark's
+  // external support GGUF. `auto` requires an explicit catalog capability so
+  // older or hand-supplied models never receive a flag they may reject.
+  const mtpMode = (() => {
+    const raw = process.env.GEZEL_DS4_MTP;
+    return raw === 'off' || raw === 'on' || raw === 'auto' ? raw : config.ds4Mtp;
+  })();
+  const mtpExactSampling = (() => {
+    const raw = process.env.GEZEL_DS4_MTP_EXACT_SAMPLING;
+    if (raw === '1' || raw === 'true') return true;
+    if (raw === '0' || raw === 'false') return false;
+    return config.ds4MtpExactSampling;
+  })();
+  const mtp = resolveDs4Mtp({
+    mode: mtpMode,
+    ...(ds4Source?.mtp ? { catalog: ds4Source.mtp } : {}),
+    ...(mtpExactSampling !== undefined ? { exactSampling: mtpExactSampling } : {}),
+    dsparkEnabled: dspark.enabled,
+  });
+  if (mtp.unmetRequest) log.warn(`[ds4] ${mtp.unmetRequest}`);
 
   const cachePlan = planDs4ExpertCache({
     configuredGb: config.ds4CacheExpertsGb,
@@ -386,7 +444,7 @@ export async function buildDs4Provider(opts: {
   await mkdirDs4(kvDir, { recursive: true }).catch(() => {});
 
   // ds4-server compiles its Metal shaders from `./metal/*.metal` resolved
-  // relative to its working directory (19 sources, each only overridable by a
+  // relative to its working directory (each source is only overridable by a
   // separate env var — cwd is the clean lever). build.sh stages `metal/` next
   // to the binary, and the dev/external `GEZEL_DS4_SERVER_BIN` points at the
   // ds4 checkout which also has `metal/`, so cwd = the binary's directory.
@@ -441,11 +499,15 @@ export async function buildDs4Provider(opts: {
         const base = ssdStreaming
           ? Math.max(0, (projected ?? 8 * 1024 ** 3) - (ds4Source?.cacheExpertsBytes ?? 0)) +
             cacheExpertsGb * 1024 ** 3
-          : ds4BaseResidentBytes({ projectedBytes: projected, modelSizeBytes });
+          : ds4BaseResidentBytes({
+              projectedBytes: projected,
+              modelSizeBytes: residentWeightBytes,
+            });
         return {
           bytes: ds4ResidentBytesForMode(
             base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0),
             ssdStreaming,
+            ds4Source?.ssdStreamingSupported,
           ),
           exclusive: !ssdStreaming,
         };
@@ -506,13 +568,15 @@ export async function buildDs4Provider(opts: {
         // port. Nothing in Gezel needs it: the daemon talks to the engine
         // server-side, where CORS — a browser policy — does not apply.
       ];
-      if (ssdStreaming) {
-        args.push('--ssd-streaming');
-        if (cacheExpertsGb && cacheExpertsGb > 0) {
-          args.push('--ssd-streaming-cache-experts', `${cacheExpertsGb}GB`);
-        }
-      }
+      args.push(
+        ...ds4RuntimeArgs({
+          ssdStreaming,
+          cacheExpertsGb,
+          ...(ds4Source?.prefillChunk ? { prefillChunk: ds4Source.prefillChunk } : {}),
+        }),
+      );
       args.push(...ds4VisionArgs(vision));
+      args.push(...ds4MtpArgs(mtp));
       args.push(...ds4DsparkArgs(dspark));
       // Record the effective safety policy before spawn. ds4-server's own
       // stdout does not reliably echo its argv, and a hard lockup/force-quit
@@ -521,8 +585,10 @@ export async function buildDs4Provider(opts: {
         `[ds4-server] launch model=${effectiveModelId ?? basename(modelPath)} ` +
           `sizeGiB=${modelSizeBytes ? (modelSizeBytes / 1024 ** 3).toFixed(1) : 'unknown'} ` +
           `backend=${backendFlag.slice(2)} ctx=${numCtx} ` +
+          `prefillChunk=${ds4Source?.prefillChunk ?? 'engine-default'} ` +
           `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0} ` +
-          `vision=${vision.enabled} dspark=${dspark.enabled} (${dspark.reason})`,
+          `vision=${vision.enabled} mtp=${mtp.enabled} exactSampling=${mtp.exactSampling} (${mtp.reason}) ` +
+          `dspark=${dspark.enabled} (${dspark.reason})`,
       );
       return { command: binary, args, baseUrl: `http://127.0.0.1:${port}`, cwd: ds4BundleDir };
     },

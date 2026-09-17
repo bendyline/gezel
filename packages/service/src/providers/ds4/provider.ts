@@ -4,6 +4,9 @@ import type { NativeEngineLifecycleSnapshot } from '../native/supervisor.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import type { Ds4CacheAdapter } from './cache-adapter.js';
 
+/** Levels accepted by ds4-server's request parser for every supported family. */
+export const DS4_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
 /**
  * ds4 (DwarfStar) provider — antirez's specialized DeepSeek-V4/GLM inference
  * engine. `ds4-server` speaks the *identical* OpenAI-compatible
@@ -79,8 +82,16 @@ export class Ds4Provider implements LLMProvider {
     return this.inner.createSession(opts);
   }
 
-  listModels(): Promise<ModelInfo[]> {
-    return this.inner.listModels();
+  async listModels(): Promise<ModelInfo[]> {
+    const models = await this.inner.listModels();
+    return models.map((model) => ({
+      ...model,
+      supportsReasoning: true,
+      reasoningEfforts: [...DS4_REASONING_EFFORTS],
+      // This matches ds4-server's default when neither a catalog profile nor
+      // a per-gezel override supplies an effort.
+      defaultReasoningEffort: 'high',
+    }));
   }
 
   getEffectiveModelId(): string | undefined {

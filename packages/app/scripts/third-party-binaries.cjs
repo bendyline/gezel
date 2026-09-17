@@ -78,8 +78,13 @@ const THIRD_PARTY_PATTERNS = [
   // duckdb.exe carry their vendors' own signatures and must keep them —
   // duckdb.exe is Authenticode-signed by the DuckDB Foundation, so the
   // afterPack sweep must leave it byte-identical to their release.
+  //
+  // uv is the ONLY row above or below that widens to win32-arm64. The NVIDIA
+  // rows stay x64-scoped deliberately: CUDA does not exist for Windows-on-ARM,
+  // so an arm64 tree can never legitimately contain those DLLs, and a signing
+  // exemption must never be broader than the payload it excuses.
   {
-    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/uv\\.exe$',
+    pattern: '(?:^|/)(?:native-bin|native/build)/win32-(?:x64|arm64)(?:-[^/]+)?/uv\\.exe$',
     source: 'Astral uv (prebuilt release)',
   },
   {

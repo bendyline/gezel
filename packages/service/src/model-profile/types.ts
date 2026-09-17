@@ -135,6 +135,12 @@ export interface TurnCtx extends ModelCtx {
   userText: string;
   /** Tool calls that drained from the per-turn accumulator. */
   drained: ChatMessageToolCall[];
+  /**
+   * A preceding turn in this task-scoped session successfully read artifact
+   * evidence and persisted its complete result. Adjacent craftbook steps can
+   * deliberately review that replayed evidence without issuing the read again.
+   */
+  verifiedPriorArtifactRead?: boolean;
   /** Final assistant content for the just-completed turn. */
   assistantContent: string;
   /** How many continuation nudges have already fired in this user-initiated send. */

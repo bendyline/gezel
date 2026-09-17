@@ -250,6 +250,39 @@ describe('FabricationDetectPastTense behavior hook', () => {
     expect(verdict).toBeNull();
   });
 
+  it('accepts read claims backed by complete artifact evidence from a preceding task step', () => {
+    const verdict = FabricationDetectPastTense.postTurnDetector!(
+      turnCtx({
+        assistantContent: 'I just read the assigned patches and found one issue.',
+        drained: [],
+        verifiedPriorArtifactRead: true,
+      }),
+      undefined,
+    );
+    expect(verdict).toBeNull();
+  });
+
+  it('does not let prior read evidence excuse mutation claims or placeholders', () => {
+    const mutation = FabricationDetectPastTense.postTurnDetector!(
+      turnCtx({
+        assistantContent: 'I just wrote the corrected file.',
+        drained: [],
+        verifiedPriorArtifactRead: true,
+      }),
+      undefined,
+    );
+    const placeholders = FabricationDetectPastTense.postTurnDetector!(
+      turnCtx({
+        assistantContent: 'I have read the records for [Region One] and [Region Two].',
+        drained: [],
+        verifiedPriorArtifactRead: true,
+      }),
+      undefined,
+    );
+    expect(mutation).not.toBeNull();
+    expect(placeholders).not.toBeNull();
+  });
+
   it('still fires when every tool call errored (model claims success despite failure)', () => {
     const verdict = FabricationDetectPastTense.postTurnDetector!(
       turnCtx({

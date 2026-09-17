@@ -11,6 +11,8 @@ export interface CraftbookEvalOverride {
   scenarioId?: string;
   /** Links a hand-authored scenario instead of the generic adapter. */
   existingScenarioId?: string;
+  /** The linked custom scenario explicitly proves real workflow execution. */
+  handAuthoredWorkflowProof?: true;
   /**
    * Optional so an override can carry ONLY operational settings (a suite
    * timeout, say) without inventing a coverage claim the book has not
@@ -1788,13 +1790,21 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
   },
   'pull-request-review': {
-    existingScenarioId: 'large-pr-review',
+    existingScenarioId: 'pull-request-review-workflow',
+    handAuthoredWorkflowProof: true,
+    mode: 'workflow',
+    timeoutMs: 90 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Hand-authored large-pr-review scenario seeds a deterministic 120-file, >80 KB artifact corpus with an early API use, late valid definition, and final-file authorization defect. It gates exact path coverage, the late finding, no false missing-API claim, verdict, and unchanged source; a local-model validation has not run yet.',
+        'The pull-request-review-workflow scenario now dispatches the real craftbook over a deterministic 120-file corpus and grades attributed host completion, one child per adaptive batch, service-observed open-batch read receipts, review-batch writes, exact runtime coverage shards, deterministic ledger provenance, cited host synthesis, a seeded authorization finding, cross-file false-positive suppression, and source immutability. It is implemented but not yet promoted to validated pending a clean local-model eval run.',
     },
-    gaps: ['Run the large-pr-review scenario across the installed local-model matrix.'],
+    gaps: [
+      'Run the new workflow scenario successfully on a local model before promoting it to validated.',
+      'Replace more of the deterministic padding records with realistic varied patch shapes while retaining the exact 120-file provenance oracle.',
+      'Persist checkpoint and phase-latency budgets in the eval result so performance regressions fail explicitly rather than requiring log inspection.',
+    ],
   },
   'pwa-offline': {
     coverage: {

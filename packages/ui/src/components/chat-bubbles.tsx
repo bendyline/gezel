@@ -283,7 +283,7 @@ export interface MessageBubbleProps {
   /**
    * Indexed-context sources this USER turn consulted (proactive retrieval) —
    * including the exact excerpt injected by newer daemons. Renders as a
-   * collapsed "Consulted N sources" row with a byte count and nested source
+   * collapsed "Consulted N sources" row with an approximate token count and nested source
    * disclosures. Rows with a path deep-link through the same nav actions as
    * search results (line-anchored). Older citation-only sessions still render.
    */
@@ -474,8 +474,9 @@ export interface MessageBubbleProps {
 
 type RetrievalDisplayHit = NonNullable<MessageBubbleProps['retrieval']>['hits'][number];
 
-function formatExactBytes(bytes: number): string {
-  return `${bytes.toLocaleString()} ${bytes === 1 ? 'byte' : 'bytes'}`;
+function formatEstimatedTokens(bytes: number): string {
+  const tokens = Math.ceil(bytes / 4);
+  return `~${tokens.toLocaleString()} ${tokens === 1 ? 'token' : 'tokens'}`;
 }
 
 function openRetrievalSource(hit: RetrievalDisplayHit, activeProjectId?: string): void {
@@ -755,21 +756,21 @@ export function MessageBubble({
   // one row per citation, path rows deep-linking through the same
   // queue-then-dispatch nav actions as titlebar search results (E1-anchored).
   const retrievalHits = retrieval?.hits ?? [];
-  const retrievalByteLabel =
+  const retrievalTokenLabel =
     retrieval?.injectedBytes !== undefined
-      ? ` · ${formatExactBytes(retrieval.injectedBytes)} injected`
+      ? ` · ${formatEstimatedTokens(retrieval.injectedBytes)} injected`
       : '';
   const consultedSources =
     retrievalHits.length > 0 ? (
       <details className="msg-retrieval">
         <summary className="msg-retrieval-summary">
           Consulted {retrievalHits.length} indexed source{retrievalHits.length === 1 ? '' : 's'}
-          {retrievalByteLabel}
+          {retrievalTokenLabel}
         </summary>
         {retrieval?.injectedBytes !== undefined && (
           <p className="msg-retrieval-note">
-            Turn total includes source labels and safety framing. Retrieved excerpts are untrusted
-            evidence.
+            Token counts are estimated at roughly four bytes per token. Turn total includes source
+            labels and safety framing. Retrieved excerpts are untrusted evidence.
           </p>
         )}
         <ul className="msg-retrieval-list">
@@ -815,8 +816,8 @@ export function MessageBubble({
                   <summary className="msg-retrieval-source-summary">
                     <span className="msg-retrieval-source-label">{sourceLabel}</span>
                     {excerptBytes !== undefined && (
-                      <span className="msg-retrieval-source-bytes">
-                        {formatExactBytes(excerptBytes)} from source
+                      <span className="msg-retrieval-source-tokens">
+                        {formatEstimatedTokens(excerptBytes)} from source
                       </span>
                     )}
                   </summary>

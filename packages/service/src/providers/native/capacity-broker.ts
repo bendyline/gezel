@@ -779,9 +779,13 @@ export function localEngineKvBudgetBytes(opts: {
   engine: LocalProviderName;
   budgetBytes: number;
   weightsBytes: number;
+  /** Fixed working set with KV excluded. When absent, derive it from weightsBytes. */
+  weightsResidentBytes?: number;
   committedOtherBytes?: number;
 }): number {
-  const weightsResident = CapacityBroker.estimateResidentBytes(opts.engine, opts.weightsBytes);
+  const weightsResident =
+    opts.weightsResidentBytes ??
+    CapacityBroker.estimateResidentBytes(opts.engine, opts.weightsBytes);
   return opts.budgetBytes - (opts.committedOtherBytes ?? 0) - weightsResident;
 }
 
@@ -802,6 +806,8 @@ export function localEngineSlotCeiling(opts: {
   engine: LocalProviderName;
   budgetBytes: number;
   weightsBytes: number;
+  /** Fixed working set with KV excluded. When absent, derive it from weightsBytes. */
+  weightsResidentBytes?: number;
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;
@@ -847,6 +853,7 @@ export function localEngineSlotCeiling(opts: {
 export function llamaCppSlotCeiling(opts: {
   budgetBytes: number;
   weightsBytes: number;
+  weightsResidentBytes?: number;
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;

@@ -46,12 +46,12 @@ import {
   type DownloadEvent,
   type DownloadResult,
   DownloadRetryBudget,
-  GEZEL_DOWNLOAD_UA,
   existingPartialSize,
   friendlyErrors,
   friendlyFetchError,
   friendlyStatusError,
   friendlyStreamError,
+  huggingFaceRequestHeaders,
   downloadLog as log,
   rawErrorString,
   sleepRespectingAbort,
@@ -280,8 +280,10 @@ async function* runSingleAttempt(opts: {
   const abortFromCaller = (): void => ac.abort();
   signal?.addEventListener('abort', abortFromCaller);
 
-  const headers: Record<string, string> = { 'User-Agent': GEZEL_DOWNLOAD_UA };
-  if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
+  const headersFor = (requestUrl: string): Record<string, string> => ({
+    ...huggingFaceRequestHeaders(requestUrl),
+    ...(resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : {}),
+  });
 
   // Fetch with manual redirect so we can inspect the 302 before following it.
   // HuggingFace `/resolve/` URLs 302 to either a classic CDN blob (follow it)
@@ -291,7 +293,11 @@ async function* runSingleAttempt(opts: {
   // (2xx / small git-blob) responses are streamed directly.
   let res: Response;
   try {
-    res = await fetchImpl(url, { headers, redirect: 'manual', signal: ac.signal });
+    res = await fetchImpl(url, {
+      headers: headersFor(url),
+      redirect: 'manual',
+      signal: ac.signal,
+    });
     let hops = 0;
     while (isRedirect(res.status) && hops++ < 5) {
       const xetHash = res.headers.get('x-xet-hash');
@@ -315,8 +321,9 @@ async function* runSingleAttempt(opts: {
       } catch {
         /* */
       }
-      res = await fetchImpl(new URL(location, url).toString(), {
-        headers,
+      const redirectUrl = new URL(location, url).toString();
+      res = await fetchImpl(redirectUrl, {
+        headers: headersFor(redirectUrl),
         redirect: 'manual',
         signal: ac.signal,
       });

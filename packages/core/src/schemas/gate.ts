@@ -369,6 +369,27 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     expectPaths: z.string().min(1).optional(),
   }),
   /**
+   * A review-batch child may claim paths in a JSON shard only after the
+   * service has returned every line of that batch's exact artifact records
+   * to its model. Read evidence is service-written tool history, not a model
+   * assertion. Partial slices are accepted when their union covers the file.
+   */
+  z.object({
+    kind: z.literal('corpusReadEvidence'),
+    batchesFile: z.string().min(1),
+    /** Template-valued at authoring time; must resolve to a positive integer. */
+    batchNumber: z.string().min(1),
+    artifact: z.boolean().optional(),
+  }),
+  /** Every assigned changed path must have an explicit observations heading. */
+  z.object({
+    kind: z.literal('corpusBatchObservations'),
+    batchesFile: z.string().min(1),
+    batchNumber: z.string().min(1),
+    file: z.string().min(1),
+    artifact: z.boolean().optional(),
+  }),
+  /**
    * A fanout-input batch file must reproduce a connector corpus manifest's own
    * batch array exactly — same count, same ordinals, same paths, in order.
    *

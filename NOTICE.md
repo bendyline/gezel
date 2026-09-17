@@ -55,7 +55,7 @@ attribution file is taken from the exact Electron distribution being packaged.
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **Electron** | `43.4.1` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
+| **Electron** | `43.7.0` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
 | **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
 | **pnpm** | `11.15.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 | **DuckDB** | `1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
@@ -204,9 +204,9 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.4.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.4.1` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — Metal/BLAS/CPU/RPC backends) | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
-| **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `9ab70534` (`main-2026-09-05`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
+| **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `8db1d1d1` (`main-2026-09-16`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-789-5114672` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |

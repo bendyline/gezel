@@ -50,6 +50,21 @@ SUPPORTED_FORMATS = frozenset({"hermes", "gemma", "glm"})
 _LLG_TOKENIZER_CACHE: Dict[int, Any] = {}
 
 
+def _resolve_hf_tokenizer(tokenizer: Any) -> Any:
+    """Unwrap mlx-lm's TokenizerWrapper for llguidance.
+
+    The fast text-tower path exposes a ``TokenizerWrapper`` whose own
+    ``is_fast`` flag is true, but ``llguidance.hf.from_tokenizer`` only accepts
+    the underlying Hugging Face tokenizer. Hugging Face fast tokenizers also
+    have an ``_tokenizer`` attribute, but that object is a low-level
+    ``tokenizers.Tokenizer`` without ``is_fast``; requiring the inner object to
+    advertise ``is_fast`` therefore unwraps mlx-lm without over-unwrapping an
+    ordinary Transformers tokenizer.
+    """
+    inner = getattr(tokenizer, "_tokenizer", None)
+    return inner if getattr(inner, "is_fast", False) else tokenizer
+
+
 def _get_llg_tokenizer(tokenizer: Any) -> Any:
     """Build (and cache) an llguidance tokenizer for a HF tokenizer.
 
@@ -58,6 +73,7 @@ def _get_llg_tokenizer(tokenizer: Any) -> Any:
     trick mlx_vlm.structured uses. Keyed by id() since the tokenizer is a
     singleton held by the loaded model.
     """
+    tokenizer = _resolve_hf_tokenizer(tokenizer)
     cached = _LLG_TOKENIZER_CACHE.get(id(tokenizer))
     if cached is not None:
         return cached

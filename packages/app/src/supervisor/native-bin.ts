@@ -249,8 +249,9 @@ function resolvePlatformKey(): string | null {
     if (process.arch === 'x64') return 'linux-x64';
     if (process.arch === 'arm64') return 'linux-arm64';
   }
-  if (process.platform === 'win32' && process.arch === 'x64') {
-    return 'win32-x64';
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'win32-x64';
+    if (process.arch === 'arm64') return 'win32-arm64';
   }
   return null;
 }

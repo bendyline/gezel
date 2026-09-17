@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -177,6 +178,88 @@ describe('craftbook document routes — end to end', () => {
     expect(doneBody.gate).toBeUndefined();
     expect(doneBody.task.activeStepId).toBe('done');
   }, 120_000);
+
+  it('allows an owner to trust the launch snapshot and executes its custom gate on Windows', async () => {
+    const create = await api('POST', '/api/projects/default/tasks', {
+      title: 'Trusted custom gate',
+      description: 'Runs an explicitly trusted custom craftbook gate on every supported platform.',
+      assignee: { kind: 'user' },
+      craftbookId: 'doc-e2e',
+      trustScripts: true,
+    });
+    expect(create.status).toBe(201);
+    const task = (await create.json()) as { num: number; cliTrustedScriptHashes: string[] };
+    expect(task.cliTrustedScriptHashes).toContain(
+      createHash('sha256').update(GATE_SCRIPT).digest('hex'),
+    );
+    const marker = join(home, 'projects', 'default', 'workspace', 'marker.txt');
+    await mkdir(dirname(marker), { recursive: true });
+    await writeFile(marker, 'present');
+    const result = await api(
+      'POST',
+      `/api/projects/default/tasks/${task.num}/steps/build/complete`,
+    );
+    const body = (await result.json()) as {
+      gate?: { message?: string };
+      task: { activeStepId?: string };
+    };
+    expect(body.gate, body.gate?.message).toBeUndefined();
+    expect(body.task.activeStepId).toBe('done');
+  }, 60_000);
+
+  it('does not let an MCP session opt itself into custom-script trust', async () => {
+    const session = svc.context.tokenStore.issueSession({
+      appId: 'session:trust-test',
+      projectId: 'default',
+      gezelId: 'test',
+      team: true,
+    });
+    const result = await httpFetch(`${baseUrl}/api/projects/default/tasks`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Untrusted launch',
+        description: 'A model session must not authorize its own custom code.',
+        craftbookId: 'doc-e2e',
+        trustScripts: true,
+      }),
+    });
+    expect(result.status).toBe(403);
+    expect(await result.text()).toContain('Only an explicit owner');
+  });
+
+  it.runIf(process.platform !== 'darwin')(
+    'does not extend launch trust to scripts edited after task creation',
+    async () => {
+      const create = await api('POST', '/api/projects/default/tasks', {
+        title: 'Trust is content bound',
+        description: 'A later craftbook edit cannot silently inherit the launch authorization.',
+        assignee: { kind: 'user' },
+        craftbookId: 'doc-e2e',
+        trustScripts: true,
+      });
+      const task = (await create.json()) as { num: number };
+      const edited = await api(
+        'PUT',
+        `/api/projects/default/tasks/${task.num}/craftbook/document`,
+        {
+          content: JSON.stringify({
+            ...DOC,
+            scripts: { checkMarker: `${GATE_SCRIPT}\n// new code` },
+          }),
+          format: 'json',
+        },
+      );
+      expect(edited.status).toBe(200);
+      const result = await api(
+        'POST',
+        `/api/projects/default/tasks/${task.num}/steps/build/complete`,
+      );
+      const body = (await result.json()) as { gate?: { message?: string } };
+      expect(body.gate?.message).toContain('enforceable OS network boundary');
+    },
+    60_000,
+  );
 
   it('replaces a task craftbook via the document route, preserving step progress by id', async () => {
     const create = await api('POST', '/api/projects/default/tasks', {

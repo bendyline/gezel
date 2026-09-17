@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   _resetSourceIndexCache,
   assertLocalEngineSource,
+  chatModelDs4RuntimeHints,
   chatModelSources,
 } from './model-sources.ts';
 import { defaultProvider } from './providers.ts';
@@ -80,6 +81,17 @@ describe('chatModelSources', () => {
 
   it('returns undefined for ids not in the catalog index (cloud/CLI models)', () => {
     expect(chatModelSources('claude-sonnet-4-6')).toBeUndefined();
+  });
+});
+
+describe('chatModelDs4RuntimeHints', () => {
+  it('reads Qwen resident-weight and launch constraints from the resolved catalog', () => {
+    expect(chatModelDs4RuntimeHints('qwen3.8-flash-next-q2')).toEqual({
+      residentWeightBytes: 44807246316,
+      ssdStreamingSupported: false,
+      prefillChunk: 1024,
+      maxLaunchCtx: 8192,
+    });
   });
 });
 

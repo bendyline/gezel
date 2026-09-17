@@ -851,7 +851,7 @@ describe('TaskManager', () => {
     expect(await tasks.list({ assigneeGezelId: 'ada' })).toHaveLength(1);
   });
 
-  it('updatePhase patches description / prompt / assignee and leaves siblings alone', async () => {
+  it('updatePhase patches description / prompt / tool policy / assignee and leaves siblings alone', async () => {
     const t = await tasks.create('website', {
       title: 'Multi-phase',
       assignee: { kind: 'user' },
@@ -861,12 +861,17 @@ describe('TaskManager', () => {
     const updated = await tasks.updateStep('website', t.num, targetId, {
       description: 'wire up the canvas + game loop',
       prompt: 'You are Ada. Focus on the engine for this phase.',
+      toolPolicy: { allowTools: ['read_file', 'write_artifact'], outputMedium: 'artifact' },
       assignee: { kind: 'gezel', gezelId: 'ada' },
     });
     expect(updated).not.toBeNull();
     const target = updated!.craftbook.steps.find((s) => s.id === targetId)!;
     expect(target.description).toBe('wire up the canvas + game loop');
     expect(target.prompt).toBe('You are Ada. Focus on the engine for this phase.');
+    expect(target.toolPolicy).toEqual({
+      allowTools: ['read_file', 'write_artifact'],
+      outputMedium: 'artifact',
+    });
     expect(target.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
     // Other steps untouched.
     expect(updated!.craftbook.steps[0]!.description).toBeUndefined();
@@ -1046,6 +1051,10 @@ describe('TaskManager spawn craftbooks & children', () => {
   });
 
   it('spawnChild clones spawn-craftbook steps with fresh ids and sets parentTaskRef', async () => {
+    const activations: Array<{ kind?: string; stepId: string }> = [];
+    tasks.setStepActivatedHook(async ({ kind, newStep }) => {
+      activations.push({ kind, stepId: newStep.id });
+    });
     const parent = await tasks.create('website', {
       title: 'Write story',
       assignee: { kind: 'user' },
@@ -1061,6 +1070,7 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(child.activeStepId).toBe(child.craftbook.steps[0]!.id);
     // First-step assignee was a suggestion — child should inherit.
     expect(child.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
+    expect(activations).toEqual([{ kind: 'entry', stepId: child.craftbook.steps[0]!.id }]);
   });
 
   it('copies scheduled craftbook parameters onto each spawned child', async () => {

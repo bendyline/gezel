@@ -105,9 +105,13 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
     expect(task.activeStepId).toBe(second!.id);
     expect(first!.onEnterCompletedAt).toBe(first!.lastActivatedAt);
     expect(run).toHaveBeenCalledTimes(1);
-    // The create route dispatches the current step returned by create(); the
-    // auto-advance cascade must not also enqueue it through this hook.
-    expect(handoff).not.toHaveBeenCalled();
+    // Once entry setup auto-advances, the next phase goes through the normal
+    // activation lifecycle. The entry-only dispatcher refuses that later
+    // phase, so this is the single handoff (and runtime fanout hooks fire).
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(handoff).toHaveBeenCalledWith(
+      expect.objectContaining({ newStep: expect.objectContaining({ id: second!.id }) }),
+    );
   });
 
   it('does not repeat setup for an already-prepared activation', async () => {

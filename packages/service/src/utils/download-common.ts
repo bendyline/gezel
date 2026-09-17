@@ -27,6 +27,26 @@ export const downloadLog = createLogger('download');
  */
 export const GEZEL_DOWNLOAD_UA = `gezel/${GEZEL_VERSION} (+https://github.com/bendyline/gezel)`;
 
+/**
+ * Headers for an HF control-plane request. An optional operator token raises
+ * public-model rate limits, but is never forwarded to Xet/CAS/CDN hosts.
+ */
+export function huggingFaceRequestHeaders(
+  url: string,
+  token = process.env.HF_TOKEN ?? process.env.HUGGING_FACE_HUB_TOKEN,
+): Record<string, string> {
+  const headers: Record<string, string> = { 'User-Agent': GEZEL_DOWNLOAD_UA };
+  try {
+    if (new URL(url).hostname === 'huggingface.co' && token?.trim()) {
+      headers.Authorization = `Bearer ${token.trim()}`;
+    }
+  } catch {
+    // The fetch will surface an invalid URL. Do not add credentials while
+    // handling it here.
+  }
+  return headers;
+}
+
 /** Upper bound on *consecutive* failed attempts that made no headway. 5 covers
  * the dominant on-device failure modes (transient ISP blip, mid-day
  * congestion, brief HF rate-limit) without giving up too readily. An attempt

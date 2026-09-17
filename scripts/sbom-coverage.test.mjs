@@ -171,7 +171,10 @@ test('every native engine, helper component, and bundled runtime reaches the SBO
   assert.equal(adl.helperId, 'device-health');
   assert.equal(adl.binary, 'gezel-device-health');
   assert.equal(adl.license, 'MIT');
-  assert.deepEqual(adl.platforms, ['win32-x64']);
+  // Both Windows keys: the ADL declarations in device-health's main.cpp are
+  // `#ifdef _WIN32`-gated, not arch-gated, so they compile into the arm64
+  // binary too and the inventory must say so.
+  assert.deepEqual(adl.platforms, ['win32-x64', 'win32-arm64']);
   assert.match(adl.source, /^https:\/\/github\.com\/GPUOpen-LibrariesAndSDKs\/display-library$/);
   for (const platform of adl.platforms) {
     assert.ok(

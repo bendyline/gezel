@@ -56,21 +56,58 @@ export const RESEARCH_STEP_TOOLS: readonly string[] = [
   'run_playwright_script',
 ];
 
-/** Read/inspect — valid regardless of which drawer receives the result. */
+/**
+ * Read/inspect — valid regardless of which drawer receives the result.
+ *
+ * `read_doc_as_markdown` belongs here beside `read_file` because they are one
+ * capability split by file format, not two features. A roster that can open
+ * `brief.md` but not `brief.docx` is arbitrary from the model's side, and the
+ * craftbooks say so out loud — powerpoint-deck's research step instructs "use
+ * `read_doc_as_markdown` for DOCX/PPTX/PDF/XLSX and `read_file` for text or
+ * Markdown".
+ *
+ * Wild-caught on the first binary-source PowerPoint trial: the researcher was
+ * handed a .docx `sourcePath`, had no converter on its step roster, fell back
+ * to `read_file`, and the whole run unravelled from there — a source packet
+ * with no real facts, a deck of invented filler that failed value grounding,
+ * and finally a reviewer with nothing real to cite writing the prompt's own
+ * `(source: …)` placeholder until the gate plateaued and paused the task.
+ * Every downstream symptom had this one missing tool underneath it.
+ */
 const WORKSPACE_READ_CORE: readonly string[] = [
   'read_file',
   'read_files',
+  'read_doc_as_markdown',
   'list_dir',
   'stat',
   'validate',
 ];
 
-/** Mutate the shipped workspace (or its diffpack overlay). */
+/**
+ * Mutate the shipped workspace (or its diffpack overlay).
+ *
+ * `copy_artifact_to_workspace` is the only NON-TEXT writer here, and that is
+ * exactly why it belongs: a binary deliverable — a .pptx, .docx, .pdf, an
+ * image — cannot be produced by any of the four text writers, and the books
+ * say so ("Never send PowerPoint bytes through text-write tools"). Without it
+ * a step whose deliverable is a binary at a workspace path has no tool that
+ * can deliver it.
+ *
+ * Wild-caught on the powerpoint-deck publish step, which converts, previews,
+ * and saves the deck into the artifacts drawer correctly and then cannot copy
+ * it to the requested workspace `outputPath`. The book even anticipates the
+ * absence — "If that tool is missing, record the retained path and exact
+ * blocker" — which is what made it invisible: `promptMandatedTools` reads
+ * that sentence as an availability fallback and stops treating the tool as
+ * mandated, so the runtime drops it and the book's contingency becomes
+ * self-fulfilling.
+ */
 const WORKSPACE_WRITE_CORE: readonly string[] = [
   'write_file',
   'append_to_file',
   'replace_in_file',
   'replace_lines',
+  'copy_artifact_to_workspace',
 ];
 
 const KIND_ADDITIONS: Partial<Record<DeliverableKind, readonly string[]>> = {

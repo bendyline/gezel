@@ -89,6 +89,117 @@ gezel --home /path/to/another-home        # standalone with an alternate home
 An explicit `--port 6228` remains available when you intentionally want a
 CLI-owned daemon on the canonical port.
 
+## Provider credentials
+
+Manage provider keys through the service credential store, using stdin or an
+existing environment variable so the value does not appear in command arguments:
+
+```bash
+gezel secret list
+gezel secret set braveSearchApiKey --env BRAVE_SEARCH_API_KEY --use-for-search
+gezel secret set openaiApiKey --stdin < /path/to/private-key-file
+gezel secret remove openaiApiKey
+```
+
+`--use-for-search` also selects Brave (or Tavily for `tavilyApiKey`) as the
+search provider while preserving its other settings. Without it, setting a
+credential leaves provider selection unchanged. `secret list` gives the supported
+names and whether each is configured; credentials are write-only and never
+printed. All three commands support `--json`, and honor `--home` / `--connect`.
+This covers the built-in provider credentials, including webhooks; it is not an
+arbitrary environment-variable store. Storage uses the same native keyring or
+encrypted fallback as the application.
+
+Search also requires the selected environment to allow external services.
+`gezel security external-services` shows that setting; append `on` or `off` to
+change it explicitly while preserving all other security capabilities. This
+permission covers model-initiated external services, including web search.
+Saving a credential does not silently enable it.
+
+`gezel model context <id> 65536` sets a local model's context window for its next
+launch; omit the token count to inspect it, or use `auto` to clear the override.
+Use `--provider llama-cpp|mlx|ds4` to select an engine (defaults to the platform's
+local engine). This can bound memory use for unattended batch tasks.
+
+`gezel model concurrency 1` limits the local engine to one inference slot and
+reduces its context-cache reservation. This is useful for serial batches with
+large models. It preserves other providers' limits; `--provider` selects an
+engine, and `auto` restores automatic sizing. Omit the value to inspect it.
+
+`gezel env indexing off` disables optional background workspace indexing in
+the current directory's project (or `--project` target). Artifact-driven batch
+workflows over large generated datasets can use this to avoid unnecessary
+indexing. `on` restores it; omitting the value reports its current state.
+Both settings commands support `--json` and the ordinary connection/home flags.
+
+## Batch craftbooks and repository workflows
+
+`do` accepts positional parameters in the recipe's `paramSchema.properties`
+order, `key=value` arguments, and repeatable `--param key=value` options:
+
+```bash
+gezel do story-batch c23n limit=3 --wait --json
+gezel task wait my-project/12 --timeout 7200 --json
+gezel task resume my-project/12 --json
+gezel task notes my-project/12 --warnings --json
+```
+
+Only explicit values are sent; the service resolves defaults such as
+`{{task.dir}}` after allocating the task. Waiting exits with 0 for completion,
+1 for cancellation, 2 for a paused task or pending user question, and 3 for a
+timeout. A timeout leaves the daemon task running. Progress goes to stderr;
+`--json` emits the result on stdout. `resume` retries a paused task using its
+saved recipe. Answer pending questions in Gezel before waiting again.
+
+For deterministic orchestration around several craftbooks, create
+`.gezel/workflows/storyify.mjs`:
+
+```js
+export async function run({ client, projectId, workspace, args, log, runCraftbook }) {
+  const [region] = args;
+  log(`Working on ${region} in ${workspace}`);
+  return runCraftbook('story-batch', { region });
+}
+```
+
+Run it with `gezel workflow storyify c23n --json`. The module receives the
+public `GezelClient`, the directory's project id, its absolute workspace,
+arguments, a stderr logger, and `runCraftbook(id, params, options)`. That helper
+starts a **project** craftbook and waits; options include `timeoutMs`, a saved
+`taskRef` to follow, `parentTaskRef` to link the child to its batch, and
+`onCreated(task)` to checkpoint the new reference.
+Returning an object with `exitCode` sets the shell exit status. Module paths
+also work: `gezel workflow ./pipeline/storyify.mjs c23n`.
+
+To expose that driver as one command, add
+`"cliWorkflow": { "module": ".gezel/workflows/storyify.mjs" }` to a project
+craftbook and declare its inputs in `paramSchema`. Then run
+`gezel do my-batch c23n limit=200 --json`. Its module receives `craftbook` and
+validated explicit `params` in addition to the context above. The driver owns
+parent creation, defaults, checkpoints, bounded child concurrency, and the
+final result. Modules must resolve inside the project workspace. Only project
+craftbooks can use this entry point; `--strict-sandbox` rejects it.
+
+These drivers run in the foreground even without `--wait`; keep the terminal
+open until completion. A timeout applies to each child wait. If the CLI exits,
+already-created daemon tasks survive, but further orchestration requires the
+workflow's resume command. `gezel task wait` observes a parent and its children;
+it does not restart a repository driver.
+
+Project recipes live in `.gezel/craftbooks/<id>/manifest.json` (identity) and
+`versions/<version>/craftbook.json` (the complete recipe, including embedded
+scripts). Legacy version manifests plus `scripts/*.ts` remain supported.
+Changing a recipe affects new tasks; running tasks retain their snapshots.
+
+CLI craftbook launches, including TUI `/do`, authorize the exact embedded
+script contents in that task snapshot. On Windows and other platforms without
+an enforceable OS network boundary, those scripts use best-effort network
+isolation. Declared capabilities and project/security policies still apply.
+Use `gezel do ... --strict-sandbox` to require the OS boundary instead. Edited
+scripts do not inherit the old source's trust, and a model session cannot
+grant trust. Workflow modules themselves run as ordinary local Node code,
+with the invoking user's permissions, like an npm script.
+
 ## What you get with no further setup
 
 The CLI does not bundle model weights or native inference engines; those are
@@ -145,6 +256,10 @@ Run `gezel --help` for the full list. The most-used ones:
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
 | `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id or display name |
+| `gezel workflow <name-or-file> [args…]` | Run an explicitly trusted repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
+| `gezel secret list / set / remove` | Manage write-only provider credentials, including Brave and Tavily search keys |
+| `gezel task wait <ref>` / `resume <ref>` | Follow a task to completion, or retry a paused task and follow it |
+| `gezel task notes <ref> --warnings` | Read task notes and runtime warnings from its recent sessions |
 | `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |

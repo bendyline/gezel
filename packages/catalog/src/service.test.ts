@@ -36,6 +36,40 @@ describe('CatalogService against bundled data', () => {
     }
   });
 
+  it('exposes Qwen 3.8 Flash Next with disk-only n-grams, matched vision, and MTP', async () => {
+    const detail = await service.get('chat-model', 'qwen3.8-flash-next-q2');
+    expect(detail?.manifest.kind).toBe('chat-model');
+    if (detail?.manifest.kind === 'chat-model') {
+      expect(detail.manifest.ds4).toMatchObject({
+        revision: 'd600fe1a43d2e1cdcadb85144ce3142f66f9eefe',
+        sha256: 'b1b93fa69aca5f187b0fb813aca8f3ec1beb5cf8cf0bd38cf041b93e0b6ccac9',
+        approxSizeBytes: 147_207_127_040,
+        residentWeightBytes: 44_807_246_316,
+        ssdStreaming: false,
+        ssdStreamingSupported: false,
+        prefillChunk: 1024,
+        maxLaunchCtx: 8192,
+        visionEncoder: {
+          huggingfaceRepo: 'ggml-org/Qwen3.8-Flash-Next-GGUF',
+          revision: '01534bc2e1877d5de995b73d247d4459d273e688',
+          filename: 'mmproj-Qwen3.8-Flash-Next-Q8_0.gguf',
+          sha256: 'b2e9b5e4a44c107f8867e67dbf09b607fd99ae33c1a97a60a6720aeb252a9dad',
+          sizeBytes: 616_703_104,
+        },
+        mtp: { exactSampling: true },
+      });
+    }
+  });
+
+  it('enables the embedded GLM 5.3 MTP block without an external companion', async () => {
+    const detail = await service.get('chat-model', 'glm-5.3-flash-320b-q2');
+    expect(detail?.manifest.kind).toBe('chat-model');
+    if (detail?.manifest.kind === 'chat-model') {
+      expect(detail.manifest.ds4?.mtp).toEqual({ exactSampling: true });
+      expect(detail.manifest.ds4?.draftModel).toBeUndefined();
+    }
+  });
+
   it('caps Gemma E4B thinking so llama.cpp does not use the unrestricted default', async () => {
     const detail = await service.get('chat-model', 'gemma4-e4b-q4');
     expect(detail?.manifest.kind).toBe('chat-model');

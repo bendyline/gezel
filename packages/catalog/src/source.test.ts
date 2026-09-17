@@ -392,6 +392,9 @@ describe('BundledSource — versioned layout', () => {
         filename: 'model.gguf',
         sha256: 'a'.repeat(64),
         approxSizeBytes: 100,
+        residentWeightBytes: 80,
+        ssdStreamingSupported: false,
+        prefillChunk: 1024,
       },
     });
     const src = new BundledSource(root);
@@ -403,6 +406,9 @@ describe('BundledSource — versioned layout', () => {
       url: 'https://example.com/core-model',
     });
     expect(found.manifest.ds4?.filename).toBe('model.gguf');
+    expect(found.manifest.ds4?.residentWeightBytes).toBe(80);
+    expect(found.manifest.ds4?.ssdStreamingSupported).toBe(false);
+    expect(found.manifest.ds4?.prefillChunk).toBe(1024);
   });
 });
 

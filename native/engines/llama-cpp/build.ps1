@@ -1,7 +1,7 @@
 # build.ps1 - Windows build of llama-server from the pinned
 # llama.cpp upstream.
 #
-# Emits: native/build/win32-x64[-<backend>]/gezel-llama-server.exe
+# Emits: native/build/win32-{x64,arm64}[-<backend>]/gezel-llama-server.exe
 #
 # Backend defaults to CUDA (nvcc on PATH) -> Vulkan (Vulkan SDK present)
 # -> CPU. Override with $env:LLAMA_BACKEND (values: cuda, vulkan, cpu).
@@ -22,6 +22,22 @@ $ErrorActionPreference = 'Stop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $here '..\..\..') | Select-Object -ExpandProperty Path
+$src = Join-Path $here '.upstream'
+$runtimePatch = Join-Path $here 'patches\muse-runtime.patch'
+# Recover only our exact patch after an interrupted build, preserving other edits.
+if (Test-Path (Join-Path $src '.git')) {
+  $patchApplied = & {
+    # Windows PowerShell turns native stderr into a terminating error under
+    # Stop, even when redirected. A clean checkout is an expected probe miss.
+    $ErrorActionPreference = 'Continue'
+    & git -C $src apply --reverse --check $runtimePatch 2>$null
+    $LASTEXITCODE -eq 0
+  }
+  if ($patchApplied) {
+    & git -C $src apply --reverse $runtimePatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not recover Muse runtime patch' }
+  }
+}
 
 # -- 1. Ensure upstream is cloned + pinned -------------------------
 $fetchScript = Join-Path $repoRoot 'native\scripts\fetch-upstream.sh'
@@ -49,11 +65,45 @@ if ($null -ne $bash) {
 }
 
 $src = Join-Path $here '.upstream'
-$platform = 'win32-x64'
+& git -C $src apply --check $runtimePatch
+if ($LASTEXITCODE -ne 0) { throw 'Muse runtime patch does not match the upstream pin' }
+& git -C $src apply $runtimePatch
+if ($LASTEXITCODE -ne 0) { throw 'Could not apply Muse runtime patch' }
+try {
+
+# -- 1b. Resolve target architecture -------------------------------
+# Windows ships on x64 and arm64 (Snapdragon X / WoA). The two legs differ
+# in more than a directory name: ggml raises
+# `FATAL_ERROR "MSVC is not supported for ARM, use clang"`, so the arm64
+# build has to go through upstream's own clang toolchain file, and its CPU
+# backend cannot use runtime ISA dispatch (see section 2b).
+$targetArch = if ($env:GEZEL_TARGET_ARCH) {
+  $env:GEZEL_TARGET_ARCH
+} else {
+  $env:PROCESSOR_ARCHITECTURE
+}
+switch -Regex ($targetArch) {
+  '^(ARM64|aarch64)$'    { $platform = 'win32-arm64'; break }
+  '^(AMD64|x64|x86_64)$' { $platform = 'win32-x64';   break }
+  default { throw "unsupported Windows architecture: $targetArch (set GEZEL_TARGET_ARCH to x64 or arm64)" }
+}
+$isArm64 = $platform -eq 'win32-arm64'
 
 # -- 2. Resolve accelerator ----------------------------------------
 $backend = if ($env:LLAMA_BACKEND) { $env:LLAMA_BACKEND } else { 'auto' }
 $llamaCudaArch = if ($env:LLAMA_CUDA_ARCH) { $env:LLAMA_CUDA_ARCH } else { '' }
+if ($isArm64) {
+  # CPU is the only shippable backend on Windows-on-ARM. NVIDIA publishes no
+  # CUDA for WoA, and LunarG no ARM64 Vulkan SDK (so there is no glslc to
+  # compile the shaders with). Adreno is reachable through OpenCL, which
+  # needs OpenCL-Headers + OpenCL-ICD-Loader built from source - a separate
+  # variant, not this one. Refuse rather than silently downgrade, so a
+  # mistaken LLAMA_BACKEND in CI is loud.
+  if ($backend -notin @('auto', 'cpu')) {
+    throw "LLAMA_BACKEND=$backend is not available on win32-arm64 (cpu only)"
+  }
+  $backend = 'cpu'
+}
 if ($backend -eq 'auto') {
   if (Get-Command nvcc -ErrorAction SilentlyContinue) {
     $backend = 'cuda'
@@ -79,14 +129,42 @@ $cmakeFlags = @(
   # instruction set, and CI cannot catch it because the machine that
   # built the binary can by definition execute it. See the much longer
   # note in build.sh; this is the same defect on the same runner pool.
-  #
-  # NATIVE=OFF + BACKEND_DL + CPU_ALL_VARIANTS is upstream's own release
-  # recipe: one dlopen-able ggml-cpu-<variant>.dll per ISA level, chosen
-  # at load time by ggml_backend_load_all() from what the running CPU
-  # actually reports.
+  # How the portable CPU code is then selected differs per arch - see
+  # section 2b.
   '-DGGML_NATIVE=OFF',
-  '-DGGML_BACKEND_DL=ON',
-  '-DGGML_CPU_ALL_VARIANTS=ON',
+  '-DGGML_BACKEND_DL=ON'
+)
+
+# -- 2b. CPU ISA policy --------------------------------------------
+# x64 gets upstream's release recipe: one dlopen-able ggml-cpu-<variant>.dll
+# per ISA level, picked at load time from what the running CPU reports.
+#
+# arm64 cannot. ggml's ARM variant table (ggml/src/CMakeLists.txt) covers
+# Linux, Android and Apple only and raises
+# `FATAL_ERROR "Unsupported ARM target OS: Windows"` otherwise, and
+# GGML_CPU_ARM_ARCH and GGML_CPU_ALL_VARIANTS are mutually exclusive besides.
+# So this leg pins ONE baseline for every shipping Windows-on-ARM part.
+#
+# The default deliberately excludes SVE and SME. Snapdragon X Elite (Oryon)
+# has neither, and the windows-11-arm CI runners - Cobalt / Neoverse-class -
+# have both, so a host-tuned build is green in CI and SIGILLs on the target
+# laptop. `armv8.2-a+dotprod+fp16` also still runs on the 8cx-era parts,
+# which lack the i8mm that Oryon has. Raising this to `armv8.7-a` (Oryon's
+# actual level, i8mm included) is a measurable win that the Phase 0 spike
+# should A/B on real hardware - override with LLAMA_ARM_ARCH - but it drops
+# the older devices, so it is not the default until someone has measured it.
+#
+# Whatever lands here, scripts/assert-arm64-baseline.mjs disassembles the
+# result and fails the build if SVE or SME instructions appear.
+if ($isArm64) {
+  $armArch = if ($env:LLAMA_ARM_ARCH) { $env:LLAMA_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' }
+  $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$armArch"
+  Write-Host "[build] arm64 CPU baseline: $armArch (SVE/SME excluded by design)"
+} else {
+  $cmakeFlags += '-DGGML_CPU_ALL_VARIANTS=ON'
+}
+
+$cmakeFlags += @(
   # Upstream defaults LLAMA_BUILD_IS_DEV=ON, which stamps the binary
   # `<version>-dev`; its CMakeLists says to set it OFF "when making a release
   # from a release tag (vX.Y.Z)", which is always what gezel pins. Mirrors
@@ -135,9 +213,35 @@ if ($backend -eq 'cuda' -and $env:CUDA_PATH) {
   $toolsetArgs = @('-T', "cuda=$env:CUDA_PATH")
   Write-Host "[build] CUDA toolset -> $env:CUDA_PATH"
 }
-& cmake -S $src -B $buildDir @toolsetArgs @cmakeFlags
+
+# arm64 needs clang, not MSVC: ggml's ARM branch opens with
+# `FATAL_ERROR "MSVC is not supported for ARM, use clang"`. Upstream ships a
+# toolchain file of its own, but it hardcodes -march=armv8.7-a; gezel's
+# native/cmake/arm64-windows-llvm.cmake carries the same flags with the
+# baseline as one overridable knob, shared with sd-cpp and whisper-cpp so
+# the three legs cannot drift. The toolchain is also Ninja-only - it sets
+# CMAKE_C_COMPILER=clang, which the Visual Studio generator cannot honour -
+# and Ninja is single-config, so the `--config Release` the VS generator
+# needs must not be passed on this branch.
+$generatorArgs = @()
+if ($isArm64) {
+  $toolchain = Join-Path $repoRoot 'native\cmake\arm64-windows-llvm.cmake'
+  if (-not (Test-Path $toolchain)) {
+    throw "arm64 toolchain file not found at $toolchain"
+  }
+  foreach ($tool in @('clang', 'ninja')) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+      throw "$tool is not on PATH; the win32-arm64 build needs the LLVM toolchain and Ninja"
+    }
+  }
+  $generatorArgs = @('-G', 'Ninja', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DGEZEL_ARM_ARCH=$armArch")
+}
+
+& cmake -S $src -B $buildDir @generatorArgs @toolsetArgs @cmakeFlags
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
-& cmake --build $buildDir --config Release --target llama-server -j
+$buildArgs = @('--build', $buildDir, '--target', 'llama-server', '-j')
+if (-not $isArm64) { $buildArgs = @('--build', $buildDir, '--config', 'Release', '--target', 'llama-server', '-j') }
+& cmake @buildArgs
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
 # -- 4. Locate + copy the produced binary --------------------------
@@ -202,18 +306,42 @@ Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
     Write-Host "[build] bundled $($_.Name)"
   }
 
-# CPU-dispatch guard, mirroring build.sh section 6b2. GGML_CPU_ALL_VARIANTS
-# is only doing its job if several ggml-cpu-<variant>.dll modules landed;
-# if a pin bump drops the option or renames them, cmake does NOT fail - it
-# quietly reverts to one host-tuned ggml-cpu.dll and the symptom is a SIGILL
-# on somebody else's machine weeks later. Assert the shape while we can.
+# CPU-dispatch guard, mirroring build.sh section 6b2. Both arches are
+# defending against the same thing - a CPU backend silently compiled for the
+# build host - but they reach it from opposite directions, so the guard is
+# the opposite shape on each.
+#
+# x64: GGML_CPU_ALL_VARIANTS is only doing its job if several
+# ggml-cpu-<variant>.dll modules landed; if a pin bump drops the option or
+# renames them, cmake does NOT fail - it quietly reverts to one host-tuned
+# ggml-cpu.dll and the symptom is a SIGILL on somebody else's machine weeks
+# later.
+#
+# arm64: runtime dispatch is unavailable (section 2b), so exactly ONE
+# ggml-cpu.dll is correct and several would mean CPU_ALL_VARIANTS came back -
+# which on this platform cannot have worked, because ggml has no Windows ARM
+# variant table. The baseline that module was compiled to is what actually
+# matters here, and that is proven downstream by
+# scripts/assert-arm64-baseline.mjs disassembling it.
 $variantDlls = @(Get-ChildItem -Path $outDir -Filter 'ggml-cpu-*.dll' -ErrorAction SilentlyContinue)
-if ($variantDlls.Count -lt 2) {
-  throw ("expected multiple ggml-cpu-<variant>.dll modules, found $($variantDlls.Count) - " +
-         "GGML_CPU_ALL_VARIANTS did not take effect, so the CPU backend is compiled for " +
-         "THIS build host's instruction set and will SIGILL on any user CPU that lacks it")
+if ($isArm64) {
+  $cpuDll = Join-Path $outDir 'ggml-cpu.dll'
+  if (-not (Test-Path $cpuDll)) {
+    throw "expected a single ggml-cpu.dll on win32-arm64, found none - the CPU backend did not build"
+  }
+  if ($variantDlls.Count -gt 0) {
+    throw ("found $($variantDlls.Count) ggml-cpu-<variant>.dll modules on win32-arm64 - " +
+           "GGML_CPU_ALL_VARIANTS is not supported for Windows ARM and must stay off")
+  }
+  Write-Host "[build] cpu-dispatch guard passed (single arm64 baseline module)"
+} else {
+  if ($variantDlls.Count -lt 2) {
+    throw ("expected multiple ggml-cpu-<variant>.dll modules, found $($variantDlls.Count) - " +
+           "GGML_CPU_ALL_VARIANTS did not take effect, so the CPU backend is compiled for " +
+           "THIS build host's instruction set and will SIGILL on any user CPU that lacks it")
+  }
+  Write-Host "[build] cpu-dispatch guard passed ($($variantDlls.Count) variant modules)"
 }
-Write-Host "[build] cpu-dispatch guard passed ($($variantDlls.Count) variant modules)"
 
 # CUDA builds also depend on cuBLAS / cuDART DLLs from the CUDA Toolkit
 # (NOT produced by the llama.cpp build itself). llama.cpp does not
@@ -279,3 +407,7 @@ if ($backend -eq 'cuda') {
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $outDir $serverName)).Hash
 Write-Host "[build] installed: $(Join-Path $outDir $serverName)"
 Write-Host "[build] sha256: $hash"
+} finally {
+  & git -C $src apply --reverse $runtimePatch
+  if ($LASTEXITCODE -ne 0) { throw 'Could not clean up Muse runtime patch' }
+}

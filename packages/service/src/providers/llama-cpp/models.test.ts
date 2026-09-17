@@ -285,6 +285,7 @@ describe('LlamaCppModelManager.install', () => {
       chatTemplate: '{%- if tools %}tools{%- endif %}',
     });
     const encoder = Buffer.from('DS4-GLM-VISION-ENCODER', 'utf8');
+    const encoderRevision = 'e'.repeat(40);
     const catalog = fakeCatalog(
       new Map<string, ChatModelManifest>([
         [
@@ -310,6 +311,8 @@ describe('LlamaCppModelManager.install', () => {
               approxSizeBytes: weights.byteLength,
               residentBytes: weights.byteLength,
               visionEncoder: {
+                huggingfaceRepo: 'vision-org/model-matched-encoder',
+                revision: encoderRevision,
                 filename: 'GLM-5.3-Flash-Vision-Encoder.gguf',
                 sha256: sha256Hex(encoder),
                 sizeBytes: encoder.byteLength,
@@ -333,7 +336,20 @@ describe('LlamaCppModelManager.install', () => {
 
     const events = await drain(mgr.install('glm-5.3-flash-q2', { includeMmproj: false }));
     expect(events.find((event) => event.type === 'done')).toBeDefined();
-    expect(requested.some((url) => url.includes('Vision-Encoder'))).toBe(true);
+    expect(
+      requested.some(
+        (url) =>
+          url.includes('vision-org/model-matched-encoder') &&
+          url.includes(`/resolve/${encoderRevision}/`) &&
+          url.includes('Vision-Encoder'),
+      ),
+    ).toBe(true);
+    expect(
+      requested.some(
+        (url) =>
+          url.includes('antirez/glm-5.3-flash-gguf') && url.includes('GLM-5.3-Flash-Q2.gguf'),
+      ),
+    ).toBe(true);
 
     const dir = join(home, 'engines', 'ds4', 'models', 'glm-5.3-flash-q2');
     const installedManifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));

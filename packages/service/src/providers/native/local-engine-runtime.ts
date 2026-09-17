@@ -689,9 +689,11 @@ export class LocalEngineRuntime {
             mlx?: { residentBytes?: number; approxSizeBytes?: number };
             ds4?: {
               residentBytes?: number;
+              residentWeightBytes?: number;
               approxSizeBytes?: number;
               kvBytesPerToken?: number;
               residentCtxTokens?: number;
+              ssdStreamingSupported?: boolean;
               maxLaunchCtx?: number;
               visionEncoder?: { sizeBytes: number };
             };
@@ -746,9 +748,13 @@ export class LocalEngineRuntime {
                 bytes,
                 shouldUseDs4SsdStreaming({
                   configured: config.ds4SsdStreaming,
-                  modelSizeBytes: block.approxSizeBytes,
+                  ...(ds4Block?.ssdStreamingSupported !== undefined
+                    ? { ssdStreamingSupported: ds4Block.ssdStreamingSupported }
+                    : {}),
+                  modelSizeBytes: ds4Block?.residentWeightBytes ?? block.approxSizeBytes,
                   ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
                 }),
+                ds4Block?.ssdStreamingSupported,
               );
               bytes += visionResidentBytes;
             }
@@ -1358,8 +1364,8 @@ export class LocalEngineRuntime {
           minViableContextTokens: contextFloor,
         });
       }
-      // ds4's catalog residentBytes is an authored SSD-streaming working set
-      // (expert cache + resident weights + KV) measured at ONE window. Where
+      // ds4's catalog residentBytes is an authored working set (resident
+      // weights or expert cache + fixed weights + KV) measured at ONE window. Where
       // the entry also authors the per-token slope, re-base it onto the window
       // this device actually launches with and hand the UI the same
       // `fixed + slope × ctx` line llama.cpp/MLX rows carry, so the slider
@@ -1384,12 +1390,21 @@ export class LocalEngineRuntime {
       );
       const ssdStreaming = shouldUseDs4SsdStreaming({
         configured: config.ds4SsdStreaming,
-        modelSizeBytes: ds4Source?.approxSizeBytes ?? installed?.approxSizeBytes,
+        ...(ds4Source?.ssdStreamingSupported !== undefined
+          ? { ssdStreamingSupported: ds4Source.ssdStreamingSupported }
+          : {}),
+        modelSizeBytes:
+          ds4Source?.residentWeightBytes ??
+          ds4Source?.approxSizeBytes ??
+          installed?.approxSizeBytes,
         ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
       });
       const plannedResidentBytes = ds4Line
-        ? ds4ResidentBytesForMode(ds4ProjectedResidentBytes(ds4Line, effective), ssdStreaming) +
-          visionResidentBytes
+        ? ds4ResidentBytesForMode(
+            ds4ProjectedResidentBytes(ds4Line, effective),
+            ssdStreaming,
+            ds4Source?.ssdStreamingSupported,
+          ) + visionResidentBytes
         : await this.resolveResidentBytes('ds4', modelId);
       return {
         contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
@@ -1397,8 +1412,11 @@ export class LocalEngineRuntime {
         ...(ds4Line
           ? {
               weightsResidentBytes:
-                ds4ResidentBytesForMode(ds4Line.contextFreeBytes, ssdStreaming) +
-                visionResidentBytes,
+                ds4ResidentBytesForMode(
+                  ds4Line.contextFreeBytes,
+                  ssdStreaming,
+                  ds4Source?.ssdStreamingSupported,
+                ) + visionResidentBytes,
               kvFixedBytesPerSlot: 0,
               kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
             }

@@ -52,7 +52,9 @@ export function ds4BaseResidentBytes(opts: {
 
 export interface Ds4ResidencyOptions {
   configured?: boolean;
-  /** Size of the selected GGUF. Unknown sizes are never allowed full residency. */
+  /** False when this architecture has no routed-expert SSD-streaming graph. */
+  ssdStreamingSupported?: boolean;
+  /** Bytes of the selected GGUF that actually become resident model weights. */
   modelSizeBytes?: number;
   totalRamBytes?: number;
   /**
@@ -99,6 +101,7 @@ export function canUseDs4FullResidency(opts: Ds4ResidencyOptions = {}): boolean 
  * honored — a user who wants the memory back can have it.
  */
 export function shouldUseDs4SsdStreaming(opts: Ds4ResidencyOptions = {}): boolean {
+  if (opts.ssdStreamingSupported === false) return false;
   if (opts.configured === true) return true;
   return !canUseDs4FullResidency(opts);
 }
@@ -146,8 +149,9 @@ export function planDs4ExpertCache(opts: Ds4ExpertCachePlanOptions): Ds4ExpertCa
 export function ds4ResidentBytesForMode(
   catalogResidentBytes: number,
   ssdStreaming: boolean,
+  ssdStreamingSupported = true,
 ): number {
-  return ssdStreaming
+  return ssdStreaming || !ssdStreamingSupported
     ? catalogResidentBytes
     : Math.max(catalogResidentBytes, DS4_FULL_RESIDENCY_RESERVATION_BYTES);
 }

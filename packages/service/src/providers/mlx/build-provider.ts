@@ -389,6 +389,7 @@ export async function buildMlxProvider(opts: {
   // discount. An explicit `providerConcurrency.mlx` still wins verbatim
   // (documented opt-in to the risk), mirroring llama-cpp's configuredSlots.
   const {
+    CapacityBroker: MlxCapacityBroker,
     computeCapacityBudget,
     defaultLocalEngineSlots,
     localEngineSlotCeiling,
@@ -397,6 +398,15 @@ export async function buildMlxProvider(opts: {
   } = await import('../native/capacity-broker.js');
   const mlxWeightsBytes =
     (modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3) + (specDrafter?.bytes ?? 0);
+  // A catalog measurement is authoritative and, for Qwen4, reflects the
+  // 0.7.1 external-PLE view rather than the much larger on-disk checkpoint.
+  // Keep the fallback byte-identical to CapacityBroker for older manifests.
+  const mlxWeightsResidentBytes =
+    (modelCatalogInfo?.residentBytes ??
+      MlxCapacityBroker.estimateResidentBytes(
+        'mlx',
+        modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
+      )) + (specDrafter?.bytes ?? 0);
   const mlxBrokerSnap = opts.broker?.committed();
   // Fast memory, not the admission budget — same reason as the llama path.
   // MLX only runs on unified-memory Macs today, where the two are equal.
@@ -411,6 +421,7 @@ export async function buildMlxProvider(opts: {
     engine: 'mlx',
     budgetBytes: mlxBudgetBytes,
     weightsBytes: mlxWeightsBytes,
+    weightsResidentBytes: mlxWeightsResidentBytes,
     committedOtherBytes: mlxCommittedOther,
   });
   // Header-exact per-slot KV from the model dir's config.json (M4) —
@@ -439,6 +450,7 @@ export async function buildMlxProvider(opts: {
             ? mlxBrokerSnap.pools.concurrencySizingBytes
             : computeCapacityBudget().concurrencySizingBytes,
           weightsBytes: mlxWeightsBytes,
+          weightsResidentBytes: mlxWeightsResidentBytes,
           perTurnCtxTokens: effectiveNumCtx,
           kvCacheType: mlxKvCacheType,
           committedOtherBytes: mlxCommittedOther,
@@ -474,7 +486,7 @@ export async function buildMlxProvider(opts: {
     });
     const kvBytesPerToken =
       (mlxExactPerSlotKvF16 / Math.max(1, effectiveNumCtx)) * kvQuantScale(mlxKvCacheType);
-    const weightsResident = CapacityBroker.estimateResidentBytes('mlx', mlxWeightsBytes);
+    const weightsResident = mlxWeightsResidentBytes;
     const admission = planCtxTokensForMemory({
       requestedPerTurnCtxTokens: effectiveNumCtx,
       slots: mlxSlots,
@@ -660,6 +672,15 @@ export async function buildMlxProvider(opts: {
           pythonServerPath,
           '--model',
           modelDir,
+          '--external-ple-dir',
+          join(
+            store.homePath,
+            'engines',
+            'mlx',
+            'views',
+            modelCatalogInfo?.id ?? 'explicit',
+            `${modelFingerprint}-qwen4-ple`,
+          ),
           '--host',
           '127.0.0.1',
           '--port',

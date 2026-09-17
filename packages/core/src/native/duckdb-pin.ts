@@ -70,7 +70,12 @@ export const DUCKDB_LICENSE_SHA256 =
   '7e17fd31249fa875cb3b1c5e05c6c3e99b75509f6a2804ca176c217834de1dcb';
 
 /** Platform keys this pin covers — the platforms Gezel ships a daemon for. */
-export type DuckdbPlatformKey = 'darwin-arm64' | 'linux-x64' | 'linux-arm64' | 'win32-x64';
+export type DuckdbPlatformKey =
+  | 'darwin-arm64'
+  | 'linux-x64'
+  | 'linux-arm64'
+  | 'win32-x64'
+  | 'win32-arm64';
 
 /**
  * Release asset per platform. The glibc archives are pinned over the `-musl`
@@ -81,6 +86,7 @@ export const DUCKDB_ASSET: Record<DuckdbPlatformKey, string> = {
   'linux-x64': 'duckdb_cli-linux-amd64.zip',
   'linux-arm64': 'duckdb_cli-linux-arm64.zip',
   'win32-x64': 'duckdb_cli-windows-amd64.zip',
+  'win32-arm64': 'duckdb_cli-windows-arm64.zip',
 };
 
 /** sha256 of each published archive, as served by duckdb/duckdb's releases. */
@@ -89,6 +95,7 @@ export const DUCKDB_ARCHIVE_SHA256: Record<DuckdbPlatformKey, string> = {
   'linux-x64': '08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05',
   'linux-arm64': '02163197027a42149147364d31fa67cac82108517a4be43304a1cc226eaef07a',
   'win32-x64': 'e1428b7114a841626b5054723731cbf45c6df91b42ae1a6c355f88fad1f6dc4c',
+  'win32-arm64': '9d0370d085684e1619ecc5efb2656cde930c50f1418380f0ae9d0379ddf06b12',
 };
 
 /** sha256 of the `duckdb[.exe]` executable inside each archive. */
@@ -97,6 +104,7 @@ export const DUCKDB_BINARY_SHA256: Record<DuckdbPlatformKey, string> = {
   'linux-x64': '3d33b1df037cb049155c393778df7853fafb23e9d49d7c9cacdde4dd67155788',
   'linux-arm64': '9882c99a9804407de82c0edb1816d7667733d37d771a98eb23ad5f6a8d37acb1',
   'win32-x64': 'fde737c7749075f6b54e14772a4e6b33a5fa0201075d03640aca358074ea4554',
+  'win32-arm64': '8c85a4c3a54a031120503be239641f0e24d15c4dea06acba6938b65f330df40d',
 };
 
 /**
@@ -128,7 +136,10 @@ export function duckdbPlatformKey(
   if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
   if (platform === 'linux' && arch === 'x64') return 'linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+  if (platform === 'win32') {
+    if (arch === 'x64') return 'win32-x64';
+    if (arch === 'arm64') return 'win32-arm64';
+  }
   return null;
 }
 

@@ -93,6 +93,8 @@ const IMPORTABLE = [
   '@bendyline/gezel-sdk/checks',
   '@bendyline/gezel-sdk/stores',
   '@bendyline/gezel-app-sdk',
+  '@bendyline/gezel-app-sdk/host',
+  '@bendyline/gezel-app-sdk/advanced',
   '@bendyline/gezel-plugin-sdk',
   '@bendyline/gezel-catalog',
   '@bendyline/gezel-knowledge',

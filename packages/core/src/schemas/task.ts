@@ -4,6 +4,7 @@ import {
   AdvanceWhenSchema,
   CraftbookBasedOnSchema,
   CraftbookBranchSchema,
+  CraftbookCliWorkflowSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookRecommendationSchema,
@@ -283,6 +284,7 @@ export const TaskCraftbookSchema = z.object({
   hooks: z.array(HookSpecSchema).optional(),
   /** Invocation schema retained with the task snapshot for audit/UI context. */
   paramSchema: z.record(z.string(), z.unknown()).optional(),
+  cliWorkflow: CraftbookCliWorkflowSchema.optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /** Soft "works better with" hints snapshotted for UI copy — see CraftbookRecommendationSchema. */
@@ -416,6 +418,8 @@ export const TaskSchema = z.object({
    * an invocation path did not also stamp an entry-step note.
    */
   craftbookParams: z.record(z.string(), z.string()).optional(),
+  /** Exact script sources trusted by an explicit CLI launch; immutable through task edits. */
+  cliTrustedScriptHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
   /**
    * Invocation parameters for a schedule/fanout host's child template.
    * Copied to each spawned child's `craftbookParams`.
@@ -576,6 +580,8 @@ export const CreateTaskRequestSchema = z
     entryStepId: z.string().optional(),
     /** Invocation-time param values for the main craftbook (launcher). */
     craftbookParams: z.record(z.string(), z.string()).optional(),
+    /** Owner/CLI opt-in to best-effort network isolation for this recipe's script snapshot. */
+    trustScripts: z.boolean().optional(),
     /** Invocation-time param values copied to each spawned child. */
     spawnsCraftbookParams: z.record(z.string(), z.string()).optional(),
     /** Spawn-side (for schedule hosts and fanouts): catalog reference. */

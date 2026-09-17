@@ -28,7 +28,15 @@
  *
  * Deliberate absences, all mirrored by matrix comments in build-native.yml:
  *   - no `darwin-x64` — Intel Mac is routed to cloud providers at first run
- *   - no `linux-arm64-vulkan` — LunarG ships no aarch64 SDK tarball
+ *   - no `linux-arm64-vulkan` / `win32-arm64-vulkan` — LunarG ships no aarch64
+ *     SDK for either OS (at the pinned version only the `-X64` Windows
+ *     installer exists). Windows-on-ARM could in principle run the x64 SDK's
+ *     `glslc` under emulation to cross-compile shaders, which Linux arm64
+ *     cannot; that is a spike, not a plan.
+ *   - no `win32-arm64-cuda` / `win32-arm64` ds4 — NVIDIA ships no CUDA for
+ *     Windows-on-ARM, and ds4 is GPU-only. The Adreno GPU path is OpenCL
+ *     (upstream `docs/build.md` §"Windows Arm64"); the Hexagon NPU needs its
+ *     op libraries inside a driver-signed `.cat`, so it is not shippable.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
  *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
@@ -60,6 +68,14 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'win32-x64-cpu': ['gezel-llama-server'],
   'win32-x64-vulkan': ['gezel-llama-server'],
   'win32-x64-cuda': ['gezel-llama-server'],
+  'win32-arm64': [
+    'gezel-device-health',
+    'gezel-service-host',
+    'gezel-sd-server',
+    'gezel-whisper-server',
+    'uv',
+  ],
+  'win32-arm64-cpu': ['gezel-llama-server'],
   'darwin-arm64': ['gezel-sd-server', 'gezel-ds4-server', 'gezel-whisper-server', 'uv'],
   'darwin-arm64-metal': ['gezel-llama-server'],
   'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
@@ -118,8 +134,8 @@ export function platformKeysForEngine(engineId) {
  *
  * Consumers fetch all of them so Settings → Advanced → Engine backend can
  * flip between variants without a re-fetch. An unsupported platform
- * (darwin-x64, win32-arm64) yields an empty list rather than throwing —
- * callers treat that as "no bundled engines on this host".
+ * (darwin-x64) yields an empty list rather than throwing — callers treat
+ * that as "no bundled engines on this host".
  */
 export function platformVariants(platform) {
   return allPlatformKeys().filter((key) => key === platform || key.startsWith(`${platform}-`));
@@ -142,6 +158,9 @@ export function detectPlatform() {
     if (process.arch === 'x64') return 'linux-x64';
     if (process.arch === 'arm64') return 'linux-arm64';
   }
-  if (process.platform === 'win32' && process.arch === 'x64') return 'win32-x64';
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'win32-x64';
+    if (process.arch === 'arm64') return 'win32-arm64';
+  }
   return null;
 }

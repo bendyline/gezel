@@ -17,6 +17,7 @@ import {
   stopOwnedDaemon,
   stopProcessByPid,
 } from '@bendyline/gezel-client/node';
+import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command } from 'commander';
 import {
   CliError,
@@ -36,6 +37,11 @@ import {
   validateGlobals,
 } from '../connection.js';
 import {
+  parseCraftbookParams,
+  resolveCraftbookInvocation,
+  waitForTask,
+} from '../craftbook-command.js';
+import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
   parseCliEngagementMode,
@@ -49,6 +55,8 @@ import {
   installNativeToolkit,
   parseNativeVariant,
 } from '../native-command.js';
+import { registerSecretCommands } from '../secrets-command.js';
+import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
 import {
   type CleanupFlags,
@@ -60,11 +68,8 @@ import {
   resolveCleanupSelection,
   resolveRestoreSelection,
 } from '../storage-format.js';
-import {
-  craftbookStartRequest,
-  findCraftbook,
-  normalizeCraftbooks,
-} from '../tui/craftbook-start.js';
+import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
+import { runWorkflow } from '../workflow-command.js';
 
 const program = new Command();
 program
@@ -88,6 +93,9 @@ program
 
 /** Global flags, read off the root program. */
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
+
+registerSecretCommands(program, () => connectOwned(cliGlobals()));
+registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,
 // and in-proc startService all resolve the same home.
@@ -517,28 +525,138 @@ program
 program
   .command('do <craftbook...>')
   .description("Start a craftbook as a task in the current directory's project")
-  .action(async (craftbookParts: string[]) => {
-    const craftbookRef = craftbookParts.join(' ').trim();
+  .option(
+    '--param <key=value>',
+    'named craftbook parameter (repeatable)',
+    (value: string, values: string[]) => [...values, value],
+    [],
+  )
+  .option('--wait', 'wait for completion; exit nonzero when blocked, canceled, or timed out')
+  .option('--timeout <seconds>', 'wait budget in seconds; timeout leaves the task running', '7200')
+  .option('--json', 'emit one JSON result on stdout')
+  .option(
+    '--strict-sandbox',
+    'require OS network isolation for custom scripts (CLI launches otherwise trust this recipe snapshot)',
+  )
+  .action(
+    async (
+      craftbookParts: string[],
+      opts: {
+        param: string[];
+        wait?: boolean;
+        timeout: string;
+        json?: boolean;
+        strictSandbox?: boolean;
+      },
+    ) => {
+      const timeoutMs = positiveSeconds(opts.timeout);
+      const client = await connectOwned(cliGlobals());
+      const projectId = await resolveRunProject(client, cliGlobals());
+      const [config, result] = await Promise.all([
+        client.getConfig(),
+        client.listProjectCraftbooks(projectId),
+      ]);
+      const craftbooks = normalizeCraftbooks(
+        result.items,
+        config.showWorkInProgressFeatures === true,
+      );
+      const { book, args } = resolveCraftbookInvocation(craftbooks, craftbookParts);
+      const { craftbook } = await client.getCraftbook(book.id, {
+        projectId,
+        source: book.source,
+        version: book.version,
+      });
+      const craftbookParams = parseCraftbookParams(craftbook, [...args, ...opts.param]);
+      if (craftbook.cliWorkflow) {
+        if (book.source !== 'project')
+          throw new CliError('CLI workflow craftbooks must belong to this project.');
+        if (opts.strictSandbox)
+          throw new CliError(
+            'CLI workflows execute ordinary repository code and cannot use --strict-sandbox.',
+          );
+        const workspace =
+          typeof cliGlobals().project === 'string'
+            ? (cliGlobals().project as string)
+            : process.cwd();
+        console.error(`Running ${craftbook.name}: ${craftbook.cliWorkflow.module}`);
+        const result = await runWorkflow(
+          client,
+          projectId,
+          workspace,
+          craftbook.cliWorkflow.module,
+          [],
+          console.error,
+          {
+            craftbook,
+            params: craftbookParams,
+            timeoutMs,
+          },
+        );
+        printWorkflowResult(result, opts.json);
+        return;
+      }
+      const created = await client.createTask(projectId, {
+        ...craftbookStartRequest(book),
+        craftbookParams,
+        trustScripts: !opts.strictSandbox,
+        roleBasedNameOnlyMode: true,
+      });
+      if (opts.wait) {
+        console.error(`started ${created.ref} — ${created.title}`);
+        await printTaskWait(client, created.ref, { ...opts, timeoutMs });
+      } else
+        console.log(
+          opts.json ? JSON.stringify(created) : `started ${created.ref} — ${created.title}`,
+        );
+    },
+  );
+
+function positiveSeconds(value: string): number {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0)
+    throw new CliError('--timeout must be a positive number of seconds');
+  return seconds * 1000;
+}
+
+program
+  .command('workflow <file> [args...]')
+  .description(
+    'Run a trusted project workflow module (ordinary local code, with your account permissions); names resolve in .gezel/workflows/',
+  )
+  .option('--json', 'emit the workflow result as JSON')
+  .action(async (file: string, args: string[], opts: { json?: boolean }) => {
     const client = await connectOwned(cliGlobals());
     const projectId = await resolveRunProject(client, cliGlobals());
-    const [config, result] = await Promise.all([
-      client.getConfig(),
-      client.listProjectCraftbooks(projectId),
-    ]);
-    const craftbooks = normalizeCraftbooks(
-      result.items,
-      config.showWorkInProgressFeatures === true,
-    );
-    const book = findCraftbook(craftbooks, craftbookRef);
-    if (!book) {
-      throw new CliError(`craftbook not found: ${craftbookRef} (run gezel and type /do to browse)`);
-    }
-    const created = await client.createTask(projectId, {
-      ...craftbookStartRequest(book),
-      roleBasedNameOnlyMode: true,
-    });
-    console.log(`started ${created.ref} — ${created.title}`);
+    const workspace =
+      typeof cliGlobals().project === 'string' ? (cliGlobals().project as string) : process.cwd();
+    const result = await runWorkflow(client, projectId, workspace, file, args);
+    printWorkflowResult(result, opts.json);
   });
+
+function printWorkflowResult(result: unknown, json?: boolean) {
+  if (result !== undefined)
+    console.log(json ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+  if (result && typeof result === 'object' && 'exitCode' in result) {
+    const code = Number(result.exitCode);
+    if (Number.isInteger(code) && code >= 0 && code <= 255) process.exitCode = code;
+  }
+}
+
+async function printTaskWait(
+  client: GezelClient,
+  ref: string,
+  opts: { json?: boolean; timeoutMs: number },
+) {
+  const result = await waitForTask(client, ref, {
+    timeoutMs: opts.timeoutMs,
+    onProgress: (task) =>
+      console.error(
+        `${task.ref}: ${task.status}${task.activeStepId ? ` (${task.activeStepId})` : ''}`,
+      ),
+  });
+  console.log(opts.json ? JSON.stringify(result) : `${result.task.ref}: ${result.outcome}`);
+  process.exitCode = result.exitCode;
+}
 
 const agent = program.command('agent').description('Manage agents');
 
@@ -574,6 +692,11 @@ agent
   });
 
 const env = program.command('env').description('Manage projects');
+registerProjectSettingsCommands(
+  env,
+  () => connectOwned(cliGlobals()),
+  (client) => resolveRunProject(client, cliGlobals()),
+);
 
 env
   .command('list')
@@ -1212,6 +1335,33 @@ appCmd
 
 const task = program.command('task').description('Manage tasks');
 
+for (const verb of ['wait', 'resume'] as const) {
+  task
+    .command(`${verb} <ref>`)
+    .description(
+      verb === 'wait'
+        ? 'Wait for a task to finish or need attention'
+        : 'Retry a paused task and wait for its result',
+    )
+    .option(
+      '--timeout <seconds>',
+      'wait budget in seconds; timeout leaves the task running',
+      '7200',
+    )
+    .option('--json', 'emit one JSON result on stdout')
+    .action(async (ref: string, opts: { timeout: string; json?: boolean }) => {
+      const timeoutMs = positiveSeconds(opts.timeout);
+      const client = await connectOwned(cliGlobals());
+      if (verb === 'resume') {
+        const current = await client.getTaskByRef(ref);
+        if (current.status !== 'paused')
+          throw new CliError(`task ${ref} is ${current.status}; resume requires a paused task`);
+        await client.retryTask(current.projectId, current.num);
+      }
+      await printTaskWait(client, ref, { ...opts, timeoutMs });
+    });
+}
+
 task
   .command('list')
   .description('List tasks across every project')
@@ -1265,6 +1415,38 @@ task
     const client = await connectOwned(cliGlobals());
     const t = await client.getTaskByRef(ref);
     console.log(JSON.stringify(t, null, 2));
+  });
+
+task
+  .command('notes <ref>')
+  .description('Read task notes, including pause reasons and failed checks')
+  .option('--warnings', 'Also include model/runtime warnings from the latest 20 task sessions')
+  .option('--json', 'Output the notes as JSON')
+  .action(async (ref: string, opts: { json?: boolean; warnings?: boolean }) => {
+    const client = await connectOwned(cliGlobals());
+    const current = await client.getTaskByRef(ref);
+    const result = await client.listTaskNotes(current.projectId, current.num);
+    const warnings: Array<{ sessionId: string; at: string; text: string }> = [];
+    if (opts.warnings) {
+      const { sessions } = await client.listTaskSessions(current.projectId, current.num);
+      for (const session of sessions.slice(0, 20)) {
+        const full = await client.getChatSession(session.id);
+        for (const message of full.messages) {
+          for (const text of message.warnings ?? [])
+            warnings.push({ sessionId: session.id, at: message.at, text });
+        }
+      }
+    }
+    console.log(
+      opts.json
+        ? JSON.stringify({ ...result, ...(opts.warnings ? { warnings } : {}) })
+        : [
+            ...result.notes.map(
+              (note) => `${note.at}${note.stepId ? ` [${note.stepId}]` : ''}\n${note.text}`,
+            ),
+            ...warnings.map((warning) => `${warning.at} [runtime warning]\n${warning.text}`),
+          ].join('\n\n') || '(no task notes)',
+    );
   });
 
 // ── Generation: create-image / create-video / create-audio ──────────
@@ -1564,8 +1746,76 @@ function resolveModelProvider(raw?: string): 'mlx' | 'llama-cpp' | 'ds4' {
     }
     return raw;
   }
-  return process.platform === 'darwin' && process.arch === 'arm64' ? 'mlx' : 'llama-cpp';
+  return resolveOnDeviceProvider(process.platform, process.arch);
 }
+
+model
+  .command('concurrency [slots]')
+  .description('Show or set local inference slots; use auto to restore automatic sizing')
+  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
+  .option('--json', 'Output the slot override as JSON')
+  .action(async (slots: string | undefined, opts: { provider?: string; json?: boolean }) => {
+    const provider = resolveModelProvider(opts.provider);
+    if (
+      slots !== undefined &&
+      slots !== 'auto' &&
+      (!/^\d+$/.test(slots) || !Number.isSafeInteger(Number(slots)) || Number(slots) < 1)
+    ) {
+      throw new CliError('Concurrency must be a positive integer, or auto.');
+    }
+    const client = await connectOwned(cliGlobals());
+    const config = await client.getConfig();
+    const concurrency = { ...config.providerConcurrency };
+    if (slots !== undefined) {
+      if (slots === 'auto') delete concurrency[provider];
+      else concurrency[provider] = Number(slots);
+      await client.updateConfig({ providerConcurrency: concurrency });
+    }
+    const result = { provider, slots: concurrency[provider] ?? null };
+    console.log(
+      opts.json
+        ? JSON.stringify(result)
+        : `${provider}: ${result.slots ?? 'auto'}${result.slots === null ? '' : ' inference slots'}${slots === undefined ? '' : ' (applies when idle sessions reload)'}`,
+    );
+  });
+
+model
+  .command('context <id> [tokens]')
+  .description('Show or set a model context window in tokens; use auto to clear an override')
+  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
+  .option('--json', 'Output the context override as JSON')
+  .action(
+    async (id: string, tokens: string | undefined, opts: { provider?: string; json?: boolean }) => {
+      const provider = resolveModelProvider(opts.provider);
+      let contextTokens: number | null | undefined;
+      if (tokens !== undefined) {
+        contextTokens = tokens === 'auto' ? null : Number(tokens);
+        if (
+          contextTokens !== null &&
+          (!/^\d+$/.test(tokens) ||
+            !Number.isInteger(contextTokens) ||
+            contextTokens < 32768 ||
+            contextTokens > 4194304)
+        ) {
+          throw new CliError('Context must be an integer from 32768 to 4194304 tokens, or auto.');
+        }
+      }
+      const client = await connectOwned(cliGlobals());
+      const result =
+        contextTokens === undefined
+          ? {
+              modelId: id,
+              contextTokens:
+                (await client.getModelContextOverrides(provider)).overrides[id] ?? null,
+            }
+          : await client.updateModelContextOverride(provider, id, contextTokens);
+      console.log(
+        opts.json
+          ? JSON.stringify({ provider, ...result })
+          : `${provider}/${id}: ${result.contextTokens ?? 'auto'}${result.contextTokens === null ? '' : ' tokens'}${tokens === undefined ? '' : ' (applies on the next model launch)'}`,
+      );
+    },
+  );
 
 model
   .command('list')

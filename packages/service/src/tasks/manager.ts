@@ -95,6 +95,7 @@ import {
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
+import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 import {
   bumpStepActivation,
@@ -240,6 +241,8 @@ export type StepActivatedHook = (ctx: {
   newStep: TaskCraftbookStep;
   /** The step that was just completed (may equal newStep on loopback). */
   completedStep: TaskCraftbookStep;
+  /** A spawned task's first step is an entry, not a self-handoff. */
+  kind?: 'entry' | 'transition' | 'redispatch';
 }) => Promise<void> | void;
 
 /**
@@ -1120,6 +1123,18 @@ export class TaskManager {
       assignee,
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
       craftbook,
+      ...(input.trustScripts
+        ? {
+            cliTrustedScriptHashes: [
+              ...new Set(
+                [
+                  ...Object.values(craftbook.scripts ?? {}),
+                  ...Object.values(spawnsCraftbook?.scripts ?? {}),
+                ].map((source) => createHash('sha256').update(source).digest('hex')),
+              ),
+            ],
+          }
+        : {}),
       ...(spawnsCraftbook ? { spawnsCraftbook } : {}),
       ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
       ...(Object.keys(effectiveCraftbookParams).length > 0
@@ -2506,7 +2521,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             log.error('[tasks] onStepActivated hook failed:', err);
           }
         }
-        return { status: 'advanced', task: preparedTask };
+        // The activation hook may itself advance the task (notably a
+        // runtime-owned spawnFanout step). Return the durable post-hook
+        // state so create-time callers do not dispatch a stale step.
+        return {
+          status: 'advanced',
+          task: (await this.get(projectId, preparedTask.num)) ?? preparedTask,
+        };
       }
     }
     return { status: 'advanced', task: updated };
@@ -2723,7 +2744,10 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       // A note-surface rejection has nothing on disk to replace whole,
       // and its declarative deliverable is passing — naming that file in
       // a stage directive sends the repair at the wrong artifact.
-      const deliverableFile = frozenSurface === 'note' ? undefined : step.advanceWhen?.file;
+      const deliverableFile =
+        frozenSurface === 'note' || frozenSurface === 'evidence'
+          ? undefined
+          : step.advanceWhen?.file;
       if (stage === 2 && !deliverableFile) stage = 1;
       const frozenEntry: GateAttemptRecord = {
         at: nowIso(),
@@ -2927,14 +2951,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
           });
           const allowed = new Set(tools);
-          const normalizePath = (value: string | undefined): string =>
-            (value ?? '')
-              .trim()
-              .replace(/\\/g, '/')
-              .replace(/^workspace\//i, '')
-              .replace(/^\.\//, '')
-              .toLocaleLowerCase();
-          const expectedPath = normalizePath(sourcePath);
+          const expectedPath = normalizeSourcePath(sourcePath);
           const matches: Array<{
             tool: string;
             path?: string;
@@ -2952,13 +2969,10 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
               : [];
             const target =
               typeof details.researchTarget === 'string' ? details.researchTarget : undefined;
-            const exactLocalRead =
-              expectedPath.length > 0 &&
-              ((tool === 'read_file' &&
-                path !== undefined &&
-                normalizePath(path) === expectedPath) ||
-                (tool === 'read_files' &&
-                  paths.some((value) => normalizePath(value) === expectedPath)));
+            const exactLocalRead = isExactLocalSourceRead(
+              { tool, ...(path !== undefined ? { path } : {}), paths },
+              expectedPath,
+            );
             let externalAcquisition = allowed.has(tool) && target !== undefined;
             if (externalAcquisition && tool === 'run_playwright_script') {
               const scriptPath = target?.startsWith('script:')
@@ -2981,6 +2995,50 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             });
           }
           return { observable: true, matches };
+        },
+        corpusReadEvidence: async () => {
+          if (!this.history) return { observable: false, slices: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: ['tool.called'],
+            ...(step.createdAt ? { from: step.createdAt } : {}),
+          });
+          const slices: Array<{
+            path: string;
+            startLine: number;
+            endLine: number;
+            totalLines: number;
+          }> = [];
+          for (const event of events) {
+            const details = event.details as Record<string, unknown> | undefined;
+            if (
+              !details ||
+              details.success !== true ||
+              details.taskRef !== task.ref ||
+              details.stepId !== step.id
+            )
+              continue;
+            const reads = details.artifactReadSlices;
+            if (!Array.isArray(reads)) continue;
+            for (const value of reads) {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+              const read = value as Record<string, unknown>;
+              if (
+                typeof read.path !== 'string' ||
+                !Number.isSafeInteger(read.startLine) ||
+                !Number.isSafeInteger(read.endLine) ||
+                !Number.isSafeInteger(read.totalLines)
+              )
+                continue;
+              slices.push({
+                path: read.path,
+                startLine: read.startLine as number,
+                endLine: read.endLine as number,
+                totalLines: read.totalLines as number,
+              });
+            }
+          }
+          return { observable: true, slices };
         },
         commandEvidence: async ({ scope, name, args }) => {
           if (!this.history) return { observable: false, runs: [] };
@@ -3191,7 +3249,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     // See the frozen path: a passing deliverable is not the thing to
     // rewrite, and a note surface has no file to name at all.
-    const deliverableFile = rejectSurface === 'note' ? undefined : step.advanceWhen?.file;
+    const deliverableFile =
+      rejectSurface === 'note' || rejectSurface === 'evidence' ? undefined : step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
     // Converging-loop rejection: the same checks fail, but on fewer
     // outstanding items than last attempt. `signature` already carries the
@@ -3944,7 +4003,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       step.id,
       undefined,
       cascadeDepth + 1,
-      { cause: 'auto', ...(suppressHandoff ? { suppressHandoff: true } : {}) },
+      // `suppressHandoff` applies only to the entry activation that the
+      // create route will dispatch. Once setup auto-advances, the new step
+      // must use the ordinary activation lifecycle: it may be a runtime
+      // fanout/barrier rather than a model handoff. dispatchTaskEntry also
+      // refuses a non-entry step, preventing duplicate model dispatch.
+      { cause: 'auto' },
     );
     return { status: 'advanced', task: cascaded.task };
   }
@@ -4104,7 +4168,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     if (!step) return;
     log.info(`[tasks] ${task.ref}: re-dispatching active step "${step.id}" — ${reason}`);
     try {
-      await this.onStepActivated({ projectId, task, newStep: step, completedStep: step });
+      await this.onStepActivated({
+        projectId,
+        task,
+        newStep: step,
+        completedStep: step,
+        kind: 'redispatch',
+      });
     } catch (err) {
       log.error(`[tasks] re-dispatch hook failed for ${task.ref}:`, err);
     }
@@ -4224,6 +4294,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       status: 'active',
       assignee: inheritedAssignee,
       craftbook: childCraftbook,
+      ...(parent.cliTrustedScriptHashes
+        ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }
+        : {}),
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
       // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
@@ -4301,6 +4374,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           task: preparedChild,
           newStep: preparedFirstStep,
           completedStep: preparedFirstStep,
+          kind: 'entry',
         });
       } catch (err) {
         log.error('[tasks] onStepActivated hook failed on spawnChild:', err);

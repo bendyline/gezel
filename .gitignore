@@ -228,3 +228,4 @@ packages/catalog/scripts/harvested-auth/
 **/.gezel/index/
 /.codex-tmp
 /packages/app/e2e-visual/snapshots
+/.tmp-storyify

@@ -8,7 +8,7 @@ import { ProviderQueue } from '../providers/queue.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
-import { TaskRunner } from './runner.js';
+import { TaskRunner, type TaskRunnerDispatcher } from './runner.js';
 
 /** Build a fixture craftbook from inline step records — keeps tests terse. */
 function fixtureCraftbook(steps: TaskCraftbookStep[]): TaskCraftbook {
@@ -45,6 +45,7 @@ class FakeDispatcher {
   readonly activeSessionIds = new Set<string>();
   readonly cancelledSessionIds: string[] = [];
   ensureProvider?: (name: ProviderName) => Promise<LLMProvider>;
+  getPooledProviderQueueSummary?: TaskRunnerDispatcher['getPooledProviderQueueSummary'];
 
   constructor(
     private readonly gezelProvider: Map<string, ProviderName>,
@@ -475,6 +476,62 @@ describe('TaskRunner — dispatch + FIFO', () => {
       }
     },
   );
+
+  it('admits pooled local handoffs up to the live background engine capacity', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    for (let num = 1; num <= 5; num++) {
+      await store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `PR batch ${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook([
+          {
+            id: 'review',
+            name: 'review',
+            assignee: { kind: 'gezel', gezelId: 'bea' },
+            createdAt: now,
+          },
+        ]),
+        activeStepId: 'review',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'mlx']]));
+    dispatcher.ensureProvider = async () => {
+      throw new Error('pooled local admission must not initialize a singleton provider');
+    };
+    dispatcher.getPooledProviderQueueSummary = () => ({
+      running: 0,
+      runningBackground: 0,
+      queuedInteractive: 0,
+      queuedBackground: 0,
+      backgroundConcurrency: 3,
+      maxConcurrency: 4,
+      active: [],
+      pending: [],
+    });
+    const runner = new TaskRunner({ store, dispatcher });
+    await runner.rehydrateFromStore({ projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(3);
+    expect(runner.snapshot().pendingCount).toBe(2);
+
+    // The provider queue has not reflected these fire-and-forget sends yet.
+    // activeDispatches must reserve their slots across ticks so the runner
+    // cannot overshoot the declared cap during that race window.
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(3);
+    expect(runner.snapshot().pendingCount).toBe(2);
+  });
 
   it('holds restored work at the background cap and preserves foreground headroom', async () => {
     await store.createProject({ name: 'p1' });
@@ -1102,6 +1159,62 @@ describe('TaskRunner — startup rehydration', () => {
     await runner.rehydrateFromStore({ projectId: 'p1' });
     expect(runner.snapshot().pendingCount).toBe(1);
     expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/1']);
+  });
+
+  it('does not bypass a fanout barrier while active children remain', async () => {
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const childBook = fixtureCraftbook([
+      {
+        id: 'review',
+        name: 'review',
+        assignee: { kind: 'gezel', gezelId: bea.id },
+        createdAt: now,
+      },
+    ]);
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 'fanout host',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: bea.id },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'collect',
+          name: 'collect',
+          assignee: { kind: 'gezel', gezelId: bea.id },
+          createdAt: now,
+        },
+      ]),
+      spawnsCraftbook: childBook,
+      activeStepId: 'collect',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    await store.writeTask({
+      projectId: 'p1',
+      num: 2,
+      ref: 'p1/2',
+      title: 'active child',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: bea.id },
+      craftbook: childBook,
+      activeStepId: 'review',
+      parentTaskRef: 'p1/1',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({ store, dispatcher });
+    const result = await runner.rehydrateFromStore({ projectId: 'p1' });
+
+    expect(result.taskRefs).toEqual(['p1/2']);
+    expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/2']);
   });
 
   it('can reconcile only night-shift work when a shift opens', async () => {

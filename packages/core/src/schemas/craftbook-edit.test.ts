@@ -166,6 +166,18 @@ describe('applyStepPatch', () => {
     expect(applyStepPatch(set, { name: 'A2' }).retrieval).toEqual(set.retrieval);
     expect('retrieval' in applyStepPatch(set, { retrieval: null })).toBe(false);
   });
+  it('sets, preserves, and clears the phase tool policy', () => {
+    const base: CraftbookStep = { id: 'a', name: 'A' };
+    const set = applyStepPatch(base, {
+      toolPolicy: { allowTools: ['read_file', 'write_artifact'], outputMedium: 'artifact' },
+    });
+    expect(set.toolPolicy).toEqual({
+      allowTools: ['read_file', 'write_artifact'],
+      outputMedium: 'artifact',
+    });
+    expect(applyStepPatch(set, { name: 'A2' }).toolPolicy).toEqual(set.toolPolicy);
+    expect('toolPolicy' in applyStepPatch(set, { toolPolicy: null })).toBe(false);
+  });
   it('sets and clears declared inputs', () => {
     const base: CraftbookStep = { id: 'a', name: 'A', prompt: 'Call `read_artifact`.' };
     const set = applyStepPatch(base, {

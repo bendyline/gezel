@@ -2,6 +2,10 @@ import { arch, platform } from 'node:process';
 import { createLogger, securityPolicyForLevel } from '@bendyline/gezel';
 import type { ChatModelManifest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  isSupportedOnDevicePlatform as coreIsSupportedOnDevicePlatform,
+  resolveOnDeviceProvider,
+} from '@bendyline/gezel/native';
 import type { Store } from '../fs/store.js';
 
 const firstRunLog = createLogger('first-run');
@@ -10,55 +14,39 @@ import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import type { MlxModelManager } from '../providers/mlx/index.js';
 
 /**
- * Platforms we ship a bundled `llama-server` for — see
- * `.github/workflows/build-native.yml`. The first-run flow auto-
- * enrolls users into on-device only on these combos; everyone else
- * (notably Intel Mac) lands on a cloud provider by default so they
- * don't download a 3–10 GB model that would then fail with
- * "no engine bundled" when they tried to chat. The set must stay
- * in sync with the build matrix; if a platform is added there, add
- * it here too.
+ * Re-exported so existing service callers keep one import site. The list
+ * itself lives in core ({@link coreIsSupportedOnDevicePlatform}) because the
+ * CLI needs the same answer and cannot import the service.
  */
-const SUPPORTED_PLATFORMS: ReadonlyArray<`${NodeJS.Platform}-${string}`> = [
-  'darwin-arm64',
-  'linux-x64',
-  'linux-arm64',
-  'win32-x64',
-];
-
 export function isSupportedOnDevicePlatform(
   p: NodeJS.Platform = platform,
   a: string = arch,
 ): boolean {
-  return (SUPPORTED_PLATFORMS as readonly string[]).includes(`${p}-${a}`);
+  return coreIsSupportedOnDevicePlatform(p, a);
 }
 
 /**
- * Darwin-arm64 gets a special branch — MLX is measurably faster than
- * llama.cpp Metal on Apple Silicon, so we route Apple Silicon users
- * to `provider=mlx`. Intel Mac, Linux, and Windows stay on llama.cpp
- * — MLX can't run there.
+ * The provider + catalog id pair to pin, given a detected tier.
  *
- * The catalog id is the same on both branches: each chat-model entry
- * carries `llamaCpp` and/or `mlx` source blocks under one `id`, and
- * the provider picks the right block on install. Earlier revisions
- * of this code suffixed `-mlx` for the Apple branch under the
- * (mistaken) assumption that there were separate `gemma4-*-mlx`
- * catalog entries — there aren't, and the suffix produced ids that
- * `MlxModelManager.install()` then couldn't find in the catalog.
+ * The provider half is {@link resolveOnDeviceProvider} — Apple Silicon gets
+ * MLX, everything else llama.cpp.
  *
- * Returns the provider + catalog id pair to pin, given a detected
- * tier. Exported for testing.
+ * The catalog id is the same on both branches: each chat-model entry carries
+ * `llamaCpp` and/or `mlx` source blocks under one `id`, and the provider picks
+ * the right block on install. Earlier revisions of this code suffixed `-mlx`
+ * for the Apple branch under the (mistaken) assumption that there were
+ * separate `gemma4-*-mlx` catalog entries — there aren't, and the suffix
+ * produced ids that `MlxModelManager.install()` then couldn't find in the
+ * catalog.
+ *
+ * Exported for testing.
  */
 export function resolveFirstRunTarget(
   tier: string,
   p: NodeJS.Platform = platform,
   a: string = arch,
 ): { provider: 'llama-cpp' | 'mlx'; modelId: string } {
-  if (p === 'darwin' && a === 'arm64') {
-    return { provider: 'mlx', modelId: tier };
-  }
-  return { provider: 'llama-cpp', modelId: tier };
+  return { provider: resolveOnDeviceProvider(p, a), modelId: tier };
 }
 
 /** The catalog's chat-model manifests — the recommendation candidate pool. */

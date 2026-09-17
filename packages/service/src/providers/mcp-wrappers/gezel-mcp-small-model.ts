@@ -12,13 +12,14 @@
  * above; only the spec-detection helper survives, kept here so the
  * existing import paths keep working without churn.
  */
-import type { McpServerSpec } from '../mcp-bridge.js';
+import { type McpServerSpec, isStdioSpec } from '../mcp-spec.js';
 
 export function isGezelMcp(spec: McpServerSpec): boolean {
   // gezel-mcp only ever runs as a stdio subprocess we spawn ourselves —
-  // a hosted (http-mcp) entry from the upstream registry can't be it,
-  // so short-circuit on the discriminator before the haystack check.
-  if (spec.kind === 'http') return false;
+  // neither a hosted (http-mcp) entry from the upstream registry nor an
+  // in-memory relay can be it, so short-circuit on the discriminator
+  // before the haystack check.
+  if (!isStdioSpec(spec)) return false;
   const haystack = [spec.command, ...spec.args].join(' ');
   // Two flavors of launch path land here, both run as `node <path>`:
   //

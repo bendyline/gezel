@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BENDYLINE_APPLE_TEAM_ID, BENDYLINE_PUBLISHER, verifyCodeSignature } from './signature.js';
 
 type RunResult = { code: number | string; stdout: string; stderr: string };
@@ -55,6 +55,44 @@ const REAL_CODESIGN_DV = [
 ].join('\n');
 
 describe('verifyCodeSignature — windows', () => {
+  it('isolates Windows PowerShell from an inherited PowerShell 7 module path', async () => {
+    vi.stubEnv('PSModulePath', 'C:\\Program Files\\PowerShell\\7\\Modules');
+    vi.stubEnv('GEZEL_SIGNATURE_TEST', 'preserved');
+    try {
+      await verifyCodeSignature("C:\\engine's folder\\x.exe", {
+        policy: 'require',
+        platform: 'win32',
+        run: async (_cmd, args, options) => {
+          expect(
+            Object.keys(options?.env ?? {}).some((key) => key.toLowerCase() === 'psmodulepath'),
+          ).toBe(false);
+          expect(options?.env.GEZEL_SIGNATURE_TEST).toBe('preserved');
+          expect(process.env.PSModulePath).toContain('PowerShell');
+          expect(args.at(-1)).toContain("$ErrorActionPreference = 'Stop'");
+          expect(args.at(-1)).toContain("-LiteralPath 'C:\\engine''s folder\\x.exe'");
+          return ok('Valid');
+        },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('fails closed with the diagnostic when PowerShell exits unsuccessfully', async () => {
+    const outcome = await verifyCodeSignature('x.exe', {
+      policy: 'prefer',
+      platform: 'win32',
+      run: async () => ({
+        code: 1,
+        stdout: 'NotSigned',
+        stderr: 'Security module could not be loaded',
+      }),
+    });
+    expect(outcome.accepted).toBe(false);
+    expect(outcome.result.status).toBe('invalid');
+    expect(outcome.result.detail).toContain('Security module could not be loaded');
+  });
+
   it('Valid → valid, accepted by every policy', async () => {
     for (const policy of ['off', 'prefer', 'require'] as const) {
       const o = await verifyCodeSignature('x.exe', {

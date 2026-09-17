@@ -742,7 +742,7 @@
   overflow-wrap: anywhere;
 }
 
-.msg-retrieval-source-bytes {
+.msg-retrieval-source-tokens {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--muted, #888);
@@ -978,6 +978,39 @@
   max-width: 12rem;
   color: var(--text-muted);
   font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inspectable pre-send routing, tucked into the composer action rail. This is
+   a read-only status chip rather than a mode or action; its tooltip retains
+   the full route while the face stays quiet beside narration and Send. */
+.chat-turn-intent-preview {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 100px;
+  gap: 0.3rem;
+  box-sizing: border-box;
+  max-width: 100px;
+  height: 1.75rem;
+  margin: 2px;
+  padding: 0 0.45rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-md);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chat-turn-intent-preview svg {
+  flex: 0 0 auto;
+}
+
+.chat-turn-intent-preview span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

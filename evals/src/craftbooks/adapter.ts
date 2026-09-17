@@ -33,6 +33,7 @@ export function evalSpecFromTestSpec(
     title: spec.title,
     objective: spec.objective,
     ...(override?.existingScenarioId ? { existingScenarioId: override.existingScenarioId } : {}),
+    ...(override?.handAuthoredWorkflowProof ? { handAuthoredWorkflowProof: true as const } : {}),
     prompt: spec.prompt,
     setup: {
       projectName: spec.setup.projectName,

@@ -196,6 +196,50 @@ describe('ensureWarmModel', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('preserves a resumable llama.cpp partial before invoking the verified installer', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-llama-warm-'));
+    const modelId = 'qwen3.8-flash-next-iq3';
+    const modelDir = join(root, 'engines', 'llama-cpp', 'models', modelId);
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(join(modelDir, 'weights.gguf.partial'), 'resume me');
+    const updateConfig = vi.fn().mockResolvedValue(undefined);
+    const installLlamaCppModel = vi.fn(async (_id: string, onEvent: (event: object) => void) => {
+      expect(readFileSync(join(modelDir, 'weights.gguf.partial'), 'utf8')).toBe('resume me');
+      writeFileSync(join(modelDir, 'weights.gguf'), 'weights');
+      writeFileSync(
+        join(modelDir, 'manifest.json'),
+        JSON.stringify({ weightsFilename: 'weights.gguf' }),
+      );
+      onEvent({ type: 'done', id: modelId });
+    });
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: { updateConfig, installLlamaCppModel },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'llama-cpp',
+        modelId,
+        llamaBin: 'fake-llama-server',
+        log: () => {},
+      });
+
+      expect(updateConfig).toHaveBeenCalledWith({
+        provider: 'llama-cpp',
+        defaultModel: { 'llama-cpp': modelId },
+        firstRunCompleted: true,
+      });
+      expect(installLlamaCppModel).toHaveBeenCalledWith(modelId, expect.any(Function), undefined, {
+        skipCompanion: true,
+      });
+      expect(spawnMocks.shutdownTrialDaemon).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('assertMlxSourceComplete', () => {

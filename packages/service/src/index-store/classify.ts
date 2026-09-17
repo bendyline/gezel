@@ -193,3 +193,19 @@ export function classifyFile(path: string, size: number): FileClass {
 function triv(kind: string): FileClass {
   return { lang: null, kind, modality: 'text', trivial: true };
 }
+
+/**
+ * Kinds whose indexed text is DERIVED rather than a copy of the file's own
+ * bytes: vision descriptions for images, STT transcripts for audio, squisq
+ * shadow conversions for office docs, and nothing at all for opaque binaries.
+ *
+ * Anything re-reading a source file to expand an index hit must consult this
+ * first. Hydrating a hit on one of these kinds returns raw bytes decoded as
+ * UTF-8 — the exact defect that put 1155 bytes of JPEG mojibake into a chat
+ * prompt above the turn's system route.
+ */
+const DERIVED_INDEX_KINDS = new Set(['image', 'audio', 'doc', 'binary']);
+
+export function hasDerivedIndexText(path: string): boolean {
+  return DERIVED_INDEX_KINDS.has(classifyFile(path, 0).kind);
+}

@@ -1,5 +1,5 @@
 /**
- * Pre-warm the eval cache with a ds4 (DeepSeek-V4 / GLM) GGUF.
+ * Pre-warm the eval cache with a ds4 (DeepSeek V4/V4.1, GLM, or Qwen) GGUF.
  *
  * `warm-models.ts` is llama-cpp only; ds4 weights run to hundreds of GB and
  * are installed through the ds4 engine's own GGUF pipeline, so a scorecard

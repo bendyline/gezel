@@ -30,6 +30,7 @@ import {
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
+import { chatModelDs4RuntimeHints } from './model-sources.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
 import type { ResolvedBinary } from './native-bin.ts';
 import { repoRoot, resolveDs4Binary, resolveLlamaBinary, resolveSdBinary } from './native-bin.ts';
@@ -1751,11 +1752,11 @@ function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
 }
 
 /**
- * ds4 (DeepSeek-V4) eval launch overrides — parallels
+ * ds4 eval launch overrides — parallels
  * {@link llamaCppEvalLaunchOverridesForModel}. On a 128 GB-class unified-memory
- * host the model is loaded fully; smaller hosts stream MoE experts from disk,
- * so their resident footprint is the expert-cache budget (not all weights)
- * plus KV + context buffers.
+ * host a fitting routed-expert model is loaded fully; smaller hosts stream MoE
+ * experts from disk. Models without that graph (currently Qwen3.8) keep their
+ * main weights resident while their lookup tables remain disk-only.
  * One trial at a time; generous startup for the cold ~80 GB mmap + first-run
  * shader compile. Capability is throughput-invariant, so the trial timeouts
  * are generous (ds4 decodes ~6 tok/s on the GB10 Spark, ~10–13 on a 64 GB Mac).
@@ -1768,9 +1769,11 @@ export function ds4EvalShouldUseSsdStreaming(opts?: {
   totalRamBytes?: number;
   modelSizeBytes?: number;
   companionBytes?: number;
+  ssdStreamingSupported?: boolean;
   platform?: NodeJS.Platform;
   arch?: string;
 }): boolean {
+  if (opts?.ssdStreamingSupported === false) return false;
   const totalRamBytes = opts?.totalRamBytes ?? totalmem();
   const modelSizeBytes = opts?.modelSizeBytes;
   const platform = opts?.platform ?? process.platform;
@@ -1802,6 +1805,7 @@ export function ds4EvalLaunchOverridesForModel(
   // headroom. Throughput only — does not change capability/scores.
   const totalRamBytes = totalmem();
   const totalRamGb = totalRamBytes / 1024 ** 3;
+  const runtimeHints = chatModelDs4RuntimeHints(modelId);
   const modelSizeBytes = model
     ? (() => {
         try {
@@ -1828,7 +1832,10 @@ export function ds4EvalLaunchOverridesForModel(
     ? Math.round(visionEncoderSizeBytes * 1.1) + 384 * 1024 ** 2
     : 0;
   const ssdStreaming = ds4EvalShouldUseSsdStreaming({
-    modelSizeBytes,
+    modelSizeBytes: runtimeHints?.residentWeightBytes ?? modelSizeBytes,
+    ...(runtimeHints?.ssdStreamingSupported !== undefined
+      ? { ssdStreamingSupported: runtimeHints.ssdStreamingSupported }
+      : {}),
     ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
   });
   const cacheExpertsGb = totalRamGb >= 120 ? 64 : totalRamGb >= 88 ? 48 : 32;
@@ -1845,7 +1852,7 @@ export function ds4EvalLaunchOverridesForModel(
   // matches buildDs4Provider's 64 GB device tier; KV stays ~1.8 GiB (under
   // ds4-server's 4096 MiB disk budget) and context buffers ~4 GiB fit alongside
   // the 32 GB expert cache on a 64 GB box.
-  const numCtx = 131072;
+  const numCtx = Math.min(131072, runtimeHints?.maxLaunchCtx ?? 131072);
   return {
     extraEnv: {
       ...(bin ? { GEZEL_DS4_SERVER_BIN: bin.path } : {}),
@@ -1862,7 +1869,7 @@ export function ds4EvalLaunchOverridesForModel(
     },
     minTrialTimeoutMs: 120 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
+    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} prefillChunk=${runtimeHints?.prefillChunk ?? 'engine-default'} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
   };
 }
 
@@ -2365,15 +2372,21 @@ export async function pollUntilDone(
             args.client,
             poisonedTarget.sessionId,
           );
-          await args.client.sendChatMessage(poisonedTarget.gezelId, {
-            projectId: poisonedTarget.projectId,
+          // Into the POISONED session itself, not a fresh chat for the same
+          // gezel. This message is about that session's aborted turn and its
+          // step; delivered anywhere else it instructs a gezel to continue
+          // work it has no context for (see deliverRecoveryNudge). The file
+          // path rides in the message prose: `SendToSessionRequestSchema`
+          // carries no `expectedDeliverable`, and a step session is already
+          // gated by its craftbook, which is stricter than that ad-hoc gate.
+          await args.client.sendToChatSession(poisonedTarget.sessionId, {
+            nudge: true,
             message: buildPoisonedSessionRecoveryMessage({
               lastTurnError: poisonedTarget.lastTurnError,
               ...(abortTeaching ? { abortTeaching } : {}),
               filePath,
               sniff: latestSniff,
             }),
-            ...(filePath ? { expectedDeliverable: { kind: 'file' as const, filePath } } : {}),
           });
           // Consume the one-shot only after dispatch succeeds. A transient
           // HTTP failure must not silently strand the trial with a poisoned
@@ -2537,20 +2550,12 @@ export async function pollUntilDone(
             sniff,
             downstream: downstream !== null,
           });
-          if (downstream) {
-            await args.client.messageGezel(targetId, {
-              fromGezelId: args.meesterId,
-              text: nudge,
-              suppressReply: true,
-              projectId: downstream.projectId,
-              ...attachableDeliverable(filePath, downstream.role, args.log),
-            });
-          } else {
-            await args.client.sendChatMessage(targetId, {
-              message: nudge,
-              projectId: 'default',
-            });
-          }
+          await deliverRecoveryNudge(args.client, nudge, downstream, {
+            meesterId: args.meesterId,
+            fallbackGezelId: targetId,
+            ...(filePath ? { filePath } : {}),
+            log: args.log,
+          });
           reEngageNudgeDelivered = true;
           reEngageNudgeDeliveredAt = Date.now();
           reEngageTargetGezelId = targetId;
@@ -2723,20 +2728,12 @@ export async function pollUntilDone(
             const nudge = artifactExists
               ? `Direct kick from the eval harness: your deliverable file${filePathClause} EXISTS but still fails the latest \`[scenario check]\`. Treat that check like a failing test: fix the specific error it names, preserve working behavior, and make the smallest targeted code/content edit that clears the gate. Do NOT recreate the file from scratch and do NOT reply that you already wrote it. If the check names a runtime/command failure, repair the file that caused it and verify with the available execution tool when practical. Your next tool call must be an edit (\`replace_in_file\`, \`append_to_file\`, \`apply_patch\`, or \`write_file\`); do not call more read-only tools until after that edit.`
               : `Direct kick from the eval harness: you've been reading and exploring for a while but the deliverable file hasn't reached its expected path yet${filePath ? ` (\`${filePath}\`)` : ''}. Stop reading. Do not end your turn until \`write_file\` has created the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `review.md`, `index.html`)'} with whatever you can write now — a stub is better than nothing. You can refine it on the next turn. Do not use \`write_artifact\` for source or app files, and do not call any more read-only tools until the workspace file exists.`;
-            if (downstream) {
-              await args.client.messageGezel(targetId, {
-                fromGezelId: args.meesterId,
-                text: nudge,
-                suppressReply: true,
-                projectId: downstream.projectId,
-                ...attachableDeliverable(filePath, downstream.role, args.log),
-              });
-            } else {
-              await args.client.sendChatMessage(targetId, {
-                message: nudge,
-                projectId: 'default',
-              });
-            }
+            await deliverRecoveryNudge(args.client, nudge, downstream, {
+              meesterId: args.meesterId,
+              fallbackGezelId: targetId,
+              ...(filePath ? { filePath } : {}),
+              log: args.log,
+            });
             retryLoopNudgeDelivered = true;
             noteHarnessInterventionDelivered(ctx);
           } catch (err) {
@@ -4205,6 +4202,62 @@ async function finalize(args: {
 }
 
 /**
+ * Deliver a recovery nudge so it lands where the work is.
+ *
+ * A nudge says things like "you are mid-craftbook step X — re-read the step
+ * procedure in your system prompt". That is only true inside the STEP's
+ * session. `sendChatMessage` can address a `{gezelId, projectId}` pair and
+ * nothing finer, so it opens a plain chat with no `taskRef` and no `stepId` —
+ * and the gezel is told to continue work it cannot see.
+ *
+ * Wild-caught on the first true end-to-end PowerPoint pass: the reviewer's turn
+ * aborted on a read loop, the recovery nudge opened an unbound session, and
+ * that session — with no outline and no topic — wrote the craftbook's
+ * `deck.md`, replacing an eleven-slide deck about lighthouses with one slide
+ * about the phrase "Review narrative and grounding", the only subject matter
+ * its prompt contained. The gate then rejected the wreckage and paused the
+ * task. The harness destroyed the artifact it was trying to rescue.
+ *
+ * Prefer the bound session by id; fall back to the old routes only when there
+ * is no task-bound session to reach. The `messageGezel` fallback is kept
+ * rather than collapsed into a `sendToChatSession` on the same id: it is the
+ * only route that can attach a file deliverable contract, which is what gates
+ * an UNBOUND session into actually producing the file. A bound session needs
+ * none of that — its craftbook step gate is stricter.
+ */
+async function deliverRecoveryNudge(
+  client: GezelClient,
+  nudge: string,
+  target: {
+    gezelId: string;
+    projectId: string;
+    role: string | null;
+    sessionId: string | null;
+    taskRef: string | null;
+  } | null,
+  opts: { meesterId: string; fallbackGezelId: string; filePath?: string; log: (m: string) => void },
+): Promise<void> {
+  if (target?.sessionId && target.taskRef) {
+    await client.sendToChatSession(target.sessionId, { message: nudge, nudge: true });
+    opts.log(
+      `[poll] recovery nudge delivered into ${target.taskRef} session ${target.sessionId.slice(0, 8)} (step context preserved)`,
+    );
+    return;
+  }
+  if (target) {
+    await client.messageGezel(target.gezelId, {
+      fromGezelId: opts.meesterId,
+      text: nudge,
+      suppressReply: true,
+      projectId: target.projectId,
+      ...attachableDeliverable(opts.filePath, target.role, opts.log),
+    });
+    return;
+  }
+  await client.sendChatMessage(opts.fallbackGezelId, { message: nudge, projectId: 'default' });
+}
+
+/**
  * Pick the most-recently-active downstream gezel to receive a direct
  * re-engage nudge, bypassing the meester relay. Returns null when no
  * qualifying session exists (single-gezel trial, or only the meester is
@@ -4214,17 +4267,31 @@ async function finalize(args: {
  * role is builder/developer/voorman (the gezels expected to write the
  * actual deliverable). Falls through to "any non-meester session" if no
  * role match — better to nudge the wrong specialist than no one.
+ *
+ * Also returns the session id and its `taskRef` so the caller can deliver
+ * INTO that session rather than opening a fresh unbound one.
  */
 async function pickReEngageTarget(
   client: GezelClient,
   meesterId: string,
   args?: { preferWritableRole?: boolean },
-): Promise<{ gezelId: string; projectId: string; role: string | null } | null> {
+): Promise<{
+  gezelId: string;
+  projectId: string;
+  role: string | null;
+  /** The chosen session, so a step-aware nudge can be delivered INTO it. */
+  sessionId: string | null;
+  /** Set when that session is bound to a craftbook step. */
+  taskRef: string | null;
+} | null> {
   let sessions: Array<{
+    id?: string;
     gezelId: string;
     projectId: string;
     lastActivityAt?: string;
     archived?: boolean;
+    taskRef?: string | null;
+    stepId?: string | null;
   }> = [];
   try {
     const r = await client.listChatSessions();
@@ -4250,7 +4317,14 @@ async function pickReEngageTarget(
     const t = Date.parse(s.lastActivityAt);
     return Number.isFinite(t) ? t : 0;
   };
-  const byRecency = [...candidates].sort((a, b) => tsOf(b) - tsOf(a));
+  // Task-bound before unbound, then recency. A gezel can hold both a step
+  // session and a plain chat, and recency alone picks the wrong one exactly
+  // when it matters most: a previous stray nudge is what made the unbound
+  // chat the most recent, so the harness would keep feeding the session that
+  // has none of the work.
+  const byRecency = [...candidates].sort(
+    (a, b) => Number(Boolean(b.taskRef)) - Number(Boolean(a.taskRef)) || tsOf(b) - tsOf(a),
+  );
 
   const builderRoles = /^(builder|developer|voorman)$/i;
   const roleOf = (s: { gezelId: string }): string | null => gezelRoles.get(s.gezelId) ?? null;
@@ -4273,5 +4347,7 @@ async function pickReEngageTarget(
     gezelId: chosen.gezelId,
     projectId: chosen.projectId,
     role: gezelRoles.get(chosen.gezelId) ?? null,
+    sessionId: chosen.id ?? null,
+    taskRef: chosen.taskRef ?? null,
   };
 }

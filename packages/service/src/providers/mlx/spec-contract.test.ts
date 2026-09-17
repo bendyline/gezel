@@ -86,8 +86,8 @@ describe('MLX MTP speculative-decoding contract', () => {
     expect(SPEC).toContain('greedy-only');
   });
 
-  it('the venv list pins mlx-lm explicitly on the 0.6.17 line', () => {
-    // mlx-vlm 0.6.6 declared mlx-lm as a dependency; 0.6.17 dropped it.
+  it('the venv list pins mlx-lm explicitly on post-0.6.17 lines', () => {
+    // mlx-vlm 0.6.6 declared mlx-lm as a dependency; later lines dropped it.
     // The sidecar imports mlx_lm.generate.BatchGenerator unconditionally,
     // so a venv provisioned without an explicit mlx-lm pin kills the
     // batch engine at import time — on every fresh install, silently.

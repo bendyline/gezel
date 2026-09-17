@@ -54,7 +54,11 @@ export interface VerifyOutcome {
 
 /** (code, stdout, stderr) of a finished command; never rejects. */
 type RunResult = { code: number | string; stdout: string; stderr: string };
-type Runner = (cmd: string, args: string[]) => Promise<RunResult>;
+type Runner = (
+  cmd: string,
+  args: string[],
+  options?: { env: NodeJS.ProcessEnv },
+) => Promise<RunResult>;
 
 export interface VerifyOptions {
   policy: SignaturePolicy;
@@ -77,10 +81,11 @@ export interface VerifyOptions {
   run?: Runner;
 }
 
-const defaultRun: Runner = async (cmd, args) => {
+const defaultRun: Runner = async (cmd, args, options) => {
   try {
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       maxBuffer: 4 * 1024 * 1024,
+      ...options,
       // Native installation verifies four toolkit executables in sequence.
       // On Windows, detaching these short-lived PowerShell checks gives each
       // one a new console window; hide the owned children instead.
@@ -157,16 +162,32 @@ async function verifyWindows(
   // NotTrusted | UnknownError | … . -LiteralPath avoids glob expansion;
   // single quotes are doubled to escape (paths are from our own cache).
   const escaped = binPath.replace(/'/g, "''");
-  const res = await run('powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-WindowStyle',
-    'Hidden',
-    '-Command',
-    `$sig = Get-AuthenticodeSignature -LiteralPath '${escaped}'; Write-Output ([string]$sig.Status); Write-Output ([string]$sig.SignerCertificate.Subject)`,
-  ]);
+  // Windows PowerShell must build its own module path. Inheriting PowerShell
+  // 7's PSModulePath can prevent Microsoft.PowerShell.Security from loading.
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  }
+  const res = await run(
+    'powershell',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      `$ErrorActionPreference = 'Stop'; $sig = Get-AuthenticodeSignature -LiteralPath '${escaped}'; Write-Output ([string]$sig.Status); Write-Output ([string]$sig.SignerCertificate.Subject)`,
+    ],
+    { env },
+  );
   if (isSpawnFailure(res.code)) {
     return { status: 'unsupported', detail: `could not run powershell (${res.code})` };
+  }
+  if (res.code !== 0) {
+    return {
+      status: 'invalid',
+      detail: `Authenticode verification failed (exit ${res.code}): ${res.stderr.trim().slice(0, 1000) || 'no diagnostic output'}`,
+    };
   }
   const [status = '', ...subjectLines] = res.stdout.trim().split(/\r?\n/);
   const subject = subjectLines.join(' ').trim();

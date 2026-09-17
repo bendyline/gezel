@@ -257,6 +257,7 @@ export function craftbookFromDoc(
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
     ...(doc.commands ? { commands: doc.commands } : {}),
     ...(doc.paramSchema ? { paramSchema: doc.paramSchema } : {}),
+    ...(doc.cliWorkflow ? { cliWorkflow: doc.cliWorkflow } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.scripts ? { scripts: doc.scripts } : {}),
     // Declarative fanout, and the three whole-book flags beside it. Every
@@ -411,6 +412,7 @@ export function docFromCraftbook(book: Craftbook): CraftbookDoc {
     ...(book.connectors ? { connectors: book.connectors } : {}),
     ...(book.commands ? { commands: book.commands } : {}),
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
+    ...(book.cliWorkflow ? { cliWorkflow: book.cliWorkflow } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
     ...(book.spawn ? { spawn: book.spawn } : {}),
     ...(book.diffpackCapable !== undefined ? { diffpackCapable: book.diffpackCapable } : {}),

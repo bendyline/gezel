@@ -1,0 +1,190 @@
+diff --git a/common/parsers/muse-glimmer.cpp b/common/parsers/muse-glimmer.cpp
+index add95697..7fab6bf6 100644
+--- a/common/parsers/muse-glimmer.cpp
++++ b/common/parsers/muse-glimmer.cpp
+@@ -16,6 +16,13 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
+     data.format            = COMMON_CHAT_FORMAT_PEG_NATIVE;
+     data.supports_thinking = true;
+ 
++    // Channel parsing alone does not activate the reasoning-budget sampler.
++    data.thinking_start_tag = " to=self<|message|>";
++    // A forced cutoff must enter the next recipient header, not leave the
++    // model free to continue an unfinished reasoning sentence after <|eom|>.
++    // Natural endings still match the shorter terminator.
++    data.thinking_end_tags  = {"<|eom|><|start|>assistant to=", "<|eom|>"};
++
+     data.preserved_tokens = {
+         "<|start|>", "<|message|>", "<|eom|>", "<|eot|>",
+         // ATEM tool-call markup emitted on " to=<tool>" turns.
+@@ -130,7 +137,10 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
+         });
+         data.grammar_triggers = {
+             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
+-              "<\\|start\\|>assistant( to=(?!self<\\|message\\|>)(?!user<\\|message\\|>)[^<]*?<\\|message\\|>)" },
++              // Lazy grammars do not receive the generation prompt. A direct
++              // tool response starts at " to=", while subsequent messages
++              // include the complete assistant header.
++              "(?:^|<\\|start\\|>assistant)( to=(?!self<\\|message\\|>)(?!user<\\|message\\|>)[^<]*?<\\|message\\|>)" },
+         };
+     }
+ 
+diff --git a/common/reasoning-budget.cpp b/common/reasoning-budget.cpp
+index 4884299f..cbf6d7df 100644
+--- a/common/reasoning-budget.cpp
++++ b/common/reasoning-budget.cpp
+@@ -37,10 +37,10 @@ struct token_matcher {
+     }
+ 
+     // returns the index into seqs of the longest sequence ending at this token, or -1
+-    int32_t advance(llama_token token) {
++    int32_t advance(llama_token token, bool reset_on_match = true) {
+         state = ac.next(state, (uint32_t) token);
+         const int32_t p = ac.match_pattern(state);
+-        if (p >= 0) {
++        if (p >= 0 && reset_on_match) {
+             state = 0;
+         }
+         return p;
+@@ -134,7 +134,10 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+         case REASONING_BUDGET_FORCING:
+         {
+             // track the end sequence within forced_tokens so it is also reported on DONE
+-            const int32_t match = ctx->end_matcher.advance(token);
++            // A shorter natural end may prefix the forced header. Retain trie
++            // state through that match so the complete header is replayed to
++            // the lazy grammar when forcing finishes.
++            const int32_t match = ctx->end_matcher.advance(token, false);
+             ctx->force_pos++;
+             if (ctx->force_pos >= ctx->forced_tokens.size()) {
+                 ctx->state = REASONING_BUDGET_DONE;
+diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
+index 30a7237e..1881bf02 100644
+--- a/tests/test-chat.cpp
++++ b/tests/test-chat.cpp
+@@ -6116,6 +6116,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
+     {
+         auto tst = peg_tester("models/templates/muse-glimmer.jinja", detailed_debug);
+ 
++        // A JSON-valued argument is one value, even when its first property
++        // is itself a string and later properties contain arrays/objects.
++        tst.test(" to=write_artifact<|message|><atem:function_calls>"
++                 "<atem:invoke name=\"write_artifact\">"
++                 "<atem:parameter name=\"jsonContent\">{\"draftHash\":\"abc\",\"claims\":[{\"id\":\"c1\"}]}</atem:parameter>"
++                 "</atem:invoke></atem:function_calls>")
++            .tools({{"write_artifact", "Write a JSON report", R"({"type":"object","properties":{"jsonContent":{"type":"object","additionalProperties":{}}},"required":["jsonContent"]})"}})
++            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
++            .expect_tool_calls({{"write_artifact", R"({"jsonContent":{"draftHash":"abc","claims":[{"id":"c1"}]}})", {}}})
++            .run();
++
+         const std::string call_markup =
+             "<atem:function_calls>\n"
+             "<atem:invoke name=\"special_function\">\n"
+@@ -7161,33 +7172,59 @@ static void test_deepseek_v4_tool_result_ordering() {
+ 
+ static void test_reasoning_budget_tokens_per_request() {
+     LOG_DBG("%s\n", __func__);
+-    // Use Qwen3 template which has <think>...</think> reasoning markers.
+-    // The autoparser detects them and sets thinking_start/end_tag, which enables
+-    // the reasoning-budget code path in oaicompat_chat_params_parse.
+-    auto tmpls = read_templates("models/templates/Qwen-Qwen3-0.6B.jinja");
++    for (const char * path : {"models/templates/Qwen-Qwen3-0.6B.jinja", "models/templates/muse-glimmer.jinja"}) {
++        // Cover both autoparser tags (Qwen3) and specialized channel parsing (Muse).
++        // Missing thinking markers silently drops request and launch budgets.
++        auto tmpls = read_templates(path);
+ 
+-    server_chat_params opt;
+-    opt.tmpls            = std::move(tmpls);
+-    opt.use_jinja        = true;
+-    opt.enable_thinking  = true;
+-    opt.reasoning_budget = -1;
+-    opt.reasoning_format = COMMON_REASONING_FORMAT_NONE;
++        server_chat_params opt;
++        opt.tmpls            = std::move(tmpls);
++        opt.use_jinja        = true;
++        opt.enable_thinking  = true;
++        opt.reasoning_budget = -1;
++        opt.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+ 
+-    // Body with per-request reasoning_budget_tokens=0 (suppress thinking).
+-    json body = {
+-        {"messages", json::array({json{{"role", "user"}, {"content", "hello"}}})},
+-        {"reasoning_budget_tokens", 0},
+-    };
+-    std::vector<raw_buffer> out_files;
+-    auto llama_params = oaicompat_chat_params_parse(body, opt, out_files);
++        json body = {
++            {"messages", json::array({json{{"role", "user"}, {"content", "hello"}}})},
++            {"reasoning_budget_tokens", 0},
++        };
++        std::vector<raw_buffer> out_files;
++        auto llama_params = oaicompat_chat_params_parse(body, opt, out_files);
+ 
+-    // The per-request value must win over the server default (-1).
+-    if (!llama_params.contains("reasoning_budget_tokens")) {
+-        throw std::runtime_error("reasoning_budget_tokens missing from llama_params (thinking_end_tag may be empty for this template)");
+-    }
+-    int got = llama_params["reasoning_budget_tokens"].get<int>();
+-    if (got != 0) {
+-        throw std::runtime_error(std::string("Expected reasoning_budget_tokens=0, got ") + std::to_string(got));
++        if (!llama_params.contains("reasoning_budget_tokens")) {
++            throw std::runtime_error("reasoning_budget_tokens missing from llama_params (thinking_end_tag may be empty for this template)");
++        }
++        int got = llama_params["reasoning_budget_tokens"].get<int>();
++        if (got != 0) {
++            throw std::runtime_error(std::string("Expected reasoning_budget_tokens=0, got ") + std::to_string(got));
++        }
++        if (std::string(path) == "models/templates/muse-glimmer.jinja") {
++            const auto & ends = llama_params.at("reasoning_budget_end_tags");
++            if (ends != json::array({"<|eom|><|start|>assistant to=", "<|eom|>"})) {
++                throw std::runtime_error("Muse forced reasoning cutoff must preserve the next recipient header");
++            }
++            body["tools"] = json::array({{
++                {"type", "function"},
++                {"function", {{"name", "write_artifact"}, {"parameters", {{"type", "object"}}}}},
++            }});
++            const auto tool_params = oaicompat_chat_params_parse(body, opt, out_files);
++            const std::regex trigger(tool_params.at("grammar_triggers").at(0).at("value").get<std::string>());
++            // The sampler does NOT feed generation-prompt tokens into lazy
++            // grammars. Test actual generated text, not prompt + generated text.
++            for (const std::string text : {" to=write_artifact<|message|>",
++                                          " to=self<|message|><|eom|><|start|>assistant to=write_artifact<|message|>"}) {
++                std::smatch match;
++                if (!std::regex_search(text, match, trigger) || match[1] != " to=write_artifact<|message|>") {
++                    throw std::runtime_error("Muse lazy grammar missed a generated tool header");
++                }
++            }
++            for (const std::string text : {" to=self<|message|>", " to=user<|message|>",
++                                          " to=user<|message|>Quoted to=write_artifact<|message|>"}) {
++                if (std::regex_search(text, trigger)) {
++                    throw std::runtime_error("Muse lazy grammar activated outside a tool header");
++                }
++            }
++        }
+     }
+ }
+ 
+diff --git a/tests/test-reasoning-budget.cpp b/tests/test-reasoning-budget.cpp
+index 3bcc77e1..5f0636cc 100644
+--- a/tests/test-reasoning-budget.cpp
++++ b/tests/test-reasoning-budget.cpp
+@@ -316,6 +316,20 @@ static void test_reasoning_budget_end_match() {
+         llama_sampler_free(sampler);
+     }
+ 
++    // A natural end can be a prefix of a longer forced channel header (Muse).
++    // Keep the whole header for replay into the lazy tool grammar.
++    {
++        const llama_tokens header = {101, 103, 104};
++        auto * sampler = common_reasoning_budget_init(nullptr, start, {header, {101}}, header, 0, REASONING_BUDGET_FORCING);
++        for (const auto token : header) {
++            GGML_ASSERT(get_forced_token(sampler, 104) == token);
++            llama_sampler_accept(sampler, token);
++        }
++        const llama_tokens * matched = common_reasoning_budget_get_end_match(sampler);
++        GGML_ASSERT(matched != nullptr && *matched == header);
++        llama_sampler_free(sampler);
++    }
++
+     // forced_tokens not ending with a known end sequence records nothing
+     {
+         auto * sampler = common_reasoning_budget_init(nullptr, start, end, {102}, 0, REASONING_BUDGET_FORCING);

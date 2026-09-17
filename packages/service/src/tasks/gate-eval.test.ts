@@ -18,6 +18,169 @@ const splitReader = (
 });
 
 describe('evaluateGate', () => {
+  it('corpusBatchObservations accepts equivalent heading levels and requires every assigned path', async () => {
+    const batchesFile = 'pr-review/batches.json';
+    const file = 'pr-review/observations-1.md';
+    const batches = JSON.stringify([{ batchNumber: 1, paths: ['src/a.ts', 'src/b.ts'] }]);
+    const check = {
+      kind: 'corpusBatchObservations' as const,
+      batchesFile,
+      batchNumber: '1',
+      file,
+      artifact: true,
+    };
+    const complete = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n### `src/b.ts` — finding\nMajor issue.\n',
+        },
+      ),
+    );
+    expect(complete.pass).toBe(true);
+    const partial = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]: '## Batch 1\n\n### src/a.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(partial.pass).toBe(false);
+    expect(partial.checks[0]?.remaining).toBe(1);
+    expect(partial.failures[0]).toContain('src/b.ts');
+    const placeholder = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:new-side-line — major — Maybe broken.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(placeholder.pass).toBe(false);
+    expect(placeholder.failures[0]).toContain('actual integer new-side line');
+    const anchored = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:42 — major — Concrete defect.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(anchored.pass).toBe(true);
+    const numberedNonIssue = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | minor | Intentional limitation; acceptable as-is. No action needed.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(numberedNonIssue.pass).toBe(false);
+    expect(numberedNonIssue.failures[0]).toContain('actionable PR defect');
+    const centralVerification = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Needs central verification; no evidence of the dependency is available in this batch.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(centralVerification.pass).toBe(false);
+    expect(centralVerification.failures[0]).toContain('actionable PR defect');
+    const boldAnchored = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Authorization check is bypassed.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(boldAnchored.pass).toBe(true);
+    expect(
+      (
+        await evaluateGate(
+          [check],
+          splitReader(
+            {},
+            {
+              [batchesFile]: '{',
+              [file]: '# Batch 1\n## src/a.ts\n## src/b.ts',
+            },
+          ),
+        )
+      ).pass,
+    ).toBe(false);
+  });
+
+  it('corpusReadEvidence requires service-observed complete reads of each exact batch record', async () => {
+    const batchesFile = 'pr-review/batches.json';
+    const records = ['data/pr/files/a.md', 'data/pr/files/b.md'];
+    const r = splitReader(
+      {},
+      {
+        [batchesFile]: JSON.stringify([{ batchNumber: 1, records }]),
+      },
+    );
+    const check = {
+      kind: 'corpusReadEvidence' as const,
+      batchesFile,
+      batchNumber: '1',
+      artifact: true,
+    };
+    const partial = await evaluateGate([check], r, {
+      corpusReadEvidence: async () => ({
+        observable: true,
+        slices: [
+          { path: records[0]!, startLine: 1, endLine: 10, totalLines: 20 },
+          { path: records[0]!, startLine: 12, endLine: 20, totalLines: 20 },
+          { path: records[1]!, startLine: 1, endLine: 8, totalLines: 8 },
+        ],
+      }),
+    });
+    expect(partial.pass).toBe(false);
+    expect(partial.checks[0]?.remaining).toBe(1);
+    expect(partial.failures[0]).toContain(records[0]);
+    const complete = await evaluateGate([check], r, {
+      corpusReadEvidence: async () => ({
+        observable: true,
+        slices: [
+          { path: records[0]!, startLine: 1, endLine: 10, totalLines: 20 },
+          { path: records[0]!, startLine: 11, endLine: 20, totalLines: 20 },
+          { path: records[1]!, startLine: 1, endLine: 8, totalLines: 8 },
+        ],
+      }),
+    });
+    expect(complete.pass).toBe(true);
+    expect(
+      (
+        await evaluateGate([check], r, {
+          corpusReadEvidence: async () => ({ observable: false, slices: [] }),
+        })
+      ).pass,
+    ).toBe(false);
+  });
+
   it('totalMinBytes: passes over the floor, fails with a concrete gap', async () => {
     const ok = await evaluateGate(
       [{ kind: 'totalMinBytes', files: ['index.html', 'game.js'], bytes: 20 }],
@@ -542,6 +705,35 @@ describe('evaluateGate', () => {
       reader({ 'CHANGELOG.md': '# 2.4.0\n\n- Added CSV export.\n' }),
     );
     expect(ok.pass).toBe(true);
+  });
+
+  it('notContains reads artifact deliverables from the artifact drawer', async () => {
+    const check = {
+      kind: 'notContains' as const,
+      file: 'tasks/42/pr-review.md',
+      pattern: '\\b(?:may|might|could)\\b',
+      flags: 'i',
+      artifact: true,
+    };
+    const forbidden = await evaluateGate(
+      [check],
+      splitReader({}, { 'tasks/42/pr-review.md': 'This change could lose an update.' }),
+    );
+    expect(forbidden.pass).toBe(false);
+    expect(forbidden.failures[0]).toContain('forbidden content');
+
+    const ok = await evaluateGate(
+      [check],
+      splitReader({}, { 'tasks/42/pr-review.md': 'This change loses the pending update.' }),
+    );
+    expect(ok.pass).toBe(true);
+
+    const workspaceOnly = await evaluateGate(
+      [check],
+      splitReader({ 'tasks/42/pr-review.md': 'No modal wording here.' }, {}),
+    );
+    expect(workspaceOnly.pass).toBe(false);
+    expect(workspaceOnly.failures[0]).toContain('not found');
   });
 
   it('uses pattern labels in repair feedback', async () => {

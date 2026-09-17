@@ -111,6 +111,13 @@ const ACTION_VERB_RE = new RegExp(
 const THIRD_PERSON_TOOL_RESULT_RE =
   /\bThe\s+(?:specialist|expert|consultant|advisor|tool|search|analysis|response|reply|result)\s+(?:has\s+|just\s+)?(?:weighed in|replied|answered|provided|recommended|suggested|responded|confirmed|indicated|reported|delivered)\b/i;
 
+// Claims that can truthfully describe evidence replayed from an immediately
+// preceding task step. Keep this narrower than ACTION_VERBS: prior read
+// evidence never licenses claims that the model wrote, clicked, submitted, or
+// otherwise mutated anything in the current turn.
+const REPLAYABLE_READ_CLAIM_RE =
+  /\b(?:read|opened|accessed|retrieved|fetched|pulled|downloaded|loaded|analy[sz]ed|compiled)\b/i;
+
 /**
  * Verdict shape exported for tests + any other code that wants to
  * use the same heuristic outside the runtime hook (e.g. the salvage
@@ -171,6 +178,14 @@ export const FabricationDetectPastTense: Behavior = {
       successfulToolCallCount,
     });
     if (!verdict.hallucinated) return null;
+    if (
+      ctx.verifiedPriorArtifactRead &&
+      verdict.placeholders.length < 2 &&
+      verdict.actionVerbHit &&
+      REPLAYABLE_READ_CLAIM_RE.test(verdict.actionVerbHit)
+    ) {
+      return null;
+    }
 
     const reason = verdict.actionVerbHit
       ? `text claims "${verdict.actionVerbHit}" but no tool actually ran`

@@ -683,6 +683,66 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
+  it('exact per-step disallows remove artifact search without removing exact reads', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'doc-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'review-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          disallowTools: ['list_artifacts', 'grep_artifact', 'read_doc_as_markdown'],
+          outputMedium: 'artifact',
+        },
+      },
+    });
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('list_artifacts')).toBe(false);
+    expect(allowlist!.has('grep_artifact')).toBe(false);
+    expect(allowlist!.has('read_doc_as_markdown')).toBe(false);
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('read_artifacts')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps a fixed patch-open roster distinct from the later observations writer', async () => {
+    const open = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'code-intel', 'security-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'open-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          allowTools: ['read_artifact', 'read_artifacts'],
+          outputMedium: 'none',
+        },
+      },
+    });
+    expect([...open.allowlist!].sort()).toEqual(['read_artifact', 'read_artifacts']);
+
+    const review = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      toolsetsGroupOverride: ['artifacts', 'code-intel', 'security-intel', 'tasks'],
+      session: baseSession({ taskRef: 'p1/9', stepId: 'review-batch' }),
+      tier: 'large',
+      activeStep: {
+        toolPolicy: {
+          allowTools: ['read_artifact', 'read_artifacts', 'write_artifact'],
+          outputMedium: 'artifact',
+        },
+      },
+    });
+    expect([...review.allowlist!].sort()).toEqual([
+      'read_artifact',
+      'read_artifacts',
+      'write_artifact',
+    ]);
+  });
+
   it('load-bearing floor keeps step tools alive even under the tiny cap', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -738,6 +798,36 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 });
 
 describe('resolveSessionToolSurface — Meester routing precedence', () => {
+  it('gives a tiny Meester one pre-resolved craftbook action for an exact format', async () => {
+    const prompt = 'Please make a PowerPoint about Mongolia and deliver the .pptx file.';
+    const { allowlist, exactCraftbookConstrained } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'powerpoint-tiny',
+        gezelId: 'meester',
+        projectId: 'default',
+        providerName: 'llama-cpp',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-12T00:00:00.000Z' }],
+        createdAt: '2026-09-12T00:00:00.000Z',
+        lastActivityAt: '2026-09-12T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-e2b-q4',
+      parameterSize: '2.3B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'tiny',
+      latestUserMessage: prompt,
+    });
+
+    expect(exactCraftbookConstrained).toBe(true);
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
+  });
+
   it('routes an exact-format PowerPoint request through the compact craftbook front door', async () => {
     const prompt = 'Create a PowerPoint presentation about D-Day and deliver the .pptx file.';
     for (const role of ['Meester', 'Voorman']) {
@@ -765,13 +855,52 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
         latestUserMessage: prompt,
       });
 
+      // Medium tier collapses to the same single pre-resolved action as tiny.
+      // A 27B Meester given the shortlist tool alongside the invocation tool
+      // shopped instead of invoking, looped on `ensure_gezel`, and shipped no
+      // .pptx — so route confidence, not parameter count, gates the clamp.
       expect(projectOrchestrationConstrained).toBe(true);
-      expect(allowlist?.has('suggest_craftbook')).toBe(true);
-      expect(allowlist?.has('invoke_craftbook')).toBe(true);
-      expect(allowlist?.has('message_gezel')).toBe(true);
-      expect(allowlist?.has('write_file')).toBe(false);
-      expect(allowlist!.size).toBeLessThan(25);
+      expect([...allowlist!]).toEqual(['invoke_craftbook']);
     }
+  });
+
+  // The clamp's promise is ONE pre-resolved action. It keeps that for builtins,
+  // and third-party toolset servers are wired on a separate path — which is how
+  // a routed Meester turn came to hold `invoke_craftbook` plus nineteen
+  // DocBlocks tools and no craftbook lookup. The model read `describe_template`
+  // as the lookup, got "Unknown template", and hand-built the deck instead.
+  // ChatManager withholds `extraMcpServers` whenever this clamp fires; this
+  // test pins the clamp signal that suppression keys on.
+  it('reports the exact-craftbook clamp so toolset servers can be withheld too', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'alaska',
+        gezelId: 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-14T00:00:00.000Z' }],
+        createdAt: '2026-09-14T00:00:00.000Z',
+        lastActivityAt: '2026-09-14T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'mlx',
+      modelId: 'qwen3.8-27b-q4',
+      parameterSize: '27B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'medium',
+      latestUserMessage: prompt,
+      onClamp: (kind: string) => clamps.push(kind),
+    } as never);
+
+    expect(clamps).toContain('exact-craftbook-invocation');
+    expect([...allowlist!]).toEqual(['invoke_craftbook']);
   });
 
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {

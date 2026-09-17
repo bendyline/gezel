@@ -1410,6 +1410,29 @@ describe('ds4 eval residency policy', () => {
     ).toBe(false);
   });
 
+  it('never asks an architecture without expert streaming support to stream', () => {
+    expect(
+      ds4EvalShouldUseSsdStreaming({
+        totalRamBytes: 64 * GB,
+        modelSizeBytes: 48 * GB,
+        ssdStreamingSupported: false,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(false);
+  });
+
+  it('uses Qwen catalog launch limits instead of its disk-only n-gram file size', () => {
+    const actual = ds4EvalLaunchOverridesForModel('qwen3.8-flash-next-q2');
+
+    expect(actual?.config).toMatchObject({
+      ds4SsdStreaming: false,
+      ds4NumCtx: 8192,
+    });
+    expect(actual?.summary).toContain('prefillChunk=1024');
+    expect(actual?.summary).toContain('residency=full');
+  });
+
   it('retains streaming for Q4-sized weights, smaller hosts, unknown sizes, and discrete GPUs', () => {
     expect(
       ds4EvalShouldUseSsdStreaming({

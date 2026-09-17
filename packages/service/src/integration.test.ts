@@ -164,6 +164,26 @@ describe('operational API surface', () => {
     }
   });
 
+  it('reloads inference concurrency without interrupting busy sessions', async () => {
+    const resetClient = vi.spyOn(svc.context.chat, 'resetClient');
+    try {
+      const update = await api('PUT', '/api/config', {
+        providerConcurrency: { 'llama-cpp': 1, ds4: 2 },
+      });
+      expect(update.status).toBe(200);
+      expect(resetClient).toHaveBeenCalledWith({ deferBusy: true });
+      expect(await (await api('GET', '/api/config')).json()).toMatchObject({
+        providerConcurrency: { 'llama-cpp': 1, ds4: 2 },
+      });
+      await api('PUT', '/api/config', { providerConcurrency: {} });
+      expect(await (await api('GET', '/api/config')).json()).toMatchObject({
+        providerConcurrency: {},
+      });
+    } finally {
+      resetClient.mockRestore();
+    }
+  });
+
   it('round-trips ds4 vision launch settings and rebuilds cached providers', async () => {
     const visionSettings = {
       ds4VisionEncoderPath: '/tmp/integration-ds4-vision-encoder.gguf',

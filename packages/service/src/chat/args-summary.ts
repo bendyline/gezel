@@ -188,9 +188,12 @@ export interface ToolResultSummary {
   truncated: boolean;
 }
 
-export function summarizeToolResult(result: string | undefined): ToolResultSummary | undefined {
+export function summarizeToolResult(
+  result: string | undefined,
+  fullCap: number = TOOL_RESULT_FULL_CAP,
+): ToolResultSummary | undefined {
   if (result === undefined || result.trim().length === 0) return undefined;
-  if (result.length <= TOOL_RESULT_FULL_CAP) return { text: result, truncated: false };
+  if (result.length <= fullCap) return { text: result, truncated: false };
 
   const head = result.slice(0, TOOL_RESULT_SUMMARY_HEAD);
   const tail = result.slice(-TOOL_RESULT_SUMMARY_TAIL);

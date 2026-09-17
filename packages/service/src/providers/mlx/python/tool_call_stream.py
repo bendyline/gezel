@@ -237,12 +237,20 @@ def resolve_tool_markers(processor) -> Optional[Tuple[str, str]]:
     extraction off and keep the existing text-salvage path.
     """
     try:
-        from mlx_vlm.tool_parsers import (  # type: ignore
+        # mlx-vlm 0.7.1 moved the parser-neutral registry into `tools`.
+        # Keep the old import for explicitly configured 0.6.17 runtimes.
+        from mlx_vlm.tools import (  # type: ignore
             _infer_tool_parser_from_processor,
             load_tool_module,
         )
     except Exception:
-        return None
+        try:
+            from mlx_vlm.tool_parsers import (  # type: ignore
+                _infer_tool_parser_from_processor,
+                load_tool_module,
+            )
+        except Exception:
+            return None
     try:
         parser_type = _infer_tool_parser_from_processor(processor)
         if not parser_type:

@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import selfsigned from 'selfsigned';
 import { z } from 'zod';
+import { zipStored } from '../fixtures/office-documents.ts';
 
 /**
  * Live per-trial mock services for the craftbook eval rail.
@@ -998,70 +999,6 @@ export function minimalPdfFixture(): Uint8Array {
   ].join('\n');
   // latin1 so the binary comment bytes in the header stay single-byte.
   return Uint8Array.from(`${header}${body}${xref}`, (char) => char.charCodeAt(0) & 0xff);
-}
-
-function zipStored(files: Array<[string, string]>): Uint8Array {
-  const encoder = new TextEncoder();
-  const locals: Uint8Array[] = [];
-  const centrals: Uint8Array[] = [];
-  let offset = 0;
-  for (const [name, text] of files) {
-    const nameBytes = encoder.encode(name);
-    const data = encoder.encode(text);
-    const crc = crc32(data);
-    const local = new Uint8Array(30 + nameBytes.length + data.length);
-    const lv = new DataView(local.buffer);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(4, 20, true);
-    lv.setUint32(14, crc, true);
-    lv.setUint32(18, data.length, true);
-    lv.setUint32(22, data.length, true);
-    lv.setUint16(26, nameBytes.length, true);
-    local.set(nameBytes, 30);
-    local.set(data, 30 + nameBytes.length);
-    locals.push(local);
-
-    const central = new Uint8Array(46 + nameBytes.length);
-    const cv = new DataView(central.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true);
-    cv.setUint16(6, 20, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, data.length, true);
-    cv.setUint32(24, data.length, true);
-    cv.setUint16(28, nameBytes.length, true);
-    cv.setUint32(42, offset, true);
-    central.set(nameBytes, 46);
-    centrals.push(central);
-    offset += local.length;
-  }
-  const centralSize = centrals.reduce((sum, entry) => sum + entry.length, 0);
-  const out = new Uint8Array(offset + centralSize + 22);
-  let cursor = 0;
-  for (const entry of locals) {
-    out.set(entry, cursor);
-    cursor += entry.length;
-  }
-  for (const entry of centrals) {
-    out.set(entry, cursor);
-    cursor += entry.length;
-  }
-  const end = new DataView(out.buffer, cursor, 22);
-  end.setUint32(0, 0x06054b50, true);
-  end.setUint16(8, files.length, true);
-  end.setUint16(10, files.length, true);
-  end.setUint32(12, centralSize, true);
-  end.setUint32(16, offset, true);
-  return out;
-}
-
-function crc32(data: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of data) {
-    crc ^= byte;
-    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
 }
 
 /** Exact, `:param`-segment, or trailing-`*` path matching. */

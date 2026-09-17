@@ -321,7 +321,13 @@ export class TaskScheduler {
     // guard (project-scoped). This is the autonomous-nudge half of "asking a
     // question shouldn't block other work — except more voorman/meester pokes."
     const pendingQuestions = await this.store.listProjectQuestions(task.projectId).catch(() => []);
-    const unanswered = pendingQuestions.filter((q) => !q.answer).length;
+    // Only a live session's question means a model is genuinely waiting for
+    // the human. Service-authored notification cards (task-paused,
+    // night-shift-review, schedule approval) deliberately have sessionId='',
+    // can remain visible for days, and must not freeze every unrelated task
+    // in the project. A long PR-review tuning run wild-caught this: old
+    // paused-child cards suppressed re-drive for every child in the fresh run.
+    const unanswered = pendingQuestions.filter((q) => !q.answer && q.sessionId !== '').length;
     if (unanswered > 0) {
       log.info(
         `[scheduler] ${task.ref}: skip re-drive — ${unanswered} unanswered user question(s) pending`,

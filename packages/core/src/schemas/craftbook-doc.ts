@@ -3,6 +3,7 @@ import { z as zod } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookCliWorkflowSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookRecommendationSchema,
@@ -55,6 +56,7 @@ export const CraftbookDocSchema = zod.object({
   commands: zod.array(CraftbookCommandNeedSchema).optional(),
   connectors: zod.array(CraftbookConnectorNeedSchema).optional(),
   paramSchema: zod.record(zod.string(), zod.unknown()).optional(),
+  cliWorkflow: CraftbookCliWorkflowSchema.optional(),
   /**
    * Pre/PostToolUse hooks installed while a task runs this book. A hook's
    * `script.name` with scope `craftbook` must resolve in `scripts` — the

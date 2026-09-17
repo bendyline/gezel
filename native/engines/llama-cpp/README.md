@@ -10,6 +10,21 @@ Status: **integrated**. The pinned source is built by the native release
 matrix, selected by the desktop supervisor, and served through the local-model
 provider. `VERSION` is the source of truth for the upstream revision.
 
+The build applies `patches/muse-runtime.patch` to the pinned source and
+removes it on exit. v0.4.0 parses Muse's analysis channel but omits its thinking
+delimiters from the reasoning-budget sampler configuration, so both launch and
+request budgets are silently dropped. The patch registers those delimiters,
+preserves the next recipient header at forced cutoffs, and replays that full
+header into the lazy tool grammar when a shorter natural terminator is its
+prefix. Direct tool responses also activate the grammar without requiring the
+generation prompt, which lazy samplers do not receive. Regression tests cover
+both transitions. It also fixes unconstrained nested
+JSON values (`additionalProperties: {}` and `items: {}`), which were wrongly
+restricted to objects and forced structured reports into extra wrappers. Native
+chat and JSON-schema regressions cover that case; the Python converter stays in
+sync. Revalidate/remove this patch when bumping upstream; a mismatch fails the
+build. It changes inference executables and does not require a desktop installer.
+
 ## Upstream versioning
 
 Upstream runs two tag lines off one history:

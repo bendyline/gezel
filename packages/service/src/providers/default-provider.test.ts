@@ -15,6 +15,9 @@ describe('resolveDefaultProviderName', () => {
     expect(resolveDefaultProviderName({}, 'linux', 'x64')).toBe('llama-cpp');
     expect(resolveDefaultProviderName({}, 'linux', 'arm64')).toBe('llama-cpp');
     expect(resolveDefaultProviderName({}, 'win32', 'x64')).toBe('llama-cpp');
+    // Windows on ARM ships a CPU-only llama build — not MLX, which is Apple
+    // Silicon only, and not Copilot, which this platform no longer needs.
+    expect(resolveDefaultProviderName({}, 'win32', 'arm64')).toBe('llama-cpp');
   });
 
   // Intel Mac ships no engine, so pointing the default at one would produce
@@ -22,7 +25,7 @@ describe('resolveDefaultProviderName', () => {
   // there — and now fails with an actionable "install it in Settings".
   it('falls back to copilot where no engine is bundled', () => {
     expect(resolveDefaultProviderName({}, 'darwin', 'x64')).toBe('copilot');
-    expect(resolveDefaultProviderName({}, 'win32', 'arm64')).toBe('copilot');
+    expect(resolveDefaultProviderName({}, 'freebsd', 'x64')).toBe('copilot');
   });
 
   it('handles a missing config the same as an unset provider', () => {

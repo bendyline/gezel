@@ -730,6 +730,7 @@ export class SearchService {
             retrievalSource: 'workspace',
             line: r.lineStart,
             lineEnd: r.lineEnd,
+            arm: r.source,
             ...scoreResult('content', r.score),
           });
         }
@@ -747,6 +748,7 @@ export class SearchService {
             retrievalSource: 'workspace',
             line: r.lineStart,
             lineEnd: r.lineEnd,
+            arm: 'fts',
             ...scoreResult('content', ftsRankRelevance(rank)),
           });
         }
@@ -764,6 +766,7 @@ export class SearchService {
             retrievalSource: 'artifacts',
             line: r.lineStart,
             lineEnd: r.lineEnd,
+            arm: 'fts',
             ...scoreResult('content', ftsRankRelevance(rank)),
           });
         }
@@ -780,6 +783,7 @@ export class SearchService {
             source: 'workspace',
             retrievalSource: 'workspace',
             line: m.lineStart,
+            arm: 'fts',
             ...scoreResult('symbol', rel),
           });
         }
@@ -794,6 +798,7 @@ export class SearchService {
             projectId: p.id,
             projectName: p.name,
             retrievalSource: 'workspace',
+            arm: 'fts',
             ...scoreResult('content', area.score),
           });
         }
@@ -808,6 +813,7 @@ export class SearchService {
             projectId: p.id,
             projectName: p.name,
             retrievalSource: 'project-memory',
+            arm: 'vector',
             ...scoreResult('memory', r.score),
           });
         }
@@ -838,6 +844,7 @@ export class SearchService {
                   subtitle: `Memory · ${g.name}`,
                   snippet: r.text,
                   retrievalSource: 'gezel-memory' as const,
+                  arm: 'vector' as const,
                   ...scoreResult('memory', r.score),
                 }));
             },
@@ -877,6 +884,7 @@ export class SearchService {
               // 1-based index of the matched message in the session — the
               // deep-link coordinate (global-index chunk lineStart semantics).
               ...(h.messageStart ? { line: h.messageStart } : {}),
+              arm: 'fts' as const,
               ...scoreResult('session', ftsRankRelevance(rank)),
             };
           });
@@ -912,6 +920,7 @@ export class SearchService {
             retrievalSource: 'shared' as const,
             line: h.lineStart,
             lineEnd: h.lineEnd,
+            ...(h.source ? { arm: h.source } : {}),
             // Hybrid score when the library index reports one; rank-based
             // pseudo-relevance for keyword-only rows.
             ...scoreResult('document', h.score ?? ftsRankRelevance(rank)),

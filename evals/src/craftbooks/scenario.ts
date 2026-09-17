@@ -25,9 +25,40 @@ import type {
   CraftbookEvalSpec,
 } from './types.ts';
 
+/**
+ * Installing ANY per-gezel builtin group replaces the worker's role kit
+ * wholesale (see {@link directWorkerNeedsArtifactToolset}), so this list is
+ * not "extras on top of Researcher" — it IS the worker's entire roster. Every
+ * capability the book's steps name has to appear here or the step cannot run.
+ *
+ * `doc-intel` is here because a source document is a source document: a book
+ * whose `sourcePath` is a .docx/.pdf/.pptx/.xlsx tells its assignee to open it
+ * with `read_doc_as_markdown`, and without the group that tool does not exist
+ * for the worker. Wild-caught on the first binary-source PowerPoint trial —
+ * the researcher fell back to `read_file`, wrote "Research Status: Skipped
+ * (Initial attempt at step 1 failed)" into its own source packet, and every
+ * downstream step built on a packet with no facts in it. The role kit it
+ * would otherwise have inherited (`researcher` in core's role registry)
+ * carries `doc-intel`; the override is what took it away.
+ */
 const WORKSPACE_EVAL_TOOLSET_IDS = [
   'builtin.workspace-fs-read',
   'builtin.workspace-fs-write',
+  'builtin.doc-intel',
+  // Source acquisition, the other half of the same hole. A research step's
+  // gate carries `researchEvidence`, and the runtime answers that by adding
+  // RESEARCH_STEP_TOOLS (`search`, `read_document`, `web_search`,
+  // `wikipedia_*`, `fetch_url`) to the step's keep-set — but a keep-set only
+  // SUBTRACTS, so a tool absent from the worker's roster can never be kept.
+  // Without these the topic-only branch has no first action at all: the step
+  // says "FIRST call `search`" and `search` does not exist for the worker.
+  //
+  // Safe to add for every book: the per-step kit intersection narrows the
+  // roster back down, so a non-research step does not carry web tools just
+  // because they are installed.
+  'builtin.memory',
+  'builtin.documents',
+  'builtin.web',
 ] as const;
 
 const CRAFTBOOK_TASK_EVAL_TOOLSET_IDS = ['builtin.artifacts', 'builtin.tasks'] as const;
@@ -408,12 +439,26 @@ function toolCallReferencesPath(call: ToolCallLike, path: string): boolean {
  * flawless review, and sat at 9/11 on "seeded workspace input(s) have not
  * been read yet".
  *
+ *   - `read_doc_as_markdown` is the ONLY correct opener for a seeded DOCX,
+ *     PDF, PPTX or XLSX source. The product mandates it — powerpoint-deck's
+ *     research step says "use `read_doc_as_markdown` for DOCX/PPTX/PDF/XLSX
+ *     and `read_file` for text or Markdown" — so a model that obeys used to
+ *     be graded as never having opened the file at all. Latent until a
+ *     scenario seeded a binary source; the first one that did failed on it
+ *     immediately.
+ *
  * Deliberately NOT included: `Grep`/`Glob` (they prove a file was matched,
  * not that its contents were taken in) and shell `cat` (a shell tool's
  * argument text is unbounded — matching a path inside it would count a
  * write, a move, or a mention as a read).
  */
-const SEEDED_READ_TOOL_NAMES = new Set(['read_file', 'read_files', 'read', 'view']);
+const SEEDED_READ_TOOL_NAMES = new Set([
+  'read_file',
+  'read_files',
+  'read_doc_as_markdown',
+  'read',
+  'view',
+]);
 
 function isSeededReadTool(name: string | undefined): boolean {
   return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
@@ -490,6 +535,20 @@ async function writeFixtureFiles(
     // per-trial); substitute when the live runtime is present.
     const content = ctx.mocks ? ctx.mocks.substitute(file.content) : file.content;
     if (file.surface === 'harness') {
+      continue;
+    }
+    // A binary source document is seeded through the raw byte route. Text
+    // substitution is deliberately not applied to it: a mock placeholder
+    // inside a PDF's xref or a ZIP's central directory would corrupt the
+    // container, and a source document has no reason to carry a live port.
+    if (file.contentBase64 !== undefined) {
+      const bytes = Buffer.from(file.contentBase64, 'base64');
+      const mimeType = file.mimeType ?? 'application/octet-stream';
+      if (file.surface === 'artifact') {
+        await ctx.client.writeProjectArtifactBinary(projectId, file.path, bytes, mimeType);
+      } else {
+        await ctx.client.writeProjectWorkspaceBinary(projectId, file.path, bytes, mimeType);
+      }
       continue;
     }
     if (file.surface === 'artifact') {
@@ -986,11 +1045,19 @@ async function taskGraphTextForSpec(
     failures,
     taskCount: listed.tasks.length,
     matchingCraftbookTaskCount: matching.length,
-    workflowRunning: matching.some(
-      (task) =>
-        task.status === 'active' &&
-        !task.craftbook.steps.find((step) => step.id === task.activeStepId)?.terminal,
-    ),
+    // An ACTIVE task is a running workflow, full stop — terminal-ness of the
+    // active step says where the workflow is, not whether it is still working.
+    //
+    // This used to also require a non-terminal active step, which was harmless
+    // only while terminal steps did no work. Tier-collapse breaks that
+    // assumption: it folds the terminal tail INTO the last working step, so a
+    // tiny-tier run's final step is both terminal and the one that writes the
+    // deck and converts it. The trial was then declared over the instant that
+    // step activated — every tiny run died with zero tool calls on it,
+    // independent of the model. Stalls are the soft/hard progress timeouts'
+    // job; they are the mechanism that can actually tell "stopped" from
+    // "still going", which a structural guess cannot.
+    workflowRunning: matching.some((task) => task.status === 'active'),
     ...(authoringTask ? { authoringGezelId: taskAssigneeGezelId(authoringTask) } : {}),
   };
 }

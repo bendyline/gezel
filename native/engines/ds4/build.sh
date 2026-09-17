@@ -116,15 +116,18 @@ if [[ "$platform" == linux-* ]] &&
   cuda_float_patch_applied=true
   echo "[build] applied ds4 CUDA FLT_MAX compatibility patch"
 fi
-# Upstream promotes a tool call salvaged from a generation-cap cutoff to
-# finish_reason=tool_calls, which hides the truncation from clients. Gezel's
-# provider keys its truncated-write recovery off finish_reason=length, so
-# patch the promotion to preserve "length" for repaired truncated calls
-# (all platforms). Pin-scoped: a bump that touches these lines fails the
-# apply loudly instead of silently dropping the fix.
-git -C "$src" apply "$truncation_finish_patch"
-truncation_finish_patch_applied=true
-echo "[build] applied ds4 repaired-truncation finish_reason patch"
+# Older pins repaired a generation-cap-cutoff tool call and then promoted its
+# finish reason to `tool_calls`, hiding the truncation from clients.  Current
+# upstream no longer repairs true `length` stops at all, which preserves the
+# signal Gezel's truncated-write recovery needs.  Keep the compatibility patch
+# only for sources that predate that upstream guard.
+if grep -Fq 'strcmp(finish, "length") != 0 && !client_stop' "$src/ds4_server.c"; then
+  echo "[build] ds4 upstream preserves length-truncated tool calls"
+else
+  git -C "$src" apply "$truncation_finish_patch"
+  truncation_finish_patch_applied=true
+  echo "[build] applied ds4 repaired-truncation finish_reason patch"
+fi
 
 # Older upstream pins never armed ds4_session_set_cancel during prefill, so a
 # disconnected client could leave a zombie prefill blocking the next turn. New

@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   type FatalProcessErrorSource,
+  GEZEL_VERSION,
   type GezmodelImportProgress,
   type ReferenceFileLocationRequest,
   ReferenceFileLocationRequestSchema,
@@ -3122,10 +3123,14 @@ app.whenReady().then(async () => {
         (!app.isPackaged && process.env.GEZEL_SPAWN !== '1'),
       ...(storeBuild.channel ? { storeProfile: true } : {}),
       uiDir: resolveBundledUi(),
-      ...installedServiceCompatibility.options(app.getVersion(), mainWindow, {
-        enabled: !app.isPackaged || Boolean(storeBuild.channel),
-        autoAccept: process.env.GEZEL_E2E === '1' || packagedSmoke || launch.forceEmbeddedFromCli,
-      }),
+      ...installedServiceCompatibility.options(
+        app.isPackaged ? app.getVersion() : GEZEL_VERSION,
+        mainWindow,
+        {
+          enabled: !app.isPackaged || Boolean(storeBuild.channel),
+          autoAccept: process.env.GEZEL_E2E === '1' || packagedSmoke || launch.forceEmbeddedFromCli,
+        },
+      ),
       logger: {
         info: (m) => {
           console.log(m);

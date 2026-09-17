@@ -12,7 +12,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
@@ -34,12 +34,31 @@ const verificationCacheWrites = new Map<string, Promise<void>>();
  */
 export const SHARED_ASSETS_ENV = 'GEZEL_SHARED_ASSETS_DIR';
 
+/**
+ * Additional gezel HOMES whose installed models this process may read but
+ * never write. Delimiter-separated absolute paths, lowest priority in the
+ * overlay.
+ *
+ * This exists for a daemon hosted by a third-party app through
+ * `@bendyline/gezel-app-sdk/host`: it owns a private home under
+ * `~/.gezel/apps/<appId>/`, so without this it would re-download weights the
+ * user's own Gezel install already has. Unlike {@link SHARED_ASSETS_ENV},
+ * which names a purpose-built public asset store, the entries here are
+ * ordinary homes, so the per-engine `engines/<engine>/models` suffix is
+ * applied for them. Read-only payloads still have to carry
+ * `manifest.fileSha256` to be adopted, so a home whose installs predate
+ * that field is simply skipped rather than trusted.
+ */
+export const READONLY_MODEL_HOMES_ENV = 'GEZEL_READONLY_MODEL_HOMES';
+
 export interface ModelStorageRoots {
   /** The only root this process may create, replace, or delete models in. */
   writableRoot: string;
   /**
-   * Lower-priority, read-only roots. A standalone CLI uses the machine asset
-   * store here; a machine service has none because that store is its writer.
+   * Lower-priority, read-only roots, highest priority first. A standalone CLI
+   * uses the machine asset store here; a machine service has none because that
+   * store is its writer. An app-hosted daemon may additionally list other
+   * gezel homes through {@link READONLY_MODEL_HOMES_ENV}.
    */
   readOnlyRoots: string[];
 }
@@ -77,11 +96,42 @@ export function modelStorageRoots(opts: ModelStorageRootOptions): ModelStorageRo
     return { writableRoot: sharedModelRoot, readOnlyRoots: [] };
   }
 
-  return {
-    writableRoot: localRoot,
-    readOnlyRoots:
-      sharedModelRoot && resolve(sharedModelRoot) !== resolve(localRoot) ? [sharedModelRoot] : [],
+  const readOnlyRoots: string[] = [];
+  const seen = new Set([resolve(localRoot)]);
+  const addReadOnly = (root: string): void => {
+    const resolved = resolve(root);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    readOnlyRoots.push(root);
   };
+  if (sharedModelRoot) addReadOnly(sharedModelRoot);
+  for (const home of readOnlyModelHomes(env)) {
+    addReadOnly(join(home, 'engines', opts.engine, 'models'));
+  }
+
+  return { writableRoot: localRoot, readOnlyRoots };
+}
+
+/**
+ * Parse {@link READONLY_MODEL_HOMES_ENV}. Relative entries are dropped rather
+ * than resolved against the daemon's cwd — a model root is a machine-level
+ * location, and guessing one from whichever directory happened to launch the
+ * process is how a host ends up reading someone else's files.
+ */
+export function readOnlyModelHomes(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env[READONLY_MODEL_HOMES_ENV]?.trim();
+  if (!raw) return [];
+  const homes: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw.split(delimiter)) {
+    const trimmed = entry.trim();
+    if (!trimmed || !isAbsolute(trimmed)) continue;
+    const resolved = resolve(trimmed);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    homes.push(resolved);
+  }
+  return homes;
 }
 
 /**

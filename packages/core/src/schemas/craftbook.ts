@@ -196,7 +196,14 @@ export function requiredOutputMediaForGate(
  *
  * `disallowToolsets` targets installed catalog/MCP ids (for example
  * `docblocks`). `disallowBuiltinToolsets` targets Gezel's stable built-in
- * group ids (for example `code-execution` or `workspace-fs-write`). These
+ * group ids (for example `code-execution` or `workspace-fs-write`).
+ * `allowTools` is an exact, subtractive ceiling for small fixed-action steps;
+ * it never grants a tool that the session does not already have and does not
+ * add implicit lifecycle tools. Completion must be named explicitly or ride
+ * observable-progress auto-advance.
+ * `disallowTools` targets exact model-facing tool names when a broad group
+ * still contains both needed and distracting tools (for example artifact
+ * reads and artifact search). These
  * are intentionally NOT the broad catalog categories, whose classification
  * is heuristic and therefore unsuitable for runtime authority.
  */
@@ -204,6 +211,8 @@ export const CraftbookStepToolPolicySchema = z
   .object({
     disallowToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
     disallowBuiltinToolsets: z.array(z.string().trim().min(1)).min(1).optional(),
+    allowTools: z.array(z.string().trim().min(1)).min(1).optional(),
+    disallowTools: z.array(z.string().trim().min(1)).min(1).optional(),
     outputMedium: CraftbookStepOutputMediumSchema.optional(),
     /**
      * Other intentional write surfaces used while producing the primary
@@ -235,6 +244,52 @@ export const CraftbookStepToolPolicySchema = z
     }
     const media = new Set([policy.outputMedium, ...additional]);
     const denied = new Set(policy.disallowBuiltinToolsets ?? []);
+    const allowedTools = policy.allowTools ? new Set(policy.allowTools) : null;
+    const deniedTools = new Set(policy.disallowTools ?? []);
+    if (allowedTools) {
+      for (const name of allowedTools) {
+        if (deniedTools.has(name)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['allowTools'],
+            message: `${name} cannot be both allowed and disallowed`,
+          });
+        }
+      }
+      for (const [medium, tool] of [
+        ['artifact', 'write_artifact'],
+        ['task-note', 'write_task_note'],
+      ] as const) {
+        if (media.has(medium) && !allowedTools.has(tool)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['allowTools'],
+            message: `${medium} output needs ${tool} in the exact allowlist`,
+          });
+        }
+      }
+    }
+    for (const safetyTool of ['advance_task_step', 'set_task_status', 'ask_user_question']) {
+      if (deniedTools.has(safetyTool)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['disallowTools'],
+          message: `${safetyTool} is a workflow safety tool and cannot be disallowed`,
+        });
+      }
+    }
+    for (const [medium, tool] of [
+      ['artifact', 'write_artifact'],
+      ['task-note', 'write_task_note'],
+    ] as const) {
+      if (media.has(medium) && deniedTools.has(tool)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['disallowTools'],
+          message: `${medium} output conflicts with disallowing ${tool}`,
+        });
+      }
+    }
     if (media.has('workspace') && denied.has('workspace-fs-write')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -768,6 +823,19 @@ export const CraftbookBasedOnSchema = z.object({
 });
 export type CraftbookBasedOn = z.infer<typeof CraftbookBasedOnSchema>;
 
+/** Explicit CLI-only repository orchestration; never evaluated by model/session tools. */
+export const CraftbookCliWorkflowSchema = z.object({
+  module: z
+    .string()
+    .min(1)
+    .refine(
+      (path) =>
+        /^(?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+\.mjs$/.test(path) &&
+        !path.split('/').some((part) => part === '..' || part === '.'),
+      'cliWorkflow.module must be a workspace-relative .mjs path without traversal',
+    ),
+});
+
 /**
  * Cross-check step script refs against the embedded scripts map: every
  * `scope: 'craftbook'` ref (onEnter / onExit / gate.scripts) must name a
@@ -838,6 +906,8 @@ export const CraftbookSchema = z
      * boundary. Absent = parameterless (the command is injected directly).
      */
     paramSchema: z.record(z.string(), z.unknown()).optional(),
+    /** A trusted repository module orchestrates this book when explicitly launched by `gezel do`. */
+    cliWorkflow: CraftbookCliWorkflowSchema.optional(),
     /**
      * CLI token the launcher stages into the terminal and that the
      * terminal recognizes. Defaults to `id` when absent — e.g. the
@@ -1368,6 +1438,7 @@ export interface StepPatch {
   suggestedRole?: string | null;
   capabilityFloor?: ModelTier | null;
   retrieval?: RetrievalPolicy | null;
+  toolPolicy?: CraftbookStepToolPolicy | null;
   assignee?: TaskAssignee | null;
   suggestedGezelId?: string | null;
   onEnter?: ScriptRefList | null;
@@ -1410,6 +1481,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
   if (patch.retrieval !== undefined) {
     if (patch.retrieval === null) delete updated.retrieval;
     else updated.retrieval = patch.retrieval;
+  }
+  if (patch.toolPolicy !== undefined) {
+    if (patch.toolPolicy === null) delete updated.toolPolicy;
+    else updated.toolPolicy = patch.toolPolicy;
   }
   if (patch.assignee !== undefined) {
     if (patch.assignee === null) delete updated.assignee;

@@ -504,6 +504,167 @@ describe('buildInstructions structured step inputs', () => {
     );
   });
 
+  // The powerpoint-deck research step, verbatim in shape: a numbered branch
+  // list whose branch-1 condition interpolated to empty. The colon after
+  // "read that exact path" used to sever the condition from the mention, so
+  // the anchor ordered a topic-only run to open a document it had no path for
+  // while the applicable branch named `search`.
+  it('skips a branch whose condition is severed from the mention by a colon', () => {
+    const step = {
+      id: 'research',
+      name: 'Acquire and verify sources',
+      prompt:
+        'Exact source path: ``. Topic: `Valencia, Spain`. ' +
+        '1. When `` is non-empty, your FIRST source action is to read that exact path: ' +
+        'use `read_doc_as_markdown` for DOCX/PPTX/PDF/XLSX and `read_file` for text or Markdown. ' +
+        '2. Otherwise treat `Valencia, Spain` as the research question. ' +
+        'FIRST call `search` for the topic to check what the user already has.',
+      createdAt: '2026-09-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Anita',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['search', 'read_file', 'read_doc_as_markdown'].map((name) => ({
+        name,
+        description: `${name} tool`,
+      })),
+      task: {
+        task: {
+          ref: 'default/18',
+          title: 'PowerPoint from Content',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'anita' },
+          craftbook: { steps: [step], entryStepId: 'research' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain(
+      'First action (once only): call `search` exactly as the procedure specifies.',
+    );
+    expect(rendered).not.toContain('call `read_doc_as_markdown` exactly as the procedure');
+    expect(rendered).not.toContain('call `read_file` exactly as the procedure');
+  });
+
+  // The other half of the same fork. Guarding EVERY conditional would swap a
+  // wrong anchor on the topic-only run for a wrong anchor here — the named
+  // source is present, so branch 1 is the live branch and its reader is right.
+  it('anchors the named-source branch when its parameter IS present', () => {
+    const step = {
+      id: 'research',
+      name: 'Acquire and verify sources',
+      prompt:
+        'Exact source path: `source/halvard-brief.docx`. ' +
+        '1. When `source/halvard-brief.docx` is non-empty, your FIRST source action is to read that exact path: ' +
+        'use `read_doc_as_markdown` for DOCX/PPTX/PDF/XLSX and `read_file` for text or Markdown. ' +
+        '2. Otherwise treat `Halvard pilot` as the research question. ' +
+        'FIRST call `search` for the topic to check what the user already has.',
+      createdAt: '2026-09-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Anita',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['search', 'read_file', 'read_doc_as_markdown'].map((name) => ({
+        name,
+        description: `${name} tool`,
+      })),
+      task: {
+        task: {
+          ref: 'default/19',
+          title: 'PowerPoint from Content',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'anita' },
+          craftbook: { steps: [step], entryStepId: 'research' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain(
+      'First action (once only): call `read_doc_as_markdown` exactly as the procedure specifies.',
+    );
+    expect(rendered).not.toContain('call `search` exactly as the procedure');
+  });
+
+  it('skips a branch whose condition interpolated away, even without a lead-in', () => {
+    const step = {
+      id: 'research',
+      name: 'Acquire and verify sources',
+      prompt:
+        'Read the supplied `` with `read_file` first. ' +
+        'FIRST call `search` for the topic to check what the user already has.',
+      createdAt: '2026-09-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Anita',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['search', 'read_file'].map((name) => ({
+        name,
+        description: `${name} tool`,
+      })),
+      task: {
+        task: {
+          ref: 'default/18',
+          title: 'PowerPoint from Content',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'anita' },
+          craftbook: { steps: [step], entryStepId: 'research' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain(
+      'First action (once only): call `search` exactly as the procedure specifies.',
+    );
+  });
+
+  // The negation guard must keep its tight scope: a colon still ends the
+  // clause a "do not" binds to, so an unconditional mention after one anchors.
+  it('still anchors an unconditional mention that follows a negated clause', () => {
+    const step = {
+      id: 'audit',
+      name: 'Audit controls',
+      prompt: 'Do not call `read_artifact` for workspace files; use `read_file` for those.',
+      createdAt: '2026-09-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Anita',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['read_file', 'read_artifact'].map((name) => ({
+        name,
+        description: `${name} tool`,
+      })),
+      task: {
+        task: {
+          ref: 'default/18',
+          title: 'Audit',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'anita' },
+          craftbook: { steps: [step], entryStepId: 'audit' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain(
+      'First action (once only): call `read_file` exactly as the procedure specifies.',
+    );
+  });
+
   it('omits the first-action anchor entirely on a gate retry attempt', () => {
     const step = {
       id: 'research',

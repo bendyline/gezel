@@ -6,7 +6,7 @@ import { MessageBubble } from './chat-bubbles.js';
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 
 describe('MessageBubble indexed context disclosure', () => {
-  it('shows the exact RAG byte count and expands each injected excerpt', async () => {
+  it('shows approximate token counts and expands each injected excerpt', async () => {
     const user = userEvent.setup();
     const { container } = render(
       // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
@@ -34,9 +34,12 @@ describe('MessageBubble indexed context disclosure', () => {
 
     const retrieval = container.querySelector<HTMLDetailsElement>('.msg-retrieval');
     const source = container.querySelector<HTMLDetailsElement>('.msg-retrieval-source');
-    expect(retrieval).toHaveTextContent('Consulted 1 indexed source · 1,024 bytes injected');
+    expect(retrieval).toHaveTextContent('Consulted 1 indexed source · ~256 tokens injected');
     expect(source).toHaveTextContent('[workspace] src/retrieval.ts:42');
-    expect(source).toHaveTextContent('28 bytes from source');
+    expect(source).toHaveTextContent('~7 tokens from source');
+    expect(retrieval).toHaveTextContent(
+      'Token counts are estimated at roughly four bytes per token',
+    );
     expect(retrieval).toHaveTextContent('Turn total includes source labels and safety framing');
     expect(retrieval?.open).toBe(false);
     expect(source?.open).toBe(false);
@@ -52,7 +55,7 @@ describe('MessageBubble indexed context disclosure', () => {
     expect(container.querySelector('.msg-retrieval-open')).toHaveTextContent('Open source');
   });
 
-  it('keeps older citation-only turns usable without inventing bytes or excerpts', () => {
+  it('keeps older citation-only turns usable without inventing counts or excerpts', () => {
     const { container } = render(
       // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
       <MessageBubble
@@ -69,7 +72,7 @@ describe('MessageBubble indexed context disclosure', () => {
     expect(container.querySelector('.msg-retrieval')).toHaveTextContent(
       'Consulted 1 indexed source',
     );
-    expect(container.querySelector('.msg-retrieval')).not.toHaveTextContent('bytes injected');
+    expect(container.querySelector('.msg-retrieval')).not.toHaveTextContent('tokens injected');
     expect(container.querySelector('.msg-retrieval-source')).toBeNull();
     expect(container.querySelector('.msg-ref-chip')).toHaveTextContent('[workspace] old.ts:3');
   });

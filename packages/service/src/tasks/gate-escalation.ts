@@ -142,7 +142,7 @@ export function appendGateAttempt(
  * broken grammar, an unprovable existence claim, and a tool that had
  * been stripped from the roster because workspace writes were off.
  */
-export type DeliverableSurface = 'workspace' | 'artifact' | 'note';
+export type DeliverableSurface = 'workspace' | 'artifact' | 'note' | 'evidence';
 
 /**
  * Classify a step's deliverable surface from what its gate actually
@@ -174,6 +174,9 @@ export function deliverableSurface(opts: {
 }): DeliverableSurface {
   const failed = opts.failedChecks ?? [];
   if (failed.length > 0 && failed.every((label) => label.startsWith('script:'))) return 'note';
+  if (failed.length > 0 && failed.every((label) => label.startsWith('corpusReadEvidence '))) {
+    return 'evidence';
+  }
   if (opts.advanceWhen?.file) return opts.advanceWhen.artifact ? 'artifact' : 'workspace';
   const fileChecks = (opts.checks ?? []).filter(
     (check) =>
@@ -230,6 +233,9 @@ export function buildStageOneNudge(opts: {
 }): string {
   const artifact = opts.surface === 'artifact';
   const note = opts.surface === 'note';
+  if (opts.surface === 'evidence') {
+    return `GATE_EVIDENCE_REQUIRED: Continue by performing the missing reads named below. This gate measures tool results delivered by read_artifact/read_artifacts; writing, editing, or merely claiming completion cannot satisfy it. Call the exact read tool now, cover every named record and line range, then call advance_task_step once.\n\n${opts.failingBullets}`;
+  }
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
   const opener = note
     ? opts.frozen
