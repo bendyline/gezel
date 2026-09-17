@@ -89,6 +89,7 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
+      - uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
         # The evals suite (run by `pnpm test:ci`) launches a real headless
         # chromium for its runtime-validation scenarios (petshop, tictactoe,
@@ -117,6 +118,7 @@ jobs:
     name: Executable V8 coverage
     needs: workflow-policy
     runs-on: ubuntu-latest
+    continue-on-error: true
     # A FOURTH execution of the UI, service and package suites, this one under
     # V8 instrumentation. It is a separate job because it reports rather than
     # gates: `unit` (stability pass 1) and `stability` (passes 2 and 3) have
@@ -137,6 +139,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
+      - uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
         # Required for the same reasons as in `unit` and `stability`, and this
         # job needs both: it instruments the evals suite, whose scenarios
@@ -225,6 +228,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
+      - uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
         # The service suite's page-check tests gate a real-browser block on
         # the shared ~/.cache/ms-playwright existing (see runner.test.ts).

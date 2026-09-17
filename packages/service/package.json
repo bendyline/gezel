@@ -62,6 +62,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:prewarm-embedder": "tsx scripts/prewarm-test-embedder.ts",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {

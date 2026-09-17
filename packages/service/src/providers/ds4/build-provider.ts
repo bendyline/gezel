@@ -345,7 +345,6 @@ export async function buildDs4Provider(opts: {
   const { ds4VisionResidentBytes, planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import(
     './residency.js'
   );
-  const totalRamBytes = totalRamGb * 1024 ** 3;
   let visionEncoderSizeBytes = installedModel?.visionEncoderSizeBytes;
   if (vision.enabled && vision.visionEncoderPath && !visionEncoderSizeBytes) {
     const { stat: statVisionEncoder } = await import('node:fs/promises');

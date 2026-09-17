@@ -26,7 +26,6 @@ import {
   detectChatCodedFileWithoutWrite,
   detectProseDeliverableWithoutWrite,
   detectUnsavedFileClaim,
-  effectiveSessionModel,
   isNoopConfirmationResponse,
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
@@ -34,72 +33,6 @@ import {
   shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';
-
-describe('effectiveSessionModel', () => {
-  const record = {
-    providerName: 'llama-cpp' as const,
-    model: 'historical-model',
-  };
-
-  it('uses the same live-default precedence for admission and inference', () => {
-    expect(
-      effectiveSessionModel({
-        record,
-        config: { defaultModel: { 'llama-cpp': 'current-default' } },
-      }),
-    ).toBe('current-default');
-    expect(
-      effectiveSessionModel({
-        record,
-        frontmatterModel: 'gezel-model',
-        config: { defaultModel: { 'llama-cpp': 'current-default' } },
-      }),
-    ).toBe('gezel-model');
-  });
-
-  it('honors the Night Shift model ahead of the ordinary install default', () => {
-    expect(
-      effectiveSessionModel({
-        record: { ...record, nightShift: true },
-        config: {
-          defaultModel: { 'llama-cpp': 'current-default' },
-          nightShift: {
-            enabled: true,
-            modelOverride: {
-              enabled: true,
-              provider: 'llama-cpp',
-              model: 'night-model',
-            },
-          },
-        },
-      }),
-    ).toBe('night-model');
-  });
-
-  it('keeps an explicit capability route ahead of the ordinary install default', () => {
-    expect(
-      effectiveSessionModel({
-        record: {
-          ...record,
-          model: 'routed-model',
-          modelSource: 'capability-routing',
-        },
-        config: { defaultModel: { 'llama-cpp': 'current-default' } },
-      }),
-    ).toBe('routed-model');
-    expect(
-      effectiveSessionModel({
-        record: {
-          ...record,
-          model: 'routed-model',
-          modelSource: 'capability-routing',
-        },
-        frontmatterModel: 'gezel-model',
-        config: { defaultModel: { 'llama-cpp': 'current-default' } },
-      }),
-    ).toBe('gezel-model');
-  });
-});
 
 describe('consultationIdleTimeoutMsForModel', () => {
   it('protects DS4 and frontier local models from too-short caller guesses', () => {

@@ -1,0 +1,26 @@
+name: 'Set up verified test embedder'
+description: >-
+  Restores the small CI embedding model and proves its cached ONNX graph loads
+  before parallel Vitest workers can share it.
+
+runs:
+  using: composite
+  steps:
+    - name: Restore verified embedding-model cache
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/gezel-test-hf
+        key: test-embedder-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('packages/service/src/test-support/prewarm-test-embedder.ts', 'packages/service/src/transformers-cache.ts', 'packages/service/src/memory/embed-core.ts') }}
+        restore-keys: test-embedder-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+
+    - name: Download and verify the test embedding model
+      shell: bash
+      run: pnpm --filter @bendyline/gezel-service test:prewarm-embedder
+
+    - name: Save verified embedding-model cache
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/gezel-test-hf
+        key: ${{ steps.restore.outputs.cache-primary-key }}

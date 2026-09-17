@@ -21,8 +21,9 @@
 # Windows-on-ARM laptop does. A build tuned to the runner passes every test
 # in CI and dies with an illegal instruction on a user's machine, and the
 # build host can by definition never reproduce it. That asymmetry is why
-# `scripts/assert-arm64-baseline.mjs` disassembles the result afterwards
-# rather than trusting these flags to have been obeyed.
+# `scripts/assert-arm64-baseline.mjs` verifies the generated compile database
+# and CMake cache afterwards, rather than trying to infer reachability from a
+# linked PE disassembly (which also decodes literal pools and padding).
 
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR arm64)
@@ -35,6 +36,12 @@ set(CMAKE_CXX_COMPILER clang++)
 set(CMAKE_C_COMPILER_TARGET ${GEZEL_ARM_TARGET})
 set(CMAKE_CXX_COMPILER_TARGET ${GEZEL_ARM_TARGET})
 set(CMAKE_ASM_COMPILER_TARGET ${GEZEL_ARM_TARGET})
+
+# The post-build contract inspects the commands CMake actually generated.
+# Keep this in the shared toolchain so every Clang-based WoA engine emits the
+# same evidence, including future engines that adopt this file.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Emit commands for the WoA baseline audit" FORCE)
+set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
 
 # Overridable from the build scripts via -DGEZEL_ARM_ARCH=... . Keep this in
 # step with the LLAMA_ARM_ARCH default in llama-cpp/build.ps1; they describe
@@ -52,3 +59,4 @@ set(gezel_warn_flags "-Wno-format -Wno-unused-variable -Wno-unused-function -Wno
 
 set(CMAKE_C_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
+set(CMAKE_ASM_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")

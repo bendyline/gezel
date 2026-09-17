@@ -142,8 +142,13 @@ Reset-BuildDirIfGeneratorChanged -BuildDir $buildDir -Generator 'Ninja'
 
 $versionStamp = Resolve-VersionStamp
 Write-Host "[service-host] stamping VERSIONINFO $versionStamp"
+$baselineArgs = if ($platform -eq 'win32-arm64') {
+  @('-DCMAKE_CXX_FLAGS=/arch:armv8.0')
+} else {
+  @()
+}
 
-& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DGEZEL_SERVICE_HOST_VERSION="$versionStamp"
+& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DGEZEL_SERVICE_HOST_VERSION="$versionStamp" @baselineArgs
 if ($LASTEXITCODE -ne 0) {
   throw "cmake configure failed (exit $LASTEXITCODE)"
 }

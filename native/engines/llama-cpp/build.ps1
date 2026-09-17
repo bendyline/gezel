@@ -154,8 +154,8 @@ $cmakeFlags = @(
 # should A/B on real hardware - override with LLAMA_ARM_ARCH - but it drops
 # the older devices, so it is not the default until someone has measured it.
 #
-# Whatever lands here, scripts/assert-arm64-baseline.mjs disassembles the
-# result and fails the build if SVE or SME instructions appear.
+# Whatever lands here, scripts/assert-arm64-baseline.mjs verifies every
+# generated compiler command plus the CMake cache after the build.
 if ($isArm64) {
   $armArch = if ($env:LLAMA_ARM_ARCH) { $env:LLAMA_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' }
   $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$armArch"
@@ -321,8 +321,8 @@ Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
 # ggml-cpu.dll is correct and several would mean CPU_ALL_VARIANTS came back -
 # which on this platform cannot have worked, because ggml has no Windows ARM
 # variant table. The baseline that module was compiled to is what actually
-# matters here, and that is proven downstream by
-# scripts/assert-arm64-baseline.mjs disassembling it.
+# matters here, and that is proven downstream from compile_commands.json and
+# CMakeCache.txt by scripts/assert-arm64-baseline.mjs.
 $variantDlls = @(Get-ChildItem -Path $outDir -Filter 'ggml-cpu-*.dll' -ErrorAction SilentlyContinue)
 if ($isArm64) {
   $cpuDll = Join-Path $outDir 'ggml-cpu.dll'

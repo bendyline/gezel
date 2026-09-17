@@ -66,7 +66,7 @@
     "check:packages": "node scripts/check-package-consumers.mjs",
     "check:npm-release-candidate": "pnpm build && pnpm check:npm-release-candidate:unbuilt",
     "check:npm-release-candidate:unbuilt": "node scripts/rehearse-npm-release.mjs",
-    "check:release-toolchain": "node --test scripts/verify-published-npm-release.test.mjs && node scripts/check-release-toolchain.mjs",
+    "check:release-toolchain": "node --test scripts/verify-published-npm-release.test.mjs scripts/assert-arm64-baseline.test.mjs && node scripts/check-release-toolchain.mjs",
     "check:workspace-deps": "node scripts/check-workspace-dependencies.mjs",
     "scorecard:barrel": "node scripts/gen-scorecard-barrel.mjs",
     "release": "multi-semantic-release",

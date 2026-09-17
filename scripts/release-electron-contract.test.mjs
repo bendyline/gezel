@@ -372,6 +372,18 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   );
   assert.match(quality, /run: pnpm test:ci/);
   assert.match(quality, /run: pnpm test:stability/);
+  assert.equal(
+    quality.match(/uses: \.\/\.github\/actions\/setup-test-embedder/g)?.length,
+    3,
+    'each Linux job that runs the service suite must verify the shared embedding cache first',
+  );
+  const coverageStart = quality.indexOf('  coverage:');
+  const coverageEnd = quality.indexOf('\n  model-tool-contracts:', coverageStart);
+  assert.match(
+    quality.slice(coverageStart, coverageEnd),
+    /continue-on-error: true/,
+    'the reporting-only coverage rerun must not contradict its non-gating contract',
+  );
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
