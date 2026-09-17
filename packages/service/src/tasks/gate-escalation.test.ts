@@ -327,13 +327,13 @@ describe('note-surface escalation nudges', () => {
   const bullets =
     '- The task notes do not yet contain /##\\s*Scope\\s*[—-]\\s*PR\\s*#46/ — write the required note (use write_task_note) before advancing.';
 
-  it('classifies a fileless script gate as the note surface', () => {
+  it('does not infer what an opaque script gate reads', () => {
     expect(
       deliverableSurface({
         checks: [],
         scripts: [{ name: 'checkTaskNoteContains', inputs: { pattern: '## Scope' } }],
       }),
-    ).toBe('note');
+    ).toBe('script');
     // A gate that names a file is still judged by that file, script or not.
     expect(
       deliverableSurface({
@@ -365,7 +365,7 @@ describe('note-surface escalation nudges', () => {
     expect(deliverableSurface({})).toBe('workspace');
   });
 
-  it('classifies a script-only failure as the note surface even with a deliverable', () => {
+  it('keeps a script-only repair target opaque even with a passing deliverable', () => {
     // Pull Request Review's `scope` gate: the batch file passes every
     // time, the note script is the only thing rejecting. Reading
     // `advanceWhen` alone aimed both stage directives at the one file the
@@ -376,7 +376,7 @@ describe('note-surface escalation nudges', () => {
         scripts: [{ name: 'checkTaskNoteContains' }],
         failedChecks: ['script:checkTaskNoteContains'],
       }),
-    ).toBe('note');
+    ).toBe('script');
     // A failing declarative check anywhere in the set keeps the file
     // wording — that half is a real file the model has to repair.
     expect(
@@ -429,6 +429,21 @@ describe('note-surface escalation nudges', () => {
     const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
     expect(isGateSurgicalEditTurn(stage1, patchTools)).toBe(false);
     expect(isImmediateFileWriteTurn(stage1, WRITE_FILE_TOOL)).toBe(false);
+  });
+});
+
+describe('opaque script gate repair', () => {
+  it('preserves artifact repair instructions without inventing a task-note target or a tool clamp', () => {
+    const message =
+      'Report claims c1 and c2 need independent citations. Repair with read_artifact and write_artifact.';
+    const nudge = buildStageOneNudge({ failingBullets: message, frozen: false, surface: 'script' });
+    expect(nudge).toContain(message);
+    expect(nudge).toContain('GATE_SCRIPT_REPAIR:');
+    expect(nudge).not.toContain('This gate reads the task record');
+    expect(nudge).not.toContain('write_task_note');
+    expect(nudge).not.toContain('EXISTS');
+    expect(isGateSurgicalEditTurn(nudge, WRITE_FILE_TOOL)).toBe(false);
+    expect(isImmediateFileWriteTurn(nudge, WRITE_FILE_TOOL)).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import { createRemotesRegistry } from '../remotes/registry.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
-import { ChatManager } from './manager.js';
+import { ChatManager, effectiveSessionModel } from './manager.js';
 
 /**
  * A `config.defaultModel` pin can name weights that never landed — first-run
@@ -35,6 +35,72 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.();
+});
+
+describe('effectiveSessionModel', () => {
+  const record = {
+    providerName: 'llama-cpp' as const,
+    model: 'historical-model',
+  };
+
+  it('uses the same live-default precedence for admission and inference', () => {
+    expect(
+      effectiveSessionModel({
+        record,
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('current-default');
+    expect(
+      effectiveSessionModel({
+        record,
+        frontmatterModel: 'gezel-model',
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('gezel-model');
+  });
+
+  it('honors the Night Shift model ahead of the ordinary install default', () => {
+    expect(
+      effectiveSessionModel({
+        record: { ...record, nightShift: true },
+        config: {
+          defaultModel: { 'llama-cpp': 'current-default' },
+          nightShift: {
+            enabled: true,
+            modelOverride: {
+              enabled: true,
+              provider: 'llama-cpp',
+              model: 'night-model',
+            },
+          },
+        },
+      }),
+    ).toBe('night-model');
+  });
+
+  it('keeps an explicit capability route ahead of the ordinary install default', () => {
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('routed-model');
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        frontmatterModel: 'gezel-model',
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('gezel-model');
+  });
 });
 
 const GEMMA = {

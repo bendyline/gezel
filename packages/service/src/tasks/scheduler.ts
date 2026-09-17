@@ -13,6 +13,7 @@ import {
   localDateKey,
   projectAllowsAmbientWork,
   projectManagedWorkspaceWritable,
+  taskEffectiveStatus,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
@@ -468,6 +469,10 @@ export class TaskScheduler {
       // falls into lobby chat and task tools lose their step-scoped env.
       taskRef: task.ref,
       stepId: step.id,
+      // This is runtime recovery, not a new delegation by the voorman.
+      // Keep success/failure in task history instead of starting a lobby
+      // conversation that can mistake another article for the stalled one.
+      suppressReply: true,
       // Ambient re-drive — must yield to any user-driven turn on the same
       // provider, like the voorman nudge.
       lane: 'background',
@@ -780,7 +785,7 @@ export class TaskScheduler {
       // Best-effort — without the task list the task-driven gates simply
       // don't trigger, and the remaining gates decide.
     }
-    const activeTasks = projectTasks.filter((t) => t.status === 'active');
+    const activeTasks = projectTasks.filter((task) => taskEffectiveStatus(task) === 'active');
 
     // A freshly-created project has a voorman but no job yet. Ambient
     // check-ins are meant to resume owned work, not turn an empty project
@@ -805,7 +810,7 @@ export class TaskScheduler {
       // A draft is pending work awaiting the user's activation, not a
       // finished project: don't stabilize it, and don't nudge the voorman
       // about a plan that isn't running yet — just skip this tick.
-      if (projectTasks.some((t) => t.status === 'draft')) {
+      if (projectTasks.some((task) => taskEffectiveStatus(task) === 'draft')) {
         trace(
           'skip meester nudge — only draft task(s) await activation; not nudging or stabilizing',
         );

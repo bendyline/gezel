@@ -1,5 +1,5 @@
 import type { GezelSummary, Task, TaskNote, TaskStatus } from '@bendyline/gezel';
-import { hasReportActionFence } from '@bendyline/gezel';
+import { hasReportActionFence, taskEffectiveStatus } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
@@ -1018,6 +1018,7 @@ function TaskRailCard({
     );
 
   const cb = task.craftbook;
+  const effectiveStatus = taskEffectiveStatus(task);
   const legacyTitleMatch = /^(.*) — \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(task.title);
   const legacyGeneratedTitle = cb && legacyTitleMatch?.[1] === cb.id;
   const displayTitle = legacyGeneratedTitle ? cb.name : task.title;
@@ -1039,7 +1040,7 @@ function TaskRailCard({
       setStatusBusy(false);
     }
   };
-  const terminal = task.status === 'complete' || task.status === 'canceled';
+  const terminal = effectiveStatus === 'complete' || effectiveStatus === 'canceled';
   const steps = cb?.steps ?? [];
   // Where the work stands: the live step, or — once the task has ended —
   // the last one it reached, so a finished task still centres on its end.
@@ -1068,7 +1069,15 @@ function TaskRailCard({
       <div className="chat-rail-task-topbar">
         <header className="chat-rail-task-header">
           <code className="chat-rail-task-ref">{task.ref}</code>
-          {task.status === 'draft' ? (
+          {task.parentTaskRef ? (
+            <span
+              className={`chat-rail-task-status chat-rail-task-status-${effectiveStatus}`}
+              title={`Lifecycle follows parent task ${task.parentTaskRef}`}
+              aria-label={`Task status: ${taskStatusLabel(effectiveStatus)}. Follows parent task ${task.parentTaskRef}`}
+            >
+              {taskStatusLabel(effectiveStatus)} · follows parent
+            </span>
+          ) : task.status === 'draft' ? (
             <span className="chat-rail-task-status chat-rail-task-status-draft">draft</span>
           ) : (
             <DropdownMenu.Root>

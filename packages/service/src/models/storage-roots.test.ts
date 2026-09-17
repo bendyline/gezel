@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join, sep } from 'node:path';
+import { delimiter, join, parse, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { publishStagedModel } from './bundle-storage.js';
 import {
@@ -98,14 +98,13 @@ describe('model storage overlay', () => {
   });
 
   it('drops relative read-only homes rather than resolving them against cwd', () => {
+    const absoluteHome = join(parse(tmpdir()).root, 'abs', 'home');
     expect(readOnlyModelHomes({ GEZEL_READONLY_MODEL_HOMES: '' })).toEqual([]);
     expect(
       readOnlyModelHomes({
-        GEZEL_READONLY_MODEL_HOMES: ['../elsewhere', '  ', sep + join('abs', 'home')].join(
-          delimiter,
-        ),
+        GEZEL_READONLY_MODEL_HOMES: ['../elsewhere', '  ', absoluteHome].join(delimiter),
       }),
-    ).toEqual([sep + join('abs', 'home')]);
+    ).toEqual([absoluteHome]);
   });
 
   it('finds a model that only the borrowed home has installed', async () => {

@@ -340,6 +340,15 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   const validateSteps = scripts['validate:unlocked'].split(' && ');
 
   assert.ok(validateSteps.includes('pnpm test:ci'), 'validate must use the serialized CI suite');
+  assert.equal(
+    scripts.all,
+    'node scripts/validate-workspace.mjs --coverage',
+    'pnpm all must append executable coverage threshold checks to local validation',
+  );
+  assert.ok(
+    !validateSteps.includes('pnpm test:coverage'),
+    'release validation must not restore the serial coverage rerun',
+  );
   assert.ok(
     !validateSteps.includes('pnpm test'),
     'validate must not restore release-only parallel package contention',
@@ -363,6 +372,18 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   );
   assert.match(quality, /run: pnpm test:ci/);
   assert.match(quality, /run: pnpm test:stability/);
+  assert.equal(
+    quality.match(/uses: \.\/\.github\/actions\/setup-test-embedder/g)?.length,
+    3,
+    'each Linux job that runs the service suite must verify the shared embedding cache first',
+  );
+  const coverageStart = quality.indexOf('  coverage:');
+  const coverageEnd = quality.indexOf('\n  model-tool-contracts:', coverageStart);
+  assert.match(
+    quality.slice(coverageStart, coverageEnd),
+    /continue-on-error: true/,
+    'the reporting-only coverage rerun must not contradict its non-gating contract',
+  );
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 

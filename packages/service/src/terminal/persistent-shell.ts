@@ -451,12 +451,23 @@ export class PersistentShell {
       }) => void;
     } = {},
   ): Promise<PersistentShellRunResult> {
+    let commandToRun = command;
     if (opts.columns !== undefined) {
       // Keep a long-lived shell in sync with whichever client submits the
       // next command. This also updates COLUMNS inside the shell process.
       this.pty.resize(opts.columns, 50);
+
+      if (this.platform === 'posix') {
+        // TIOCSWINSZ is synchronous, but overloaded Linux runners have
+        // occasionally let the next command observe the PTY's previous size.
+        // Reassert it on the slave side in the same shell input line so the
+        // user's command cannot race the resize. Keep this in one line: each
+        // prompt cycle emits a completion sentinel, so a separate setup line
+        // would resolve the run before the user's command executes.
+        commandToRun = `command stty rows 50 cols ${opts.columns} >/dev/null 2>&1 || :; ${command}`;
+      }
     }
-    return this.runInternal(command, {
+    return this.runInternal(commandToRun, {
       discardOutput: false,
       onChunk: opts.onChunk,
       onPromptDetected: opts.onPromptDetected,

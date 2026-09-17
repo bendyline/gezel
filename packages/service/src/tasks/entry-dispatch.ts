@@ -19,7 +19,7 @@
  */
 
 import type { Task } from '@bendyline/gezel';
-import { createLogger, projectAllowsAmbientWork } from '@bendyline/gezel';
+import { createLogger, projectAllowsAmbientWork, taskEffectiveStatus } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { stepOwnerGezelId } from './manager.js';
@@ -56,7 +56,7 @@ export async function dispatchTaskEntry(
   deps: EntryDispatchDeps,
   task: Task,
 ): Promise<EntryDispatchResult> {
-  if (task.status !== 'active') {
+  if (taskEffectiveStatus(task) !== 'active') {
     return { enqueued: false, reason: 'not-active' };
   }
   if (task.cron || task.fanout) {

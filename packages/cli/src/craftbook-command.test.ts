@@ -81,11 +81,40 @@ describe('task wait', () => {
     client.getTaskByRef.mockResolvedValue({ ...task('active'), craftbook: { spawn: {} } });
     client.listTaskChildren.mockResolvedValue({ tasks: [task('paused')] });
     expect((await waitForTask(client, 'p/1', { timeoutMs: 100 })).outcome).toBe('blocked');
-    client.getTaskByRef.mockResolvedValue({
-      ...task('active'),
-      craftbook: { cliWorkflow: { module: '.gezel/workflows/batch.mjs' } },
-    });
-    expect((await waitForTask(client, 'p/1', { timeoutMs: 100 })).outcome).toBe('blocked');
+    client.getTaskByRef
+      .mockResolvedValueOnce({
+        ...task('active'),
+        craftbook: { cliWorkflow: { module: '.gezel/workflows/batch.mjs' } },
+      })
+      .mockResolvedValue(task('complete'));
+    expect((await waitForTask(client, 'p/1', { timeoutMs: 100, pollMs: 1 })).outcome).toBe(
+      'complete',
+    );
+  });
+  it('keeps watching a mixed fanout while other children still run', async () => {
+    const client = {
+      getTaskByRef: vi
+        .fn()
+        .mockResolvedValueOnce({ ...task('active'), craftbook: { spawn: {} } })
+        .mockResolvedValue(task('complete')),
+      listTaskChildren: vi.fn().mockResolvedValue({ tasks: [task('paused'), task('active')] }),
+    };
+    expect((await waitForTask(client, 'p/1', { timeoutMs: 100, pollMs: 1 })).outcome).toBe(
+      'complete',
+    );
+  });
+  it('a CLI batch decides when child questions block the whole parent', async () => {
+    const parent = { ...task('active'), craftbook: { cliWorkflow: { module: 'batch.mjs' } } };
+    const client = {
+      getTaskByRef: vi.fn().mockResolvedValueOnce(parent).mockResolvedValue(task('paused')),
+      listTaskChildren: vi.fn().mockResolvedValue({ tasks: [{ ...task('paused'), ref: 'p/2' }] }),
+      listQuestions: vi
+        .fn()
+        .mockResolvedValue({ questions: [{ id: 'child-question', taskRef: 'p/2' }] }),
+    };
+    const result = await waitForTask(client, 'p/1', { timeoutMs: 100, pollMs: 1 });
+    expect(result.task.status).toBe('paused');
+    expect(result.questionIds).toBeUndefined();
   });
   it('times out without canceling the daemon task', async () => {
     const client = {

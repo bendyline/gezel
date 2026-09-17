@@ -17,10 +17,20 @@ switch -Regex ($targetArch) {
 
 $buildDir = Join-Path $helperDir ".build\$platform"
 $outputDir = Join-Path $repoRoot "native\build\$platform"
+$baselineArgs = if ($platform -eq 'win32-arm64') {
+  # MSVC otherwise defaults to armv8.0 today; spell it out so a future
+  # toolchain default cannot silently tune this redistributable to the host.
+  @('-DCMAKE_CXX_FLAGS=/arch:armv8.0')
+} else {
+  @()
+}
 
-cmake -S $helperDir -B $buildDir -A $cmakePlatform -DBUILD_TESTING=ON
-cmake --build $buildDir --config Release --parallel
-ctest --test-dir $buildDir -C Release --output-on-failure
+& cmake -S $helperDir -B $buildDir -A $cmakePlatform -DBUILD_TESTING=ON @baselineArgs
+if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (exit $LASTEXITCODE)" }
+& cmake --build $buildDir --config Release --parallel
+if ($LASTEXITCODE -ne 0) { throw "cmake build failed (exit $LASTEXITCODE)" }
+& ctest --test-dir $buildDir -C Release --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw "ctest failed (exit $LASTEXITCODE)" }
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 Copy-Item -Force (Join-Path $buildDir 'Release\gezel-device-health.exe') $outputDir

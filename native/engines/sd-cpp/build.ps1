@@ -7,9 +7,9 @@
 # without requiring the CUDA toolkit. Override with $env:SD_BACKEND
 # (values: vulkan, cuda, cpu).
 #
-# Toolchain: this script bootstraps the Visual Studio x64 developer
-# environment (via vswhere + vcvars64.bat) and builds with the Ninja
-# generator, which ships with VS. That is deliberate. CMake's Visual
+# Toolchain: this script bootstraps the Visual Studio developer environment
+# for the requested target (via vswhere + the matching vcvars*.bat) and builds
+# with the Ninja generator, which ships with VS. That is deliberate. CMake's Visual
 # Studio generator auto-detects the MSVC toolset on most hosts, but
 # newer VS + CMake combinations - notably "Visual Studio 18 2026" with
 # CMake 4.x - fail that detection from a bare shell with "No
@@ -26,37 +26,62 @@
 param()
 $ErrorActionPreference = 'Stop'
 
-# Import the Visual Studio x64 "Native Tools" environment into this
-# session so cl.exe, ninja, and the Windows SDK land on PATH for the
+# Import the Visual Studio target environment into this session so cl.exe,
+# clang, Ninja, the correct-architecture CRT, and the Windows SDK land on PATH for the
 # cmake calls below. Located via vswhere (ships with every VS 2017+
-# install). The environment is captured from vcvars64.bat rather than
-# Enter-VsDevShell because the vcvars contract is stable across VS
+# install). The environment is captured from the target-specific vcvars
+# script rather than Enter-VsDevShell because the vcvars contract is stable across VS
 # versions while the DevShell module API has shifted between them.
 function Import-VsDevEnv {
   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
   if (-not (Test-Path $vswhere)) {
     throw "vswhere not found at $vswhere. Install Visual Studio Build Tools with the 'Desktop development with C++' workload."
   }
-  $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  $hostIsArm64 = $env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$'
+  if ($isArm64) {
+    $vcComponent = 'Microsoft.VisualStudio.Component.VC.Tools.ARM64'
+    $vcvarsScript = if ($hostIsArm64) { 'vcvarsarm64.bat' } else { 'vcvarsamd64_arm64.bat' }
+    $expectedVsTarget = 'arm64'
+  } else {
+    $vcComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+    $vcvarsScript = 'vcvars64.bat'
+    $expectedVsTarget = 'x64'
+  }
+
+  $vsPath = & $vswhere -latest -products * -requires $vcComponent -property installationPath
   if (-not $vsPath) {
-    throw "No Visual Studio install with the VC++ x64 toolset found. Install the 'Desktop development with C++' workload."
+    throw "No Visual Studio install with the $vcComponent toolset found. Install the matching C++ workload."
   }
-  $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\$vcvarsScript"
   if (-not (Test-Path $vcvars)) {
-    throw "vcvars64.bat not found at $vcvars - the VS install looks incomplete."
+    throw "$vcvarsScript not found at $vcvars - the VS install looks incomplete."
   }
-  Write-Host "[build] importing VS x64 dev environment from $vsPath"
+  Write-Host "[build] importing VS $expectedVsTarget dev environment from $vsPath ($vcvarsScript)"
   # Redirect vcvars' own banner to nul; `&& set` then dumps the
   # resulting environment one KEY=VALUE per line, but only if vcvars
   # succeeded. Re-import each var into this process so the child
   # cmake / ninja / cl inherit it. SetEnvironmentVariable (not Set-Item
   # env:) handles names with parens like ProgramFiles(x86).
-  $envText = & cmd /c "`"$vcvars`" >nul 2>&1 && set"
-  if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat failed (exit $LASTEXITCODE)" }
+  $envText = & $env:ComSpec /d /c "`"$vcvars`" >nul 2>&1 && set"
+  if ($LASTEXITCODE -ne 0) { throw "$vcvarsScript failed (exit $LASTEXITCODE)" }
+  $devPath = $null
   foreach ($line in $envText) {
     if ($line -match '^([^=]+)=(.*)$') {
-      [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+      $name = $matches[1]
+      $value = $matches[2]
+      if ($name -ieq 'Path') {
+        if (-not $devPath -or $value -match '\\VC\\Tools\\(?:MSVC|Llvm)\\') {
+          $devPath = $value
+        }
+        continue
+      }
+      [System.Environment]::SetEnvironmentVariable($name, $value, 'Process')
     }
+  }
+  if (-not $devPath) { throw "$vcvarsScript did not produce a PATH value" }
+  [System.Environment]::SetEnvironmentVariable('Path', $devPath, 'Process')
+  if (-not $env:VSCMD_ARG_TGT_ARCH -or $env:VSCMD_ARG_TGT_ARCH -ine $expectedVsTarget) {
+    throw "$vcvarsScript selected target '$env:VSCMD_ARG_TGT_ARCH'; expected '$expectedVsTarget'"
   }
   if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
     throw "cl.exe is still not on PATH after importing the VS dev environment."
@@ -162,7 +187,8 @@ if ($isArm64) {
   # `/bigobj` below is MSVC syntax the clang driver does not accept; LLVM's
   # COFF writer raises the section limit on its own, so arm64 needs no
   # equivalent. The ISA baseline comes from the shared toolchain file.
-  $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$(if ($env:SD_ARM_ARCH) { $env:SD_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' })"
+  $armArch = if ($env:SD_ARM_ARCH) { $env:SD_ARM_ARCH } else { 'armv8.2-a+dotprod+fp16' }
+  $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$armArch"
 } else {
   # stable-diffusion.cpp's generated translation unit exceeds COFF's default
   # section count on current MSVC. /bigobj raises that object-file limit.
@@ -195,7 +221,7 @@ if ($isArm64) {
   if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
     throw "clang is not on PATH; the win32-arm64 build needs the LLVM toolchain"
   }
-  $toolchainArgs = @("-DCMAKE_TOOLCHAIN_FILE=$toolchain")
+  $toolchainArgs = @("-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DGEZEL_ARM_ARCH=$armArch")
 }
 $buildDir = Join-Path $src "build-$platform-$backend"
 Reset-BuildDirIfGeneratorChanged $buildDir 'Ninja'

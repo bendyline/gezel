@@ -1,14 +1,18 @@
 import { mkdtempSync } from 'node:fs';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   TRANSFORMERS_MODULE,
   type TransformersEnv,
+  isCorruptTransformersCacheFailure,
   isMissingModule,
+  loadTransformersModelWithCacheRecovery,
   pinTransformersCacheDir,
+  removeTransformersModelCache,
   transformersCacheDir,
+  withTransformersModelCacheLock,
 } from './transformers-cache.js';
 
 const ABSENT = '@bendyline/definitely-not-installed';
@@ -145,6 +149,113 @@ describe('pinTransformersCacheDir', () => {
       }),
     );
     expect(stderr).toBe('');
+  });
+});
+
+describe('transformers model cache coordination', () => {
+  it('serializes concurrent first-use work for the same model', async () => {
+    const dir = await freshCacheDir();
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    let firstStarted!: () => void;
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstInside = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+
+    const first = withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => {
+      events.push('first:start');
+      firstStarted();
+      await firstHeld;
+      events.push('first:end');
+    });
+    await firstInside;
+    const second = withTransformersModelCacheLock(
+      dir,
+      'Xenova/test-model',
+      async () => {
+        events.push('second');
+      },
+      { pollMs: 5 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(events).toEqual(['first:start']);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual(['first:start', 'first:end', 'second']);
+  });
+
+  it('releases the model lock when loading throws', async () => {
+    const dir = await freshCacheDir();
+    await expect(
+      withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => {
+        throw new Error('load failed');
+      }),
+    ).rejects.toThrow('load failed');
+    await expect(
+      withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => 'recovered'),
+    ).resolves.toBe('recovered');
+  });
+
+  it('removes only the corrupt named model repository', async () => {
+    const dir = await freshCacheDir();
+    const corrupt = join(dir, 'Xenova', 'test-model', 'onnx');
+    const healthy = join(dir, 'Xenova', 'other-model');
+    await mkdir(corrupt, { recursive: true });
+    await mkdir(healthy, { recursive: true });
+    await writeFile(join(corrupt, 'model.onnx'), 'partial protobuf');
+    await writeFile(join(healthy, 'config.json'), '{}');
+
+    await removeTransformersModelCache(dir, 'Xenova/test-model');
+
+    await expect(stat(join(dir, 'Xenova', 'test-model'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect((await stat(join(healthy, 'config.json'))).isFile()).toBe(true);
+    await expect(removeTransformersModelCache(dir, '../outside')).rejects.toThrow(
+      /unsafe transformers model id/,
+    );
+  });
+
+  it('recognises cached ONNX/protobuf corruption through an error cause', () => {
+    const error = new Error('Load model from cache failed', {
+      cause: new Error('Protobuf parsing failed'),
+    });
+    expect(isCorruptTransformersCacheFailure(error)).toBe(true);
+    expect(isCorruptTransformersCacheFailure(new Error('socket hang up'))).toBe(false);
+  });
+
+  it('deletes a proven-corrupt model and retries its load exactly once', async () => {
+    const dir = await freshCacheDir();
+    const modelFile = join(dir, 'Xenova', 'test-model', 'onnx', 'model.onnx');
+    await mkdir(join(dir, 'Xenova', 'test-model', 'onnx'), { recursive: true });
+    await writeFile(modelFile, 'partial protobuf');
+    let calls = 0;
+    let corruptNotices = 0;
+
+    const loaded = await loadTransformersModelWithCacheRecovery(
+      dir,
+      'Xenova/test-model',
+      async () => {
+        calls++;
+        if (calls === 1) {
+          expect((await stat(modelFile)).isFile()).toBe(true);
+          throw new Error('Load model failed', { cause: new Error('Protobuf parsing failed') });
+        }
+        await expect(stat(modelFile)).rejects.toMatchObject({ code: 'ENOENT' });
+        return 'loaded';
+      },
+      () => {
+        corruptNotices++;
+      },
+    );
+
+    expect(loaded).toBe('loaded');
+    expect(calls).toBe(2);
+    expect(corruptNotices).toBe(1);
   });
 });
 

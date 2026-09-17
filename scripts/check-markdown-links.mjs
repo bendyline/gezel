@@ -16,6 +16,7 @@ const ignoredDirectories = new Set([
 // `.claude/skills/*/SKILL.md`. Their relative links resolve from the skill
 // directory, not from the copy, so checking them only ever reports the sync.
 const ignoredRepoDirectories = new Set([
+  '.tmp-qualla-batch',
   '.gezel/craftbooks',
   'artifacts',
   'evals/runs',

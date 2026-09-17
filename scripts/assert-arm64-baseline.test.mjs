@@ -1,102 +1,225 @@
-/**
- * The win32-arm64 ISA gate has to be right on synthetic input, because the
- * only other way to exercise it is a Snapdragon laptop. Both directions
- * matter equally: a false negative ships a binary that SIGILLs on every
- * target machine, and a false positive blocks the platform over NEON code
- * that was always fine.
- */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { findForbiddenIsa, instructionText, scannableFiles } from './assert-arm64-baseline.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  DEFAULT_CLANG_BASELINE,
+  IMAGE_FILE_MACHINE_ARM64,
+  arm64PeFailures,
+  clangCompileCommandFailures,
+  cmakeCacheFailures,
+  readPeMachine,
+  scannableFiles,
+  splitCommandLine,
+} from './assert-arm64-baseline.mjs';
 
-/** `llvm-objdump -d --no-show-raw-insn` output, as it really looks. */
-const NEON_ONLY = `
-gezel-llama-server.exe:\tfile format coff-arm64
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-Disassembly of section .text:
+function peFixture(machine = IMAGE_FILE_MACHINE_ARM64) {
+  const buffer = Buffer.alloc(0x100);
+  buffer.write('MZ', 0, 'ascii');
+  buffer.writeUInt32LE(0x80, 0x3c);
+  buffer.write('PE\0\0', 0x80, 'binary');
+  buffer.writeUInt16LE(machine, 0x84);
+  return buffer;
+}
 
-0000000140001000 <.text>:
-140001000: stp\tx29, x30, [sp, #-32]!
-140001004: mov\tx29, sp
-140001008: ld1\t{ v0.16b, v1.16b }, [x0]
-14000100c: fmla\tv2.4s, v0.4s, v1.4s
-140001010: sdot\tv3.4s, v0.16b, v1.16b
-140001014: smmla\tv4.4s, v0.16b, v1.16b
-140001018: fcvtn\tv5.4h, v6.4s
-14000101c: ldp\tx29, x30, [sp], #32
-140001020: ret
-`;
+function clangEntry(
+  file = 'kernel.cpp',
+  flags = `--target=arm64-pc-windows-msvc -march=${DEFAULT_CLANG_BASELINE}`,
+) {
+  return {
+    directory: 'C:/a/gezel',
+    command: `"C:/Program Files/LLVM/bin/clang++.exe" ${flags} -c ${file}`,
+    file,
+  };
+}
 
-test('a NEON + dotprod + i8mm listing is within the baseline', () => {
-  assert.deepEqual(findForbiddenIsa(NEON_ONLY), []);
+function cacheFixture(overrides = {}) {
+  return Object.entries({
+    GGML_NATIVE: 'OFF',
+    GGML_CPU_ARM_ARCH: DEFAULT_CLANG_BASELINE,
+    GEZEL_ARM_ARCH: DEFAULT_CLANG_BASELINE,
+    CMAKE_EXPORT_COMPILE_COMMANDS: 'ON',
+    ...overrides,
+  })
+    .map(([name, value]) => `${name}:STRING=${value}`)
+    .join('\n');
+}
+
+test('reads IMAGE_FILE_MACHINE_ARM64 from a PE header', () => {
+  assert.equal(readPeMachine(peFixture()), IMAGE_FILE_MACHINE_ARM64);
+  assert.equal(readPeMachine(peFixture(0x8664)), 0x8664);
 });
 
-test('SVE vector registers are rejected', () => {
-  const findings = findForbiddenIsa('140001008: fmla\tz2.s, p0/m, z0.s, z1.s');
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].feature, 'SVE');
+test('rejects malformed PE payloads', () => {
+  assert.throws(() => readPeMachine(Buffer.alloc(8)), /too small/);
+  assert.throws(() => readPeMachine(Buffer.alloc(0x100)), /MZ signature/);
 });
 
-test('SVE predicate qualifiers are rejected on their own', () => {
-  // `p0/m` without a `z` operand still means the encoding is SVE.
-  assert.equal(findForbiddenIsa('140001008: ld1b\t{ w0 }, p3/z, [x1]')[0]?.feature, 'SVE');
+test('reports a linked PE with the wrong machine type', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel-arm64-pe-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'wrong.exe');
+  writeFileSync(file, peFixture(0x8664));
+  assert.match(arm64PeFailures([file]).join('\n'), /expected ARM64/);
 });
 
-test('SVE-only mnemonics are rejected even with no register syntax', () => {
-  for (const line of [
-    '140001000: ptrue\tp0.b',
-    '140001004: whilelo\tp1.s, x0, x1',
-    '140001008: rdvl\tx0, #1',
-    '14000100c: cntb\tx2',
-  ]) {
-    assert.equal(findForbiddenIsa(line).length, 1, `expected a finding for: ${line}`);
-  }
+test('only linked Windows payloads are selected for PE validation', () => {
+  assert.deepEqual(
+    scannableFiles('.', [
+      'gezel-llama-server.exe',
+      'ggml-cpu.dll',
+      'gezel-llama-build.json',
+      'THIRD_PARTY_LICENSES',
+      'notes.txt',
+    ]),
+    ['gezel-llama-server.exe', 'ggml-cpu.dll'],
+  );
 });
 
-test('SME instructions are rejected and labelled separately', () => {
-  assert.equal(findForbiddenIsa('140001000: smstart\tza')[0]?.feature, 'SME');
-  assert.equal(findForbiddenIsa('140001004: zero\t{ za }')[0]?.feature, 'SME');
-  assert.equal(findForbiddenIsa('140001008: mova\tza0.s[w12, 0], p0/m, z1.s')[0]?.feature, 'SVE');
+test('tokenizes quoted CMake compiler paths without splitting Program Files', () => {
+  assert.deepEqual(
+    splitCommandLine(
+      '"C:/Program Files/LLVM/bin/clang++.exe" --target=arm64-pc-windows-msvc -c source.cpp',
+    ),
+    ['C:/Program Files/LLVM/bin/clang++.exe', '--target=arm64-pc-windows-msvc', '-c', 'source.cpp'],
+  );
 });
 
-test('symbol names and section headers are never scanned', () => {
-  // The words that trip the mnemonic patterns appear here in NON-instruction
-  // positions. This is the false-positive case that made --no-show-raw-insn
-  // and the address-anchored parse non-negotiable.
-  const noise = `
-gezel-llama-server.exe:\tfile format coff-arm64
-Disassembly of section .ptrue_lookalike:
-0000000140002000 <_ZN4ggml6whilelo17cntb_helper_ptrueEv>:
-`;
-  assert.deepEqual(findForbiddenIsa(noise), []);
-});
-
-test('instructionText isolates the instruction half', () => {
-  assert.equal(instructionText('140001008: ld1\t{ v0.16b }, [x0]'), 'ld1\t{ v0.16b }, [x0]');
-  assert.equal(instructionText('Disassembly of section .text:'), null);
-  assert.equal(instructionText('0000000140001000 <.text>:'), null);
-  assert.equal(instructionText(''), null);
-});
-
-test('identical offending instructions are reported once', () => {
-  const repeated = [
-    '140001000: ptrue\tp0.b',
-    '140001004: ptrue\tp0.b',
-    '140001008: ptrue\tp0.b',
-  ].join('\n');
-  assert.equal(findForbiddenIsa(repeated).length, 1);
-});
-
-test('only linkable artifacts are scanned', () => {
-  // The sidecar JSON, the licence tree and stray text must not reach objdump:
-  // it refuses non-object input, and this gate turns a refusal into a build
-  // failure. THIRD_PARTY_LICENSES is the one that actually ships.
+test('accepts every clang command pinned to the conservative WoA baseline', () => {
   const entries = [
-    'gezel-llama-server.exe',
-    'ggml-cpu.dll',
-    'gezel-llama-build.json',
-    'THIRD_PARTY_LICENSES',
-    'notes.txt',
+    clangEntry('one.c'),
+    {
+      directory: 'C:/a/gezel',
+      arguments: [
+        'C:/Program Files/LLVM/bin/clang.exe',
+        '--target',
+        'arm64-pc-windows-msvc',
+        '-march',
+        DEFAULT_CLANG_BASELINE,
+        '-c',
+        'two.c',
+      ],
+      file: 'two.c',
+    },
+    { command: 'rc.exe /fo resource.res resource.rc', file: 'resource.rc' },
   ];
-  assert.deepEqual(scannableFiles('.', entries), ['gezel-llama-server.exe', 'ggml-cpu.dll']);
+  assert.deepEqual(clangCompileCommandFailures(entries), []);
+});
+
+test('rejects missing, host-native, and SVE/SME compiler overrides', () => {
+  assert.match(
+    clangCompileCommandFailures([clangEntry('bad.c', '-march=native')]).join('\n'),
+    /target|march/,
+  );
+  assert.match(
+    clangCompileCommandFailures([
+      clangEntry(
+        'bad.cpp',
+        `--target=arm64-pc-windows-msvc -march=${DEFAULT_CLANG_BASELINE} -mcpu=native`,
+      ),
+    ]).join('\n'),
+    /-mcpu is forbidden/,
+  );
+  assert.match(
+    clangCompileCommandFailures([
+      clangEntry('bad.cpp', `--target=arm64-pc-windows-msvc -march=${DEFAULT_CLANG_BASELINE}+sve2`),
+    ]).join('\n'),
+    /march|SVE\/SME/,
+  );
+  assert.match(clangCompileCommandFailures([]).join('\n'), /no clang compiler commands/);
+});
+
+test('requires CMake and ggml to agree on the same non-native baseline', () => {
+  assert.deepEqual(cmakeCacheFailures(cacheFixture()), []);
+  assert.match(cmakeCacheFailures(cacheFixture({ GGML_NATIVE: 'ON' })).join('\n'), /expected OFF/);
+  assert.match(
+    cmakeCacheFailures(cacheFixture({ GGML_CPU_ARM_ARCH: 'armv9-a+sve2' })).join('\n'),
+    /GGML_CPU_ARM_ARCH/,
+  );
+  assert.match(cmakeCacheFailures('GGML_NATIVE:BOOL=OFF').join('\n'), /missing GGML_CPU_ARM_ARCH/);
+});
+
+test('CLI validates PE, compile database, and CMake cache together', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel-arm64-contract-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const commands = join(dir, 'compile_commands.json');
+  const cache = join(dir, 'CMakeCache.txt');
+  writeFileSync(join(dir, 'engine.exe'), peFixture());
+  writeFileSync(commands, JSON.stringify([clangEntry()]));
+  writeFileSync(cache, cacheFixture());
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(repoRoot, 'scripts/assert-arm64-baseline.mjs'),
+      '--dir',
+      dir,
+      '--mode',
+      'clang-baseline',
+      '--compile-commands',
+      commands,
+      '--cmake-cache',
+      cache,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /clang commands and CMake cache pin/);
+});
+
+test('MSVC CLI mode fails closed on any looser claimed baseline', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel-arm64-msvc-contract-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'helper.exe'), peFixture());
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(repoRoot, 'scripts/assert-arm64-baseline.mjs'),
+      '--dir',
+      dir,
+      '--mode',
+      'msvc-baseline',
+      '--baseline',
+      'armv8.5',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires --baseline armv8\.0/);
+});
+
+test('Windows ARM64 build scripts keep their architecture evidence explicit', () => {
+  const sdBuild = readFileSync(resolve(repoRoot, 'native/engines/sd-cpp/build.ps1'), 'utf8');
+  assert.match(sdBuild, /Microsoft\.VisualStudio\.Component\.VC\.Tools\.ARM64/);
+  assert.match(sdBuild, /vcvarsarm64\.bat/);
+  assert.match(sdBuild, /vcvarsamd64_arm64\.bat/);
+  assert.match(sdBuild, /-DGEZEL_ARM_ARCH=\$armArch/);
+
+  for (const relativePath of [
+    'native/helpers/device-health/build.ps1',
+    'native/helpers/service-host/build.ps1',
+  ]) {
+    assert.match(
+      readFileSync(resolve(repoRoot, relativePath), 'utf8'),
+      /-DCMAKE_CXX_FLAGS=\/arch:armv8\.0/,
+    );
+  }
+
+  const toolchain = readFileSync(
+    resolve(repoRoot, 'native/cmake/arm64-windows-llvm.cmake'),
+    'utf8',
+  );
+  assert.match(toolchain, /CMAKE_EXPORT_COMPILE_COMMANDS ON/);
+  assert.match(toolchain, /CMAKE_ASM_FLAGS_INIT/);
+
+  const workflow = readFileSync(resolve(repoRoot, '.github/workflows/build-native.yml'), 'utf8');
+  assert.doesNotMatch(workflow, /llvm-objdump/);
+  assert.match(workflow, /--compile-commands/);
+  assert.match(workflow, /--mode clang-baseline/);
 });

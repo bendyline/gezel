@@ -810,7 +810,7 @@ test('build, test, typecheck, and lint entry points use dependency read leases',
   }
 });
 
-test('holds one checkout lock across install and validation', async (t) => {
+test('holds one checkout lock across install, validation, and coverage', async (t) => {
   const root = await fixture(t);
   const events = [];
   let competingMutation;
@@ -818,6 +818,7 @@ test('holds one checkout lock across install and validation', async (t) => {
   const code = await runWorkspaceValidation({
     repoRoot: root,
     install: true,
+    coverage: true,
     runInstallFn: async ({ env }) => {
       events.push('install');
       await withPnpmInstallLock(root, async () => events.push('install:locked'), { env });
@@ -834,6 +835,12 @@ test('holds one checkout lock across install and validation', async (t) => {
       assert.equal(events.includes('competitor'), false);
       return 0;
     },
+    runCoverageFn: async ({ env }) => {
+      events.push('coverage');
+      await withPnpmInstallLock(root, async () => events.push('coverage:locked'), { env });
+      assert.equal(events.includes('competitor'), false);
+      return 0;
+    },
   });
   await competingMutation;
 
@@ -843,10 +850,58 @@ test('holds one checkout lock across install and validation', async (t) => {
     'install:locked',
     'validate',
     'validate:locked',
+    'coverage',
+    'coverage:locked',
     'competitor',
   ]);
-  assert.deepEqual(parseWorkspaceValidationArgs([]), { install: false });
-  assert.deepEqual(parseWorkspaceValidationArgs(['--install']), { install: true });
+  assert.deepEqual(parseWorkspaceValidationArgs([]), { install: false, coverage: false });
+  assert.deepEqual(parseWorkspaceValidationArgs(['--install']), {
+    install: true,
+    coverage: false,
+  });
+  assert.deepEqual(parseWorkspaceValidationArgs(['--coverage']), {
+    install: false,
+    coverage: true,
+  });
+});
+
+test('the local all path runs coverage only after validation succeeds', async (t) => {
+  const root = await fixture(t);
+  const invocations = [];
+  const spawnPnpmFn = (args) => {
+    invocations.push(args);
+    const child = new EventEmitter();
+    child.pid = 2_147_483_647;
+    child.killed = false;
+    child.kill = () => true;
+    queueMicrotask(() => child.emit('close', 0, null));
+    return child;
+  };
+
+  const code = await runWorkspaceValidation({
+    repoRoot: root,
+    coverage: true,
+    spawnPnpmFn,
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(invocations, [
+    ['run', 'validate:unlocked'],
+    ['run', 'test:coverage:unleased'],
+  ]);
+
+  let coverageRan = false;
+  const failedCode = await runWorkspaceValidation({
+    repoRoot: root,
+    coverage: true,
+    runValidationFn: async () => 1,
+    runCoverageFn: async () => {
+      coverageRan = true;
+      return 0;
+    },
+  });
+  assert.equal(failedCode, 1);
+  assert.equal(coverageRan, false);
 });
 
 test('link and release-update workflows lock config edits and prepare installs safely', async () => {

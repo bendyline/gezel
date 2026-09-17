@@ -89,13 +89,18 @@ export async function waitForTask(
     if (task.status === 'canceled') return { task, outcome: 'canceled', exitCode: 1 };
     if (task.status === 'paused' || task.status === 'draft')
       return { task, outcome: 'blocked', exitCode: 2 };
-    // A parent barrier can remain active indefinitely when one shard needs help.
+    // CLI workflow drivers own partial-failure policy and set the parent's
+    // status themselves. A paused article must not stop watching other work.
     const refs = new Set([task.ref]);
     if (task.fanout || task.craftbook.spawn || task.craftbook.cliWorkflow) {
       const { tasks } = await client.listTaskChildren(task.projectId, task.num);
-      if (tasks.some((child) => child.status === 'paused' || child.status === 'canceled'))
+      if (
+        !task.craftbook.cliWorkflow &&
+        !tasks.some((child) => child.status === 'active') &&
+        tasks.some((child) => child.status === 'paused' || child.status === 'canceled')
+      )
         return { task, outcome: 'blocked', exitCode: 2 };
-      for (const child of tasks) refs.add(child.ref);
+      if (!task.craftbook.cliWorkflow) for (const child of tasks) refs.add(child.ref);
     }
     if (client.listQuestions) {
       const { questions } = await client.listQuestions({

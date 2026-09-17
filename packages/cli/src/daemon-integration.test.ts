@@ -435,6 +435,45 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     await client.updateConfig({ provider: before.provider });
   });
 
+  it('sets, reads, and clears a gezel output limit without erasing its other tuning', async () => {
+    const gezel = await client.createGezel({ name: 'Output budget test', about: 'Test only.' });
+    const tuning = {
+      sampling: { temperature: 0.35, maxTokens: 8192 },
+      reasoning: { thinkingBudget: 2048 },
+    };
+    await client.updateGezelSettings(gezel.id, { tuning });
+    const args = ['agent', 'output-limit', gezel.id];
+    expect(JSON.parse((await runCli(...args, '--json')).stdout)).toEqual({
+      gezelId: gezel.id,
+      outputTokens: 8192,
+    });
+    expect(JSON.parse((await runCli(...args, '16384', '--json')).stdout)).toEqual({
+      gezelId: gezel.id,
+      outputTokens: 16384,
+    });
+    expect((await client.getGezel(gezel.id)).parsed.frontmatter.tuning).toEqual({
+      ...tuning,
+      sampling: { ...tuning.sampling, maxTokens: 16384 },
+    });
+    expect(JSON.parse((await runCli(...args, 'auto', '--json')).stdout).outputTokens).toBeNull();
+    expect((await client.getGezel(gezel.id)).parsed.frontmatter.tuning).toEqual({
+      sampling: { temperature: 0.35 },
+      reasoning: tuning.reasoning,
+    });
+    for (const value of ['0', '-1', '1.5', '1e4', '9007199254740992']) {
+      await expect(runCli(...args, value)).rejects.toMatchObject({
+        stderr: expect.stringContaining('positive integer'),
+      });
+    }
+    const plain = await client.createGezel({
+      name: 'Inherited output budget test',
+      about: 'Test only.',
+    });
+    await runCli('agent', 'output-limit', plain.id, '1024');
+    await runCli('agent', 'output-limit', plain.id, 'auto');
+    expect((await client.getGezel(plain.id)).parsed.frontmatter.tuning).toBeUndefined();
+  }, 30_000);
+
   it('sets, reads, and clears model context through the CLI without changing other models', async () => {
     await client.updateModelContextOverride('llama-cpp', 'unrelated-model', 98304);
     const args = ['model', 'context', 'test-model'];
@@ -452,6 +491,31 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       'unrelated-model': 98304,
     });
     await client.updateModelContextOverride('llama-cpp', 'unrelated-model', null);
+  });
+
+  it('pauses one task idempotently through the CLI while preserving other task work', async () => {
+    const create = (title: string) =>
+      client.createTask('default', {
+        title,
+        description: 'Manual task for the CLI pause integration check.',
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Main' }],
+      });
+    const target = await create('Pause target');
+    const neighbor = await create('Unaffected neighbor');
+    const before = (await client.getConfig()).aiEngagementMode;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(JSON.parse((await runCli('task', 'pause', target.ref, '--json')).stdout)).toEqual({
+        taskRef: target.ref,
+        status: 'paused',
+      });
+    }
+    expect((await client.getTaskByRef(neighbor.ref)).status).toBe('active');
+    expect((await client.getConfig()).aiEngagementMode).toBe(before);
+    await client.setTaskStatus(neighbor.projectId, neighbor.num, 'canceled');
+    await expect(runCli('task', 'pause', neighbor.ref)).rejects.toMatchObject({
+      stderr: expect.stringContaining('pause requires an active or paused task'),
+    });
   });
 
   it('sets and clears inference concurrency while preserving other providers', async () => {

@@ -68,9 +68,11 @@ import {
   roleDeliverableScripts,
   stepDeliverablePath,
   stepOnEnterProducesAdvanceFile,
+  taskEffectiveStatus,
   tierAtLeast,
   turnCancelledMessage,
   validateScriptInput,
+  withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -2226,7 +2228,9 @@ export class ChatManager extends LocalEngineRuntime {
     // The model's own advance wins — never double-advance in one turn.
     if (drained.some((d) => d.name === 'advance_task_step' && d.success)) return {};
 
-    const tasks = await this.store.listProjectTasks(projectId).catch(() => [] as Task[]);
+    const tasks = withEffectiveTaskStatuses(
+      await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
+    );
     // First owned, active edit-gate that HELD because the model didn't
     // write to the deliverable this turn. Surfaced to the caller so the
     // false-"done" re-prompt can fire (the active half of the gate).
@@ -2239,7 +2243,7 @@ export class ChatManager extends LocalEngineRuntime {
       // the same reviewer owns both (wild-caught when a child read made the PR
       // review host spend its collect-gate attempt early).
       if (state.record.taskRef && task.ref !== state.record.taskRef) continue;
-      if (task.status !== 'active' || !task.activeStepId) continue;
+      if (taskEffectiveStatus(task) !== 'active' || !task.activeStepId) continue;
       const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
       const adv = step?.advanceWhen;
       if (!step) continue;
@@ -2870,7 +2874,11 @@ export class ChatManager extends LocalEngineRuntime {
     // cheap and is work the next real turn needs anyway; the adapters'
     // resolveBaseUrl guards still prevent a focus from spawning a
     // multi-minute engine load.
-    const provider = await this.ensureProviderForSession(record).catch(() => null);
+    // The historical session model does not outrank the install default.
+    // Supply the current gezel pin, as send does, or this warm can load a
+    // different model and compete with the actual handoff for GPU memory.
+    const gezel = await this.store.getGezel(record.gezelId);
+    const provider = await this.ensureProviderForSession(record, gezel).catch(() => null);
     if (!provider) return;
 
     // Under machine-broker adoption the persisted provider name remains the
@@ -3198,6 +3206,14 @@ export class ChatManager extends LocalEngineRuntime {
     const task = await this.store.readTask(parsed.projectId, parsed.num).catch(() => null);
     if (!task) return new Set();
     return autoAllowedToolsForToolsets(this.catalog, task.craftbook.toolsets);
+  }
+
+  /** Runtime task read whose lifecycle includes recursive parent inheritance. */
+  private async readEffectiveTask(projectId: string, num: number): Promise<Task | null> {
+    const tasks = withEffectiveTaskStatuses(
+      await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
+    );
+    return tasks.find((task) => task.num === num) ?? null;
   }
 
   /**
@@ -4461,9 +4477,13 @@ export class ChatManager extends LocalEngineRuntime {
             if (requiresExactOutcome) {
               const parsed = parseTaskRef(args.taskRef);
               const afterSend = parsed
-                ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
+                ? await this.readEffectiveTask(parsed.projectId, parsed.num)
                 : null;
-              if (afterSend?.status === 'active' && afterSend.activeStepId === dispatchStepId) {
+              if (
+                afterSend &&
+                taskEffectiveStatus(afterSend) === 'active' &&
+                afterSend.activeStepId === dispatchStepId
+              ) {
                 throw new Error(
                   `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
                 );
@@ -4474,11 +4494,11 @@ export class ChatManager extends LocalEngineRuntime {
             if (attempt === maxHandoffSendAttempts) throw error;
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
-              ? await this.store.readTask(parsed.projectId, parsed.num).catch(() => null)
+              ? await this.readEffectiveTask(parsed.projectId, parsed.num)
               : null;
             if (
               !currentTask ||
-              currentTask.status !== 'active' ||
+              taskEffectiveStatus(currentTask) !== 'active' ||
               currentTask.activeStepId !== dispatchStepId
             ) {
               throw error;
@@ -4723,7 +4743,7 @@ export class ChatManager extends LocalEngineRuntime {
     // reply back into the same session would loop).
     const resolvedFromSessionId =
       args.fromSessionId ??
-      (target.id === args.fromGezelId
+      (args.suppressReply || target.id === args.fromGezelId
         ? null
         : await this.ensureOrCreateSession({ gezelId: args.fromGezelId, projectId })
             .then((s) => s.id)
@@ -4841,7 +4861,7 @@ export class ChatManager extends LocalEngineRuntime {
             );
             const senderSessionId =
               resolvedFromSessionId !== session.id ? resolvedFromSessionId : null;
-            if (senderSessionId) {
+            if (!args.suppressReply && senderSessionId) {
               this.deliverHandoffFailureNotice({
                 once: failureNotice,
                 fromSessionId: senderSessionId,
@@ -10042,8 +10062,10 @@ export class ChatManager extends LocalEngineRuntime {
     // without doing it; the voorman-idle arm is reserved for active work.
     // Likewise, when every task is terminal there is no active step to
     // advance, so the voorman's prose is already a valid terminal response.
-    const tasks = await this.store.listProjectTasks(record.projectId).catch(() => [] as Task[]);
-    if (tasks.length === 0 || !tasks.some((t) => t.status === 'active')) {
+    const tasks = withEffectiveTaskStatuses(
+      await this.store.listProjectTasks(record.projectId).catch(() => [] as Task[]),
+    );
+    if (tasks.length === 0 || !tasks.some((task) => taskEffectiveStatus(task) === 'active')) {
       return null;
     }
     // Live work remains. Distinguish whether anything has actually been
@@ -13686,7 +13708,7 @@ export class ChatManager extends LocalEngineRuntime {
     if (record.taskRef) {
       const parsed = parseTaskRef(record.taskRef);
       if (parsed) {
-        const task = await this.store.readTask(parsed.projectId, parsed.num);
+        const task = await this.readEffectiveTask(parsed.projectId, parsed.num);
         if (task) {
           const step =
             (record.stepId && task.craftbook.steps.find((s) => s.id === record.stepId)) ||
@@ -13730,9 +13752,10 @@ export class ChatManager extends LocalEngineRuntime {
     let assignedTasks: Task[] = [];
     if (!record.taskRef && record.projectId !== DEFAULT_PROJECT_ID) {
       try {
-        const all = await this.store.listProjectTasks(record.projectId);
+        const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(record.projectId));
         assignedTasks = all.filter((t) => {
-          if (t.status !== 'active' && t.status !== 'paused') return false;
+          const status = taskEffectiveStatus(t);
+          if (status !== 'active' && status !== 'paused') return false;
           if (t.assignee.kind === 'gezel' && t.assignee.gezelId === record.gezelId) return true;
           // Step-level assignment: the active step may name this gezel
           // even if the task's top-level assignee is someone else.

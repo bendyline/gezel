@@ -9,7 +9,7 @@ import type {
   TaskStatus,
   UpdateTaskStepRequest,
 } from '@bendyline/gezel';
-import { planGuardrails, summarizePlanDocument } from '@bendyline/gezel';
+import { planGuardrails, summarizePlanDocument, taskEffectiveStatus } from '@bendyline/gezel';
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -489,6 +489,7 @@ export function TaskDetail({
   const systemOwnerId =
     task.origin?.kind === 'system-job' ? task.origin.managedByGezelId : undefined;
   const isSystemJob = task.origin?.kind === 'system-job';
+  const effectiveStatus = taskEffectiveStatus(task);
   const systemOwner = systemOwnerId
     ? gezels.find((gezel) => gezel.id === systemOwnerId)
     : undefined;
@@ -509,7 +510,15 @@ export function TaskDetail({
           <h3>{task.title}</h3>
         </div>
         <div className="task-detail-actions">
-          {task.status === 'draft' ? (
+          {task.parentTaskRef ? (
+            <span
+              className={`task-status task-status-${effectiveStatus}`}
+              title={`Lifecycle follows parent task ${task.parentTaskRef}`}
+              aria-label={`Task status: ${effectiveStatus}. Follows parent task ${task.parentTaskRef}`}
+            >
+              {effectiveStatus} · follows parent
+            </span>
+          ) : task.status === 'draft' ? (
             <div className="task-draft-activate">
               <span className="task-detail-status-badge status-draft">
                 {curatedBook ? 'ready' : 'draft'}
@@ -628,9 +637,9 @@ export function TaskDetail({
           selectedStepId={selectedStepId}
           onSelect={handleSelectStep}
           onAddStep={() => setAddStepOpen(true)}
-          busy={busy || isSystemJob}
+          busy={busy || isSystemJob || effectiveStatus !== 'active'}
           gezels={gezels}
-          taskStatus={task.status}
+          taskStatus={effectiveStatus}
           onAssign={(stepId, assignee) => void updateStep(stepId, { assignee })}
           taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
         />
@@ -641,7 +650,7 @@ export function TaskDetail({
           task={task}
           stepId={selectedStepId}
           gezels={gezels}
-          busy={busy || isSystemJob}
+          busy={busy || isSystemJob || effectiveStatus !== 'active'}
           gateRejection={gateRejection}
           onActivate={activateStep}
           onComplete={completeStep}
@@ -895,7 +904,9 @@ export function TaskDetail({
                 <ul className="task-children-list">
                   {children.map((c) => (
                     <li key={c.ref}>
-                      <span className={`task-status task-status-${c.status}`}>{c.status}</span>
+                      <span className={`task-status task-status-${taskEffectiveStatus(c)}`}>
+                        {taskEffectiveStatus(c)}
+                      </span>
                       <span className="task-ref">{c.ref}</span>
                       <span className="task-title">{c.title}</span>
                       <span className="task-session-time">{c.updatedAt}</span>

@@ -70,6 +70,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  NODE_VERSION: '24'
   CMAKE_MIN: '3.24'
   # The native payload's build target. Never let `macos-latest` or a newer
   # Xcode silently raise LC_BUILD_VERSION again: native-v0.1.23 inherited
@@ -107,7 +108,20 @@ env:
   LINUX_MAX_GLIBCXX: '3.4.32'
 
 jobs:
+  native_contract_tests:
+    name: Native build contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Test Windows ARM64 release contracts
+        run: node --test scripts/assert-arm64-baseline.test.mjs
+
   build:
+    needs: native_contract_tests
     strategy:
       fail-fast: false
       matrix:
@@ -972,34 +986,63 @@ jobs:
             --expected '${{ matrix.llama_cuda_arch }}'
 
       # ── Windows-on-ARM ISA baseline ───────────────────────────────
-      # The one gate in this workflow whose bug CI provably cannot reproduce.
-      # The windows-11-arm runners are Cobalt / Neoverse-class parts WITH
-      # SVE2; Snapdragon X Elite (Oryon), which is what these binaries ship
-      # to, has none. A host-tuned build therefore passes every other step
-      # here and SIGILLs on the target laptop. See the matrix comment on the
-      # llama-cpp win32-arm64 leg, and scripts/assert-arm64-baseline.mjs.
+      # Do not scan a whole PE .text section with objdump. AArch64 literal
+      # pools, jump tables and padding are data even when the section is
+      # executable, and arbitrary data words often decode as valid SVE/SME
+      # instructions. That rejected every known-good WoA payload in 0.1.40,
+      # including Astral's prebuilt uv and two plain MSVC helpers.
       #
-      # llvm-objdump comes from the LLVM/Clang toolset preinstalled on the
-      # image; resolve it explicitly rather than trusting PATH.
+      # Locally compiled Clang engines instead prove the exact target and
+      # -march in every generated compiler command and agree with CMake's
+      # GGML_NATIVE/CPU cache. MSVC helpers explicitly use /arch:armv8.0 in
+      # their build scripts. The hash-pinned upstream uv archive cannot expose
+      # producer flags, so its honest local boundary is the PE machine check.
       - name: Assert win32-arm64 CPU baseline
         if: steps.preflight.outputs.pinned == 'true' && matrix.platform == 'win32-arm64'
         shell: bash
         run: |
-          set -uo pipefail
-          objdump="$(command -v llvm-objdump || true)"
-          if [[ -z "$objdump" ]]; then
-            objdump="$(find '/c/Program Files/Microsoft Visual Studio' -name llvm-objdump.exe 2>/dev/null | head -1)"
-          fi
-          if [[ -z "$objdump" ]]; then
-            # Fail closed. This gate is the only defence against shipping SVE
-            # to hardware that lacks it, so a missing tool is a build failure,
-            # never a skipped check.
-            echo "::error::llvm-objdump not found — cannot verify the Windows-on-ARM ISA baseline"
-            exit 1
-          fi
-          node scripts/assert-arm64-baseline.mjs \
-            --dir "${{ steps.outdir.outputs.dir }}" \
-            --objdump "$objdump"
+          set -euo pipefail
+          args=(--dir "${{ steps.outdir.outputs.dir }}")
+          case "${{ matrix.engine }}" in
+            llama-cpp)
+              build_dir="native/engines/llama-cpp/.upstream/build-win32-arm64-cpu"
+              args+=(
+                --mode clang-baseline
+                --baseline armv8.2-a+dotprod+fp16
+                --compile-commands "$build_dir/compile_commands.json"
+                --cmake-cache "$build_dir/CMakeCache.txt"
+              )
+              ;;
+            whisper-cpp)
+              build_dir="native/engines/whisper-cpp/.upstream/build-win32-arm64"
+              args+=(
+                --mode clang-baseline
+                --baseline armv8.2-a+dotprod+fp16
+                --compile-commands "$build_dir/compile_commands.json"
+                --cmake-cache "$build_dir/CMakeCache.txt"
+              )
+              ;;
+            sd-cpp)
+              build_dir="native/engines/sd-cpp/.upstream/build-win32-arm64-cpu"
+              args+=(
+                --mode clang-baseline
+                --baseline armv8.2-a+dotprod+fp16
+                --compile-commands "$build_dir/compile_commands.json"
+                --cmake-cache "$build_dir/CMakeCache.txt"
+              )
+              ;;
+            device-health|service-host)
+              args+=(--mode msvc-baseline --baseline armv8.0)
+              ;;
+            uv)
+              args+=(--mode upstream-prebuilt)
+              ;;
+            *)
+              echo "::error::No Windows ARM64 provenance policy for ${{ matrix.engine }}"
+              exit 1
+              ;;
+          esac
+          node scripts/assert-arm64-baseline.mjs "${args[@]}"
 
       # ── Unbundled-runtime guard ───────────────────────────────────
       # The engines are built with -DGGML_OPENMP=OFF so nothing depends

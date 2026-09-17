@@ -153,6 +153,28 @@ describe('createSession routedModel precedence', () => {
     expect(inflightModel).toBe('worker-8b');
   });
 
+  it('prewarms the pinned worker model instead of loading the install default', async () => {
+    await store.updateGezelSettings('worker', { model: 'worker-8b' });
+    const session = await manager.createSession({ gezelId: 'worker' });
+
+    await manager.prewarmSession(session.id);
+
+    expect(boundModels).toEqual(['worker-8b']);
+  });
+
+  it('prewarming follows a changed model pin just like the next real turn', async () => {
+    const session = await manager.createSession({ gezelId: 'worker' });
+    expect(session.model).toBe('brain-27b');
+    await store.updateGezelSettings('worker', { model: 'worker-8b' });
+
+    await manager.prewarmSession(session.id);
+    mock.script('ok');
+    await manager.send(session.id, 'continue');
+
+    expect(boundModels.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(boundModels)).toEqual(new Set(['worker-8b']));
+  });
+
   it('reports the actual live default for a legacy record with a stale model stamp', async () => {
     const session = await manager.createSession({ gezelId: 'worker' });
     session.model = 'worker-8b';

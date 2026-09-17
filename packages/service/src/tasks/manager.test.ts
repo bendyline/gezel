@@ -1073,6 +1073,44 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(activations).toEqual([{ kind: 'entry', stepId: child.craftbook.steps[0]!.id }]);
   });
 
+  it('derives child effective state from the parent without overwriting child state', async () => {
+    const parent = await tasks.create('website', {
+      title: 'Coordinate review',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Review batch' }],
+      cron: { expression: '0 9 * * *' },
+    });
+    const child = await tasks.spawnChild(parent.ref);
+
+    await tasks.setStatus('website', parent.num, 'paused');
+    const held = (await tasks.get('website', child.num))!;
+    expect(held.status).toBe('active');
+    expect(held.effectiveStatus).toBe('paused');
+    expect(
+      (await tasks.list({ projectId: 'website', status: 'active' })).map((t) => t.ref),
+    ).not.toContain(child.ref);
+    expect(
+      (await tasks.listChildren(parent.ref, { status: 'paused' })).map((t) => t.ref),
+    ).toContain(child.ref);
+    expect((await store.readTask('website', child.num))?.effectiveStatus).toBeUndefined();
+
+    await expect(tasks.completeStep('website', child.num, child.activeStepId!)).rejects.toThrow(
+      'effective status is paused',
+    );
+
+    await tasks.setStatus('website', parent.num, 'active');
+    const resumed = (await tasks.get('website', child.num))!;
+    expect(resumed.status).toBe('active');
+    expect(resumed.effectiveStatus).toBe('active');
+
+    await tasks.setStatus('website', child.num, 'complete');
+    await tasks.setStatus('website', parent.num, 'canceled');
+    expect((await tasks.get('website', child.num))?.effectiveStatus).toBe('canceled');
+    await tasks.setStatus('website', parent.num, 'active');
+    expect((await tasks.get('website', child.num))?.effectiveStatus).toBe('complete');
+  });
+
   it('copies scheduled craftbook parameters onto each spawned child', async () => {
     const parent = await tasks.create('website', {
       title: 'Weekly review',

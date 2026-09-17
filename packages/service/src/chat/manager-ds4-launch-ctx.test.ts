@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
+import { ds4RamTieredContext, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
+
+const GB = 1024 ** 3;
+
+describe('ds4RamTieredContext', () => {
+  it('keeps 64 GiB-class hosts at 64K', () => {
+    expect(ds4RamTieredContext(64 * GB)).toBe(65_536);
+    expect(ds4RamTieredContext(95 * GB)).toBe(65_536);
+  });
+
+  it('uses 128K once the host has room for a large resident core', () => {
+    expect(ds4RamTieredContext(96 * GB)).toBe(131_072);
+    expect(ds4RamTieredContext(128 * GB)).toBe(131_072);
+  });
+
+  it('reserves 256K for 192 GiB+ hosts', () => {
+    expect(ds4RamTieredContext(192 * GB)).toBe(262_144);
+  });
+});
 
 /**
  * The RAM tier is calibrated on DeepSeek V4 Flash, which keeps only ~4 GiB of

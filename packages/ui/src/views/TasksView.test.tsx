@@ -304,6 +304,31 @@ describe('TasksView', () => {
     );
   });
 
+  it('uses effective child status and hides bulk lifecycle controls for a child selection', async () => {
+    const parent = makeTask({ ref: 'pj-alpha/1', num: 1, title: 'Parent task' });
+    const child = makeTask({
+      ref: 'pj-alpha/2',
+      num: 2,
+      title: 'Child task',
+      parentTaskRef: parent.ref,
+      status: 'active',
+      effectiveStatus: 'paused',
+    });
+    vi.mocked(api.listTasks).mockResolvedValue({ tasks: [parent, child] } as never);
+    render(<TasksView />);
+
+    await screen.findByText('Parent task');
+    fireEvent.click(screen.getByRole('button', { name: /Expand instances/ }));
+    const childRow = screen.getByRole('button', { name: /Child task/ });
+    expect(within(childRow).getByLabelText('paused')).toBeInTheDocument();
+    fireEvent.click(childRow, { ctrlKey: true });
+
+    expect(screen.getByText('Child task status follows its parent.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('radiogroup', { name: 'Set status for selected tasks' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('filters top-level tasks with radio-style task type keys', async () => {
     vi.mocked(api.listTasks).mockResolvedValue({
       tasks: [

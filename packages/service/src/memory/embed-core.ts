@@ -27,6 +27,7 @@ import {
   HF_CACHE_DIR_ENV,
   TRANSFORMERS_MODULE,
   isMissingModule,
+  loadTransformersModelWithCacheRecovery,
   pinTransformersCacheDir,
 } from '../transformers-cache.js';
 
@@ -222,7 +223,17 @@ export async function loadPipeline(): Promise<Pipeline> {
         const { pipeline } = await import('@huggingface/transformers');
         const modelId = embedModelId();
         if (modelId !== DEFAULT_EMBED_MODEL) log.info(`[embed] using model ${modelId}`);
-        return (await pipeline('feature-extraction', modelId, daemonLoadOptions())) as Pipeline;
+        const createPipeline = () =>
+          pipeline('feature-extraction', modelId, daemonLoadOptions()) as Promise<Pipeline>;
+        if (!cacheDir) return await createPipeline();
+        return await loadTransformersModelWithCacheRecovery(
+          cacheDir,
+          modelId,
+          createPipeline,
+          () => {
+            log.warn(`[embed] discarded corrupt cached model files for ${modelId}; retrying once`);
+          },
+        );
       } catch (err) {
         const missing = isMissingModule(err, TRANSFORMERS_MODULE);
         const message = missing

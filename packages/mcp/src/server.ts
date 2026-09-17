@@ -4278,7 +4278,11 @@ server.tool(
       ...(gezelId ? { gezelId } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
-    return { content: [{ type: 'text' as const, text: `Wrote ${clean}` }] };
+    const completionHint =
+      sessionTaskRef && sessionStepId
+        ? '\nSaving an artifact does not complete the task step. When its required deliverable is ready, call advance_task_step to run the completion checks. Repair specific failures if returned; do not repeatedly rewrite a finished report without submitting it.'
+        : '';
+    return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
   },
 );
 

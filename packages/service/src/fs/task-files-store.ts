@@ -53,7 +53,11 @@ export class TaskFilesStore {
   async writeTask(task: Task): Promise<void> {
     const file = projectTaskFile(this.home, task.projectId, task.num, this.external);
     await mkdir(dirname(file), { recursive: true });
-    const { description, ...rest } = task;
+    // `effectiveStatus` is a runtime projection of the ancestry graph. Never
+    // persist it: resuming a parent must reveal the child's unchanged own
+    // status rather than a stale inherited snapshot.
+    const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
+    void _effectiveStatus;
     await writeFileAtomic(file, `${JSON.stringify(rest, null, 2)}\n`);
     if (description !== undefined && description.trim().length > 0) {
       await this.writeTaskAbout(task.projectId, task.num, description);

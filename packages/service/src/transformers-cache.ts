@@ -15,9 +15,11 @@
  * the model loader reads `cacheDir` from at download time.
  */
 
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { isPathInside } from './fs/safe-paths.js';
 
 const log = createLogger('service');
 
@@ -35,6 +37,146 @@ export function transformersCacheDir(home: string): string {
 
 /** The optional peer both TTS and memory embeddings load lazily. */
 export const TRANSFORMERS_MODULE = '@huggingface/transformers';
+
+const DEFAULT_MODEL_LOCK_TIMEOUT_MS = 10 * 60 * 1_000;
+const DEFAULT_MODEL_LOCK_STALE_MS = 2 * 60 * 60 * 1_000;
+const DEFAULT_MODEL_LOCK_POLL_MS = 100;
+
+export interface TransformersModelCacheLockOptions {
+  timeoutMs?: number;
+  staleMs?: number;
+  pollMs?: number;
+}
+
+function modelLockDir(cacheDir: string, modelId: string): string {
+  const key = createHash('sha256').update(modelId, 'utf8').digest('hex').slice(0, 24);
+  return join(cacheDir, '.gezel-locks', `${key}.lock`);
+}
+
+function cacheModelDir(cacheDir: string, modelId: string): string {
+  const parts = modelId.split('/');
+  if (
+    parts.length === 0 ||
+    parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))
+  ) {
+    throw new Error(`refusing unsafe transformers model id: ${modelId}`);
+  }
+  const root = resolve(cacheDir);
+  const target = resolve(root, ...parts);
+  if (target === root || !isPathInside(target, root)) {
+    throw new Error(`refusing transformers cache path outside ${root}: ${modelId}`);
+  }
+  return target;
+}
+
+function errorCode(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException | null | undefined)?.code;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function staleOrMissing(lockDir: string, staleMs: number): Promise<boolean> {
+  try {
+    const info = await stat(lockDir);
+    return Date.now() - info.mtimeMs > staleMs;
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return true;
+    throw err;
+  }
+}
+
+/**
+ * Serialize first-use model downloads across service/Vitest processes sharing
+ * one transformers cache. `pipelinePromise` prevents duplicate loads inside a
+ * process; this directory lock closes the remaining cross-process race where
+ * two fetches could replace the same ONNX file and leave one worker parsing a
+ * partial protobuf.
+ */
+export async function withTransformersModelCacheLock<T>(
+  cacheDir: string,
+  modelId: string,
+  run: () => Promise<T>,
+  options: TransformersModelCacheLockOptions = {},
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_MODEL_LOCK_TIMEOUT_MS;
+  const staleMs = options.staleMs ?? DEFAULT_MODEL_LOCK_STALE_MS;
+  const pollMs = options.pollMs ?? DEFAULT_MODEL_LOCK_POLL_MS;
+  const lockDir = modelLockDir(cacheDir, modelId);
+  await mkdir(dirname(lockDir), { recursive: true });
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      await mkdir(lockDir);
+      break;
+    } catch (err) {
+      if (errorCode(err) !== 'EEXIST') throw err;
+      if (await staleOrMissing(lockDir, staleMs)) {
+        await rm(lockDir, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(`timed out waiting for transformers cache lock for ${modelId}`);
+      }
+      await delay(pollMs);
+    }
+  }
+
+  try {
+    await writeFile(
+      join(lockDir, 'owner.json'),
+      `${JSON.stringify({ pid: process.pid, modelId, acquiredAt: new Date().toISOString() })}\n`,
+    );
+    return await run();
+  } finally {
+    await rm(lockDir, { recursive: true, force: true });
+  }
+}
+
+/** Remove only the named repository directory after a proven cache parse failure. */
+export async function removeTransformersModelCache(
+  cacheDir: string,
+  modelId: string,
+): Promise<void> {
+  await rm(cacheModelDir(cacheDir, modelId), { recursive: true, force: true });
+}
+
+/** Failures that mean retrying against the same cached bytes cannot succeed. */
+export function isCorruptTransformersCacheFailure(error: unknown): boolean {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth++) {
+    messages.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return /(?:protobuf parsing failed|failed to parse protobuf|invalid protobuf|unexpected end of (?:file|data)|failed to load model|load model .* failed|invalid wire type)/i.test(
+    messages.join(' '),
+  );
+}
+
+/**
+ * Load a model under its cross-process lock, replacing only its repository
+ * cache and retrying once when the first load proves those bytes corrupt.
+ */
+export async function loadTransformersModelWithCacheRecovery<T>(
+  cacheDir: string,
+  modelId: string,
+  load: () => Promise<T>,
+  onCorrupt?: () => void | Promise<void>,
+): Promise<T> {
+  return withTransformersModelCacheLock(cacheDir, modelId, async () => {
+    try {
+      return await load();
+    } catch (err) {
+      if (!isCorruptTransformersCacheFailure(err)) throw err;
+      await onCorrupt?.();
+      await removeTransformersModelCache(cacheDir, modelId);
+      return await load();
+    }
+  });
+}
 
 /**
  * True when Node is reporting that `specifier` itself is not installed, rather

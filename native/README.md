@@ -94,9 +94,13 @@ worth knowing before you touch it:
   Windows-on-ARM laptop does, so a host-tuned build is green in CI and
   SIGILLs on the target machine.
   [`scripts/assert-arm64-baseline.mjs`](../scripts/assert-arm64-baseline.mjs)
-  disassembles the output and fails the build if those instructions appear
-  — it is the only mechanical defence, because the build host can by
-  definition execute everything it just produced.
+  checks every generated Clang command and the CMake cache for the exact
+  baseline, rejects native/SVE/SME overrides, and confirms every staged PE
+  really targets ARM64. The MSVC helpers pin `/arch:armv8.0`; the hash-pinned
+  upstream uv asset is architecture-checked without inventing unavailable
+  compiler provenance. This deliberately avoids whole-section disassembly:
+  AArch64 literal pools and padding can decode as valid but unreachable
+  instructions and made that approach reject known-good binaries.
 
 **Which binaries a given platform key must contain is a contract, not a
 convention** — it lives in [`scripts/native-payload.mjs`](../scripts/native-payload.mjs)

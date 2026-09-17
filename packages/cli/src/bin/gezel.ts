@@ -661,6 +661,39 @@ async function printTaskWait(
 const agent = program.command('agent').description('Manage agents');
 
 agent
+  .command('output-limit <id> [tokens]')
+  .description(
+    "Show or set one gezel's output-token limit, including reasoning; auto clears its override",
+  )
+  .option('--json', 'Output the per-gezel override as JSON')
+  .action(async (id: string, tokens: string | undefined, opts: { json?: boolean }) => {
+    if (
+      tokens !== undefined &&
+      tokens !== 'auto' &&
+      (!/^\d+$/.test(tokens) || !Number.isSafeInteger(Number(tokens)) || Number(tokens) < 1)
+    ) {
+      throw new CliError('Output limit must be a positive integer, or auto.');
+    }
+    const client = await connectOwned(cliGlobals());
+    const { parsed } = await client.getGezel(id);
+    const tuning = { ...parsed.frontmatter.tuning };
+    const sampling = { ...tuning.sampling };
+    if (tokens !== undefined) {
+      if (tokens === 'auto') delete sampling.maxTokens;
+      else sampling.maxTokens = Number(tokens);
+      if (Object.keys(sampling).length) tuning.sampling = sampling;
+      else delete tuning.sampling;
+      await client.updateGezelSettings(id, { tuning: Object.keys(tuning).length ? tuning : null });
+    }
+    const result = { gezelId: id, outputTokens: sampling.maxTokens ?? null };
+    console.log(
+      opts.json
+        ? JSON.stringify(result)
+        : `${id}: ${result.outputTokens === null ? 'auto (inherits model/profile defaults)' : `${result.outputTokens} output tokens, including reasoning`}`,
+    );
+  });
+
+agent
   .command('list')
   .description('List agents')
   .action(async () => {
@@ -1334,6 +1367,28 @@ appCmd
   });
 
 const task = program.command('task').description('Manage tasks');
+
+task
+  .command('pause <ref>')
+  .description('Pause one active task without stopping other tasks or the daemon')
+  .option('--json', 'emit the task reference and status as JSON')
+  .action(async (ref: string, opts: { json?: boolean }) => {
+    const client = await connectOwned(cliGlobals());
+    let current = await client.getTaskByRef(ref);
+    if (current.status !== 'active' && current.status !== 'paused') {
+      throw new CliError(
+        `task ${ref} is ${current.status}; pause requires an active or paused task`,
+      );
+    }
+    if (current.status === 'active') {
+      current = await client.setTaskStatus(current.projectId, current.num, 'paused');
+    }
+    console.log(
+      opts.json
+        ? JSON.stringify({ taskRef: current.ref, status: current.status })
+        : `paused ${current.ref}`,
+    );
+  });
 
 for (const verb of ['wait', 'resume'] as const) {
   task

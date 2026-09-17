@@ -1,184 +1,293 @@
 #!/usr/bin/env node
 /**
- * Fail a Windows-on-ARM native build that emitted instructions the target
- * CPUs cannot execute.
+ * Verify the Windows-on-ARM native payload without guessing which bytes in a
+ * linked PE image are reachable instructions.
  *
- * This exists because CI cannot catch the bug it guards. GitHub's
- * `windows-11-arm` runners are Cobalt / Neoverse-class parts that implement
- * **SVE and SVE2**; the laptops gezel actually ships to — Snapdragon X Elite
- * (Oryon) and every other shipping Windows-on-ARM part — do not. Anything
- * that tunes to the build host (`GGML_NATIVE=ON`, a `-mcpu=native`
- * equivalent, or a dependency compiled that way) produces a binary that
- * passes the `--help` smoke test on the runner and dies with an illegal
- * instruction on a user's machine. The build host can, by definition,
- * execute everything it just produced, so no runtime probe finds this.
+ * `llvm-objdump -d` is not a safe ISA policy oracle for this job: it decodes
+ * every word in executable sections, including literal pools, jump tables and
+ * padding. On AArch64 those data words frequently decode as valid SVE/SME
+ * instructions and produce false positives across unrelated Clang, MSVC and
+ * Rust binaries.
  *
- * It is the same defect class as the native-v0.1.29 AVX-512 regression on
- * x64, which is why `win32-x64` answers it with `GGML_CPU_ALL_VARIANTS`
- * runtime dispatch instead. That option is unavailable here: ggml's ARM
- * variant table covers Linux, Android and Apple and raises
- * `FATAL_ERROR "Unsupported ARM target OS: Windows"` otherwise, so the
- * win32-arm64 leg pins one conservative baseline and proves it here.
+ * The reliable evidence available in CI is instead:
  *
- * SVE and SME are the whole gate. Dotprod, i8mm and fp16 arithmetic are in
- * the baseline deliberately — every shipping WoA part has them.
+ *   1. Every staged PE must declare IMAGE_FILE_MACHINE_ARM64.
+ *   2. Locally compiled Clang engines must show the exact target and baseline
+ *      in every compiler command, with no native/SVE/SME override.
+ *   3. Their CMake cache must prove GGML_NATIVE=OFF and preserve the same
+ *      baseline in both gezel's toolchain and ggml's CPU configuration.
  *
- *   node scripts/assert-arm64-baseline.mjs --dir native/build/win32-arm64-cpu
+ * MSVC helpers are built with an explicit `/arch:armv8.0` in their build
+ * scripts. The hash-pinned uv payload is compiled upstream, so the local gate
+ * can prove its PE architecture but must not invent compiler provenance it
+ * does not possess.
  */
-import { spawnSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, extname, join, resolve, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/**
- * Extensions worth disassembling. Everything else staged beside the engine is
- * data: the build-info sidecar, the THIRD_PARTY_LICENSES tree, SHA files.
- *
- * Extensionless entries are deliberately NOT scanned. This gate only runs on
- * `win32-arm64*`, where every linkable artifact carries `.exe` or `.dll`, and
- * admitting them would hand objdump a licence text file and turn its refusal
- * into a build failure. Reusing this gate on a Unix arm64 key means adding
- * `''` back and teaching `disassemble` to tell "not an object file" apart
- * from a real objdump fault.
- */
+export const IMAGE_FILE_MACHINE_ARM64 = 0xaa64;
+export const DEFAULT_CLANG_BASELINE = 'armv8.2-a+dotprod+fp16';
+export const DEFAULT_CLANG_TARGET = 'arm64-pc-windows-msvc';
+export const DEFAULT_MSVC_BASELINE = 'armv8.0';
+
 const SCANNABLE = new Set(['.exe', '.dll']);
+const MODES = new Set(['clang-baseline', 'msvc-baseline', 'upstream-prebuilt']);
 
-/**
- * Instruction-text patterns that prove a forbidden extension was emitted.
- *
- * Matched against the *instruction* half of each disassembly line only --
- * `--no-show-raw-insn` keeps the encoded bytes out of the haystack, so a
- * symbol name or an opcode byte can never trip these.
- */
-export const FORBIDDEN_ISA = Object.freeze([
-  {
-    feature: 'SVE',
-    // `z3.s` is an SVE vector register with an element-size suffix. NEON
-    // spells the same idea `v3.4s`, so the leading `z` discriminates.
-    pattern: /\bz\d{1,2}\.[bhsdq]\b/,
-  },
-  {
-    feature: 'SVE',
-    // `p0/m`, `p2/z` are governing-predicate qualifiers, SVE-only syntax.
-    pattern: /\bp\d{1,2}\/[mz]\b/,
-  },
-  {
-    feature: 'SVE',
-    pattern:
-      /\b(?:ptrue|pfalse|whilelo|whilelt|whilels|whilele|rdvl|addvl|addpl|cntb|cnth|cntw|cntd|setffr|rdffr|wrffr)\b/,
-  },
-  {
-    feature: 'SME',
-    pattern: /\b(?:smstart|smstop|rdsvl|addsvl|addspl)\b/,
-  },
-  {
-    feature: 'SME',
-    // `za0.s`, and the `zero {za}` form.
-    pattern: /\bza\d?\.[bhsdq]\b|\bzero\s+\{\s*za\b/,
-  },
-]);
-
-/**
- * The instruction half of one `llvm-objdump -d --no-show-raw-insn` line, or
- * null for anything that is not an instruction (headers, symbol lines,
- * section banners, blank lines).
- */
-export function instructionText(line) {
-  const match = line.match(/^\s*[0-9a-f]+:\s+(\S.*)$/i);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Every forbidden-ISA hit in a disassembly listing.
- *
- * Returns `{ feature, instruction }` objects rather than throwing so the
- * caller can report all offenders in one pass -- a build that emitted SVE in
- * three files should say so once, not fail three times in a row.
- */
-export function findForbiddenIsa(disassembly) {
-  const findings = [];
-  const seen = new Set();
-  for (const line of disassembly.split('\n')) {
-    const instruction = instructionText(line);
-    if (!instruction) continue;
-    for (const { feature, pattern } of FORBIDDEN_ISA) {
-      if (!pattern.test(instruction)) continue;
-      const key = `${feature} ${instruction}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      findings.push({ feature, instruction });
-      break;
-    }
-  }
-  return findings;
-}
-
-/** Files in `dir` worth disassembling, sorted for stable output. */
 export function scannableFiles(dir, entries = readdirSync(dir)) {
   return entries
     .filter((name) => SCANNABLE.has(extname(name).toLowerCase()))
     .sort((a, b) => a.localeCompare(b));
 }
 
-function disassemble(objdump, file) {
-  const result = spawnSync(objdump, ['-d', '--no-show-raw-insn', file], {
-    encoding: 'utf8',
-    maxBuffer: 512 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const detail = `${result.stderr ?? ''}`.trim();
-    throw new Error(`${objdump} failed on ${file}${detail ? `: ${detail}` : ''}`);
+export function readPeMachine(buffer, label = '<buffer>') {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 0x40) {
+    throw new Error(`${label} is too small to be a PE image`);
   }
-  return result.stdout ?? '';
+  if (buffer[0] !== 0x4d || buffer[1] !== 0x5a) {
+    throw new Error(`${label} is missing the DOS MZ signature`);
+  }
+  const peOffset = buffer.readUInt32LE(0x3c);
+  if (peOffset + 6 > buffer.length) {
+    throw new Error(`${label} has an out-of-range PE header offset`);
+  }
+  if (
+    buffer[peOffset] !== 0x50 ||
+    buffer[peOffset + 1] !== 0x45 ||
+    buffer[peOffset + 2] !== 0 ||
+    buffer[peOffset + 3] !== 0
+  ) {
+    throw new Error(`${label} is missing the PE signature`);
+  }
+  return buffer.readUInt16LE(peOffset + 4);
+}
+
+export function arm64PeFailures(files) {
+  const failures = [];
+  for (const file of files) {
+    try {
+      const machine = readPeMachine(readFileSync(file), file);
+      if (machine !== IMAGE_FILE_MACHINE_ARM64) {
+        failures.push(
+          `${file} targets PE machine 0x${machine.toString(16).padStart(4, '0')}; expected ARM64 (0xaa64)`,
+        );
+      }
+    } catch (error) {
+      failures.push(error.message);
+    }
+  }
+  return failures;
+}
+
+/** A small command-line tokenizer sufficient for CMake's JSON command field. */
+export function splitCommandLine(command) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  for (const char of `${command ?? ''}`) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (quote) throw new Error('unterminated quote in compile command');
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function commandArguments(entry) {
+  if (Array.isArray(entry?.arguments)) return entry.arguments.map(String);
+  if (typeof entry?.command === 'string') return splitCommandLine(entry.command);
+  return [];
+}
+
+function executableName(value) {
+  return basename(win32.basename(`${value}`)).toLowerCase();
+}
+
+function flagValues(args, names) {
+  const loweredNames = names.map((name) => name.toLowerCase());
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const token = `${args[index]}`;
+    const lower = token.toLowerCase();
+    for (const name of loweredNames) {
+      if (lower === name) {
+        values.push(`${args[index + 1] ?? ''}`);
+      } else if (lower.startsWith(`${name}=`)) {
+        values.push(token.slice(name.length + 1));
+      }
+    }
+  }
+  return values;
+}
+
+export function clangCompileCommandFailures(
+  entries,
+  { baseline = DEFAULT_CLANG_BASELINE, target = DEFAULT_CLANG_TARGET } = {},
+) {
+  if (!Array.isArray(entries)) return ['compile_commands.json must contain a JSON array'];
+
+  const failures = [];
+  let clangCommands = 0;
+  for (const [index, entry] of entries.entries()) {
+    let args;
+    try {
+      args = commandArguments(entry);
+    } catch (error) {
+      failures.push(`compile command ${index + 1}: ${error.message}`);
+      continue;
+    }
+    const compilerIndex = args.findIndex((arg) =>
+      /^clang(?:\+\+)?(?:\.exe)?$/i.test(executableName(arg)),
+    );
+    if (compilerIndex < 0) continue;
+    clangCommands += 1;
+
+    const flags = args.slice(compilerIndex + 1);
+    const label = entry.file ? `${entry.file}` : `compile command ${index + 1}`;
+    const targets = flagValues(flags, ['--target', '-target']);
+    const marches = flagValues(flags, ['-march']);
+    const mcpu = flagValues(flags, ['-mcpu']);
+    const joined = flags.join(' ').toLowerCase();
+
+    if (
+      targets.length === 0 ||
+      targets.some((value) => value.toLowerCase() !== target.toLowerCase())
+    ) {
+      failures.push(`${label}: expected every compiler target to be ${target}`);
+    }
+    if (
+      marches.length === 0 ||
+      marches.some((value) => value.toLowerCase() !== baseline.toLowerCase())
+    ) {
+      failures.push(`${label}: expected every -march value to be ${baseline}`);
+    }
+    if (mcpu.length > 0) {
+      failures.push(`${label}: -mcpu is forbidden because it can override the declared baseline`);
+    }
+    if (/(?:^|\s)-mtune(?:=|\s+)native(?:\s|$)/i.test(joined)) {
+      failures.push(`${label}: -mtune=native is forbidden on a redistributable build`);
+    }
+    if (/(?:\+|-)(?:sve|sve2|sme|sme2)(?:\b|_)/i.test(joined)) {
+      failures.push(`${label}: explicitly enables or disables an SVE/SME feature`);
+    }
+  }
+
+  if (clangCommands === 0)
+    failures.push('compile_commands.json contains no clang compiler commands');
+  return failures;
+}
+
+export function parseCmakeCache(contents) {
+  const values = new Map();
+  for (const line of `${contents}`.split(/\r?\n/)) {
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+    const match = line.match(/^([^:=]+):[^=]+=(.*)$/);
+    if (match) values.set(match[1], match[2]);
+  }
+  return values;
+}
+
+export function cmakeCacheFailures(contents, { baseline = DEFAULT_CLANG_BASELINE } = {}) {
+  const cache = parseCmakeCache(contents);
+  const failures = [];
+  const expected = new Map([
+    ['GGML_NATIVE', 'OFF'],
+    ['GGML_CPU_ARM_ARCH', baseline],
+    ['GEZEL_ARM_ARCH', baseline],
+    ['CMAKE_EXPORT_COMPILE_COMMANDS', 'ON'],
+  ]);
+  for (const [name, value] of expected) {
+    if (!cache.has(name)) failures.push(`CMake cache is missing ${name}`);
+    else if (cache.get(name).toLowerCase() !== value.toLowerCase()) {
+      failures.push(`CMake cache has ${name}=${cache.get(name)}; expected ${value}`);
+    }
+  }
+  return failures;
 }
 
 function parseArgs(argv) {
-  const args = { dir: null, objdump: 'llvm-objdump' };
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--dir') args.dir = argv[++i];
-    else if (argv[i] === '--objdump') args.objdump = argv[++i];
+  const args = {
+    dir: null,
+    mode: null,
+    compileCommands: null,
+    cmakeCache: null,
+    baseline: null,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (value === '--dir') args.dir = argv[++index];
+    else if (value === '--mode') args.mode = argv[++index];
+    else if (value === '--compile-commands') args.compileCommands = argv[++index];
+    else if (value === '--cmake-cache') args.cmakeCache = argv[++index];
+    else if (value === '--baseline') args.baseline = argv[++index];
+    else throw new Error(`unknown argument: ${value}`);
   }
-  if (!args.dir) throw new Error('usage: assert-arm64-baseline.mjs --dir <native/build/...>');
+  if (!args.dir || !args.mode || !MODES.has(args.mode)) {
+    throw new Error(
+      'usage: assert-arm64-baseline.mjs --dir <output> --mode <clang-baseline|msvc-baseline|upstream-prebuilt> [--compile-commands <file> --cmake-cache <file> --baseline <arch>]',
+    );
+  }
+  if (args.mode === 'clang-baseline' && (!args.compileCommands || !args.cmakeCache)) {
+    throw new Error('clang-baseline mode requires --compile-commands and --cmake-cache');
+  }
+  if (
+    args.mode === 'msvc-baseline' &&
+    (args.baseline ?? DEFAULT_MSVC_BASELINE).toLowerCase() !== DEFAULT_MSVC_BASELINE
+  ) {
+    throw new Error(`msvc-baseline mode requires --baseline ${DEFAULT_MSVC_BASELINE}`);
+  }
   return args;
 }
 
 function main() {
-  const { dir, objdump } = parseArgs(process.argv.slice(2));
-  const root = resolve(dir);
-  const files = scannableFiles(root).filter((name) => statSync(join(root, name)).isFile());
-  if (files.length === 0) {
-    // Fail closed. An empty scan means the build staged nothing, or the
-    // output directory moved -- either way the gate proved nothing, and
-    // "proved nothing" must never read as "passed".
-    throw new Error(`no scannable binaries in ${root}`);
+  const args = parseArgs(process.argv.slice(2));
+  const root = resolve(args.dir);
+  const files = scannableFiles(root)
+    .map((name) => join(root, name))
+    .filter((file) => statSync(file).isFile());
+  if (files.length === 0) throw new Error(`no PE binaries found in ${root}`);
+
+  const failures = arm64PeFailures(files);
+  if (args.mode === 'clang-baseline') {
+    const baseline = args.baseline ?? DEFAULT_CLANG_BASELINE;
+    const commands = JSON.parse(readFileSync(resolve(args.compileCommands), 'utf8'));
+    failures.push(...clangCompileCommandFailures(commands, { baseline }));
+    failures.push(
+      ...cmakeCacheFailures(readFileSync(resolve(args.cmakeCache), 'utf8'), { baseline }),
+    );
   }
 
-  let bad = 0;
-  for (const name of files) {
-    const findings = findForbiddenIsa(disassemble(objdump, join(root, name)));
-    if (findings.length === 0) {
-      process.stdout.write(`[arm64-baseline] ${name}: clean\n`);
-      continue;
-    }
-    bad += 1;
-    const features = [...new Set(findings.map((f) => f.feature))].join(', ');
-    const why = [
-      'Snapdragon X (Oryon) has neither, so this binary SIGILLs on the hardware it ships to.',
-      'The build host has SVE2 and cannot reproduce it.',
-      'Check that GGML_NATIVE stays OFF and GGML_CPU_ARM_ARCH names a baseline without SVE.',
-    ].join(' ');
-    process.stdout.write(`::error::${name} contains ${features} instructions. ${why}\n`);
-    for (const finding of findings.slice(0, 10)) {
-      process.stdout.write(`    ${finding.feature}: ${finding.instruction}\n`);
-    }
-    if (findings.length > 10) {
-      process.stdout.write(`    ... and ${findings.length - 10} more\n`);
-    }
+  if (failures.length > 0) {
+    throw new Error(`Windows ARM64 contract failed:\n- ${failures.join('\n- ')}`);
   }
 
-  if (bad > 0) throw new Error(`${bad} binary/binaries emit instructions outside the WoA baseline`);
-  process.stdout.write(`[arm64-baseline] ${files.length} binaries within the WoA baseline\n`);
+  process.stdout.write(`[arm64-baseline] ${files.length} staged PE file(s) target ARM64\n`);
+  if (args.mode === 'clang-baseline') {
+    process.stdout.write(
+      `[arm64-baseline] clang commands and CMake cache pin ${args.baseline ?? DEFAULT_CLANG_BASELINE} without SVE/SME/native overrides\n`,
+    );
+  } else if (args.mode === 'msvc-baseline') {
+    process.stdout.write(
+      `[arm64-baseline] MSVC helper uses the build-script /arch:${args.baseline ?? DEFAULT_MSVC_BASELINE} contract\n`,
+    );
+  } else {
+    process.stdout.write(
+      '[arm64-baseline] upstream prebuilt provenance accepted after pinned-archive verification\n',
+    );
+  }
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

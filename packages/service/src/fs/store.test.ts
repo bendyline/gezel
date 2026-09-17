@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TaskSchema, isSharedLibraryProject } from '@bendyline/gezel';
+import { type Project, TaskSchema, isSharedLibraryProject } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigCorruptionError, Store, pickRoleBasedName } from './store.js';
 
@@ -390,6 +390,58 @@ describe('projects', () => {
     const project = await store.getProject(created.id);
     expect(project?.description).toBe('Keep this description');
     expect(project?.indexingEnabled).toBe(false);
+  });
+
+  it('serializes settings updates with background project metadata writers', async () => {
+    const created = await store.createProject({ name: 'Settings and Scheduler' });
+    const internals = store as unknown as {
+      writeProjectMeta(project: Project): Promise<void>;
+    };
+    const writeProjectMeta = internals.writeProjectMeta.bind(store);
+    let releaseSettingsWrite!: () => void;
+    let settingsWriteReached!: () => void;
+    let nudgeWriteFinished!: () => void;
+    const settingsHeld = new Promise<void>((resolve) => {
+      releaseSettingsWrite = resolve;
+    });
+    const settingsReached = new Promise<void>((resolve) => {
+      settingsWriteReached = resolve;
+    });
+    const nudgeFinished = new Promise<void>((resolve) => {
+      nudgeWriteFinished = resolve;
+    });
+
+    // Hold the settings write after it has read project.json. Before every
+    // writer shared the lock, the scheduler could now read the same stale
+    // file, persist its nudge state, and have this delayed write erase it.
+    internals.writeProjectMeta = async (project) => {
+      if (project.id === created.id && project.indexingEnabled === false && !project.nudgeState) {
+        settingsWriteReached();
+        await settingsHeld;
+      }
+      await writeProjectMeta(project);
+      if (project.id === created.id && project.nudgeState) nudgeWriteFinished();
+    };
+
+    const settingsUpdate = store.updateProject(created.id, { indexingEnabled: false });
+    await settingsReached;
+    const nudgeUpdate = store.writeProjectNudgeState(created.id, {
+      lastNudgedAt: '2026-09-17T12:00:00.000Z',
+      consecutiveRapidNudges: 2,
+    });
+
+    // Give an unlocked writer enough time to prove the old lost-update path;
+    // a correctly locked writer remains queued until settingsHeld is released.
+    await Promise.race([nudgeFinished, new Promise((resolve) => setTimeout(resolve, 100))]);
+    releaseSettingsWrite();
+    await Promise.all([settingsUpdate, nudgeUpdate]);
+
+    const project = await store.getProject(created.id);
+    expect(project?.indexingEnabled).toBe(false);
+    expect(project?.nudgeState).toEqual({
+      lastNudgedAt: '2026-09-17T12:00:00.000Z',
+      consecutiveRapidNudges: 2,
+    });
   });
 
   it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {

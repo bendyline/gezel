@@ -185,6 +185,7 @@ import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
+import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
@@ -784,6 +785,17 @@ export async function startProductService(
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
+  // A parent's lifecycle is a runtime gate for its whole descendant tree.
+  // Reconcile immediately on every durable status transition: inactive
+  // ancestors prune queued/running child turns, while a resumed ancestor
+  // rehydrates only descendants whose own stored status is still active.
+  tasks.setTaskStatusChangedHook(async ({ projectId }) => {
+    await taskRunner.rehydrateFromStore({ projectId });
+    // Do not await: a status transition can originate inside the runner's
+    // own preparation pass. Waiting on that same serialized tick would
+    // deadlock; the current/next pass observes the newly persisted state.
+    void taskRunner.wake();
+  });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
     // so the runner's night dispatch holds until static + AI indexing is
@@ -1327,10 +1339,7 @@ export async function startProductService(
                         ? JSON.stringify(v)
                         : String(v);
               }
-              const title =
-                context.number && context.client
-                  ? `Invoice ${context.number} — ${context.client}`
-                  : (context.client ?? context.number ?? undefined);
+              const title = deriveFanoutChildTitle(context);
               await tasks
                 .spawnChild(task.ref, { context, ...(title ? { title } : {}) })
                 .catch((err) =>

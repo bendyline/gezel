@@ -1484,7 +1484,6 @@ describe('completion gates — judge checks (advisory ride-along + budget)', () 
 
 describe('completion gates — unsatisfiable under writes-off', () => {
   it('pauses without consuming an attempt when a failing workspace check cannot be repaired', async () => {
-    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const task = await tasks.create('default', {
       title: 'Dependency audit',
       description: 'workspace-path deliverable gate on a writes-off project.',
@@ -1495,6 +1494,9 @@ describe('completion gates — unsatisfiable under writes-off', () => {
       }),
     });
     const buildId = task.craftbook.steps[0]!.id;
+    // Keep creation writable so this test reaches the completion-time
+    // unsatisfiable path. Activation-time pre-pausing is covered below.
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
 
     const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
       cause: 'model',
@@ -1626,7 +1628,6 @@ describe('completion gates — unsatisfiable under writes-off', () => {
   });
 
   it('fires the needs-help hook with gate_unsatisfiable on the policy pause', async () => {
-    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const events: { reason: string; ref: string; stepId?: string }[] = [];
     tasks.setTaskNeedsHelpHook(({ task, reason, stepId }) => {
       events.push({ reason, ref: task.ref, ...(stepId ? { stepId } : {}) });
@@ -1641,6 +1642,7 @@ describe('completion gates — unsatisfiable under writes-off', () => {
       }),
     });
     const buildId = task.craftbook.steps[0]!.id;
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     await tasks.completeStepChecked('default', task.num, buildId, undefined, { cause: 'model' });
     expect(events).toEqual([{ reason: 'gate_unsatisfiable', ref: task.ref, stepId: buildId }]);
   });
@@ -1873,7 +1875,7 @@ describe('completion gates — scripted gates', () => {
     expect(step.lastGateReject?.contentHash).toBeUndefined();
   });
 
-  it('aims a script-only rejection at the task record, not the passing deliverable', async () => {
+  it('keeps a script-only repair target opaque instead of rewriting the passing deliverable', async () => {
     const { task, stepId } = await scopeShapedTask();
     const { runner } = flippingScriptRunner(['reject']);
     tasks.setScriptRunner(runner);
@@ -1887,8 +1889,10 @@ describe('completion gates — scripted gates', () => {
     expect(second.status).toBe('held');
     if (second.status !== 'held') return;
     expect(second.gate.escalationStage).toBe(1);
-    expect(second.gate.message).toContain('This gate reads the task record, not a file');
-    expect(second.gate.message).toContain('write_task_note');
+    expect(second.gate.message).toContain('GATE_SCRIPT_REPAIR:');
+    expect(second.gate.message).toContain('The task notes do not yet contain the header.');
+    expect(second.gate.message).not.toContain('This gate reads the task record');
+    expect(second.gate.message).not.toContain('write_task_note');
     // The batch file passes every check — never name it as the repair target.
     expect(second.gate.message).not.toContain('batches.json');
     expect(second.gate.message).not.toContain('write_artifact');

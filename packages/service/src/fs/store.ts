@@ -1124,10 +1124,14 @@ export class Store {
         // pointer is derived state that re-syncs on every boot rather than
         // a value the user edits on the project.
         if (existing.workingDir !== documentsRoot) {
-          await this.writeProjectMeta({
-            ...existing,
-            workingDir: documentsRoot,
-            updatedAt: nowIso(),
+          await this.projectUpdateLocks.run(preferredId, async () => {
+            const current = await this.tryGetProjectMeta(preferredId);
+            if (!current || current.workingDir === documentsRoot) return;
+            await this.writeProjectMeta({
+              ...current,
+              workingDir: documentsRoot,
+              updatedAt: nowIso(),
+            });
           });
         }
         await this.backfillSharedProjectDocs(preferredId);
@@ -1178,8 +1182,9 @@ export class Store {
       },
       { id },
     );
-    const meta = await this.tryGetProjectMeta(id);
-    if (meta) {
+    await this.projectUpdateLocks.run(id, async () => {
+      const meta = await this.tryGetProjectMeta(id);
+      if (!meta) return;
       await this.writeProjectMeta({
         ...meta,
         properties: { ...(meta.properties ?? {}), [SHARED_PROJECT_MARKER]: '1' },
@@ -1193,7 +1198,7 @@ export class Store {
         projectTypeId: 'content-writing',
         updatedAt: nowIso(),
       });
-    }
+    });
     await this.seedSharedLibraryStarterDoc();
     return project;
   }
@@ -1754,16 +1759,20 @@ export class Store {
 
     const projects = await this.listProjects();
     for (const project of projects) {
-      const wasVoorman = project.voormanGezelId === id;
-      const wasMember = project.gezelIds?.includes(id) ?? false;
-      if (!wasVoorman && !wasMember) continue;
-      const updated: Project = {
-        ...project,
-        ...(wasVoorman ? { voormanGezelId: undefined, voormanAutoAssignedAt: undefined } : {}),
-        ...(wasMember ? { gezelIds: project.gezelIds!.filter((gezelId) => gezelId !== id) } : {}),
-        updatedAt: nowIso(),
-      };
-      await this.writeProjectMeta(updated);
+      await this.projectUpdateLocks.run(project.id, async () => {
+        const current = await this.tryGetProjectMeta(project.id);
+        if (!current) return;
+        const wasVoorman = current.voormanGezelId === id;
+        const wasMember = current.gezelIds?.includes(id) ?? false;
+        if (!wasVoorman && !wasMember) return;
+        const updated: Project = {
+          ...current,
+          ...(wasVoorman ? { voormanGezelId: undefined, voormanAutoAssignedAt: undefined } : {}),
+          ...(wasMember ? { gezelIds: current.gezelIds!.filter((gezelId) => gezelId !== id) } : {}),
+          updatedAt: nowIso(),
+        };
+        await this.writeProjectMeta(updated);
+      });
     }
 
     const config = await this.readConfig();
@@ -3306,10 +3315,11 @@ export class Store {
   }
 
   /**
-   * Per-project lock shared by {@link updateProject} and activity touches.
-   * Project classification and HTTP/CLI settings both funnel through
-   * `updateProject`; without a lock around that full read-patch-write cycle,
-   * whichever atomic rename lands last silently drops the other's fields.
+   * Per-project lock shared by every project.json read-modify-write path.
+   * Settings, classification, roster bookkeeping, scheduler nudge state, and
+   * Git sync metadata can all land concurrently. Atomic file replacement
+   * prevents torn JSON, but only this full-cycle lock prevents a later writer
+   * from silently restoring the stale fields it read before another write.
    */
   private readonly projectUpdateLocks = new KeyedLock();
 
@@ -3358,27 +3368,29 @@ export class Store {
   }
 
   async updateProjectWorkingDir(id: string, workingDir?: string): Promise<ProjectDetail> {
-    const meta = await this.tryGetProjectMeta(id);
-    if (!meta) throw new Error(`project ${id} not found`);
     if (typeof workingDir === 'string') this.assertSafeWorkingDir(workingDir);
-    // Same auto-link as updateProject — pointing workingDir at an
-    // existing github clone wires up the github link without an extra
-    // round-trip from the UI.
-    let nextGitHub = meta.github;
-    if (workingDir && workingDir.length > 0) {
-      const detected = await autoDetectGitHubLink(workingDir, nextGitHub);
-      if (detected) nextGitHub = detected;
-    }
-    const updated: Project = {
-      ...meta,
-      workingDir: workingDir || undefined,
-      ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
-      updatedAt: nowIso(),
-    };
-    await this.writeProjectMeta(updated);
-    const detail = await this.getProject(id);
-    if (!detail) throw new Error(`project ${id} not found after update`);
-    return detail;
+    return this.projectUpdateLocks.run(id, async () => {
+      const meta = await this.tryGetProjectMeta(id);
+      if (!meta) throw new Error(`project ${id} not found`);
+      // Same auto-link as updateProject — pointing workingDir at an
+      // existing github clone wires up the github link without an extra
+      // round-trip from the UI.
+      let nextGitHub = meta.github;
+      if (workingDir && workingDir.length > 0) {
+        const detected = await autoDetectGitHubLink(workingDir, nextGitHub);
+        if (detected) nextGitHub = detected;
+      }
+      const updated: Project = {
+        ...meta,
+        workingDir: workingDir || undefined,
+        ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
+        updatedAt: nowIso(),
+      };
+      await this.writeProjectMeta(updated);
+      const detail = await this.getProject(id);
+      if (!detail) throw new Error(`project ${id} not found after update`);
+      return detail;
+    });
   }
 
   /**
@@ -3716,7 +3728,7 @@ export class Store {
       // Builder is the only member). Idempotent — no-op when the
       // gezel was already on the roster from a prior interaction.
       if (patch.voormanGezelId) {
-        await this.addGezelToProject(id, patch.voormanGezelId, {
+        await this.addGezelToProjectUnlocked(id, patch.voormanGezelId, {
           source: 'voorman',
         }).catch((err) => {
           log.warn(
@@ -3844,6 +3856,17 @@ export class Store {
     removedWorkspace: boolean;
     workspaceSource: 'workingDir' | 'githubCheckout' | 'internal';
   }> {
+    return this.projectUpdateLocks.run(id, () => this.deleteProjectUnlocked(id, opts));
+  }
+
+  private async deleteProjectUnlocked(
+    id: string,
+    opts?: { removeWorkspace?: boolean },
+  ): Promise<{
+    name: string;
+    removedWorkspace: boolean;
+    workspaceSource: 'workingDir' | 'githubCheckout' | 'internal';
+  }> {
     if (id === 'default') {
       throw new ProjectDeleteError('The default project cannot be deleted.', 'default_project');
     }
@@ -3897,17 +3920,25 @@ export class Store {
     await Promise.all(
       remaining.map(async (project) => {
         if (!(project.linkedProjectIds ?? []).includes(id)) return;
-        const linkedProjectIds = project.linkedProjectIds!.filter((linkedId) => linkedId !== id);
-        await this.writeProjectMeta({
-          ...project,
-          linkedProjectIds: linkedProjectIds.length > 0 ? linkedProjectIds : undefined,
-          updatedAt: nowIso(),
-        }).catch((err) => {
-          log.warn(
-            `[store] failed to remove deleted project ${id} from links on ${project.id}:`,
-            err,
-          );
-        });
+        await this.projectUpdateLocks
+          .run(project.id, async () => {
+            const current = await this.tryGetProjectMeta(project.id);
+            if (!current || !(current.linkedProjectIds ?? []).includes(id)) return;
+            const linkedProjectIds = current.linkedProjectIds!.filter(
+              (linkedId) => linkedId !== id,
+            );
+            await this.writeProjectMeta({
+              ...current,
+              linkedProjectIds: linkedProjectIds.length > 0 ? linkedProjectIds : undefined,
+              updatedAt: nowIso(),
+            });
+          })
+          .catch((err) => {
+            log.warn(
+              `[store] failed to remove deleted project ${id} from links on ${project.id}:`,
+              err,
+            );
+          });
       }),
     );
 
@@ -3938,6 +3969,18 @@ export class Store {
    * nudge scheduler cares about.
    */
   async addGezelToProject(
+    projectId: string,
+    gezelId: string,
+    opts?: {
+      source?: 'voorman' | 'session' | 'message' | 'task' | 'project-type' | 'manual';
+    },
+  ): Promise<{ added: boolean }> {
+    return this.projectUpdateLocks.run(projectId, () =>
+      this.addGezelToProjectUnlocked(projectId, gezelId, opts),
+    );
+  }
+
+  private async addGezelToProjectUnlocked(
     projectId: string,
     gezelId: string,
     opts?: {
@@ -3979,24 +4022,26 @@ export class Store {
       source?: 'manual';
     },
   ): Promise<{ removed: boolean }> {
-    const meta = await this.tryGetProjectMeta(projectId);
-    if (!meta) return { removed: false };
-    const current = meta.gezelIds ?? [];
-    if (!current.includes(gezelId)) return { removed: false };
-    const updated: Project = {
-      ...meta,
-      gezelIds: current.filter((id) => id !== gezelId),
-    };
-    await this.writeProjectMeta(updated);
-    const gezel = await this.getGezel(gezelId).catch(() => null);
-    await this.history?.log({
-      kind: 'project.gezel.left',
-      projectId,
-      gezelId,
-      summary: `${gezel?.name ?? gezelId} left "${meta.name}"`,
-      details: { source: opts?.source ?? 'manual' },
+    return this.projectUpdateLocks.run(projectId, async () => {
+      const meta = await this.tryGetProjectMeta(projectId);
+      if (!meta) return { removed: false };
+      const current = meta.gezelIds ?? [];
+      if (!current.includes(gezelId)) return { removed: false };
+      const updated: Project = {
+        ...meta,
+        gezelIds: current.filter((id) => id !== gezelId),
+      };
+      await this.writeProjectMeta(updated);
+      const gezel = await this.getGezel(gezelId).catch(() => null);
+      await this.history?.log({
+        kind: 'project.gezel.left',
+        projectId,
+        gezelId,
+        summary: `${gezel?.name ?? gezelId} left "${meta.name}"`,
+        details: { source: opts?.source ?? 'manual' },
+      });
+      return { removed: true };
     });
-    return { removed: true };
   }
 
   /**
@@ -4010,18 +4055,20 @@ export class Store {
     key: string,
     dismissed: boolean,
   ): Promise<{ changed: boolean }> {
-    const meta = await this.tryGetProjectMeta(projectId);
-    if (!meta) return { changed: false };
-    const current = meta.suggestedWorkDismissed ?? [];
-    if (dismissed === current.includes(key)) return { changed: false };
-    const next = dismissed ? [...current, key] : current.filter((k) => k !== key);
-    const updated: Project = {
-      ...meta,
-      ...(next.length > 0 ? { suggestedWorkDismissed: next } : {}),
-    };
-    if (next.length === 0) delete (updated as Partial<Project>).suggestedWorkDismissed;
-    await this.writeProjectMeta(updated);
-    return { changed: true };
+    return this.projectUpdateLocks.run(projectId, async () => {
+      const meta = await this.tryGetProjectMeta(projectId);
+      if (!meta) return { changed: false };
+      const current = meta.suggestedWorkDismissed ?? [];
+      if (dismissed === current.includes(key)) return { changed: false };
+      const next = dismissed ? [...current, key] : current.filter((k) => k !== key);
+      const updated: Project = {
+        ...meta,
+        ...(next.length > 0 ? { suggestedWorkDismissed: next } : {}),
+      };
+      if (next.length === 0) delete (updated as Partial<Project>).suggestedWorkDismissed;
+      await this.writeProjectMeta(updated);
+      return { changed: true };
+    });
   }
 
   /**
@@ -4034,10 +4081,12 @@ export class Store {
     id: string,
     nudgeState: NonNullable<Project['nudgeState']>,
   ): Promise<void> {
-    const meta = await this.tryGetProjectMeta(id);
-    if (!meta) return;
-    const updated: Project = { ...meta, nudgeState };
-    await this.writeProjectMeta(updated);
+    await this.projectUpdateLocks.run(id, async () => {
+      const meta = await this.tryGetProjectMeta(id);
+      if (!meta) return;
+      const updated: Project = { ...meta, nudgeState };
+      await this.writeProjectMeta(updated);
+    });
   }
 
   /**
@@ -4096,29 +4145,31 @@ export class Store {
   }
 
   async updateProjectGitHub(id: string, patch: Partial<ProjectGitHub>): Promise<void> {
-    const meta = await this.tryGetProjectMeta(id);
-    if (!meta) return;
-    const url = patch.url ?? meta.github?.url;
-    if (!url) return;
-    const nextGitHub: ProjectGitHub = { ...(meta.github ?? { url }), ...patch, url };
-    const updated: Project = {
-      ...meta,
-      updatedAt: nowIso(),
-      github: nextGitHub,
-    };
-    await this.writeProjectMeta(updated);
-    if (patch.lastSyncedAt) {
-      await this.history?.log({
-        kind: 'project.github.synced',
-        projectId: id,
-        summary: `Synced GitHub repo for "${meta.name}"`,
-        details: {
-          url: nextGitHub.url,
-          branch: nextGitHub.branch,
-          checkoutDir: nextGitHub.checkoutDir,
-        },
-      });
-    }
+    await this.projectUpdateLocks.run(id, async () => {
+      const meta = await this.tryGetProjectMeta(id);
+      if (!meta) return;
+      const url = patch.url ?? meta.github?.url;
+      if (!url) return;
+      const nextGitHub: ProjectGitHub = { ...(meta.github ?? { url }), ...patch, url };
+      const updated: Project = {
+        ...meta,
+        updatedAt: nowIso(),
+        github: nextGitHub,
+      };
+      await this.writeProjectMeta(updated);
+      if (patch.lastSyncedAt) {
+        await this.history?.log({
+          kind: 'project.github.synced',
+          projectId: id,
+          summary: `Synced GitHub repo for "${meta.name}"`,
+          details: {
+            url: nextGitHub.url,
+            branch: nextGitHub.branch,
+            checkoutDir: nextGitHub.checkoutDir,
+          },
+        });
+      }
+    });
   }
 
   // ---------- project documents (per-project prose) ----------

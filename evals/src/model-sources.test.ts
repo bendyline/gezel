@@ -85,12 +85,11 @@ describe('chatModelSources', () => {
 });
 
 describe('chatModelDs4RuntimeHints', () => {
-  it('reads Qwen resident-weight and launch constraints from the resolved catalog', () => {
+  it('reads Qwen resident-weight runtime hints from the resolved catalog', () => {
     expect(chatModelDs4RuntimeHints('qwen3.8-flash-next-q2')).toEqual({
       residentWeightBytes: 44807246316,
       ssdStreamingSupported: false,
       prefillChunk: 1024,
-      maxLaunchCtx: 8192,
     });
   });
 });
