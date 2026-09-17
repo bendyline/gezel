@@ -1878,6 +1878,13 @@ jobs:
           prerelease: true
           make_latest: false
           generate_release_notes: true
+          # The default is Promise.all over every matching asset. This release
+          # currently has 17 files, including several multi-hundred-MiB CUDA
+          # archives; concurrent uploads have made GitHub's asset service fail
+          # with "Error creating asset temp dir" after the full matrix passed.
+          # Keep only one streamed upload in flight so a transient failure can
+          # be retried without rebuilding every native engine.
+          preserve_order: true
           body: |
             Prebuilt Gezel native engine binaries, signed at birth:
             Windows first-party executables and DLLs carry Bendyline Authenticode
