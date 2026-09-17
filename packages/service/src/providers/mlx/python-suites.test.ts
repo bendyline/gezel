@@ -31,6 +31,7 @@ const PYTHON_DIR = fileURLToPath(new URL('./python', import.meta.url));
  */
 const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   { file: 'qwen3_5_text_compat_test.py', ranMarker: /PASS / },
+  { file: 'qwen4_ple_test.py', ranMarker: /PASS / },
   { file: 'tool_call_stream_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_fuzz_test.py', ranMarker: /PASS / },
@@ -41,6 +42,7 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   // anything — its own docstring says "No pytest harness is wired for the
   // MLX python sidecar". It is pure stdlib, so it can simply gate.
   { file: 'cache_seed_test.py', ranMarker: /all cache_seed tests passed/ },
+  { file: 'cache_persist_test.py', ranMarker: /PASS / },
   { file: 'template_stability_test.py', ranMarker: /PASS / },
   { file: 'spec_decode_test.py', ranMarker: /all spec_decode tests passed/ },
 ];

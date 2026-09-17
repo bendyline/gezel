@@ -611,6 +611,33 @@ def processed_walk(lm, target_hidden, draft_tokens, sampler, processors,
     return accepted, new_tokens
 
 
+def commit_verify_round(verify, lm, cache, accepted: int, block_size: int) -> None:
+    """Commit one target-verification transaction across mlx-vlm releases.
+
+    mlx-vlm 0.7.1 replaced the public-ish ``gdn_states`` result field plus
+    direct ``rollback_speculative_cache`` call with a transaction-owned
+    ``verify.commit(...)`` method. The latter must run on every round, not
+    only a rejection: Qwen4's sparse-attention verifier uses it to finalize
+    the target cache even when every draft token was accepted. Keep the
+    legacy branch for operator-provided runtimes on the 0.6.17 line.
+    """
+    commit = getattr(verify, "commit", None)
+    if callable(commit):
+        commit(lm, cache, accepted, block_size)
+        return
+
+    rollback = getattr(lm, "rollback_speculative_cache", None)
+    if accepted < block_size - 1 and callable(rollback):
+        rollback(cache, getattr(verify, "gdn_states", None), accepted, block_size)
+
+
+def abort_verify_round(verify) -> None:
+    """Abort a 0.7.1 verification transaction after a contained round error."""
+    abort = getattr(verify, "abort", None)
+    if callable(abort):
+        abort()
+
+
 def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
                     last_output, first_bonus: int, max_tokens: int, *,
                     sampler, processors, history):
@@ -676,28 +703,53 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
         if bs <= 1:
             break
 
-        draft_tokens = drafter.draft_block(
-            b, hidden, None, bs, draw, token_dtype, **draft_kwargs
-        )
-        mx.async_eval(draft_tokens)
+        verify = None
+        try:
+            draft_tokens = drafter.draft_block(
+                b, hidden, None, bs, draw, token_dtype, **draft_kwargs
+            )
+            mx.async_eval(draft_tokens)
 
-        verify_input = mx.concatenate(
-            [mx.array([[b]], dtype=token_dtype), draft_tokens], axis=1
-        )
-        verify = _mtp_verify_target(
-            lm, verify_input, cache, draw, sample_target_tokens=False
-        )
-        accepted, new_tokens = processed_walk(
-            lm,
-            verify.hidden,
-            draft_tokens,
-            sampler,
-            processors,
-            history,
-            max_tokens - emitted,
-            base_position=emitted,
-        )
-        _record_speculative_round(drafter, accepted, bs - 1)
+            verify_input = mx.concatenate(
+                [mx.array([[b]], dtype=token_dtype), draft_tokens], axis=1
+            )
+            verify = _mtp_verify_target(
+                lm, verify_input, cache, draw, sample_target_tokens=False
+            )
+            accepted, new_tokens = processed_walk(
+                lm,
+                verify.hidden,
+                draft_tokens,
+                sampler,
+                processors,
+                history,
+                max_tokens - emitted,
+                base_position=emitted,
+            )
+            _record_speculative_round(drafter, accepted, bs - 1)
+
+            accept_verified = getattr(drafter, "accept_verified_tokens", None)
+            if callable(accept_verified):
+                accept_verified(
+                    verify.hidden,
+                    draft_tokens,
+                    accepted,
+                    new_tokens,
+                    draw,
+                    token_dtype,
+                    **draft_kwargs,
+                )
+
+            # Commit before exposing tokens to the stream: a failed commit
+            # must not leave the client with output backed by a dirty cache.
+            commit_verify_round(verify, lm, cache, accepted, bs)
+        except BaseException:
+            if verify is not None:
+                abort_verify_round(verify)
+            abort_draft = getattr(drafter, "abort_draft_round", None)
+            if callable(abort_draft):
+                abort_draft()
+            raise
 
         budget_hit = False
         for tok in new_tokens:
@@ -707,18 +759,8 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
                 budget_hit = True
                 break
 
-        accept_verified = getattr(drafter, "accept_verified_tokens", None)
-        if callable(accept_verified):
-            accept_verified(
-                verify.hidden, draft_tokens, accepted, new_tokens, draw, token_dtype, **draft_kwargs
-            )
-
         hidden = _mtp_draft_hidden(lm, verify.hidden[:, accepted : accepted + 1, :])
         b = new_tokens[-1] if new_tokens else b
-
-        rollback = getattr(lm, "rollback_speculative_cache", None)
-        if accepted < bs - 1 and callable(rollback):
-            rollback(cache, verify.gdn_states, accepted, bs)
 
         shared_kv = _slice_shared_kv_after_reject(
             verify.shared_kv_states, bs - (accepted + 1)

@@ -11,5 +11,5 @@
 #
 # License: MIT (https://github.com/antirez/ds4)
 upstream=https://github.com/antirez/ds4.git
-tag=main-2026-09-05
-commit=9ab705347c1775e7599ede7eb81a6255ec7dccb5
+tag=main-2026-09-16
+commit=8db1d1d155cb0400a86a86b9c62d0defb3a6148b

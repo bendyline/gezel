@@ -113,6 +113,62 @@ describe('llama.cpp reasoning request budgets', () => {
   );
 });
 
+describe('DS4 per-request reasoning effort', () => {
+  it('preserves Qwen profile tuning and lets a session choice override it on chat and prefill', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      disableThinkingRequestShape: 'deepseek',
+      reasoningEffortRequestShape: 'ds4',
+      fetchImpl: (async (_input, init) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        requests.push(body);
+        if (body.stream === false) return new Response('{}', { status: 200 });
+        return sseResponse([
+          { choices: [{ index: 0, delta: { content: 'Ready.' } }] },
+          { choices: [{ index: 0, finish_reason: 'stop' }] },
+          '[DONE]',
+        ]);
+      }) as typeof fetch,
+    });
+    try {
+      const qwen = await provider.createSession({
+        systemMessage: 'You are Qwen.',
+        model: 'qwen3.8-flash-next-q2',
+        tuning: resolveTuning({
+          catalog: { reasoning: { templateKwargs: { reasoning_effort: 'xhigh' } } },
+        }),
+      });
+      await qwen.sendAndWait('Hello');
+
+      const deepseek = await provider.createSession({
+        systemMessage: 'You are DeepSeek.',
+        model: 'deepseek-v4.1-flash',
+        reasoningEffort: 'max',
+        tuning: resolveTuning({
+          catalog: { reasoning: { templateKwargs: { reasoning_effort: 'medium' } } },
+        }),
+      });
+      await (
+        deepseek as typeof deepseek & {
+          prefillOnly: () => Promise<void>;
+        }
+      ).prefillOnly();
+      await deepseek.sendAndWait('Hello');
+
+      expect(requests).toHaveLength(3);
+      expect(requests[0]?.reasoning_effort).toBe('xhigh');
+      expect(requests[0]?.chat_template_kwargs).toMatchObject({ reasoning_effort: 'xhigh' });
+      for (const body of requests.slice(1)) {
+        expect(body.reasoning_effort).toBe('max');
+        expect(body.chat_template_kwargs).toMatchObject({ reasoning_effort: 'max' });
+      }
+    } finally {
+      await provider.shutdown();
+    }
+  });
+});
+
 describe('llama.cpp JSON Schema compatibility', () => {
   it('normalizes RegExp.source slash escapes in nested URI patterns without mutating the source', () => {
     const schema = {
@@ -2195,13 +2251,15 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const provider = new LlamaCppProvider({
       baseUrl: 'http://ds4.test',
       disableThinkingRequestShape: 'deepseek',
+      reasoningEffortRequestShape: 'ds4',
     });
     const session = await provider.createSession({
       systemMessage: 'sys',
       model: 'deepseek-v4-flash-284b-q2',
+      reasoningEffort: 'max',
       tuning: {
         sampling: { maxTokens: 8192 },
-        reasoning: {},
+        reasoning: { templateKwargs: { reasoning_effort: 'xhigh' } },
         output: {},
         promptTags: {},
         wasThinking: false,
@@ -2220,7 +2278,13 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     );
 
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]?.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(bodies[0]?.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+      reasoning_effort: 'low',
+    });
+    // The top-level alias must be resynced after the constrained-turn rewrite;
+    // retaining `max` here would let JSON field order decide which value wins.
+    expect(bodies[0]?.reasoning_effort).toBe('low');
     expect(bodies[0]?.think).toBe(false);
     expect(bodies[0]?.thinking).toEqual({ type: 'disabled' });
     expect(bodies[0]?.max_tokens).toBe(8192);

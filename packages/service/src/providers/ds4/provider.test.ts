@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { LlamaCppProvider } from '../llama-cpp/index.js';
-import { buildDs4Provider, ds4VisionArgs, resolveDs4VisionLaunch } from './build-provider.js';
+import {
+  buildDs4Provider,
+  ds4RuntimeArgs,
+  ds4VisionArgs,
+  resolveDs4VisionLaunch,
+} from './build-provider.js';
 import { Ds4Provider } from './provider.js';
 import { classifyDs4Line } from './stdout-parser.js';
 
@@ -14,6 +19,7 @@ vi.mock('node:os', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:os')>()),
   totalmem: () => 128 * 1024 ** 3,
 }));
+vi.mock('../native/port.js', () => ({ pickFreePort: vi.fn().mockResolvedValue(51_147) }));
 
 /**
  * A minimal stand-in for the inner llama.cpp engine. Ds4Provider is a
@@ -38,6 +44,21 @@ function mockInner(overrides: Partial<LlamaCppProvider> = {}): LlamaCppProvider 
 }
 
 describe('Ds4Provider (composition over llama.cpp)', () => {
+  it('launches Qwen with its bounded prefill and without unsupported expert streaming', () => {
+    expect(
+      ds4RuntimeArgs({
+        ssdStreaming: false,
+        cacheExpertsGb: 32,
+        prefillChunk: 1024,
+      }),
+    ).toEqual(['--prefill-chunk', '1024']);
+    expect(ds4RuntimeArgs({ ssdStreaming: true, cacheExpertsGb: 32 })).toEqual([
+      '--ssd-streaming',
+      '--ssd-streaming-cache-experts',
+      '32GB',
+    ]);
+  });
+
   it('uses only a model-matched encoder and stays conservative for external servers', () => {
     expect(
       resolveDs4VisionLaunch({
@@ -98,7 +119,11 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
           }),
         } as never,
       });
-      const inner = p.llamaCpp as unknown as { visionEnabled: boolean };
+      const inner = p.llamaCpp as unknown as {
+        visionEnabled: boolean;
+        reasoningEffortRequestShape: string;
+        supervisor: { resolveLaunch: () => Promise<{ args: string[] }> };
+      };
       expect(
         ds4VisionArgs({
           enabled: true,
@@ -106,6 +131,9 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
         }),
       ).toEqual(['--vision', '/models/GLM-5.3-Flash-Vision-Encoder.gguf']);
       expect(inner.visionEnabled).toBe(true);
+      expect(inner.reasoningEffortRequestShape).toBe('ds4');
+      const launch = await inner.supervisor.resolveLaunch();
+      expect(launch.args).not.toContain('--think-level');
     } finally {
       if (savedBin === undefined) delete process.env.GEZEL_DS4_SERVER_BIN;
       else process.env.GEZEL_DS4_SERVER_BIN = savedBin;
@@ -135,7 +163,14 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
     await p.createSession(opts);
     expect(inner.createSession).toHaveBeenCalledWith(opts);
 
-    expect(await p.listModels()).toEqual([{ id: 'deepseek-v4-flash-284b-q2' }]);
+    expect(await p.listModels()).toEqual([
+      {
+        id: 'deepseek-v4-flash-284b-q2',
+        supportsReasoning: true,
+        reasoningEfforts: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+        defaultReasoningEffort: 'high',
+      },
+    ]);
     expect(p.getEffectiveModelId()).toBe('deepseek-v4-flash-284b-q2');
     expect(p.getContextWindow()).toBe(35_840);
 
@@ -159,9 +194,11 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
       const inner = p.llamaCpp as unknown as {
         replayReasoningContent: boolean;
         includeUsageInStream: boolean;
+        reasoningEffortRequestShape: string;
       };
       expect(inner.replayReasoningContent).toBe(true);
       expect(inner.includeUsageInStream).toBe(true);
+      expect(inner.reasoningEffortRequestShape).toBe('ds4');
     } finally {
       if (saved !== undefined) process.env.GEZEL_DS4_NO_REASONING_REPLAY = saved;
     }

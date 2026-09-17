@@ -4,6 +4,7 @@ import {
   DownloadRetryBudget,
   MAX_TOTAL_ATTEMPTS,
   PROGRESS_REFUND_BYTES,
+  huggingFaceRequestHeaders,
 } from './download-common.js';
 
 const MB = 1024 * 1024;
@@ -109,5 +110,22 @@ describe('DownloadRetryBudget', () => {
 
   it('exposes a sane default ceiling', () => {
     expect(MAX_TOTAL_ATTEMPTS).toBeGreaterThan(DEFAULT_MAX_RETRIES);
+  });
+});
+
+describe('huggingFaceRequestHeaders', () => {
+  it('uses an operator token only on the Hugging Face control plane', () => {
+    expect(
+      huggingFaceRequestHeaders(
+        'https://huggingface.co/org/repo/resolve/main/model.gguf',
+        'secret',
+      ),
+    ).toHaveProperty('Authorization', 'Bearer secret');
+    expect(
+      huggingFaceRequestHeaders('https://cas-bridge.xethub.hf.co/blob', 'secret'),
+    ).not.toHaveProperty('Authorization');
+    expect(
+      huggingFaceRequestHeaders('https://cdn-lfs.huggingface.co/blob', 'secret'),
+    ).not.toHaveProperty('Authorization');
   });
 });

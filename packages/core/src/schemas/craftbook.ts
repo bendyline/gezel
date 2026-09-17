@@ -1438,6 +1438,7 @@ export interface StepPatch {
   suggestedRole?: string | null;
   capabilityFloor?: ModelTier | null;
   retrieval?: RetrievalPolicy | null;
+  toolPolicy?: CraftbookStepToolPolicy | null;
   assignee?: TaskAssignee | null;
   suggestedGezelId?: string | null;
   onEnter?: ScriptRefList | null;
@@ -1480,6 +1481,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
   if (patch.retrieval !== undefined) {
     if (patch.retrieval === null) delete updated.retrieval;
     else updated.retrieval = patch.retrieval;
+  }
+  if (patch.toolPolicy !== undefined) {
+    if (patch.toolPolicy === null) delete updated.toolPolicy;
+    else updated.toolPolicy = patch.toolPolicy;
   }
   if (patch.assignee !== undefined) {
     if (patch.assignee === null) delete updated.assignee;

@@ -87,6 +87,37 @@ export interface GateCheckOutcome {
   remaining?: number;
 }
 
+const PR_NON_ACTIONABLE_FINDING_RE =
+  /\b(?:verified\s+ok|no\s+(?:defect|issue|finding|action\s+needed|functional\s+issue)|not\s+(?:a\s+bug|a\s+(?:functional|correctness)\s+defect|a\s+defect|introduced\s+by\s+this\s+patch|available\s+(?:in|for)\s+this\s+batch)|none\s+needed|acceptable(?:\s+as[- ]is)?|accept\s+as[- ]is|worth\s+noting|future\s+(?:optimization|hardening)|pre[- ]existing|functionally\s+harmless|intentional\s+limitation|needs?\s+(?:(?:central|cross[- ]file)\s+)?verification|requires?\s+(?:central\s+)?verification|central\s+verification|not\s+audited|implementation\s+(?:is\s+)?unknown|no\s+evidence\s+(?:of|that).{0,80}\bavailable|correct\s+(?:and\s+bounded\s+)?fallback|intent\s+is\s+correct|best[- ]effort|harmless\s+here|does\s+not\s+affect\s+runtime\s+behavior|finding\s+is\s+contingent|this\s+finding\s+is\s+contingent|risk\s+(?:is\s+)?low|may|might|could|potential(?:ly)?|possibly|likely|consider(?:ing)?|comment|documentation|documented|discoverability|verify\s+(?:that|the|whether)|verification\s+(?:of|whether)|(?:style|quoting|backslash)\s+(?:inconsistency|concern)|standardiz(?:e|ing)|if\s+.{0,160}\b(?:fails?|missing|empty|malformed|changes?|changed|removed|renamed|never|does\s+not|doesn't))\b/is;
+
+/**
+ * Models use several equivalent Markdown shapes for batch findings (plain,
+ * bold, headings, bullets, and pipe-delimited rows). Normalize them before a
+ * PR gate judges anchors or actionable content; matching only `B1-1:` let
+ * `**B1-1** ...` and `B1-1 | ...` bypass both checks in real reviews.
+ */
+function prFindingBlocks(text: string): Array<{ batch: number; id: string; text: string }> {
+  const lines = text.split(/\r?\n/);
+  const starts: Array<{ index: number; batch: number; id: string }> = [];
+  const pattern = /^\s*(?:#{1,6}\s+|[-*]\s+)?(?:\*\*)?B(\d+)-(\d+)(?:\*\*)?\b/i;
+  for (let index = 0; index < lines.length; index++) {
+    const match = pattern.exec(lines[index]!);
+    if (!match) continue;
+    starts.push({ index, batch: Number(match[1]), id: `B${match[1]}-${match[2]}` });
+  }
+  return starts.map((start, position) => {
+    const next = starts[position + 1]?.index ?? lines.length;
+    let end = next;
+    for (let index = start.index + 1; index < next; index++) {
+      if (/^\s*#{1,4}\s+/.test(lines[index]!)) {
+        end = index;
+        break;
+      }
+    }
+    return { batch: start.batch, id: start.id, text: lines.slice(start.index, end).join('\n') };
+  });
+}
+
 export interface GateCheckResult {
   pass: boolean;
   /** One human-readable line per failed check — fed back to the builder as the gap to fix. */
@@ -471,7 +502,7 @@ async function evalCheckInner(
       return { ok: r.ok, detail: r.detail };
     }
     case 'notContains': {
-      const r = await notContainsPattern(ws, c.file, c.pattern, c.flags, c.label);
+      const r = await notContainsPattern(reader, c.file, c.pattern, c.flags, c.label);
       return { ok: r.ok, detail: r.detail };
     }
     case 'unsupportedClaims': {
@@ -1163,21 +1194,22 @@ async function evalCheckInner(
               heading.startsWith(`${path} -`),
           ),
       );
-      const findingLines = observations
-        .split(/\r?\n/)
-        .filter((line) => /^\s*B\d+-\d+\s*:/i.test(line));
-      const invalidFindings = findingLines.filter((line) => {
-        const id = /^\s*B(\d+)-\d+\s*:/i.exec(line);
-        if (Number(id?.[1]) !== number) return true;
+      const findingBlocks = prFindingBlocks(observations);
+      const invalidFindings = findingBlocks.filter((finding) => {
+        if (finding.batch !== number) return true;
         return !(paths as string[]).some((path) => {
           const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          return new RegExp(`${escaped}:\\d+\\b`).test(line);
+          return new RegExp(`${escaped}:\\d+\\b`).test(finding.text);
         });
       });
+      const nonActionableFindings = findingBlocks.filter((finding) =>
+        PR_NON_ACTIONABLE_FINDING_RE.test(finding.text),
+      );
       const literalAnchorPlaceholders = observations
         .split(/\r?\n/)
         .filter((line) => /(?:new[- ]side[- ]line|:\s*(?:new\s+)?line\b)/i.test(line));
-      const invalidCount = invalidFindings.length + literalAnchorPlaceholders.length;
+      const invalidCount =
+        invalidFindings.length + nonActionableFindings.length + literalAnchorPlaceholders.length;
       return {
         ok: batchTitle && missing.length === 0 && invalidCount === 0,
         detail: !batchTitle
@@ -1185,7 +1217,13 @@ async function evalCheckInner(
           : missing.length > 0
             ? `${c.file}: ${missing.length}/${paths.length} assigned path(s) lack their own Markdown heading: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ' …' : ''}`
             : invalidCount > 0
-              ? `${c.file}: every B${number}-N finding must cite an assigned path with an actual integer new-side line (for example src/a.ts:42); replace literal placeholders and drop speculative findings without a concrete patch anchor. Invalid: ${[...invalidFindings, ...literalAnchorPlaceholders].slice(0, 3).join(' | ')}`
+              ? `${c.file}: every B${number}-N finding must be an actionable PR defect and cite an assigned path with an actual integer new-side line (for example src/a.ts:42). Drop numbered non-issues (such as "no defect", "no action needed", or "acceptable as-is"), replace literal placeholders, and move checks/limitations outside Findings. Invalid: ${[
+                  ...invalidFindings.map((finding) => finding.text),
+                  ...nonActionableFindings.map((finding) => finding.text),
+                  ...literalAnchorPlaceholders,
+                ]
+                  .slice(0, 3)
+                  .join(' | ')}`
               : `Batch ${number}: observations include headings for all ${paths.length} assigned path(s) and concrete anchors for every numbered finding.`,
         remaining: missing.length + invalidCount + (batchTitle ? 0 : 1),
       };

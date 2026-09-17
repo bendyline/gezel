@@ -80,6 +80,7 @@ import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
+from qwen4_ple import prepare_external_ple_view  # noqa: E402
 
 
 def log_contained_exception(tag: str) -> None:
@@ -266,6 +267,28 @@ def _tool_call_close_stop_ids(model_dir: str) -> "List[int]":
 
 parser = argparse.ArgumentParser(description="gezel MLX wrapper server")
 parser.add_argument("--model", required=True, help="Path to the MLX model directory")
+parser.add_argument(
+    "--external-ple-dir",
+    type=str,
+    default=None,
+    help=(
+        "Derived model-view directory for Qwen4's disk-backed PLE table. "
+        "Applicable checkpoints are hard-linked into this view and the large "
+        "n-gram table is memory-mapped by mlx-vlm 0.7.1. Other model families "
+        "keep the source directory; an eligible Qwen4 checkpoint fails safely "
+        "when the configured runtime cannot prepare the view."
+    ),
+)
+parser.add_argument(
+    "--allow-resident-ple-fallback",
+    action="store_true",
+    help=(
+        "Advanced/manual override: if a quantized Qwen4 checkpoint is eligible "
+        "for --external-ple-dir but the derived view cannot be prepared, load "
+        "the full PLE table resident. Gezel never passes this because its "
+        "catalog working-set reservation assumes external PLE is active."
+    ),
+)
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=8080)
 parser.add_argument(
@@ -508,6 +531,22 @@ _start_parent_death_watchdog()
 
 print(f"Started server process [{os.getpid()}]", flush=True)
 print("Waiting for application startup.", flush=True)
+_SOURCE_MODEL_DIR = ARGS.model
+ARGS.model, _ple_status, _ple_applicable = prepare_external_ple_view(
+    ARGS.model, ARGS.external_ple_dir
+)
+if ARGS.model != _SOURCE_MODEL_DIR:
+    print(f"[ple] external view {_ple_status}: {ARGS.model}", flush=True)
+elif ARGS.external_ple_dir:
+    if not _ple_applicable:
+        print(f"[ple] not applicable: {_ple_status}", flush=True)
+    elif ARGS.allow_resident_ple_fallback:
+        print(f"[ple] resident fallback explicitly allowed: {_ple_status}", flush=True)
+    else:
+        raise RuntimeError(
+            "external Qwen4 PLE view is required by the planned memory footprint "
+            f"but could not be prepared: {_ple_status}"
+        )
 print(f"Loading model from: {ARGS.model}", flush=True)
 _LFM2_FF_DIM = ensure_lfm2_config_compat(ARGS.model)
 if _LFM2_FF_DIM is not None:
@@ -729,7 +768,11 @@ def _metal_recommended_working_set() -> int:
     """Metal's `max_recommended_working_set_size` (bytes), or 0 if unavailable.
     This is the OS's own soft ceiling for GPU-resident memory."""
     try:
-        info = mx.metal.device_info()
+        # mlx 0.32.2 (resolved by mlx-vlm 0.7.1) deprecates the old
+        # mx.metal.device_info() namespace. Keep the fallback so an operator's
+        # older, explicitly configured mlx package still gets a useful cap.
+        device_info = getattr(mx, "device_info", None)
+        info = device_info() if callable(device_info) else mx.metal.device_info()
         return int(info.get("max_recommended_working_set_size", 0) or 0)
     except Exception:  # noqa: BLE001 — API shape varies across mlx versions
         return 0

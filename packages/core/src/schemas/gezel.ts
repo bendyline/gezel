@@ -26,7 +26,7 @@ export const ProviderNameSchema = z.enum([
   'ollama',
   'llama-cpp',
   'mlx',
-  // DwarfStar/ds4 — antirez's specialized DeepSeek/GLM MoE engine. Like
+  // DwarfStar/ds4 — antirez's specialized DeepSeek/GLM/Qwen MoE engine. Like
   // llama-cpp/mlx it serves an OpenAI-compatible HTTP API from a supervised
   // native binary, but it only loads GGUF layouts the engine explicitly
   // supports. GPU-only (Metal/CUDA/ROCm upstream); see the ds4 provider for

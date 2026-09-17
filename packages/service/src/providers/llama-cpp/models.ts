@@ -306,6 +306,10 @@ interface InstalledManifest {
 }
 
 interface DownloadPlanEntry {
+  /** Repository override for a sidecar published separately from the weights. */
+  huggingfaceRepo?: string;
+  /** Revision in the repository override; absent inherits the parent source revision. */
+  revision?: string;
   /** Path within the repo (may include a subdirectory). */
   repoPath: string;
   /** Destination filename on disk (basename only — subdirs flattened). */
@@ -868,11 +872,13 @@ export class LlamaCppModelManager {
       }
       const destPath = join(itemDir, entry.destFilename);
       const tmpPath = `${destPath}.partial`;
-      // Pin to the catalog's revision (commit SHA) when present so we
-      // get the exact bytes the sha256 was computed against; fall back
-      // to `main` for legacy manifests that predate revision pinning.
-      const ref = src.revision ?? 'main';
-      const url = `https://huggingface.co/${src.huggingfaceRepo}/resolve/${encodeURIComponent(
+      // Pin to this payload's catalog revision when present. A model-matched
+      // vision encoder may live in a different repository from the language
+      // GGUF and therefore carries its own repo + revision. Fall back to the
+      // parent source and finally `main` for legacy manifests.
+      const repo = entry.huggingfaceRepo ?? src.huggingfaceRepo;
+      const ref = entry.revision ?? src.revision ?? 'main';
+      const url = `https://huggingface.co/${repo}/resolve/${encodeURIComponent(
         ref,
       )}/${entry.repoPath.split('/').map(encodeURIComponent).join('/')}?download=true`;
 
@@ -1267,7 +1273,13 @@ function planDownloads(
     approxSizeBytes: number;
     shards?: Array<{ name: string; sha256: string; sizeBytes: number }>;
     mmproj?: { filename: string; sha256: string; sizeBytes: number };
-    visionEncoder?: { filename: string; sha256: string; sizeBytes: number };
+    visionEncoder?: {
+      huggingfaceRepo?: string;
+      revision?: string;
+      filename: string;
+      sha256: string;
+      sizeBytes: number;
+    };
     draftModel?: { filename: string; sha256: string; sizeBytes: number };
   },
   /**
@@ -1321,6 +1333,10 @@ function planDownloads(
   }
   if (src.visionEncoder) {
     out.push({
+      ...(src.visionEncoder.huggingfaceRepo
+        ? { huggingfaceRepo: src.visionEncoder.huggingfaceRepo }
+        : {}),
+      ...(src.visionEncoder.revision ? { revision: src.visionEncoder.revision } : {}),
       repoPath: src.visionEncoder.filename,
       destFilename: basename(src.visionEncoder.filename),
       sha256: src.visionEncoder.sha256,

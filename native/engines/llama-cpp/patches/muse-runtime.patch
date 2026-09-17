@@ -1,8 +1,8 @@
-diff --git a/common/chat.cpp b/common/chat.cpp
-index 743ecde0a77..5dd83592de6 100644
---- a/common/chat.cpp
-+++ b/common/chat.cpp
-@@ -3338,6 +3338,13 @@ static common_chat_params common_chat_params_init_muse_glimmer(const common_chat
+diff --git a/common/parsers/muse-glimmer.cpp b/common/parsers/muse-glimmer.cpp
+index add95697..7fab6bf6 100644
+--- a/common/parsers/muse-glimmer.cpp
++++ b/common/parsers/muse-glimmer.cpp
+@@ -16,6 +16,13 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
      data.format            = COMMON_CHAT_FORMAT_PEG_NATIVE;
      data.supports_thinking = true;
  
@@ -16,7 +16,7 @@ index 743ecde0a77..5dd83592de6 100644
      data.preserved_tokens = {
          "<|start|>", "<|message|>", "<|eom|>", "<|eot|>",
          // ATEM tool-call markup emitted on " to=<tool>" turns.
-@@ -3462,7 +3469,10 @@ static common_chat_params common_chat_params_init_muse_glimmer(const common_chat
+@@ -130,7 +137,10 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
          });
          data.grammar_triggers = {
              { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
@@ -28,25 +28,8 @@ index 743ecde0a77..5dd83592de6 100644
          };
      }
  
-diff --git a/common/json-schema-to-grammar.cpp b/common/json-schema-to-grammar.cpp
-index a7a18857d71..e57a32c602f 100644
---- a/common/json-schema-to-grammar.cpp
-+++ b/common/json-schema-to-grammar.cpp
-@@ -1072,6 +1072,12 @@ public:
-             out << ")";
-             return _add_rule(rule_name, out.str());
-         }
-+        // An unconstrained nested schema permits every JSON value. Keeping the
-+        // historical root-object default must not force record values or array
-+        // items to become objects (e.g. additionalProperties: {} from Zod).
-+        if (schema.empty() && rule_name != "root") {
-+            return _add_rule(rule_name, _add_primitive("value", PRIMITIVE_RULES.at("value")));
-+        }
-         if (schema.empty() || schema_type == "object") {
-             return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
-         }
 diff --git a/common/reasoning-budget.cpp b/common/reasoning-budget.cpp
-index 4884299f301..cbf6d7dff47 100644
+index 4884299f..cbf6d7df 100644
 --- a/common/reasoning-budget.cpp
 +++ b/common/reasoning-budget.cpp
 @@ -37,10 +37,10 @@ struct token_matcher {
@@ -74,25 +57,11 @@ index 4884299f301..cbf6d7dff47 100644
              ctx->force_pos++;
              if (ctx->force_pos >= ctx->forced_tokens.size()) {
                  ctx->state = REASONING_BUDGET_DONE;
-diff --git a/examples/json_schema_to_grammar.py b/examples/json_schema_to_grammar.py
-index 02b7ef15ae9..b1b24f2fffc 100755
---- a/examples/json_schema_to_grammar.py
-+++ b/examples/json_schema_to_grammar.py
-@@ -683,6 +683,9 @@ class SchemaConverter:
-             out.append(")")
-             return self._add_rule(rule_name, ''.join(out))
- 
-+        elif len(schema) == 0 and rule_name != 'root':
-+            return self._add_rule(rule_name, self._add_primitive('value', PRIMITIVE_RULES['value']))
-+
-         elif (schema_type == 'object') or (len(schema) == 0):
-             return self._add_rule(rule_name, self._add_primitive('object', PRIMITIVE_RULES['object']))
- 
 diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
-index 7918f0ffcf4..1d0bea00343 100644
+index 30a7237e..1881bf02 100644
 --- a/tests/test-chat.cpp
 +++ b/tests/test-chat.cpp
-@@ -5950,6 +5950,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
+@@ -6116,6 +6116,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
      {
          auto tst = peg_tester("models/templates/muse-glimmer.jinja", detailed_debug);
  
@@ -110,7 +79,7 @@ index 7918f0ffcf4..1d0bea00343 100644
          const std::string call_markup =
              "<atem:function_calls>\n"
              "<atem:invoke name=\"special_function\">\n"
-@@ -6995,33 +7006,59 @@ static void test_deepseek_v4_tool_result_ordering() {
+@@ -7161,33 +7172,59 @@ static void test_deepseek_v4_tool_result_ordering() {
  
  static void test_reasoning_budget_tokens_per_request() {
      LOG_DBG("%s\n", __func__);
@@ -194,30 +163,8 @@ index 7918f0ffcf4..1d0bea00343 100644
      }
  }
  
-diff --git a/tests/test-json-schema-to-grammar.cpp b/tests/test-json-schema-to-grammar.cpp
-index 2a1b6348c95..02a478d9f5d 100755
---- a/tests/test-json-schema-to-grammar.cpp
-+++ b/tests/test-json-schema-to-grammar.cpp
-@@ -582,7 +582,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
-             char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
-             decimal-part ::= [0-9]{1,16}
-             integral-part ::= [0] | [1-9] [0-9]{0,15}
--            item ::= object
-+            item ::= value
-             null ::= "null"
-             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
-             object ::= "{" space ( string ":" space value ("," space string ":" space value)* )? space "}"
-@@ -607,7 +607,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
-             char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
-             decimal-part ::= [0-9]{1,16}
-             integral-part ::= [0] | [1-9] [0-9]{0,15}
--            item ::= object
-+            item ::= value
-             null ::= "null"
-             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
-             object ::= "{" space ( string ":" space value ("," space string ":" space value)* )? space "}"
 diff --git a/tests/test-reasoning-budget.cpp b/tests/test-reasoning-budget.cpp
-index 3bcc77e1733..5f0636cc25c 100644
+index 3bcc77e1..5f0636cc 100644
 --- a/tests/test-reasoning-budget.cpp
 +++ b/tests/test-reasoning-budget.cpp
 @@ -316,6 +316,20 @@ static void test_reasoning_budget_end_match() {

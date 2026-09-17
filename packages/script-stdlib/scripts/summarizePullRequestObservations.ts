@@ -51,6 +51,33 @@ function cleanPath(raw: string): string {
 const batchesFile = cleanPath(input.batchesFile);
 const shardDir = cleanPath(input.shardDir);
 const outFile = cleanPath(input.outFile);
+const NON_ACTIONABLE_RE =
+  /\b(?:verified\s+ok|no\s+(?:defect|issue|finding|action\s+needed|functional\s+issue)|not\s+(?:a\s+bug|a\s+(?:functional|correctness)\s+defect|a\s+defect|introduced\s+by\s+this\s+patch|available\s+(?:in|for)\s+this\s+batch)|none\s+needed|acceptable(?:\s+as[- ]is)?|accept\s+as[- ]is|worth\s+noting|future\s+(?:optimization|hardening)|pre[- ]existing|functionally\s+harmless|intentional\s+limitation|needs?\s+(?:(?:central|cross[- ]file)\s+)?verification|requires?\s+(?:central\s+)?verification|central\s+verification|not\s+audited|implementation\s+(?:is\s+)?unknown|no\s+evidence\s+(?:of|that).{0,80}\bavailable|correct\s+(?:and\s+bounded\s+)?fallback|intent\s+is\s+correct|best[- ]effort|harmless\s+here|does\s+not\s+affect\s+runtime\s+behavior|finding\s+is\s+contingent|this\s+finding\s+is\s+contingent|risk\s+(?:is\s+)?low|may|might|could|potential(?:ly)?|possibly|likely|consider(?:ing)?|comment|documentation|documented|discoverability|verify\s+(?:that|the|whether)|verification\s+(?:of|whether)|(?:style|quoting|backslash)\s+(?:inconsistency|concern)|standardiz(?:e|ing)|if\s+.{0,160}\b(?:fails?|missing|empty|malformed|changes?|changed|removed|renamed|never|does\s+not|doesn't))\b/is;
+const SHORTLIST_LIMIT = 8;
+const UNKNOWN_SEVERITY_RANK = 3;
+const SEVERITY_RANK: Record<string, number> = {
+  critical: 0,
+  major: 1,
+  minor: 2,
+  unknown: UNKNOWN_SEVERITY_RANK,
+  nit: 4,
+};
+function severityRank(severity: string): number {
+  return SEVERITY_RANK[severity] ?? UNKNOWN_SEVERITY_RANK;
+}
+const FINDING_START_RE = /^\s*(?:#{1,6}\s+|\*\*|[-*]\s+)?B(\d+)-(\d+)\b/i;
+function scopeRank(preview: string): number {
+  const path = /`([^`\n]+):\d+/.exec(preview)?.[1] ?? '';
+  if (
+    path.startsWith('evals/') ||
+    path.startsWith('scripts/') ||
+    path.startsWith('native/') ||
+    /(?:^|\/)(?:test|tests|fixtures)(?:\/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+  )
+    return 2;
+  if (/^packages\/[^/]+\/src\//.test(path)) return 0;
+  return 1;
+}
 let parsed: unknown;
 try {
   parsed = JSON.parse(await gezel.artifacts.read(batchesFile));
@@ -63,6 +90,20 @@ if (!Array.isArray(parsed) || parsed.length === 0)
   throw new Error('Review batches must be a non-empty array.');
 
 const summaries = [];
+const indexedCandidates: Array<{
+  id: string;
+  severity: string;
+  preview: string;
+  likelyNonIssue: boolean;
+  batchNumber: number;
+  observationsFile: string;
+  scopeRank: number;
+}> = [];
+const overflowCandidates: Array<{
+  id: string;
+  batchNumber: number;
+  observationsFile: string;
+}> = [];
 let candidateCount = 0;
 for (let index = 0; index < parsed.length; index++) {
   const value = parsed[index];
@@ -101,30 +142,52 @@ for (let index = 0; index < parsed.length; index++) {
   const candidates = [];
   const overflow: string[] = [];
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const match = /^\s*(?:#{1,6}\s+|\*\*|[-*]\s+)?B(\d+)-(\d+)\b/i.exec(lines[lineIndex]!);
+    const match = FINDING_START_RE.exec(lines[lineIndex]!);
     if (!match) continue;
     const id = `B${match[1]}-${match[2]}`;
     const previewLines = [lines[lineIndex]!];
-    for (let next = lineIndex + 1; next < lines.length && previewLines.length < 7; next++) {
-      if (/\bB\d+-\d+\b/.test(lines[next]!) || /^\s*#{1,4}\s+/.test(lines[next]!)) break;
+    for (let next = lineIndex + 1; next < lines.length && previewLines.length < 20; next++) {
+      if (FINDING_START_RE.test(lines[next]!) || /^\s*#{1,4}\s+/.test(lines[next]!)) break;
       previewLines.push(lines[next]!);
     }
-    const preview = previewLines.join('\n').slice(0, 750);
-    const severity = /\[(critical|major|minor|nit)\]|\b(critical|major|minor|nit)\s*:/i.exec(
-      preview,
-    );
+    const fullPreview = previewLines.join('\n');
+    const severity =
+      /\[(critical|major|minor|nit)\]|\b\**severity\**\s*(?::|\||—|-)?\s*\**(critical|major|minor|nit)\b|(?:^|\|)\s*\**(critical|major|minor|nit)\**\s*(?:\||$)|\b(critical|major|minor|nit)\s*:|\((critical|major|minor|nit)\)|(?:—|-)\s*\**(critical|major|minor|nit)\**\s*(?:(?:—|-)|$)/im.exec(
+        fullPreview,
+      );
+    const normalizedSeverity = (
+      severity?.[1] ??
+      severity?.[2] ??
+      severity?.[3] ??
+      severity?.[4] ??
+      severity?.[5] ??
+      severity?.[6] ??
+      'unknown'
+    ).toLowerCase();
+    const candidateScopeRank = scopeRank(fullPreview);
+    const likelyNonIssue =
+      NON_ACTIONABLE_RE.test(fullPreview) ||
+      (candidateScopeRank === 2 && !['critical', 'major'].includes(normalizedSeverity));
+    const preview = fullPreview.slice(0, likelyNonIssue ? 240 : 520);
     if (candidates.length < 20) {
       candidates.push({
         id,
-        severity: (severity?.[1] ?? severity?.[2] ?? 'unknown').toLowerCase(),
+        severity: normalizedSeverity,
         preview,
-        likelyNonIssue:
-          /\b(?:verified ok|no issue|no finding|not a bug|none needed|functionally harmless|pre-existing|not introduced by this patch)\b/i.test(
-            preview,
-          ),
+        likelyNonIssue,
+      });
+      indexedCandidates.push({
+        id,
+        severity: normalizedSeverity,
+        preview,
+        likelyNonIssue,
+        batchNumber: number,
+        observationsFile,
+        scopeRank: candidateScopeRank,
       });
     } else {
       overflow.push(id);
+      overflowCandidates.push({ id, batchNumber: number, observationsFile });
     }
   }
   candidateCount += candidates.length + overflow.length;
@@ -135,10 +198,32 @@ for (let index = 0; index < parsed.length; index++) {
     paths: batch.paths.length,
     observationsFile,
     bytes: new TextEncoder().encode(content).length,
-    candidates,
+    candidateIds: candidates.map((candidate) => candidate.id),
+    nonActionableIds: candidates
+      .filter((candidate) => candidate.likelyNonIssue)
+      .map((candidate) => candidate.id),
     overflow,
   });
 }
+const actionableCandidates = indexedCandidates
+  .filter((candidate) => !candidate.likelyNonIssue)
+  .sort(
+    (left, right) =>
+      severityRank(left.severity) - severityRank(right.severity) ||
+      left.scopeRank - right.scopeRank ||
+      left.batchNumber - right.batchNumber ||
+      left.id.localeCompare(right.id),
+  );
+const shortlist = actionableCandidates.slice(0, SHORTLIST_LIMIT);
+const omittedActionable = [
+  ...actionableCandidates.slice(SHORTLIST_LIMIT).map((candidate) => ({
+    id: candidate.id,
+    severity: candidate.severity,
+    batchNumber: candidate.batchNumber,
+    observationsFile: candidate.observationsFile,
+  })),
+  ...overflowCandidates.map((candidate) => ({ ...candidate, severity: 'unknown' })),
+];
 await gezel.artifacts.write(
   outFile,
   `${JSON.stringify(
@@ -147,6 +232,12 @@ await gezel.artifacts.write(
       batchesFile,
       batchCount: summaries.length,
       candidateCount,
+      actionableCandidateCount: actionableCandidates.length + overflowCandidates.length,
+      nonActionableCandidateCount: indexedCandidates.filter((candidate) => candidate.likelyNonIssue)
+        .length,
+      shortlistLimit: SHORTLIST_LIMIT,
+      shortlist,
+      omittedActionable,
       batches: summaries,
     },
     null,

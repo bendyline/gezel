@@ -61,6 +61,19 @@ describe('DS4 residency policy', () => {
     ).toBe(true);
   });
 
+  it('never emits routed-expert streaming for an architecture that lacks it', () => {
+    expect(
+      shouldUseDs4SsdStreaming({
+        configured: true,
+        ssdStreamingSupported: false,
+        modelSizeBytes: 42 * GB,
+        totalRamBytes: 128 * GB,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(false);
+  });
+
   it('prices a DSpark companion into the residency sum', () => {
     const model = Math.round(80.76 * GB);
     const companion = Math.round(5.58 * GB);
@@ -154,6 +167,7 @@ describe('DS4 residency policy', () => {
   it('reserves the broker ceiling for a fully resident model', () => {
     expect(ds4ResidentBytesForMode(36 * GB, true)).toBe(36 * GB);
     expect(ds4ResidentBytesForMode(36 * GB, false)).toBe(DS4_FULL_RESIDENCY_RESERVATION_BYTES);
+    expect(ds4ResidentBytesForMode(52 * GB, false, false)).toBe(52 * GB);
   });
 
   it('re-bases the authored footprint onto another context window', () => {

@@ -27,6 +27,7 @@ import {
   friendlyFetchError,
   friendlyStatusError,
   friendlyStreamError,
+  huggingFaceRequestHeaders,
   rawErrorString,
   sleepRespectingAbort,
 } from './download-common.js';
@@ -60,7 +61,18 @@ export interface XetDownloadOptions {
    * the classic downloader, so a bounded caller can take the Xet path.
    */
   maxBytes?: number;
+  /** Bounded number of reconstruction terms fetched ahead of the writer. */
+  termConcurrency?: number;
 }
+
+const DEFAULT_XET_TERM_CONCURRENCY = 8;
+
+interface CachedSegment {
+  end: number;
+  chunks: Promise<Buffer[]>;
+}
+
+type PrefetchedTerm = { ok: true; data: Buffer } | { ok: false; error: unknown };
 
 export async function* downloadXet(
   opts: XetDownloadOptions,
@@ -164,7 +176,7 @@ async function* runXetAttempt(
   let token: CasToken;
   try {
     const tr = await fetchImpl(detection.authUrl, {
-      headers: { 'User-Agent': GEZEL_DOWNLOAD_UA },
+      headers: huggingFaceRequestHeaders(detection.authUrl),
       signal,
     });
     if (!tr.ok) {
@@ -217,8 +229,15 @@ async function* runXetAttempt(
   }
 
   // Exact total from the manifest (drives an accurate progress bar).
-  const totalBytes =
-    recon.terms.reduce((n, t) => n + t.unpacked_length, 0) - (recon.offset_into_first_range ?? 0);
+  const termStarts: number[] = [];
+  let totalBytes = 0;
+  for (let index = 0; index < recon.terms.length; index++) {
+    const term = recon.terms[index];
+    if (!term) continue;
+    termStarts[index] = totalBytes;
+    const leadingTrim = index === 0 ? (recon.offset_into_first_range ?? 0) : 0;
+    totalBytes += Math.max(0, term.unpacked_length - leadingTrim);
+  }
   if (opts.maxBytes !== undefined && totalBytes > opts.maxBytes) {
     return {
       kind: 'fatal',
@@ -234,7 +253,36 @@ async function* runXetAttempt(
     streamError ??= e;
   });
 
-  const segCache = new Map<string, { end: number; chunks: Buffer[] }>();
+  const segCache = new Map<string, CachedSegment>();
+  const prefetched = new Map<number, Promise<PrefetchedTerm>>();
+  const termConcurrency = Math.max(
+    1,
+    Math.floor(opts.termConcurrency ?? DEFAULT_XET_TERM_CONCURRENCY),
+  );
+  let nextToPrefetch = 0;
+
+  const fillPrefetchWindow = (): void => {
+    while (prefetched.size < termConcurrency && nextToPrefetch < recon.terms.length) {
+      const index = nextToPrefetch++;
+      const term = recon.terms[index];
+      if (!term) continue;
+      const leadingTrim = index === 0 ? (recon.offset_into_first_range ?? 0) : 0;
+      const termStart = termStarts[index] ?? 0;
+      const termLength = Math.max(0, term.unpacked_length - leadingTrim);
+      if (termStart + termLength <= resumeFrom) continue;
+
+      const pending = termData(term, recon, segCache, fetchImpl, chunkTimeoutMs, signal).then(
+        (data): PrefetchedTerm => ({
+          ok: true,
+          data: leadingTrim > 0 ? data.subarray(leadingTrim) : data,
+        }),
+        (error: unknown): PrefetchedTerm => ({ ok: false, error }),
+      );
+      prefetched.set(index, pending);
+    }
+  };
+
+  fillPrefetchWindow();
   let written = 0; // logical output-file offset processed so far
   let lastReport = Date.now();
 
@@ -253,7 +301,7 @@ async function* runXetAttempt(
       // boundary without downloading or decoding the preceding xorbs.
       const leadingTrim = termIndex === 0 ? (recon.offset_into_first_range ?? 0) : 0;
       const termLength = Math.max(0, term.unpacked_length - leadingTrim);
-      const termStart = written;
+      const termStart = termStarts[termIndex] ?? written;
       const termEnd = termStart + termLength;
 
       // The partial file already contains this entire term. The previous
@@ -274,8 +322,14 @@ async function* runXetAttempt(
         };
       }
 
-      let data = await termData(term, recon, segCache, fetchImpl, chunkTimeoutMs, signal);
-      if (leadingTrim > 0) data = data.subarray(leadingTrim);
+      const pending = prefetched.get(termIndex);
+      if (!pending)
+        throw new XetError('reconstruction term was not prefetched', false, 'term-missing');
+      const fetched = await pending;
+      prefetched.delete(termIndex);
+      fillPrefetchWindow();
+      if (!fetched.ok) throw fetched.error;
+      const data = fetched.data;
       const toWrite = termStart < resumeFrom ? data.subarray(resumeFrom - termStart) : data;
       if (
         opts.maxBytes !== undefined &&
@@ -354,7 +408,7 @@ async function* runXetAttempt(
 async function termData(
   term: XetReconstruction['terms'][number],
   recon: XetReconstruction,
-  segCache: Map<string, { end: number; chunks: Buffer[] }>,
+  segCache: Map<string, CachedSegment>,
   fetchImpl: typeof fetch,
   chunkTimeoutMs: number,
   signal: AbortSignal | undefined,
@@ -373,14 +427,16 @@ async function termData(
     const key = `${term.hash}:${seg.range.start}`;
     let entry = segCache.get(key);
     if (!entry) {
-      const buf = await fetchXorbSegment(seg, fetchImpl, chunkTimeoutMs, signal);
       entry = {
         end: seg.range.end,
-        chunks: decodeSegmentChunks(buf, seg.range.end - seg.range.start),
+        chunks: fetchXorbSegment(seg, fetchImpl, chunkTimeoutMs, signal).then((buf) =>
+          decodeSegmentChunks(buf, seg.range.end - seg.range.start),
+        ),
       };
       segCache.set(key, entry);
     }
-    parts.push(entry.chunks[idx - seg.range.start]!);
+    const chunks = await entry.chunks;
+    parts.push(chunks[idx - seg.range.start]!);
   }
   return Buffer.concat(parts);
 }

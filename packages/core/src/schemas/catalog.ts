@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CraftbookCategorySchema } from '../craftbook-categories.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
+import { SemverRegex } from './catalog-semver.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
@@ -56,11 +57,6 @@ import { ProjectTabVisibilitySchema } from './project.js';
 // Allow dots and colons to support real-world Ollama tag names like
 // `llama3.2` or `qwen2.5:7b`. Length cap keeps filesystem paths sane.
 const IdRegex = /^[a-z0-9][a-z0-9.\-:]{1,63}$/;
-
-// Loose semver: major.minor.patch with optional pre-release / build tags.
-// Strict enough to reject `latest` or `v1` while still accepting common
-// pre-release shapes (`1.0.0-rc.1`, `1.0.0+build.7`).
-const SemverRegex = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // ─ License presentation ─────────────────────────────────────────────
 //
@@ -1408,7 +1404,8 @@ export type ChatModelLlamaCppSource = z.infer<typeof ChatModelLlamaCppSourceSche
 
 /**
  * Per-entry ds4 (DwarfStar) source. ds4 loads supported routed-MoE GGUFs
- * (including DeepSeek V4 and GLM 5.2/5.3), so the shape mirrors
+ * (including DeepSeek V4/V4.1, GLM 5.2/5.3, and Qwen3.8 Flash Next), so the
+ * shape mirrors
  * {@link ChatModelLlamaCppSourceSchema} — HF repo + revision + filename/shards
  * + sha256 + residentBytes + quantization — plus two ds4-specific SSD-
  * streaming hints. Current Gezel registrations use single-file artifacts.
@@ -1446,6 +1443,15 @@ export const ChatModelDs4SourceSchema = z
      */
     residentBytes: z.number().int().positive().optional(),
     /**
+     * Bytes of model weights that must actually be resident when ds4 is not
+     * using routed-expert SSD streaming. This normally equals the GGUF size,
+     * but architectures with always-disk tables are different: Qwen3.8 keeps
+     * its BF16 n-grams on disk and DeepSeek V4.1 does the same for Engrams.
+     * The full-residency fit gate uses this value instead of charging those
+     * intentionally disk-only bytes as RAM.
+     */
+    residentWeightBytes: z.number().int().positive().optional(),
+    /**
      * Resident bytes each context token costs: ds4's compressed KV rows plus
      * the context buffers that scale with the window. ds4-server prints the
      * split at load —
@@ -1474,19 +1480,48 @@ export const ChatModelDs4SourceSchema = z
      * complete encoder whose output is projected into the selected model's
      * visual-token space. The encoder MUST match the language checkpoint.
      *
-     * It lives in the same Hugging Face repository as the language GGUF and
-     * is downloaded, hashed, and stored beside it. Declaring one makes native
-     * image input available for the installed ds4 model; absent means the
-     * model is deliberately text-only.
+     * It is downloaded, hashed, and stored beside the language GGUF. The
+     * repository normally inherits from the language model, but may be
+     * overridden when upstream publishes the matched encoder separately.
+     * Declaring one makes native image input available for the installed ds4
+     * model; absent means the model is deliberately text-only.
      */
     visionEncoder: z
       .object({
+        /**
+         * Optional repository override when the model-matched encoder is
+         * published separately from the language GGUF. Absent inherits the
+         * enclosing ds4 source repository.
+         */
+        huggingfaceRepo: z
+          .string()
+          .regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/)
+          .optional(),
+        /** Immutable encoder-repository revision. Absent inherits the parent revision. */
+        revision: z.string().optional(),
         /** Filename within the repo, e.g. `GLM-5.3-Flash-Vision-Encoder.gguf`. */
         filename: z.string(),
         /** SHA-256 of the encoder GGUF, lifted from HF LFS metadata. */
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         /** Size on disk after download. */
         sizeBytes: z.number().int().positive(),
+      })
+      .optional(),
+    /**
+     * Model-embedded multi-token prediction. Presence declares that this GGUF
+     * contains the draft block consumed by ds4's `--mtp` flag and enables it
+     * under the default `ds4Mtp=auto` policy. This is distinct from
+     * {@link draftModel}, which is an external DSpark companion.
+     */
+    mtp: z
+      .object({
+        /**
+         * Preserve ordinary non-zero-temperature sampling by also passing
+         * `--mtp-exact-sampling`. Qwen3.8 should set this: opportunistic MTP
+         * otherwise accepts matching greedy drafts directly and changes the
+         * requested distribution.
+         */
+        exactSampling: z.boolean().optional(),
       })
       .optional(),
     /**
@@ -1501,6 +1536,20 @@ export const ChatModelDs4SourceSchema = z
      * runtime decides per actual device RAM.
      */
     ssdStreaming: z.boolean().optional(),
+    /**
+     * Whether this model family implements ds4's routed-expert
+     * `--ssd-streaming` mode. Defaults to true for existing entries. Qwen3.8
+     * Flash Next sets false: its n-gram table is always read from disk, but
+     * its routed experts currently have no SSD-streaming implementation.
+     */
+    ssdStreamingSupported: z.boolean().optional(),
+    /**
+     * Model-specific graph prefill cap passed as `--prefill-chunk`. Qwen3.8
+     * needs a 1K cap on memory-constrained Macs because its transient Metal
+     * workspace scales with this value. Omit for families such as GLM whose
+     * graph selects its own chunk size and rejects the flag.
+     */
+    prefillChunk: z.number().int().positive().optional(),
     /**
      * Ceiling on the launch-time `--ctx` window, in tokens. ds4's default is
      * RAM-tiered, which assumes DeepSeek-V4's small resident footprint; a
@@ -1621,12 +1670,13 @@ export const ChatModelMlxSourceSchema = z
     /** Total on-disk size across all files. */
     approxSizeBytes: z.number().int().positive(),
     /**
-     * Working-set footprint when loaded: weights + KV cache at default
-     * context + activations + Metal buffers. Used by the local-engine
-     * capacity broker. MLX's KV grows linearly with sequence length, so
-     * this is typically a bigger multiplier of `approxSizeBytes` than
-     * the llama.cpp equivalent. Optional — absent entries fall back to
-     * `Math.round(approxSizeBytes * 1.30)`.
+     * Working-set footprint when loaded, **KV cache EXCLUDED**: resident
+     * weights plus the Python/MLX process and fixed engine buffers. The
+     * capacity broker prices this value and config.json-derived KV separately
+     * for the admitted context and concurrency, so including KV here would
+     * double-count it. Optional — absent entries fall back to
+     * `estimateMlxResidentBytes(approxSizeBytes)`, currently weights × 1.02
+     * plus a fixed 1 GiB engine allowance.
      */
     residentBytes: z.number().int().positive().optional(),
     /** Short quant tag for display (`4bit`, `8bit`, `bf16`). */
@@ -1823,7 +1873,7 @@ export const ChatModelVersionManifestSchema = z.object({
   llamaCpp: ChatModelLlamaCppSourceSchema.optional(),
   /** MLX source — Apple Silicon only. Optional. */
   mlx: ChatModelMlxSourceSchema.optional(),
-  /** ds4 (DwarfStar) source — supported DeepSeek/GLM GGUFs, GPU-only. Optional. */
+  /** ds4 (DwarfStar) source — supported DeepSeek/GLM/Qwen GGUFs, GPU-only. Optional. */
   ds4: ChatModelDs4SourceSchema.optional(),
   notes: z.string().optional(),
 });
@@ -2897,72 +2947,4 @@ export const SharedModelMigrationResultSchema = z.object({
 });
 export type SharedModelMigrationResult = z.infer<typeof SharedModelMigrationResultSchema>;
 
-// ─ Semver helpers ───────────────────────────────────────────────────
-//
-// Tiny inline comparator. We don't need full semver-tools — just the
-// two operations the catalog uses: parse-and-compare, and pick-the-max
-// from a list.
-
-export function isSemver(v: string): boolean {
-  return SemverRegex.test(v);
-}
-
-interface ParsedSemver {
-  major: number;
-  minor: number;
-  patch: number;
-  /** Pre-release identifier (`rc.1` etc.); empty string means none. */
-  pre: string;
-}
-
-function parseSemver(v: string): ParsedSemver | null {
-  const m = SemverRegex.exec(v);
-  if (!m) return null;
-  // Strip build metadata (`+...`) — semver spec says it doesn't affect ordering.
-  const noBuild = v.split('+', 1)[0] ?? v;
-  const [versionCore, pre] = noBuild.split('-', 2) as [string, string | undefined];
-  const [major, minor, patch] = versionCore.split('.').map((n) => Number.parseInt(n, 10));
-  return { major: major ?? 0, minor: minor ?? 0, patch: patch ?? 0, pre: pre ?? '' };
-}
-
-function compareIdentifier(a: string, b: string): number {
-  // Numeric identifiers compare numerically; alphanumerics lexically;
-  // numeric identifiers always sort below alphanumerics. (semver §11.4.3)
-  const aNum = /^\d+$/.test(a);
-  const bNum = /^\d+$/.test(b);
-  if (aNum && bNum) return Number.parseInt(a, 10) - Number.parseInt(b, 10);
-  if (aNum) return -1;
-  if (bNum) return 1;
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/**
- * Standard semver compare: returns < 0 if a < b, 0 if equal, > 0 if
- * a > b. Throws on non-semver input. Pre-release versions sort below
- * their associated normal version (1.0.0-rc.1 < 1.0.0).
- */
-export function compareSemver(a: string, b: string): number {
-  const pa = parseSemver(a);
-  const pb = parseSemver(b);
-  if (!pa) throw new Error(`not semver: ${a}`);
-  if (!pb) throw new Error(`not semver: ${b}`);
-  if (pa.major !== pb.major) return pa.major - pb.major;
-  if (pa.minor !== pb.minor) return pa.minor - pb.minor;
-  if (pa.patch !== pb.patch) return pa.patch - pb.patch;
-  if (pa.pre === pb.pre) return 0;
-  // A version without a pre-release outranks one with a pre-release.
-  if (pa.pre === '') return 1;
-  if (pb.pre === '') return -1;
-  const aIds = pa.pre.split('.');
-  const bIds = pb.pre.split('.');
-  const len = Math.max(aIds.length, bIds.length);
-  for (let i = 0; i < len; i++) {
-    const ai = aIds[i];
-    const bi = bIds[i];
-    if (ai === undefined) return -1;
-    if (bi === undefined) return 1;
-    const c = compareIdentifier(ai, bi);
-    if (c !== 0) return c;
-  }
-  return 0;
-}
+export { compareSemver, isSemver } from './catalog-semver.js';

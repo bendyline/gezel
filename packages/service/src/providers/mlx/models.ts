@@ -76,6 +76,8 @@ export interface InstalledMlxModel {
   id: string;
   name: string;
   approxSizeBytes: number;
+  /** Cataloged fixed working set with KV excluded; measured values beat the fallback formula. */
+  residentBytes?: number;
   installedAt: string;
   /** Absolute path to the model directory the supervisor passes to `mlx_lm.server --model`. */
   modelDir: string;
@@ -192,6 +194,7 @@ interface InstalledManifest {
   renamedFrom?: string;
   name: string;
   approxSizeBytes: number;
+  residentBytes?: number;
   installedAt: string;
   catalogId: string;
   catalogVersion: string;
@@ -302,6 +305,7 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 
 export class MlxModelManager {
   private readonly modelsRoot: string;
+  private readonly viewsRoot: string;
   private readonly storageRoots: ModelStorageRoots;
   private readonly catalog: CatalogService;
   private readonly fetchImpl: typeof fetch;
@@ -324,6 +328,7 @@ export class MlxModelManager {
   constructor(opts: MlxModelManagerOptions) {
     this.storageRoots = modelStorageRoots({ home: opts.home, engine: 'mlx' });
     this.modelsRoot = this.storageRoots.writableRoot;
+    this.viewsRoot = join(opts.home, 'engines', 'mlx', 'views');
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.onInstallStart) this.onInstallStart = opts.onInstallStart;
@@ -500,6 +505,9 @@ export class MlxModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
+    // External-PLE views hard-link the installed shards. Removing the model
+    // without its derived view would keep a 100+ GiB checkpoint allocated.
+    await rm(join(this.viewsRoot, id), { recursive: true, force: true });
     await removeModelDir(join(this.modelsRoot, id), this.modelsRoot);
   }
 
@@ -903,6 +911,7 @@ export class MlxModelManager {
         id: catalogId,
         name: manifest.name,
         approxSizeBytes: src.approxSizeBytes,
+        ...(src.residentBytes ? { residentBytes: src.residentBytes } : {}),
         installedAt: new Date().toISOString(),
         catalogId,
         catalogVersion: manifest.version,
@@ -930,6 +939,13 @@ export class MlxModelManager {
       installed.fileSha256 = await hashModelPayloadFiles(itemDir, verifiedDigests);
       await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
       await makeSharedModelReadable(itemDir);
+      // A completed update invalidates any view derived from the prior index.
+      // Loaded processes retain their open file handles; the next launch
+      // rebuilds the small view atomically from the new checkpoint.
+      await rm(join(this.viewsRoot, catalogId), {
+        recursive: true,
+        force: true,
+      });
 
       // The sidecar case is the modern norm (Gemma 4, etc.) and mlx_vlm
       // reads it natively — nothing actionable to surface, so no warning.
@@ -1256,6 +1272,7 @@ export class MlxModelManager {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
+      ...(parsed.residentBytes ? { residentBytes: parsed.residentBytes } : {}),
       installedAt: parsed.installedAt,
       modelDir: join(root, id),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),

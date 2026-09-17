@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
 
@@ -41,8 +42,16 @@ from mlx.utils import tree_flatten, tree_unflatten
 # or some operator has both installed and a model uses one set vs the
 # other. We resolve lazily on each load so an import failure here
 # can't take down the server module at import time.
-def _resolve_cache_class(name: str) -> Optional[type]:
+def _resolve_cache_class(name: str, module_name: Optional[str] = None) -> Optional[type]:
     candidates: list[Any] = []
+    # Custom caches such as Qwen4's QSAKVCache live in the model's language
+    # module, not either package's shared cache module. Persist the originating
+    # module and import it only inside the two trusted MLX package namespaces.
+    if module_name and module_name.startswith(("mlx_vlm.models.", "mlx_lm.models.")):
+        try:
+            candidates.append(import_module(module_name))
+        except Exception:  # noqa: BLE001 — fall through to legacy lookup
+            pass
     try:
         from mlx_vlm.models import cache as vlm_cache  # type: ignore[attr-defined]
 
@@ -64,8 +73,24 @@ def _resolve_cache_class(name: str) -> Optional[type]:
 
 # Schema version baked into sidecar metadata. Bump when the on-disk
 # layout changes incompatibly so older entries are rejected on load
-# instead of silently corrupting reconstruction.
-SCHEMA_VERSION = "1"
+# instead of silently corrupting reconstruction. Version 2 stores scalar
+# cache-state leaves in metadata: Qwen4's QSA cache carries an integer block
+# compression ratio alongside its arrays, and passing that integer to
+# ``mx.save_safetensors`` raises ``std::bad_cast``. Version 3 also records the
+# defining module for model-specific caches such as QSAKVCache.
+SCHEMA_VERSION = "3"
+
+
+def _split_state_leaves(layer_states: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Partition cache state into safetensor arrays and JSON scalar leaves."""
+    arrays: dict[str, Any] = {}
+    scalars: dict[str, Any] = {}
+    for path, value in tree_flatten(layer_states):
+        if value is None or isinstance(value, (bool, int, float, str)):
+            scalars[path] = value
+        else:
+            arrays[path] = value
+    return arrays, scalars
 
 
 def cache_path(persist_dir: Path, model_fingerprint: str, cache_id: str) -> Path:
@@ -107,11 +132,12 @@ def save_cache(
         # default to an empty dict so reconstruction can still proceed.
         meta_state = [getattr(c, "meta_state", {}) for c in cache_layers]
         class_names = [type(c).__name__ for c in cache_layers]
+        class_modules = [type(c).__module__ for c in cache_layers]
         # tree_flatten turns a nested structure of arrays into a flat
         # list of (path, array) tuples — exactly what save_safetensors
         # wants. The path encoding is what tree_unflatten reads back to
         # reconstruct the structure.
-        flat = dict(tree_flatten(layer_states))
+        flat, state_scalars = _split_state_leaves(layer_states)
         if not flat:
             # Nothing array-shaped to save; reconstruction would always
             # fail. Treat as a no-op rather than writing an empty file.
@@ -120,7 +146,9 @@ def save_cache(
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "classes": json.dumps(class_names),
+            "class_modules": json.dumps(class_modules),
             "meta_state": json.dumps(meta_state, default=str),
+            "state_scalars": json.dumps(state_scalars),
             "token_ids": json.dumps(token_ids),
             "model_fingerprint": model_fingerprint,
             "saved_at": str(time.time()),
@@ -193,17 +221,31 @@ def load_cache(
 
     try:
         class_names = json.loads(metadata.get("classes", "[]"))
+        class_modules = json.loads(metadata.get("class_modules", "[]"))
         meta_state_list = json.loads(metadata.get("meta_state", "[]"))
         token_ids = json.loads(metadata.get("token_ids", "[]"))
+        state_scalars = json.loads(metadata.get("state_scalars", "{}"))
     except json.JSONDecodeError as exc:
         print(f"[cache] metadata parse failed for cache_id={cache_id}: {exc}", flush=True)
         return None
 
-    if not class_names or not token_ids:
+    if (
+        not class_names
+        or len(class_modules) != len(class_names)
+        or not token_ids
+        or not isinstance(state_scalars, dict)
+    ):
         return None
 
     try:
-        layer_states = tree_unflatten(list(flat.items()))
+        # Scalar leaves use the same tree paths as the mmap-backed arrays, so
+        # merging the two flat maps reconstructs the original cache state
+        # exactly. Reject an overlap rather than letting metadata replace a
+        # tensor silently.
+        if set(flat).intersection(state_scalars):
+            print(f"[cache] scalar/array path overlap for cache_id={cache_id}; ignoring", flush=True)
+            return None
+        layer_states = tree_unflatten([*flat.items(), *state_scalars.items()])
     except Exception as exc:  # noqa: BLE001
         print(f"[cache] tree_unflatten failed for cache_id={cache_id}: {exc}", flush=True)
         return None
@@ -217,8 +259,10 @@ def load_cache(
         return None
 
     cache_layers: list[Any] = []
-    for cls_name, meta, layer_state in zip(class_names, meta_state_list, layer_states):
-        cls = _resolve_cache_class(cls_name)
+    for cls_name, cls_module, meta, layer_state in zip(
+        class_names, class_modules, meta_state_list, layer_states
+    ):
+        cls = _resolve_cache_class(cls_name, cls_module)
         if cls is None:
             print(
                 f"[cache] unknown cache class {cls_name!r} for cache_id={cache_id}; ignoring",

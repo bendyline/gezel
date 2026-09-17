@@ -42,6 +42,28 @@ def _tool(name, props, required=()):
     }
 
 
+def test_mlx_lm_tokenizer_wrapper_is_unwrapped_for_llguidance():
+    class FastHfTokenizer:
+        is_fast = True
+
+    class MlxLmTokenizerWrapper:
+        is_fast = True
+
+        def __init__(self, inner):
+            self._tokenizer = inner
+
+    class RawTokenizersTokenizer:
+        pass
+
+    hf = FastHfTokenizer()
+    assert tg._resolve_hf_tokenizer(MlxLmTokenizerWrapper(hf)) is hf
+
+    # Do not peel a normal Transformers tokenizer down to its low-level
+    # `tokenizers.Tokenizer`; llguidance expects the HF object here.
+    hf._tokenizer = RawTokenizersTokenizer()
+    assert tg._resolve_hf_tokenizer(hf) is hf
+
+
 # create_project + write_file declare params; list_projects declares none.
 # All flat scalars — no tool here wants an object/array argument.
 TOOLS = [

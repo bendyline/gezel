@@ -145,8 +145,15 @@ export function ds4Routes(ctx: EngineContext): Hono {
               ...(ds4Config.ds4SsdStreaming !== undefined
                 ? { configured: ds4Config.ds4SsdStreaming }
                 : {}),
-              ...(manifest.ds4.approxSizeBytes !== undefined
-                ? { modelSizeBytes: manifest.ds4.approxSizeBytes }
+              ...(manifest.ds4.residentWeightBytes !== undefined ||
+              manifest.ds4.approxSizeBytes !== undefined
+                ? {
+                    modelSizeBytes:
+                      manifest.ds4.residentWeightBytes ?? manifest.ds4.approxSizeBytes,
+                  }
+                : {}),
+              ...(manifest.ds4.ssdStreamingSupported !== undefined
+                ? { ssdStreamingSupported: manifest.ds4.ssdStreamingSupported }
                 : {}),
               ...(manifest.ds4.visionEncoder &&
               nativeVisionEnabledFor(ds4Config.nativeVision, manifest.id)

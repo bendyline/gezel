@@ -680,6 +680,22 @@ describe('localEngineSlotCeiling', () => {
     });
     expect(n).toBeGreaterThanOrEqual(2);
   });
+
+  it('uses an authored MLX resident set instead of re-expanding download bytes', () => {
+    const budget = computeCapacityBudget({ systemRamBytes: 128 * GB, unifiedMemory: true });
+    const checkpointBytes = 104 * GB;
+    const externalPleResidentBytes = 70 * GB;
+    const free = localEngineKvBudgetBytes({
+      engine: 'mlx',
+      budgetBytes: budget.fastBytes,
+      weightsBytes: checkpointBytes,
+      weightsResidentBytes: externalPleResidentBytes,
+    });
+    expect(free).toBe(budget.fastBytes - externalPleResidentBytes);
+    expect(free).toBeGreaterThan(
+      budget.fastBytes - CapacityBroker.estimateResidentBytes('mlx', checkpointBytes),
+    );
+  });
 });
 
 describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {

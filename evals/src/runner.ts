@@ -30,6 +30,7 @@ import {
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
+import { chatModelDs4RuntimeHints } from './model-sources.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
 import type { ResolvedBinary } from './native-bin.ts';
 import { repoRoot, resolveDs4Binary, resolveLlamaBinary, resolveSdBinary } from './native-bin.ts';
@@ -1751,11 +1752,11 @@ function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
 }
 
 /**
- * ds4 (DeepSeek-V4) eval launch overrides — parallels
+ * ds4 eval launch overrides — parallels
  * {@link llamaCppEvalLaunchOverridesForModel}. On a 128 GB-class unified-memory
- * host the model is loaded fully; smaller hosts stream MoE experts from disk,
- * so their resident footprint is the expert-cache budget (not all weights)
- * plus KV + context buffers.
+ * host a fitting routed-expert model is loaded fully; smaller hosts stream MoE
+ * experts from disk. Models without that graph (currently Qwen3.8) keep their
+ * main weights resident while their lookup tables remain disk-only.
  * One trial at a time; generous startup for the cold ~80 GB mmap + first-run
  * shader compile. Capability is throughput-invariant, so the trial timeouts
  * are generous (ds4 decodes ~6 tok/s on the GB10 Spark, ~10–13 on a 64 GB Mac).
@@ -1768,9 +1769,11 @@ export function ds4EvalShouldUseSsdStreaming(opts?: {
   totalRamBytes?: number;
   modelSizeBytes?: number;
   companionBytes?: number;
+  ssdStreamingSupported?: boolean;
   platform?: NodeJS.Platform;
   arch?: string;
 }): boolean {
+  if (opts?.ssdStreamingSupported === false) return false;
   const totalRamBytes = opts?.totalRamBytes ?? totalmem();
   const modelSizeBytes = opts?.modelSizeBytes;
   const platform = opts?.platform ?? process.platform;
@@ -1802,6 +1805,7 @@ export function ds4EvalLaunchOverridesForModel(
   // headroom. Throughput only — does not change capability/scores.
   const totalRamBytes = totalmem();
   const totalRamGb = totalRamBytes / 1024 ** 3;
+  const runtimeHints = chatModelDs4RuntimeHints(modelId);
   const modelSizeBytes = model
     ? (() => {
         try {
@@ -1828,7 +1832,10 @@ export function ds4EvalLaunchOverridesForModel(
     ? Math.round(visionEncoderSizeBytes * 1.1) + 384 * 1024 ** 2
     : 0;
   const ssdStreaming = ds4EvalShouldUseSsdStreaming({
-    modelSizeBytes,
+    modelSizeBytes: runtimeHints?.residentWeightBytes ?? modelSizeBytes,
+    ...(runtimeHints?.ssdStreamingSupported !== undefined
+      ? { ssdStreamingSupported: runtimeHints.ssdStreamingSupported }
+      : {}),
     ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
   });
   const cacheExpertsGb = totalRamGb >= 120 ? 64 : totalRamGb >= 88 ? 48 : 32;
@@ -1845,7 +1852,7 @@ export function ds4EvalLaunchOverridesForModel(
   // matches buildDs4Provider's 64 GB device tier; KV stays ~1.8 GiB (under
   // ds4-server's 4096 MiB disk budget) and context buffers ~4 GiB fit alongside
   // the 32 GB expert cache on a 64 GB box.
-  const numCtx = 131072;
+  const numCtx = Math.min(131072, runtimeHints?.maxLaunchCtx ?? 131072);
   return {
     extraEnv: {
       ...(bin ? { GEZEL_DS4_SERVER_BIN: bin.path } : {}),
@@ -1862,7 +1869,7 @@ export function ds4EvalLaunchOverridesForModel(
     },
     minTrialTimeoutMs: 120 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
+    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} prefillChunk=${runtimeHints?.prefillChunk ?? 'engine-default'} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
   };
 }
 

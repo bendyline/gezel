@@ -59,6 +59,7 @@ function makeHarness(opts: {
   /** Optional model root inside a multi-quant Hugging Face repository. */
   subdir?: string;
   requestedUrls?: string[];
+  residentBytes?: number;
   onInstallStart?: (info: { catalogId: string }) => void;
 }): Harness {
   const fileNames = [...Object.keys(opts.files), ...(opts.missing ?? [])];
@@ -86,6 +87,7 @@ function makeHarness(opts: {
             revision: 'deadbeef',
             ...(opts.subdir ? { subdir: opts.subdir } : {}),
             approxSizeBytes: fileList.reduce((s, f) => s + f.sizeBytes, 0),
+            ...(opts.residentBytes ? { residentBytes: opts.residentBytes } : {}),
             files: fileList,
           },
         },
@@ -165,8 +167,12 @@ describe('MlxModelManager — concurrent multi-file install', () => {
       }),
     ]);
 
+    const viewDir = join(home, 'engines', 'mlx', 'views', id, 'old-fingerprint-qwen4-ple');
+    await mkdir(viewDir, { recursive: true });
+    await writeFile(join(viewDir, 'linked-shard'), 'derived');
     await manager.delete(id);
     await expect(readdir(join(home, 'engines', 'mlx', 'models'))).resolves.toEqual([]);
+    await expect(readdir(join(home, 'engines', 'mlx', 'views', id))).rejects.toThrow();
   });
 
   it('downloads several files concurrently and completes', async () => {
@@ -177,7 +183,15 @@ describe('MlxModelManager — concurrent multi-file install', () => {
       'model-00002.safetensors': Buffer.from('b'.repeat(900)),
       'model-00003.safetensors': Buffer.from('c'.repeat(900)),
     };
-    const { manager, maxConcurrent } = makeHarness({ home, files });
+    const measuredResidentBytes = 2_048;
+    const { manager, maxConcurrent } = makeHarness({
+      home,
+      files,
+      residentBytes: measuredResidentBytes,
+    });
+    const staleView = join(home, 'engines', 'mlx', 'views', 'test-model', 'stale-qwen4-ple');
+    await mkdir(staleView, { recursive: true });
+    await writeFile(join(staleView, 'linked-shard'), 'derived');
 
     const events = await drain(manager.install('test-model'));
 
@@ -199,6 +213,10 @@ describe('MlxModelManager — concurrent multi-file install', () => {
     const onDisk = await readdir(join(home, 'engines', 'mlx', 'models', 'test-model'));
     for (const name of Object.keys(files)) expect(onDisk).toContain(name);
     expect(onDisk).toContain('manifest.json');
+    await expect(manager.listInstalled()).resolves.toEqual([
+      expect.objectContaining({ residentBytes: measuredResidentBytes }),
+    ]);
+    await expect(readdir(staleView)).rejects.toThrow();
   });
 
   it('fetches below an MLX source subdirectory but installs at the selected model root', async () => {

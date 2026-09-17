@@ -109,13 +109,21 @@ def test_resolve_version_gate():
         md.version = real
     assert got is None and any("inexact" in l for l in lines), lines
 
-    # Unknown version (mlx-vlm absent, e.g. this bare-python3 run) also
-    # refuses rather than guessing.
+    # Unknown version also refuses rather than guessing. Simulate it instead
+    # of relying on whichever Python happens to run this suite having no
+    # mlx-vlm installation.
     lines2, log2 = _logs()
-    got2 = spec_decode.resolve_spec(_args(draft=here), object(), None, log=log2)
-    assert got2 is None and any(
-        "inexact" in l or "cannot determine" in l for l in lines2
-    ), lines2
+    def missing_version(name):
+        if name == "mlx-vlm":
+            raise md.PackageNotFoundError(name)
+        return real(name)
+
+    md.version = missing_version
+    try:
+        got2 = spec_decode.resolve_spec(_args(draft=here), object(), None, log=log2)
+    finally:
+        md.version = real
+    assert got2 is None and any("cannot determine" in l for l in lines2), lines2
     print("PASS resolve: version gate")
 
 
@@ -260,12 +268,45 @@ def test_draft_prefill_gate():
     print("PASS draft_prefill_gate")
 
 
+def test_verify_transaction_compat():
+    calls = []
+
+    class NewVerify:
+        def commit(self, model, cache, accepted, block_size):
+            calls.append(("commit", model, cache, accepted, block_size))
+
+        def abort(self):
+            calls.append(("abort",))
+
+    new = NewVerify()
+    spec_decode.commit_verify_round(new, "lm", "cache", 2, 3)
+    spec_decode.abort_verify_round(new)
+    assert calls == [("commit", "lm", "cache", 2, 3), ("abort",)], calls
+
+    class LegacyModel:
+        def rollback_speculative_cache(self, cache, state, accepted, block_size):
+            calls.append(("rollback", cache, state, accepted, block_size))
+
+    old = types.SimpleNamespace(gdn_states="legacy-state")
+    model = LegacyModel()
+    spec_decode.commit_verify_round(old, model, "cache", 1, 3)
+    assert calls[-1] == ("rollback", "cache", "legacy-state", 1, 3), calls
+    before = len(calls)
+    spec_decode.commit_verify_round(old, model, "cache", 2, 3)
+    assert len(calls) == before, "a fully accepted legacy round needs no rollback"
+    # Legacy verify objects have no transaction-owned abort method.
+    spec_decode.abort_verify_round(old)
+    assert len(calls) == before
+    print("PASS verify transaction compatibility")
+
+
 def main():
     test_eligibility()
     test_spec_mode()
     test_draft_prefill_chunks()
     test_chunked_prefill_probe_and_install()
     test_draft_prefill_gate()
+    test_verify_transaction_compat()
     test_resolve_unconfigured_is_silent()
     test_resolve_kill_switch()
     test_resolve_mlx_lm_tower_refused()

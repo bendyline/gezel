@@ -57,8 +57,19 @@ interface EngineBlock {
   filename?: string;
   sha256?: string;
   disabledReason?: unknown;
+  residentWeightBytes?: number;
+  ssdStreamingSupported?: boolean;
+  prefillChunk?: number;
+  maxLaunchCtx?: number;
   draftModel?: { filename?: string };
   visionEncoder?: { filename?: string };
+}
+
+export interface Ds4RuntimeHints {
+  residentWeightBytes?: number;
+  ssdStreamingSupported?: boolean;
+  prefillChunk?: number;
+  maxLaunchCtx?: number;
 }
 
 interface IndexedModel {
@@ -158,6 +169,23 @@ export function _resetSourceIndexCache(): void {
 export function chatModelSources(modelId: string): ChatModelSources | undefined {
   const id = normalizeChatModelCatalogId(modelId) ?? modelId;
   return loadIndex().get(id)?.sources;
+}
+
+/** DS4 launch facts from the resolved catalog entry used by the product. */
+export function chatModelDs4RuntimeHints(modelId: string): Ds4RuntimeHints | undefined {
+  const id = normalizeChatModelCatalogId(modelId) ?? modelId;
+  const block = loadIndex().get(id)?.blocks.ds4;
+  if (!block) return undefined;
+  return {
+    ...(block.residentWeightBytes !== undefined
+      ? { residentWeightBytes: block.residentWeightBytes }
+      : {}),
+    ...(block.ssdStreamingSupported !== undefined
+      ? { ssdStreamingSupported: block.ssdStreamingSupported }
+      : {}),
+    ...(block.prefillChunk !== undefined ? { prefillChunk: block.prefillChunk } : {}),
+    ...(block.maxLaunchCtx !== undefined ? { maxLaunchCtx: block.maxLaunchCtx } : {}),
+  };
 }
 
 function sourceKeyFor(p: ChatProvider): keyof ChatModelSources | null {

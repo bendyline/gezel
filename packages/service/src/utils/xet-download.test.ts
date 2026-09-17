@@ -99,6 +99,8 @@ function segmentedXetFetch(opts: {
   /** Xorb index that answers 503 for its first `failTimes` requests. */
   failAt?: number;
   failTimes?: number;
+  delayMs?: number;
+  concurrency?: { active: number; maxActive: number };
 }): typeof fetch {
   const segments = opts.parts.map((part) => noneChunk(part));
   const recon = {
@@ -145,13 +147,22 @@ function segmentedXetFetch(opts: {
     if (url.startsWith(`${XORB}/`)) {
       const index = Number.parseInt(url.slice(`${XORB}/`.length), 10);
       opts.requested.push(index);
-      if (index === opts.failAt && failures < budget) {
-        failures++;
-        return new Response(null, { status: 503 });
+      if (opts.concurrency) {
+        opts.concurrency.active++;
+        opts.concurrency.maxActive = Math.max(opts.concurrency.maxActive, opts.concurrency.active);
       }
-      const segment = segments[index];
-      if (!segment) throw new Error(`unexpected xorb index: ${index}`);
-      return new Response(new Uint8Array(segment), { status: 206 });
+      try {
+        if (opts.delayMs) await new Promise((resolve) => setTimeout(resolve, opts.delayMs));
+        if (index === opts.failAt && failures < budget) {
+          failures++;
+          return new Response(null, { status: 503 });
+        }
+        const segment = segments[index];
+        if (!segment) throw new Error(`unexpected xorb index: ${index}`);
+        return new Response(new Uint8Array(segment), { status: 206 });
+      } finally {
+        if (opts.concurrency) opts.concurrency.active--;
+      }
     }
     throw new Error(`unexpected fetch: ${url}`);
   }) as typeof fetch;
@@ -265,7 +276,9 @@ describe('downloadWithRetry — Xet path', () => {
     expect(result.kind).toBe('ok');
     expect(readFileSync(`${destPath}.partial`)).toEqual(full);
     // Only the failed segment is re-requested; the walk continues from there.
-    expect(requested).toEqual([0, 1, 1, 2]);
+    expect(requested.filter((index) => index === 0)).toHaveLength(1);
+    expect(requested.filter((index) => index === 1)).toHaveLength(2);
+    expect(requested.filter((index) => index === 2)).toHaveLength(1);
     // No outer retry — the whole-file attempt was never restarted.
     expect(events.some((event) => event.type === 'retrying')).toBe(false);
   });
@@ -292,7 +305,34 @@ describe('downloadWithRetry — Xet path', () => {
     expect(events.some((event) => event.type === 'retrying')).toBe(true);
     // The first term completed before term 1 transiently failed. The retry
     // starts at term 1 rather than silently re-downloading term 0.
-    expect(requested).toEqual([0, 1, 1, 1, 1, 2]);
+    expect(requested.filter((index) => index === 0)).toHaveLength(1);
+    expect(requested.filter((index) => index === 1)).toHaveLength(4);
+    expect(requested.filter((index) => index === 2)).toHaveLength(2);
+  });
+
+  it('prefetches independent terms concurrently while preserving output order', async () => {
+    const parts = [Buffer.from('AAAA'), Buffer.from('BBBB'), Buffer.from('CCCC')];
+    const requested: number[] = [];
+    const concurrency = { active: 0, maxActive: 0 };
+    const destPath = join(dir, 'parallel.bin');
+
+    const { result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath,
+        approxSizeBytes: 12,
+        fetchImpl: segmentedXetFetch({
+          parts,
+          requested,
+          delayMs: 20,
+          concurrency,
+        }),
+      }),
+    );
+
+    expect(result.kind).toBe('ok');
+    expect(concurrency.maxActive).toBeGreaterThan(1);
+    expect(readFileSync(`${destPath}.partial`)).toEqual(Buffer.concat(parts));
   });
 
   it('treats a 403 from the token endpoint as fatal (gated repo — no endless retry)', async () => {

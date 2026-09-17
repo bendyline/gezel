@@ -10,8 +10,9 @@ export const Ds4ConfigSchema = z.object({
   ds4BaseUrl: z.string().optional(),
   /**
    * ds4-only: explicit GGUF path passed to `ds4-server --model`. Only the
-   * DeepSeek-V4 and GLM 5.2/5.3 checkpoints ds4 implements load (ds4 is not a
-   * general GGUF runner). Env override: `GEZEL_DS4_MODEL`.
+   * DeepSeek-V4/V4.1, GLM 5.2/5.3, and Qwen3.8 Flash Next checkpoints ds4
+   * implements load (ds4 is not a general GGUF runner). Env override:
+   * `GEZEL_DS4_MODEL`.
    */
   ds4ModelPath: z.string().optional(),
   /**
@@ -45,6 +46,23 @@ export const Ds4ConfigSchema = z.object({
    * runtime/OS headroom.
    */
   ds4CacheExpertsGb: z.number().positive().optional(),
+  /**
+   * ds4-only: model-embedded multi-token prediction (`--mtp`).
+   *
+   * - `off`  — never use an embedded draft block.
+   * - `on`   — request it even for an explicit development GGUF.
+   * - `auto` — enable only when the selected catalog source declares `mtp`.
+   *
+   * Default: `auto`. This is separate from `ds4Dspark`, whose draft weights
+   * live in an external support GGUF.
+   */
+  ds4Mtp: z.enum(['off', 'on', 'auto']).optional(),
+  /**
+   * ds4-only override for `--mtp-exact-sampling`. When absent, the selected
+   * catalog model decides. Exact sampling preserves the target model's normal
+   * distribution at non-zero temperature.
+   */
+  ds4MtpExactSampling: z.boolean().optional(),
   /**
    * ds4-only: DSpark speculative decoding (`--dspark --mtp-model <support.gguf>`).
    *

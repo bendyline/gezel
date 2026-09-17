@@ -72,6 +72,42 @@ describe('readMlxModelGeometry', () => {
     expect(perSlot).toBeLessThan(fullAllLayers / 3);
   });
 
+  it('prices Qwen4 sparse-indexer state alongside its full-attention KV', () => {
+    const layerTypes = Array.from({ length: 48 }, (_, i) =>
+      (i + 1) % 4 === 0 ? 'full_attention' : 'linear_attention',
+    );
+    const geometry = readMlxModelGeometry(
+      writeConfig({
+        model_type: 'qwen4_exp',
+        text_config: {
+          model_type: 'qwen4_exp_text',
+          num_hidden_layers: 48,
+          num_key_value_heads: 2,
+          head_dim: 256,
+          indexer_kv_heads: 1,
+          indexer_head_dim: 128,
+          indexer_compress_ratio: 4,
+          layer_types: layerTypes,
+        },
+      }),
+    );
+    // 128 raw-index elements + 32 compressed-block elements + worst-case
+    // 3-axis int64 positions = 172 f16-equivalent elements. Across two KV
+    // heads that raises the key width from 256 to 342.
+    expect(geometry).toMatchObject({
+      blockCount: 48,
+      headCountKv: 2,
+      keyLength: 342,
+      valueLength: 256,
+      slidingWindow: 1024,
+    });
+    expect(geometry?.slidingWindowPattern?.filter((bounded) => !bounded)).toHaveLength(12);
+    const perSlot = estimateExactPerSlotKvBytesF16(geometry ?? {}, 65_536);
+    const qsa = 12 * 2 * (342 + 256) * 2 * 65_536;
+    const linear = 36 * 2 * (256 + 256) * 2 * (1024 + 2048);
+    expect(perSlot).toBe(qsa + linear);
+  });
+
   it('reads a dense top-level config and derives head_dim from hidden/heads', () => {
     const geometry = readMlxModelGeometry(
       writeConfig({

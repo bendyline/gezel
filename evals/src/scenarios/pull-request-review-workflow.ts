@@ -101,6 +101,16 @@ function sameStrings(actual: unknown, expected: readonly string[]): boolean {
   );
 }
 
+function reportFindingRows(report: string): string[] {
+  const findings = /##\s+Findings\s*([\s\S]*?)##\s+Verdict/i.exec(report)?.[1] ?? '';
+  return findings
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) => line.startsWith('|') && !/^\|\s*#\s*\|/i.test(line) && !/^\|\s*:?-{3,}/.test(line),
+    );
+}
+
 async function setup(ctx: EvalContext): Promise<void> {
   const project = await ctx.client.createProject({
     name: PROJECT_NAME,
@@ -356,6 +366,26 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   }
   if (!/Verdict:\s*request-changes/i.test(report)) {
     failures.push('final report does not request changes for the authorization regression');
+  }
+  const findingRows = reportFindingRows(report);
+  if (findingRows.length > 8) {
+    failures.push(
+      `final report contains ${findingRows.length} findings instead of a concise verified set`,
+    );
+  }
+  const nonActionable = findingRows.find((row) =>
+    /\b(?:no\s+(?:defect|issue|finding|action\s+needed)|acceptable\s+as[- ]is|accept\s+as[- ]is|worth\s+noting|future\s+optimization|pre[- ]existing|intentional\s+limitation|needs?\s+(?:central\s+)?verification|contingent|undefined\s+behavior|may|might|could|potentially|hardening\s+suggestion|best\s+addressed\s+in\s+follow[- ]ups)\b/i.test(
+      row,
+    ),
+  );
+  if (nonActionable) {
+    failures.push('final report promoted a non-issue or no-action suggestion into Findings');
+  }
+  if (
+    /Verdict:\s*approve/i.test(report) &&
+    findingRows.some((row) => /\|\s*(?:critical|major)\s*\|/i.test(row))
+  ) {
+    failures.push('final report approves despite a critical or major finding');
   }
   if (
     /assuredApi.{0,80}(missing|does not exist|undefined)|(?:missing|does not exist|undefined).{0,80}assuredApi/is.test(

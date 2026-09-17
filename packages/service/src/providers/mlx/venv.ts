@@ -68,9 +68,20 @@
  * ~1.4x speedup are verified on-device for this list's resolved set
  * (mlx-lm 0.31.3 with mlx 0.32.0; the rig also verified mlx 0.32.2).
  *
+ * 0.7.1 (2026-09-14): bumped for Qwen3.8 Flash Next (`qwen4_exp`). Its
+ * Qwen4 implementation carries the sparse-attention cache/batch fixes and
+ * the Qwen3.8 Conv3d layout correction that the checkpoint needs. Gezel's
+ * exact wrapper combination was verified on an M5 Max with mlx-lm 0.31.3
+ * and the resolved mlx 0.32.2: real sidecar generation + prompt-cache reuse,
+ * plus a two-row Qwen4-Exp continuous-batch prefill/decode smoke. The full
+ * 112 GB Flash checkpoint is separately catalog-qualified through 0.7.1's
+ * external-PLE view: its 32,000,153,600-byte n-gram table stays disk-backed
+ * instead of consuming the Metal working set. Do not treat the library pin
+ * alone as proof that every community conversion is correct or fits.
+ *
  * Keep upgrades explicit and re-sweep the MLX catalog whenever this pin
  * moves. */
-export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.6.17';
+export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.7.1';
 
 /** Venv name passed to `UvRuntime.ensureVenv` (and its dir basename). */
 export const MLX_VENV_NAME = 'mlx';
@@ -88,10 +99,11 @@ export function mlxVenvPackages(packageSpec?: string): string[] {
   //
   // `mlx-lm` is load-bearing twice over — the sidecar's batch engine
   // (`from mlx_lm.generate import BatchGenerator`) and the qwen3_5 text
-  // tower both live there — and mlx-vlm 0.6.17 no longer declares it as
+  // tower both live there — and modern mlx-vlm no longer declares it as
   // a dependency (0.6.6 did, which is the only reason the old list
   // worked). Dropping this pin kills the batch engine at import time.
-  // 0.31.3 is the combination every 2026-08-28 measurement ran on.
+  // 0.31.3 is also the combination used for the 0.7.1 Qwen4-Exp batch
+  // compatibility check above; keep it independent of mlx-vlm's deps.
   return [
     packageSpec ?? MLX_DEFAULT_PACKAGE_SPEC,
     'mlx-lm==0.31.3',

@@ -45,4 +45,13 @@ describe('markdownToChatDoc', () => {
     expect(doc.blocks[0]).toMatchObject({ template: 'statHighlight' });
     expect(doc.blocks[0]?.autoTemplate).toBeUndefined();
   });
+
+  it('respects an explicitly authored section header treatment around a list', () => {
+    const doc = markdownToChatDoc(
+      parseMarkdown('## Phase 1 {[sectionHeader]}\n\n- First event\n- Second event'),
+    );
+
+    expect(doc.blocks[0]).toMatchObject({ template: 'sectionHeader' });
+    expect(doc.blocks[0]?.autoTemplate).toBeUndefined();
+  });
 });
