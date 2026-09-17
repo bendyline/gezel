@@ -566,6 +566,13 @@ describe('tasks API', () => {
     const paused = (await statusRes.json()) as { status: string };
     expect(paused.status).toBe('paused');
 
+    const resumeRes = await api('POST', '/api/projects/taskproj/tasks/1/status', {
+      status: 'active',
+    });
+    expect(resumeRes.status).toBe(200);
+    const resumed = (await resumeRes.json()) as { status: string };
+    expect(resumed.status).toBe('active');
+
     // Complete step 1 → next step activates.
     const firstId = task.craftbook.steps[0]!.id;
     const advRes = await api(
@@ -573,6 +580,7 @@ describe('tasks API', () => {
       `/api/projects/taskproj/tasks/1/steps/${firstId}/complete`,
       {},
     );
+    expect(advRes.status).toBe(200);
     // The route returns { task, gate? } — a gate rejection is a
     // structured result, not a different status code.
     const { task: advanced, gate } = (await advRes.json()) as {
