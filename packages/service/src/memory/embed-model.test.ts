@@ -1,7 +1,11 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BGE_SMALL_EN_V15_1, MULTILINGUAL_E5_SMALL_1 } from '@bendyline/gezel-knowledge';
+import {
+  BGE_SMALL_EN_V15_1,
+  MULTILINGUAL_E5_SMALL_1,
+  MULTILINGUAL_E5_SMALL_2,
+} from '@bendyline/gezel-knowledge';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   PipelineLoadError,
@@ -135,9 +139,9 @@ describe('daemon embedder pin', () => {
 
   it('is the registered profile of the configured model, or nothing', () => {
     delete process.env.GEZEL_EMBED_MODEL;
-    expect(daemonEmbedderPin()?.id).toBe('bge-small-en-v1.5@1');
+    expect(daemonEmbedderPin()).toBe(BGE_SMALL_EN_V15_1);
     process.env.GEZEL_EMBED_MODEL = 'Xenova/multilingual-e5-small';
-    expect(daemonEmbedderPin()?.id).toBe('multilingual-e5-small@1');
+    expect(daemonEmbedderPin()).toBe(MULTILINGUAL_E5_SMALL_2);
     process.env.GEZEL_EMBED_MODEL = 'Xenova/gte-small';
     expect(daemonEmbedderPin()).toBeNull();
   });
