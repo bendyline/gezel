@@ -1415,6 +1415,7 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
       lane: string | undefined;
       taskRef: string | undefined;
       stepId: string | undefined;
+      suppressReply: boolean | undefined;
     }> = [];
     // Every `messageGezel` call, recorded BEFORE the identity check can
     // throw. `delivered` only sees calls that succeeded, so a guard that
@@ -1447,6 +1448,7 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
         lane?: string;
         taskRef?: string;
         stepId?: string;
+        suppressReply?: boolean;
       }) => {
         attempts.push({
           fromGezelId: args.fromGezelId,
@@ -1465,6 +1467,7 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
           lane: args.lane,
           taskRef: args.taskRef,
           stepId: args.stepId,
+          suppressReply: args.suppressReply,
         });
         return {
           sessionId: 'mock',
@@ -1552,6 +1555,7 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered[0]!.stepId).toBe(entryStepId);
     // Ambient re-drive rides the background lane.
     expect(chat.delivered[0]!.lane).toBe('background');
+    expect(chat.delivered[0]!.suppressReply).toBe(true);
     // Re-drive bookkeeping bumped.
     const rec = await store.readTask('cron', num);
     expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);

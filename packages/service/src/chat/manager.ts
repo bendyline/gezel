@@ -2870,7 +2870,11 @@ export class ChatManager extends LocalEngineRuntime {
     // cheap and is work the next real turn needs anyway; the adapters'
     // resolveBaseUrl guards still prevent a focus from spawning a
     // multi-minute engine load.
-    const provider = await this.ensureProviderForSession(record).catch(() => null);
+    // The historical session model does not outrank the install default.
+    // Supply the current gezel pin, as send does, or this warm can load a
+    // different model and compete with the actual handoff for GPU memory.
+    const gezel = await this.store.getGezel(record.gezelId);
+    const provider = await this.ensureProviderForSession(record, gezel).catch(() => null);
     if (!provider) return;
 
     // Under machine-broker adoption the persisted provider name remains the
@@ -4723,7 +4727,7 @@ export class ChatManager extends LocalEngineRuntime {
     // reply back into the same session would loop).
     const resolvedFromSessionId =
       args.fromSessionId ??
-      (target.id === args.fromGezelId
+      (args.suppressReply || target.id === args.fromGezelId
         ? null
         : await this.ensureOrCreateSession({ gezelId: args.fromGezelId, projectId })
             .then((s) => s.id)
@@ -4841,7 +4845,7 @@ export class ChatManager extends LocalEngineRuntime {
             );
             const senderSessionId =
               resolvedFromSessionId !== session.id ? resolvedFromSessionId : null;
-            if (senderSessionId) {
+            if (!args.suppressReply && senderSessionId) {
               this.deliverHandoffFailureNotice({
                 once: failureNotice,
                 fromSessionId: senderSessionId,

@@ -468,6 +468,10 @@ export class TaskScheduler {
       // falls into lobby chat and task tools lose their step-scoped env.
       taskRef: task.ref,
       stepId: step.id,
+      // This is runtime recovery, not a new delegation by the voorman.
+      // Keep success/failure in task history instead of starting a lobby
+      // conversation that can mistake another article for the stalled one.
+      suppressReply: true,
       // Ambient re-drive — must yield to any user-driven turn on the same
       // provider, like the voorman nudge.
       lane: 'background',

@@ -2761,6 +2761,49 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(adaDisk?.messages ?? []).toHaveLength(0);
   });
 
+  it.each([false, true])(
+    'records a one-way delivery failure without waking the sender (explicit session: %s)',
+    async (explicitSender) => {
+      await store.createGezel({ name: 'Maya', role: 'Developer' });
+      const sender = explicitSender ? await manager.createSession({ gezelId: 'ada' }) : undefined;
+      const logged: Array<{
+        kind: string;
+        details?: { targetSessionId?: string; error?: string };
+      }> = [];
+      const internals = manager as unknown as {
+        historyManager: { log(event: (typeof logged)[number]): Promise<void> };
+      };
+      internals.historyManager = {
+        log: async (event) => {
+          logged.push(event);
+        },
+      };
+      mock.scriptSendFailure('worker admission refused');
+
+      const target = await manager.messageGezel({
+        fromGezelId: 'ada',
+        ...(sender ? { fromSessionId: sender.id } : {}),
+        toGezelIdOrName: 'maya',
+        text: 'Resume the current task step.',
+        suppressReply: true,
+      });
+      await manager.drainBackground();
+
+      expect(logged).toContainEqual(
+        expect.objectContaining({
+          kind: 'gezel.message.delivery_failed',
+          details: expect.objectContaining({
+            targetSessionId: target.sessionId,
+            error: 'worker admission refused',
+          }),
+        }),
+      );
+      const senderSessions = await store.listSessions({ gezelId: 'ada' });
+      expect(senderSessions).toHaveLength(explicitSender ? 1 : 0);
+      if (sender) expect((await store.getSession('ada', sender.id))?.messages).toEqual([]);
+    },
+  );
+
   it('keeps the async reply listener alive while a slow target is still making progress', async () => {
     await store.createGezel({ name: 'Maya', role: 'Voorman' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
