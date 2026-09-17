@@ -19,7 +19,7 @@ const APP_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export function hostedGezelHome(appId: string, env: NodeJS.ProcessEnv = process.env): string {
   assertAppId(appId);
   const root = env.GEZEL_HOME?.trim() || join(homedir(), '.gezel');
-  return join(resolve(root), 'apps', appId);
+  return join(root, 'apps', appId);
 }
 
 export function assertAppId(appId: string): void {
@@ -181,7 +181,7 @@ function readOnlyModelHomes(opts: HostOptions, env: NodeJS.ProcessEnv, ownHome: 
     const resolved = resolve(entry);
     if (seen.has(resolved)) continue;
     seen.add(resolved);
-    out.push(resolved);
+    out.push(entry);
   }
   return out;
 }
