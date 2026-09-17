@@ -48,7 +48,6 @@ describe('CatalogService against bundled data', () => {
         ssdStreaming: false,
         ssdStreamingSupported: false,
         prefillChunk: 1024,
-        maxLaunchCtx: 8192,
         visionEncoder: {
           huggingfaceRepo: 'ggml-org/Qwen3.8-Flash-Next-GGUF',
           revision: '01534bc2e1877d5de995b73d247d4459d273e688',

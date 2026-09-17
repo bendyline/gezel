@@ -116,8 +116,10 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   implement it. Qwen3.8 does not: its 41.73 GiB of main/MTP weights stay
   resident, while the separate 95.37 GiB n-gram table is always read row-wise
   from the GGUF. Its catalog row therefore sets `residentWeightBytes`, disables
-  routed-expert streaming, caps the initial context at 8K, and passes
-  `--prefill-chunk 1024` for a 64 GB Mac. DeepSeek V4.1 can stream experts, but
+  routed-expert streaming, and passes `--prefill-chunk 1024` for a 64 GB Mac.
+  The host tier now supplies 64K on 64 GiB-class Macs and 128K on 96 GiB+ Macs;
+  a universal 8K catalog cap discarded usable memory and broke ordinary
+  specialist handoffs. DeepSeek V4.1 can stream experts, but
   its Engram tables likewise remain disk-only in every mode.
 - For routed-expert models, full residency is normally a config-only expert override. Gezel honors
   `ds4SsdStreaming:false` only when the exact GGUF plus 32 GiB of headroom fits
@@ -139,7 +141,8 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   separate from DeepSeek DSpark's external `--mtp-model` companion and the two
   draft paths are never stacked. Operators can override with `ds4Mtp` or
   `GEZEL_DS4_MTP=off|on|auto`.
-- Launch context is RAM-tiered (128K, or 256K above 192 GiB) and a model may
+- Launch context is RAM-tiered (64K below 96 GiB, 128K from 96 GiB, or 256K
+  from 192 GiB) and a model may
   lower it via `ds4.maxLaunchCtx`. The tier assumes DeepSeek V4 Flash's small
   resident footprint; GLM 5.2 IQ2_XXS keeps 19.6 GiB of non-routed weights
   resident (vs ~4 GiB) and spends 89 KiB/token on MLA KV, so it caps at 64K.

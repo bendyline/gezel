@@ -19,6 +19,22 @@ import { Ds4Provider } from './provider.js';
 const log = createLogger('chat');
 
 /**
+ * Default ds4 context window for the host's unified-memory tier.
+ *
+ * The old two-tier policy gave every machine below 192 GiB a 128K window.
+ * That was calibrated on DeepSeek V4's small resident core and was too
+ * aggressive for a 64 GiB Mac running Qwen3.8 Flash Next, whose main/MTP
+ * weights alone occupy about 42 GiB. Keep 64 GiB-class machines at 64K,
+ * while 96 GiB+ machines retain the measured 128K default.
+ */
+export function ds4RamTieredContext(totalRamBytes: number): number {
+  const totalRamGb = totalRamBytes / 1024 ** 3;
+  if (totalRamGb >= 192) return 262_144;
+  if (totalRamGb >= 96) return 131_072;
+  return 65_536;
+}
+
+/**
  * Resolve ds4's launch `--ctx` from the device tier and the model's catalog
  * cap.
  *
@@ -153,8 +169,9 @@ export async function buildDs4Provider(opts: {
   // This tier assumes DeepSeek-V4's small resident footprint. A model whose
   // non-routed weights are much larger caps it further via the catalog's
   // `ds4.maxLaunchCtx`; see `resolveDs4LaunchCtx` below.
-  const totalRamGb = (await import('node:os')).totalmem() / 1024 ** 3;
-  const ramTieredCtx = totalRamGb >= 192 ? 262_144 : 131_072;
+  const totalRamBytes = (await import('node:os')).totalmem();
+  const totalRamGb = totalRamBytes / 1024 ** 3;
+  const ramTieredCtx = ds4RamTieredContext(totalRamBytes);
   const ds4ConstrainedToolNoSignalMs = (() => {
     const raw = process.env.GEZEL_DS4_CONSTRAINED_TOOL_NO_SIGNAL_MS;
     if (raw) {
