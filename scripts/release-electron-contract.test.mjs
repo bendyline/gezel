@@ -250,6 +250,11 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /^\s+make_latest: false$/m,
     'prerelease alone is editable at publish time; make_latest is the flag the API consults',
   );
+  assert.match(
+    nativeRelease,
+    /^\s+preserve_order: true$/m,
+    'large native release assets must upload sequentially to avoid GitHub asset temp-dir failures',
+  );
 
   // Native archives remain prereleases for honest public classification, while
   // app discovery no longer depends on GitHub's repository-wide latest pointer.
