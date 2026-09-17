@@ -1,4 +1,12 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -150,9 +158,140 @@ describe('ensureWarmModel', () => {
     expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
   });
 
-  it('warms ds4 through its own install route, including declared vision sidecars', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'gezel-ds4-warm-'));
+  it('tops up a missing sidecar without evicting the weights already on disk', async () => {
     const modelId = 'glm-5.3-flash-320b-q2';
+    useSyntheticIndex([
+      {
+        id: modelId,
+        name: 'GLM 5.3 Flash',
+        version: '1.0.0',
+        ds4: {
+          huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+          filename: 'weights.gguf',
+          sha256: 'a'.repeat(64),
+          approxSizeBytes: 96505816384,
+          visionEncoder: {
+            filename: 'vision.gguf',
+            sha256: 'b'.repeat(64),
+            sizeBytes: 1127280960,
+          },
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-ds4-topup-'));
+    // A complete, identity-correct install that predates the catalog growing
+    // a vision encoder — exactly the state a 96 GiB GLM download lands in.
+    const modelDir = writeInstall(root, modelId, { weightsFilename: 'weights.gguf' }, [], 'ds4');
+    const weightsPath = join(modelDir, 'weights.gguf');
+    writeFileSync(weightsPath, 'the-expensive-bytes');
+
+    const installDs4Model = vi.fn(async (_id: string, onEvent: (event: object) => void) => {
+      // The whole point of the fix: the weights survive to be reused by
+      // `planReusableFiles` instead of being deleted and refetched.
+      expect(readFileSync(weightsPath, 'utf8')).toBe('the-expensive-bytes');
+      writeFileSync(join(modelDir, 'vision.gguf'), 'vision');
+      writeFileSync(
+        join(modelDir, 'manifest.json'),
+        JSON.stringify({ weightsFilename: 'weights.gguf', visionEncoderFilename: 'vision.gguf' }),
+      );
+      onEvent({ type: 'done', id: modelId });
+    });
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: { updateConfig: vi.fn().mockResolvedValue(undefined), installDs4Model },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    const logs: string[] = [];
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'ds4',
+        modelId,
+        log: (line) => logs.push(line),
+      });
+      expect(readFileSync(weightsPath, 'utf8')).toBe('the-expensive-bytes');
+      expect(logs.join('\n')).toContain('topping up in place');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still evicts when the catalog repoints at different weights', async () => {
+    const modelId = 'glm-5.3-flash-320b-q2';
+    useSyntheticIndex([
+      {
+        id: modelId,
+        name: 'GLM 5.3 Flash',
+        version: '1.0.0',
+        ds4: {
+          huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+          filename: 'requantized.gguf',
+          sha256: 'c'.repeat(64),
+          approxSizeBytes: 96505816384,
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-ds4-evict-'));
+    const modelDir = writeInstall(root, modelId, { weightsFilename: 'weights.gguf' }, [], 'ds4');
+    writeFileSync(join(modelDir, 'weights.gguf'), 'superseded-bytes');
+
+    const installDs4Model = vi.fn(async (_id: string, onEvent: (event: object) => void) => {
+      // Wrong bytes must not survive into a measurement.
+      expect(existsSync(join(modelDir, 'weights.gguf'))).toBe(false);
+      // The eviction removed the directory itself, as the real install path
+      // then recreates it.
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, 'requantized.gguf'), 'fresh');
+      writeFileSync(
+        join(modelDir, 'manifest.json'),
+        JSON.stringify({ weightsFilename: 'requantized.gguf' }),
+      );
+      onEvent({ type: 'done', id: modelId });
+    });
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: { updateConfig: vi.fn().mockResolvedValue(undefined), installDs4Model },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    const logs: string[] = [];
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'ds4',
+        modelId,
+        log: (line) => logs.push(line),
+      });
+      expect(logs.join('\n')).toContain('evicting and refetching');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('warms ds4 through its own install route, including declared vision sidecars', async () => {
+    const modelId = 'glm-5.3-flash-320b-q2';
+    // Pin the catalog, per this file's convention. Without it the test read
+    // the committed content, where it passed only because the id was absent
+    // and the identity lookup returned nothing to compare against — so the
+    // post-install check the test's own name describes was never exercised.
+    useSyntheticIndex([
+      {
+        id: modelId,
+        name: 'GLM 5.3 Flash',
+        version: '1.0.0',
+        ds4: {
+          huggingfaceRepo: 'antirez/glm-5.3-flash-gguf',
+          filename: 'weights.gguf',
+          sha256: 'a'.repeat(64),
+          approxSizeBytes: 96505816384,
+          visionEncoder: {
+            filename: 'vision.gguf',
+            sha256: 'b'.repeat(64),
+            sizeBytes: 1127280960,
+          },
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-ds4-warm-'));
     const modelDir = join(root, 'engines', 'ds4', 'models', modelId);
     mkdirSync(modelDir, { recursive: true });
     writeFileSync(join(modelDir, 'weights.gguf.partial'), 'resume me');

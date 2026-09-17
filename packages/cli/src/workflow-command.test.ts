@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Craftbook, Task } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runWorkflow } from './workflow-command.js';
+import { runWorkflow, validateWorkflowCraftbook } from './workflow-command.js';
 
 const homes: string[] = [];
 
@@ -13,6 +13,25 @@ afterEach(async () => {
 });
 
 describe('repository-owned workflow modules', () => {
+  it('rejects invalid generated books with actionable errors before dispatch', () => {
+    const book = {
+      id: 'writer',
+      name: 'Writer',
+      steps: [
+        {
+          id: 'write',
+          name: 'Write',
+          terminal: true,
+          consumes: [{ file: '{{input}}', artifact: true }],
+          prompt: 'First call read_artifact with path "{{input}}".',
+        },
+      ],
+    };
+    expect(() => validateWorkflowCraftbook(book)).toThrow(/read_artifact/);
+    book.steps[0]!.prompt = 'First call `read_artifact({ path: "{{input}}" })`.';
+    expect(validateWorkflowCraftbook(book).entryStepId).toBe('write');
+    expect(() => validateWorkflowCraftbook({ ...book, steps: [] })).toThrow();
+  });
   it('runs named modules and lets them start or follow project craftbooks', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'gezel-cli-workflow-'));
     homes.push(workspace);
@@ -22,6 +41,7 @@ describe('repository-owned workflow modules', () => {
       join(workflowDir, 'batch.mjs'),
       [
         'export async function run(context) {',
+        "  context.validateCraftbook({ id: 'valid', name: 'Valid', steps: [{ id: 'done', name: 'Done', terminal: true }] });",
         "  const created = await context.runCraftbook('book', { region: 'west' }, {",
         "    title: 'Custom batch',",
         "    parentTaskRef: 'project/parent',",

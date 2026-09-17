@@ -3,19 +3,29 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type Craftbook,
+  type CraftbookDocError,
   craftbookFromDoc,
   docFromCraftbook,
+  formatCraftbookDocErrors,
   nowIso,
   parseCraftbookDoc,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from './atomic.js';
 
+export class InvalidProjectCraftbookError extends Error {
+  constructor(id: string, errors: CraftbookDocError[]) {
+    super(`Project craftbook "${id}" is invalid: ${formatCraftbookDocErrors(errors)}`);
+    this.name = 'InvalidProjectCraftbookError';
+  }
+}
+
 /** Missing is undefined; present-but-invalid is null and must never fall back to stale legacy files. */
 export async function readProjectCraftbookDocument(
   versionDir: string,
   id: string,
   version: string,
+  options: { throwOnInvalid?: boolean } = {},
 ): Promise<Craftbook | null | undefined> {
   let text: string;
   try {
@@ -24,10 +34,16 @@ export async function readProjectCraftbookDocument(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
+  const invalid = (errors: CraftbookDocError[]): null => {
+    if (options.throwOnInvalid) throw new InvalidProjectCraftbookError(id, errors);
+    return null;
+  };
   const parsed = parseCraftbookDoc(text, 'json');
-  if (!parsed.ok || (parsed.doc.id && parsed.doc.id !== id)) return null;
+  if (!parsed.ok) return invalid(parsed.errors);
+  if (parsed.doc.id && parsed.doc.id !== id)
+    return invalid([{ where: 'id', message: `Expected "${id}", received "${parsed.doc.id}".` }]);
   const built = craftbookFromDoc({ ...parsed.doc, version }, { id, now: nowIso() });
-  return built.ok ? built.craftbook : null;
+  return built.ok ? built.craftbook : invalid(built.errors);
 }
 
 /** Preserve the authoring format on edits; legacy books retain their existing file layout. */

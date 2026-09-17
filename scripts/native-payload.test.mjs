@@ -210,6 +210,14 @@ test('Windows native signing passes resolved file paths to signtool', () => {
     /"\$target\.FullName"/,
     'PowerShell appends literal `.FullName` inside this interpolation form',
   );
+  assert.match(workflow, /TRUSTED_SIGNING_TOOL_ARCH=\$\(\$dlibDir\.Name\.ToLowerInvariant\(\)\)/);
+  assert.match(step, /\$signingArch = \$env:TRUSTED_SIGNING_TOOL_ARCH/);
+  assert.match(step, /Join-Path \$_\.FullName "\$signingArch\\signtool\.exe"/);
+  assert.doesNotMatch(
+    step,
+    /\$env:PROCESSOR_ARCHITECTURE/,
+    'signtool architecture must match the Trusted Signing plugin, not the runner host',
+  );
 });
 
 test('macOS deployment compatibility is declared and checked before signing', () => {

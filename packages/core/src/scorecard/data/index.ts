@@ -41,6 +41,9 @@ import run_2026_09_03_mac_apple_m2 from './runs/2026-09-03-mac-apple-m2.json' wi
 import run_2026_09_04_win32_amd_ryzen_9_7950x3d_16_core_proces from './runs/2026-09-04-win32-amd-ryzen-9-7950x3d-16-core-proces.json' with {
   type: 'json',
 };
+import run_2026_09_07_dgx_spark_class from './runs/2026-09-07-dgx-spark-class.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -58,4 +61,5 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_09_02_ryzen_ai_hx_370_core_productivity as unknown as ScorecardDataset,
   run_2026_09_03_mac_apple_m2 as unknown as ScorecardDataset,
   run_2026_09_04_win32_amd_ryzen_9_7950x3d_16_core_proces as unknown as ScorecardDataset,
+  run_2026_09_07_dgx_spark_class as unknown as ScorecardDataset,
 ];

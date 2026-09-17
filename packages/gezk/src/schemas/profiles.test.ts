@@ -5,6 +5,8 @@ import {
   KnowledgeEmbeddingProfileSchema,
   RepoRelativePathSchema,
   embeddingProfileArtifacts,
+  embeddingProfileCenter,
+  embeddingProfileCenterProblem,
   sameVectorSpace,
 } from './profiles.js';
 
@@ -129,5 +131,70 @@ describe('sameVectorSpace', () => {
       },
     });
     expect(sameVectorSpace(BASE, rewritten)).toBe(true);
+  });
+});
+
+describe('centered-sign', () => {
+  const CENTER = Array.from({ length: 384 }, (_, i) => (i % 2 ? 0.05 : -0.05));
+  const centered = variant({
+    id: 'example@2',
+    quantization: {
+      int8: { method: 'symmetric-linear', scale: 127 },
+      binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center: CENTER },
+    },
+  });
+
+  it('parses a centered-sign profile whose center matches the dimension', () => {
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(centered).success).toBe(true);
+    expect(embeddingProfileCenterProblem(centered)).toBeNull();
+    expect(embeddingProfileCenter(centered)).toEqual(Float32Array.from(CENTER));
+  });
+
+  it('a plain sign profile has no center', () => {
+    expect(embeddingProfileCenter(BASE)).toBeNull();
+    expect(embeddingProfileCenterProblem(BASE)).toBeNull();
+  });
+
+  it('refuses centered-sign without a center, or with the wrong length', () => {
+    const missing = variant({
+      quantization: {
+        int8: { method: 'symmetric-linear', scale: 127 },
+        binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first' },
+      },
+    });
+    const short = variant({
+      quantization: {
+        int8: { method: 'symmetric-linear', scale: 127 },
+        binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center: [0.1, 0.2] },
+      },
+    });
+    for (const bad of [missing, short]) {
+      expect(KnowledgeEmbeddingProfileSchema.safeParse(bad).success).toBe(false);
+      expect(embeddingProfileCenterProblem(bad)).not.toBeNull();
+      expect(() => embeddingProfileCenter(bad)).toThrow(/center/);
+    }
+  });
+
+  it('refuses a center on a plain sign profile and an unknown method', () => {
+    const stray = variant({
+      quantization: {
+        int8: { method: 'symmetric-linear', scale: 127 },
+        binary: { method: 'sign', threshold: 0, packing: 'lsb-first', center: CENTER },
+      },
+    });
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(stray).success).toBe(false);
+    const unknown = {
+      ...BASE,
+      quantization: {
+        int8: { method: 'symmetric-linear', scale: 127 },
+        binary: { method: 'median-sign', threshold: 0, packing: 'lsb-first' },
+      },
+    };
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(unknown).success).toBe(false);
+  });
+
+  it('shares the vector space of the plain revision: only the bit scan differs', () => {
+    expect(sameVectorSpace(BASE, centered)).toBe(true);
+    expect(sameVectorSpace(centered, BASE)).toBe(true);
   });
 });

@@ -153,6 +153,10 @@ describe('project-local craftbooks', () => {
     expect(JSON.parse(await readFile(file, 'utf8')).name).toBe('Edited document');
     await writeFile(file, '{invalid');
     expect(await store.getProjectCraftbook(project.id, 'document')).toBeNull();
+    await expect(
+      store.getProjectCraftbook(project.id, 'document', undefined, { throwOnInvalid: true }),
+    ).rejects.toThrow(/Project craftbook "document" is invalid/);
+    expect(await store.listProjectCraftbooks(project.id)).toEqual([]);
   });
 
   it('writes, reads, and lists a project craftbook', async () => {

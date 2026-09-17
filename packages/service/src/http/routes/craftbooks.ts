@@ -26,6 +26,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { runtimeCraftbookFromTemplate } from '../../craftbook/resolve.js';
 import { suggestCraftbooks } from '../../craftbook/suggest.js';
+import { InvalidProjectCraftbookError } from '../../fs/project-craftbook-document.js';
 import {
   deleteCraftbookScriptSource,
   listCraftbookScripts,
@@ -85,20 +86,29 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
   async function resolveOne(
     id: string,
     opts: { version?: string; sourceParam?: string; projectId?: string },
-  ): Promise<Craftbook | { error: string; status: 400 | 404 } | null> {
+  ): Promise<Craftbook | { error: string; status: 400 | 404 | 422 } | null> {
     const { version, sourceParam, projectId } = opts;
+    const projectBook = async () => {
+      try {
+        return await ctx.store.getProjectCraftbook(projectId!, id, version, {
+          throwOnInvalid: true,
+        });
+      } catch (error) {
+        if (error instanceof InvalidProjectCraftbookError)
+          return { error: error.message, status: 422 as const };
+        throw error;
+      }
+    };
     if (sourceParam === 'project') {
       if (!projectId) return { error: 'projectId required for project source', status: 400 };
-      return ctx.store.getProjectCraftbook(projectId, id, version);
+      return projectBook();
     }
     if (sourceParam === 'local') {
       return ctx.store.getLocalCraftbookTemplate(id, version);
     }
     if (sourceParam !== 'bundled') {
       if (projectId) {
-        const project = await ctx.store
-          .getProjectCraftbook(projectId, id, version)
-          .catch(() => null);
+        const project = await projectBook().catch(() => null);
         if (project) return project;
       }
       const local = await ctx.store.getLocalCraftbookTemplate(id, version).catch(() => null);

@@ -8,12 +8,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { packGezappFromSource } from '@bendyline/gezel-service/gezapp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetHostStateForTest } from './host-service.js';
 import { type Gezel, type GezelProject, connectOrHost } from './host.js';
 
-const REPO_ROOT = new URL('../../../', import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SAMPLE_APP = join(REPO_ROOT, 'examples/apps/example-journal');
 
 let root: string;

@@ -14,6 +14,7 @@
  */
 
 import type { KnowledgeChunkingProfile, KnowledgeEmbeddingProfile } from '@bendyline/gezk';
+import { MULTILINGUAL_E5_SMALL_CENTER } from './e5-small-center.js';
 
 const SHARED_ENCODING = {
   pooling: 'mean',
@@ -28,7 +29,12 @@ const SHARED_ENCODING = {
   },
 } as const;
 
-/** The public profile: multilingual, so world catalogs serve every reader. */
+/**
+ * The public profile's first revision: multilingual, so world catalogs serve
+ * every reader. Superseded for new builds by MULTILINGUAL_E5_SMALL_2 (same
+ * vectors, centered stage-1 bits); catalogs built with this revision stay
+ * readable and searchable, at the lower stage-1 recall of raw sign bits.
+ */
 export const MULTILINGUAL_E5_SMALL_1: KnowledgeEmbeddingProfile = {
   id: 'multilingual-e5-small@1',
   model: {
@@ -45,6 +51,31 @@ export const MULTILINGUAL_E5_SMALL_1: KnowledgeEmbeddingProfile = {
   queryInstruction: 'query: ',
   passageInstruction: 'passage: ',
   ...SHARED_ENCODING,
+};
+
+/**
+ * The public profile, revision 2: the model, files, instructions and int8
+ * rerank of revision 1, with the stage-1 sign bits taken from
+ * `vector − center` (`centered-sign`). e5-small vectors share one dominant
+ * direction, so raw sign bits mostly encode that direction rather than the
+ * passage and the hamming pre-filter loses most true neighbours; centering
+ * on the pinned corpus mean restores them (see e5-small-center.ts for the
+ * provenance and the measurements). A query vector for revision 1 is a
+ * valid query vector for revision 2 — `sameVectorSpace` says so — and the
+ * reader centers it itself from the catalog's profile echo.
+ */
+export const MULTILINGUAL_E5_SMALL_2: KnowledgeEmbeddingProfile = {
+  ...MULTILINGUAL_E5_SMALL_1,
+  id: 'multilingual-e5-small@2',
+  quantization: {
+    int8: { method: 'symmetric-linear', scale: 127 },
+    binary: {
+      method: 'centered-sign',
+      threshold: 0,
+      packing: 'lsb-first',
+      center: [...MULTILINGUAL_E5_SMALL_CENTER],
+    },
+  },
 };
 
 /** The local-build default — matches gezel's shipped project embedder. */
@@ -66,7 +97,9 @@ export const BGE_SMALL_EN_V15_1: KnowledgeEmbeddingProfile = {
   ...SHARED_ENCODING,
 };
 
+/** Newest revision of a model first: `daemonEmbedderPin` picks the first match by repo. */
 export const KNOWLEDGE_EMBEDDING_PROFILES: readonly KnowledgeEmbeddingProfile[] = [
+  MULTILINGUAL_E5_SMALL_2,
   MULTILINGUAL_E5_SMALL_1,
   BGE_SMALL_EN_V15_1,
 ];

@@ -168,6 +168,10 @@ arguments, a stderr logger, and `runCraftbook(id, params, options)`. That helper
 starts a **project** craftbook and waits; options include `timeoutMs`, a saved
 `taskRef` to follow, `parentTaskRef` to link the child to its batch, and
 `onCreated(task)` to checkpoint the new reference.
+For drivers that generate craftbook documents, `validateCraftbook(document)`
+checks the same schema and step contracts as the daemon and returns the runtime
+craftbook. Call it before installing files or freezing a batch checkpoint;
+invalid documents throw actionable authoring errors without creating a task.
 Returning an object with `exitCode` sets the shell exit status. Module paths
 also work: `gezel workflow ./pipeline/storyify.mjs c23n`.
 

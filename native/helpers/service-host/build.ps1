@@ -142,13 +142,22 @@ Reset-BuildDirIfGeneratorChanged -BuildDir $buildDir -Generator 'Ninja'
 
 $versionStamp = Resolve-VersionStamp
 Write-Host "[service-host] stamping VERSIONINFO $versionStamp"
-$baselineArgs = if ($platform -eq 'win32-arm64') {
-  @('-DCMAKE_CXX_FLAGS=/arch:armv8.0')
-} else {
-  @()
+$cmakeArgs = @(
+  '-S', $helperDir,
+  '-B', $buildDir,
+  '-G', 'Ninja',
+  '-DCMAKE_BUILD_TYPE=Release',
+  '-DBUILD_TESTING=ON',
+  "-DGEZEL_SERVICE_HOST_VERSION=$versionStamp"
+)
+if ($platform -eq 'win32-arm64') {
+  # Append to an already multi-element argv array. A one-element array emitted
+  # by an `if` expression is unwrapped by PowerShell, and splatting the scalar
+  # sends CMake one argument per character (`-`, ..., `0`).
+  $cmakeArgs += '-DCMAKE_CXX_FLAGS=/arch:armv8.0'
 }
 
-& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DGEZEL_SERVICE_HOST_VERSION="$versionStamp" @baselineArgs
+& cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) {
   throw "cmake configure failed (exit $LASTEXITCODE)"
 }

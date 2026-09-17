@@ -55,9 +55,11 @@ CREATE VIRTUAL TABLE fts_documents USING fts5(
 
 /**
  * Per-shard tables. Vectors are plain BLOB columns keyed by chunk id:
- * `chunk_vectors_bit.v` holds ceil(dim/8) bytes of sign bits (LSB-first) and
- * `chunk_vectors_int8.v` holds dim signed bytes (symmetric-linear, scale
- * 127). Two tables, not one, so a stage-1 scan pages in 48 bytes per row
+ * `chunk_vectors_bit.v` holds ceil(dim/8) bytes of sign bits (LSB-first; of
+ * the unit vector for a `sign` profile, of `vector − center` for a
+ * `centered-sign` profile — the profile echo in the router's meta says
+ * which) and `chunk_vectors_int8.v` holds dim signed bytes
+ * (symmetric-linear, scale 127, never centered). Two tables, not one, so a stage-1 scan pages in 48 bytes per row
  * rather than the whole record. Rowid alignment invariant:
  * chunks.id == chunk_vectors_bit.chunk_id == chunk_vectors_int8.chunk_id ==
  * fts_chunks.rowid, dense from 1.

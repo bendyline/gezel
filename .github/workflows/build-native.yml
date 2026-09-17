@@ -117,8 +117,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Test Windows ARM64 release contracts
-        run: node --test scripts/assert-arm64-baseline.test.mjs
+      - name: Test native release contracts
+        run: node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs
 
   build:
     needs: native_contract_tests
@@ -1323,15 +1323,17 @@ jobs:
           }
           nuget install Microsoft.Trusted.Signing.Client -Version 1.0.60 `
             -OutputDirectory "${{ runner.temp }}\TrustedSigning"
-          # The client nuget ships one bin/<arch> tree per host. Prefer the
-          # runner's own (windows-11-arm needs arm64) and fall back to x64,
-          # which WoA can still run under emulation.
+          # Prefer a native plugin when the NuGet package contains one, then
+          # fall back to x64, which WoA can run under emulation. The signtool
+          # process selected below MUST have this same architecture: an arm64
+          # signtool cannot load the package's x64 Azure.CodeSigning.Dlib.dll.
           $hostDir = if ($env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$') { 'arm64' } else { 'x64' }
           $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\$hostDir" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $dlibDir) {
             $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\x64" -Directory | Select-Object -First 1
           }
           echo "TRUSTED_SIGNING_DLIB_PATH=$($dlibDir.FullName)\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          echo "TRUSTED_SIGNING_TOOL_ARCH=$($dlibDir.Name.ToLowerInvariant())" >> $env:GITHUB_ENV
           $metadata = @{
             Endpoint = "$env:SIGNING_ENDPOINT"
             CodeSigningAccountName = "$env:SIGNING_ACCOUNT"
@@ -1359,16 +1361,20 @@ jobs:
             exit 0
           }
           # The Windows SDK lays signtool.exe down under bin/<version>/<arch>.
-          # Prefer the runner's own architecture so the windows-11-arm legs do
-          # not depend on x64 emulation, then fall back to x64 and finally to
-          # whatever is on PATH.
+          # Match the process architecture to Azure.CodeSigning.Dlib.dll. The
+          # Trusted Signing 1.0.60 package falls back to its x64 plugin on the
+          # ARM runner, so that leg intentionally runs x64 signtool under WoA
+          # emulation instead of asking arm64 signtool to load an x64 DLL.
+          $signingArch = $env:TRUSTED_SIGNING_TOOL_ARCH
+          if ($signingArch -notin @('arm64', 'x64')) {
+            throw "[sign] unsupported Trusted Signing plugin architecture: $signingArch"
+          }
           $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
-          $sdkArches = if ($env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$') { @('arm64', 'x64') } else { @('x64') }
           $signtool = Get-ChildItem $sdkRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -like '10.*' } | Sort-Object Name -Descending |
-            ForEach-Object { $dir = $_.FullName; $sdkArches | ForEach-Object { Join-Path $dir "$_\signtool.exe" } } |
+            ForEach-Object { Join-Path $_.FullName "$signingArch\signtool.exe" } |
             Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $signtool) { $signtool = 'signtool.exe' }
+          if (-not $signtool) { throw "[sign] no $signingArch signtool.exe found under $sdkRoot" }
           $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
           $targets = Get-ChildItem "${{ steps.outdir.outputs.dir }}" -Recurse -File |
             Where-Object { $_.Extension -in '.exe', '.dll' } |

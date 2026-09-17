@@ -170,6 +170,8 @@ describe('KnowledgeManager — per-profile query embedding', () => {
   let profileHome: string;
   let profileManager: KnowledgeManager;
   const embedded: string[] = [];
+  /** A test may steer the vector arm at a chosen text while the query text says something else. */
+  let embedOverride: ((text: string) => number[]) | null = null;
 
   beforeAll(async () => {
     profileDir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-profile-'));
@@ -187,7 +189,7 @@ describe('KnowledgeManager — per-profile query embedding', () => {
       host: await createInProcessCatalogHost(),
       embedQueryForProfile: async (text, profile) => {
         embedded.push(`${profile.id}:${text}`);
-        return testHashVector(text);
+        return embedOverride ? embedOverride(text) : testHashVector(text);
       },
     });
     await profileManager.start();
@@ -232,6 +234,51 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     const dovetails = results.find((r) => r.documentId === 'dovetails');
     expect(dovetails).toBeDefined();
     expect(dovetails?.relevance).toBe(1);
+  });
+
+  it('fuses the arms: two lexical arms naming a document outrank a lone vector hit', async () => {
+    // Steer the vector arm at the dovetails chunk (its exact stored embed
+    // input) while the query TEXT names shellac, which the doc-title arm
+    // and the chunk-body arm both find. Under the old cosine-first order the
+    // steered chunk sat on top at relevance 1.0 and shellac trailed at 0.6.
+    const stored = (
+      await profileManager.host.search({
+        query: 'dovetail',
+        shardBudget: 6,
+        finalK: 24,
+        includeChunkFts: true,
+        catalogKeys: ['gezel-tests/e5-notes'],
+      })
+    ).chunks.find((hit) => hit.documentId === 'dovetails');
+    expect(stored).toBeDefined();
+    if (!stored) return;
+    const path = stored.headingPath.filter((h) => h !== stored.title);
+    const header = path.length > 0 ? `${stored.title}\n${path.join(' > ')}\n` : `${stored.title}\n`;
+    const dovetailsInput = `passage: ${header}${stored.text}`;
+    embedOverride = () => testHashVector(dovetailsInput);
+    try {
+      const results = await profileManager.searchUnified('Shellac', {
+        vector: null,
+        maxResults: 5,
+      });
+      expect(results.map((r) => r.documentId)).toEqual(['shellac', 'dovetails']);
+      // One entry per document, with the chunk that named it as the snippet.
+      expect(results[0]?.snippet).toContain('dries fast');
+      expect(results[0]?.relevance).toBe(1);
+      expect(results[1]?.relevance).toBeCloseTo(11 / 12, 6);
+      expect(results[1]?.snippet).toContain('Tails and pins');
+    } finally {
+      embedOverride = null;
+    }
+  });
+
+  it('a document every arm names comes first, once', async () => {
+    const results = await profileManager.searchUnified('Dovetail Joints', {
+      vector: null,
+      maxResults: 5,
+    });
+    expect(results[0]?.documentId).toBe('dovetails');
+    expect(new Set(results.map((r) => r.documentId)).size).toBe(results.length);
   });
 });
 

@@ -11,7 +11,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GEZK_FORMAT_VERSION, GEZK_INDEX_SCHEMA_VERSION, GEZK_MIME_TYPE } from '@bendyline/gezk';
+import {
+  GEZK_FORMAT_VERSION,
+  GEZK_INDEX_SCHEMA_VERSION,
+  GEZK_MIME_TYPE,
+  type KnowledgeEmbeddingProfile,
+  l2Normalize,
+  quantizeBinary,
+  quantizeBinaryForProfile,
+} from '@bendyline/gezk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   GezkArchiveError,
@@ -22,6 +30,7 @@ import {
 import { writeGezkArchive } from './archive/write.js';
 import type { CompileReport } from './compiler/compile.js';
 import { compileKnowledgeCatalog } from './compiler/compile.js';
+import { DatabaseSync } from './format/node-sqlite.js';
 import { CatalogHandle } from './reader/catalog-handle.js';
 import { validateExtractedCatalog } from './reader/validate.js';
 import {
@@ -420,5 +429,108 @@ describe('gezk 0.6: leaf filing, ordering, metadata, assets', () => {
     expect(handle.getDocument(FIXTURE_ASSET_DOCUMENT_ID)?.markdown).toContain(
       `](${FIXTURE_ASSET_PATH})`,
     );
+  });
+});
+
+describe('centered-sign profile', () => {
+  // A small deterministic center: enough to flip many bits of the hash
+  // embedder's isotropic vectors, so the centered path is genuinely
+  // exercised rather than coinciding with the raw one.
+  const CENTER = Array.from({ length: 384 }, (_, i) => ((i % 7) - 3) * 0.012);
+  const CENTERED_PROFILE: KnowledgeEmbeddingProfile = {
+    ...FIXTURE_EMBEDDING_PROFILE,
+    id: 'test-hash-embed-centered@1',
+    quantization: {
+      int8: { method: 'symmetric-linear', scale: 127 },
+      binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center: CENTER },
+    },
+  };
+  const CENTERED_DOCS = generateFixtureCorpus(80, 11);
+  let cDir: string;
+  let cExtracted: string;
+  let cHandle: CatalogHandle;
+
+  beforeAll(async () => {
+    cDir = await mkdtemp(join(tmpdir(), 'gezk-centered-'));
+    const archive = join(cDir, 'centered-en-1.0.0.gezk');
+    await compileKnowledgeCatalog({
+      catalog: {
+        id: 'centered-en',
+        version: '1.0.0',
+        name: 'Centered Fixture',
+        language: 'en',
+        publisher: { id: 'gezel-tests', name: 'Gezel Tests' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        license: { name: 'MIT', attributionRequired: false },
+      },
+      topics: FIXTURE_TOPICS,
+      documents: (async function* () {
+        for (const doc of CENTERED_DOCS) yield doc;
+      })(),
+      outputPath: archive,
+      embeddingProfile: CENTERED_PROFILE,
+      chunkingProfile: FIXTURE_CHUNKING_PROFILE,
+      embed: fakeEmbed,
+      countTokens: fakeCountTokens,
+      workDir: join(cDir, 'work'),
+      assets: FIXTURE_ASSETS,
+    });
+    cExtracted = join(cDir, 'extracted');
+    await extractGezkVerified(archive, cExtracted);
+    cHandle = CatalogHandle.open(cExtracted);
+  }, 240_000);
+
+  afterAll(async () => {
+    cHandle?.close();
+    await rm(cDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  /** The probe chunk's stored row and the exact vector the compiler embedded for it. */
+  async function probe(): Promise<{ chunkUid: string; bits: Uint8Array; unit: Float32Array }> {
+    const shard = cHandle.shards[0] as { path: string };
+    const db = new DatabaseSync(join(cExtracted, shard.path), { readOnly: true });
+    try {
+      const row = db
+        .prepare('SELECT chunk_uid, title, heading_path, text FROM chunks WHERE id = 1')
+        .get() as { chunk_uid: string; title: string; heading_path: string; text: string };
+      const bits = (
+        db.prepare('SELECT v FROM chunk_vectors_bit WHERE chunk_id = 1').get() as { v: Uint8Array }
+      ).v;
+      const path = (JSON.parse(row.heading_path) as string[]).filter((h) => h !== row.title);
+      const header = path.length > 0 ? `${row.title}\n${path.join(' > ')}\n` : `${row.title}\n`;
+      const [vector] = await fakeEmbed([
+        `${CENTERED_PROFILE.passageInstruction}${header}${row.text}`,
+      ]);
+      return {
+        chunkUid: row.chunk_uid,
+        bits: Uint8Array.from(bits),
+        unit: l2Normalize(vector as number[]),
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  it('echoes the centered profile and stores the bits of vector − center', async () => {
+    const echo = JSON.parse(
+      cHandle.meta.embedding_profile_json ?? '{}',
+    ) as KnowledgeEmbeddingProfile;
+    expect(echo.quantization.binary.method).toBe('centered-sign');
+    expect(echo.quantization.binary.center?.length).toBe(384);
+    const { bits, unit } = await probe();
+    expect(bits).toEqual(quantizeBinaryForProfile(CENTERED_PROFILE, unit));
+    expect(bits).not.toEqual(quantizeBinary(unit));
+  });
+
+  it('two-stage search returns a chunk for its own vector through the centered scan', async () => {
+    const { chunkUid, unit } = await probe();
+    const hits = cHandle.searchSemantic(unit, { finalK: 5 });
+    expect(hits[0]?.chunkUid).toBe(chunkUid);
+    expect(hits[0]?.cosine ?? 0).toBeGreaterThan(0.99);
+  });
+
+  it('passes deep validation, self-KNN included, over centered bits', async () => {
+    const validation = await validateExtractedCatalog(cExtracted, { deep: true });
+    expect(validation.checks.filter((c) => !c.ok)).toEqual([]);
   });
 });

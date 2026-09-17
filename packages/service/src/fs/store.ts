@@ -6921,6 +6921,7 @@ export class Store {
     projectId: string,
     id: string,
     version?: string,
+    options: { throwOnInvalid?: boolean } = {},
   ): Promise<Craftbook | null> {
     let ws: string;
     try {
@@ -6947,7 +6948,12 @@ export class Store {
     if (versions.length === 0) return null;
     const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
     if (!versions.includes(chosen)) return null;
-    const document = await readProjectCraftbookDocument(join(versionsDir, chosen), id, chosen);
+    const document = await readProjectCraftbookDocument(
+      join(versionsDir, chosen),
+      id,
+      chosen,
+      options,
+    );
     if (document !== undefined) return document;
     let parsedRaw: unknown;
     try {

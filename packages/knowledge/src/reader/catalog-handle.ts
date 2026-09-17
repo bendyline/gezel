@@ -2,12 +2,16 @@
  * One mounted catalog: the router database plus lazily opened shards, and
  * the two-stage query flow (the gezk spec §8 and §9):
  *
- *   embed query (caller) → centroid routing → per shard: bit-hamming KNN
+ *   embed query (caller) → centroid routing → per shard: sign-bit scan
  *   top-K → int8 rerank → fuse.
  *
  * Stage 1 runs in memory: a shard's sign-bit rows are loaded once into a
- * contiguous array (9.6 MB for a full 200k-chunk shard) and scanned with a
- * popcount, so no vector extension is needed to read a catalog.
+ * contiguous array (9.6 MB for a full 200k-chunk shard) and scanned with
+ * the float query (`asymmetricTopK`), so no vector extension is needed to
+ * read a catalog. The catalog's own profile echo says how its bits were
+ * derived: a `centered-sign` profile's bits come from `vector − center`, so
+ * the query is centered the same way before the scan. The int8 rerank is
+ * identical for both kinds of bits.
  *
  * The handle is synchronous (node:sqlite) and single-threaded by design —
  * the daemon confines every handle to its knowledge worker thread; the CLI
@@ -20,8 +24,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import { brotliDecompressSync } from 'node:zlib';
 import {
   type GezkIndexSchemaVersion,
+  KnowledgeEmbeddingProfileSchema,
   MAX_KNOWLEDGE_ASSET_BYTES,
   assetContentType,
+  embeddingProfileCenter,
   isKnowledgeAssetPath,
 } from '@bendyline/gezk';
 import {
@@ -32,8 +38,8 @@ import {
   ROUTE_SHARDS_EXPLICIT,
   rerankK,
 } from '../format/constants.js';
-import { quantizeBinary, rerankScore } from '../format/quantize.js';
-import { type ShardBitIndex, hammingTopK } from './bit-scan.js';
+import { centerVector, rerankScore } from '../format/quantize.js';
+import { type ShardBitIndex, asymmetricTopK, hammingTopK } from './bit-scan.js';
 import { documentFtsTopIds, sanitizeFtsQuery } from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
 
@@ -112,6 +118,8 @@ export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
   private readonly bitIndexes = new Map<string, ShardBitIndex>();
   private assetsByPath: Map<string, CatalogAssetInfo> | null = null;
+  /** Lazily parsed from the profile echo; `undefined` until first needed. */
+  private binaryCenterCache: Float32Array | null | undefined;
   readonly meta: Record<string, string>;
   readonly shards: ShardInfo[];
   /** The router's `PRAGMA user_version` generation; decides which columns exist. */
@@ -235,6 +243,29 @@ export class CatalogHandle {
     }
     this.bitIndexes.set(shard.path, index);
     return index;
+  }
+
+  /**
+   * The stage-1 center the catalog's bits were derived with (a
+   * `centered-sign` profile), or null for plain sign bits. Read from the
+   * router's profile echo, never from this reader's registry: the echo is
+   * the statement of how THIS catalog was built.
+   */
+  private binaryCenter(): Float32Array | null {
+    if (this.binaryCenterCache !== undefined) return this.binaryCenterCache;
+    const raw = this.meta.embedding_profile_json;
+    let parsed: unknown = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = null;
+    }
+    const profile = KnowledgeEmbeddingProfileSchema.safeParse(parsed);
+    if (!profile.success) {
+      throw new CatalogOpenError('router meta lacks a usable embedding profile', 'corrupt');
+    }
+    this.binaryCenterCache = embeddingProfileCenter(profile.data);
+    return this.binaryCenterCache;
   }
 
   /** The embedding dimension from the router's profile echo. */
@@ -591,7 +622,7 @@ export class CatalogHandle {
   }
 
   /**
-   * Two-stage semantic search over the routed shards: bit-hamming KNN
+   * Two-stage semantic search over the routed shards: sign-bit scan
    * (stage 1) → int8 rerank (stage 2). Sequential by design (§9).
    */
   searchSemantic(
@@ -607,14 +638,17 @@ export class CatalogHandle {
    * after global cross-catalog routing has already spent the S budget.
    */
   searchShards(queryVector: Float32Array, shardIds: number[], finalK: number): CatalogChunkHit[] {
-    const queryBits = quantizeBinary(queryVector);
+    // Centered bits need a centered query; the int8 rerank below always
+    // uses the raw unit query, since int8 vectors are never centered.
+    const center = this.binaryCenter();
+    const scanQuery = center ? centerVector(queryVector, center) : queryVector;
     const hits: CatalogChunkHit[] = [];
     for (const shardId of shardIds) {
       const shard = this.shards.find((s) => s.id === shardId);
       if (!shard) continue;
       const db = this.shardDb(shard);
       const k = rerankK(finalK, shard.chunkCount);
-      const candidates = hammingTopK(this.shardBits(shard), queryBits, k).map((hit) => ({
+      const candidates = asymmetricTopK(this.shardBits(shard), scanQuery, k).map((hit) => ({
         chunk_id: hit.chunkId,
       }));
       if (candidates.length === 0) continue;

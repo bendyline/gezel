@@ -12,6 +12,8 @@ const TOOLCHAIN_ONLY = new Set([
   'SHARD_DDL',
   'quantizeInt8',
   'quantizeBinary',
+  'quantizeBinaryForProfile',
+  'centerVector',
   'rerankScore',
   'l2Normalize',
   'canonicalizeJson',

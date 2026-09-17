@@ -159,6 +159,16 @@ function formatWithBiome(paths: string[]): void {
   }
   if (formatted.status !== 0) {
     const detail = formatted.stderr.trim() || formatted.stdout.trim();
+    // Biome exits non-zero with this message when every path it was handed is
+    // covered by an `ignore` entry. That is the case here: biome.json ignores
+    // `runs/**`, an UNANCHORED pattern that matches any directory named `runs`
+    // at any depth — including this published dataset dir. So `pnpm lint` never
+    // inspects these shards, the formatting pass has nothing to enforce, and
+    // treating it as fatal throws away a completed sweep AFTER its data is
+    // already on disk. Wild-caught 2026-09-08: a 3h20m core cell finished
+    // 33/33, wrote its shard, then aborted the whole sweep here before the
+    // remaining cells ran.
+    if (/No files were processed/i.test(detail)) return;
     throw new Error(`[scorecard] Biome could not format${detail ? `:\n${detail}` : ''}`);
   }
 }
