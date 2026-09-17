@@ -81,8 +81,9 @@ Extraction verifies every file against the manifest (both directions —
 undeclared and missing files are equally fatal) and rejects unsafe archive
 entries. Catalog databases are opened strictly read-only and immutable.
 Semantic search loads a shard's sign-bit rows into memory once (9.6 MB for a
-full 200,000-chunk shard) and scans them with a popcount; the int8 rerank
-reads the candidates by rowid.
+full 200,000-chunk shard) and scores the float query against them through a
+per-byte lookup table (the query is centered first when the catalog's profile
+is `centered-sign`); the int8 rerank reads the top 1,024 candidates by rowid.
 
 ## Stability
 

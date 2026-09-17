@@ -66,6 +66,8 @@ export {
   assetExtension,
   assetKindForExtension,
   embeddingProfileArtifacts,
+  embeddingProfileCenter,
+  embeddingProfileCenterProblem,
   formatKnowledgeUri,
   isKnowledgeAssetPath,
   isSupportedFormatVersion,
@@ -98,6 +100,7 @@ export type {
  * package's profile registry test asserts the two lists stay identical.
  */
 export const KNOWLEDGE_EMBEDDING_PROFILE_IDS = [
+  'multilingual-e5-small@2',
   'multilingual-e5-small@1',
   'bge-small-en-v1.5@1',
 ] as const;

@@ -217,18 +217,25 @@ What this document needs from it:
   WebP and inert SVG only, magic bytes checked — and the daemon serves them
   from the mounted catalog behind bearer auth, so the UI turns them into
   `blob:` URLs rather than pointing an `<img>` at the route.
-- Vectors use the two-stage `bit+int8` encoding: 384 sign bits for a hamming
-  pre-filter, int8 for the cosine rerank, with the rounding rule pinned by the
-  conformance kit. The reader keeps a shard's sign-bit rows in memory (9.6 MB
-  per 200,000 chunks) and scans them; no index structure is part of the format.
+- Vectors use the two-stage `bit+int8` encoding: 384 sign bits for the
+  stage-1 pre-filter, int8 for the cosine rerank, with the rounding rule
+  pinned by the conformance kit. A profile says whether the bits are the raw
+  signs (`sign`) or the signs of `vector − center` (`centered-sign`, the
+  `multilingual-e5-small@2` revision — e5's shared mean direction otherwise
+  swamps the bits). The reader keeps a shard's sign-bit rows in memory
+  (9.6 MB per 200,000 chunks) and scans them; no index structure is part of
+  the format.
 - Embedding profiles are self-describing (Hugging Face repo + revision, the
   exact ONNX graph and tokenizer file with their sha256 digests, pooling,
   normalization, instructions, encoding). Published profiles:
-  `multilingual-e5-small@1` (public catalogs) and `bge-small-en-v1.5@1`
-  (local builds), both pinned to the full-precision `onnx/model.onnx`. A
-  reader never mixes vectors across profile ids; matching only a dimension
-  is unsafe, and gezel's embedders refuse to serve a profile whose fetched
-  files do not hash to its pins (see [gezk-format.md](gezk-format.md)).
+  `multilingual-e5-small@2` (public catalogs; centered stage-1 bits),
+  `multilingual-e5-small@1` (its predecessor — same vectors, raw bits;
+  still readable) and `bge-small-en-v1.5@1` (local builds), all pinned to
+  the full-precision `onnx/model.onnx`. A reader never mixes vectors across
+  vector spaces (`sameVectorSpace`: model, files, instructions, int8 rerank;
+  the two e5 revisions share one); matching only a dimension is unsafe, and
+  gezel's embedders refuse to serve a profile whose fetched files do not
+  hash to its pins (see [gezk-format.md](gezk-format.md)).
 - References are publisher-qualified: `knowledge://<publisherId>/<catalogId>/<documentId>[#chunk=…]`.
   Within one install a catalog id still maps to one publisher (the user
   registry refuses a second), so product routes keep addressing catalogs by id.

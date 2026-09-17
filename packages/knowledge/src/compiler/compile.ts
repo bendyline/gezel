@@ -65,7 +65,7 @@ import { ROUTER_DDL, SHARD_DDL } from '../format/ddl.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
-import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
+import { l2Normalize, quantizeBinaryForProfile, quantizeInt8 } from '../format/quantize.js';
 import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 
@@ -431,7 +431,9 @@ export async function compileKnowledgeCatalog(
         }
         const row = pendingRows[i] as { shardId: number; chunkId: number };
         const stmts = vecStmtsFor(shardDb(row.shardId));
-        stmts.vec.run(BigInt(row.chunkId), Buffer.from(quantizeBinary(unit)));
+        // Sign bits per the profile: raw for `sign`, from `unit − center` for
+        // `centered-sign` (§6.2). Readers derive the query's side the same way.
+        stmts.vec.run(BigInt(row.chunkId), Buffer.from(quantizeBinaryForProfile(profile, unit)));
         stmts.int8.run(BigInt(row.chunkId), Buffer.from(quantizeInt8(unit).buffer));
         // Deterministic stride sample for centroids (§3.3).
         const shardTotal = shardChunkCounts.get(row.shardId) ?? 0;

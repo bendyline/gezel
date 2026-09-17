@@ -55,9 +55,20 @@ are frozen in their own directory; only the current version's is rewritten.
   sign-bit rows stay resident up to a 256 MB budget across catalogs.
 - **Routing knobs**: `S = 3` shards for proactive retrieval, `S = 6` for
   explicit search, shared globally across active catalogs; stage-1 keeps
-  `K = min(512, max(128, 8·finalK))` candidates with `finalK = 24`. These are
-  runtime constants (`packages/knowledge/src/format/constants.ts`), not
-  format constants.
+  `K = min(4096, max(1024, 32·finalK))` candidates with `finalK = 24`. These
+  are runtime constants (`packages/knowledge/src/format/constants.ts`), not
+  format constants. K used to be `min(512, max(128, 8·finalK))` = 192; on a
+  43,859-chunk multilingual-e5-small catalog that pool held only 22% of the
+  exact top-24 for natural-language questions (raw sign bits), which is how
+  "Who painted the Mona Lisa?" returned three other Mona Lisa copies and not
+  the article. With the `centered-sign` profile revision and the asymmetric
+  scan, 1,024 candidates hold 99%.
+- **Stage-1 scan**: the reader scores the float query against each row's
+  bits (`asymmetricTopK`, Σ q·±1 via a per-byte lookup table, ~8 ms per
+  200k-row shard) rather than binarizing the query for a popcount; for a
+  `centered-sign` profile the query is centered first with the center from
+  the catalog's own profile echo. The hamming scan stays as the format's
+  baseline and the self-KNN smoke.
 - **Latency gates** (warm, from the knowledge-bench eval): ≤ 250 ms p95
   proactive retrieval, ≤ 750 ms p95 explicit search.
 - **Query embedding is verified, not assumed.** A catalog's query vector
@@ -72,8 +83,13 @@ are frozen in their own directory; only the current version's is rewritten.
   daemon's memory pipeline itself stays on the repo's `main` cache key so
   existing installs do not re-download; the digest check is what makes
   sharing it safe.
-- **Merge weight** `MERGE_WEIGHTS.knowledge = 370`; relevance mapping
-  `clamp01((cosine − 0.30) / 0.50)`.
+- **Merge weight** `MERGE_WEIGHTS.knowledge = 370`. Explicit search fuses
+  the vector arm, the doc-title FTS arm and the chunk-body FTS arm per
+  document by reciprocal rank (k = 60; weights 1 / 1 / 0.5) and maps the
+  fused rank to relevance as `11 / (11 + rank)` — rank 0 is a strong 1.0.
+  The former `clamp01((cosine − 0.30) / 0.50)` mapping saturated: e5-small
+  cosines sit in a 0.7–0.9 band for everything, so every vector hit scored
+  ≈ 0.9–1.0 and outranked an exact title match capped at 0.6.
 - **Installed layout**: `~/.gezel/knowledge/catalogs/<publisher>/<catalog>/<version>/<digest16>/`
   (private tier) or the machine asset store (shared tier); the user registry
   keeps one catalog id per install, so product routes address catalogs by

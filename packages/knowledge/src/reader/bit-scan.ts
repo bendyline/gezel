@@ -1,9 +1,20 @@
 /**
  * Stage-1 retrieval over a shard's sign-bit vectors, in memory. A full
- * 200k-chunk shard is 9.6 MB of bits; one linear hamming pass with a SWAR
- * popcount plus a histogram selection of the top-K is a few milliseconds and
- * needs nothing beyond plain SQLite to load — which is what lets any reader
- * implement the format without a vector extension.
+ * 200k-chunk shard is 9.6 MB of bits, and either scan below is one linear
+ * pass over them, a few milliseconds, needing nothing beyond plain SQLite
+ * to load — which is what lets any reader implement the format without a
+ * vector extension.
+ *
+ * Two scans share the bits:
+ *   - `hammingTopK` — symmetric: the query is binarized too and rows are
+ *     ranked by popcount(xor). The format's baseline (§2), and what the
+ *     self-KNN smoke and the conformance kit exercise.
+ *   - `asymmetricTopK` — the float query against each row's bits, ranked by
+ *     Σ q[d]·(bit ? +1 : −1). Keeps the query's magnitudes, which on real
+ *     embeddings roughly doubles the share of true neighbours a small
+ *     candidate pool retains (measured on multilingual-e5-small: 22% → 39%
+ *     of the exact top-24 at K = 192 with raw bits, 73% → 88% with centered
+ *     bits). This is what `CatalogHandle` uses.
  */
 
 export interface ShardBitIndex {
@@ -96,5 +107,119 @@ export function hammingTopK(index: ShardBitIndex, query: Uint8Array, k: number):
     }
   }
   hits.sort((a, b) => a.distance - b.distance || a.chunkId - b.chunkId);
+  return hits;
+}
+
+export interface AsymmetricHit {
+  chunkId: number;
+  score: number;
+}
+
+/**
+ * The K best rows by asymmetric score, descending, ties broken by chunk id.
+ *
+ * The score of a row is Σ_d query[d] · (bit_d ? +1 : −1). Per query a table
+ * of 256 partial sums is built for each byte position, so a row costs
+ * `bytesPerRow` table reads and adds — about the popcount scan's cost. The
+ * top-K is kept in a bounded min-heap whose root is the worst kept row.
+ *
+ * For a `centered-sign` profile the caller passes `query − center`; for a
+ * plain `sign` profile the unit query. The bits are whatever the catalog
+ * stored; this function does not know or care which.
+ */
+export function asymmetricTopK(
+  index: ShardBitIndex,
+  query: ArrayLike<number>,
+  k: number,
+): AsymmetricHit[] {
+  const { bits, bytesPerRow, rows } = index;
+  if (Math.ceil(query.length / 8) !== bytesPerRow) {
+    throw new Error(
+      `query has ${query.length} dimensions, shard rows have ${bytesPerRow} bytes of bits`,
+    );
+  }
+  const limit = Math.min(k, rows);
+  if (limit <= 0) return [];
+
+  const lut = new Float32Array(bytesPerRow * 256);
+  for (let p = 0; p < bytesPerRow; p++) {
+    for (let b = 0; b < 256; b++) {
+      let s = 0;
+      for (let i = 0; i < 8; i++) {
+        const d = p * 8 + i;
+        if (d >= query.length) break;
+        const v = query[d] as number;
+        s += (b >> i) & 1 ? v : -v;
+      }
+      lut[p * 256 + b] = s;
+    }
+  }
+
+  // Bounded min-heap: index 0 holds the worst kept row (lowest score; among
+  // equal scores the higher chunk id, so ties resolve to the lower id).
+  const heapScore = new Float64Array(limit);
+  const heapId = new Int32Array(limit);
+  let size = 0;
+  const worse = (i: number, j: number): boolean =>
+    (heapScore[i] as number) < (heapScore[j] as number) ||
+    ((heapScore[i] as number) === (heapScore[j] as number) &&
+      (heapId[i] as number) > (heapId[j] as number));
+  const swap = (i: number, j: number): void => {
+    const s = heapScore[i] as number;
+    const id = heapId[i] as number;
+    heapScore[i] = heapScore[j] as number;
+    heapId[i] = heapId[j] as number;
+    heapScore[j] = s;
+    heapId[j] = id;
+  };
+  const siftUp = (start: number): void => {
+    let i = start;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!worse(i, parent)) break;
+      swap(i, parent);
+      i = parent;
+    }
+  };
+  const siftDown = (start: number): void => {
+    let i = start;
+    for (;;) {
+      const left = 2 * i + 1;
+      if (left >= size) break;
+      const right = left + 1;
+      const child = right < size && worse(right, left) ? right : left;
+      if (!worse(child, i)) break;
+      swap(child, i);
+      i = child;
+    }
+  };
+
+  let offset = 0;
+  for (let r = 0; r < rows; r++) {
+    let score = 0;
+    for (let p = 0; p < bytesPerRow; p++) {
+      score += lut[p * 256 + (bits[offset + p] as number)] as number;
+    }
+    offset += bytesPerRow;
+    if (size < limit) {
+      heapScore[size] = score;
+      heapId[size] = r + 1;
+      size++;
+      siftUp(size - 1);
+    } else if (
+      score > (heapScore[0] as number) ||
+      (score === (heapScore[0] as number) && r + 1 < (heapId[0] as number))
+    ) {
+      heapScore[0] = score;
+      heapId[0] = r + 1;
+      siftDown(0);
+    }
+  }
+
+  const hits: AsymmetricHit[] = [];
+  for (let i = 0; i < size; i++) {
+    hits.push({ chunkId: heapId[i] as number, score: heapScore[i] as number });
+  }
+  hits.sort((a, b) => b.score - a.score || a.chunkId - b.chunkId);
   return hits;
 }

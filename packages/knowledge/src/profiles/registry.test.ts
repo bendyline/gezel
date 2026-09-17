@@ -1,10 +1,16 @@
-import { KnowledgeEmbeddingProfileSchema } from '@bendyline/gezk';
+import {
+  KnowledgeEmbeddingProfileSchema,
+  embeddingProfileCenter,
+  embeddingProfileCenterProblem,
+  sameVectorSpace,
+} from '@bendyline/gezk';
 import { describe, expect, it } from 'vitest';
 import {
   BGE_SMALL_EN_V15_1,
   KNOWLEDGE_EMBEDDING_PROFILES,
   MARKDOWN_CHUNKS_2,
   MULTILINGUAL_E5_SMALL_1,
+  MULTILINGUAL_E5_SMALL_2,
   knowledgeEmbeddingProfile,
 } from './registry.js';
 
@@ -52,6 +58,30 @@ describe('embedding profile registry', () => {
     // Two distinct models never share an artifact.
     expect(MULTILINGUAL_E5_SMALL_1.model.onnxDigest).not.toBe(BGE_SMALL_EN_V15_1.model.onnxDigest);
     expect(MULTILINGUAL_E5_SMALL_1.tokenizer.digest).not.toBe(BGE_SMALL_EN_V15_1.tokenizer.digest);
+  });
+
+  it('revision 2 of the public profile centers its stage-1 bits in the same float space', () => {
+    expect(MULTILINGUAL_E5_SMALL_2.id).toBe('multilingual-e5-small@2');
+    expect(MULTILINGUAL_E5_SMALL_1.quantization.binary.method).toBe('sign');
+    expect(MULTILINGUAL_E5_SMALL_2.quantization.binary.method).toBe('centered-sign');
+    expect(embeddingProfileCenterProblem(MULTILINGUAL_E5_SMALL_2)).toBeNull();
+    const center = embeddingProfileCenter(MULTILINGUAL_E5_SMALL_2);
+    expect(center?.length).toBe(384);
+    // The corpus mean of an anisotropic model: most of a unit vector, not a
+    // rounding artefact and not a full vector.
+    const norm = Math.sqrt(Array.from(center ?? []).reduce((sum, x) => sum + x * x, 0));
+    expect(norm).toBeGreaterThan(0.8);
+    expect(norm).toBeLessThan(0.95);
+    // Same model files, instructions and int8 rerank: one query vector serves both.
+    expect(MULTILINGUAL_E5_SMALL_2.model).toEqual(MULTILINGUAL_E5_SMALL_1.model);
+    expect(MULTILINGUAL_E5_SMALL_2.tokenizer).toEqual(MULTILINGUAL_E5_SMALL_1.tokenizer);
+    expect(sameVectorSpace(MULTILINGUAL_E5_SMALL_1, MULTILINGUAL_E5_SMALL_2)).toBe(true);
+    // New builds pick the newest revision: it is listed first for its repo.
+    expect(
+      KNOWLEDGE_EMBEDDING_PROFILES.find((p) => p.model.repo === 'Xenova/multilingual-e5-small'),
+    ).toBe(MULTILINGUAL_E5_SMALL_2);
+    expect(knowledgeEmbeddingProfile('multilingual-e5-small@2')).toBe(MULTILINGUAL_E5_SMALL_2);
+    expect(knowledgeEmbeddingProfile('multilingual-e5-small@1')).toBe(MULTILINGUAL_E5_SMALL_1);
   });
 
   it('resolves by id and rejects unknown ids', () => {

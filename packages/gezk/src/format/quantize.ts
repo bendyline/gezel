@@ -4,7 +4,16 @@
  * functions, so extension-internal semantics can never drift the format:
  * both the compiler (packing) and the reader (query packing + rerank) call
  * exactly these functions.
+ *
+ * `quantizeBinary` is the raw sign packing. What a catalog actually stores
+ * depends on the profile's `quantization.binary.method`: `sign` packs the
+ * unit vector, `centered-sign` packs `vector − center` (see the profile
+ * schema for why). `quantizeBinaryForProfile` is the one entry point that
+ * applies that rule, so the compiler and every reader derive bits the same
+ * way.
  */
+
+import { type KnowledgeEmbeddingProfile, embeddingProfileCenter } from '../schemas/profiles.js';
 
 /** int8: symmetric linear, scale 127, −128 never produced. */
 export function quantizeInt8(unitVector: ArrayLike<number>): Int8Array {
@@ -14,6 +23,29 @@ export function quantizeInt8(unitVector: ArrayLike<number>): Int8Array {
     out[i] = q > 127 ? 127 : q < -127 ? -127 : q;
   }
   return out;
+}
+
+/** `vector − center`, the input to a `centered-sign` profile's bits. */
+export function centerVector(vector: ArrayLike<number>, center: ArrayLike<number>): Float32Array {
+  if (vector.length !== center.length) {
+    throw new Error(`vector has ${vector.length} dimensions, center has ${center.length}`);
+  }
+  const out = new Float32Array(vector.length);
+  for (let i = 0; i < vector.length; i++) out[i] = (vector[i] as number) - (center[i] as number);
+  return out;
+}
+
+/**
+ * The sign bits a profile stores for a unit vector — and, symmetrically,
+ * the bits a hamming reader packs for a query: centered first when the
+ * profile pins a center, raw otherwise.
+ */
+export function quantizeBinaryForProfile(
+  profile: KnowledgeEmbeddingProfile,
+  unitVector: ArrayLike<number>,
+): Uint8Array {
+  const center = embeddingProfileCenter(profile);
+  return quantizeBinary(center ? centerVector(unitVector, center) : unitVector);
 }
 
 /** binary: sign threshold 0 (exact 0.0 → 0), packed LSB-first. */

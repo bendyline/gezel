@@ -14,7 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { RERANK_FINAL_K, rerankK } from '../format/constants.js';
 import { quantizeBinary, quantizeInt8, rerankScore } from '../format/quantize.js';
-import { type ShardBitIndex, hammingTopK } from '../reader/bit-scan.js';
+import { type ShardBitIndex, asymmetricTopK, hammingTopK } from '../reader/bit-scan.js';
 
 const enabled = process.env.GEZK_BENCH === '1';
 const CHUNKS = 200_000;
@@ -95,6 +95,17 @@ describe.skipIf(!enabled)('large-shard benchmark (GEZK_BENCH=1)', () => {
     scanTimes.sort((a, b) => a - b);
     const scanMedian = scanTimes[Math.floor(scanTimes.length / 2)] as number;
 
+    // The scan the reader actually runs: float query vs bits via a byte LUT.
+    asymmetricTopK(index, query, k);
+    const asymTimes: number[] = [];
+    for (let run = 0; run < 10; run++) {
+      const a0 = performance.now();
+      asymmetricTopK(index, query, k);
+      asymTimes.push(performance.now() - a0);
+    }
+    asymTimes.sort((a, b) => a - b);
+    const asymMedian = asymTimes[Math.floor(asymTimes.length / 2)] as number;
+
     const r0 = performance.now();
     const reranked = hits
       .map((h) => {
@@ -112,7 +123,7 @@ describe.skipIf(!enabled)('large-shard benchmark (GEZK_BENCH=1)', () => {
     const rerankMs = performance.now() - r0;
 
     console.log(
-      `[bench] k=${k} in-memory hamming median ${scanMedian.toFixed(1)}ms over ${CHUNKS} rows; ` +
+      `[bench] k=${k} in-memory hamming median ${scanMedian.toFixed(1)}ms, asymmetric median ${asymMedian.toFixed(1)}ms over ${CHUNKS} rows; ` +
         `int8 rerank ${rerankMs.toFixed(1)}ms; top score ${reranked[0]?.score.toFixed(3)}`,
     );
     db.close();
@@ -122,6 +133,7 @@ describe.skipIf(!enabled)('large-shard benchmark (GEZK_BENCH=1)', () => {
     // Generous ceilings — the design budget is 10-25ms scan; a slow CI runner
     // gets 4x headroom before this counts as a regression signal.
     expect(scanMedian).toBeLessThan(100);
+    expect(asymMedian).toBeLessThan(100);
     expect(rerankMs).toBeLessThan(50);
   });
 });

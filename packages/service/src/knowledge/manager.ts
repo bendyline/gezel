@@ -51,7 +51,7 @@ import {
 } from '../machine-engine/knowledge-assets.js';
 import { embedKnowledgeQuery, sharesDaemonEmbedder } from '../memory/embeddings.js';
 import { ChatModelInstallRegistry } from '../models/install-registry.js';
-import { ftsRankRelevance, scoreResult } from '../search/search-service.js';
+import { scoreResult } from '../search/search-service.js';
 import type {
   GlobalSearchHit,
   GlobalSearchResponse,
@@ -97,9 +97,42 @@ function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSem
   return 'keyword-only';
 }
 
-/** Provisional cosine → calibrated relevance (tuned by Phase-4 evals). */
-function cosineRelevance(cosine: number): number {
-  return Math.max(0, Math.min(1, (cosine - 0.3) / 0.5));
+/**
+ * Explicit search fuses three arms per catalog by reciprocal rank (k = 60):
+ * the vector chunks (best chunk per document, by rerank cosine), the
+ * doc-title FTS hits, and the chunk-body FTS hits. Rank fusion instead of
+ * score comparison because the arms' scores are not commensurable — e5
+ * cosines sit in a narrow 0.7–0.9 band for everything, so a cosine-first
+ * ordering buried an exact title match under any vaguely related passage
+ * ("Who painted the Mona Lisa?" listed three other Mona Lisa copies above
+ * the article whose title the question names). Two lexical arms agreeing
+ * on a document now outrank one vector arm; a document every arm names
+ * comes first.
+ */
+const RRF_K = 60;
+const ARM_WEIGHTS = { vector: 1, docFts: 1, chunkFts: 0.5 } as const;
+/** Fused documents per catalog: keeps one catalog from monopolizing the merged list. */
+const PER_CATALOG_CAP = 6;
+
+/** Rank-anchored relevance for a fused knowledge result: the best hit is a strong 1.0, decaying RRF-style. */
+function fusedRankRelevance(rank: number): number {
+  return 11 / (11 + rank);
+}
+
+/**
+ * The first prose paragraph of a document body, for a hit that no chunk
+ * carries (a title-only match): the model gets something to read, not just
+ * a summary line. Skips the title heading and a key-facts list.
+ */
+function leadExcerpt(markdown: string, max = 600): string {
+  const body = markdown.replace(/^#\s[^\n]*\n+/, '');
+  const paragraph =
+    body
+      .split(/\n\s*\n/)
+      .map((part) => part.trim())
+      .find((part) => part.length > 0 && !part.startsWith('#') && !part.startsWith('- ')) ??
+    body.trim();
+  return paragraph.length > max ? `${paragraph.slice(0, max - 1)}…` : paragraph;
 }
 
 function errorMessage(err: unknown): string {
@@ -1134,47 +1167,109 @@ export class KnowledgeManager {
       response.documents.push(...part.documents);
     }
 
-    const out: UnifiedSearchResult[] = [];
-    const perCatalogCount = new Map<string, number>();
-    const sorted = [...response.chunks].sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0));
-    let rank = 0;
-    for (const hit of sorted) {
-      const info = this.mountedByKey.get(hit.catalogKey);
-      if (!info) continue;
-      const count = perCatalogCount.get(hit.catalogKey) ?? 0;
-      if (count >= 3) continue; // diversity cap: ≤3 chunks per catalog
-      perCatalogCount.set(hit.catalogKey, count + 1);
-      out.push(this.toResult(info, hit, rank++));
-      if (out.length >= Math.max(10, opts.maxResults)) break;
+    // ── fuse the arms per document ──────────────────────────────────────
+    const fused = new Map<
+      string,
+      { catalogKey: string; documentId: string; score: number; chunk?: GlobalSearchHit }
+    >();
+    const bump = (
+      catalogKey: string,
+      documentId: string,
+      weight: number,
+      rank: number,
+      chunk?: GlobalSearchHit,
+    ): void => {
+      const key = `${catalogKey}\u0000${documentId}`;
+      const entry = fused.get(key) ?? { catalogKey, documentId, score: 0 };
+      entry.score += weight / (RRF_K + rank);
+      // The document's representative chunk: its best vector chunk, else
+      // whichever chunk-FTS row named it.
+      if (chunk && (!entry.chunk || (chunk.cosine ?? -1) > (entry.chunk.cosine ?? -1))) {
+        entry.chunk = chunk;
+      }
+      fused.set(key, entry);
+    };
+
+    // Vector arm: one rank per document, in rerank-cosine order.
+    const seenVector = new Set<string>();
+    let vectorRank = 0;
+    for (const hit of response.chunks
+      .filter((h) => h.cosine !== undefined)
+      .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
+      const key = `${hit.catalogKey}\u0000${hit.documentId}`;
+      if (seenVector.has(key)) continue;
+      seenVector.add(key);
+      bump(hit.catalogKey, hit.documentId, ARM_WEIGHTS.vector, vectorRank++, hit);
+    }
+    // Chunk-body FTS arm: BM25 order as the shards returned it, ranked per catalog.
+    const chunkFtsRank = new Map<string, number>();
+    const seenChunkFts = new Set<string>();
+    for (const hit of response.chunks.filter((h) => h.cosine === undefined)) {
+      const key = `${hit.catalogKey}\u0000${hit.documentId}`;
+      if (seenChunkFts.has(key)) continue;
+      seenChunkFts.add(key);
+      const rank = chunkFtsRank.get(hit.catalogKey) ?? 0;
+      chunkFtsRank.set(hit.catalogKey, rank + 1);
+      bump(hit.catalogKey, hit.documentId, ARM_WEIGHTS.chunkFts, rank, hit);
+    }
+    // Doc-title FTS arm: exact-name evidence, ranked per catalog by the host.
+    for (const doc of response.documents) {
+      bump(doc.catalogKey, doc.documentId, ARM_WEIGHTS.docFts, doc.rank);
     }
 
-    // Doc-title FTS floor: exact-name recall never depends on vector routing.
-    for (const [docRank, doc] of response.documents.entries()) {
-      const info = this.mountedByKey.get(doc.catalogKey);
+    const ordered = [...fused.values()].sort(
+      (a, b) =>
+        b.score - a.score ||
+        (b.chunk?.cosine ?? -1) - (a.chunk?.cosine ?? -1) ||
+        a.documentId.localeCompare(b.documentId),
+    );
+    const out: UnifiedSearchResult[] = [];
+    const perCatalogCount = new Map<string, number>();
+    for (const entry of ordered) {
+      const info = this.mountedByKey.get(entry.catalogKey);
       if (!info) continue;
-      const meta = await this.opts.host.getDocument(info.key, doc.documentId).catch(() => null);
-      if (!meta) continue;
-      out.push({
-        kind: 'knowledge',
-        id: `knowledge:${info.ref.catalogId}:doc:${doc.documentId}`,
-        title: meta.title,
-        subtitle: `${info.name} · ${info.topicNames.get(meta.topicId) ?? meta.topicId}`,
-        ...(meta.summary ? { snippet: meta.summary } : {}),
-        retrievalSource: 'knowledge',
-        catalogId: info.ref.catalogId,
-        catalogVersion: info.ref.version,
-        documentId: doc.documentId,
-        topicPath: [info.topicNames.get(meta.topicId) ?? meta.topicId],
-        uri: formatKnowledgeUri({
-          publisherId: info.ref.publisherId,
-          catalogId: info.ref.catalogId,
-          documentId: doc.documentId,
-        }),
-        ...(meta.sourceUrl ? { sourceUrl: meta.sourceUrl } : {}),
-        ...scoreResult('knowledge', ftsRankRelevance(docRank)),
-      });
+      const count = perCatalogCount.get(entry.catalogKey) ?? 0;
+      if (count >= PER_CATALOG_CAP) continue;
+      const relevance = fusedRankRelevance(out.length);
+      const result = entry.chunk
+        ? this.toResult(info, entry.chunk, relevance)
+        : await this.toDocumentResult(info, entry.documentId, relevance);
+      if (!result) continue;
+      perCatalogCount.set(entry.catalogKey, count + 1);
+      out.push(result);
+      if (out.length >= Math.max(10, opts.maxResults)) break;
     }
     return out;
+  }
+
+  /** A document the lexical arms named but no chunk carries: cite it with its lead paragraph. */
+  private async toDocumentResult(
+    info: MountedInfo,
+    documentId: string,
+    relevance: number,
+  ): Promise<UnifiedSearchResult | null> {
+    const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
+    if (!doc) return null;
+    const snippet = leadExcerpt(doc.markdown) || doc.summary || '';
+    return {
+      kind: 'knowledge',
+      id: `knowledge:${info.ref.catalogId}:doc:${documentId}`,
+      title: doc.title,
+      subtitle: `${info.name} · ${info.topicNames.get(doc.topicId) ?? doc.topicId}`,
+      ...(snippet ? { snippet } : {}),
+      retrievalSource: 'knowledge',
+      catalogId: info.ref.catalogId,
+      catalogVersion: info.ref.version,
+      documentId,
+      topicPath: [info.topicNames.get(doc.topicId) ?? doc.topicId],
+      uri: formatKnowledgeUri({
+        publisherId: info.ref.publisherId,
+        catalogId: info.ref.catalogId,
+        documentId,
+      }),
+      ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...scoreResult('knowledge', relevance),
+    };
   }
 
   /** A profile's query vector, or undefined when its model is unavailable (that group searches FTS). */
@@ -1193,9 +1288,11 @@ export class KnowledgeManager {
     }
   }
 
-  private toResult(info: MountedInfo, hit: GlobalSearchHit, rank: number): UnifiedSearchResult {
-    const relevance =
-      hit.cosine !== undefined ? cosineRelevance(hit.cosine) : ftsRankRelevance(rank);
+  private toResult(
+    info: MountedInfo,
+    hit: GlobalSearchHit,
+    relevance: number,
+  ): UnifiedSearchResult {
     return {
       kind: 'knowledge',
       id: `knowledge:${info.ref.catalogId}:${hit.chunkUid}`,
