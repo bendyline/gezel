@@ -2745,7 +2745,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       // and its declarative deliverable is passing — naming that file in
       // a stage directive sends the repair at the wrong artifact.
       const deliverableFile =
-        frozenSurface === 'note' || frozenSurface === 'evidence'
+        frozenSurface === 'note' || frozenSurface === 'evidence' || frozenSurface === 'script'
           ? undefined
           : step.advanceWhen?.file;
       if (stage === 2 && !deliverableFile) stage = 1;
@@ -3248,9 +3248,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     ]);
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     // See the frozen path: a passing deliverable is not the thing to
-    // rewrite, and a note surface has no file to name at all.
+    // rewrite, and notes, read evidence, and opaque scripts have no file to name.
     const deliverableFile =
-      rejectSurface === 'note' || rejectSurface === 'evidence' ? undefined : step.advanceWhen?.file;
+      rejectSurface === 'note' || rejectSurface === 'evidence' || rejectSurface === 'script'
+        ? undefined
+        : step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
     // Converging-loop rejection: the same checks fail, but on fewer
     // outstanding items than last attempt. `signature` already carries the

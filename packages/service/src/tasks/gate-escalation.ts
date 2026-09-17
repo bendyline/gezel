@@ -142,14 +142,14 @@ export function appendGateAttempt(
  * broken grammar, an unprovable existence claim, and a tool that had
  * been stripped from the roster because workspace writes were off.
  */
-export type DeliverableSurface = 'workspace' | 'artifact' | 'note' | 'evidence';
+export type DeliverableSurface = 'workspace' | 'artifact' | 'note' | 'evidence' | 'script';
 
 /**
  * Classify a step's deliverable surface from what its gate actually
  * reads. What FAILED wins when the caller knows it; otherwise an
  * explicit `advanceWhen` deliverable, then the gate's own checks, and a
- * gate that names no file anywhere while carrying scripts is judging the
- * task record.
+ * gate that names no file anywhere while carrying scripts has an opaque
+ * repair target. A script may read artifacts, notes, or external state.
  *
  * `failedChecks` matters because a step can carry a declarative
  * deliverable AND a script that judges something else. Pull Request
@@ -159,8 +159,9 @@ export type DeliverableSurface = 'workspace' | 'artifact' | 'note' | 'evidence';
  * from `advanceWhen` there aimed both stage directives at the one file
  * the step forbids rewriting. When every failing check is a script the
  * declarative deliverable is passing, so it is not what needs repair —
- * and since a script's inputs are opaque to us, the honest wording is
- * the fileless one, which claims no file and names no file tool.
+ * and since a script's inputs are opaque to us, its own rejection must
+ * identify what to repair. Assuming it judges a task note is equally wrong
+ * for a custom script that validates the contents of an output artifact.
  *
  * The artifact verdict requires EVERY file-naming check to be drawer-
  * flagged: a mixed gate still needs workspace wording, because the
@@ -173,7 +174,7 @@ export function deliverableSurface(opts: {
   failedChecks?: readonly string[] | undefined;
 }): DeliverableSurface {
   const failed = opts.failedChecks ?? [];
-  if (failed.length > 0 && failed.every((label) => label.startsWith('script:'))) return 'note';
+  if (failed.length > 0 && failed.every((label) => label.startsWith('script:'))) return 'script';
   if (failed.length > 0 && failed.every((label) => label.startsWith('corpusReadEvidence '))) {
     return 'evidence';
   }
@@ -188,7 +189,7 @@ export function deliverableSurface(opts: {
   if (fileChecks.length > 0) {
     return fileChecks.every((check) => check.artifact === true) ? 'artifact' : 'workspace';
   }
-  if ((opts.scripts?.length ?? 0) > 0) return 'note';
+  if ((opts.scripts?.length ?? 0) > 0) return 'script';
   return 'workspace';
 }
 
@@ -233,6 +234,9 @@ export function buildStageOneNudge(opts: {
 }): string {
   const artifact = opts.surface === 'artifact';
   const note = opts.surface === 'note';
+  if (opts.surface === 'script') {
+    return `GATE_SCRIPT_REPAIR: The gate script still rejects the result. Use its current findings below and the step instructions to identify the actual repair target and the appropriate allowed tools. A script can check an artifact, a task note, or other state; do not assume which one it reads. Preserve work that already passes and repair the named defects before advancing again. If a finding is unclear or impossible, report that specific blocker rather than modifying unrelated files or notes.\n\n${opts.failingBullets}`;
+  }
   if (opts.surface === 'evidence') {
     return `GATE_EVIDENCE_REQUIRED: Continue by performing the missing reads named below. This gate measures tool results delivered by read_artifact/read_artifacts; writing, editing, or merely claiming completion cannot satisfy it. Call the exact read tool now, cover every named record and line range, then call advance_task_step once.\n\n${opts.failingBullets}`;
   }

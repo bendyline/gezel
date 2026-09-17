@@ -229,3 +229,4 @@ packages/catalog/scripts/harvested-auth/
 /.codex-tmp
 /packages/app/e2e-visual/snapshots
 /.tmp-storyify
+/.tmp-qualla-batch

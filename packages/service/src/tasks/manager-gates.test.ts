@@ -1873,7 +1873,7 @@ describe('completion gates — scripted gates', () => {
     expect(step.lastGateReject?.contentHash).toBeUndefined();
   });
 
-  it('aims a script-only rejection at the task record, not the passing deliverable', async () => {
+  it('keeps a script-only repair target opaque instead of rewriting the passing deliverable', async () => {
     const { task, stepId } = await scopeShapedTask();
     const { runner } = flippingScriptRunner(['reject']);
     tasks.setScriptRunner(runner);
@@ -1887,8 +1887,10 @@ describe('completion gates — scripted gates', () => {
     expect(second.status).toBe('held');
     if (second.status !== 'held') return;
     expect(second.gate.escalationStage).toBe(1);
-    expect(second.gate.message).toContain('This gate reads the task record, not a file');
-    expect(second.gate.message).toContain('write_task_note');
+    expect(second.gate.message).toContain('GATE_SCRIPT_REPAIR:');
+    expect(second.gate.message).toContain('The task notes do not yet contain the header.');
+    expect(second.gate.message).not.toContain('This gate reads the task record');
+    expect(second.gate.message).not.toContain('write_task_note');
     // The batch file passes every check — never name it as the repair target.
     expect(second.gate.message).not.toContain('batches.json');
     expect(second.gate.message).not.toContain('write_artifact');
