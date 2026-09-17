@@ -14389,6 +14389,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable ? { expectedDeliverable: record.expectedDeliverable } : {}),
       ...(executorContextTrimActive ? { trimExecutorContext: true } : {}),
       ...(minimalContextActive ? { minimalContext: true } : {}),
+      ...(taskContext?.step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(workspaceGestalt ? { workspaceGestalt } : {}),
       ...(retrievalFirstActive ? { retrievalFirstHint: true } : {}),

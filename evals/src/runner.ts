@@ -69,6 +69,7 @@ import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 import { bareToolName } from './tool-names.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
+  EvalContext,
   EvalRepairActionSnapshot,
   EvalScenario,
   EvalTerminalFailure,
@@ -864,21 +865,22 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     Object.assign(mergedExtraEnv, originEnv);
     log(`[mock] fetch_url exact-origin grant: ${originEnv.GEZEL_EVAL_FETCH_URL_ALLOWED_ORIGINS}`);
   }
+  const daemonSpawnOptions = {
+    home: trialHome,
+    ...(llamaBin ? { llamaBin } : {}),
+    ...(sdBin ? { sdBin } : {}),
+    ...(Object.keys(mergedExtraEnv).length > 0 ? { extraEnv: mergedExtraEnv } : {}),
+    stderrLogPath: join(runDir, 'daemon.log'),
+    // 120s, not 60s: after an image scenario a native sd-server can hold
+    // Metal/RAM a few seconds past its SIGKILL, and the next daemon's boot
+    // races that release. See `SpawnTrialDaemonOptions.timeoutMs`. The
+    // batch runner additionally retries a daemon-boot timeout once
+    // (`runTrialWithSpawnRetry`), since it's unambiguously infra.
+    timeoutMs: 120_000,
+  };
   let spawned: Awaited<ReturnType<typeof spawnTrialDaemon>>;
   try {
-    spawned = await spawnTrialDaemon({
-      home: trialHome,
-      ...(llamaBin ? { llamaBin } : {}),
-      ...(sdBin ? { sdBin } : {}),
-      ...(Object.keys(mergedExtraEnv).length > 0 ? { extraEnv: mergedExtraEnv } : {}),
-      stderrLogPath: join(runDir, 'daemon.log'),
-      // 120s, not 60s: after an image scenario a native sd-server can hold
-      // Metal/RAM a few seconds past its SIGKILL, and the next daemon's boot
-      // races that release. See `SpawnTrialDaemonOptions.timeoutMs`. The
-      // batch runner additionally retries a daemon-boot timeout once
-      // (`runTrialWithSpawnRetry`), since it's unambiguously infra.
-      timeoutMs: 120_000,
-    });
+    spawned = await spawnTrialDaemon(daemonSpawnOptions);
   } catch (err) {
     await mockRuntime?.close().catch(() => {});
     return finalize({
@@ -899,12 +901,28 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   }
   log(`[trial] daemon spawned pid=${spawned.pid} port=${spawned.baseUrl}`);
 
-  const client = spawned.client;
+  let client = spawned.client;
   // Run recording ("exhaust") — always-on, best-effort. Started the moment
   // the daemon is reachable so the meester-ensure and setup turns are on
   // tape too; a recorder fault degrades the recording, never the trial.
   let recorder: ChatEventRecorderHandle | null = null;
   let recordingStats: ChatEventRecorderStats | null = null;
+  const recordingSegments: ChatEventRecorderStats[] = [];
+  const stopRecorderSegment = async (label: string): Promise<void> => {
+    if (!recorder) return;
+    const activeRecorder = recorder;
+    recorder = null;
+    try {
+      const segment = await activeRecorder.stop();
+      recordingSegments.push(segment);
+      log(
+        `[recording] ${label}: ${segment.lines} line(s), ` +
+          `${segment.coalescedDeltas} coalesced delta(s), ${segment.gaps.length} gap(s)`,
+      );
+    } catch (err) {
+      log(`[recording] ${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
   try {
     recorder = startChatEventRecorder({ client, runDir, log });
     log('[recording] chat-event tap started');
@@ -915,6 +933,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   let reason = 'trial did not produce a terminal result';
   let failureMode: FailureMode | undefined = 'crash';
   let finalSniff: TrialFinalSniff | undefined;
+  let diagnostics: Record<string, unknown> | undefined;
 
   // ── Performance collector + host info (Tier 5a) ─────────────────
   // Captures peak RSS / CPU / GPU util across the trial + token usage
@@ -1042,7 +1061,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     // ask_user_question calls — without it any scenario where a gezel
     // pauses to ask a clarifying question runs out the clock.
     logger.startHistoryTail();
-    const stopAutoAnswerer = startAutoAnswerer({
+    let stopAutoAnswerer = startAutoAnswerer({
       client,
       meesterId,
       log,
@@ -1068,6 +1087,35 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       if (evalHints) {
         log(`[trial] evalHints loaded: ${JSON.stringify(evalHints)}`);
       }
+      const restartDaemon = async (): Promise<GezelClient> => {
+        log(`[trial] controlled restart: stopping daemon pid=${spawned.pid}`);
+        await stopAutoAnswerer();
+        await stopRecorderSegment('tap stopped for controlled restart');
+        await shutdownTrialDaemon(spawned);
+        await spawned.daemonLogDrain?.catch(() => {});
+
+        const restarted = await spawnTrialDaemon(daemonSpawnOptions);
+        spawned = restarted;
+        client = restarted.client;
+        log(
+          `[trial] controlled restart: daemon respawned pid=${spawned.pid} port=${spawned.baseUrl}`,
+        );
+        try {
+          recorder = startChatEventRecorder({ client, runDir, log });
+          log('[recording] chat-event tap restarted');
+        } catch (err) {
+          log(
+            `[recording] tap restart failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        stopAutoAnswerer = startAutoAnswerer({
+          client,
+          meesterId,
+          log,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+        });
+        return client;
+      };
       const verdict = await pollUntilDone(scenario, {
         client,
         meesterId,
@@ -1082,11 +1130,13 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(evalHints ? { evalHints } : {}),
         ...(mockRuntime ? { mocks: mockRuntime } : {}),
+        ...(scenario.restartWhen ? { restartDaemon } : {}),
       });
       success = verdict.success;
       reason = verdict.reason;
       failureMode = verdict.failureMode;
       finalSniff = verdict.finalSniff;
+      diagnostics = verdict.diagnostics;
     } finally {
       await stopAutoAnswerer();
     }
@@ -1119,16 +1169,17 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         `[perf] collector teardown failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    if (recorder) {
-      try {
-        recordingStats = await recorder.stop();
-        log(
-          `[recording] tap stopped: ${recordingStats.lines} line(s), ` +
-            `${recordingStats.coalescedDeltas} coalesced delta(s), ${recordingStats.gaps.length} gap(s)`,
-        );
-      } catch (err) {
-        log(`[recording] tap stop failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    await stopRecorderSegment('tap stopped');
+    if (recordingSegments.length > 0) {
+      recordingStats = {
+        lines: recordingSegments.reduce((sum, segment) => sum + segment.lines, 0),
+        coalescedDeltas: recordingSegments.reduce(
+          (sum, segment) => sum + segment.coalescedDeltas,
+          0,
+        ),
+        gaps: recordingSegments.flatMap((segment) => segment.gaps),
+        truncated: recordingSegments.some((segment) => segment.truncated),
+      };
     }
     try {
       await captureFinalState({ client, trialHome, runDir, log, trialFailed: !success });
@@ -1213,6 +1264,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     reason,
     failureMode: success ? undefined : failureMode,
     ...(success || !finalSniff ? {} : { finalSniff }),
+    ...(diagnostics ? { diagnostics } : {}),
     logger,
     trialHome,
     client,
@@ -1956,12 +2008,15 @@ export async function pollUntilDone(
     evalHints?: import('@bendyline/gezel').EvalHints;
     /** Live mock-service runtime, threaded onto the EvalContext. */
     mocks?: import('./mock/mock-server.ts').MockServicesRuntime;
+    /** Respawn the trial daemon against the same home and return its fresh client. */
+    restartDaemon?: () => Promise<GezelClient>;
   },
 ): Promise<{
   success: boolean;
   reason: string;
   failureMode?: FailureMode;
   finalSniff?: TrialFinalSniff;
+  diagnostics?: Record<string, unknown>;
 }> {
   const startedAt = Date.now();
   // Progress-aware hard ceiling. The ceiling is a runaway backstop, not a
@@ -2059,7 +2114,7 @@ export async function pollUntilDone(
   // Allocated ONCE per trial so any module that keys per-trial state off
   // the ctx identity (`runtime-feedback.ts`'s `WeakMap<EvalContext, Set>`)
   // sees a stable handle across all poll iterations.
-  const ctx = {
+  const ctx: EvalContext = {
     client: args.client,
     meesterId: args.meesterId,
     log: args.log,
@@ -2238,6 +2293,7 @@ export async function pollUntilDone(
   let imageRetryLoopDeferralLoggedAt = 0;
   let inflightRetryLoopDeferralLoggedAt = 0;
   const poisonedSessionRecovery = new PoisonedSessionRecoveryTracker();
+  let restartPerformed = false;
 
   while (true) {
     if (Date.now() >= hardDeadline) {
@@ -2260,6 +2316,44 @@ export async function pollUntilDone(
         failureMode: 'interrupted',
       };
     }
+    if (!restartPerformed && scenario.restartWhen && args.restartDaemon) {
+      let shouldRestart = false;
+      try {
+        shouldRestart = await scenario.restartWhen(ctx);
+      } catch (err) {
+        args.log(
+          `[poll] restart predicate failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (shouldRestart) {
+        args.log('[poll] controlled daemon restart predicate matched');
+        const restartedClient = await args.restartDaemon();
+        args.client = restartedClient;
+        ctx.client = restartedClient;
+        restartPerformed = true;
+        lastHardChangeAt = Date.now();
+        lastSoftChangeAt = lastHardChangeAt;
+        sniffPlateauStartedAt = lastHardChangeAt;
+        try {
+          const restarted = await captureFingerprint(
+            args.client,
+            args.meesterId,
+            latestSniff,
+            args.daemonLogPath,
+          );
+          const digest = digestFingerprint(restarted);
+          lastHardDigest = digest.hard;
+          lastSoftDigest = digest.soft;
+          args.log(
+            `[poll] controlled daemon restart complete; reset digests hard=${lastHardDigest} soft=${lastSoftDigest}`,
+          );
+        } catch (err) {
+          args.log(
+            `[poll] post-restart fingerprint failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
     let result: SuccessCheckResult;
     try {
       result = await scenario.successCheck(ctx);
@@ -2273,6 +2367,7 @@ export async function pollUntilDone(
         success: result.success,
         reason: result.reason,
         failureMode: result.success ? undefined : (result.failureMode ?? 'success-check-false'),
+        ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
       };
     }
     const capacityDenial = readCapacityDenialFromLog(args.daemonLogPath);
@@ -4088,6 +4183,7 @@ async function finalize(args: {
   reason: string;
   failureMode?: FailureMode;
   finalSniff?: TrialFinalSniff;
+  diagnostics?: Record<string, unknown>;
   logger: TrialLogger;
   trialHome: string;
   client: GezelClient | null;
@@ -4153,6 +4249,7 @@ async function finalize(args: {
     durationMs,
     success: args.success,
     reason: args.reason,
+    ...(args.diagnostics ? { diagnostics: args.diagnostics } : {}),
     runDir: args.runDir,
     ...(effectiveFailureMode ? { failureMode: effectiveFailureMode } : {}),
     ...(nativeEngineIncidents ? { nativeEngineIncidents } : {}),

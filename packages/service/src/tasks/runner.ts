@@ -309,6 +309,14 @@ export class TaskRunner {
       dispatchedAt: number;
     }
   >();
+  /**
+   * Child tasks admitted into one declarative-fanout cohort. Admission lasts
+   * for the child's whole task, not one step, so a two-step shard completes
+   * read → review before the scheduler opens another sibling and displaces
+   * its local-model prefix cache. Keyed by parent + provider because those
+   * are the resources whose live background width defines the window.
+   */
+  private readonly fanoutAdmissions = new Map<string, Set<string>>();
   private nextId = 1;
   /** Why `dispatchable` work isn't moving, as of the last tick. */
   private holdReason: TaskHandoffHoldReason | undefined;
@@ -834,6 +842,48 @@ export class TaskRunner {
       }
       admissionProviders.set(providerName, provider);
       const lane = 'background' as const;
+      const pooled = provider
+        ? null
+        : (this.dispatcher.getPooledProviderQueueSummary?.(providerName) ?? null);
+
+      // Keep a fanout child admitted across ALL of its steps. ProviderQueue
+      // already limits simultaneous turns, but without this cohort window a
+      // breadth-first fanout opens a session for every sibling's first step
+      // before any sibling reaches its terminal review step. On local models
+      // that multiplies prefixes and forces LRU churn. The window uses the
+      // provider's actual background lane width; cold/unknown providers stay
+      // conservatively one-wide until they can report capacity.
+      const parentRef = task.parentTaskRef;
+      let fanoutAdmissionKey: string | undefined;
+      let fanoutAdmission: Set<string> | undefined;
+      if (parentRef) {
+        fanoutAdmissionKey = `${parentRef}\u0000${providerName}`;
+        fanoutAdmission = this.fanoutAdmissions.get(fanoutAdmissionKey) ?? new Set<string>();
+        for (const admittedRef of [...fanoutAdmission]) {
+          const [admittedProjectId, admittedNumText] = admittedRef.split('/');
+          const admittedNum = Number(admittedNumText);
+          const admittedTask =
+            admittedProjectId && Number.isFinite(admittedNum)
+              ? await effectiveTask(admittedProjectId, admittedNum)
+              : null;
+          if (
+            !admittedTask ||
+            admittedTask.parentTaskRef !== parentRef ||
+            taskEffectiveStatus(admittedTask) !== 'active'
+          ) {
+            fanoutAdmission.delete(admittedRef);
+          }
+        }
+        if (fanoutAdmission.size === 0) this.fanoutAdmissions.delete(fanoutAdmissionKey);
+        else this.fanoutAdmissions.set(fanoutAdmissionKey, fanoutAdmission);
+        const fanoutWidth =
+          provider?.queue?.backgroundConcurrency ?? pooled?.backgroundConcurrency ?? 1;
+        if (!fanoutAdmission.has(task.ref) && fanoutAdmission.size >= fanoutWidth) {
+          handoff.heldFor = 'provider-busy';
+          keep.push(handoff);
+          continue;
+        }
+      }
       if (provider?.queue) {
         const inFlight = inTickDispatches.get(providerName) ?? 0;
         // Hold off when either the provider's total cap or its background
@@ -857,7 +907,6 @@ export class TaskRunner {
           (dispatch) => dispatch.providerName === providerName,
         );
         const inFlight = inTickDispatches.get(providerName) ?? 0;
-        const pooled = this.dispatcher.getPooledProviderQueueSummary?.(providerName) ?? null;
         let atCapacity: boolean;
         if (pooled && pooled.maxConcurrency > 0 && pooled.backgroundConcurrency > 0) {
           const reflectedSessionIds = new Set(
@@ -938,6 +987,10 @@ export class TaskRunner {
           dispatchedAt: this.now(),
           ...(activationAt ? { activationAt } : {}),
         });
+        if (fanoutAdmissionKey && fanoutAdmission) {
+          fanoutAdmission.add(task.ref);
+          this.fanoutAdmissions.set(fanoutAdmissionKey, fanoutAdmission);
+        }
         inTickDispatches.set(providerName, (inTickDispatches.get(providerName) ?? 0) + 1);
       } catch (err) {
         log.error(

@@ -17,6 +17,14 @@ const splitReader = (
   listArtifacts: async () => Object.keys(artifacts),
 });
 
+const verificationChannel = `
+## Verification candidates
+
+\`\`\`json
+{"verificationCandidates":[]}
+\`\`\`
+`;
+
 describe('evaluateGate', () => {
   it('corpusBatchObservations accepts equivalent heading levels and requires every assigned path', async () => {
     const batchesFile = 'pr-review/batches.json';
@@ -27,16 +35,28 @@ describe('evaluateGate', () => {
       batchesFile,
       batchNumber: '1',
       file,
+      requireVerificationCandidates: true,
       artifact: true,
     };
+    const legacyWithoutChannel = await evaluateGate(
+      [{ ...check, requireVerificationCandidates: false }],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n## src/b.ts\nVerified OK.\n',
+        },
+      ),
+    );
+    expect(legacyWithoutChannel.pass).toBe(true);
     const complete = await evaluateGate(
       [check],
       splitReader(
         {},
         {
           [batchesFile]: batches,
-          [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n### `src/b.ts` — finding\nMajor issue.\n',
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n### \`src/b.ts\` — finding\nMajor issue.\n${verificationChannel}`,
         },
       ),
     );
@@ -47,7 +67,7 @@ describe('evaluateGate', () => {
         {},
         {
           [batchesFile]: batches,
-          [file]: '## Batch 1\n\n### src/a.ts\nVerified OK.\n',
+          [file]: `## Batch 1\n\n### src/a.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );
@@ -60,8 +80,7 @@ describe('evaluateGate', () => {
         {},
         {
           [batchesFile]: batches,
-          [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:new-side-line — major — Maybe broken.\n\n## src/b.ts\nVerified OK.\n',
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:new-side-line — major — Maybe broken.\n\n## src/b.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );
@@ -73,20 +92,43 @@ describe('evaluateGate', () => {
         {},
         {
           [batchesFile]: batches,
-          [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:42 — major — Concrete defect.\n\n## src/b.ts\nVerified OK.\n',
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\nB1-1: src/a.ts:42 — major — Concrete defect at the new-side line 42.\n\n## src/b.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );
     expect(anchored.pass).toBe(true);
-    const numberedNonIssue = await evaluateGate(
+    const structuredVerification = await evaluateGate(
       [check],
       splitReader(
         {},
         {
           [batchesFile]: batches,
           [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | minor | Intentional limitation; acceptable as-is. No action needed.\n\n## src/b.ts\nVerified OK.\n',
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nNeeds central verification at the new-side line 42.\n\n## src/b.ts\nVerified OK.\n\n## Verification candidates\n\n```json\n{"verificationCandidates":[{"id":"V1-1","path":"src/a.ts","line":42,"severity":"major","claim":"The caller may bypass the owner guard.","verify":"Inspect src/auth/owner.ts and the route-level guard."}]}\n```\n',
+        },
+      ),
+    );
+    expect(structuredVerification.pass).toBe(true);
+    const ambiguousVerification = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]:
+            '# Batch 1 — files 1–2\n\n## src/a.ts\nVerified OK.\n\n## src/b.ts\nVerified OK.\n\n## Verification candidates\n\n```json\n{"verificationCandidates":[]}\n```\n```json\n{"verificationCandidates":[]}\n```\n',
+        },
+      ),
+    );
+    expect(ambiguousVerification.pass).toBe(false);
+    expect(ambiguousVerification.failures[0]).toContain('exactly one fenced JSON block');
+    const numberedNonIssue = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          [batchesFile]: batches,
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | minor | Intentional limitation; acceptable as-is. No action needed.\n\n## src/b.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );
@@ -98,8 +140,7 @@ describe('evaluateGate', () => {
         {},
         {
           [batchesFile]: batches,
-          [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Needs central verification; no evidence of the dependency is available in this batch.\n\n## src/b.ts\nVerified OK.\n',
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Needs central verification; no evidence of the dependency is available in this batch.\n\n## src/b.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );
@@ -111,8 +152,7 @@ describe('evaluateGate', () => {
         {},
         {
           [batchesFile]: batches,
-          [file]:
-            '# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Authorization check is bypassed.\n\n## src/b.ts\nVerified OK.\n',
+          [file]: `# Batch 1 — files 1–2\n\n## src/a.ts\n**B1-1** | src/a.ts:42 | major | Authorization check is bypassed.\n\n## src/b.ts\nVerified OK.\n${verificationChannel}`,
         },
       ),
     );

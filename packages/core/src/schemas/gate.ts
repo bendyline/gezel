@@ -387,6 +387,8 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     batchesFile: z.string().min(1),
     batchNumber: z.string().min(1),
     file: z.string().min(1),
+    /** Require the versioned structured cross-file verification channel. */
+    requireVerificationCandidates: z.boolean().optional(),
     artifact: z.boolean().optional(),
   }),
   /**

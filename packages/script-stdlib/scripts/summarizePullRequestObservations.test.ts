@@ -34,6 +34,13 @@ const h = vi.hoisted(() => {
   };
 });
 vi.mock('@bendyline/gezel-sdk', () => ({ defineScript: <T>(meta: T) => meta, gezel: h.gezel }));
+const emptyVerification = `
+## Verification candidates
+
+\`\`\`json
+{"verificationCandidates":[]}
+\`\`\`
+`;
 beforeEach(() => {
   h.files.clear();
   h.reset();
@@ -46,11 +53,11 @@ beforeEach(() => {
   );
   h.files.set(
     'tasks/1/pr-review/observations-1.md',
-    `# Batch 1\n## src/a.ts\nVerified OK.\n## src/b.ts\n### Findings\n**B1-1** src/b.ts:4 — **Severity: major** — authorization bypass\n- Mechanism: unlike B9-2, the owner check is skipped.\n- Fix: compare owner.\n${'padding not copied\n'.repeat(1000)}`,
+    `# Batch 1\n## src/a.ts\nVerified OK.\n## src/b.ts\n### Findings\n**B1-1** src/b.ts:4 — **Severity: major** — authorization bypass\n- Mechanism: unlike B9-2, the owner check is skipped.\n- Fix: compare owner.\n${'padding not copied\n'.repeat(1000)}${emptyVerification}`,
   );
   h.files.set(
     'tasks/1/pr-review/observations-2.md',
-    '## Batch 2\n### `src/c.ts`\n### Findings\n### B2-1 — Minor: no issue\n- Fix: None needed.\n\n### B2-2 — severity **major** — Needs central verification\n- No evidence of the dependency is available in this batch.\n',
+    `## Batch 2\n### \`src/c.ts\`\n### Findings\n### B2-1 — Minor: no issue\n- Fix: None needed.\n\n### B2-2 — severity **major** — Needs central verification\n- No evidence of the dependency is available in this batch.\n${emptyVerification}`,
   );
 });
 
@@ -67,6 +74,7 @@ describe('summarizePullRequestObservations', () => {
       actionableCandidateCount: 1,
       nonActionableCandidateCount: 2,
       shortlistLimit: 8,
+      verificationCandidates: [],
     });
     expect(index.shortlist[0]).toMatchObject({
       id: 'B1-1',
@@ -81,6 +89,49 @@ describe('summarizePullRequestObservations', () => {
     expect(index.shortlist[0].preview).toContain('unlike B9-2, the owner check is skipped');
     expect(raw.length).toBeLessThan(2500);
   });
+  it('carries structured cross-file candidates into synthesis data', async () => {
+    h.files.set(
+      'tasks/1/pr-review/observations-2.md',
+      `## Batch 2
+### \`src/c.ts\`
+Needs central verification at the new-side line 29.
+
+## Verification candidates
+
+\`\`\`json
+{"verificationCandidates":[{"id":"V2-1","path":"src/c.ts","line":29,"severity":"major","claim":"The route may call a helper that omits ownership enforcement.","verify":"Inspect packages/service/src/auth/owner.ts and the route registration."}]}
+\`\`\`
+`,
+    );
+    vi.resetModules();
+    await import('./summarizePullRequestObservations');
+    expect(h.output).toMatchObject({ verificationCandidates: 1 });
+    const index = JSON.parse(h.files.get('tasks/1/pr-review/synthesis-data.json')!);
+    expect(index.schemaVersion).toBe(2);
+    expect(index.verificationCandidates).toEqual([
+      expect.objectContaining({
+        id: 'V2-1',
+        path: 'src/c.ts',
+        line: 29,
+        severity: 'major',
+        batchNumber: 2,
+        observationsFile: 'tasks/1/pr-review/observations-2.md',
+      }),
+    ]);
+    expect(index.batches[1].verificationCandidateIds).toEqual(['V2-1']);
+  });
+  it('keeps pre-channel in-flight shards compatible by treating absence as empty', async () => {
+    for (const path of [
+      'tasks/1/pr-review/observations-1.md',
+      'tasks/1/pr-review/observations-2.md',
+    ]) {
+      h.files.set(path, h.files.get(path)!.replace(emptyVerification, ''));
+    }
+    vi.resetModules();
+    await import('./summarizePullRequestObservations');
+    const index = JSON.parse(h.files.get('tasks/1/pr-review/synthesis-data.json')!);
+    expect(index.verificationCandidates).toEqual([]);
+  });
   it('fails closed if a shard is missing or omits an assigned path', async () => {
     h.files.delete('tasks/1/pr-review/observations-2.md');
     vi.resetModules();
@@ -88,7 +139,10 @@ describe('summarizePullRequestObservations', () => {
       /Missing exact observations shard/,
     );
     expect(h.files.has('tasks/1/pr-review/synthesis-data.json')).toBe(false);
-    h.files.set('tasks/1/pr-review/observations-2.md', '## Batch 2\n### src/not-c.ts\n');
+    h.files.set(
+      'tasks/1/pr-review/observations-2.md',
+      `## Batch 2\n### src/not-c.ts\n${emptyVerification}`,
+    );
     vi.resetModules();
     await expect(import('./summarizePullRequestObservations')).rejects.toThrow(
       /lacks path heading/,
@@ -97,11 +151,11 @@ describe('summarizePullRequestObservations', () => {
   it('drops speculative candidates and prioritizes product source over eval-only findings', async () => {
     h.files.set(
       'tasks/1/pr-review/observations-1.md',
-      '# Batch 1\n## src/a.ts\nVerified OK.\n## src/b.ts\n### Findings\n**B1-1** `evals/src/runner.ts:40` — **major** — the loop performs one redundant probe on every run.\n**B1-2** `packages/service/src/chat/manager.ts:90` — **major** — the guard drops the only queued response when the owner disconnects.\n**B1-3** `packages/core/src/state.ts:12` — **critical** — this could lose state if a future provider changes its ordering.\n',
+      `# Batch 1\n## src/a.ts\nVerified OK.\n## src/b.ts\n### Findings\n**B1-1** \`evals/src/runner.ts:40\` — **major** — the loop performs one redundant probe on every run.\n**B1-2** \`packages/service/src/chat/manager.ts:90\` — **major** — the guard drops the only queued response when the owner disconnects.\n**B1-3** \`packages/core/src/state.ts:12\` — **critical** — this could lose state if a future provider changes its ordering.\n${emptyVerification}`,
     );
     h.files.set(
       'tasks/1/pr-review/observations-2.md',
-      '## Batch 2\n### `src/c.ts`\nVerified OK.\n',
+      `## Batch 2\n### \`src/c.ts\`\nVerified OK.\n${emptyVerification}`,
     );
     vi.resetModules();
     await import('./summarizePullRequestObservations');

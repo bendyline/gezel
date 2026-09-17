@@ -1,4 +1,4 @@
-import type { Task, TaskCraftbookStep } from '@bendyline/gezel';
+import type { ProjectDetail, Task, TaskCraftbookStep } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   type BuildInstructionsOptions,
@@ -80,5 +80,61 @@ describe('buildInstructions — craftbook invocation parameters', () => {
 
   it('omits the invocation block for ordinary tasks without parameters', () => {
     expect(render(powerpointTask())).not.toContain('### Invocation parameters');
+  });
+});
+
+describe('buildInstructions — focused craftbook steps', () => {
+  const focusedPrompt = (layeredPrefixCache = false) => {
+    const task = powerpointTask({ content: 'Exact batch records: record-1.md, record-2.md' });
+    if (!task.step) throw new Error('fixture step missing');
+    task.step.promptProfile = 'focused';
+    return buildInstructions({
+      name: 'Koray',
+      role: 'Reviewer',
+      about: 'PROJECT-IRRELEVANT-ABOUT '.repeat(100),
+      project: {
+        id: 'gezel',
+        name: 'Gezel',
+        about: 'PROJECT-GUIDE-SHOULD-BE-OMITTED '.repeat(100),
+        missionObjectives: 'MISSION-SHOULD-BE-OMITTED',
+      } as unknown as ProjectDetail,
+      workspaceFiles: [
+        {
+          name: 'manager.ts',
+          path: 'packages/service/src/chat/manager.ts',
+          isDirectory: false,
+        },
+      ],
+      documentFiles: [{ name: 'house-style.md', path: 'house-style.md', isDirectory: false }],
+      recallBlock: '\n\nRECALL-SHOULD-BE-OMITTED',
+      task,
+      layeredPrefixCache,
+      availableTools: [
+        { name: 'read_artifact', description: 'Read an artifact.' },
+        { name: 'write_artifact', description: 'Write an artifact.' },
+      ],
+      focusedTaskContext: true,
+    } as BuildInstructionsOptions);
+  };
+
+  it('keeps the exact step procedure and truthful tools while dropping standing project context', () => {
+    const rendered = focusedPrompt();
+    expect(rendered.full).toContain('Your role is "Reviewer".');
+    expect(rendered.full).toContain('#### Step procedure');
+    expect(rendered.full).toContain('Exact batch records: record-1.md, record-2.md');
+    expect(rendered.full).toContain('`read_artifact`');
+    expect(rendered.full).not.toContain('PROJECT-IRRELEVANT-ABOUT');
+    expect(rendered.full).not.toContain('PROJECT-GUIDE-SHOULD-BE-OMITTED');
+    expect(rendered.full).not.toContain('MISSION-SHOULD-BE-OMITTED');
+    expect(rendered.full).not.toContain('RECALL-SHOULD-BE-OMITTED');
+    expect(rendered.full).not.toContain('### Workspace files');
+    expect(rendered.full).not.toContain('house-style.md');
+  });
+
+  it('keeps task-specific context in the volatile layer when layered caching is active', () => {
+    const rendered = focusedPrompt(true);
+    expect(rendered.full).not.toContain('Exact batch records');
+    expect(rendered.volatileContext).toContain('Exact batch records: record-1.md, record-2.md');
+    expect(rendered.layers?.project).toBe(rendered.full);
   });
 });

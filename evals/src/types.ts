@@ -9,8 +9,14 @@ import type { ChatProvider } from './providers.ts';
  */
 export type SuccessCheckResult =
   | { done: false }
-  | { done: true; success: true; reason: string }
-  | { done: true; success: false; reason: string; failureMode?: FailureMode };
+  | { done: true; success: true; reason: string; diagnostics?: Record<string, unknown> }
+  | {
+      done: true;
+      success: false;
+      reason: string;
+      failureMode?: FailureMode;
+      diagnostics?: Record<string, unknown>;
+    };
 
 /**
  * Bounded scenario helpers can hand a terminal failure to the runner without
@@ -236,6 +242,14 @@ export interface EvalScenario {
    * qwen3.6-class models doesn't trip the watchdog.
    */
   progressTimeoutMs?: number;
+  /**
+   * Optional one-shot daemon-restart exercise. The runner polls this predicate
+   * with the same live eval context as `successCheck`; once it returns true,
+   * the trial daemon is stopped and respawned against the same home before
+   * polling continues. Use it to prove persisted task/session recovery under
+   * a real local-model interruption, not merely through unit fixtures.
+   */
+  restartWhen?: (ctx: EvalContext) => Promise<boolean>;
   /** Polled every `pollIntervalMs` (default 5000). */
   successCheck: (ctx: EvalContext) => Promise<SuccessCheckResult>;
   /**
@@ -516,6 +530,8 @@ export interface TrialResult {
   success: boolean;
   /** Why the trial ended — same string the user sees in `result.json`. */
   reason: string;
+  /** Scenario-owned structured measurements retained in result.json. */
+  diagnostics?: Record<string, unknown>;
   /** Set when `success === false`. */
   failureMode?: FailureMode;
   /** Coarse accountability tag (see {@link FailureClass}). */

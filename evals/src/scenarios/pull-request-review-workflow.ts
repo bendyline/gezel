@@ -1,3 +1,4 @@
+import type { Task } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { mergeCorpusCoverageShards } from '@bendyline/gezel/checks';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
@@ -32,9 +33,116 @@ interface CoverageLedger {
   complete?: boolean;
 }
 
+export const PR_REVIEW_PHASE_BUDGETS_MS = {
+  deterministicSetup: 5 * 60_000,
+  childOpenBatch: 15 * 60_000,
+  childReviewBatch: 30 * 60_000,
+  fanoutMakespan: 70 * 60_000,
+  synthesis: 20 * 60_000,
+  total: 90 * 60_000,
+} as const;
+
+interface PhaseMeasurement {
+  actualMs: number | null;
+  budgetMs: number;
+  pass: boolean;
+}
+
+function elapsedMs(start?: string, end?: string): number | null {
+  if (!start || !end) return null;
+  const value = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function maxStepDuration(children: Task[], stepId: string): number | null {
+  const durations = children.flatMap((child) => {
+    const step = child.craftbook.steps.find((candidate) => candidate.id === stepId);
+    const value = elapsedMs(step?.lastActivatedAt ?? step?.createdAt, step?.completedAt);
+    return value === null ? [] : [value];
+  });
+  return durations.length > 0 ? Math.max(...durations) : null;
+}
+
+/** Persisted, gateable phase timings for the real local-model workflow. */
+export function pullRequestReviewPhaseDiagnostics(
+  host: Task,
+  children: Task[],
+): {
+  phaseLatencies: Record<keyof typeof PR_REVIEW_PHASE_BUDGETS_MS, PhaseMeasurement>;
+  restartRecovery: { resumedSteps: number; taskRefs: string[]; allCompleted: boolean };
+  violations: string[];
+} {
+  const scan = host.craftbook.steps.find((step) => step.id === 'scan');
+  const report = host.craftbook.steps.find((step) => step.id === 'report');
+  const childStarts = children.map((child) => Date.parse(child.createdAt)).filter(Number.isFinite);
+  const childEnds = children.map((child) => Date.parse(child.updatedAt)).filter(Number.isFinite);
+  const fanoutMakespan =
+    childStarts.length > 0 && childEnds.length > 0
+      ? Math.max(...childEnds) - Math.min(...childStarts)
+      : null;
+  const actuals: Record<keyof typeof PR_REVIEW_PHASE_BUDGETS_MS, number | null> = {
+    deterministicSetup: elapsedMs(host.createdAt, scan?.completedAt),
+    childOpenBatch: maxStepDuration(children, 'open-batch'),
+    childReviewBatch: maxStepDuration(children, 'review-batch'),
+    fanoutMakespan,
+    synthesis: elapsedMs(report?.lastActivatedAt ?? report?.createdAt, report?.completedAt),
+    total: elapsedMs(host.createdAt, host.updatedAt),
+  };
+  const phaseLatencies = Object.fromEntries(
+    Object.entries(PR_REVIEW_PHASE_BUDGETS_MS).map(([phase, budgetMs]) => {
+      const actualMs = actuals[phase as keyof typeof actuals];
+      return [phase, { actualMs, budgetMs, pass: actualMs !== null && actualMs <= budgetMs }];
+    }),
+  ) as Record<keyof typeof PR_REVIEW_PHASE_BUDGETS_MS, PhaseMeasurement>;
+  const violations = Object.entries(phaseLatencies)
+    .filter(([, measurement]) => !measurement.pass)
+    .map(([phase, measurement]) =>
+      measurement.actualMs === null
+        ? `${phase} timing was not persisted`
+        : `${phase} took ${Math.round(measurement.actualMs / 1000)}s (budget ${Math.round(measurement.budgetMs / 1000)}s)`,
+    );
+  const resumed = [host, ...children].filter((task) =>
+    task.craftbook.steps.some((step) => (step.restartResumeCount ?? 0) > 0),
+  );
+  return {
+    phaseLatencies,
+    restartRecovery: {
+      resumedSteps: resumed.reduce(
+        (sum, task) =>
+          sum + task.craftbook.steps.filter((step) => (step.restartResumeCount ?? 0) > 0).length,
+        0,
+      ),
+      taskRefs: resumed.map((task) => task.ref),
+      allCompleted: resumed.every((task) => task.status === 'complete'),
+    },
+    violations,
+  };
+}
+
 async function findProject(client: GezelClient): Promise<{ id: string } | null> {
   const { projects } = await client.listProjects();
   return projects.find((project) => project.name === PROJECT_NAME) ?? null;
+}
+
+async function restartDuringActiveShard(ctx: EvalContext): Promise<boolean> {
+  const project = await findProject(ctx.client);
+  if (!project) return false;
+  const { tasks } = await ctx.client.listProjectTasks(project.id);
+  const host = tasks.find(
+    (task) =>
+      !task.parentTaskRef &&
+      task.sourceCraftbookIds?.some(
+        (source) => source.role === 'main' && source.catalogId === 'pull-request-review',
+      ),
+  );
+  if (!host) return false;
+  const children = (await ctx.client.listTaskChildren(project.id, host.num, { limit: 1_000 }))
+    .tasks;
+  return children.some(
+    (child) =>
+      child.status === 'active' &&
+      (child.activeStepId === 'open-batch' || child.activeStepId === 'review-batch'),
+  );
 }
 
 async function readArtifact(
@@ -225,6 +333,17 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   }
 
   const failures: string[] = [];
+  const phaseDiagnostics = pullRequestReviewPhaseDiagnostics(host, children);
+  for (const violation of phaseDiagnostics.violations) {
+    failures.push(`phase latency budget failed: ${violation}`);
+  }
+  if (phaseDiagnostics.restartRecovery.resumedSteps === 0) {
+    failures.push('controlled restart produced no persisted restart-resume evidence');
+  } else if (!phaseDiagnostics.restartRecovery.allCompleted) {
+    failures.push(
+      `restart interruption stranded task(s): ${phaseDiagnostics.restartRecovery.taskRefs.join(', ')}`,
+    );
+  }
   const expectedFiles = buildLargePrArtifacts()
     .slice(2)
     .map((fixture) => parsePathFrontmatter(fixture.content));
@@ -394,6 +513,37 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   ) {
     failures.push('final report falsely claims assuredApi is missing');
   }
+  const synthesisText = await readArtifact(
+    ctx.client,
+    project.id,
+    `${workPath}/pr-review/synthesis-data.json`,
+  );
+  if (!synthesisText) {
+    failures.push('structured synthesis data is missing');
+  } else {
+    try {
+      const synthesis = JSON.parse(synthesisText) as { verificationCandidates?: unknown };
+      const verificationCandidates = synthesis.verificationCandidates;
+      if (!Array.isArray(verificationCandidates)) {
+        failures.push('synthesis data has no verificationCandidates[] channel');
+      } else if (
+        !verificationCandidates.some(
+          (candidate) =>
+            candidate &&
+            typeof candidate === 'object' &&
+            !Array.isArray(candidate) &&
+            (candidate as Record<string, unknown>).path === API_USE_PATH &&
+            /assuredApi/i.test(String((candidate as Record<string, unknown>).claim)),
+        )
+      ) {
+        failures.push(
+          `cross-file ${API_USE_PATH} assuredApi candidate was not preserved in verificationCandidates[]`,
+        );
+      }
+    } catch {
+      failures.push('structured synthesis data is not valid JSON');
+    }
+  }
   const sourcesUnchanged =
     (await readWorkspace(ctx.client, project.id, API_USE_PATH)) === API_USE &&
     (await readWorkspace(ctx.client, project.id, API_DEFINITION_PATH)) === API_DEFINITION &&
@@ -406,12 +556,14 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       success: false,
       failureMode: 'success-check-false',
       reason: failures.join('; '),
+      diagnostics: { pullRequestReview: phaseDiagnostics },
     };
   }
   return {
     done: true,
     success: true,
     reason: `real craftbook workflow completed ${batches.length} batches with exact read/write receipts, deterministic 120-file coverage provenance, a cited request-changes verdict, and unchanged source`,
+    diagnostics: { pullRequestReview: phaseDiagnostics },
   };
 }
 
@@ -429,6 +581,7 @@ export const pullRequestReviewWorkflowScenario: EvalScenario = {
   progressTimeoutMs: 12 * 60_000,
   skipInitialPrompt: true,
   repairPolicy: 'runtime',
+  restartWhen: restartDuringActiveShard,
   setup,
   successCheck,
 };
