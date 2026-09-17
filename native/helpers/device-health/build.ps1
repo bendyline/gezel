@@ -17,15 +17,22 @@ switch -Regex ($targetArch) {
 
 $buildDir = Join-Path $helperDir ".build\$platform"
 $outputDir = Join-Path $repoRoot "native\build\$platform"
-$baselineArgs = if ($platform -eq 'win32-arm64') {
+$cmakeArgs = @(
+  '-S', $helperDir,
+  '-B', $buildDir,
+  '-A', $cmakePlatform,
+  '-DBUILD_TESTING=ON'
+)
+if ($platform -eq 'win32-arm64') {
   # MSVC otherwise defaults to armv8.0 today; spell it out so a future
   # toolchain default cannot silently tune this redistributable to the host.
-  @('-DCMAKE_CXX_FLAGS=/arch:armv8.0')
-} else {
-  @()
+  # Keep this in the multi-element CMake argv array. Assigning a one-element
+  # array through an `if` expression makes PowerShell unwrap it to a scalar;
+  # splatting that scalar passes each character as a separate native argument.
+  $cmakeArgs += '-DCMAKE_CXX_FLAGS=/arch:armv8.0'
 }
 
-& cmake -S $helperDir -B $buildDir -A $cmakePlatform -DBUILD_TESTING=ON @baselineArgs
+& cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (exit $LASTEXITCODE)" }
 & cmake --build $buildDir --config Release --parallel
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed (exit $LASTEXITCODE)" }

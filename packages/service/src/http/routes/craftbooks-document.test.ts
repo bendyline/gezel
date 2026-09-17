@@ -99,6 +99,43 @@ const DOC: CraftbookDoc = {
 };
 
 describe('craftbook document routes — end to end', () => {
+  it('reports invalid project documents as 422 with a repair, while absent books remain 404', async () => {
+    const ws = await svc.context.store.projectWorkspaceDir('default');
+    const dir = join(ws, '.gezel', 'craftbooks', 'bad-input');
+    const versionDir = join(dir, 'versions', '1.0.0');
+    await mkdir(versionDir, { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ id: 'bad-input', name: 'Bad input' }),
+    );
+    await writeFile(
+      join(versionDir, 'craftbook.json'),
+      JSON.stringify({
+        id: 'bad-input',
+        name: 'Bad input',
+        steps: [
+          {
+            id: 'write',
+            name: 'Write',
+            terminal: true,
+            consumes: [{ file: 'input.json', artifact: true }],
+            prompt: 'Write a story.',
+          },
+        ],
+      }),
+    );
+    for (const suffix of ['', '/document'])
+      for (const source of ['', '&source=project']) {
+        const res = await api(
+          'GET',
+          `/api/craftbooks/bad-input${suffix}?projectId=default${source}`,
+        );
+        expect(res.status).toBe(422);
+        expect(((await res.json()) as { error: string }).error).toContain('read_artifact');
+      }
+    const missing = await api('GET', '/api/craftbooks/absent?projectId=default&source=project');
+    expect(missing.status).toBe(404);
+  });
   it('creates a book from a MARKDOWN document, reads it back as JSON, and round-trips', async () => {
     const content = serializeCraftbookDoc(DOC, 'markdown');
     const res = await api('POST', '/api/craftbooks/document', { content, format: 'markdown' });

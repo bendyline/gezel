@@ -6,10 +6,26 @@
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Craftbook, Task } from '@bendyline/gezel';
+import {
+  type Craftbook,
+  type Task,
+  craftbookFromDoc,
+  formatCraftbookDocErrors,
+  nowIso,
+  parseCraftbookDoc,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
 import { parseCraftbookParams, waitForTask } from './craftbook-command.js';
+
+/** Validate generated documents with the same contracts as the daemon, before installing them. */
+export function validateWorkflowCraftbook(document: unknown): Craftbook {
+  const parsed = parseCraftbookDoc(JSON.stringify(document), 'json');
+  if (!parsed.ok) throw new CliError(formatCraftbookDocErrors(parsed.errors));
+  const built = craftbookFromDoc(parsed.doc, { now: nowIso() });
+  if (!built.ok) throw new CliError(formatCraftbookDocErrors(built.errors));
+  return built.craftbook;
+}
 
 export async function runWorkflow(
   client: GezelClient,
@@ -43,6 +59,7 @@ export async function runWorkflow(
     args,
     ...(invocation ?? {}),
     log,
+    validateCraftbook: validateWorkflowCraftbook,
     runCraftbook: async (
       id: string,
       params: Record<string, string>,

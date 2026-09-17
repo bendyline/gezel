@@ -205,9 +205,14 @@ test('Windows ARM64 build scripts keep their architecture evidence explicit', ()
     'native/helpers/device-health/build.ps1',
     'native/helpers/service-host/build.ps1',
   ]) {
-    assert.match(
-      readFileSync(resolve(repoRoot, relativePath), 'utf8'),
-      /-DCMAKE_CXX_FLAGS=\/arch:armv8\.0/,
+    const helperBuild = readFileSync(resolve(repoRoot, relativePath), 'utf8');
+    assert.match(helperBuild, /\$cmakeArgs = @\(/);
+    assert.match(helperBuild, /\$cmakeArgs \+= '-DCMAKE_CXX_FLAGS=\/arch:armv8\.0'/);
+    assert.match(helperBuild, /& cmake @cmakeArgs/);
+    assert.doesNotMatch(
+      helperBuild,
+      /@baselineArgs/,
+      `${relativePath} must not splat a scalar produced by a one-element if-expression array`,
     );
   }
 
@@ -219,6 +224,10 @@ test('Windows ARM64 build scripts keep their architecture evidence explicit', ()
   assert.match(toolchain, /CMAKE_ASM_FLAGS_INIT/);
 
   const workflow = readFileSync(resolve(repoRoot, '.github/workflows/build-native.yml'), 'utf8');
+  assert.match(
+    workflow,
+    /node --test scripts\/assert-arm64-baseline\.test\.mjs scripts\/native-payload\.test\.mjs/,
+  );
   assert.doesNotMatch(workflow, /llvm-objdump/);
   assert.match(workflow, /--compile-commands/);
   assert.match(workflow, /--mode clang-baseline/);
