@@ -91,10 +91,11 @@ async function removeIfDangling(path: string): Promise<void> {
  * pre-install forces a clean download.
  *
  * No-op when the directory doesn't exist or contains no partials. Callers
- * must not use this for ds4: its artifacts are routinely 90-200+ GiB and the
- * shared model downloader deliberately resumes verified HTTP/Xet partials.
- * Throwing that progress away turns an interrupted eval into another
- * multi-hour transfer.
+ * must only use this for the legacy image-model warm path. Chat-model
+ * downloads (llama.cpp and ds4) are routinely tens to hundreds of GiB and the
+ * shared downloader deliberately resumes bounded HTTP/Xet partials, then
+ * verifies their catalog hash before publishing them. Throwing that progress
+ * away turns an interrupted eval into another multi-hour transfer.
  */
 async function purgeStalePartials(dir: string, log: (line: string) => void): Promise<void> {
   let entries: string[];
@@ -390,11 +391,10 @@ export async function ensureWarmModel(opts: {
   // before re-invoking install. Without this, sd-cpp's SDXL warm path
   // sees the partial, declines to overwrite it, and reports `done` on a
   // never-finished file — leaving the cache permanently broken.
-  // Preserve ds4's resumable partials. The older cleanup exists for image and
-  // llama.cpp caches whose historical installers could leave poisoned files;
-  // ds4 uses the current byte-range/Xet downloader and its models are far too
-  // large to restart unconditionally.
-  if (engine !== 'ds4') {
+  // Preserve resumable chat-model partials. Both llama.cpp and ds4 now use the
+  // current bounded byte-range/Xet downloader and verify the completed file;
+  // only the legacy image warm path still needs unconditional cleanup.
+  if (engine === 'sd-cpp') {
     await purgeStalePartials(modelDirInHome(cacheRoot, engine, modelId), log);
   }
 

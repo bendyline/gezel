@@ -379,6 +379,19 @@ describe('projects', () => {
     expect((await store.getProject(created.id))?.outputPaneVisible).toBeUndefined();
   });
 
+  it('serializes concurrent project patches without dropping unrelated fields', async () => {
+    const created = await store.createProject({ name: 'Concurrent Patches' });
+
+    await Promise.all([
+      store.updateProject(created.id, { description: 'Keep this description' }),
+      store.updateProject(created.id, { indexingEnabled: false }),
+    ]);
+
+    const project = await store.getProject(created.id);
+    expect(project?.description).toBe('Keep this description');
+    expect(project?.indexingEnabled).toBe(false);
+  });
+
   it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {
     await store.createProject({ name: 'External', workingDir: '/tmp/ext' });
     const detail = await store.getProject('external');

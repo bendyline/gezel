@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { type FileHandle, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -334,6 +335,43 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
   // only the empty session JSON and the user has to re-run with a
   // different setup to diagnose. With this in place, every trial dir
   // includes the full daemon log.
+  // Attach the drain inside the spawn function, before discoverOrSpawn starts
+  // polling readiness. Attaching it only after discoverOrSpawn returns creates
+  // a startup deadlock: a noisy cold daemon fills the OS pipe while discovery
+  // waits for runtime files that the blocked daemon has not written yet.
+  let daemonLogDrain: Promise<void> | undefined;
+  let childLogsAttached = false;
+  const attachChildLogs = (child: ChildProcess): void => {
+    if (childLogsAttached) return;
+    childLogsAttached = true;
+    if (opts.stderrLogPath) {
+      const sink = new BoundedDaemonLogSink(opts.stderrLogPath);
+      daemonLogDrain = new Promise((resolve) => sink.once('close', resolve));
+      const streams = [child.stdout, child.stderr].filter(
+        (stream): stream is NonNullable<typeof stream> => stream !== null,
+      );
+      for (const stream of streams) stream.pipe(sink, { end: false });
+      child.once('close', () => sink.end());
+      sink.once('error', (error) => {
+        // Logging must never back-pressure the daemon after a filesystem
+        // error. Unpipe and explicitly resume both streams so the trial can
+        // still end and report the log failure instead of deadlocking.
+        console.warn(
+          `[spawn] daemon log disabled after write failure (${error instanceof Error ? error.message : error})`,
+        );
+        for (const stream of streams) {
+          stream.unpipe(sink);
+          stream.resume();
+        }
+      });
+    } else {
+      // No log path provided — drain to /dev/null equivalent so the child
+      // cannot block on a full pipe buffer during discovery.
+      child.stdout?.resume();
+      child.stderr?.resume();
+    }
+  };
+
   const result = await discoverOrSpawn({
     daemonEntry,
     detached: false,
@@ -341,40 +379,16 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
     home: opts.home,
     env,
     timeoutMs: opts.timeoutMs ?? 120_000,
+    spawnFn: (command, args, spawnOptions) => {
+      const child = nodeSpawn(command, args, spawnOptions);
+      attachChildLogs(child);
+      return child;
+    },
   });
 
-  // Sink BOTH stdout and stderr into a single chronological log file
-  // alongside the trial's other captures. The historical caller's
-  // `stderrLogPath` becomes a `daemon.log` path — both streams
-  // interleave into it. The bounded sink preserves startup provenance and the
-  // latest diagnostics without allowing an unattended trial to exhaust disk.
-  let daemonLogDrain: Promise<void> | undefined;
-  if (opts.stderrLogPath && result.child) {
-    const sink = new BoundedDaemonLogSink(opts.stderrLogPath);
-    daemonLogDrain = new Promise((resolve) => sink.once('close', resolve));
-    const streams = [result.child.stdout, result.child.stderr].filter(
-      (stream): stream is NonNullable<typeof stream> => stream !== null,
-    );
-    for (const stream of streams) stream.pipe(sink, { end: false });
-    result.child.once('close', () => sink.end());
-    sink.once('error', (error) => {
-      // Logging must never back-pressure the daemon after a filesystem error.
-      // Unpipe and explicitly resume both streams so the trial can still end
-      // and report the log failure instead of deadlocking on a full OS pipe.
-      console.warn(
-        `[spawn] daemon log disabled after write failure (${error instanceof Error ? error.message : error})`,
-      );
-      for (const stream of streams) {
-        stream.unpipe(sink);
-        stream.resume();
-      }
-    });
-  } else {
-    // No log path provided — drain to /dev/null equivalent so the
-    // child doesn't block on a full pipe buffer.
-    result.child?.stdout?.resume();
-    result.child?.stderr?.resume();
-  }
+  // Defensive fallback for a future discoverOrSpawn implementation that
+  // returns a child without going through the injected spawn function.
+  if (result.child && !childLogsAttached) attachChildLogs(result.child);
 
   return { ...result, home: opts.home, ...(daemonLogDrain ? { daemonLogDrain } : {}) };
 }
