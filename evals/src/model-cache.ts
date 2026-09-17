@@ -185,6 +185,31 @@ export async function isModelInstalled(
 }
 
 /**
+ * Why an install no longer matches the catalog, and how much of it has to be
+ * refetched to fix that.
+ *
+ * The distinction is the difference between minutes and hours. `weights-changed`
+ * means the bytes on disk are the WRONG bytes — a requant, a repo move, a
+ * renamed file — so they have to go. `sidecar-missing` means the weights are
+ * exactly right and the catalog merely grew a companion payload beside them
+ * (a vision encoder, MTP draft weights), which the install path can top up in
+ * place: `planReusableFiles` reuses every file whose recorded sha256 and size
+ * already match, so only the missing sidecar is fetched.
+ *
+ * Wild-caught on 2026-09-07: `ensureWarmModel` evicted on ANY staleness, so a
+ * missing 1.1 GB GLM vision encoder deleted a verified 96 GB weights file and
+ * re-downloaded it — per trial, forever, because the install that replaced it
+ * omitted the same sidecar again. Two hours of download destroyed to recover
+ * one gigabyte that was already reusable.
+ */
+export type StaleInstallKind = 'weights-changed' | 'sidecar-missing';
+
+export interface StaleInstall {
+  kind: StaleInstallKind;
+  reason: string;
+}
+
+/**
  * Why a present-and-complete install no longer matches the catalog, or
  * `null` when it does (or when there's nothing to compare against).
  *
@@ -201,7 +226,7 @@ export async function isModelInstalled(
  *
  * Ordered most-precise-first so the logged reason names the real difference.
  */
-export async function staleInstallReason(opts: {
+export async function staleInstall(opts: {
   cacheRoot: string;
   engine: EngineKey;
   /** Directory id to inspect on disk. */
@@ -212,7 +237,7 @@ export async function staleInstallReason(opts: {
    * slug is no longer in the catalog index.
    */
   expectedId?: string;
-}): Promise<string | null> {
+}): Promise<StaleInstall | null> {
   // sd-cpp image models aren't in the chat-model index; nothing to check.
   if (opts.engine === 'sd-cpp') return null;
   const expected = chatModelInstallIdentity(opts.expectedId ?? opts.modelId, opts.engine);
@@ -235,21 +260,30 @@ export async function staleInstallReason(opts: {
   }
 
   if (expected.sha256 && installed.sha256 && expected.sha256 !== installed.sha256) {
-    return `weights sha256 ${installed.sha256.slice(0, 12)}… != catalog ${expected.sha256.slice(0, 12)}…`;
+    return {
+      kind: 'weights-changed',
+      reason: `weights sha256 ${installed.sha256.slice(0, 12)}… != catalog ${expected.sha256.slice(0, 12)}…`,
+    };
   }
   if (
     expected.huggingfaceRepo &&
     installed.huggingfaceRepo &&
     expected.huggingfaceRepo !== installed.huggingfaceRepo
   ) {
-    return `upstream repo moved: ${installed.huggingfaceRepo} -> ${expected.huggingfaceRepo}`;
+    return {
+      kind: 'weights-changed',
+      reason: `upstream repo moved: ${installed.huggingfaceRepo} -> ${expected.huggingfaceRepo}`,
+    };
   }
   if (
     expected.weightsFilename &&
     installed.weightsFilename &&
     expected.weightsFilename !== installed.weightsFilename
   ) {
-    return `weights file ${installed.weightsFilename} != catalog ${expected.weightsFilename}`;
+    return {
+      kind: 'weights-changed',
+      reason: `weights file ${installed.weightsFilename} != catalog ${expected.weightsFilename}`,
+    };
   }
   // Compare the draft by BASENAME. The catalog names it by its upstream
   // repo-relative path (`MTP/mtp-gemma-4-26B-A4B-it-Q4_0.gguf`) but the
@@ -257,22 +291,46 @@ export async function staleInstallReason(opts: {
   // never finds a correctly-installed draft — and would report a
   // just-downloaded model stale, re-evicting and refetching it every run.
   if (expected.draftFilename && !existsSync(join(dir, basename(expected.draftFilename)))) {
-    return `missing draft (MTP) weights ${basename(expected.draftFilename)} added by catalog`;
+    return {
+      kind: 'sidecar-missing',
+      reason: `missing draft (MTP) weights ${basename(expected.draftFilename)} added by catalog`,
+    };
   }
   if (
     expected.visionEncoderFilename &&
     !existsSync(join(dir, basename(expected.visionEncoderFilename)))
   ) {
-    return `missing vision encoder ${basename(expected.visionEncoderFilename)} added by catalog`;
+    return {
+      kind: 'sidecar-missing',
+      reason: `missing vision encoder ${basename(expected.visionEncoderFilename)} added by catalog`,
+    };
   }
   if (
     expected.catalogVersion &&
     installed.catalogVersion &&
     expected.catalogVersion !== installed.catalogVersion
   ) {
-    return `catalogVersion ${installed.catalogVersion} != catalog ${expected.catalogVersion}`;
+    return {
+      kind: 'weights-changed',
+      reason: `catalogVersion ${installed.catalogVersion} != catalog ${expected.catalogVersion}`,
+    };
   }
   return null;
+}
+
+/**
+ * The staleness reason alone, for callers that only report it.
+ *
+ * `staleInstall` carries the recovery disposition too; use that wherever the
+ * answer decides whether to delete anything.
+ */
+export async function staleInstallReason(opts: {
+  cacheRoot: string;
+  engine: EngineKey;
+  modelId: string;
+  expectedId?: string;
+}): Promise<string | null> {
+  return (await staleInstall(opts))?.reason ?? null;
 }
 
 /**
@@ -368,15 +426,25 @@ export async function ensureWarmModel(opts: {
   const { cacheRoot, engine, modelId, log } = opts;
   if (await isModelInstalled(cacheRoot, engine, modelId)) {
     // Present and complete — but the catalog may have moved underneath it.
-    // Evict rather than reuse, so the install path below refetches; keeping
-    // stale weights would silently invalidate every downstream measurement.
-    const stale = await staleInstallReason({ cacheRoot, engine, modelId });
+    // Keeping stale weights would silently invalidate every downstream
+    // measurement, so a mismatch always re-runs the install. What it does NOT
+    // always do is delete first: see `StaleInstallKind`. Evicting to recover a
+    // missing sidecar throws away weights the installer would have reused.
+    const stale = await staleInstall({ cacheRoot, engine, modelId });
     if (!stale) {
       log(`[cache] ${engine}/${modelId} already warm`);
       return;
     }
-    log(`[cache] ${engine}/${modelId} is STALE vs catalog (${stale}) — evicting and refetching`);
-    await rm(modelDirInHome(cacheRoot, engine, modelId), { recursive: true, force: true });
+    if (stale.kind === 'sidecar-missing') {
+      log(
+        `[cache] ${engine}/${modelId} is missing a catalog sidecar (${stale.reason}) — topping up in place; existing weights are reused, not refetched`,
+      );
+    } else {
+      log(
+        `[cache] ${engine}/${modelId} is STALE vs catalog (${stale.reason}) — evicting and refetching`,
+      );
+      await rm(modelDirInHome(cacheRoot, engine, modelId), { recursive: true, force: true });
+    }
   } else if (
     engine === 'llama-cpp' &&
     (await adoptHistoricalLlamaCppAlias({ cacheRoot, modelId, log }))
@@ -496,6 +564,23 @@ export async function ensureWarmModel(opts: {
     if (!(await isModelInstalled(cacheRoot, engine, modelId))) {
       throw new Error(
         `install reported done but ${modelDirInHome(cacheRoot, engine, modelId)} has no valid manifest+weights`,
+      );
+    }
+    // `isModelInstalled` only proves manifest+weights. A payload the catalog
+    // declares but the install never fetched leaves the model permanently
+    // stale, and the NEXT call lands right back here — an unbounded
+    // evict/refetch cycle whose per-iteration cost is the whole model.
+    //
+    // The realistic cause is a stale build rather than a bad download: the
+    // service parses catalog source blocks through Zod, which strips keys the
+    // compiled schema doesn't know, while the staleness check reads the raw
+    // index.json. A `packages/core/dist` older than a schema addition makes the
+    // installer blind to a sidecar the checker requires, and the install still
+    // reports `done`. Fail loudly and name the fix instead of looping.
+    const residual = await staleInstall({ cacheRoot, engine, modelId });
+    if (residual) {
+      throw new Error(
+        `install of ${engine}/${modelId} reported done but is still stale: ${residual.reason}. The installer did not fetch a payload the catalog declares. If this is a sidecar (vision encoder / MTP draft), the usual cause is a stale build stripping it from the parsed catalog source block — run \`pnpm build\` and retry.`,
       );
     }
   } finally {

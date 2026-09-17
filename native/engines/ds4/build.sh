@@ -12,7 +12,10 @@
 #   - linux-arm64:  CUDA / DGX Spark (`make ds4-server CUDA_ARCH=sm_121`)
 #   - darwin-x64 / win32: UNSUPPORTED (no artifact produced)
 #
-# CUDA arch: local dev defaults to `native` (nvcc detects the present GPU).
+# CUDA arch: local dev detects the present GPU's compute capability and passes
+# it as a concrete `sm_XX`, because upstream's architecture promotion (for
+# example sm_121 -> sm_121a + DS4_CUDA_HAVE_MXF4) only runs for a named
+# architecture — `-arch=native` silently skips it and fails to assemble.
 # CI cross-builds (no GPU) MUST set DS4_CUDA_ARCH to an explicit value, e.g.
 #   DS4_CUDA_ARCH=sm_90        (H100-class)
 #   DS4_CUDA_ARCH=sm_121       (GB10 / DGX Spark)
@@ -187,7 +190,26 @@ case "$platform" in
     ;;
   linux-x64|linux-arm64)
     backend="cuda"
-    cuda_arch="${DS4_CUDA_ARCH:-native}"
+    # Resolve a CONCRETE `sm_XX` rather than leaning on nvcc's `-arch=native`.
+    # Upstream's Makefile owns architecture promotion — it turns a base
+    # capability such as `sm_121` into `sm_121a` and adds the matching feature
+    # defines (`DS4_CUDA_HAVE_MXF4=1`) — and that expansion only runs when
+    # CUDA_ARCH names an architecture. `native` skips it, so nvcc targets bare
+    # `sm_121` and ptxas then rejects the MXF4 kernels the pin requires:
+    #   Feature '.kind::mxf4' not supported on .target 'sm_121'
+    # That made the documented local-dev invocation the one that cannot build
+    # on a DGX Spark. Query the device instead of hardcoding a capability, so
+    # Orin (sm_87) and Thor (sm_110) still resolve to their own targets.
+    cuda_arch="${DS4_CUDA_ARCH:-}"
+    if [[ -z "$cuda_arch" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+      detected="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null |
+        head -1 | tr -d '[:space:].')"
+      [[ -n "$detected" ]] && cuda_arch="sm_${detected}"
+    fi
+    # No CUDA device visible (a cross-build host): let nvcc decide, and let the
+    # explicit DS4_CUDA_ARCH that CI already passes take precedence anyway.
+    cuda_arch="${cuda_arch:-native}"
+    echo "[build] cuda arch: $cuda_arch${DS4_CUDA_ARCH:+ (from DS4_CUDA_ARCH)}"
     if [[ "$cuda_arch" == "spark" ]]; then
       make_args+=("CUDA_ARCH=")          # legacy empty-architecture escape hatch
     else
