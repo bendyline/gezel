@@ -185,7 +185,8 @@ export function clangCompileCommandFailures(
     }
   }
 
-  if (clangCommands === 0) failures.push('compile_commands.json contains no clang compiler commands');
+  if (clangCommands === 0)
+    failures.push('compile_commands.json contains no clang compiler commands');
   return failures;
 }
 
@@ -264,7 +265,9 @@ function main() {
     const baseline = args.baseline ?? DEFAULT_CLANG_BASELINE;
     const commands = JSON.parse(readFileSync(resolve(args.compileCommands), 'utf8'));
     failures.push(...clangCompileCommandFailures(commands, { baseline }));
-    failures.push(...cmakeCacheFailures(readFileSync(resolve(args.cmakeCache), 'utf8'), { baseline }));
+    failures.push(
+      ...cmakeCacheFailures(readFileSync(resolve(args.cmakeCache), 'utf8'), { baseline }),
+    );
   }
 
   if (failures.length > 0) {

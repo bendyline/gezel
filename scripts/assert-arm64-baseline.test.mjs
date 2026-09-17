@@ -86,12 +86,7 @@ test('tokenizes quoted CMake compiler paths without splitting Program Files', ()
     splitCommandLine(
       '"C:/Program Files/LLVM/bin/clang++.exe" --target=arm64-pc-windows-msvc -c source.cpp',
     ),
-    [
-      'C:/Program Files/LLVM/bin/clang++.exe',
-      '--target=arm64-pc-windows-msvc',
-      '-c',
-      'source.cpp',
-    ],
+    ['C:/Program Files/LLVM/bin/clang++.exe', '--target=arm64-pc-windows-msvc', '-c', 'source.cpp'],
   );
 });
 
@@ -132,10 +127,7 @@ test('rejects missing, host-native, and SVE/SME compiler overrides', () => {
   );
   assert.match(
     clangCompileCommandFailures([
-      clangEntry(
-        'bad.cpp',
-        `--target=arm64-pc-windows-msvc -march=${DEFAULT_CLANG_BASELINE}+sve2`,
-      ),
+      clangEntry('bad.cpp', `--target=arm64-pc-windows-msvc -march=${DEFAULT_CLANG_BASELINE}+sve2`),
     ]).join('\n'),
     /march|SVE\/SME/,
   );
@@ -149,10 +141,7 @@ test('requires CMake and ggml to agree on the same non-native baseline', () => {
     cmakeCacheFailures(cacheFixture({ GGML_CPU_ARM_ARCH: 'armv9-a+sve2' })).join('\n'),
     /GGML_CPU_ARM_ARCH/,
   );
-  assert.match(
-    cmakeCacheFailures('GGML_NATIVE:BOOL=OFF').join('\n'),
-    /missing GGML_CPU_ARM_ARCH/,
-  );
+  assert.match(cmakeCacheFailures('GGML_NATIVE:BOOL=OFF').join('\n'), /missing GGML_CPU_ARM_ARCH/);
 });
 
 test('CLI validates PE, compile database, and CMake cache together', (t) => {

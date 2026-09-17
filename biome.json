@@ -39,6 +39,7 @@
       "packages/app/native-bin/**",
       "native/helpers/service-host/.build/**",
       ".codex-tmp/**",
+      ".tmp-qualla-batch/**",
       "tmp/**",
       "temp/**",
       "packages/catalog/scripts/harvested-auth/**",

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  ds4RamTieredContext,
-  resolveDs4LaunchCtx,
-} from '../providers/ds4/build-provider.js';
+import { ds4RamTieredContext, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 
 const GB = 1024 ** 3;
 

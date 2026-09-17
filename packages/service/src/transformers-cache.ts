@@ -17,8 +17,9 @@
 
 import { createHash } from 'node:crypto';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { isPathInside } from './fs/safe-paths.js';
 
 const log = createLogger('service');
 
@@ -62,7 +63,7 @@ function cacheModelDir(cacheDir: string, modelId: string): string {
   }
   const root = resolve(cacheDir);
   const target = resolve(root, ...parts);
-  if (target === root || !target.startsWith(`${root}${sep}`)) {
+  if (target === root || !isPathInside(target, root)) {
     throw new Error(`refusing transformers cache path outside ${root}: ${modelId}`);
   }
   return target;
