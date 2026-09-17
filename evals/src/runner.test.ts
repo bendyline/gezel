@@ -1422,12 +1422,12 @@ describe('ds4 eval residency policy', () => {
     ).toBe(false);
   });
 
-  it('uses Qwen catalog launch limits instead of its disk-only n-gram file size', () => {
+  it('uses Qwen resident-weight hints instead of its disk-only n-gram file size', () => {
     const actual = ds4EvalLaunchOverridesForModel('qwen3.8-flash-next-q2');
 
     expect(actual?.config).toMatchObject({
       ds4SsdStreaming: false,
-      ds4NumCtx: 8192,
+      ds4NumCtx: 131072,
     });
     expect(actual?.summary).toContain('prefillChunk=1024');
     expect(actual?.summary).toContain('residency=full');
