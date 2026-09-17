@@ -77,8 +77,9 @@ jobs:
     # instrumented vitest run over 16 package roots unnoticed; it had already
     # forced quality.yml's unit job from 45 to 60 min, and here it pushed a
     # 79 min gate past 90. It is deliberately no longer in `validate` — it
-    # re-runs suites test:ci already ran to completion, so it reports rather
-    # than gates, and PR CI still measures it on every pull request.
+    # re-runs suites test:ci already ran to completion, so PR CI measures it
+    # separately on every pull request. The local `pnpm all` superset appends
+    # that coverage threshold check while keeping this release path unchanged.
     #
     # 150 is headroom over the ~100 min the gate needs after that removal, not
     # a target. If it is approached again, split this job rather than raise it.

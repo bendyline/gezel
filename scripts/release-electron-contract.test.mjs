@@ -340,6 +340,15 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   const validateSteps = scripts['validate:unlocked'].split(' && ');
 
   assert.ok(validateSteps.includes('pnpm test:ci'), 'validate must use the serialized CI suite');
+  assert.equal(
+    scripts.all,
+    'node scripts/validate-workspace.mjs --coverage',
+    'pnpm all must append executable coverage threshold checks to local validation',
+  );
+  assert.ok(
+    !validateSteps.includes('pnpm test:coverage'),
+    'release validation must not restore the serial coverage rerun',
+  );
   assert.ok(
     !validateSteps.includes('pnpm test'),
     'validate must not restore release-only parallel package contention',

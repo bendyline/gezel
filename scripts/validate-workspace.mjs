@@ -17,7 +17,15 @@ function waitForChild(child) {
 }
 
 async function runValidationChild(options) {
-  const child = (options.spawnPnpmFn ?? spawnPnpm)(['run', 'validate:unlocked'], {
+  return runPnpmScriptChild(options, 'validate:unlocked');
+}
+
+async function runCoverageChild(options) {
+  return runPnpmScriptChild(options, 'test:coverage:unleased');
+}
+
+async function runPnpmScriptChild(options, script) {
+  const child = (options.spawnPnpmFn ?? spawnPnpm)(['run', script], {
     cwd: options.repoRoot,
     env: options.env,
     stdio: 'inherit',
@@ -35,7 +43,7 @@ async function runValidationChild(options) {
   try {
     const { code, signal } = await completion;
     if (signal) {
-      console.error(`[validate] validation exited on ${signal}`);
+      console.error(`[validate] ${script} exited on ${signal}`);
       return 1;
     }
     return code ?? 1;
@@ -49,9 +57,11 @@ async function runValidationChild(options) {
 export async function runWorkspaceValidation(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const install = options.install ?? false;
+  const coverage = options.coverage ?? false;
   const inheritedEnv = options.env ?? process.env;
   const runInstallFn = options.runInstallFn ?? runPreparedFrozenInstall;
   const runValidationFn = options.runValidationFn ?? runValidationChild;
+  const runCoverageFn = options.runCoverageFn ?? runCoverageChild;
 
   const withLease = install ? withPnpmInstallLock : withDependencyReadLease;
   return withLease(
@@ -68,23 +78,31 @@ export async function runWorkspaceValidation(options = {}) {
         });
         if (installCode !== 0) return installCode;
       }
-      return runValidationFn({ repoRoot, env, setChildPid });
+      const childOptions = {
+        repoRoot,
+        env,
+        setChildPid,
+        ...(options.spawnPnpmFn ? { spawnPnpmFn: options.spawnPnpmFn } : {}),
+      };
+      const validationCode = await runValidationFn(childOptions);
+      if (validationCode !== 0 || !coverage) return validationCode;
+      return runCoverageFn(childOptions);
     },
     {
-      command: install ? 'pnpm deps:validate' : 'pnpm validate',
+      command: coverage ? 'pnpm all' : install ? 'pnpm deps:validate' : 'pnpm validate',
       env: inheritedEnv,
     },
   );
 }
 
 export function parseWorkspaceValidationArgs(argv) {
-  return { install: argv.includes('--install') };
+  return { install: argv.includes('--install'), coverage: argv.includes('--coverage') };
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) {
-  const { install } = parseWorkspaceValidationArgs(process.argv.slice(2));
-  runWorkspaceValidation({ install }).then(
+  const { install, coverage } = parseWorkspaceValidationArgs(process.argv.slice(2));
+  runWorkspaceValidation({ install, coverage }).then(
     (code) => {
       process.exitCode = code;
     },
