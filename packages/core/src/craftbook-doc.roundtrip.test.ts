@@ -60,7 +60,14 @@ const FULL_BOOK: Craftbook = {
     ],
   },
   steps: [
-    { id: 'host', name: 'Fan out', prompt: 'Read the item list.', spawnFanout: true, next: 'done' },
+    {
+      id: 'host',
+      name: 'Fan out',
+      prompt: 'Read the item list.',
+      promptProfile: 'focused',
+      spawnFanout: true,
+      next: 'done',
+    },
     { id: 'done', name: 'Done', prompt: 'Wrap up.', terminal: true },
   ],
   createdAt: NOW,
@@ -126,6 +133,7 @@ describe('markdown codec round-trip', () => {
     expect(parsed.doc.commands).toEqual(FULL_BOOK.commands);
     expect(parsed.doc.diffpackCapable).toBe(true);
     expect(parsed.doc.capabilityFloor).toBe('medium');
+    expect(parsed.doc.steps.find((s) => s.id === 'host')?.promptProfile).toBe('focused');
     expect(parsed.doc.steps.find((s) => s.id === 'host')?.spawnFanout).toBe(true);
   });
 

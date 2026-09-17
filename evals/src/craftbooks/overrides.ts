@@ -1798,12 +1798,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'The pull-request-review-workflow scenario now dispatches the real craftbook over a deterministic 120-file corpus and grades attributed host completion, one child per adaptive batch, service-observed open-batch read receipts, review-batch writes, exact runtime coverage shards, deterministic ledger provenance, cited host synthesis, a seeded authorization finding, cross-file false-positive suppression, and source immutability. It is implemented but not yet promoted to validated pending a clean local-model eval run.',
+        'The pull-request-review-workflow scenario now dispatches the real craftbook over a deterministic 120-file corpus, performs one controlled daemon restart while a shard is active, and grades persisted restart recovery, explicit per-phase latency budgets, attributed host completion, one child per adaptive batch, service-observed read/write receipts, exact coverage provenance, structured cross-file candidate preservation, cited host synthesis, a seeded authorization finding, false-positive suppression, and source immutability. It is implemented but not yet promoted to validated pending a clean local-model eval run.',
     },
     gaps: [
       'Run the new workflow scenario successfully on a local model before promoting it to validated.',
       'Replace more of the deterministic padding records with realistic varied patch shapes while retaining the exact 120-file provenance oracle.',
-      'Persist checkpoint and phase-latency budgets in the eval result so performance regressions fail explicitly rather than requiring log inspection.',
     ],
   },
   'pwa-offline': {

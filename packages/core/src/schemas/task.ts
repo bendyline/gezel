@@ -12,6 +12,7 @@ import {
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
   CraftbookStepInputSchema,
+  CraftbookStepPromptProfileSchema,
   CraftbookStepSchema,
   CraftbookStepToolPolicySchema,
   CraftbookToolsetNeedSchema,
@@ -848,6 +849,8 @@ export const UpdateTaskStepRequestSchema = z.object({
   suggestedRole: z.string().nullable().optional(),
   /** Per-step indexed-context policy. `null` restores inherited behavior. */
   retrieval: RetrievalPolicySchema.nullable().optional(),
+  /** Reduced prompt context for bounded procedure-only work. `null` restores the full prompt. */
+  promptProfile: CraftbookStepPromptProfileSchema.nullable().optional(),
   /** Per-step subtractive tool/output policy. `null` restores inherited behavior. */
   toolPolicy: CraftbookStepToolPolicySchema.nullable().optional(),
   assignee: TaskAssigneeSchema.nullable().optional(),

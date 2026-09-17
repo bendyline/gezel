@@ -31,6 +31,10 @@ export const meta = defineScript({
       type: 'number',
       description: 'Number of B-numbered findings candidates indexed.',
     },
+    verificationCandidates: {
+      type: 'number',
+      description: 'Number of structured V-numbered cross-file candidates indexed.',
+    },
   },
   requires: ['artifacts.read', 'artifacts.write'],
 } as const);
@@ -66,6 +70,70 @@ function severityRank(severity: string): number {
   return SEVERITY_RANK[severity] ?? UNKNOWN_SEVERITY_RANK;
 }
 const FINDING_START_RE = /^\s*(?:#{1,6}\s+|\*\*|[-*]\s+)?B(\d+)-(\d+)\b/i;
+interface VerificationCandidate {
+  id: string;
+  path: string;
+  line: number;
+  severity: 'critical' | 'major' | 'minor' | 'nit';
+  claim: string;
+  verify: string;
+  batchNumber: number;
+  observationsFile: string;
+}
+
+function parseVerificationCandidates(
+  content: string,
+  batchNumber: number,
+  observationsFile: string,
+): VerificationCandidate[] {
+  const heading = /^#{1,6}\s+Verification candidates\s*$/im.exec(content);
+  // Older in-flight craftbook snapshots predate the structured channel.
+  // Their gates never promised one, so absence remains an empty list. New
+  // versions explicitly require the section in corpusBatchObservations.
+  if (!heading) return [];
+  const afterHeading = heading ? content.slice(heading.index + heading[0].length) : undefined;
+  const nextHeadingOffset = afterHeading?.search(/^#{1,6}\s+/m) ?? -1;
+  const section =
+    afterHeading === undefined
+      ? undefined
+      : nextHeadingOffset >= 0
+        ? afterHeading.slice(0, nextHeadingOffset)
+        : afterHeading;
+  const json = section ? /```json\s*([\s\S]*?)```/i.exec(section)?.[1] : undefined;
+  if (!json) throw new Error(`${observationsFile} lacks its verificationCandidates JSON block.`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new Error(
+      `${observationsFile} has invalid verificationCandidates JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const raw =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).verificationCandidates
+      : undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error(`${observationsFile} verificationCandidates must be an array.`);
+  }
+  return raw.map((candidate, index) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error(`${observationsFile} verificationCandidates[${index}] is invalid.`);
+    }
+    const fields = candidate as Record<string, unknown>;
+    return {
+      id: String(fields.id),
+      path: String(fields.path),
+      line: Number(fields.line),
+      severity: String(fields.severity) as VerificationCandidate['severity'],
+      claim: String(fields.claim),
+      verify: String(fields.verify),
+      batchNumber,
+      observationsFile,
+    };
+  });
+}
+
 function scopeRank(preview: string): number {
   const path = /`([^`\n]+):\d+/.exec(preview)?.[1] ?? '';
   if (
@@ -104,6 +172,7 @@ const overflowCandidates: Array<{
   batchNumber: number;
   observationsFile: string;
 }> = [];
+const verificationCandidates: VerificationCandidate[] = [];
 let candidateCount = 0;
 for (let index = 0; index < parsed.length; index++) {
   const value = parsed[index];
@@ -139,6 +208,12 @@ for (let index = 0; index < parsed.length; index++) {
     throw new Error(
       `${observationsFile} lacks path heading(s): ${missingPaths.slice(0, 5).join(', ')}`,
     );
+  const batchVerificationCandidates = parseVerificationCandidates(
+    content,
+    number,
+    observationsFile,
+  );
+  verificationCandidates.push(...batchVerificationCandidates);
   const candidates = [];
   const overflow: string[] = [];
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -203,6 +278,7 @@ for (let index = 0; index < parsed.length; index++) {
       .filter((candidate) => candidate.likelyNonIssue)
       .map((candidate) => candidate.id),
     overflow,
+    verificationCandidateIds: batchVerificationCandidates.map((candidate) => candidate.id),
   });
 }
 const actionableCandidates = indexedCandidates
@@ -224,11 +300,17 @@ const omittedActionable = [
   })),
   ...overflowCandidates.map((candidate) => ({ ...candidate, severity: 'unknown' })),
 ];
+verificationCandidates.sort(
+  (left, right) =>
+    severityRank(left.severity) - severityRank(right.severity) ||
+    left.batchNumber - right.batchNumber ||
+    left.id.localeCompare(right.id),
+);
 await gezel.artifacts.write(
   outFile,
   `${JSON.stringify(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       batchesFile,
       batchCount: summaries.length,
       candidateCount,
@@ -238,10 +320,17 @@ await gezel.artifacts.write(
       shortlistLimit: SHORTLIST_LIMIT,
       shortlist,
       omittedActionable,
+      verificationCandidates,
       batches: summaries,
     },
     null,
     2,
   )}\n`,
 );
-gezel.output({ ok: true, outFile, batches: summaries.length, candidates: candidateCount });
+gezel.output({
+  ok: true,
+  outFile,
+  batches: summaries.length,
+  candidates: candidateCount,
+  verificationCandidates: verificationCandidates.length,
+});

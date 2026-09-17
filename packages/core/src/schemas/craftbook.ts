@@ -320,6 +320,15 @@ export type CraftbookStepToolPolicy = z.infer<typeof CraftbookStepToolPolicySche
  */
 export const ModelTierSchema = z.enum(MODEL_TIER_ORDER);
 
+/**
+ * Prompt context carried into one craftbook step. `focused` is for bounded
+ * workers whose complete authority and inputs are already named by the step
+ * procedure (for example one artifact-only fanout shard); it omits standing
+ * project/workspace context that the step cannot use.
+ */
+export const CraftbookStepPromptProfileSchema = z.enum(['focused']);
+export type CraftbookStepPromptProfile = z.infer<typeof CraftbookStepPromptProfileSchema>;
+
 export const CraftbookStepSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -352,6 +361,8 @@ export const CraftbookStepSchema = z.object({
   capabilityFloor: ModelTierSchema.optional(),
   /** Per-phase indexed-context policy; overrides gezel and install defaults. */
   retrieval: RetrievalPolicySchema.optional(),
+  /** Optional reduced prompt context for tightly bounded procedure-only work. */
+  promptProfile: CraftbookStepPromptProfileSchema.optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -1080,6 +1091,8 @@ export const NewCraftbookStepSchema = z.object({
   capabilityFloor: ModelTierSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.retrieval}. */
   retrieval: RetrievalPolicySchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.promptProfile}. */
+  promptProfile: CraftbookStepPromptProfileSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -1311,6 +1324,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.suggestedRole ? { suggestedRole: s.suggestedRole } : {}),
       ...(s.capabilityFloor ? { capabilityFloor: s.capabilityFloor } : {}),
       ...(s.retrieval ? { retrieval: s.retrieval } : {}),
+      ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),
@@ -1438,6 +1452,7 @@ export interface StepPatch {
   suggestedRole?: string | null;
   capabilityFloor?: ModelTier | null;
   retrieval?: RetrievalPolicy | null;
+  promptProfile?: CraftbookStepPromptProfile | null;
   toolPolicy?: CraftbookStepToolPolicy | null;
   assignee?: TaskAssignee | null;
   suggestedGezelId?: string | null;
@@ -1481,6 +1496,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
   if (patch.retrieval !== undefined) {
     if (patch.retrieval === null) delete updated.retrieval;
     else updated.retrieval = patch.retrieval;
+  }
+  if (patch.promptProfile !== undefined) {
+    if (patch.promptProfile === null) delete updated.promptProfile;
+    else updated.promptProfile = patch.promptProfile;
   }
   if (patch.toolPolicy !== undefined) {
     if (patch.toolPolicy === null) delete updated.toolPolicy;

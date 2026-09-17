@@ -170,6 +170,41 @@ describe('runaway session safety cap', () => {
 });
 
 describe('scenario terminal failure handoff', () => {
+  it('reconnects the stable eval context after the one-shot daemon restart predicate matches', async () => {
+    const firstClient = terminalHandoffTestClient();
+    const restartedClient = terminalHandoffTestClient();
+    const restartDaemon = vi.fn(async () => restartedClient);
+    const clientsSeen: GezelClient[] = [];
+    const scenario: EvalScenario = {
+      id: 'restart-exercise-test',
+      description: 'test',
+      prompt: 'test',
+      restartWhen: async (ctx) => {
+        clientsSeen.push(ctx.client);
+        return true;
+      },
+      successCheck: async (ctx) => {
+        clientsSeen.push(ctx.client);
+        return { done: true, success: true, reason: 'resumed after restart' };
+      },
+    };
+
+    const verdict = await pollUntilDone(scenario, {
+      client: firstClient,
+      meesterId: 'meester',
+      log: vi.fn(),
+      pollIntervalMs: 10,
+      maxDurationMs: 60_000,
+      hardProgressTimeoutMs: 60_000,
+      softProgressTimeoutMs: 60_000,
+      restartDaemon,
+    });
+
+    expect(restartDaemon).toHaveBeenCalledOnce();
+    expect(clientsSeen).toEqual([firstClient, restartedClient]);
+    expect(verdict).toMatchObject({ success: true, reason: 'resumed after restart' });
+  });
+
   it('leaves aborted-session repair to the runtime while preserving the hard watchdog', async () => {
     const client = terminalHandoffTestClient();
     vi.mocked(client.listChatSessions).mockResolvedValue({

@@ -332,6 +332,12 @@ export interface BuildInstructionsOptions {
    */
   minimalContext?: boolean;
   /**
+   * The active craftbook step is a bounded procedure whose prompt contains
+   * all required inputs. Keep identity, task procedure, truthful tools, and
+   * action discipline; omit project/workspace/recall layers it cannot use.
+   */
+  focusedTaskContext?: boolean;
+  /**
    * Pre-rendered "Workspace map" block (see chat/workspace-gestalt.ts) —
    * the index-derived architecture note + folder purposes + entry points.
    * Computed in buildSessionOpts only when the `prompt.workspace-gestalt`
@@ -574,6 +580,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     voormanGender,
     trimExecutorContext,
     minimalContext,
+    focusedTaskContext,
     workspaceGestalt,
     retrievalFirstHint,
     workspaceWritable,
@@ -1822,6 +1829,28 @@ ${artifactsLine}
       full: minimalFull,
       ...(layeredPrefixCache ? { layers: { gezel: minimalFull, project: minimalFull } } : {}),
     };
+  }
+
+  // Focused craftbook-step mode. Artifact-only fanout shards already carry
+  // their exact records and authority in taskContext; injecting the project
+  // guide, workspace inventory, memories, and a broad about.md both wastes
+  // local-model prefill and can promise tools the step policy removed. Keep
+  // the role identity, exact task/step contract, post-policy tool roster,
+  // model-specific tool syntax, and the late recency anchor.
+  if (focusedTaskContext && task?.step?.prompt) {
+    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.\n\n${actDontNarrate}\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+    const volatile = `${taskContext}${consultationAddendum}${activeTaskAnchor}`
+      .replace(/^\n+(?:---\n+)?/, '')
+      .trim();
+    if (layeredPrefixCache) {
+      return {
+        full: stable,
+        layers: { gezel: stable, project: stable },
+        ...(volatile ? { volatileContext: volatile } : {}),
+      };
+    }
+    const full = `${stable}${taskContext}${consultationAddendum}${activeTaskAnchor}`;
+    return { full, sharedPrefix: stable };
   }
 
   // Legacy single-band ordering (flag OFF) — byte-identical to before.

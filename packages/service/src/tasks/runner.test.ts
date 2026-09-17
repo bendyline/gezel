@@ -423,6 +423,92 @@ describe('TaskRunner — dispatch + FIFO', () => {
     expect(runner.snapshot().pendingCount).toBe(2);
   });
 
+  it('keeps a provider-sized fanout cohort through every child step before opening siblings', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const steps: TaskCraftbookStep[] = [
+      {
+        id: 'open-batch',
+        name: 'open batch',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        createdAt: now,
+      },
+      {
+        id: 'review-batch',
+        name: 'review batch',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        createdAt: now,
+      },
+    ];
+    for (let num = 1; num <= 5; num++) {
+      await store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        parentTaskRef: 'p1/99',
+        title: `batch ${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook(steps.map((step) => ({ ...step }))),
+        activeStepId: 'open-batch',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider(
+      'copilot',
+      new ProviderQueue({ concurrency: 3, backgroundConcurrency: 3 }),
+    );
+    const runner = new TaskRunner({ store, dispatcher });
+    for (let num = 1; num <= 5; num++) {
+      runner.enqueueHandoff({
+        taskRef: `p1/${num}`,
+        stepId: 'open-batch',
+        gezelId: 'bea',
+        projectId: 'p1',
+      });
+    }
+
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual([
+      'p1/1',
+      'p1/2',
+      'p1/3',
+    ]);
+
+    dispatcher.activeSessionIds.clear();
+    for (let num = 1; num <= 3; num++) {
+      const task = (await store.readTask('p1', num))!;
+      await store.writeTask({ ...task, activeStepId: 'review-batch', updatedAt: now });
+      runner.enqueueHandoff({
+        taskRef: task.ref,
+        stepId: 'review-batch',
+        gezelId: 'bea',
+        projectId: 'p1',
+      });
+    }
+
+    await runner.tick();
+    expect(
+      dispatcher.dispatches.slice(3).map((dispatch) => `${dispatch.taskRef}:${dispatch.stepId}`),
+    ).toEqual(['p1/1:review-batch', 'p1/2:review-batch', 'p1/3:review-batch']);
+
+    dispatcher.activeSessionIds.clear();
+    for (let num = 1; num <= 3; num++) {
+      const task = (await store.readTask('p1', num))!;
+      await store.writeTask({ ...task, status: 'complete', updatedAt: now });
+    }
+    await runner.tick();
+    expect(dispatcher.dispatches.slice(6).map((dispatch) => dispatch.taskRef)).toEqual([
+      'p1/4',
+      'p1/5',
+    ]);
+  });
+
   it.each(['copilot', 'llama-cpp', 'mlx', 'ds4'] as const)(
     'paces a cold %s fanout without loading an unrelated native model',
     async (providerName) => {
@@ -1228,6 +1314,14 @@ describe('TaskRunner — startup rehydration', () => {
     await runner.rehydrateFromStore({ projectId: 'p1' });
     expect(runner.snapshot().pendingCount).toBe(1);
     expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/1']);
+    await runner.tick();
+    expect(dispatcher.dispatches).toEqual([
+      expect.objectContaining({
+        taskRef: 'p1/1',
+        stepId: 'plan',
+        resumeExisting: true,
+      }),
+    ]);
   });
 
   it('does not bypass a fanout barrier while active children remain', async () => {

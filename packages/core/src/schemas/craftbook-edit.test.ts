@@ -32,6 +32,14 @@ describe('resolveSteps', () => {
     const [bare] = resolveSteps([{ name: 'Build' }]);
     expect('capabilityFloor' in bare!).toBe(false);
   });
+  it('carries the focused prompt profile through step resolution', () => {
+    const [step] = resolveSteps([{ name: 'Review shard', promptProfile: 'focused' }]);
+    expect(step?.promptProfile).toBe('focused');
+    expect(
+      CraftbookStepSchema.safeParse({ id: 'review', name: 'Review', promptProfile: 'verbose' })
+        .success,
+    ).toBe(false);
+  });
   it('carries declared file inputs (silent-drop trap: this field list is explicit)', () => {
     const [step] = resolveSteps([
       {
