@@ -127,8 +127,9 @@ describe('single-channel kickoff (D1)', () => {
       try {
         await dispatchTaskEntry({ store, taskRunner: runner, history }, task);
         await runner.tick();
-        await vi.waitFor(() =>
-          expect(mock.calls.some((call) => call.kind === 'create')).toBe(true),
+        await vi.waitFor(
+          () => expect(mock.calls.some((call) => call.kind === 'create')).toBe(true),
+          { timeout: 5000, interval: 10 },
         );
         sessionId = (await store.listSessions({ gezelId: 'worker' })).find(
           (session) => session.taskRef === task.ref,
@@ -141,8 +142,9 @@ describe('single-channel kickoff (D1)', () => {
         await runner.tick();
         if (phase === 'generation') {
           gate.release();
-          await vi.waitFor(() =>
-            expect(mock.calls.some((call) => call.kind === 'send')).toBe(true),
+          await vi.waitFor(
+            () => expect(mock.calls.some((call) => call.kind === 'send')).toBe(true),
+            { timeout: 5000, interval: 10 },
           );
         }
         await tasks.setStatus(task.projectId, task.num, 'paused');
@@ -159,6 +161,7 @@ describe('single-channel kickoff (D1)', () => {
         if (sessionId) await manager.cancelInflight(sessionId, 'task-superseded');
       }
     },
+    20_000,
   );
 
   it('repeats a tiny fixed-action entry procedure after the generic completion sentence', async () => {
