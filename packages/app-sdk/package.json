@@ -1,7 +1,7 @@
 {
   "name": "@bendyline/gezel-app-sdk",
-  "version": "1.0.9",
-  "description": "Public SDK for building third-party local apps against gezel \u2014 discovery, consent, OpenAI-shaped chat, ensure-model, custom app tools, and in-process hosting.",
+  "version": "1.0.10",
+  "description": "Public SDK for building third-party local apps against gezel — discovery, consent, OpenAI-shaped chat, ensure-model, custom app tools, and in-process hosting.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "embedding"],
   "homepage": "https://github.com/bendyline/gezel",
