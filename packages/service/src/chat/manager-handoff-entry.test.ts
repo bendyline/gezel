@@ -127,7 +127,9 @@ describe('single-channel kickoff (D1)', () => {
       try {
         await dispatchTaskEntry({ store, taskRunner: runner, history }, task);
         await runner.tick();
-        await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'create')).toBe(true));
+        await vi.waitFor(() =>
+          expect(mock.calls.some((call) => call.kind === 'create')).toBe(true),
+        );
         sessionId = (await store.listSessions({ gezelId: 'worker' })).find(
           (session) => session.taskRef === task.ref,
         )?.id;
@@ -139,7 +141,9 @@ describe('single-channel kickoff (D1)', () => {
         await runner.tick();
         if (phase === 'generation') {
           gate.release();
-          await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'send')).toBe(true));
+          await vi.waitFor(() =>
+            expect(mock.calls.some((call) => call.kind === 'send')).toBe(true),
+          );
         }
         await tasks.setStatus(task.projectId, task.num, 'paused');
         await runner.tick();
