@@ -2523,7 +2523,7 @@ export function ChatTimelineView({
    * runway changes size. ResizeObserver follows streaming bubbles as their
    * text grows without routing token-frequency updates through this parent.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loading and the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
   useLayoutEffect(() => {
     const timeline = scrollRef.current;
     const runway = responseRunwayRef.current;
@@ -2565,7 +2565,7 @@ export function ChatTimelineView({
       observer.observe(node);
     }
     return () => observer.disconnect();
-  }, [liveStructureVersion, terminalLiveStructureVersion]);
+  }, [loading, liveStructureVersion, terminalLiveStructureVersion]);
 
   /**
    * Align a locally-submitted prompt after its row has rendered. The target

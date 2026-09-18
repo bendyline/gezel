@@ -1805,6 +1805,18 @@ describe('McpBridge', () => {
     });
   });
 
+  it('explains a misnested artifact path while preserving validation rejection and caller args', async () => {
+    const args = { jsonContent: { passages: [{ id: 'p1' }, { path: 'misnested-report.json' }] } };
+    const before = structuredClone(args);
+    const result = await bridge.callToolRich('write_artifact', args);
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('`path` belongs at the top level');
+    expect(result.text).toContain('`jsonContent.passages[1].path`');
+    expect(args).toEqual(before);
+    const read = await bridge.callToolRich('read_artifact', { path: 'misnested-report.json' });
+    expect(read.isError).toBe(true);
+  });
+
   describe('unresolved-failure ledger gate on advance_task_step', () => {
     const REJECTION =
       'ERROR: `convert_document` rejected by validator. Wrong type: `source` (got string, expected object).';

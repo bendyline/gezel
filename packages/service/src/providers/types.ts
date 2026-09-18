@@ -266,15 +266,18 @@ export interface SessionOpts {
    */
   onBridgeFailure?: (info: { bridgeId: string; error: unknown }) => void;
   /**
-   * When present, the bridge pool filters its advertised tools to
-   * names in this set. Tools not in the set are hidden from the model
-   * (their JSON schemas are never serialized into requests) but the
-   * bridge can still call them if invoked by id. Driven by the
-   * `toolFilterMode` config + gezel role — see
-   * `chat/role-tool-filter.ts`. Unset means "advertise every tool"
-   * (pre-filter behavior).
+   * Role-derived ceiling on advertised and callable built-in tools.
+   * Third-party tools are unaffected by this set; an authored step's
+   * toolNamePolicy can constrain those too. The bridge pool retains a
+   * narrow append recovery exception for truncated write_file calls.
+   * See chat/role-tool-filter.ts. Unset adds no role-based restriction.
    */
   toolAllowlist?: Set<string>;
+  /** Authored step ceiling for all bridge tools, including third-party MCP tools. */
+  toolNamePolicy?: {
+    allow?: ReadonlySet<string>;
+    deny?: ReadonlySet<string>;
+  };
   /**
    * The chat manager classified this session's current turn as direct
    * file work and narrowed its tool surface accordingly. Local providers

@@ -132,6 +132,52 @@ function valueAt(args: Record<string, unknown>, path: ReadonlyArray<string | num
   return node;
 }
 
+/** Locate misplaced envelope fields without interpreting or repairing their values. */
+function nestedArgumentHints(args: Record<string, unknown>, issues: ZodIssue[]): string[] {
+  const fields = new Set(
+    issues
+      .filter((issue) => isMissingValueIssue(issue) && issue.path?.length === 1)
+      .map((issue) => String(issue.path![0]))
+      .filter((field) => /^[A-Za-z_][\w-]{0,63}$/.test(field))
+      .slice(0, 3),
+  );
+  if (fields.size === 0) return [];
+  const locations = new Map<string, string[]>();
+  const seen = new Set<object>();
+  let remaining = 2_048;
+  function visit(node: unknown, path: string, depth: number): void {
+    if (!node || typeof node !== 'object' || depth > 6 || seen.has(node)) return;
+    seen.add(node);
+    // Do not allocate an unbounded keys/entries array or invoke getters. The
+    // input normally comes from JSON, but a diagnostic must also tolerate
+    // cycles and shared objects supplied by an adapter.
+    for (const key in node) {
+      if (--remaining < 0) return;
+      if (!Object.hasOwn(node, key) || !/^(?:[A-Za-z_][\w-]{0,63}|\d{1,10})$/.test(key)) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(node, key);
+      if (!descriptor || !('value' in descriptor)) continue;
+      const value: unknown = descriptor.value;
+      const location =
+        Array.isArray(node) && /^\d+$/.test(key)
+          ? `${path}[${key}]`
+          : path
+            ? `${path}.${key}`
+            : key;
+      if (depth > 0 && value !== undefined && fields.has(key)) {
+        const found = locations.get(key) ?? [];
+        if (found.length < 3) found.push(location);
+        locations.set(key, found);
+      }
+      visit(value, location, depth + 1);
+    }
+  }
+  visit(args, '', 0);
+  return [...locations].map(
+    ([field, paths]) =>
+      `Required argument \`${field}\` belongs at the top level. Same-named nested fields occur at ${paths.map((path) => `\`${path}\``).join(', ')}; they do not supply that argument. Supply \`${field}\` directly in the tool arguments and check the nested data structure before retrying.`,
+  );
+}
+
 function translateIssues(
   toolName: string,
   issues: ZodIssue[],
@@ -204,6 +250,7 @@ function translateIssues(
     parts.push(`Other: ${other.join('; ')}.`);
   }
   for (const hint of shapeHints) parts.push(hint);
+  parts.push(...nestedArgumentHints(args, issues));
   // Never promise a list this message did not give: the old blanket
   // "retry with all listed fields supplied" was printed even when the
   // only content was `expected object`, which lists nothing.

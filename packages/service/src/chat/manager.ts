@@ -349,6 +349,7 @@ import {
   buildToolCapWarning,
   projectOrchestrationConstraintActive as resolveProjectOrchestrationConstraintActive,
   resolveSessionToolSurface,
+  stepAllowsOnlyBuiltinTools,
   taskStepContextualBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
@@ -2605,8 +2606,13 @@ export class ChatManager extends LocalEngineRuntime {
     return this.inflight.size > 0 || this.externalConversations.listActive().length > 0;
   }
 
-  /** True while a specific session is running or has an unstarted send. */
-  private isSessionTurnPending(sessionId: string): boolean {
+  /**
+   * True while a specific session is running or has an unstarted send,
+   * including cold setup before its live state exists. Lifecycle callers
+   * must use this rather than listInflight(), whose display records require
+   * that state and can omit a turn while ensureState is still initializing.
+   */
+  isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0;
   }
 
@@ -14048,8 +14054,13 @@ export class ChatManager extends LocalEngineRuntime {
       taskContext?.step,
       taskContext?.task.craftbook.toolsets,
     );
+    const builtinOnlyStep = stepAllowsOnlyBuiltinTools(taskContext?.step);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
-      entries.filter((entry) => !stepDisabledToolsetIds.has(entry.toolsetId));
+      entries.filter(
+        (entry) =>
+          (!builtinOnlyStep || entry.runtime.kind === 'builtin') &&
+          !stepDisabledToolsetIds.has(entry.toolsetId),
+      );
     const activePerGezel = activeToolsets(perGezel);
     const activeShared = activeToolsets(shared);
     const activeSystem = activeToolsets(system);
@@ -14129,7 +14140,7 @@ export class ChatManager extends LocalEngineRuntime {
     // Tools a connected app registered for this project. They are named in the
     // prompt's toolset listing the same way an installed toolset is; the real
     // tool names arrive with the post-bridge refresh, from the live server.
-    const appToolBindings = this.appToolBindingsFor(record);
+    const appToolBindings = builtinOnlyStep ? [] : this.appToolBindingsFor(record);
     for (const binding of appToolBindings) {
       installedToolsetIds.add(appToolsToolsetId(binding.appId));
     }
@@ -15848,6 +15859,18 @@ export class ChatManager extends LocalEngineRuntime {
         .join(',');
     }
     if (constrainedAllowlist) opts.toolAllowlist = constrainedAllowlist;
+    // The role allowlist deliberately applies only to built-ins. The authored
+    // step policy is exact across the merged MCP surface, so carry it separately
+    // to both schema filtering and call-time authorization in bridge providers.
+    const authoredPolicy = taskContext?.step?.toolPolicy;
+    if (authoredPolicy?.allowTools || authoredPolicy?.disallowTools?.length) {
+      opts.toolNamePolicy = {
+        ...(authoredPolicy.allowTools ? { allow: new Set(authoredPolicy.allowTools) } : {}),
+        ...(authoredPolicy.disallowTools?.length
+          ? { deny: new Set(authoredPolicy.disallowTools) }
+          : {}),
+      };
+    }
 
     // Mid-tool-loop compaction hook for local providers. When a
     // tool-heavy turn balloons the in-memory transcript past

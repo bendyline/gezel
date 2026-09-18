@@ -4,8 +4,30 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   availableBuiltinToolsForAllowlist,
   resolveSessionToolSurface,
+  stepAllowsOnlyBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
+
+describe('built-in-only authored steps', () => {
+  it('suppresses external servers only for a nonempty exact built-in roster', () => {
+    expect(
+      stepAllowsOnlyBuiltinTools({
+        toolPolicy: { allowTools: ['read_artifact', 'write_artifact', 'advance_task_step'] },
+      }),
+    ).toBe(true);
+    expect(stepAllowsOnlyBuiltinTools({ toolPolicy: { allowTools: ['draft_email'] } })).toBe(true);
+    for (const step of [
+      undefined,
+      {},
+      { toolPolicy: { outputMedium: 'artifact' as const } },
+      { toolPolicy: { allowTools: ['write_artifact', 'browser_click'] } },
+      { toolPolicy: { allowTools: ['constructor'] } },
+      { toolPolicy: { allowTools: [] } },
+    ]) {
+      expect(stepAllowsOnlyBuiltinTools(step)).toBe(false);
+    }
+  });
+});
 
 /**
  * Pins the tier x role cap table. History that makes this worth a direct

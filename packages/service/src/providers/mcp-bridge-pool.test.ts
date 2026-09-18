@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
+import type { SessionOpts } from './types.js';
 
-function poolWithFakeBridge(toolAllowlist: Set<string> | null): McpBridgePool {
+function poolWithFakeBridge(
+  toolAllowlist: Set<string> | null,
+  toolNamePolicy?: SessionOpts['toolNamePolicy'],
+): McpBridgePool {
   const pool = new McpBridgePool();
   const tools: OpenAIFunctionTool[] = [
     tool('start_project', 'Start a project.'),
@@ -13,6 +17,9 @@ function poolWithFakeBridge(toolAllowlist: Set<string> | null): McpBridgePool {
     tool('append_to_file', 'Append to a file.'),
     tool('draft_email', 'Draft email.'),
     tool('draft_connector_action', 'Draft connector action.'),
+    ...(toolNamePolicy
+      ? [tool('browser_click', 'Click a page.'), tool('remote_lookup', 'Look up a record.')]
+      : []),
   ];
   const bridge = new McpBridge();
   const mutableBridge = bridge as unknown as {
@@ -29,9 +36,11 @@ function poolWithFakeBridge(toolAllowlist: Set<string> | null): McpBridgePool {
   }));
   const mutable = pool as unknown as {
     toolAllowlist: Set<string> | null;
+    toolNamePolicy: SessionOpts['toolNamePolicy'];
     bridges: Array<{ id: string; bridge: McpBridge }>;
   };
   mutable.toolAllowlist = toolAllowlist;
+  mutable.toolNamePolicy = toolNamePolicy;
   mutable.bridges.push({ id: 'gezel', bridge });
   return pool;
 }
@@ -41,6 +50,39 @@ function tool(name: string, description: string): OpenAIFunctionTool {
 }
 
 describe('McpBridgePool allowlist enforcement', () => {
+  it('enforces an authored ceiling on both advertised and callable external tools', async () => {
+    const pool = poolWithFakeBridge(new Set(['write_file']), {
+      allow: new Set(['write_file', 'remote_lookup']),
+    });
+    expect(pool.getOpenAITools().map((t) => t.name)).toEqual(['write_file', 'remote_lookup']);
+    expect(pool.getAnthropicTools().map((t) => t.name)).toEqual(['write_file', 'remote_lookup']);
+    expect(pool.hasTool('remote_lookup')).toBe(true);
+    await expect(pool.callTool('remote_lookup', {})).resolves.toBe('called remote_lookup');
+    for (const name of ['browser_click', 'BrowserClick', 'append_to_file', 'ask_gezel']) {
+      expect(pool.hasTool(name)).toBe(false);
+      await expect(pool.callTool(name, {})).rejects.toThrow('not available');
+      await expect(pool.callToolRich(name, {})).rejects.toThrow('not available');
+    }
+  });
+
+  it('applies explicit denials to external tools without turning the role filter into an external allowlist', async () => {
+    const pool = poolWithFakeBridge(new Set(['write_file']), { deny: new Set(['browser_click']) });
+    expect(pool.getOpenAITools().map((t) => t.name)).toEqual(['write_file', 'remote_lookup']);
+    expect(pool.hasTool('remote_lookup')).toBe(true);
+    await expect(pool.callToolRich('browser_click', {})).rejects.toThrow('not available');
+    expect(pool.hasTool('append_to_file')).toBe(true);
+  });
+
+  it('preserves third-party tools with only the ordinary role filter', () => {
+    const pool = poolWithFakeBridge(new Set(['start_project']), {});
+    expect(pool.getOpenAITools().map((t) => t.name)).toEqual([
+      'start_project',
+      'browser_click',
+      'remote_lookup',
+    ]);
+    expect(pool.hasTool('browser_click')).toBe(true);
+  });
+
   it('hides and rejects built-in tools omitted from the session allowlist', async () => {
     const pool = poolWithFakeBridge(new Set(['start_project']));
 

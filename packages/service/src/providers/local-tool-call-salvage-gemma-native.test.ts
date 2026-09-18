@@ -93,6 +93,36 @@ describe('parseGemmaNativeToolCall', () => {
     expect(parsed?.arguments).toEqual({ spec: { name: 'Y', steps: ['a', 'b'] } });
   });
 
+  it.each(['first', 'last'])(
+    'preserves an envelope path %s beside a long nested report',
+    (position) => {
+      const passages = Array.from({ length: 45 }, (_, i) => ({
+        id: `p${i + 1}`,
+        verdict: 'supported',
+        citations: ['s1/p1'],
+        sourceFact: 'A string containing {braces}, [brackets], and "quotes".',
+      }));
+      const report = { passages, corrections: [], dignity: { passed: true } };
+      const content = `jsonContent:${JSON.stringify(report)}`;
+      const path = 'path:<|"|>reports/result.json<|"|>';
+      const parsed = parseGemmaNativeToolCall(
+        `call:write_artifact{${position === 'first' ? `${path},${content}` : `${content},${path}`}}`,
+        TOOLS,
+      );
+      expect(parsed?.arguments).toEqual({ path: 'reports/result.json', jsonContent: report });
+    },
+  );
+
+  it('does not promote a path already emitted inside a report array', () => {
+    const parsed = parseGemmaNativeToolCall(
+      'call:write_artifact{jsonContent:{passages:[{id:<|"|>p1<|"|>},{path:<|"|>result.json<|"|>}]}}',
+      TOOLS,
+    );
+    expect(parsed?.arguments).toEqual({
+      jsonContent: { passages: [{ id: 'p1' }, { path: 'result.json' }] },
+    });
+  });
+
   it('parses a leaked start_project envelope with ordinary quoted strings and arrays', () => {
     const body = `<|tool_call>call:start_project{
   name: "Tic-Tac-Toe Game",

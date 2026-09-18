@@ -186,6 +186,14 @@ export interface ResolvedSessionToolSurface {
   exactCraftbookConstrained: boolean;
 }
 
+/** An exact built-in-only step cannot use any separately installed MCP server. */
+export function stepAllowsOnlyBuiltinTools(
+  step: Pick<TaskCraftbookStep, 'toolPolicy'> | undefined,
+): boolean {
+  const names = step?.toolPolicy?.allowTools;
+  return !!names?.length && names.every((name) => Object.hasOwn(TOOL_REGISTRY, name));
+}
+
 const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
 
 /** Materialize the primary built-in roster when an unrestricted surface must be subtracted. */
