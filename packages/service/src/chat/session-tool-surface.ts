@@ -174,10 +174,52 @@ export interface ResolveSessionToolSurfaceOptions {
    * (security, repository, and configured-service gates still apply).
    */
   requiredTool?: string;
+  /**
+   * Generalist mode: every persisted step of the session's task. The
+   * deliverable kit, the mandated / conditionally-referenced tool sets, the
+   * contextual built-in grants and the research-intent flag become UNIONS
+   * over these steps, so the surface is the same on every step of the run
+   * and a later step never lacks a tool the union already admitted. The
+   * authored `toolPolicy` of `activeStep` still applies afterwards as the
+   * per-step ceiling (fixed-action steps depend on it). Absent → the
+   * ordinary single-step surface.
+   */
+  generalistSteps?: ReadonlyArray<NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>>;
   forceDirectFileWork?: boolean;
   existingSubstantialFileForImmediate?: () => Promise<boolean>;
   onCapTrim?: (event: { before: number; after: number; dropped: string[] }) => void;
   onClamp?: (kind: SessionToolClampKind) => void;
+}
+
+type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>;
+type StepKitLike = NonNullable<ReturnType<typeof stepToolKit>>;
+
+/**
+ * The kit for a generalist run: the active step's kit widened by every
+ * other step's. `kind`/`path` stay the ACTIVE step's so the tier cap's
+ * priority prefix still ranks the current deliverable's producers first.
+ * Null only when no step in the run targets a file.
+ */
+function unionStepKit(
+  activeStep: StepSurfaceInput,
+  steps: ReadonlyArray<StepSurfaceInput>,
+): StepKitLike | null {
+  const active = stepToolKit(activeStep);
+  if (steps.length <= 1) return active;
+  const tools = new Set<string>(active?.tools ?? []);
+  let kind = active?.kind;
+  let path = active?.path;
+  let anyKit = active !== null;
+  for (const step of steps) {
+    const kit = stepToolKit(step);
+    if (!kit) continue;
+    anyKit = true;
+    for (const tool of kit.tools) tools.add(tool);
+    kind ??= kit.kind;
+    path ??= kit.path;
+  }
+  if (!anyKit || kind === undefined) return null;
+  return { kind, path, tools } as StepKitLike;
 }
 
 export interface ResolvedSessionToolSurface {
@@ -326,10 +368,21 @@ export async function resolveSessionToolSurface(
   opts: ResolveSessionToolSurfaceOptions,
 ): Promise<ResolvedSessionToolSurface> {
   const hasToolsetOverride = opts.toolsetsGroupOverride.length > 0;
-  const mandatedStepTools = stepMandatedTools(opts.activeStep);
-  const conditionallyReferencedStepTools = promptConditionallyReferencedTools(
-    opts.activeStep?.prompt ?? '',
-  );
+  // The steps whose procedures shape this surface: just the active step,
+  // or every step of a generalist run.
+  const surfaceSteps: ReadonlyArray<StepSurfaceInput> = opts.generalistSteps?.length
+    ? opts.generalistSteps
+    : opts.activeStep
+      ? [opts.activeStep]
+      : [];
+  const mandatedStepTools = new Set<string>();
+  const conditionallyReferencedStepTools = new Set<string>();
+  for (const step of surfaceSteps) {
+    for (const name of stepMandatedTools(step)) mandatedStepTools.add(name);
+    for (const name of promptConditionallyReferencedTools(step.prompt ?? '')) {
+      conditionallyReferencedStepTools.add(name);
+    }
+  }
   let rawAllowlist = computeToolAllowlist({
     role: opts.role,
     mode: opts.mode,
@@ -356,8 +409,10 @@ export async function resolveSessionToolSurface(
   // A task-scoped plan step may surgically edit its embedded craftbook. The
   // MCP process pre-registers this one large schema for task sessions, while
   // this exact procedure mention is what admits it to the current turn.
-  for (const name of taskStepContextualBuiltinTools(opts.session, opts.activeStep)) {
-    contextualBuiltinTools.add(name);
+  for (const step of surfaceSteps) {
+    for (const name of taskStepContextualBuiltinTools(opts.session, step)) {
+      contextualBuiltinTools.add(name);
+    }
   }
   if (rawAllowlist && contextualBuiltinTools.size > 0) {
     rawAllowlist = new Set(rawAllowlist);
@@ -443,11 +498,11 @@ export async function resolveSessionToolSurface(
     opts.mode !== 'never' &&
     !hasToolsetOverride &&
     !stepToolKitDisabled()
-      ? stepToolKit(opts.activeStep)
+      ? unionStepKit(opts.activeStep, surfaceSteps)
       : null;
   const researchIntent =
     resolveRoleId(opts.role) === 'researcher' ||
-    resolveRoleId(opts.activeStep?.suggestedRole) === 'researcher';
+    surfaceSteps.some((step) => resolveRoleId(step.suggestedRole) === 'researcher');
   // A persisted step assignment is authority to execute THAT step, even when
   // the assignee's ordinary role kit is narrower. Grant only the deterministic
   // deliverable kit plus canonical tools the procedure positively mandates,
@@ -1020,6 +1075,7 @@ function isImplementationRole(role: string | undefined): boolean {
   const normalized = role?.toLowerCase().trim() ?? '';
   return (
     normalized.includes('builder') ||
+    normalized.includes('generalist') ||
     normalized.includes('developer') ||
     normalized.includes('engineer') ||
     normalized.includes('programmer') ||

@@ -477,6 +477,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   const authProbe = probeProviderAuth(engine);
   if (!authProbe.ok) {
     return finalize({
+      generalistMode: opts.generalistMode,
+      engine,
       trialId,
       scenarioId: scenario.id,
       modelId: opts.modelId,
@@ -524,6 +526,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     }
   } catch (err) {
     return finalize({
+      generalistMode: opts.generalistMode,
+      engine,
       trialId,
       scenarioId: scenario.id,
       modelId: opts.modelId,
@@ -643,6 +647,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   } catch (err) {
     const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
+      generalistMode: opts.generalistMode,
+      engine,
       trialId,
       scenarioId: scenario.id,
       modelId: opts.modelId,
@@ -766,6 +772,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       });
     } catch (err) {
       return finalize({
+        generalistMode: opts.generalistMode,
+        engine,
         trialId,
         scenarioId: scenario.id,
         modelId: opts.modelId,
@@ -820,6 +828,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     } catch (error) {
       await mockRuntime?.close().catch(() => {});
       return finalize({
+        generalistMode: opts.generalistMode,
+        engine,
         trialId,
         scenarioId: scenario.id,
         modelId: opts.modelId,
@@ -843,6 +853,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     } catch (error) {
       await mockRuntime?.close().catch(() => {});
       return finalize({
+        generalistMode: opts.generalistMode,
+        engine,
         trialId,
         scenarioId: scenario.id,
         modelId: opts.modelId,
@@ -884,6 +896,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   } catch (err) {
     await mockRuntime?.close().catch(() => {});
     return finalize({
+      generalistMode: opts.generalistMode,
+      engine,
       trialId,
       scenarioId: scenario.id,
       modelId: opts.modelId,
@@ -1003,7 +1017,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
           }
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
-      ...(opts.executionDensity ? { executionDensity: opts.executionDensity } : {}),
+      ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
       ...(opts.keurmeester
         ? {
             keurmeester: {
@@ -1032,7 +1046,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       firstRunCompleted: true,
     });
     log(
-      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.executionDensity ? ` executionDensity=${opts.executionDensity}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.
@@ -1253,6 +1267,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   }
 
   return finalize({
+    generalistMode: opts.generalistMode,
+    engine,
     trialId,
     scenarioId: scenario.id,
     modelId: opts.modelId,
@@ -1348,7 +1364,7 @@ const SELF_ORCHESTRATING_MIN_SOFT_PROGRESS_MS = 20 * 60 * 1000;
  * gemma4-e4b-q8 / data-wrangle, where both escalation nudges 400'd and the
  * trial still failed claiming the model had ignored them.
  */
-const WRITE_CAPABLE_ROLES = /^(builder|developer|implementer|engineer)$/i;
+const WRITE_CAPABLE_ROLES = /^(builder|generalist|developer|implementer|engineer)$/i;
 
 /**
  * Default hard no-progress window. If the HARD digest (real product
@@ -4176,6 +4192,8 @@ async function finalize(args: {
   scenarioId: string;
   modelId: string;
   modelTier: import('@bendyline/gezel').ModelTier;
+  generalistMode?: TrialOptions['generalistMode'];
+  engine?: TrialOptions['engine'];
   startedAt: Date;
   startMonotonic: number;
   runDir: string;
@@ -4244,6 +4262,8 @@ async function finalize(args: {
     scenarioId: args.scenarioId,
     modelId: args.modelId,
     modelTier: args.modelTier,
+    ...(args.generalistMode ? { generalistMode: args.generalistMode } : {}),
+    ...(args.engine ? { engine: args.engine } : {}),
     startedAt: args.startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,
@@ -4423,7 +4443,7 @@ async function pickReEngageTarget(
     (a, b) => Number(Boolean(b.taskRef)) - Number(Boolean(a.taskRef)) || tsOf(b) - tsOf(a),
   );
 
-  const builderRoles = /^(builder|developer|voorman)$/i;
+  const builderRoles = /^(builder|generalist|developer|voorman)$/i;
   const roleOf = (s: { gezelId: string }): string | null => gezelRoles.get(s.gezelId) ?? null;
   const matches = (s: { gezelId: string }, re: RegExp): boolean => {
     const role = roleOf(s);

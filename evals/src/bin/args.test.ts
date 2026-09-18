@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertKnownFlags, parseArgs } from './args.ts';
+import { assertKnownFlags, parseArgs, resolveGeneralistFlag } from './args.ts';
 
 function capture(run: () => void): { errors: string[]; exited: number | null } {
   const errors: string[] = [];
@@ -71,5 +71,47 @@ describe('assertKnownFlags', () => {
     });
     expect(errors.join('\n')).toContain('--nope');
     expect(errors.join('\n')).toContain('--alsonope');
+  });
+});
+
+describe('resolveGeneralistFlag', () => {
+  it('returns undefined when the flag is absent (daemon default applies)', () => {
+    const { exited } = capture(() => {
+      expect(resolveGeneralistFlag(parseArgs(['--model', 'x']).flags)).toBeUndefined();
+    });
+    expect(exited).toBeNull();
+  });
+
+  it.each(['auto', 'on', 'off'] as const)('accepts --generalist %s', (value) => {
+    let resolved: string | undefined;
+    const { exited } = capture(() => {
+      resolved = resolveGeneralistFlag(parseArgs(['--generalist', value]).flags);
+    });
+    expect(exited).toBeNull();
+    expect(resolved).toBe(value);
+  });
+
+  it('rejects a typo instead of silently running the default arm', () => {
+    const { errors, exited } = capture(() => {
+      resolveGeneralistFlag(parseArgs(['--generalist', 'flat']).flags);
+    });
+    expect(exited).toBe(2);
+    expect(errors.join('\n')).toContain('Unknown --generalist "flat"');
+  });
+
+  it('rejects a bare --generalist with no value', () => {
+    const { errors, exited } = capture(() => {
+      resolveGeneralistFlag(parseArgs(['--generalist']).flags);
+    });
+    expect(exited).toBe(2);
+    expect(errors.join('\n')).toContain('needs a value');
+  });
+
+  it('names the replacement when the pre-v2 --render-mode spelling is used', () => {
+    const { errors, exited } = capture(() => {
+      resolveGeneralistFlag(parseArgs(['--render-mode', 'flat']).flags);
+    });
+    expect(exited).toBe(2);
+    expect(errors.join('\n')).toContain('--render-mode was renamed to --generalist');
   });
 });

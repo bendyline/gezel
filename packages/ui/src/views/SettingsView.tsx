@@ -38,6 +38,7 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-side.js';
 import { type ThemePref, getThemePref, setThemePref } from '../theme.js';
+import { GeneralistModeSection } from './GeneralistModeSection.js';
 import {
   AutostartToggle,
   BackgroundServiceStatus,
@@ -2961,6 +2962,16 @@ export function SettingsView() {
                   )}
                 </div>
               </section>
+
+              <GeneralistModeSection
+                value={config?.generalistMode}
+                setStatus={setStatus}
+                onSaved={(res) => {
+                  setConfig(res);
+
+                  window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+                }}
+              />
 
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Tool filtering</h3>

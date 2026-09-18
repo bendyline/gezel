@@ -2622,26 +2622,34 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
-   * Execution density — how much orchestration scaffolding wraps a task.
+   * Generalist mode — one switch for how much orchestration wraps a piece
+   * of work. See `core/generalist-mode.ts` and `docs/generalist-mode.md`.
    *
-   *  - `scaffold` (default): the full `meester → voorman → specialists`
-   *    crew with granular per-step craftbooks. Right for raw-completion
-   *    local models, where gezel's loop IS the agent.
-   *  - `flat`: route concrete asks to a single generalist (`start_job` →
-   *    solo Builder, which already collapses the craftbook onto the
-   *    one specialist). Right for self-orchestrating providers (codex-cli,
-   *    anthropic-cli, copilot) that bring their own agent loop — the crew
-   *    + granular steps are mostly redundant overhead for them (eval data:
-   *    ~3.5 gezels/scenario, output ≈1–2% of token traffic).
-   *  - `auto` (**the default**, including when unset): pick by provider —
-   *    `flat` for self-orchestrating providers (codex-cli/anthropic-cli/
-   *    copilot), `scaffold` otherwise. Local + raw-cloud providers are
-   *    unaffected. Set `scaffold` explicitly to force the full crew on a
-   *    frontier provider (the escape hatch).
+   *  - `on`: craftbook tasks run in **generalist** execution — one gezel
+   *    owns every step in one continuous session, with the union of every
+   *    step's tools and the task outline in view; steps are still disclosed
+   *    one at a time and every step gate still applies. The Meester's
+   *    `start_project` routes concrete asks to a single solo lead.
+   *  - `off`: **stepwise** execution — a specialist per `suggestedRole`, a
+   *    fresh session per gezel change, a per-step tool kit — and crew
+   *    kickoff (the escape hatch for a frontier provider).
+   *  - `auto` (**the default**, including when unset): generalist execution
+   *    for hosted frontier providers (copilot, anthropic, anthropic-cli,
+   *    openai, codex-cli), stepwise for on-device models; solo kickoff for
+   *    frontier providers and local MEDIUM (the measured 2026-07-17 rule).
    *
-   * The quality gates stay the universal floor across all densities — that
-   * is what makes `flat` safe. Validated by the flat-vs-scaffold
-   * A/B (codex-cli: equal pass rate, materially fewer tokens).
+   * The quality gates stay the universal floor in both modes — that is what
+   * makes generalist execution safe. Resolved once per task at create and
+   * stamped as `Task.executionMode`, so changing this never flips a running
+   * task.
+   */
+  generalistMode: z.enum(['auto', 'on', 'off']).optional(),
+  /**
+   * @deprecated Pre-v2 name for `generalistMode` (`flat` ≙ `on`, `scaffold`
+   * ≙ `off`). Still declared so `Store.ensureLayout` can read and migrate a
+   * config written by an older daemon — this schema is non-strict and would
+   * otherwise strip the key before the migration ever saw it. Never written
+   * by current code.
    */
   executionDensity: z.enum(['auto', 'flat', 'scaffold']).optional(),
   /**

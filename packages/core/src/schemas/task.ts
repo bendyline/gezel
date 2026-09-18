@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TASK_EXECUTION_MODES } from '../generalist-mode.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   AdvanceWhenSchema,
@@ -27,6 +28,9 @@ import { ScriptRefListSchema } from './script.js';
 // Re-export so existing consumers of `TaskAssignee` from this module keep working.
 export { TaskAssigneeSchema };
 export type { TaskAssignee } from './assignee.js';
+
+/** Wire twin of `TaskExecutionMode` (core/generalist-mode.ts). */
+export const TaskExecutionModeSchema = z.enum(TASK_EXECUTION_MODES);
 
 /**
  * Task workflow status. "Active" tasks are what the scheduler ticks.
@@ -416,6 +420,16 @@ export const TaskSchema = z.object({
    * specialist exists to point at.
    */
   assigneeAuto: z.boolean().optional(),
+  /**
+   * How this task executes — resolved ONCE from `config.generalistMode`
+   * and the executing provider when the task was created (or activated
+   * from a draft), inherited verbatim by fanout children, never
+   * re-evaluated. `generalist`: one owner gezel pinned on every step, one
+   * continuous session across steps, the union of every step's tools.
+   * `stepwise` (and absent, for records that predate the field): a
+   * specialist per `suggestedRole`, a fresh session per gezel change.
+   */
+  executionMode: TaskExecutionModeSchema.optional(),
   craftbook: TaskCraftbookSchema,
   spawnsCraftbook: TaskCraftbookSchema.optional(),
   sourceCraftbookIds: z.array(TaskCraftbookSourceSchema).optional(),
@@ -676,6 +690,15 @@ export const CreateTaskRequestSchema = z
      * `TaskSchema.diffpackId`).
      */
     deliveryMode: z.enum(['auto', 'edit', 'propose']).optional(),
+    /**
+     * Per-invocation override of `config.generalistMode` for this task:
+     * `generalist` / `stepwise` force the execution mode, `auto` (the
+     * default when absent) resolves it from the install setting and the
+     * executing provider. A launcher's lever (evals, the task composer) —
+     * deliberately not exposed on the model-facing MCP tool schemas, since a
+     * model must not pick its own mode.
+     */
+    executionMode: z.enum(['auto', 'generalist', 'stepwise']).optional(),
     /**
      * Enqueue the entry-step handoff immediately after create — the
      * single-channel kickoff (there is no "tell a gezel about work"

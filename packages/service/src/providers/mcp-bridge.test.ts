@@ -688,7 +688,7 @@ describe('McpBridge', () => {
     const flatBridge = new McpBridge();
     const flatEnv: Record<string, string> = {
       ...bridgeEnv,
-      GEZEL_EXECUTION_DENSITY: 'flat',
+      GEZEL_GENERALIST_KICKOFF: 'on',
     };
     delete flatEnv.GEZEL_MCP_LEGACY_TOOLS;
     await flatBridge.start({ command: 'node', args: [mcpPath], env: flatEnv });

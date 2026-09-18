@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { fitMessagesToBudget } from './manager.js';
+import { fitMessagesToBudget } from './context-forcefit.js';
 
 const msg = (role: 'user' | 'assistant', content: string): ChatMessage => ({
   role,

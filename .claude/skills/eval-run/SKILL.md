@@ -65,6 +65,7 @@ Suite (the standard path) or ad-hoc matrix (cross-scenario × N):
 ```bash
 pnpm eval:all --count <N> --suite <core|smoke|extended-*|headroom>
 pnpm eval:all --count <N> --scenarios <comma,list>   # ad-hoc; mutually exclusive with --suite
+pnpm eval:all --generalist on|off|auto ...            # force the generalist-mode arm (docs/generalist-mode.md); A/B via pnpm eval:ab-generalist
 ```
 
 `--llm-judge` opt-in: after the trial, sends the final HTML artifact +

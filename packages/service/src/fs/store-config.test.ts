@@ -153,3 +153,49 @@ describe('config patches', () => {
     expect(await store.readConfig()).toEqual(result);
   });
 });
+
+describe('legacy executionDensity migration', () => {
+  async function bootWith(config: Record<string, unknown>): Promise<Store> {
+    await writeFile(join(home, 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+    const booted = new Store({ home });
+    await booted.ensureLayout();
+    return booted;
+  }
+
+  it.each([
+    ['flat', 'on'],
+    ['scaffold', 'off'],
+    ['auto', 'auto'],
+  ] as const)(
+    'maps executionDensity=%s onto generalistMode=%s and drops the old key',
+    async (density, mode) => {
+      const booted = await bootWith({ executionDensity: density, provider: 'openai' });
+      const config = await booted.readConfig();
+      expect(config.generalistMode).toBe(mode);
+      expect(config).not.toHaveProperty('executionDensity');
+      expect(config.provider).toBe('openai');
+      const raw = JSON.parse(await readFile(join(home, 'config.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      expect(raw).not.toHaveProperty('executionDensity');
+    },
+  );
+
+  it('keeps an explicit generalistMode and only removes the stale key', async () => {
+    const booted = await bootWith({ executionDensity: 'flat', generalistMode: 'off' });
+    const config = await booted.readConfig();
+    expect(config.generalistMode).toBe('off');
+    expect(config).not.toHaveProperty('executionDensity');
+  });
+
+  it('is a no-op on a second boot and on a config without the legacy key', async () => {
+    const booted = await bootWith({ executionDensity: 'flat' });
+    const first = await booted.readConfig();
+    await booted.ensureLayout();
+    expect(await booted.readConfig()).toEqual(first);
+
+    const clean = await bootWith({ generalistMode: 'auto' });
+    expect(await clean.readConfig()).toEqual({ generalistMode: 'auto' });
+  });
+});

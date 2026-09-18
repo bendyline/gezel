@@ -745,3 +745,158 @@ describe('handoff seed wording', () => {
     expect(seedRow?.origin).toBe('system');
   });
 });
+
+describe('generalist task session continuity', () => {
+  const at = () => new Date().toISOString();
+
+  it('keeps one session across every step and points the seed at the task outline', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Generalist run',
+      description: 'Three steps, one owner, one conversation from first step to last.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      executionMode: 'generalist',
+      steps: [
+        { id: 'research', name: 'Research', prompt: 'Look things up with read_file.' },
+        { id: 'build', name: 'Build', prompt: 'Write the deliverable with write_file.' },
+        {
+          id: 'review',
+          name: 'Review',
+          prompt: 'Check the result with read_file.',
+          terminal: true,
+        },
+      ],
+      entryStepId: 'research',
+      createdBy: { kind: 'user' },
+    });
+    expect(task.executionMode).toBe('generalist');
+    expect(task.craftbook.steps.every((s) => s.assignee?.kind === 'gezel')).toBe(true);
+    await tasks.completeStep('p1', task.num, 'research');
+
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'research',
+    });
+    prior.messages.push({ role: 'assistant', content: 'Research done.', at: at() });
+    await store.writeSession(prior);
+
+    mock.script('Building.');
+    const handoff = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'build',
+      fromGezelId: 'worker',
+      fromGezelName: 'Worker',
+    });
+    await manager.drainBackground();
+    expect(handoff.sessionId).toBe(prior.id);
+    const carried = await store.getSession('worker', prior.id);
+    expect(carried?.stepId).toBe('build');
+    const seed =
+      [...(carried?.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+    expect(seed).toContain('has advanced to the next step');
+    expect(seed).toContain('Task outline in your prompt');
+
+    await tasks.completeStep('p1', task.num, 'build');
+    mock.script('Reviewing.');
+    const again = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      fromGezelId: 'worker',
+    });
+    await manager.drainBackground();
+    expect(again.sessionId).toBe(prior.id);
+    const sessions = (await store.listSessions({ gezelId: 'worker', projectId: 'p1' })).filter(
+      (session) => session.taskRef === task.ref,
+    );
+    expect(sessions).toHaveLength(1);
+    expect((await store.getSession('worker', prior.id))?.stepId).toBe('review');
+  });
+
+  it('a retry after a compaction-loop halt starts fresh for a generalist task and resumes for a stepwise one', async () => {
+    for (const mode of ['generalist', 'stepwise'] as const) {
+      const task = await tasks.create('p1', {
+        title: `Retry ${mode}`,
+        description: 'A single step whose last attempt halted on repeated compaction.',
+        assignee: { kind: 'gezel', gezelId: 'worker' },
+        executionMode: mode,
+        steps: [
+          { id: 'work', name: 'Work', prompt: 'Do the work with write_file.', terminal: true },
+        ],
+        entryStepId: 'work',
+        createdBy: { kind: 'user' },
+      });
+      const prior = await manager.createSession({
+        gezelId: 'worker',
+        projectId: 'p1',
+        taskRef: task.ref,
+        stepId: 'work',
+      });
+      prior.messages.push(
+        { role: 'user', content: 'Go.', at: at() },
+        {
+          role: 'assistant',
+          content: 'This turn triggered context compaction twice without making progress.',
+          at: at(),
+          synthetic: 'context-loop-halt',
+        },
+      );
+      await store.writeSession(prior);
+
+      mock.script('Trying again.');
+      const retried = await manager.startHandoffSession({
+        gezelId: 'worker',
+        projectId: 'p1',
+        taskRef: task.ref,
+        stepId: 'work',
+        kind: 'retry',
+        resumeExisting: true,
+      });
+      await manager.drainBackground();
+      if (mode === 'generalist') {
+        expect(retried.sessionId).not.toBe(prior.id);
+      } else {
+        expect(retried.sessionId).toBe(prior.id);
+      }
+    }
+  });
+
+  it('opens a fresh session when the prior transcript ran on another provider', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Provider moved',
+      description: 'Two steps; the first ran before the default provider changed.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      executionMode: 'generalist',
+      steps: [
+        { id: 'a', name: 'A', prompt: 'Start with read_file.' },
+        { id: 'b', name: 'B', prompt: 'Finish with write_file.', terminal: true },
+      ],
+      entryStepId: 'a',
+      createdBy: { kind: 'user' },
+    });
+    await tasks.completeStep('p1', task.num, 'a');
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'a',
+    });
+    prior.providerName = 'openai';
+    await store.writeSession(prior);
+
+    mock.script('ok');
+    const handoff = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'b',
+      fromGezelId: 'worker',
+    });
+    await manager.drainBackground();
+    expect(handoff.sessionId).not.toBe(prior.id);
+  });
+});

@@ -1128,3 +1128,45 @@ describe('SettingsView', () => {
     expect(screen.getByTestId('boekwachter-settings')).toHaveTextContent('Noor');
   });
 });
+
+describe('generalist mode switch', () => {
+  it('shows the three keys under Artificial Intelligence with Automatic latched by default', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    const tray = within(await screen.findByRole('radiogroup', { name: 'Run in generalist mode' }));
+    expect(tray.getByRole('radio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true');
+    expect(tray.getByRole('radio', { name: 'On' })).toHaveAttribute('aria-checked', 'false');
+    expect(tray.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('latches the configured key and writes the choice through updateConfig', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      generalistMode: 'off',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mlx',
+      generalistMode: 'on',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    const tray = within(await screen.findByRole('radiogroup', { name: 'Run in generalist mode' }));
+    expect(tray.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(tray.getByRole('radio', { name: 'On' }));
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ generalistMode: 'on' }));
+    await waitFor(() =>
+      expect(tray.getByRole('radio', { name: 'On' })).toHaveAttribute('aria-checked', 'true'),
+    );
+  });
+});

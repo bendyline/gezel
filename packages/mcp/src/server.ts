@@ -6507,6 +6507,7 @@ const SPECIALIST_ROLES = z.enum([
   'researcher',
   'developer',
   'builder',
+  'generalist',
   'designer',
   'writer',
   'planner',
@@ -6526,6 +6527,7 @@ const ROLE_TO_JOB_TITLE: Record<z.infer<typeof SPECIALIST_ROLES>, string> = {
   researcher: 'Researcher',
   developer: 'Developer',
   builder: 'Builder',
+  generalist: 'Generalist',
   designer: 'Designer',
   writer: 'Copywriter',
   planner: 'Planner',
@@ -6543,7 +6545,7 @@ server.tool(
   "Quick role-shaped consultation. Picks (or auto-creates) a gezel matching `role` and synchronously asks them `question` — their answer comes back as the tool result, ready to use inline within this turn. ONE call replaces the `ensure_gezel` → `ask_gezel` sequence. Use this for domain answers you need to keep working: 'researcher' for facts and prior art, 'designer' for visual / UX feedback, 'developer' or 'builder' for technical implementation calls, 'writer' for copy, 'planner' for breaking work down, 'reviewer' for QA on a draft, 'voorman' for project-status questions. Do NOT use this for shippable file or image deliverables (`index.html`, `review.md`, `logo.png`): first call `ensure_gezel`, then `message_gezel` with `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the specialist works asynchronously and writes/renders the file. `ask_specialist` rejects file-shaped expectedDeliverable hints. The chosen specialist auto-joins your current project so the user can switch to their chat for follow-ups. For a specific known gezel use `ask_gezel`; for fan-out / fire-and-forget pings use `message_gezel`.",
   {
     role: SPECIALIST_ROLES.describe(
-      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = current-project lead, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
+      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, generalist = one gezel for a whole multi-step task of any craft, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = current-project lead, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
     ),
     question: z
       .string()
@@ -7292,6 +7294,11 @@ function normalizeSpecialistRole(value: string | undefined): string {
     )![1]!;
   }
   const resolved = resolveRoleId(lower) ?? resolveRoleId(normalized);
+  // The solo kickoff lead is the Builder template. `generalist` is the
+  // task-execution persona (generalist mode pins it onto a task's steps);
+  // as a project lead it would be the same job under a different name, and
+  // the template may not be in the pinned catalog yet.
+  if (resolved === 'generalist') return 'builder';
   if (resolved && resolved !== 'meester' && resolved !== 'voorman') return resolved;
   return 'builder';
 }
@@ -7826,7 +7833,7 @@ server.tool(
         'start_project',
       );
     }
-    if (process.env.GEZEL_EXECUTION_DENSITY === 'flat') {
+    if (process.env.GEZEL_GENERALIST_KICKOFF === 'on') {
       return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
     }
     const repoRedirect = repoFetchRedirectForMacro({

@@ -362,13 +362,17 @@ export interface TrialOptions {
    */
   imageModelId?: string;
   /**
-   * Execution density for the trial daemon (`--render-mode`). `flat` routes
-   * the meester to a solo Builder (collapsed craftbook) instead of a
-   * crew; `scaffold` is the full team; `auto` picks by provider. Threaded
-   * into the daemon's `config.executionDensity`. Omitted ⇒ daemon default
-   * (`scaffold`). The A/B lever for frontier-adaptive execution.
+   * Generalist mode for the trial daemon (`--generalist auto|on|off`).
+   * `on` runs every craftbook task in generalist execution — one gezel, one
+   * continuous session across all steps, the union of every step's tools,
+   * the task outline in view, gates unchanged, fanout children still
+   * separate tasks — and routes Meester kickoff to a solo lead; `off` is
+   * stepwise execution with a crew; `auto` picks by provider (generalist for
+   * hosted frontier providers, stepwise for local models). Threaded into the
+   * daemon's `config.generalistMode`. Omitted ⇒ daemon default (`auto`).
+   * The A/B lever for generalist mode v2; arms should force `on`/`off`.
    */
-  executionDensity?: 'auto' | 'flat' | 'scaffold';
+  generalistMode?: 'auto' | 'on' | 'off';
   /** Override the default poll cadence (ms). */
   pollIntervalMs?: number;
   /**
@@ -524,6 +528,14 @@ export interface TrialResult {
    * rate rendering at tiny tier in the reporting bins.
    */
   modelTier?: import('@bendyline/gezel').ModelTier;
+  /**
+   * The generalist-mode setting the trial daemon ran with (`--generalist`),
+   * so an A/B arm is queryable from `result.json` / `facts.json` without
+   * parsing `log.txt`. Absent when the run left the daemon default.
+   */
+  generalistMode?: 'auto' | 'on' | 'off';
+  /** Chat provider the trial ran against (was only in the transient status.json). */
+  engine?: TrialOptions['engine'];
   startedAt: string;
   finishedAt: string;
   durationMs: number;

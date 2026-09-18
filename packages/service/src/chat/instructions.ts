@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
-  type ExecutionDensity,
   type ExpectedDeliverable,
+  type GeneralistMode,
   type GezelGender,
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ProjectFileEntry,
@@ -39,6 +39,42 @@ export interface PromptTaskContext {
   step?: TaskCraftbookStep;
   notes?: string;
   stepNotes?: string;
+}
+
+/**
+ * The bird's-eye view a generalist task carries on every turn: the goal the
+ * book works toward and every step with its state, so one owner walking the
+ * whole task can shape today's step for tomorrow's. Lives inside the task
+ * block (the volatile band) so it survives the `focused` prompt profile,
+ * which drops everything but task context. The closing sentence names
+ * `advance_task_step` only when the turn wired it (ADR 0001).
+ */
+export function renderTaskOutline(
+  task: Task,
+  activeStep: TaskCraftbookStep | undefined,
+  opts: { advanceWired: boolean },
+): string {
+  const goal = (task.craftbook.description ?? task.description ?? '').trim();
+  const activeId = activeStep?.id ?? task.activeStepId;
+  const steps = task.craftbook.steps.map((s, i) => {
+    const state = s.completedAt ? 'done' : s.id === activeId ? 'active' : 'pending';
+    const desc = s.description?.trim() ? ` — ${s.description.trim()}` : '';
+    const gated = isGatedStep(s, task.craftbook.steps) ? ' (gated)' : '';
+    const fanout = s.spawnFanout
+      ? ' [fanout: the runtime spawns one child task per item here and holds this step until they settle]'
+      : '';
+    return `${i + 1}. ${s.name} (${state})${desc}${gated}${fanout}`;
+  });
+  const reveal = opts.advanceWired
+    ? 'finish and pass them before `advance_task_step` reveals the next'
+    : 'finish and pass them before the next step is revealed';
+  return [
+    '### Task outline',
+    ...(goal ? [`Goal: ${goal}`] : []),
+    ...steps,
+    '',
+    `You own every step of this task in this one conversation. Steps are disclosed one at a time; the **Step procedure** and **Phase gate** below are the authoritative instructions now — ${reveal}.`,
+  ].join('\n');
 }
 
 export function renderTraitsBlock(traits: string[]): string {
@@ -156,13 +192,13 @@ export interface BuildInstructionsOptions {
    */
   providerName?: ProviderName;
   /**
-   * Resolved execution density for this session. The model always calls
-   * `start_project`; this value lets the runtime choose a flat lead or a
-   * scaffolded crew without making the model select between two macros.
-   * See {@link resolveExecutionDensity} and
-   * `docs/frontier-adaptive-execution.md`.
+   * Resolved generalist kickoff for this session. The model always calls
+   * `start_project`; this value lets the runtime choose a solo lead (`on`)
+   * or a scaffolded crew (`off`) without making the model select between
+   * two macros. See {@link resolveGeneralistKickoff} and
+   * `docs/generalist-mode.md`.
    */
-  executionDensity?: ExecutionDensity;
+  generalistKickoff?: GeneralistMode;
   project?: import('@bendyline/gezel').ProjectDetail | null;
   /**
    * True when this project holds observation tables — the tabular connector
@@ -722,7 +758,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail = !isDelegationRole
     ? ''
-    : opts.executionDensity === 'flat'
+    : opts.generalistKickoff === 'on'
       ? flatRoutingGuardrail
       : providerNeedsGuardrail
         ? crewRoutingGuardrail
@@ -1223,6 +1259,14 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    if (t.executionMode === 'generalist') {
+      lines.push(
+        renderTaskOutline(t, step, {
+          advanceWired:
+            availableTools === undefined || availableToolNameSet.has('advance_task_step'),
+        }),
+      );
+    }
     // Drafting mode is a property of the RUN, injected by the runtime — a
     // craftbook must read identically whether it edits in place or drafts a
     // proposal, so no book carries this prose itself. Saying it plainly is
@@ -1451,7 +1495,11 @@ ${artifactsLine}
           firstActionAnchor = ` First action (once only): call \`${firstProcedureTool}\` exactly as the procedure specifies. After its successful tool result appears in this turn, treat that first action as complete and do not call it again unless the procedure explicitly requires a later repeat; continue with the next procedure action.`;
         }
       }
-      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. At the start of a fresh step turn, read the procedure and begin with the FIRST tool action it names. If this turn's transcript already contains a successful result for that action, it is complete; continue with the next procedure action instead of starting over. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
+      const generalistAnchor =
+        task.task.executionMode === 'generalist'
+          ? " You own every step of this task in this conversation; the Task outline above shows where this step sits, and only this step's procedure is in force."
+          : '';
+      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.**${generalistAnchor} The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. At the start of a fresh step turn, read the procedure and begin with the FIRST tool action it names. If this turn's transcript already contains a successful result for that action, it is complete; continue with the next procedure action instead of starting over. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
     } else {
       const resumeAction = availableToolNameSet.has('read_task_notes')
         ? `call \`read_task_notes({ ref: "${task.task.ref}" })\` for the latest, then take the next concrete step with the tools wired this turn`

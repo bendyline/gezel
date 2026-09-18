@@ -9,8 +9,11 @@ import {
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { basename, delimiter, dirname, join } from 'node:path';
 import {
+  GENERALIST_TEMPLATE_ID,
   type GezelConfig,
+  type ProviderName,
   createLogger,
+  effectiveGeneralistModeSetting,
   formatNightShiftSummary,
   formatSuspension,
   isEngagementAllowed,
@@ -20,6 +23,7 @@ import {
   onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
@@ -151,6 +155,7 @@ import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
 import type { LLMProvider } from './providers/types.js';
@@ -972,6 +977,64 @@ export async function startProductService(
   };
   tasks.setRoleResolver(roleResolverClosure);
 
+  // Execution mode (generalist v2): decided once per task from the install
+  // setting and the provider that will actually run it, then stamped on
+  // the task. An auto-assigned generalist task gets the Generalist gezel
+  // (one per install, reused by template id) pulled onto the project;
+  // a task whose caller pinned an owner keeps that owner. Errors fall back
+  // to stepwise inside TaskManager, the behavior every task had before.
+  tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
+    const config = await store.readConfig();
+    const setting = effectiveGeneralistModeSetting(config);
+    let providerName: ProviderName | undefined;
+    let tier: string | undefined;
+    let mode: 'generalist' | 'stepwise';
+    if (requested === 'generalist' || requested === 'stepwise') {
+      mode = requested;
+    } else {
+      providerName = assigneeGezelId
+        ? await chat.providerForGezel(assigneeGezelId, { nightShift: Boolean(nightShift) })
+        : resolveDefaultProviderName(config);
+      tier = await chat.classifyExecutionTier(providerName, assigneeGezelId);
+      mode = resolveTaskExecutionMode(setting, providerName, tier);
+    }
+    const base = {
+      ...(setting ? { setting } : {}),
+      ...(providerName ? { providerName } : {}),
+      ...(tier ? { tier } : {}),
+    };
+    if (mode !== 'generalist' || assigneeGezelId) return { mode, ...base };
+    const generalist = await ensureGezel({
+      opts: { jobTitle: 'Generalist', templateId: GENERALIST_TEMPLATE_ID },
+      store,
+      catalog,
+      chat,
+      bespokeMode: 'static',
+    });
+    await store.addGezelToProject(projectId, generalist.gezelId, { source: 'task' }).catch(() => {
+      /* roster add is best-effort */
+    });
+    // The Generalist may carry its own provider pin (a user parked it on a
+    // local model). Under `auto` that pin decides, not the install default:
+    // a single-session run on a model the rule says is not ready for it is
+    // exactly what `auto` exists to avoid.
+    if (requested === 'auto') {
+      const ownerProvider = await chat.providerForGezel(generalist.gezelId, {
+        nightShift: Boolean(nightShift),
+      });
+      if (ownerProvider !== providerName) {
+        const ownerTier = await chat.classifyExecutionTier(ownerProvider, generalist.gezelId);
+        if (resolveTaskExecutionMode(setting, ownerProvider, ownerTier) !== 'generalist') {
+          log.info(
+            `[tasks] generalist ${generalist.gezelId} is pinned to ${ownerProvider} (${ownerTier}); running stepwise under auto`,
+          );
+          return { mode: 'stepwise', ...base, providerName: ownerProvider, tier: ownerTier };
+        }
+      }
+    }
+    return { mode: 'generalist', ownerGezelId: generalist.gezelId, ...base };
+  });
+
   // Install a craftbook's bundled scripts into the project's scripts/
   // folder the first time a task is created from it. Idempotent — the
   // provenance marker comment makes re-installs no-ops when the
@@ -1414,16 +1477,16 @@ export async function startProductService(
       completedStep.assignee?.kind === 'gezel'
         ? completedStep.assignee.gezelId
         : completedStep.suggestedGezelId;
-    // Self-handoff: normally we don't start a new session when the same
-    // gezel owned both steps. But a craftbook step CHANGE means a new
-    // procedure (and, in a crew, different role tools) — so when the new
-    // step carries its own `prompt`, start a fresh, clean, task-scoped
-    // session even for the same gezel. This is what lets a solo-collapsed
-    // multi-step craftbook (every step = the one specialist) actually
-    // advance through its phases: without it, no transition ever
-    // re-engages the worker with the next step's instructions. A
-    // procedure-less step keeps the old skip (a redundant session would
-    // just confuse them).
+    // Self-handoff: when the same gezel owns both steps and the new step
+    // carries its own `prompt`, still enqueue a handoff — the runner then
+    // re-engages the SAME task session (`ChatManager.startHandoffSession`
+    // reuses it for adjacent same-gezel steps and for every step of a
+    // generalist task), rebuilding the step prompt and exact tool surface
+    // once the prior turn is idle. Without this, no transition would ever
+    // put the next step's instructions in front of the worker. A
+    // procedure-less step keeps the old skip: its activation already
+    // reached the model inside the `advance_task_step` result it is
+    // reading, and a redundant turn would only confuse it.
     if (prevGezelId === assigneeGezelId && !newStep.prompt) return;
     // If the project is read-only or inactive, don't dispatch the
     // handoff. The step-advance tool call itself still mutates task

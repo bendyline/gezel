@@ -280,3 +280,87 @@ describe('summarizeNativeEngineIncidents', () => {
     });
   });
 });
+
+describe('classifyTrial — generalist-mode continuity rules', () => {
+  const stalled = (daemonLog: string, reason = 'no real progress for 45m') => ({
+    success: false,
+    reason,
+    failureMode: 'no-progress',
+    daemonLog,
+  });
+
+  it('books a hosted-provider overflow as infra, not model/timeout', () => {
+    const c = classifyTrial({
+      success: false,
+      reason: 'timed out',
+      failureMode: 'timeout',
+      daemonLog:
+        '[anthropic] 400 invalid_request_error: prompt is too long: 214000 tokens > 200000 maximum',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'cloud-context-overflow' });
+  });
+
+  it('a fanout that never fanned out is infra', () => {
+    const c = classifyTrial(
+      stalled('[service] [fanout] p/1 step "draft": skipping fanout — overFile missing'),
+    );
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'fanout-skipped' });
+  });
+
+  it('a barrier that could not release is infra', () => {
+    const c = classifyTrial(stalled('[service] fanout barrier release failed for p/1: boom'));
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'fanout-barrier-stuck' });
+  });
+
+  it('a CLI session that could not be resumed is infra', () => {
+    const c = classifyTrial(stalled('[anthropic-cli] SessionResumeError: could not resume 1234'));
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'cli-resume-failed' });
+  });
+
+  it('LLM compaction failing twice while force-fit carries the window is infra', () => {
+    const log = [
+      'pressure#a COMPACT-END afterMs=30 removed=0 nope',
+      'pressure#a FORCE-FIT truncated=3 savedChars=1000',
+      'pressure#a COMPACT-END afterMs=31 removed=0 nope',
+      'pressure#a FORCE-FIT truncated=2 savedChars=800',
+    ].join('\n');
+    expect(classifyTrial(stalled(log))).toMatchObject({
+      failureClass: 'infra',
+      rule: 'compaction-degraded',
+    });
+  });
+
+  it('a compaction loop halt, a hard budget trip and a read-tool abort storm stay model', () => {
+    expect(
+      classifyTrial(
+        stalled('this turn triggered context compaction 2 times without making progress'),
+      ),
+    ).toMatchObject({ failureClass: 'model', rule: 'compaction-loop' });
+    expect(
+      classifyTrial(
+        stalled(
+          '[task-budget] p/1 HARD threshold (turns): 60 turns / 90000 out-tok (tier=medium) — pausing task for help',
+        ),
+      ),
+    ).toMatchObject({ failureClass: 'model', rule: 'task-budget-hard-pause' });
+    const aborts = Array.from(
+      { length: 3 },
+      () =>
+        '[mlx] aborting — `read_task_notes` was called 4 times this turn without making progress.',
+    ).join('\n');
+    expect(classifyTrial(stalled(aborts))).toMatchObject({
+      failureClass: 'model',
+      rule: 'tool-repeat-abort-storm',
+    });
+  });
+
+  it('none of the log-signature rules apply to a crisp non-stall failure', () => {
+    const c = classifyTrial({
+      success: false,
+      reason: 'sniff failed: index.html missing',
+      failureMode: 'artifact-missing',
+      daemonLog: '[service] fanout barrier release failed for p/1: boom',
+    });
+    expect(c).toMatchObject({ failureClass: 'model', rule: 'model-default' });
+  });
+});

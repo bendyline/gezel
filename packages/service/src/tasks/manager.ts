@@ -22,6 +22,7 @@ import {
   type TaskCraftbook,
   type TaskCraftbookSource,
   type TaskCraftbookStep,
+  type TaskExecutionMode,
   type TaskFanout,
   type TaskNote,
   type TaskNoteAuthor,
@@ -68,12 +69,14 @@ import {
   interpolateContext,
   interpolateContextDeep,
   interpolateStepsContext,
+  pinCraftbookOwner,
   resolveCraftbookParamDefaults,
   resolveRuntimeTokensInParams,
   snapshotCraftbookForTask,
   taskInterpolationContext,
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
+import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
 import {
   type DeliverableSurface,
   type EscalationStage,
@@ -329,6 +332,7 @@ export type TaskNeedsHelpHook = (ctx: {
  * doesn't block step activation.
  */
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
+export type { ExecutionModeResolution, ExecutionModeResolver } from './execution-mode.js';
 
 /**
  * The gezel a step is bound to on its OWN terms — an explicit assignee,
@@ -462,6 +466,7 @@ export class TaskManager {
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
+  private executionModeResolver?: ExecutionModeResolver;
   /**
    * Join concurrent replays of the same step transition. Local models can
    * retry an MCP call when its response is slow; without single-flight both
@@ -737,6 +742,11 @@ export class TaskManager {
    */
   setRoleResolver(fn: RoleResolver): void {
     this.roleResolver = fn;
+  }
+
+  /** Wire the execution-mode resolver (generalist vs stepwise). See {@link ExecutionModeResolver}. */
+  setExecutionModeResolver(fn: ExecutionModeResolver): void {
+    this.executionModeResolver = fn;
   }
 
   /**
@@ -1117,9 +1127,24 @@ export class TaskManager {
       craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
+    const requestedExecutionMode = input.executionMode ?? 'auto';
+    // A draft resolves nothing yet (like roles) — `activate()` does, reading
+    // an explicit request back off the stamp. Everything else resolves now.
+    let executionMode: TaskExecutionMode | undefined =
+      isDraft && requestedExecutionMode !== 'auto' ? requestedExecutionMode : undefined;
     if (!isDraft) {
       // First activation of the entry step → attemptCount 1.
       craftbook.steps = bumpStepActivation(craftbook.steps, activeStepId, now);
+
+      executionMode = await applyExecutionMode(this.executionModeResolver, {
+        projectId,
+        ref: buildTaskRef(projectId, num),
+        craftbook,
+        spawnsCraftbook,
+        requested: requestedExecutionMode,
+        ...(input.assignee?.kind === 'gezel' ? { assigneeGezelId: input.assignee.gezelId } : {}),
+        ...(input.nightShift?.enabled ? { nightShift: true } : {}),
+      });
 
       // Resolve the entry step's `suggestedRole` (if any) into a concrete
       // gezel id BEFORE writing the task. Without this the very first
@@ -1151,6 +1176,7 @@ export class TaskManager {
       status: isDraft ? 'draft' : 'active',
       assignee,
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
+      ...(executionMode ? { executionMode } : {}),
       craftbook,
       ...(input.trustScripts
         ? {
@@ -1210,6 +1236,7 @@ export class TaskManager {
         status: task.status,
         steps: craftbook.steps.map((s) => ({ id: s.id, name: s.name })),
         assignee: task.assignee,
+        ...(executionMode ? { executionMode } : {}),
         ...(spawnsCraftbook ? { spawnSteps: spawnsCraftbook.steps.length } : {}),
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
@@ -1573,6 +1600,17 @@ export class TaskManager {
       activeStepId: entry,
       updatedAt: now,
     };
+    next.executionMode = await applyExecutionMode(this.executionModeResolver, {
+      projectId,
+      ref: next.ref,
+      craftbook: next.craftbook,
+      spawnsCraftbook: next.spawnsCraftbook,
+      requested: task.executionMode ?? 'auto',
+      ...(!task.assigneeAuto && task.assignee.kind === 'gezel'
+        ? { assigneeGezelId: task.assignee.gezelId }
+        : {}),
+      ...(task.nightShift?.enabled ? { nightShift: true } : {}),
+    });
     await this.maybeResolveStepRole(next.craftbook, entry, projectId);
     // A draft created without a named owner has been carrying an interim
     // `{kind:'user'}` assignee — the entry step's role only just resolved,
@@ -4345,6 +4383,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       ...(plan ? { plan } : {}),
       status: 'active',
       assignee: inheritedAssignee,
+      // Same run, same mode — never re-resolved for a child.
+      ...(parent.executionMode ? { executionMode: parent.executionMode } : {}),
       craftbook: childCraftbook,
       ...(parent.cliTrustedScriptHashes
         ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }

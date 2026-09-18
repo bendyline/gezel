@@ -984,6 +984,8 @@ export interface FolderMoveStatus {
 
 export interface ConfigResponse {
   provider: ProviderName;
+  /** Generalist mode setting (`auto` when unset). See docs/generalist-mode.md. */
+  generalistMode?: 'auto' | 'on' | 'off';
   githubToken?: string;
   hasGithubToken: boolean;
   openaiApiKey?: string;

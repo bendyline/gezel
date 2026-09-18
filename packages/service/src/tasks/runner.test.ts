@@ -1874,9 +1874,13 @@ describe('TaskRunner — night quota reserve gating', () => {
 });
 
 describe('TaskRunner — capability-floor derivation at dispatch', () => {
-  async function writeFloorTask(step: Partial<TaskCraftbookStep> & { id: string }): Promise<void> {
+  async function writeFloorTask(
+    step: Partial<TaskCraftbookStep> & { id: string },
+    extras: Partial<import('@bendyline/gezel').Task> = {},
+  ): Promise<void> {
     const now = new Date().toISOString();
     await store.writeTask({
+      ...extras,
       projectId: 'p1',
       num: 1,
       ref: 'p1/1',
@@ -1934,6 +1938,18 @@ describe('TaskRunner — capability-floor derivation at dispatch', () => {
 
   it('neither floor nor role → no floor fields on the dispatch', async () => {
     await writeFloorTask({ id: 'work' });
+    const dispatch = await dispatchOnce();
+    expect(dispatch.capabilityFloor).toBeUndefined();
+    expect(dispatch.bookCatalogId).toBeUndefined();
+  });
+
+  it('a generalist task dispatches with no floor even when its step declares one', async () => {
+    // Per-step routing would move the one owner between models as floors
+    // change, and a model change is what breaks the shared transcript.
+    await writeFloorTask(
+      { id: 'work', suggestedRole: 'developer', capabilityFloor: 'large' },
+      { executionMode: 'generalist' },
+    );
     const dispatch = await dispatchOnce();
     expect(dispatch.capabilityFloor).toBeUndefined();
     expect(dispatch.bookCatalogId).toBeUndefined();

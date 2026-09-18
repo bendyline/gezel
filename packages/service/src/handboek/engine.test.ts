@@ -126,7 +126,7 @@ describe('handboek engine', () => {
     // Every built-in role has a curated lead, and curated always shadows
     // the generated fallback — exactly one entry per role.
     const roleEntries = roles.entries.filter((e) => e.id.startsWith('role/'));
-    expect(roleEntries).toHaveLength(11);
+    expect(roleEntries).toHaveLength(12);
     expect(roleEntries.every((e) => !e.generated)).toBe(true);
     const craftbooks = toc.areas.find((a) => a.area === 'craftbooks')!;
     expect(craftbooks.entries.map((e) => e.id)).toEqual([

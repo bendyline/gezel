@@ -945,10 +945,16 @@ export class TaskRunner {
       // stamps `suggestedGezelId`, so the role is available here).
       const step = task.craftbook?.steps.find((s) => s.id === handoff.stepId);
       // Effective floor = explicit step floor, else max(role floor,
-      // whole-book floor) — see effectiveCapabilityFloor.
-      const floor = step
-        ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
-        : undefined;
+      // whole-book floor) — see effectiveCapabilityFloor. A generalist task
+      // passes NO floor: per-step routing would move the owner between
+      // models as floors change, and the dispatcher refuses to share a
+      // transcript across a model change — silently turning "one session
+      // across every step" back into a session per step on local engines.
+      // One model per run; the owner's pin or the install default decides.
+      const floor =
+        step && task.executionMode !== 'generalist'
+          ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
+          : undefined;
 
       // Dispatch. `startHandoffSession` is itself fire-and-forget
       // internally (spawns a session, detaches the first send), so
