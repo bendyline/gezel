@@ -11,7 +11,7 @@ describe('native release trust manifest', () => {
   it('pins every published archive with an immutable SHA256', () => {
     const entries = Object.entries(NATIVE_ENGINE_ARCHIVE_SHA256);
 
-    expect(entries).toHaveLength(13);
+    expect(entries).toHaveLength(15);
     expect(Object.isFrozen(NATIVE_ENGINE_ARCHIVE_SHA256)).toBe(true);
     for (const [filename, hash] of entries) {
       expect(filename).toContain(`gezel-native-${NATIVE_ENGINE_RELEASE}-`);
