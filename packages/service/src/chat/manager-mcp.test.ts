@@ -1020,6 +1020,31 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
 
   it('auto-advances an evidence-only step after its exact artifact read', async () => {
     const project = await store.createProject({ name: 'Read evidence' });
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
+      {
+        toolsetId: 'builtin-artifacts',
+        sourceId: 'test',
+        version: '1.0.0',
+        installedAt: new Date().toISOString(),
+        runtime: { kind: 'builtin', toolsetGroupId: 'artifacts' },
+      },
+      {
+        toolsetId: 'custom-unrelated',
+        sourceId: 'test',
+        version: '1.0.0',
+        installedAt: new Date().toISOString(),
+        runtime: {
+          kind: 'custom-mcp',
+          serverName: 'unrelated',
+          source: { kind: 'imported' },
+          transport: 'stdio',
+          command: process.execPath,
+          args: [],
+          envKeys: [],
+          headerKeys: [],
+        },
+      },
+    ]);
     await store.writeProjectArtifact(project.id, 'data/record.md', 'line one\nline two\n');
     await store.writeProjectArtifact(
       project.id,
@@ -1112,6 +1137,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect((await store.readTask(project.id, unrelatedHost.num))?.activeStepId).toBe('collect');
     const createOpts = mock.calls.find((call) => call.kind === 'create')?.opts;
     const calls = createOpts?.toolAllowlist;
+    expect(createOpts?.toolNamePolicy?.allow).toEqual(new Set(['read_artifact', 'read_artifacts']));
+    expect(createOpts?.extraMcpServers ?? []).toEqual([]);
     expect(calls?.has('read_artifact')).toBe(true);
     expect(calls?.has('advance_task_step')).toBe(false);
     expect(createOpts?.terminalToolPolicy).toEqual({

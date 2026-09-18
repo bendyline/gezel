@@ -34,9 +34,11 @@ export class McpBridgePool {
    * pass through this pool-level filter.** A server-specific bridge wrapper
    * may still prune its own advertised/callable surface (the managed
    * local-preview Playwright profile does this). Ordinary user-installed
-   * toolsets remain untouched here; per-tool UI exclusion is future work.
+   * toolsets remain untouched by the role filter. Authored step policies
+   * are enforced separately by toolNamePolicy for every bridge tool.
    */
   private toolAllowlist: Set<string> | null = null;
+  private toolNamePolicy: SessionOpts['toolNamePolicy'];
 
   /**
    * One ledger per session, shared by every bridge. A gezel that cannot
@@ -55,6 +57,7 @@ export class McpBridgePool {
   static async fromSessionOpts(opts: SessionOpts, logPrefix: string): Promise<McpBridgePool> {
     const pool = new McpBridgePool();
     if (opts.toolAllowlist) pool.toolAllowlist = opts.toolAllowlist;
+    pool.toolNamePolicy = opts.toolNamePolicy;
 
     const secrets = opts.knownSecretValues ?? new Set<string>();
     const debugOn = opts.debug?.isEnabled() === true;
@@ -188,6 +191,12 @@ export class McpBridgePool {
     return allow.has(canonical);
   }
 
+  private allowsAuthoredName(name: string): boolean {
+    const canonical = canonicalToolName(name);
+    const policy = this.toolNamePolicy;
+    return !policy?.deny?.has(canonical) && (!policy?.allow || policy.allow.has(canonical));
+  }
+
   getOpenAITools(): OpenAIFunctionTool[] {
     const allow = this.toolAllowlist;
     const seen = new Set<string>();
@@ -195,6 +204,7 @@ export class McpBridgePool {
     for (const { bridge } of this.bridges) {
       for (const t of bridge.getOpenAITools()) {
         if (seen.has(t.name)) continue;
+        if (!this.allowsAuthoredName(t.name)) continue;
         if (allow && !this.allowsBuiltin(allow, t.name)) continue;
         seen.add(t.name);
         out.push(t);
@@ -210,6 +220,7 @@ export class McpBridgePool {
     for (const { bridge } of this.bridges) {
       for (const t of bridge.getAnthropicTools()) {
         if (seen.has(t.name)) continue;
+        if (!this.allowsAuthoredName(t.name)) continue;
         if (allow && !this.allowsBuiltin(allow, t.name)) continue;
         seen.add(t.name);
         out.push(t);
@@ -281,6 +292,7 @@ export class McpBridgePool {
   }
 
   private isCallableByModel(name: string): boolean {
+    if (!this.allowsAuthoredName(name)) return false;
     const canonical = canonicalToolName(name);
     // Immediate-write sessions intentionally advertise only `write_file` on
     // their first request. If that write is truncated, the local-provider

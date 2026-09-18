@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseTaskHandoffNote } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -97,6 +97,8 @@ beforeEach(async () => {
     store,
     dispatcher: {
       startHandoffSession: (args) => manager.startHandoffSession(args),
+      cancelHandoffSession: (sessionId) => manager.cancelInflight(sessionId, 'task-superseded'),
+      isHandoffSessionActive: (sessionId) => manager.isSessionTurnPending(sessionId),
       resolveProviderName: async () => 'llama-cpp',
       getProvider: () => mock,
     },
@@ -110,6 +112,51 @@ afterEach(async () => {
 });
 
 describe('single-channel kickoff (D1)', () => {
+  it.each(['startup', 'generation'] as const)(
+    'retains a cold handoff so pausing during %s stops its turn',
+    async (phase) => {
+      const task = await tasks.create('p1', {
+        title: 'Bounded cold-start review',
+        assignee: { kind: 'gezel', gezelId: 'worker' },
+        steps: [{ name: 'Review', assignee: { kind: 'gezel', gezelId: 'worker' } }],
+        createdBy: { kind: 'user' },
+      });
+      const gate = mock.gateNextCreateSession();
+      mock.scriptStreamThenHang('Partial review');
+      let sessionId: string | undefined;
+      try {
+        await dispatchTaskEntry({ store, taskRunner: runner, history }, task);
+        await runner.tick();
+        await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'create')).toBe(true));
+        sessionId = (await store.listSessions({ gezelId: 'worker' })).find(
+          (session) => session.taskRef === task.ref,
+        )?.id;
+        expect(sessionId).toBeDefined();
+        expect(manager.isAnyActive()).toBe(true);
+        // The UI snapshot deliberately omits a turn until ensureState finishes.
+        expect(manager.listInflight()).toEqual([]);
+        // A scheduler tick inside that window must not forget its reservation.
+        await runner.tick();
+        if (phase === 'generation') {
+          gate.release();
+          await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'send')).toBe(true));
+        }
+        await tasks.setStatus(task.projectId, task.num, 'paused');
+        await runner.tick();
+        expect(manager.isAnyActive()).toBe(false);
+        gate.release();
+        await manager.drainBackground();
+        expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(
+          phase === 'startup' ? 0 : 1,
+        );
+        expect((await tasks.get(task.projectId, task.num))?.status).toBe('paused');
+      } finally {
+        gate.release();
+        if (sessionId) await manager.cancelInflight(sessionId, 'task-superseded');
+      }
+    },
+  );
+
   it('repeats a tiny fixed-action entry procedure after the generic completion sentence', async () => {
     const procedure =
       'FIRST call read_artifacts with the exact assigned record. Only after it returns, call advance_task_step.';

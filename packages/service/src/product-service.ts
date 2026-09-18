@@ -766,8 +766,7 @@ export async function startProductService(
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
       cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId, 'task-superseded'),
-      isHandoffSessionActive: (sessionId) =>
-        chat.listInflight().some((entry) => entry.sessionId === sessionId),
+      isHandoffSessionActive: (sessionId) => chat.isSessionTurnPending(sessionId),
       resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
       getProvider: (name) => chat.getProviderIfReady(name),
       ensureProvider: (name) =>

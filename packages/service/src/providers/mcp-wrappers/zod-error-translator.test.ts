@@ -168,6 +168,87 @@ describe('ZodErrorTranslator', () => {
     const out = await ZodErrorTranslator.postProcessError!('create_task', {}, raw, ctx);
     expect(out).toContain('`assignee.gezelId`');
   });
+
+  describe('misnested top-level arguments', () => {
+    const missing = (path: string[] = ['path']) =>
+      `Invalid arguments for tool write_artifact: ${JSON.stringify([
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          path,
+          message: 'Invalid input: expected string, received undefined',
+        },
+      ])}`;
+    const translate = (args: Record<string, unknown>, path?: string[]) =>
+      ZodErrorTranslator.postProcessError!('write_artifact', args, missing(path), ctx);
+
+    it('locates an envelope path inside a report array without repairing or disclosing values', async () => {
+      const args = {
+        jsonContent: {
+          passages: [
+            ...Array.from({ length: 27 }, (_, i) => ({
+              id: `p${i + 1}`,
+              verdict: 'supported',
+              citations: ['s1/p1'],
+            })),
+            { path: 'private-result-name.json' },
+          ],
+        },
+      };
+      const before = structuredClone(args);
+      const out = await translate(args);
+      expect(out).toContain('Missing required fields: `path`');
+      expect(out).toContain('`path` belongs at the top level');
+      expect(out).toContain('`jsonContent.passages[27].path`');
+      expect(out).toContain('check the nested data structure');
+      expect(out).not.toContain('private-result-name');
+      expect(args).toEqual(before);
+      expect(args).not.toHaveProperty('path');
+    });
+
+    it('identifies multiple occurrences without choosing one as the intended argument', async () => {
+      const out = await translate({ input: { path: 'private-a' }, output: { path: 'private-b' } });
+      expect(out).toContain('`input.path`, `output.path`');
+      expect(out).not.toContain('private-');
+      expect(out).not.toContain('move');
+    });
+
+    it('does not interpret JSON strings, undefined fields or nested missing requirements', async () => {
+      expect(
+        await translate({ content: '{"path":"a.json"}', unused: { path: undefined } }),
+      ).not.toContain('belongs at the top level');
+      expect(
+        await translate({ source: { extra: { path: 'a.json' } } }, ['source', 'path']),
+      ).not.toContain('belongs at the top level');
+    });
+
+    it('ignores inherited fields and getters and terminates on cycles', async () => {
+      const args: Record<string, unknown> = { nested: Object.create({ path: 'inherited' }) };
+      Object.defineProperty(args, 'getter', {
+        enumerable: true,
+        get() {
+          throw new Error('do not inspect getters');
+        },
+      });
+      args.cycle = args;
+      args.output = { path: 'hidden' };
+      const out = await translate(args);
+      expect(out).toContain('`output.path`');
+      expect(out).not.toContain('nested.path');
+    });
+
+    it('bounds field locations, traversal depth and wide arrays', async () => {
+      const many = await translate({ rows: Array.from({ length: 10 }, () => ({ path: 'x' })) });
+      expect(many).toContain('rows[2].path');
+      expect(many).not.toContain('rows[3].path');
+      let deep: Record<string, unknown> = { path: 'deep' };
+      for (let i = 0; i < 10; i++) deep = { next: deep };
+      expect(await translate(deep)).not.toContain('belongs at the top level');
+      expect(await translate({ rows: Array(3_000).fill(0), late: { path: 'late' } })).not.toContain(
+        'belongs at the top level',
+      );
+    });
+  });
 });
 
 /**
