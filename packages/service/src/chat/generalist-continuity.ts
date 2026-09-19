@@ -13,6 +13,19 @@ import { type LocalModelTier, classifyLocalModelTier } from './local-model-tier.
  * decisions are testable on their own and the manager stays an orchestrator.
  */
 
+/**
+ * A local provider closes an immediate-write turn the moment the requested
+ * file lands, before the model can call `advance_task_step`. On a task step
+ * that leaves the step active with nothing queued, and the only thing that
+ * would move it is the eight-minute stall sweep: five serial fanout children
+ * on one engine slot could not finish inside a thirty-minute ceiling that way
+ * (fanout-stories, 2026-09-18). One bounded continuation in the same session
+ * closes the gap; the sweep stays the backstop.
+ */
+export function renderWriteBailContinuation(stepId: string): string {
+  return `Your file write landed and the runtime closed that turn early. Step \`${stepId}\` is still active: it is not complete until its gate passes. Finish anything the step procedure in your prompt still requires, then call \`advance_task_step\` once.`;
+}
+
 export function isContextOverflowError(err: unknown): boolean {
   if (!err) return false;
   if ((err as { code?: string }).code === 'context-overflow') return true;

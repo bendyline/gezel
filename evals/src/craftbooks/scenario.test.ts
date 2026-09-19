@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MockServicesRuntime } from '../mock/mock-server.ts';
 import type { EvalContext } from '../types.ts';
 import {
+  RUNNING_WORKFLOW_GRACE_POLLS,
   craftbookScenarioFromSpec,
   evaluateHistoryExpectations,
   prioritizeRepairFailures,
@@ -1311,10 +1312,116 @@ describe('craftbook generic scenario adapter', () => {
         logChanged: vi.fn(),
       } as unknown as EvalContext),
     ).resolves.toEqual({ done: false });
+    // A workflow that has just started has not reached a terminal step by
+    // definition: the virtual target holds its nudge through the start-up
+    // grace and speaks only once the runtime has had its two minutes.
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    for (let poll = 0; poll < RUNNING_WORKFLOW_GRACE_POLLS; poll++) {
+      await scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext);
+    }
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('runner-1');
     const repair = client.messageGezel.mock.calls[0]![1].text as string;
     expect(repair).toContain('Continue the real craftbook task `T-1`');
     expect(repair).toContain('advance_task_step');
     expect(repair).not.toContain('draft task');
+  });
+
+  function runningWorkflowFixture(inflight: Array<{ gezelId: string; elapsedMs: number }> = []) {
+    const task = {
+      projectId: 'project-1',
+      num: 1,
+      ref: 'T-1',
+      title: 'Run workflow',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'runner-1' },
+      activeStepId: 'build',
+      craftbook: {
+        id: 'sample-book',
+        steps: [
+          { id: 'build', name: 'Build' },
+          { id: 'finish', name: 'Finish', terminal: true },
+        ],
+      },
+      sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+    };
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockImplementation(() => Promise.resolve({ tasks: [task] })),
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [
+          {
+            id: 'session-runner',
+            gezelId: 'runner-1',
+            projectId: 'project-1',
+            lastActivityAt: '2026-09-04T05:00:00Z',
+          },
+        ],
+      }),
+      listGezels: vi.fn().mockResolvedValue({
+        gezels: [{ id: 'runner-1', role: 'Workflow Operator' }],
+      }),
+      listInflightTurns: vi.fn().mockResolvedValue({
+        inflight: inflight.map((turn) => ({ ...turn, projectId: 'project-1' })),
+      }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      mode: 'workflow',
+      success: { summary: 'The real workflow completes.' },
+    });
+    return { task, client, scenario };
+  }
+
+  it('holds the running-workflow nudge for as long as the owner is mid-turn', async () => {
+    const { client, scenario } = runningWorkflowFixture([
+      { gezelId: 'runner-1', elapsedMs: 90_000 },
+    ]);
+    const logChanged = vi.fn();
+    for (let poll = 0; poll <= RUNNING_WORKFLOW_GRACE_POLLS + 2; poll++) {
+      await expect(
+        scenario.successCheck({
+          client,
+          meesterId: 'meester',
+          log: vi.fn(),
+          logChanged,
+        } as unknown as EvalContext),
+      ).resolves.toEqual({ done: false });
+    }
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    const holds = logChanged.mock.calls.map((call) => String(call[1]));
+    expect(holds.some((line) => line.includes('start-up grace'))).toBe(true);
+    expect(holds.some((line) => line.includes('owner runner-1 is mid-turn'))).toBe(true);
+  });
+
+  it('lets a runtime repair policy on the context silence the harness channel', async () => {
+    const { task, client, scenario } = runningWorkflowFixture();
+    const ctx = {
+      client,
+      meesterId: 'meester',
+      repairPolicy: 'runtime',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext;
+    for (let poll = 0; poll <= RUNNING_WORKFLOW_GRACE_POLLS + 2; poll++) {
+      await expect(scenario.successCheck(ctx)).resolves.toEqual({ done: false });
+    }
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.listInflightTurns).not.toHaveBeenCalled();
+
+    task.status = 'paused';
+    await expect(scenario.successCheck(ctx)).resolves.toEqual(
+      expect.objectContaining({ done: true, success: false }),
+    );
+    expect(client.messageGezel).not.toHaveBeenCalled();
   });
 
   it('rejects a seeded workspace fixture whose bytes changed', async () => {

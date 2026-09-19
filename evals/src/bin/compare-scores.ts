@@ -2,11 +2,13 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { generalistArmLabel } from '../generalist-arm.ts';
 
 interface TrialFactsSummary {
   trialId?: string;
   scenarioId?: string;
   modelId?: string;
+  continuity?: { mode?: string | null };
   modelTier?: string;
   timing?: {
     startedAt?: string;
@@ -20,6 +22,7 @@ interface TrialFactsSummary {
 interface TrialResultSummary {
   scenarioId?: string;
   modelId?: string;
+  generalistMode?: string;
   modelTier?: string;
   startedAt?: string;
   success?: boolean;
@@ -30,6 +33,7 @@ interface TrialResultSummary {
 export interface ScoredTrial {
   dir: string;
   modelId: string;
+  arm?: string;
   scenarioId: string;
   startedAt: string;
   composite: number;
@@ -45,6 +49,7 @@ export interface ScoredTrial {
 export interface ComparisonPair {
   key: string;
   modelId: string;
+  arm?: string;
   scenarioId: string;
   pre: ScoredTrial;
   post: ScoredTrial;
@@ -164,11 +169,13 @@ export function discoverScoredTrials(runsDir: string): ScoredTrial[] {
     const failureClass = sidecar?.failureClass ?? resultForClass?.failureClass;
 
     const modelTier = facts?.modelTier ?? resultForClass?.modelTier;
+    const arm = generalistArmLabel(facts?.continuity?.mode ?? resultForClass?.generalistMode);
     trials.push({
       dir: resolve(dir),
       modelId,
       scenarioId,
       startedAt,
+      ...(arm ? { arm } : {}),
       composite,
       success: (facts?.outcome?.success ?? result?.success) === true,
       ...(failureClass ? { failureClass } : {}),
@@ -231,7 +238,7 @@ export function compareScores(trials: ScoredTrial[], cutoffIso: string): ScoreCo
 
   const byKey = new Map<string, ScoredTrial[]>();
   for (const trial of trials) {
-    const key = `${canonicalModelId(trial.modelId)}\u0000${trial.scenarioId}`;
+    const key = `${canonicalModelId(trial.modelId)}\u0000${trial.arm ?? ''}\u0000${trial.scenarioId}`;
     byKey.set(key, [...(byKey.get(key) ?? []), trial]);
   }
 
@@ -243,6 +250,7 @@ export function compareScores(trials: ScoredTrial[], cutoffIso: string): ScoreCo
     comparablePairs.push({
       key,
       modelId: post.modelId,
+      ...(post.arm ? { arm: post.arm } : {}),
       scenarioId: post.scenarioId,
       pre,
       post,
@@ -318,7 +326,7 @@ export function renderMarkdownReport(comparison: ScoreComparison): string {
     const passPost = pair.post.composite >= 8 ? 'yes' : 'no';
     const tier = pair.post.modelTier ?? pair.pre.modelTier ?? '?';
     lines.push(
-      `| ${pair.modelId} | ${tier} | ${pair.cohort} | ${pair.scenarioId} | ${fmt1(pair.pre.composite)} | ${fmt1(pair.post.composite)} | ${signed1(pair.delta)} | ${passPre} -> ${passPost} |`,
+      `| ${pair.modelId}${pair.arm ? ` (${pair.arm})` : ''} | ${tier} | ${pair.cohort} | ${pair.scenarioId} | ${fmt1(pair.pre.composite)} | ${fmt1(pair.post.composite)} | ${signed1(pair.delta)} | ${passPre} -> ${passPost} |`,
     );
   }
 

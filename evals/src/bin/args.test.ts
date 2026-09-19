@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertKnownFlags, parseArgs, resolveGeneralistFlag } from './args.ts';
+import {
+  assertKnownFlags,
+  parseArgs,
+  resolveGeneralistFlag,
+  resolveRepairPolicyFlag,
+} from './args.ts';
 
 function capture(run: () => void): { errors: string[]; exited: number | null } {
   const errors: string[] = [];
@@ -113,5 +118,31 @@ describe('resolveGeneralistFlag', () => {
     });
     expect(exited).toBe(2);
     expect(errors.join('\n')).toContain('--render-mode was renamed to --generalist');
+  });
+});
+
+describe('resolveRepairPolicyFlag', () => {
+  it('returns undefined when the flag is absent (the scenario keeps its own policy)', () => {
+    const { exited } = capture(() => {
+      expect(resolveRepairPolicyFlag(parseArgs(['--model', 'x']).flags)).toBeUndefined();
+    });
+    expect(exited).toBeNull();
+  });
+
+  it.each(['harness', 'runtime'] as const)('accepts --repair-policy %s', (value) => {
+    let resolved: string | undefined;
+    const { exited } = capture(() => {
+      resolved = resolveRepairPolicyFlag(parseArgs(['--repair-policy', value]).flags);
+    });
+    expect(exited).toBeNull();
+    expect(resolved).toBe(value);
+  });
+
+  it('rejects an unknown policy instead of silently running the default', () => {
+    const { errors, exited } = capture(() => {
+      resolveRepairPolicyFlag(parseArgs(['--repair-policy', 'none']).flags);
+    });
+    expect(exited).toBe(2);
+    expect(errors.join('\n')).toContain('Unknown --repair-policy "none"');
   });
 });

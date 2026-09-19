@@ -224,3 +224,55 @@ describe('digestFingerprint — engine heartbeat', () => {
     expect(b.soft).toBe(a.soft);
   });
 });
+
+describe('digestFingerprint — deliverable digest', () => {
+  const base = (over: Partial<ProgressFingerprint> = {}): ProgressFingerprint => ({
+    workspace: {},
+    sessionCount: 1,
+    maxSessionActivityMs: 1000,
+    daemonActivity: {
+      turnStarts: 1,
+      toolCalls: 3,
+      writeCalls: 0,
+      slotUpdates: 0,
+      streamPulses: 0,
+      imageLogLines: 0,
+      imageGenerationActive: false,
+      engineProgressMarker: null,
+      source: 'service-telemetry',
+    },
+    sniffState: { key: 'craftbook-invoice-run', score: 2, bytes: 0 },
+    ...over,
+  });
+
+  // A Meester check-in every few minutes kept a dead task "progressing" to
+  // the 100-minute cap: tool calls and fresh sessions move the hard digest,
+  // and must leave this one alone.
+  it('ignores tool-call and session churn', () => {
+    const a = digestFingerprint(base());
+    const b = digestFingerprint(
+      base({
+        sessionCount: 34,
+        daemonActivity: { ...base().daemonActivity!, toolCalls: 300 },
+      }),
+    );
+    expect(b.hard).not.toBe(a.hard);
+    expect(b.deliverable).toBe(a.deliverable);
+  });
+
+  it('moves when the sniff verdict or the workspace moves', () => {
+    const a = digestFingerprint(base());
+    const sniffMoved = digestFingerprint(
+      base({ sniffState: { key: 'craftbook-invoice-run', score: 3, bytes: 0 } }),
+    );
+    expect(sniffMoved.deliverable).not.toBe(a.deliverable);
+    const workspaceMoved = digestFingerprint(
+      base({
+        workspace: {
+          p1: { fileCount: 1, pathsHash: 'abc', totalBytes: 945, maxMtimeMs: 1 } as never,
+        },
+      }),
+    );
+    expect(workspaceMoved.deliverable).not.toBe(a.deliverable);
+  });
+});

@@ -131,7 +131,10 @@ describe('summarizeContinuity', () => {
   });
 
   it('counts steps, gates and per-step timings from history (deduped by id)', () => {
-    expect(facts.steps.activated).toBe(2);
+    // a and b from events; w was active too (it was re-driven and made a
+    // tool call) even though no activation event was ever written for it.
+    expect(facts.steps.activated).toBe(3);
+    expect(facts.steps.activationEvents).toBe(2);
     expect(facts.steps.completed).toBe(2);
     expect(facts.steps.gateRejections).toBe(1);
     expect(facts.steps.gateApprovals).toBe(1);
@@ -150,7 +153,7 @@ describe('summarizeContinuity', () => {
     expect(facts.sessions.reusedAcrossSteps).toBe(1);
     expect(facts.sessions.continuityReuses).toBe(1);
     expect(facts.sessions.continuityBreaks).toBe(0);
-    expect(facts.sessions.sessionsPerStep).toBe(1);
+    expect(facts.sessions.sessionsPerStep).toBeCloseTo(2 / 3, 5);
     expect(facts.sessions.byGezel).toEqual({ wren: 2, meester: 1 });
     expect(facts.sessions.perTask).toEqual({ 'p/1': 1, 'p/2': 1 });
     expect(facts.sessions.resumeFailures).toBe(1);
@@ -241,7 +244,7 @@ describe('summarizeContinuityForRunDir', () => {
     const facts = summarizeContinuityForRunDir(dir, { generalistMode: 'off', engine: 'llama-cpp' });
     expect(facts).not.toBeNull();
     expect(facts!.mode).toBe('off');
-    expect(facts!.steps.activated).toBe(2);
+    expect(facts!.steps.activated).toBe(3);
     expect(facts!.sessions.total).toBe(3);
     expect(facts!.fanout.childrenSpawned).toBe(2);
     expect(facts!.compaction.forceFit).toBe(1);

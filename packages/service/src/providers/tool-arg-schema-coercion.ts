@@ -161,8 +161,14 @@ function reinterpretString(value: string, types: ReadonlySet<string>): unknown |
   }
 
   if (types.has('boolean')) {
-    if (trimmed === 'true') return true;
-    if (trimmed === 'false') return false;
+    // Hermes-style markup carries whatever casing the model wrote, and a
+    // Python-leaning model writes `True`. Refusing it produced a validator
+    // loop that ran to the five-failure abort (verify_outcome, list_artifacts,
+    // grep_artifact on qwen3.8-27b, 2026-09-18). Schema-gated, so a declared
+    // string is never touched.
+    const lowered = trimmed.toLowerCase();
+    if (lowered === 'true') return true;
+    if (lowered === 'false') return false;
   }
   if ((types.has('number') || types.has('integer')) && /^-?\d+(?:\.\d+)?$/.test(trimmed)) {
     const n = Number(trimmed);

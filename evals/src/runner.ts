@@ -58,6 +58,7 @@ import {
   startChatEventRecorder,
 } from './recording/recorder.ts';
 import { captureRecordingScreenshots } from './recording/screenshots.ts';
+import { withRepairPolicy } from './repair-policy.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
   HARNESS_INTERVENTION_SETTLE_MS,
@@ -344,7 +345,11 @@ export function modelWarmFailure(
  * even on spawn errors, timeouts, or scenario failures — and always
  * leaves the run directory populated for postmortem.
  */
-export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Promise<TrialResult> {
+export async function runTrial(
+  scenarioInput: EvalScenario,
+  opts: TrialOptions,
+): Promise<TrialResult> {
+  const scenario = withRepairPolicy(scenarioInput, opts.repairPolicy);
   const engine = opts.engine ?? 'llama-cpp';
   const evalLlamaSpecType = evalLlamaSpecTypeOverride();
   const evalLlamaKvCache = evalLlamaKvCacheOverride();
@@ -478,6 +483,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   if (!authProbe.ok) {
     return finalize({
       generalistMode: opts.generalistMode,
+      repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
       scenarioId: scenario.id,
@@ -527,6 +533,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   } catch (err) {
     return finalize({
       generalistMode: opts.generalistMode,
+      repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
       scenarioId: scenario.id,
@@ -648,6 +655,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
       generalistMode: opts.generalistMode,
+      repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
       scenarioId: scenario.id,
@@ -773,6 +781,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     } catch (err) {
       return finalize({
         generalistMode: opts.generalistMode,
+        repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
         scenarioId: scenario.id,
@@ -829,6 +838,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
         scenarioId: scenario.id,
@@ -854,6 +864,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
         scenarioId: scenario.id,
@@ -897,6 +908,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     await mockRuntime?.close().catch(() => {});
     return finalize({
       generalistMode: opts.generalistMode,
+      repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
       scenarioId: scenario.id,
@@ -1018,6 +1030,13 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
+      // The daemon installs a bundled Meester oversight task at boot and the
+      // night shift dispatches it within a minute whenever the wall clock is
+      // inside the night window. Every trial run at night then spends one or
+      // two turns of the provider under test on an unrelated task and mixes a
+      // second task into the trial's history (Opus, 2026-09-19: every cell).
+      // No scenario depends on the shift; the trial clock should not matter.
+      nightShift: { enabled: false },
       ...(opts.keurmeester
         ? {
             keurmeester: {
@@ -1046,7 +1065,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       firstRunCompleted: true,
     });
     log(
-      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.
@@ -1268,6 +1287,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
 
   return finalize({
     generalistMode: opts.generalistMode,
+    repairPolicy: scenario.repairPolicy,
     engine,
     trialId,
     scenarioId: scenario.id,
@@ -2133,6 +2153,7 @@ export async function pollUntilDone(
   const ctx: EvalContext = {
     client: args.client,
     meesterId: args.meesterId,
+    ...(scenario.repairPolicy ? { repairPolicy: scenario.repairPolicy } : {}),
     log: args.log,
     logChanged,
     recordSniff,
@@ -2149,6 +2170,7 @@ export async function pollUntilDone(
   // current state we're waiting to see move.
   let lastHardDigest: string;
   let lastSoftDigest: string;
+  let lastDeliverableDigest: string;
   try {
     const initial = await captureFingerprint(
       args.client,
@@ -2159,14 +2181,17 @@ export async function pollUntilDone(
     const d = digestFingerprint(initial);
     lastHardDigest = d.hard;
     lastSoftDigest = d.soft;
+    lastDeliverableDigest = d.deliverable;
   } catch (err) {
     args.log(
       `[poll] initial fingerprint capture failed: ${err instanceof Error ? err.message : String(err)} (continuing with empty baseline)`,
     );
     lastHardDigest = 'initial-capture-failed';
+    lastDeliverableDigest = 'initial-capture-failed';
     lastSoftDigest = 'initial-capture-failed';
   }
   let lastHardChangeAt = Date.now();
+  let lastDeliverableChangeAt = Date.now();
   let lastSoftChangeAt = Date.now();
   args.log(`[poll] initial digests hard=${lastHardDigest} soft=${lastSoftDigest}`);
 
@@ -2313,12 +2338,18 @@ export async function pollUntilDone(
 
   while (true) {
     if (Date.now() >= hardDeadline) {
-      const sinceHardMs = Date.now() - lastHardChangeAt;
+      // Under the runtime repair policy an extension is EARNED by the
+      // deliverable moving (workspace bytes, sniff verdict), never by tool
+      // calls or new sessions: a Meester check-in every few minutes kept a
+      // dead invoice-run task "progressing" to the 100-minute cap (2026-09-18).
+      const deliverableAnchored = scenario.repairPolicy === 'runtime';
+      const sinceHardMs =
+        Date.now() - (deliverableAnchored ? lastDeliverableChangeAt : lastHardChangeAt);
       const step = Math.min(ceilingExtendStepMs, hardCeilingCapMs - (hardDeadline - startedAt));
       if (sinceHardMs <= ceilingExtendIfProgressWithinMs && step > 0) {
         hardDeadline += step;
         args.log(
-          `[poll] hard ceiling reached but hard progress moved ${Math.round(sinceHardMs / 1000)}s ago — extending ${Math.round(step / 60_000)}m (${Math.round((hardDeadline - startedAt) / 60_000)}m of ${Math.round(hardCeilingCapMs / 60_000)}m cap)`,
+          `[poll] hard ceiling reached but ${deliverableAnchored ? 'the deliverable' : 'hard progress'} moved ${Math.round(sinceHardMs / 1000)}s ago — extending ${Math.round(step / 60_000)}m (${Math.round((hardDeadline - startedAt) / 60_000)}m of ${Math.round(hardCeilingCapMs / 60_000)}m cap)`,
         );
       } else {
         break;
@@ -2348,6 +2379,7 @@ export async function pollUntilDone(
         ctx.client = restartedClient;
         restartPerformed = true;
         lastHardChangeAt = Date.now();
+        lastDeliverableChangeAt = lastHardChangeAt;
         lastSoftChangeAt = lastHardChangeAt;
         sniffPlateauStartedAt = lastHardChangeAt;
         try {
@@ -2360,6 +2392,7 @@ export async function pollUntilDone(
           const digest = digestFingerprint(restarted);
           lastHardDigest = digest.hard;
           lastSoftDigest = digest.soft;
+          lastDeliverableDigest = digest.deliverable;
           args.log(
             `[poll] controlled daemon restart complete; reset digests hard=${lastHardDigest} soft=${lastSoftDigest}`,
           );
@@ -2546,6 +2579,10 @@ export async function pollUntilDone(
         // Progress is the proof a dispatched repair turn actually landed.
         poisonedSessionRecovery.confirmResponded();
         silentRecoveryNote = null;
+      }
+      if (digest.deliverable !== lastDeliverableDigest) {
+        lastDeliverableDigest = digest.deliverable;
+        lastDeliverableChangeAt = Date.now();
       }
       if (digest.soft !== lastSoftDigest) {
         lastSoftDigest = digest.soft;
@@ -3813,8 +3850,17 @@ export function recoveryFilePathForSniff(
   return null;
 }
 
+/**
+ * When the harness cannot name the file, the placeholder must not look like
+ * a path. The daemon's read-pacing guard (`deliverable-read-pacing.ts`)
+ * lifts the target from a quoted `write_file({ path: "..." })` in the
+ * nudge, so a quoted `"<workspace-relative-file>"` became the expected file
+ * of a real turn: a Codebase Analyst six reads into a read-heavy
+ * `enumerate` step was aborted for not having written `<workspace-relative-file>`
+ * (codemod-sweep, 2026-09-18).
+ */
 function formatImmediateWriteFileCall(filePath: string | null): string {
-  const path = filePath ? JSON.stringify(filePath) : '"<workspace-relative-file>"';
+  const path = filePath ? JSON.stringify(filePath) : "<the deliverable's workspace-relative path>";
   return `write_file({ path: ${path}, content: <the full deliverable contents> })`;
 }
 
@@ -4193,6 +4239,7 @@ async function finalize(args: {
   modelId: string;
   modelTier: import('@bendyline/gezel').ModelTier;
   generalistMode?: TrialOptions['generalistMode'];
+  repairPolicy?: TrialOptions['repairPolicy'];
   engine?: TrialOptions['engine'];
   startedAt: Date;
   startMonotonic: number;
@@ -4263,6 +4310,7 @@ async function finalize(args: {
     modelId: args.modelId,
     modelTier: args.modelTier,
     ...(args.generalistMode ? { generalistMode: args.generalistMode } : {}),
+    ...(args.repairPolicy ? { repairPolicy: args.repairPolicy } : {}),
     ...(args.engine ? { engine: args.engine } : {}),
     startedAt: args.startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),

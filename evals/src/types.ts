@@ -46,6 +46,13 @@ export interface EvalContext {
   client: GezelClient;
   meesterId: string;
   /**
+   * Effective repair policy for this trial: the scenario's own, or the
+   * `--repair-policy` override the runner applied. Craftbook scenarios read
+   * this before their spec so an A/B bin can switch the harness channel off
+   * without touching the book's `test.json`.
+   */
+  repairPolicy?: 'harness' | 'runtime';
+  /**
    * Live mock-service runtime for this trial, present when the scenario
    * declared `mockServices`. The runner boots the fake HTTPS services
    * BEFORE the daemon spawns (the daemon needs NODE_EXTRA_CA_CERTS +
@@ -373,6 +380,16 @@ export interface TrialOptions {
    * The A/B lever for generalist mode v2; arms should force `on`/`off`.
    */
   generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Override a craftbook scenario's repair policy for this trial. `runtime`
+   * silences every harness-injected repair turn (sniff nudges, missing-
+   * deliverable kicks, Developer recruitment, poisoned-session recovery,
+   * plateau kills) so the run measures the runtime's own gates, retries and
+   * stall handling; the progress watchdogs still bound a hang. Ignored by
+   * scenarios that do not take part in the repair protocol — see
+   * `withRepairPolicy`.
+   */
+  repairPolicy?: 'harness' | 'runtime';
   /** Override the default poll cadence (ms). */
   pollIntervalMs?: number;
   /**
@@ -534,6 +551,11 @@ export interface TrialResult {
    * parsing `log.txt`. Absent when the run left the daemon default.
    */
   generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Repair policy the trial actually ran under (the scenario's own or the
+   * `--repair-policy` override). Absent for scenarios outside the protocol.
+   */
+  repairPolicy?: 'harness' | 'runtime';
   /** Chat provider the trial ran against (was only in the transient status.json). */
   engine?: TrialOptions['engine'];
   startedAt: string;

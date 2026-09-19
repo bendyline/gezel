@@ -76,6 +76,10 @@ const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'append_to_file',
   'apply_patch',
   'insert_at_marker',
+  // An artifact-drawer deliverable is written with `write_artifact`; without
+  // it here a step that had just saved its report was nudged as if nothing
+  // had been written (Opus, 2026-09-19).
+  'write_artifact',
 ]);
 
 /**

@@ -261,11 +261,19 @@ async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
 
   let activeStepId: string | undefined;
+  let activeStepOwnedBySession = false;
   if (!sessionStepCompleted) {
     try {
       const parsed = await parseRef(sessionTaskRef);
       const task = await api.getTask(parsed.projectId, parsed.num);
       activeStepId = task.activeStepId;
+      const activeStep = task.craftbook.steps.find((s) => s.id === activeStepId);
+      const owner =
+        activeStep?.assignee?.kind === 'gezel'
+          ? activeStep.assignee.gezelId
+          : (activeStep?.suggestedGezelId ??
+            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      activeStepOwnedBySession = !!gezelId && owner === gezelId;
     } catch {
       // Let the mutation's own API request enforce scope after a transient read failure.
       return null;
@@ -276,6 +284,7 @@ async function staleStepMutationResult() {
     sessionStepId,
     activeStepId,
     transitionCompleted: sessionStepCompleted,
+    activeStepOwnedBySession,
   });
   return rejection ? errorResult(rejection, { code: 'stale_task_step', retryable: false }) : null;
 }

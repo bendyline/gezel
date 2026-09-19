@@ -192,7 +192,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
-import { TaskManager } from './tasks/manager.js';
+import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
@@ -746,10 +746,14 @@ export async function startProductService(
   // TaskScheduler needs ChatManager (for ambient voorman nudges) so it's
   // constructed after `chat` is ready. Task-cron ticks work without chat,
   // but we route both through the same scheduler to avoid two timers.
+  // The runner is constructed below; the scheduler reads it lazily so the
+  // stuck-step sweep can tell a queued handoff from a stall.
+  const schedulerRunner: { current: TaskRunner | undefined } = { current: undefined };
   const scheduler = new TaskScheduler({
     manager: tasks,
     chat,
     store,
+    runner: () => schedulerRunner.current,
     debug,
     isNightShiftWindowOpen: () => nightShift.isWindowOpen(),
     currentNightShiftDayKey: () => nightShift.currentDayKey(),
@@ -764,10 +768,58 @@ export async function startProductService(
   // Late-bound: IndexEnrichmentManager is constructed after the runner; the
   // closure reads through this ref so night dispatch can hold on catch-up.
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
+  // One exit for a handoff the runtime could not carry: the runner reaches it
+  // when the dispatch itself rejects, the chat manager when the detached sends
+  // spend their bounded retries. Both re-check the step is still the live one
+  // so a task that moved on (or was paused by a person) is left alone.
+  const pauseTaskAfterFailedHandoff = async ({
+    projectId,
+    num,
+    stepId,
+    taskRef,
+    detail,
+  }: {
+    projectId: string;
+    num: number;
+    stepId: string;
+    taskRef: string;
+    detail: string;
+  }): Promise<void> => {
+    const current = await tasks.get(projectId, num);
+    if (!current || current.status !== 'active' || current.activeStepId !== stepId) return;
+    await tasks
+      .appendNote(projectId, num, {
+        text: `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`,
+        author: { kind: 'user' },
+        stepId,
+      })
+      .catch(() => {});
+    await tasks.setStatus(projectId, num, 'paused');
+    const paused = await tasks.get(projectId, num);
+    if (paused) {
+      await tasks.emitNeedsHelp({
+        projectId,
+        task: paused,
+        stepId,
+        reason: 'step_stalled',
+        detail: `Handoff for step "${stepId}" failed after bounded retries: ${detail}`,
+      });
+    }
+    log.warn(
+      `[tasks] ${taskRef} step "${stepId}": handoff failed after bounded retries — paused for help`,
+    );
+  };
+  chat.setHandoffExhaustedHandler(async ({ taskRef, stepId, detail }) => {
+    const [projectId, numText] = taskRef.split('/');
+    const num = Number(numText);
+    if (!projectId || !Number.isFinite(num)) return;
+    await pauseTaskAfterFailedHandoff({ projectId, num, stepId, taskRef, detail });
+  });
   const taskRunner = new TaskRunner({
     store,
     prepareActiveStep: (projectId, num) => tasks.ensureActiveStepEntered(projectId, num),
     noteRestartResume: (projectId, num, stepId) => tasks.noteRestartResume(projectId, num, stepId),
+    pauseAfterFailedDispatch: pauseTaskAfterFailedHandoff,
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
       cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId, 'task-superseded'),
@@ -789,6 +841,7 @@ export async function startProductService(
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
+  schedulerRunner.current = taskRunner;
   // A parent's lifecycle is a runtime gate for its whole descendant tree.
   // Reconcile immediately on every durable status transition: inactive
   // ancestors prune queued/running child turns, while a resumed ancestor
@@ -1470,13 +1523,16 @@ export async function startProductService(
       }
     }
 
-    const assigneeGezelId =
-      newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+    // The same three-level resolution entry dispatch uses. A task created
+    // with a task-level assignee and unbound steps (a create-time fanout
+    // host, an ad-hoc task with plain steps) has no step binding at all in
+    // stepwise mode; reading only the step here made every such barrier
+    // release a silent no-op, and the host sat idle until the eight-minute
+    // stall sweep messaged it (every stepwise fanout cell of the 2026-09
+    // campaign; Opus: 63s generalist vs 536s stepwise on identical work).
+    const assigneeGezelId = stepOwnerGezelId(task, newStep);
     if (!assigneeGezelId) return;
-    const prevGezelId =
-      completedStep.assignee?.kind === 'gezel'
-        ? completedStep.assignee.gezelId
-        : completedStep.suggestedGezelId;
+    const prevGezelId = stepOwnerGezelId(task, completedStep);
     // Self-handoff: when the same gezel owns both steps and the new step
     // carries its own `prompt`, still enqueue a handoff — the runner then
     // re-engages the SAME task session (`ChatManager.startHandoffSession`

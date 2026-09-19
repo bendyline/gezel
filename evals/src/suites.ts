@@ -463,19 +463,20 @@ export const SUITES: Record<string, EvalSuite> = {
   // stepwise-vs-generalist execution. Members are multi-step, gated,
   // task-driven scenarios — the shape the mode changes — plus the two
   // hermetic fanout probes (fanout is the mechanic the mode must keep) and
-  // `schema-migration`, the one Meester-kickoff member, kept as the kickoff
-  // canary even though `core` also bills it. Ordered cheapest-first. Arms
-  // force `--generalist on|off`; `auto` is never an arm.
+  // `schema-migration`, a plain-chat refactor sent straight to a pre-recruited
+  // Developer — no task, no kickoff — kept as the same-work control that the
+  // setting must leave untouched, even though `core` also bills it. Ordered
+  // cheapest-first. Arms force `--generalist on|off`; `auto` is never an arm.
   generalist: {
     id: 'generalist',
     description:
       'Generalist-mode A/B suite (7 scenarios, <=7h10m at --count 1): two hermetic fanout ' +
-      'probes, the Meester-kickoff canary, and four multi-step gated craftbook runs, ' +
+      'probes, the plain-chat refactor control, and four multi-step gated craftbook runs, ' +
       'ordered cheapest-first. Run each arm with --generalist on and --generalist off.',
     scenarios: [
       'fanout-tally', // 25m — create-time fanout, arithmetic oracle
       'fanout-stories', // 30m — create-time fanout, prose, host-vs-child work split
-      'schema-migration', // 35m — Meester kickoff: the only member the kickoff shape touches
+      'schema-migration', // 35m — plain chat to a pre-recruited Developer; the setting must not move it
       'craftbook-invoice-run', // 50m — gilde step-time fanout, five host steps
       'craftbook-author-linear', // 80m — authored three-gated-step book run to completion
       'craftbook-codemod-sweep', // 90m — dispatched multi-step code task

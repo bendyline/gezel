@@ -148,7 +148,10 @@ describe('CodexCliSession', () => {
       // Codex's duplicate mutation/execution/web surfaces stay excluded.
       expect(names).not.toContain('mcp__gezel__write_file');
       expect(names).not.toContain('mcp__gezel__fetch_url');
-      expect(names).not.toContain('mcp__gezel__run_npx');
+      expect(names).not.toContain('mcp__gezel__run_nodejs_script');
+      // The package-script runners write the receipts a commandEvidence
+      // gate checks, so they stay registered beside Codex's own shell.
+      expect(names).toContain('mcp__gezel__run_package_script');
       expect(names).not.toContain('mcp__gezel__craftbook_update_step');
       expect(names).not.toContain('mcp__gezel__craftbook_create');
       expect(names).not.toContain('mcp__gezel__create_gezel_from_gilde');

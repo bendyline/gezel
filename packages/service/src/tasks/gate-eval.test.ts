@@ -1853,6 +1853,11 @@ describe('commandEvidence', () => {
     expect(res.pass).toBe(false);
     expect(res.failures[0]).toMatch(/No `npm run test` run was observed/);
     expect(res.failures[0]).toMatch(/run_package_script/);
+    // The gate cannot see the session's roster; a session without the
+    // runner needs an honest exit instead of four identical rejections.
+    expect(res.failures[0]).toMatch(
+      /`run_package_script` is not among your tools, say so and pause/,
+    );
   });
 
   it('expect fail: a passing latest run rejects with the repro-first message', async () => {

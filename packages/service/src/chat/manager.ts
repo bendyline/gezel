@@ -312,6 +312,7 @@ import {
   classifyExecutionTierFor,
   isContextOverflowError,
   renderEntryPreface,
+  renderWriteBailContinuation,
   sessionContextPoisoned,
 } from './generalist-continuity.js';
 import {
@@ -1697,6 +1698,31 @@ export class ChatManager extends LocalEngineRuntime {
    * the dependency points both ways). When unset, trigger sites no-op
    * and the existing give-up behavior runs unchanged.
    */
+  /**
+   * Called once when a task handoff has spent its bounded sends without the
+   * step completing. This is the only place that failure is visible:
+   * `startHandoffSession` detaches its sends, so the runner's dispatch has
+   * long since succeeded. product-service pauses the task for help here;
+   * before it, the task stayed active with nothing queued until the stall
+   * sweep noticed — or, when the session was poisoned, never.
+   */
+  setHandoffExhaustedHandler(
+    handler: (args: {
+      taskRef: string;
+      stepId: string;
+      gezelId: string;
+      detail: string;
+    }) => Promise<void>,
+  ): void {
+    this.handoffExhausted = handler;
+  }
+  private handoffExhausted?: (args: {
+    taskRef: string;
+    stepId: string;
+    gezelId: string;
+    detail: string;
+  }) => Promise<void>;
+
   setKeurmeester(keurmeester: KeurmeesterManager): void {
     this.keurmeester = keurmeester;
   }
@@ -4465,7 +4491,7 @@ export class ChatManager extends LocalEngineRuntime {
             attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
-                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
+                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4481,6 +4507,26 @@ export class ChatManager extends LocalEngineRuntime {
               ) {
                 throw new Error(
                   `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
+                );
+              }
+            } else if (attempt === 1) {
+              const bail = this.states.get(handoffSession.id)?.session?.lastTurnBail;
+              const parsed = bail === 'immediate-write' ? parseTaskRef(args.taskRef) : null;
+              const afterBail = parsed
+                ? await this.readEffectiveTask(parsed.projectId, parsed.num)
+                : null;
+              if (
+                afterBail &&
+                taskEffectiveStatus(afterBail) === 'active' &&
+                afterBail.activeStepId === dispatchStepId
+              ) {
+                log.info(
+                  `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended on an immediate-write bail with the step still active — sending one continuation`,
+                );
+                await this.sendWithBusyRetry(
+                  handoffSession.id,
+                  renderWriteBailContinuation(dispatchStepId),
+                  sendOptions,
                 );
               }
             }
@@ -4517,11 +4563,24 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
-      })().catch((err) => {
+      })().catch(async (err) => {
+        const detail = err instanceof Error ? err.message : String(err);
         log.error(
-          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}):`,
-          err,
+          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
         );
+        if (this.handoffExhausted && dispatchStepId) {
+          await this.handoffExhausted({
+            taskRef: args.taskRef,
+            stepId: dispatchStepId,
+            gezelId: args.gezelId,
+            detail,
+          }).catch((hookErr: unknown) => {
+            log.warn(
+              `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
+              hookErr instanceof Error ? hookErr.message : hookErr,
+            );
+          });
+        }
       }),
     );
     return { sessionId: handoffSession.id };
@@ -14644,6 +14703,9 @@ export class ChatManager extends LocalEngineRuntime {
             ? 'Assigned records opened.'
             : 'Checkpoint written for validation.',
           maxClosingChars: 120,
+          ...(artifactCheckpointAction && step.advanceWhen?.file
+            ? { onlyWhenArgEquals: { arg: 'path', value: step.advanceWhen.file } }
+            : {}),
         };
         if (fixedEvidenceAction) {
           // This is a mechanical capability invocation, not a reasoning

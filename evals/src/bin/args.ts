@@ -53,6 +53,7 @@ export const SHARED_FLAGS = [
   'engine',
   'generalist',
   'render-mode',
+  'repair-policy',
   'keurmeester',
 ] as const;
 
@@ -161,6 +162,30 @@ export function resolveGeneralistFlag(
   if (value.length === 0) return undefined;
   if (value !== 'auto' && value !== 'on' && value !== 'off') {
     console.error(`Unknown --generalist "${value}". Expected one of: auto, on, off.`);
+    process.exit(2);
+  }
+  return value;
+}
+
+/**
+ * Resolve `--repair-policy harness|runtime` into `TrialOptions.repairPolicy`.
+ * Applies only to scenarios in the harness-repair protocol (craftbook
+ * scenarios); `runtime` makes the trial measure the runtime's own gates and
+ * retries with no injected repair turns. See `withRepairPolicy`.
+ */
+export function resolveRepairPolicyFlag(
+  flags: Record<string, string | boolean>,
+): 'harness' | 'runtime' | undefined {
+  const raw = flags['repair-policy'];
+  if (raw === undefined || raw === false) return undefined;
+  if (raw === true) {
+    console.error('The --repair-policy flag needs a value: --repair-policy harness|runtime.');
+    process.exit(2);
+  }
+  const value = String(raw).trim();
+  if (value.length === 0) return undefined;
+  if (value !== 'harness' && value !== 'runtime') {
+    console.error(`Unknown --repair-policy "${value}". Expected one of: harness, runtime.`);
     process.exit(2);
   }
   return value;

@@ -385,3 +385,59 @@ describe('ToolFailureTracker', () => {
     expect(msg).toContain('Otherwise');
   });
 });
+
+describe('ToolFailureTracker — reads of a path that does not exist', () => {
+  const notFound = 'ERROR: read_file "tasks/1/scope.md": not found';
+
+  it('names the wired artifact writer instead of blaming the call shape', () => {
+    const t = new ToolFailureTracker({
+      artifactWriterAvailable: true,
+      workspaceWriterAvailable: true,
+    });
+    t.recordResult('read_file', notFound);
+    t.recordResult('read_file', notFound);
+    const third = t.recordResult('read_file', notFound);
+    expect(third.missingPath).toBe(true);
+    expect(third.output).toContain('does not exist');
+    expect(third.output).toContain('write_artifact');
+    expect(third.output).not.toContain('call shape will keep failing');
+    t.recordResult('read_file', notFound);
+    const fifth = t.recordResult('read_file', notFound);
+    expect(fifth.shouldAbort).toBe(true);
+    const abort = ToolFailureTracker.buildAbortMessage({
+      providerLabel: 'Mac AI',
+      toolName: 'read_file',
+      count: fifth.count,
+      missingPath: true,
+      artifactWriterAvailable: true,
+      workspaceWriterAvailable: false,
+    });
+    expect(abort).toContain('answered "not found" 5 times');
+    expect(abort).toContain('write_artifact');
+    expect(abort).not.toContain('write_file');
+    expect(abort).not.toContain('working call shape');
+  });
+
+  it('never prescribes a writer the roster lacks', () => {
+    const t = new ToolFailureTracker();
+    const missing = 'ERROR: Artifact "tasks/1/sites.md" not found.';
+    t.recordResult('read_artifact', missing);
+    t.recordResult('read_artifact', missing);
+    const third = t.recordResult('read_artifact', missing);
+    expect(third.output).toContain('cannot create files');
+    expect(third.output).not.toContain('write_artifact');
+    expect(third.output).not.toContain('write_file');
+  });
+
+  it('leaves genuine shape failures on the generic corrective', () => {
+    const t = new ToolFailureTracker();
+    for (let i = 0; i < 2; i++)
+      t.recordResult('read_file', 'ERROR: `read_file` rejected by validator. Missing `path`.');
+    const third = t.recordResult(
+      'read_file',
+      'ERROR: `read_file` rejected by validator. Missing `path`.',
+    );
+    expect(third.missingPath).toBeUndefined();
+    expect(third.output).toContain('call shape will keep failing');
+  });
+});

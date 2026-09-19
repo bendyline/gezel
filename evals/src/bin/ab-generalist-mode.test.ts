@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ContinuityFacts } from '../continuity-facts.ts';
-import { ARM_LABEL, parseArms, renderMarkdown, summarizeCell } from './ab-generalist-mode.ts';
+import {
+  ARM_LABEL,
+  parseArms,
+  renderMarkdown,
+  resolveAbRepairPolicy,
+  summarizeCell,
+} from './ab-generalist-mode.ts';
 
 function facts(over: Partial<ContinuityFacts> = {}): ContinuityFacts {
   return {
@@ -9,6 +15,7 @@ function facts(over: Partial<ContinuityFacts> = {}): ContinuityFacts {
     resolvedModes: { generalist: 1, stepwise: 0 },
     steps: {
       activated: 4,
+      activationEvents: 4,
       completed: 4,
       gateApprovals: 4,
       gateRejections: 1,
@@ -137,5 +144,15 @@ describe('summarizeCell', () => {
     expect(md).toContain('| s1 | generalist | 1/1 (100%) | 2m |');
     expect(md).toContain('| n/a |');
     expect(md).toContain('- **gitSha:** abc123');
+  });
+});
+
+describe('resolveAbRepairPolicy', () => {
+  it('defaults craftbook cells to the runtime policy so the harness stays out of the A/B', () => {
+    expect(resolveAbRepairPolicy({})).toBe('runtime');
+  });
+
+  it('lets a deliberate comparison with the standard matrix opt back into harness repairs', () => {
+    expect(resolveAbRepairPolicy({ 'repair-policy': 'harness' })).toBe('harness');
   });
 });

@@ -17,6 +17,7 @@ import {
   parseDuration,
   printScenarios,
   resolveProviderFlag,
+  resolveRepairPolicyFlag,
 } from './args.ts';
 
 /**
@@ -63,7 +64,24 @@ const OWN_FLAGS = [
   'runs-dir',
   'list',
   'mlx-source-home',
+  'repair-policy',
 ] as const;
+
+/**
+ * Craftbook cells run under `--repair-policy runtime` unless told otherwise.
+ * This bin compares two ways the RUNTIME executes a book; the harness's
+ * repair channel (sniff nudges in plain sessions, missing-deliverable kicks,
+ * Developer recruitment) is a third actor that speaks to whichever gezel it
+ * scores best and bypasses the mode under test. The dry run of 2026-09-18
+ * lost both invoice-run arms to that channel before the runtime had finished
+ * step one. `--repair-policy harness` restores the standard craftbook-matrix
+ * behaviour for a deliberate comparison with older runs.
+ */
+export function resolveAbRepairPolicy(
+  flags: Record<string, string | boolean>,
+): 'harness' | 'runtime' {
+  return resolveRepairPolicyFlag(flags) ?? 'runtime';
+}
 
 export function parseArms(raw: unknown, allowAuto: boolean): GeneralistArm[] {
   if (raw === undefined || raw === true || raw === false) return DEFAULT_ARMS;
@@ -362,6 +380,7 @@ async function main(): Promise<void> {
   const count = args.flags.count ? Number(args.flags.count) : 1;
   const countStrict = args.flags['count-strict'] === true;
   const timeoutMs = args.flags.timeout ? parseDuration(String(args.flags.timeout)) : undefined;
+  const repairPolicy = resolveAbRepairPolicy(args.flags);
   const deviceLock = acquireEvalDeviceLockIfNeeded({ provider: engine, scenarios });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -382,6 +401,7 @@ async function main(): Promise<void> {
     interleave,
     count,
     countStrict,
+    repairPolicy,
     gildeDataDir: gildeDataDir(),
     gitSha: await gitSha(),
     host: `${hostname()} ${platform()}/${arch()}`,
@@ -405,6 +425,7 @@ async function main(): Promise<void> {
     signal: ac.signal,
     runsDir: dir,
     generalistMode: arm,
+    repairPolicy,
     ...(args.flags['mlx-source-home']
       ? { mlxSourceHome: String(args.flags['mlx-source-home']) }
       : {}),

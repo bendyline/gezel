@@ -1098,6 +1098,13 @@ describe('TaskManager spawn craftbooks & children', () => {
     await expect(tasks.completeStep('website', child.num, child.activeStepId!)).rejects.toThrow(
       'effective status is paused',
     );
+    await expect(
+      tasks.completeStep('website', child.num, child.activeStepId!),
+    ).rejects.toMatchObject({
+      name: 'StepCompletionBlockedError',
+      code: 'step_completion_blocked',
+      reason: 'task_not_active',
+    });
 
     await tasks.setStatus('website', parent.num, 'active');
     const resumed = (await tasks.get('website', child.num))!;
@@ -2433,5 +2440,34 @@ describe('TaskManager — execution mode on drafts', () => {
     const active = await tasks.activate('website', draft.num, { force: true });
     expect(requested).toEqual(['auto']);
     expect(active.executionMode).toBe('stepwise');
+  });
+});
+
+describe('TaskManager — a last step with no next ends the book', () => {
+  it('completes a single-step task instead of re-activating its only step', async () => {
+    const task = await tasks.create('website', {
+      title: 'Draft one invoice',
+      assignee: { kind: 'gezel', gezelId: 'karima' },
+      steps: [{ name: 'Draft the invoice' }],
+    });
+    const stepId = task.craftbook.steps[0]!.id;
+    await tasks.completeStep('website', task.num, stepId);
+    const done = (await store.readTask('website', task.num))!;
+    expect(done.status).toBe('complete');
+    expect(done.activeStepId).toBeUndefined();
+    expect(done.craftbook.steps[0]!.completedAt).toBeTruthy();
+  });
+
+  it('completes a multi-step task on its unflagged last step', async () => {
+    const task = await tasks.create('website', {
+      title: 'Two steps, no terminal flag',
+      assignee: { kind: 'gezel', gezelId: 'karima' },
+      steps: [{ name: 'First' }, { name: 'Last' }],
+    });
+    const [first, last] = task.craftbook.steps;
+    await tasks.completeStep('website', task.num, first!.id);
+    expect((await store.readTask('website', task.num))!.activeStepId).toBe(last!.id);
+    await tasks.completeStep('website', task.num, last!.id);
+    expect((await store.readTask('website', task.num))!.status).toBe('complete');
   });
 });

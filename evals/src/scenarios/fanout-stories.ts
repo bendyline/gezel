@@ -3,8 +3,10 @@ import {
   createFanoutWorker,
   fanoutDiagnostics,
   findFanoutState,
+  isWorkspaceWriteReceipt,
   readWorkspaceText,
   reviewHostSessions,
+  toolReceiptsObservable,
 } from './fanout-shared.ts';
 
 /**
@@ -42,6 +44,11 @@ async function setup(ctx: EvalContext): Promise<void> {
     missionObjectives:
       'Every child writes its own story into stories/; the host writes only anthology.md after all children have finished.',
   });
+  // This probe grades fanout mechanics, so the Meester's periodic project
+  // check-in stays out of it: on a one-slot local engine a nudged Meester
+  // recruiting and messaging burns the slot the children and host need
+  // (wild-caught: seven minutes of `ensure_gezel` loops mid-fanout).
+  await ctx.client.updateProject(project.id, { nudgeConfig: { enabled: false } });
   const workerId = await createFanoutWorker(ctx, project.id, {
     name: WORKER_NAME,
     role: 'Copywriter',
@@ -77,8 +84,12 @@ async function setup(ctx: EvalContext): Promise<void> {
     ],
     fanout: {
       count: FANOUT_STORY_TOPICS.length,
+      // Each child gets its OWN description: a child otherwise inherits the
+      // host's, reads about "collect the stories", and tries to advance to a
+      // step that only exists on the host.
       variations: FANOUT_STORY_TOPICS.map((t) => ({
         title: `Story: ${t.topic}`,
+        description: `Write one short story about ${t.topic} into stories/${t.slug}.md. This task has a single step; finishing it is the whole job.`,
         context: { topic: t.topic, slug: t.slug },
       })),
     },
@@ -160,15 +171,22 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     kind: 'tool.called',
     limit: 2_000,
   });
-  for (const child of children) {
-    const wrote = entries.some(
-      (entry) =>
-        entry.entryType === 'event' &&
-        entry.details?.taskRef === child.ref &&
-        entry.details?.success === true &&
-        entry.details?.name === 'write_file',
+  const receiptsObservable = toolReceiptsObservable(entries);
+  if (receiptsObservable) {
+    for (const child of children) {
+      const wrote = entries.some(
+        (entry) =>
+          entry.entryType === 'event' &&
+          entry.details?.taskRef === child.ref &&
+          entry.details?.success === true &&
+          isWorkspaceWriteReceipt(entry.details?.name),
+      );
+      if (!wrote) failures.push(`${child.ref} has no successful workspace-write receipt`);
+    }
+  } else {
+    ctx.log(
+      '[fanout-stories] tool receipts are unobservable for this provider (tools run inside its own process); per-child write attribution skipped, the file and completion checks stand',
     );
-    if (!wrote) failures.push(`${child.ref} has no successful write_file receipt`);
   }
   const review = await reviewHostSessions(ctx.client, project.id, host.ref, 'stories/');
   if (review.hostWrotePaths.length > 0) {
@@ -176,8 +194,12 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       `the host wrote ${review.hostWrotePaths.length} story file(s) itself: ${[...new Set(review.hostWrotePaths)].join(', ')}`,
     );
   }
-  const diagnostics = fanoutDiagnostics(host, children, review);
-  const fanout = diagnostics.fanout as { barrierHeld: boolean | null };
+  const base = fanoutDiagnostics(host, children, review);
+  const diagnostics = {
+    ...base,
+    fanout: { ...(base.fanout as Record<string, unknown>), receiptsObservable },
+  };
+  const fanout = base.fanout as { barrierHeld: boolean | null };
   if (fanout.barrierHeld === false) {
     failures.push('the host was active before its last child settled (fanout barrier not held)');
   }

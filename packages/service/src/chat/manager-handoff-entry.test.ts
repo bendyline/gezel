@@ -359,6 +359,91 @@ describe('handoff seed wording', () => {
     ).toBe(true);
   });
 
+  it('reports a handoff that spent its bounded sends so the task can be paused for help', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Review a patch that keeps aborting',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.scriptSendFailure('first abort');
+    mock.scriptSendFailure('second abort');
+    mock.scriptSendFailure('third abort');
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(3);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledWith({
+      taskRef: task.ref,
+      stepId: 'review',
+      gezelId: 'worker',
+      detail: expect.stringContaining('third abort'),
+    });
+  });
+
+  it('sends one continuation when a local write-bail closes the turn with the step still active', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Write a story',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        { id: 'write', name: 'Write', prompt: 'Write the story to stories/lighthouse.md now.' },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    // The scripted reply claims nothing about a file: a bare write claim
+    // with no file on disk wakes the claim-check nudge, a different path.
+    mock.scriptWriteBail();
+    mock.script('Draft saved.');
+    mock.script('Advanced the step.');
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'write',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(2);
+    expect(String(sends[1]!.prompt)).toContain('still active');
+    expect(String(sends[1]!.prompt)).toContain('advance_task_step');
+    const full = await store.getSession('worker', sessionId);
+    expect(full?.messages.some((message) => message.content === 'Advanced the step.')).toBe(true);
+  });
+
+  it('leaves a handoff turn the model ended itself alone', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Write a story',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'write', name: 'Write', prompt: 'Write the story to stories/harbor.md now.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.script('Draft saved; finishing next turn.');
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'write',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+  });
+
   it('retries a fixed-action handoff that returns text without publishing its checkpoint', async () => {
     const task = await tasks.create('p1', {
       title: 'Publish a review checkpoint',
@@ -398,6 +483,9 @@ describe('handoff seed wording', () => {
     expect(sends).toHaveLength(3);
     expect(sends[1]?.prompt).toContain('ended before fixed-action step');
     expect(sends[1]?.prompt).toContain('Do not call `read_task_notes` or `advance_task_step`');
+    // The recovery names the checkpoint the step advances on, so a model
+    // that wrote a different deliverable first does not restart from the top.
+    expect(sends[1]?.prompt).toContain('once `observations.md` is written');
     expect((await store.readTask('p1', task.num))?.activeStepId).toBe('review');
   });
 

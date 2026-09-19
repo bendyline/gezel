@@ -92,6 +92,7 @@ import {
   gateRemaining,
   plateauScore,
   stageForPlateau,
+  withMissingDeliverableHint,
 } from './gate-escalation.js';
 import {
   type GateCheckOutcome,
@@ -101,7 +102,12 @@ import {
 } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
+import {
+  StepCompletionBlockedError,
+  formatGateScriptDiagnostics,
+} from './step-completion-errors.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
+export { StepCompletionBlockedError };
 import {
   bumpStepActivation,
   findBranchGoto,
@@ -427,19 +433,6 @@ export type StepEntranceOutcome = {
   status: 'ready' | 'advanced' | 'failed' | 'not-active';
   task: Task;
 };
-
-function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
-  return runs
-    .filter((run) => run.error || run.logsTail)
-    .map((run) => {
-      const lines = [`- Script: \`${run.scriptName}\``];
-      if (run.runId) lines.push(`  - Run ID: \`${run.runId}\``);
-      if (run.error) lines.push(`  - Error: ${run.error}`);
-      if (run.logsTail) lines.push(`  - Log tail:\n\n    \`\`\`\n${run.logsTail}\n    \`\`\``);
-      return lines.join('\n');
-    })
-    .join('\n');
-}
 
 /** Thrown by the legacy `completeStep` wrapper when completion is held. */
 export class GateRejectionError extends Error {
@@ -2330,16 +2323,18 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         );
         return { status: 'advanced', task };
       }
-      throw new Error(
+      throw new StepCompletionBlockedError(
         `task ${task.ref}: step "${stepId}" is not active ` +
           `(active step: "${task.activeStepId ?? '(none)'}")`,
+        'step_not_active',
       );
     }
 
     const effectiveStatus = await this.effectiveStatusFor(task);
     if (effectiveStatus !== 'active') {
-      throw new Error(
-        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}`,
+      throw new StepCompletionBlockedError(
+        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
+        'task_not_active',
       );
     }
 
@@ -2430,7 +2425,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         newActive = completedStep.next;
       } else {
         const following = task.craftbook.steps[idx + 1];
-        if (following) newActive = following.id;
+        if (following) {
+          newActive = following.id;
+        } else {
+          // A last step with no `next` ends the book. Left as-is, `newActive`
+          // still held this step's id and the book re-activated itself (gemma's
+          // invoice-run children re-ran `draft-invoice` three times each and the
+          // fanout barrier never released, 2026-09-19); an intended self-loop says so with `next`.
+          terminating = true;
+          newActive = undefined;
+        }
       }
     }
 
@@ -2609,6 +2613,23 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           status: 'advanced',
           task: (await this.get(projectId, preparedTask.num)) ?? preparedTask,
         };
+      }
+    } else if (newActive && (opts.cause === 'model' || opts.cause === 'auto')) {
+      // A step that routes to itself (`next` names its own id, as the
+      // night-shift oversight re-arm does) was re-activated by the turn that
+      // completed it. Hand that dispatch the fresh activation now, exactly as
+      // a gate hold does, or the runner's stale sweep reads the new
+      // `lastActivatedAt` as a superseding dispatch, cancels the turn while
+      // it is still streaming its close, and re-runs the whole step (Opus
+      // oversight, 2026-09-19).
+      const newStep = finalSteps.find((s) => s.id === newActive);
+      if (newStep) {
+        this.onCurrentTurnStepReactivated?.({
+          projectId,
+          task: updated,
+          newStep,
+          gatedStep: newStep,
+        });
       }
     }
     return { status: 'advanced', task: updated };
@@ -3377,7 +3398,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             })
           : converging
             ? `${buildProgressPreamble({ previousRemaining: previousRemaining!, remaining: remaining! })}\n\n${rawMessage}`
-            : rawMessage;
+            : withMissingDeliverableHint(rawMessage, deliverableFile, rejectSurface);
     const fingerprint = gateMessageFingerprint(message);
     const now = nowIso();
     const trailEntry: GateAttemptRecord = {
@@ -3848,12 +3869,17 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       summary: `Gate looped ${next.ref} back to "${target.name}"`,
       details: { ref: next.ref, stepId: targetId },
     });
-    // Model/tool and observable-progress attempts already have a live chat
-    // turn that receives the gate verdict and continues the repair loop.
-    // Starting a second handoff here creates two workers for the same
-    // activation. Non-chat drivers (idle sweep/user/runtime routing) still
+    // A self-route stays with the live turn: it already holds the verdict and
+    // the step's procedure, and a second handoff would mean two workers on
+    // one activation. A route to a DIFFERENT step cannot: that turn is pinned
+    // to the gated step's procedure and the step-scope write guard refuses
+    // its writes, so the target needs its own dispatch — a same-owner
+    // continuity re-pin once this turn ends, or a handoff to the other gezel
+    // (Opus codemod-sweep: a REVISE left the owner idle for 22 minutes,
+    // 2026-09-19). Non-chat drivers (idle sweep/user/runtime routing) always
     // need a fresh handoff because no current model turn can consume it.
-    if (newStep && this.onStepActivated && !currentTurnOwnsRecovery) {
+    const routesElsewhere = targetId !== gatedStep.id;
+    if (newStep && this.onStepActivated && (!currentTurnOwnsRecovery || routesElsewhere)) {
       try {
         await this.onStepActivated({ projectId, task: next, newStep, completedStep: gatedStep });
       } catch (err) {

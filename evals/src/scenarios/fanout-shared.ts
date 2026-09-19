@@ -114,10 +114,7 @@ export async function reviewHostSessions(
       for (const call of message.toolCalls ?? []) {
         const at = call.at ?? message.at;
         if (at && (!firstHostActivityAt || at < firstHostActivityAt)) firstHostActivityAt = at;
-        if (
-          call.success &&
-          /^(write_file|append_to_file|replace_in_file|replace_lines|apply_patch)$/.test(call.name)
-        ) {
+        if (call.success && isWorkspaceWriteReceipt(call.name)) {
           for (const path of [call.path, ...(call.paths ?? [])]) {
             if (path?.startsWith(forbiddenPrefix)) hostWrotePaths.push(path);
           }
@@ -126,6 +123,49 @@ export async function reviewHostSessions(
     }
   }
   return { hostSessionCount: summaries.length, hostWrotePaths, firstHostActivityAt };
+}
+
+/**
+ * Tool names that count as "this session wrote a workspace file". The
+ * gezel-mcp writers cover bridge-backed providers; the capitalised names are
+ * the Claude CLI's own file tools, which the CLI provider records into
+ * `tool.called` history under their native names because gezel-mcp's
+ * `write_file` is hidden from that provider as a duplicate. Opus finished
+ * fanout-stories in under two minutes with every check green and was failed
+ * on five missing `write_file` receipts while five `Write` receipts sat in the
+ * same history (2026-09-19).
+ */
+export const WORKSPACE_WRITE_RECEIPT_TOOLS: ReadonlySet<string> = new Set([
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+]);
+
+export function isWorkspaceWriteReceipt(name: unknown): boolean {
+  return typeof name === 'string' && WORKSPACE_WRITE_RECEIPT_TOOLS.has(name);
+}
+
+/**
+ * Whether tool-call receipts exist for this project at all. A provider that
+ * runs its tools inside its own process without reporting them (Copilot's SDK
+ * loop) writes no `tool.called` history, so the per-child "wrote its own file"
+ * attribution is unobservable there, not failed. The CLI providers DO report
+ * their tool uses, under native tool names — see
+ * {@link WORKSPACE_WRITE_RECEIPT_TOOLS}.
+ */
+export function toolReceiptsObservable(
+  entries: Array<{ entryType?: string; details?: Record<string, unknown> }>,
+): boolean {
+  return entries.some(
+    (entry) => entry.entryType === 'event' && typeof entry.details?.name === 'string',
+  );
 }
 
 /** Wall-clock shape of the fanout: how long the crew took, and how fast the host picked up afterwards. */

@@ -14,12 +14,14 @@ import {
   buildProgressPreamble,
   buildStageOneNudge,
   buildStageTwoNudge,
+  deliverableMissingInVerdict,
   deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
   gateRemaining,
   plateauScore,
   stageForPlateau,
+  withMissingDeliverableHint,
 } from './gate-escalation.js';
 import type { GateCheckOutcome } from './gate-eval.js';
 
@@ -555,5 +557,75 @@ describe('escalationDisabled', () => {
     expect(escalationDisabled()).toBe(false);
     process.env.GEZEL_DISABLE_GATE_ESCALATION = '1';
     expect(escalationDisabled()).toBe(true);
+  });
+});
+
+describe('buildStageOneNudge for a deliverable the gate cannot find', () => {
+  const bullets =
+    '- tasks/1/sites.md is 0 bytes, need >= 500\n- tasks/1/sites.md not found (needed for the nonempty check)\n- tasks/1/sites.md not found';
+
+  it('says the artifact does not exist instead of claiming it EXISTS', () => {
+    const nudge = buildStageOneNudge({
+      file: 'tasks/1/sites.md',
+      failingBullets: bullets,
+      frozen: false,
+      surface: 'artifact',
+    });
+    expect(nudge.startsWith('GATE_TARGETED_EDIT:')).toBe(true);
+    expect(nudge).toContain('does NOT exist yet');
+    expect(nudge).toContain('artifacts drawer');
+    expect(nudge).toContain('write_artifact');
+    expect(nudge).not.toContain('EXISTS but fails');
+    expect(nudge).not.toContain('read the artifact with read_artifact');
+  });
+
+  it('names write_file for a missing workspace file', () => {
+    const nudge = buildStageOneNudge({
+      file: 'tasks/1/sites.md',
+      failingBullets: bullets,
+      frozen: true,
+      surface: 'workspace',
+    });
+    expect(nudge).toContain('does NOT exist yet');
+    expect(nudge).toContain('write_file');
+    expect(nudge).not.toContain('replace_in_file');
+  });
+
+  it('keeps the EXISTS wording when the verdict is about content, not absence', () => {
+    const nudge = buildStageOneNudge({
+      file: 'tasks/1/sites.md',
+      failingBullets: '- tasks/1/sites.md has 1 recognizable citation(s), need >= 2',
+      frozen: false,
+      surface: 'artifact',
+    });
+    expect(nudge).toContain('EXISTS but fails');
+    expect(deliverableMissingInVerdict('tasks/1/sites.md', bullets)).toBe(true);
+    expect(deliverableMissingInVerdict('other.md', bullets)).toBe(false);
+  });
+});
+
+describe('withMissingDeliverableHint', () => {
+  const verdict =
+    '- tasks/1/scope.md is 0 bytes, need >= 120\n- tasks/1/scope.md not found (needed for the nonempty check)';
+
+  it('tells a first-time artifact miss which drawer and which writer', () => {
+    const out = withMissingDeliverableHint(verdict, 'tasks/1/scope.md', 'artifact');
+    expect(out.startsWith(verdict)).toBe(true);
+    expect(out).toContain('artifacts drawer');
+    expect(out).toContain('write_artifact');
+    expect(out).toContain('reading the path cannot create it');
+  });
+
+  it('names write_file for a workspace deliverable', () => {
+    const out = withMissingDeliverableHint(verdict, 'tasks/1/scope.md', 'workspace');
+    expect(out).toContain('write_file');
+    expect(out).not.toContain('write_artifact');
+  });
+
+  it('leaves content failures, notes and unknown files alone', () => {
+    const content = '- tasks/1/scope.md has 1 recognizable citation(s), need >= 2';
+    expect(withMissingDeliverableHint(content, 'tasks/1/scope.md', 'artifact')).toBe(content);
+    expect(withMissingDeliverableHint(verdict, 'tasks/1/scope.md', 'note')).toBe(verdict);
+    expect(withMissingDeliverableHint(verdict, undefined, 'artifact')).toBe(verdict);
   });
 });

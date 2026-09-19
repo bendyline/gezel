@@ -115,7 +115,7 @@ import {
   terminalToolClosingText,
 } from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
-import { ToolFailureTracker } from '../tool-failure-tracker.js';
+import { type ToolFailureLoop, ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   BatchCapability,
@@ -2809,6 +2809,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
   }
 
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
+    this.lastTurnBail = null;
     // Ask-spawned sub-sessions bypass the TS-side queue to avoid the
     // ask_specialist / ask_gezel deadlock (asker holds the only slot
     // while waiting on the consultation's reply). llama-server's own
@@ -3016,9 +3017,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     );
     // Per-tool consecutive-failure tracker. See ToolFailureTracker for
     // the threshold rationale; same logic the MLX provider uses.
+    const writerFlagsForFailures = {
+      artifactWriterAvailable: knownToolNamesForFailures.has('write_artifact'),
+      workspaceWriterAvailable: knownToolNamesForFailures.has('write_file'),
+    };
     const failureTracker = new ToolFailureTracker({
       surgicalEditsAvailable: surgicalEditsAvailableForFailures,
       delegationAvailable: delegationAvailableForFailures,
+      ...writerFlagsForFailures,
     });
     // Per-turn same-(name, args) repeat tracker. Catches the
     // narrative-spinning loop. See ToolRepeatTracker docstring.
@@ -5957,12 +5963,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             ? { reasoning_content: turnReasoning }
             : {}),
         });
-        let abortDueToFailureLoop: {
-          tool: string;
-          count: number;
-          sourceFailureKind?: 'truncated' | 'not-persisted';
-          transportFailure?: boolean;
-        } | null = null;
+        let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let terminalActionClosing: string | null = null;
         const immediateFileWritePaths: string[] = [];
         const immediatePartialWritePaths: string[] = [];
@@ -6453,6 +6454,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 ? { sourceFailureKind: tracked.sourceFailureKind }
                 : {}),
               ...(tracked.transportFailure ? { transportFailure: true } : {}),
+              ...(tracked.missingPath ? { missingPath: true } : {}),
             };
             break;
           }
@@ -6565,6 +6567,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         ) {
           const closingText = immediateFileWriteClosing(immediateFileWritePaths);
           this.messages.push({ role: 'assistant', content: closingText });
+          this.lastTurnBail = 'immediate-write';
           fullText = fullText ? `${fullText}\n${closingText}` : closingText;
           if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
             const durationMs = Date.now() - start;
@@ -6655,16 +6658,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           return fullText;
         }
         if (abortDueToFailureLoop) {
-          throw ToolFailureTracker.buildAbort({
+          throw ToolFailureTracker.buildLoopAbort({
             providerLabel: 'llama.cpp',
-            toolName: abortDueToFailureLoop.tool,
-            count: abortDueToFailureLoop.count,
+            loop: abortDueToFailureLoop,
             surgicalEditsAvailable: surgicalEditsAvailableForFailures,
             delegationAvailable: delegationAvailableForFailures,
-            ...(abortDueToFailureLoop.sourceFailureKind
-              ? { sourceFailureKind: abortDueToFailureLoop.sourceFailureKind }
-              : {}),
-            ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
+            ...writerFlagsForFailures,
           });
         }
       }

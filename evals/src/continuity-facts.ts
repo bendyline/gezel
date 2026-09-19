@@ -43,7 +43,17 @@ export interface ContinuityFacts {
   /** Tasks per resolved execution mode, from the `generalist-mode resolved=` log marker. */
   resolvedModes: { generalist: number; stepwise: number };
   steps: {
+    /** Distinct steps that were active at some point: events plus the captured task records. */
     activated: number;
+    /**
+     * Raw `task.step.activated` events. The runtime emits one only when it
+     * RE-activates a step (a gate loop, a re-drive); the entry step goes
+     * active at creation with no event, and a book that passes first time
+     * emits none. So this is a re-activation count, not a walk length —
+     * the dry run of 2026-09-18 showed "2 steps" for a task that never left
+     * step one, and "0" for a fanout whose five children all ran.
+     */
+    activationEvents: number;
     completed: number;
     gateApprovals: number;
     gateRejections: number;
@@ -118,9 +128,12 @@ export interface ContinuitySession {
 export interface ContinuityTask {
   ref?: string;
   status?: string;
+  createdAt?: string;
+  activeStepId?: string;
   parentTaskRef?: string;
   spawnsCraftbook?: unknown;
   fanout?: unknown;
+  craftbook?: { steps?: Array<{ id?: string; completedAt?: string }> };
 }
 
 export interface ContinuityInputs {
@@ -258,6 +271,31 @@ export function summarizeContinuity(input: ContinuityInputs): ContinuityFacts {
         break;
     }
   }
+  // The captured task records are the authoritative walk: a completed step
+  // was active, the active step is active, and for a linear run the entry
+  // step went active at creation and each later step when its predecessor
+  // completed. Event-derived stamps win where both exist.
+  const activationEvents = activated;
+  for (const task of input.tasks) {
+    const ref = task.ref;
+    const recordSteps = task.craftbook?.steps ?? [];
+    if (!ref || recordSteps.length === 0) continue;
+    let predecessorCompletedAt: string | null = task.createdAt ?? null;
+    for (const step of recordSteps) {
+      const done = str(step.completedAt);
+      const active = task.activeStepId === step.id;
+      if (!step.id || (!done && !active)) {
+        predecessorCompletedAt = null;
+        continue;
+      }
+      const entry = stepFor(ref, step.id);
+      if (done && !entry.completedAt) entry.completedAt = done;
+      if (!entry.activatedAt && predecessorCompletedAt) entry.activatedAt = predecessorCompletedAt;
+      predecessorCompletedAt = done;
+    }
+  }
+  activated = perStep.size;
+  completed = [...perStep.values()].filter((entry) => entry.completedAt !== null).length;
   for (const entry of perStep.values()) {
     if (entry.activatedAt && entry.completedAt) {
       const ms = Date.parse(entry.completedAt) - Date.parse(entry.activatedAt);
@@ -332,6 +370,7 @@ export function summarizeContinuity(input: ContinuityInputs): ContinuityFacts {
     },
     steps: {
       activated,
+      activationEvents,
       completed,
       gateApprovals,
       gateRejections,

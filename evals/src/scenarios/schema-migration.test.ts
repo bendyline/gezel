@@ -465,6 +465,26 @@ describe('evaluateSchemaMigrationStructure', () => {
     expect(result.handlersUpdated).toBe(false);
   });
 
+  it("accepts a card that composes the name through the file's own formatDisplayName", () => {
+    const diagnostics = evaluateSchemaMigrationHandlers(`
+import type { User } from './types.ts';
+
+export function formatDisplayName(user: User): string {
+  return \`\${user.firstName} \${user.lastName}\`.trim();
+}
+
+export function renderUserCardHtml(user: User): string {
+  return \`<div class="user-card"><h3>\${formatDisplayName(user)}</h3><p>\${user.email}</p></div>\`;
+}
+
+export function summarizeUsersForLog(users: User[]): string {
+  return users.map((u) => \`\${u.id}: \${formatDisplayName(u)}\`).join(', ');
+}
+`);
+    expect(diagnostics.unmet).toEqual([]);
+    expect(diagnostics.updated).toBe(true);
+  });
+
   it('accepts a summary that delegates full-name formatting but preserves each user id', () => {
     const result = evaluateSchemaMigrationStructure({
       typesTs: REFERENCE_TYPES,
