@@ -17,6 +17,10 @@ export const TERMINAL_ACTION_SKIPPED_OUTPUT =
  */
 const BUILTIN_TERMINAL_TOOLS = new Set(['advance_task_step']);
 
+function normalizePath(path: string): string {
+  return path.trim().replace(/^\.\//, '').replace(/\\/g, '/');
+}
+
 function compactClosing(text: string, fallback: string, maxChars: number): string {
   const compact = (text.trim() || fallback).replace(/\s+/g, ' ');
   const max = Math.max(1, maxChars);
@@ -39,6 +43,15 @@ export function terminalToolClosingText(
     return compactClosing(output, 'Step completed and handed off.', 280);
   }
   if (!policy?.toolNames.includes(toolName)) return null;
+  if (policy.onlyWhenArgEquals) {
+    const actual = args[policy.onlyWhenArgEquals.arg];
+    if (
+      typeof actual !== 'string' ||
+      normalizePath(actual) !== normalizePath(policy.onlyWhenArgEquals.value)
+    ) {
+      return null;
+    }
+  }
   const fromArg =
     policy.closingArg && typeof args[policy.closingArg] === 'string'
       ? (args[policy.closingArg] as string)

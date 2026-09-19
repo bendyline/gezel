@@ -17,6 +17,21 @@ describe('DeliverableReadPaceTracker', () => {
     ).toBeInstanceOf(DeliverableReadPaceTracker);
   });
 
+  it('paces a placeholder-path nudge without naming the placeholder as the file', () => {
+    const tracker = DeliverableReadPaceTracker.fromUserText(
+      'Direct kick: your next tool call MUST be `write_file({ path: "<workspace-relative-file>", content: <the full deliverable contents> })` creating the deliverable.',
+    );
+    expect(tracker).toBeInstanceOf(DeliverableReadPaceTracker);
+    const message = tracker!.buildAbortMessage('llama.cpp');
+    expect(message).not.toContain('<workspace-relative-file>');
+    expect(message).toContain('write_file({ path, content })');
+    expect(
+      DeliverableReadPaceTracker.fromUserText(
+        '[Deliverable expected as a FILE at `{{task.dir}}/review.md`. Your first assistant action should be write_file.]',
+      )!.buildUserMessage(),
+    ).not.toContain('{{task.dir}}');
+  });
+
   it('warns then aborts after too many read-only calls without a write', () => {
     const tracker = new DeliverableReadPaceTracker({
       targetPath: 'review.md',

@@ -151,9 +151,24 @@ function isFileDeliverableTurn(text: string): boolean {
 
 function extractTargetPath(text: string): string | undefined {
   const deliverable = text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1];
-  if (deliverable) return deliverable;
+  if (deliverable) return realPath(deliverable);
   const writeFile = text.match(/write_file\s*\(\s*\{\s*path\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
-  if (writeFile) return writeFile;
+  if (writeFile) return realPath(writeFile);
   const filePath = text.match(/filePath\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
-  return filePath;
+  return realPath(filePath);
+}
+
+/**
+ * A nudge that does not know the file spells the slot as a placeholder,
+ * `<workspace-relative-file>` or `{{task.dir}}/review.md`. Naming that as
+ * the expected file turns the pacing corrective into an instruction the
+ * model cannot satisfy; an unknown target paces reads without naming one.
+ * No real workspace path carries angle brackets or template braces.
+ */
+function realPath(candidate: string | undefined): string | undefined {
+  if (!candidate) return undefined;
+  const trimmed = candidate.trim();
+  if (!trimmed) return undefined;
+  if (/[<>]/.test(trimmed) || /\{\{|\}\}/.test(trimmed)) return undefined;
+  return trimmed;
 }

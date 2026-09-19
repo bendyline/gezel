@@ -9,13 +9,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PUBLISHED_PACKAGE_DIRS, readPublishedManifest } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const maxAttempts = 21;
-const retryDelayMs = 15_000;
+export const REGISTRY_AVAILABILITY_TIMEOUT_MS = 40 * 60_000;
+export const REGISTRY_RETRY_DELAY_MS = 15_000;
 
 export function verifyPublishedNpmRelease({
   spawn = spawnSync,
   wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
+  now = Date.now,
   log = console.log,
+  availabilityTimeoutMs = REGISTRY_AVAILABILITY_TIMEOUT_MS,
+  retryDelayMs = REGISTRY_RETRY_DELAY_MS,
 } = {}) {
   const specs = PUBLISHED_PACKAGE_DIRS.map((dir) => {
     const manifest = readPublishedManifest(repoRoot, dir);
@@ -38,31 +41,45 @@ export function verifyPublishedNpmRelease({
 
   try {
     mkdirSync(tarballDir, { recursive: true });
-    let packed;
-    // npm acknowledged the SDK publish before its version became readable in
-    // the 2026-09-05 release. Allow five minutes of retries and revalidate cached
-    // metadata each time; the previous 45-second window failed a valid release.
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      packed = run('npm', [
-        'pack',
-        '--pack-destination',
-        tarballDir,
-        '--cache',
-        cacheDir,
-        '--prefer-online',
-        ...specs,
-      ]);
-      if (packed.status === 0) break;
-      if (attempt < maxAttempts) {
-        log(
-          `registry verification: exact artifacts not ready (attempt ${attempt}/${maxAttempts}); retrying in ${retryDelayMs / 1000}s`,
-        );
-        wait(retryDelayMs);
+    const pending = new Set(specs);
+    const startedAt = now();
+    const deadline = startedAt + availabilityTimeoutMs;
+    let attempt = 0;
+
+    // npm scans every newly published package before making it installable.
+    // Its documented typical delay is around five minutes, but scans can take
+    // 15 minutes or more depending on registry load, package size, and content.
+    // Pack each artifact separately so packages that clear scanning are saved
+    // once instead of being downloaded again while a slower sibling is pending.
+    while (pending.size > 0) {
+      attempt += 1;
+      for (const spec of pending) {
+        const packed = run('npm', [
+          'pack',
+          '--pack-destination',
+          tarballDir,
+          '--cache',
+          cacheDir,
+          '--prefer-online',
+          spec,
+        ]);
+        if (packed.status === 0) pending.delete(spec);
       }
+
+      if (pending.size === 0) break;
+      const remainingMs = deadline - now();
+      if (remainingMs <= 0) break;
+      const delayMs = Math.min(retryDelayMs, remainingMs);
+      const elapsedSeconds = Math.round((now() - startedAt) / 1000);
+      log(
+        `registry verification: ${pending.size}/${specs.length} exact artifacts not ready after ${elapsedSeconds}s (attempt ${attempt}): ${[...pending].join(', ')}; retrying in ${delayMs / 1000}s`,
+      );
+      wait(delayMs);
     }
-    if (packed?.status !== 0) {
+
+    if (pending.size > 0) {
       throw new Error(
-        `could not download the exact published artifacts after ${maxAttempts} attempts (${packed?.status ?? 1})`,
+        `could not download ${pending.size}/${specs.length} exact published artifacts within ${availabilityTimeoutMs / 60_000} minutes: ${[...pending].join(', ')}`,
       );
     }
 

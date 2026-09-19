@@ -53,3 +53,34 @@ describe('terminalToolClosingText', () => {
     ).toBeNull();
   });
 });
+
+describe('terminalToolClosingText — checkpoint-bound terminal writes', () => {
+  const policy = {
+    toolNames: ['write_artifact'],
+    fallbackText: 'Checkpoint written for validation.',
+    maxClosingChars: 120,
+    onlyWhenArgEquals: { arg: 'path', value: 'tasks/1/billables.json' },
+  };
+
+  it('lets a write to another deliverable continue the turn', () => {
+    expect(
+      terminalToolClosingText(
+        policy,
+        'write_artifact',
+        { path: 'tasks/1/scope.md' },
+        'Wrote tasks/1/scope.md',
+      ),
+    ).toBeNull();
+  });
+
+  it('ends the turn on the checkpoint file, however the path is spelled', () => {
+    expect(
+      terminalToolClosingText(
+        policy,
+        'write_artifact',
+        { path: './tasks/1/billables.json' },
+        'Wrote tasks/1/billables.json',
+      ),
+    ).toBe('Checkpoint written for validation.');
+  });
+});

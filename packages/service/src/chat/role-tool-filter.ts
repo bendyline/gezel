@@ -285,7 +285,11 @@ const VOORMAN_STRIPPED_DELEGATION_TOOLS: ReadonlySet<string> = new Set([
  * instead of creating the file. Upstream Meester/Voorman roles keep the
  * consultation surface; builders/developers get the direct-write lane.
  */
-const DIRECT_IMPLEMENTER_ROLES: ReadonlySet<string> = new Set(['developer', 'web-developer']);
+const DIRECT_IMPLEMENTER_ROLES: ReadonlySet<string> = new Set([
+  'developer',
+  'web-developer',
+  'generalist',
+]);
 const URGENT_FILE_WRITER_ROLES: ReadonlySet<string> = new Set([
   'copywriter',
   'developer',

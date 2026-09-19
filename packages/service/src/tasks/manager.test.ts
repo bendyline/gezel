@@ -1098,6 +1098,13 @@ describe('TaskManager spawn craftbooks & children', () => {
     await expect(tasks.completeStep('website', child.num, child.activeStepId!)).rejects.toThrow(
       'effective status is paused',
     );
+    await expect(
+      tasks.completeStep('website', child.num, child.activeStepId!),
+    ).rejects.toMatchObject({
+      name: 'StepCompletionBlockedError',
+      code: 'step_completion_blocked',
+      reason: 'task_not_active',
+    });
 
     await tasks.setStatus('website', parent.num, 'active');
     const resumed = (await tasks.get('website', child.num))!;
@@ -2197,5 +2204,270 @@ describe('connector-backed craftbooks', () => {
       assignee: { kind: 'user' },
     });
     expect(task.status).toBe('active');
+  });
+});
+
+describe('TaskManager — execution mode (generalist v2)', () => {
+  const threePhaseBook = () =>
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Three phases',
+            steps: [
+              { id: 'research', name: 'Research', suggestedRole: 'researcher' },
+              { id: 'build', name: 'Build', suggestedRole: 'developer' },
+              { id: 'review', name: 'Review', suggestedRole: 'reviewer', terminal: true },
+            ],
+            entryStepId: 'research',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+  it('resolves once at create, stamps the mode, and pins the Generalist on every step (main + spawn)', async () => {
+    threePhaseBook();
+    const resolverCalls: unknown[] = [];
+    tasks.setExecutionModeResolver(async (args) => {
+      resolverCalls.push(args);
+      return {
+        mode: 'generalist',
+        ownerGezelId: 'gen-1',
+        setting: 'auto',
+        providerName: 'anthropic',
+        tier: 'cloud',
+      };
+    });
+    let roleCalls = 0;
+    tasks.setRoleResolver(async () => {
+      roleCalls++;
+      return { gezelId: 'specialist' };
+    });
+    const task = await tasks.create('website', {
+      title: 'Ship it',
+      craftbookId: 'three-phases',
+      spawnsSteps: [{ name: 'Shard', suggestedRole: 'copywriter' }],
+    });
+    expect(resolverCalls).toEqual([{ projectId: 'website', requested: 'auto' }]);
+    expect(task.executionMode).toBe('generalist');
+    for (const step of task.craftbook.steps) {
+      expect(step.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+      expect(step.suggestedGezelId).toBeUndefined();
+      expect(step.suggestedRole).toBeTruthy();
+    }
+    expect(task.spawnsCraftbook!.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(task.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(task.assigneeAuto).toBe(true);
+    expect(roleCalls).toBe(0);
+
+    const advanced = await tasks.completeStep('website', task.num, 'research');
+    expect(roleCalls).toBe(0);
+    expect(advanced.craftbook.steps[1]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(advanced.activeStepId).toBe('build');
+  });
+
+  it('keeps an explicit task assignee as the single owner and never mints a Generalist', async () => {
+    threePhaseBook();
+    const resolverCalls: unknown[] = [];
+    tasks.setExecutionModeResolver(async (args) => {
+      resolverCalls.push(args);
+      return { mode: 'generalist' };
+    });
+    const task = await tasks.create('website', {
+      title: 'Ship it',
+      craftbookId: 'three-phases',
+      assignee: { kind: 'gezel', gezelId: 'breno' },
+    });
+    expect(resolverCalls).toEqual([
+      { projectId: 'website', requested: 'auto', assigneeGezelId: 'breno' },
+    ]);
+    for (const step of task.craftbook.steps) {
+      expect(step.assignee).toEqual({ kind: 'gezel', gezelId: 'breno' });
+    }
+    expect(task.assigneeAuto).toBeUndefined();
+  });
+
+  it('leaves a human step with the human and a step pinned to another gezel alone', async () => {
+    tasks.setExecutionModeResolver(async () => ({ mode: 'generalist', ownerGezelId: 'gen-1' }));
+    const task = await tasks.create('website', {
+      title: 'Mixed',
+      steps: [
+        { id: 'draft', name: 'Draft', suggestedRole: 'copywriter' },
+        { id: 'approve', name: 'Approve', assignee: { kind: 'user' } },
+        { id: 'publish', name: 'Publish', assignee: { kind: 'gezel', gezelId: 'ops-bot' } },
+      ],
+      entryStepId: 'draft',
+    });
+    expect(task.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(task.craftbook.steps[1]!.assignee).toEqual({ kind: 'user' });
+    expect(task.craftbook.steps[2]!.assignee).toEqual({ kind: 'gezel', gezelId: 'ops-bot' });
+  });
+
+  it('stepwise resolution changes nothing: roles still resolve per step', async () => {
+    threePhaseBook();
+    tasks.setExecutionModeResolver(async () => ({ mode: 'stepwise', setting: 'off' }));
+    const seen: string[] = [];
+    tasks.setRoleResolver(async (role) => {
+      seen.push(role);
+      return { gezelId: `${role}-id` };
+    });
+    const task = await tasks.create('website', { title: 'Crew', craftbookId: 'three-phases' });
+    expect(task.executionMode).toBe('stepwise');
+    expect(seen).toEqual(['researcher']);
+    expect(task.craftbook.steps[0]!.suggestedGezelId).toBe('researcher-id');
+    expect(task.craftbook.steps[0]!.assignee).toBeUndefined();
+  });
+
+  it('an explicit executionMode request reaches the resolver as-is; without a resolver it is honored directly', async () => {
+    threePhaseBook();
+    const requested: string[] = [];
+    tasks.setExecutionModeResolver(async (args) => {
+      requested.push(args.requested);
+      return { mode: args.requested === 'auto' ? 'stepwise' : args.requested };
+    });
+    await tasks.create('website', {
+      title: 'Forced stepwise',
+      craftbookId: 'three-phases',
+      executionMode: 'stepwise',
+    });
+    expect(requested).toEqual(['stepwise']);
+
+    const bare = new TaskManager(store, history);
+    const task = await bare.create('website', {
+      title: 'Forced generalist, no wiring',
+      assignee: { kind: 'gezel', gezelId: 'solo' },
+      executionMode: 'generalist',
+      steps: [
+        { id: 'a', name: 'A', suggestedRole: 'researcher' },
+        { id: 'b', name: 'B', suggestedRole: 'developer', terminal: true },
+      ],
+      entryStepId: 'a',
+    });
+    expect(task.executionMode).toBe('generalist');
+    expect(task.craftbook.steps.map((s) => s.assignee)).toEqual([
+      { kind: 'gezel', gezelId: 'solo' },
+      { kind: 'gezel', gezelId: 'solo' },
+    ]);
+  });
+
+  it('a resolver failure runs the task stepwise', async () => {
+    threePhaseBook();
+    tasks.setExecutionModeResolver(async () => {
+      throw new Error('boom');
+    });
+    tasks.setRoleResolver(async (role) => ({ gezelId: `${role}-id` }));
+    const task = await tasks.create('website', { title: 'Fallback', craftbookId: 'three-phases' });
+    expect(task.executionMode).toBe('stepwise');
+    expect(task.craftbook.steps[0]!.suggestedGezelId).toBe('researcher-id');
+  });
+
+  it('children inherit the mode and the pinned owner; spawning recruits nobody', async () => {
+    tasks.setExecutionModeResolver(async () => ({ mode: 'generalist', ownerGezelId: 'gen-1' }));
+    let roleCalls = 0;
+    tasks.setRoleResolver(async () => {
+      roleCalls++;
+      return { gezelId: 'specialist' };
+    });
+    const parent = await tasks.create('website', {
+      title: 'Fan out',
+      steps: [{ name: 'Collect' }],
+      spawnsSteps: [{ name: 'Write one', suggestedRole: 'copywriter' }],
+    });
+    const child = await tasks.spawnChild(parent.ref);
+    expect(child.executionMode).toBe('generalist');
+    expect(child.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(child.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(roleCalls).toBe(0);
+  });
+});
+
+describe('TaskManager — execution mode on drafts', () => {
+  it('keeps an explicit request on the draft and resolves + pins on activate', async () => {
+    const requested: string[] = [];
+    tasks.setExecutionModeResolver(async (args) => {
+      requested.push(args.requested);
+      return { mode: 'generalist', ownerGezelId: 'gen-1' };
+    });
+    let roleCalls = 0;
+    tasks.setRoleResolver(async () => {
+      roleCalls++;
+      return { gezelId: 'specialist' };
+    });
+    const draft = await tasks.create('website', {
+      title: 'Later',
+      status: 'draft',
+      executionMode: 'generalist',
+      steps: [
+        { id: 'a', name: 'A', suggestedRole: 'researcher', description: 'Look things up' },
+        { id: 'b', name: 'B', suggestedRole: 'developer', terminal: true, description: 'Build' },
+      ],
+      entryStepId: 'a',
+      description: 'A draft that will run as a generalist task once activated.',
+    });
+    expect(requested).toEqual([]);
+    expect(draft.executionMode).toBe('generalist');
+    expect(draft.craftbook.steps[0]!.assignee).toBeUndefined();
+
+    const active = await tasks.activate('website', draft.num, { force: true });
+    expect(requested).toEqual(['generalist']);
+    expect(active.executionMode).toBe('generalist');
+    expect(active.craftbook.steps.map((s) => s.assignee)).toEqual([
+      { kind: 'gezel', gezelId: 'gen-1' },
+      { kind: 'gezel', gezelId: 'gen-1' },
+    ]);
+    expect(active.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(roleCalls).toBe(0);
+  });
+
+  it('a draft without a request resolves as auto on activate', async () => {
+    const requested: string[] = [];
+    tasks.setExecutionModeResolver(async (args) => {
+      requested.push(args.requested);
+      return { mode: 'stepwise' };
+    });
+    const draft = await tasks.create('website', {
+      title: 'Later',
+      status: 'draft',
+      steps: [{ id: 'a', name: 'A', description: 'Do the thing', terminal: true }],
+      entryStepId: 'a',
+      description: 'A plain draft.',
+    });
+    expect(draft.executionMode).toBeUndefined();
+    const active = await tasks.activate('website', draft.num, { force: true });
+    expect(requested).toEqual(['auto']);
+    expect(active.executionMode).toBe('stepwise');
+  });
+});
+
+describe('TaskManager — a last step with no next ends the book', () => {
+  it('completes a single-step task instead of re-activating its only step', async () => {
+    const task = await tasks.create('website', {
+      title: 'Draft one invoice',
+      assignee: { kind: 'gezel', gezelId: 'karima' },
+      steps: [{ name: 'Draft the invoice' }],
+    });
+    const stepId = task.craftbook.steps[0]!.id;
+    await tasks.completeStep('website', task.num, stepId);
+    const done = (await store.readTask('website', task.num))!;
+    expect(done.status).toBe('complete');
+    expect(done.activeStepId).toBeUndefined();
+    expect(done.craftbook.steps[0]!.completedAt).toBeTruthy();
+  });
+
+  it('completes a multi-step task on its unflagged last step', async () => {
+    const task = await tasks.create('website', {
+      title: 'Two steps, no terminal flag',
+      assignee: { kind: 'gezel', gezelId: 'karima' },
+      steps: [{ name: 'First' }, { name: 'Last' }],
+    });
+    const [first, last] = task.craftbook.steps;
+    await tasks.completeStep('website', task.num, first!.id);
+    expect((await store.readTask('website', task.num))!.activeStepId).toBe(last!.id);
+    await tasks.completeStep('website', task.num, last!.id);
+    expect((await store.readTask('website', task.num))!.status).toBe('complete');
   });
 });

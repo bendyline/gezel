@@ -69,6 +69,7 @@ describe('deliverableWrittenThisTurn', () => {
       'append_to_file',
       'apply_patch',
       'insert_at_marker',
+      'write_artifact',
     ]) {
       expect(deliverableWrittenThisTurn([write({ name, path: file })], file)).toBe(true);
     }

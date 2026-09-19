@@ -131,7 +131,10 @@ jobs:
     name: Publish packages
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # npm publish-time scanning can now delay artifact availability for tens of
+    # minutes. Leave room for the 40-minute registry verifier plus build,
+    # publishing, and the clean-consumer checks that follow availability.
+    timeout-minutes: 75
     permissions:
       # semantic-release pushes release commits and per-package git tags.
       contents: write

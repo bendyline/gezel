@@ -32,7 +32,12 @@ import { tierAtLeast } from './tier.js';
  * change tool filtering AND the delegation/implementer classification that
  * keys off the canonical string, so keep this set stable; template-only
  * roles (builder → developer, boekwachter → default) continue to resolve
- * via the alias/fallback paths.
+ * via the alias/fallback paths. The one deliberate addition since is
+ * `generalist` (generalist mode v2): a task pinned to a single owner needs
+ * a kit that is the union of what its steps' specialists would carry, and
+ * its implementer classification is spelled out explicitly in
+ * `role-tool-filter` (`DIRECT_IMPLEMENTER_ROLES`) and `session-tool-surface`
+ * (`isImplementationRole`).
  */
 
 export type RoleId =
@@ -46,7 +51,16 @@ export type RoleId =
   | 'video-generator'
   | 'developer'
   | 'web-developer'
-  | 'planner';
+  | 'planner'
+  | 'generalist';
+
+/**
+ * Gilde template id of the Generalist persona — the gezel a task gets in
+ * generalist mode when nobody pinned an owner. The solo-kickoff lead stays
+ * the `builder` template; the two are different characters for different
+ * shapes of work.
+ */
+export const GENERALIST_TEMPLATE_ID = 'generalist';
 
 export interface RoleDefinition {
   /** Canonical role id — also the toolset-kit key. */
@@ -423,6 +437,49 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     ],
     capabilityFloor: 'medium',
   },
+  // The Generalist — the single owner of a task in generalist mode (see
+  // `core/generalist-mode.ts`). Not a delegation target and not the solo
+  // kickoff lead (that stays the `builder` template, which aliases onto the
+  // developer kit): this role exists so a task that would otherwise recruit
+  // a specialist per step can be pinned to one gezel whose kit is the union
+  // of what those specialists carry. Broad by design; the per-step tool
+  // surface still narrows to what the book's steps mandate. No
+  // team-management, craftbooks or craftbook-launch groups — the Generalist
+  // executes, it does not recruit or launch books.
+  generalist: {
+    id: 'generalist',
+    label: 'Generalist',
+    summary:
+      'Carries a whole task from first step to last in one conversation — every step, every gate.',
+    toolsetGroups: [
+      'workspace-fs-read',
+      'workspace-fs-write',
+      'code-intel',
+      'security-intel',
+      'code-execution',
+      'git',
+      'tasks',
+      'artifacts',
+      'data-tables',
+      'memory',
+      'documents',
+      'doc-intel',
+      'entity-intel',
+      'images',
+      'image-intel',
+      'web',
+      'browser-automation',
+      'interaction',
+      'history',
+      'handboek',
+    ],
+    suggestedTuningProfile: 'thinking-coding',
+    // Gates are whatever the book's steps declare; the Generalist has no
+    // deliverable shape of its own.
+    gateAffinity: [],
+    defaultBooks: ['build-loop', 'bug-fix-tdd'],
+    capabilityFloor: 'medium',
+  },
 };
 
 /**
@@ -462,6 +519,12 @@ export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }
   // coach-to-specialist handoff) and craftbooks groups, which the default kit
   // lacks.
   { contains: 'coach', canonical: 'voorman' },
+  // Generalist-mode owner. Listed early so a compound title such as
+  // "Generalist Developer" keeps the union kit rather than the narrower
+  // developer preset. `ambachtsman` is the pre-Builder name for the solo
+  // all-rounder; queries for it land here.
+  { contains: 'generalist', canonical: 'generalist' },
+  { contains: 'ambachtsman', canonical: 'generalist' },
   { contains: 'researcher', canonical: 'researcher' },
   { contains: 'research', canonical: 'researcher' },
   { contains: 'analyst', canonical: 'researcher' },

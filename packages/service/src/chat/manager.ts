@@ -43,6 +43,7 @@ import {
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
   displayName,
+  effectiveGeneralistModeSetting,
   isEngagementAllowed,
   isLocalProvider,
   isOutsideInInternalPath,
@@ -62,7 +63,7 @@ import {
   pronounFormsForGender,
   redactCredentials,
   requiredOutputMediaForGate,
-  resolveExecutionDensity,
+  resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
@@ -271,10 +272,20 @@ import { extractReferencedTasks } from '../references/task-references.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import {
+  resolveCatalogContextWindow,
+  resolveCatalogParameterSize,
+} from './catalog-model-lookup.js';
+import {
   CONTEXT_COMPACT_RATIO,
   type CompactSessionNowResult,
   ContextCompactor,
 } from './context-compaction.js';
+import {
+  CONTEXT_FORCEFIT_RATIO,
+  FORCEFIT_CHARS_PER_TOKEN,
+  FORCEFIT_MARKER,
+  fitMessagesToBudget,
+} from './context-forcefit.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import {
   deliverableWrittenThisTurn,
@@ -297,6 +308,13 @@ import {
   formatFixedFunctionResult,
   stripGezelMentions,
 } from './fixed-function-adapters.js';
+import {
+  classifyExecutionTierFor,
+  isContextOverflowError,
+  renderEntryPreface,
+  renderWriteBailContinuation,
+  sessionContextPoisoned,
+} from './generalist-continuity.js';
 import {
   IMG2IMG_EDIT_STRENGTH,
   classifyImageFollowUp,
@@ -554,55 +572,6 @@ function liveTurnToolNames(session: LLMSession | null | undefined): string[] {
     if (qualified && qualified !== '*') names.add(qualified);
   }
   return [...names];
-}
-
-/**
- * Look up a chat-model manifest's `parameterSize` for the given model
- * id. Best-effort: returns undefined when the model isn't in the
- * catalog (third-party/manual installs) or when the lookup throws.
- *
- * The result feeds {@link classifyLocalModelTier}, which prefers an
- * explicit parameterSize over tag parsing. The lookup matters because
- * several catalog model tags drop the size suffix — `qwen3.6` is 27B
- * but the tag never says so, and tag-only parsing would land it in
- * `tiny` rather than `medium`.
- */
-async function resolveCatalogParameterSize(
-  catalog: CatalogService,
-  catalogId: string | undefined,
-): Promise<string | undefined> {
-  if (!catalogId) return undefined;
-  try {
-    const detail = await catalog.get('chat-model', catalogId);
-    if (!detail) return undefined;
-    if (detail.manifest.kind !== 'chat-model') return undefined;
-    return detail.manifest.parameterSize;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Catalog `contextWindow` lookup, mirroring
- * {@link resolveCatalogParameterSize}. Drives the auto-activation of
- * `prompt.minimal-context`: a model whose window can't hold the standing
- * prompt (e.g. talkie-1930 at 2048) gets the stripped prompt without any
- * per-manifest opt-in. Returns undefined when the id is unknown or the
- * manifest omits the field (treated as "not tiny").
- */
-async function resolveCatalogContextWindow(
-  catalog: CatalogService,
-  catalogId: string | undefined,
-): Promise<number | undefined> {
-  if (!catalogId) return undefined;
-  try {
-    const detail = await catalog.get('chat-model', catalogId);
-    if (!detail) return undefined;
-    if (detail.manifest.kind !== 'chat-model') return undefined;
-    return detail.manifest.contextWindow;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -1729,6 +1698,31 @@ export class ChatManager extends LocalEngineRuntime {
    * the dependency points both ways). When unset, trigger sites no-op
    * and the existing give-up behavior runs unchanged.
    */
+  /**
+   * Called once when a task handoff has spent its bounded sends without the
+   * step completing. This is the only place that failure is visible:
+   * `startHandoffSession` detaches its sends, so the runner's dispatch has
+   * long since succeeded. product-service pauses the task for help here;
+   * before it, the task stayed active with nothing queued until the stall
+   * sweep noticed — or, when the session was poisoned, never.
+   */
+  setHandoffExhaustedHandler(
+    handler: (args: {
+      taskRef: string;
+      stepId: string;
+      gezelId: string;
+      detail: string;
+    }) => Promise<void>,
+  ): void {
+    this.handoffExhausted = handler;
+  }
+  private handoffExhausted?: (args: {
+    taskRef: string;
+    stepId: string;
+    gezelId: string;
+    detail: string;
+  }) => Promise<void>;
+
   setKeurmeester(keurmeester: KeurmeesterManager): void {
     this.keurmeester = keurmeester;
   }
@@ -4068,11 +4062,16 @@ export class ChatManager extends LocalEngineRuntime {
         ) &&
         (args.fromGezelId === undefined || candidate.gezelId === args.fromGezelId),
     );
+    // A generalist task has exactly one owner and one transcript: any prior
+    // task session of theirs is their own earlier step, whatever the caller
+    // labelled the handoff, and it is continued rather than replaced.
+    const generalistTask = taskRecord?.executionMode === 'generalist';
     const selfHandoff =
       (args.fromGezelId !== undefined && args.fromGezelId === args.gezelId) ||
       (args.fromGezelId === undefined &&
         previous?.gezelId === args.gezelId &&
-        previous.stepId !== dispatchStepId);
+        previous.stepId !== dispatchStepId) ||
+      (generalistTask && previous?.gezelId === args.gezelId);
     const desiredModel =
       dispatchGezel?.parsed.frontmatter.model ??
       configuredNightShiftModel ??
@@ -4091,6 +4090,11 @@ export class ChatManager extends LocalEngineRuntime {
     let reusedAcrossSteps = false;
     let resumedExisting = false;
     let session: ChatSession | null = null;
+    const compatibleTranscript = (prior: ChatSession): boolean =>
+      prior.providerName === dispatchProviderName &&
+      (desiredModel === undefined || prior.model === desiredModel) &&
+      Boolean(prior.nightShift) === Boolean(args.nightShift) &&
+      (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode;
     if (
       args.kind !== 'entry' &&
       args.kind !== 'retry' &&
@@ -4098,18 +4102,21 @@ export class ChatManager extends LocalEngineRuntime {
       selfHandoff &&
       previous?.gezelId === args.gezelId &&
       previous.stepId !== dispatchStepId &&
-      (this.pendingSends.get(previous.id)?.length ?? 0) === 0
+      // A generalist task keeps its one transcript even with a send queued
+      // behind the current turn: the re-pin below waits for that queue to
+      // drain, so the queued input runs under the old step before the
+      // prompt and surface flip. A fresh session would strand it in a
+      // thread nobody reads again.
+      ((this.pendingSends.get(previous.id)?.length ?? 0) === 0 || generalistTask)
     ) {
       const prior = await this.store.getSession(args.gezelId, previous.id);
-      if (
-        prior &&
-        prior.providerName === dispatchProviderName &&
-        (desiredModel === undefined || prior.model === desiredModel) &&
-        Boolean(prior.nightShift) === Boolean(args.nightShift) &&
-        (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode
-      ) {
+      if (prior && compatibleTranscript(prior)) {
         session = prior;
         reusedAcrossSteps = true;
+      } else if (prior && generalistTask) {
+        log.warn(
+          `[chat] generalist continuity broken for ${args.taskRef}: session ${prior.id.slice(0, 8)} ran on ${prior.providerName}/${prior.model ?? 'default'}, step "${dispatchStepId}" dispatches on ${dispatchProviderName}/${desiredModel ?? 'default'}; opening a fresh session`,
+        );
       }
     }
     if (args.resumeExisting) {
@@ -4124,8 +4131,24 @@ export class ChatManager extends LocalEngineRuntime {
           candidate.stepId === dispatchStepId,
       );
       if (exact) {
-        session = await this.store.getSession(args.gezelId, exact.id);
-        resumedExisting = session !== null;
+        const candidate = await this.store.getSession(args.gezelId, exact.id);
+        // A retry of a generalist task continues its one transcript — unless
+        // that transcript is what stopped it. A compaction-loop halt or a
+        // context overflow means the accumulated context IS the failure;
+        // resuming it replays the failure. Start over from the task notes.
+        if (
+          candidate &&
+          generalistTask &&
+          args.kind === 'retry' &&
+          sessionContextPoisoned(candidate)
+        ) {
+          log.info(
+            `[chat] generalist retry for ${args.taskRef}/${dispatchStepId}: session ${candidate.id.slice(0, 8)} ended in a context failure; starting a fresh session instead of resuming it`,
+          );
+        } else {
+          session = candidate;
+          resumedExisting = session !== null;
+        }
       } else {
         // A fixed-action step can advance its task before the provider turn
         // that produced the evidence has fully unwound and relabelled the
@@ -4142,13 +4165,7 @@ export class ChatManager extends LocalEngineRuntime {
             candidate.stepId !== dispatchStepId,
         );
         const prior = adjacent ? await this.store.getSession(args.gezelId, adjacent.id) : null;
-        if (
-          prior &&
-          prior.providerName === dispatchProviderName &&
-          (desiredModel === undefined || prior.model === desiredModel) &&
-          Boolean(prior.nightShift) === Boolean(args.nightShift) &&
-          (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode
-        ) {
+        if (prior && compatibleTranscript(prior)) {
           session = prior;
           resumedExisting = true;
           reusedAcrossSteps = true;
@@ -4267,28 +4284,8 @@ export class ChatManager extends LocalEngineRuntime {
           log.warn(`[chat] model-routing history event failed: ${err}`);
         });
     }
-    // Entry preface: a fresh-launch gezel has never seen this task before,
-    // so before the "you've been assigned" line we orient it with the
-    // craftbook it came from and the full step arc. The per-step procedure
-    // lives in the system prompt; this is the bird's-eye "what is this task
-    // and where does my step sit in it" the seed otherwise lacks. Only on
-    // the `entry` kind — handoff recipients inherit the same system-prompt
-    // context and the prior gezels' notes, so they don't need it re-stated.
-    let entryPreface = '';
-    if (args.kind === 'entry') {
-      if (taskRecord) {
-        const cb = taskRecord.craftbook;
-        const stepArc = cb.steps
-          .map((s, i) => {
-            const here = s.id === dispatchStepId ? ' ← your step' : '';
-            const desc = s.description?.trim() ? ` — ${s.description.trim()}` : '';
-            return `${i + 1}. ${s.name}${desc}${here}`;
-          })
-          .join('\n');
-        const cbDesc = cb.description?.trim() ? ` ${cb.description.trim()}` : '';
-        entryPreface = `Task ${taskRecord.ref} ("${taskRecord.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
-      }
-    }
+    const entryPreface =
+      args.kind === 'entry' && taskRecord ? renderEntryPreface(taskRecord, dispatchStepId) : '';
     // Seed wording: deliberately does NOT name `read_task_notes` as the
     // first action. The system prompt already carries the step procedure
     // and (for gated steps) a recency anchor that tells the model the
@@ -4406,6 +4403,9 @@ export class ChatManager extends LocalEngineRuntime {
       exactStepAutoAdvances && dispatchStep?.prompt?.trim()
         ? `Task ${args.taskRef} is still active on fixed-action step \`${dispatchStepId}\`. The previous provider turn failed before its required action completed. Call the procedure's named tool now; the runtime will evaluate its durable evidence and advance automatically. Do not call \`read_task_notes\` or \`advance_task_step\` — neither is available on this exact step:\n\n${dispatchStep.prompt.trim()}`
         : `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`;
+    const generalistClause = generalistTask
+      ? " The Task outline in your prompt shows where this step sits in the whole task; only the active step's procedure is in force now."
+      : '';
     const seed =
       args.kind === 'retry'
         ? retrySeed
@@ -4414,7 +4414,7 @@ export class ChatManager extends LocalEngineRuntime {
           : args.kind === 'entry'
             ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}${fixedEntryProcedure}`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
@@ -4436,6 +4436,21 @@ export class ChatManager extends LocalEngineRuntime {
           await new Promise<void>((resolve) =>
             this.runAfterSessionIdle(handoffSession.id, resolve),
           );
+          // A generalist task may have a send queued behind the turn that
+          // just ended (the reuse gate admits that on purpose). Let it run
+          // under the old step and settle before the prompt flips; each pass
+          // re-parks behind whatever the drain started. Bounded so a drain
+          // that never starts cannot hold the step forever.
+          for (
+            let waits = 0;
+            generalistTask && waits < 300 && this.isSessionTurnPending(handoffSession.id);
+            waits += 1
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            await new Promise<void>((resolve) =>
+              this.runAfterSessionIdle(handoffSession.id, resolve),
+            );
+          }
           const live = this.states.get(handoffSession.id);
           const record =
             live?.record ??
@@ -4476,7 +4491,7 @@ export class ChatManager extends LocalEngineRuntime {
             attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
-                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
+                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4492,6 +4507,26 @@ export class ChatManager extends LocalEngineRuntime {
               ) {
                 throw new Error(
                   `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
+                );
+              }
+            } else if (attempt === 1) {
+              const bail = this.states.get(handoffSession.id)?.session?.lastTurnBail;
+              const parsed = bail === 'immediate-write' ? parseTaskRef(args.taskRef) : null;
+              const afterBail = parsed
+                ? await this.readEffectiveTask(parsed.projectId, parsed.num)
+                : null;
+              if (
+                afterBail &&
+                taskEffectiveStatus(afterBail) === 'active' &&
+                afterBail.activeStepId === dispatchStepId
+              ) {
+                log.info(
+                  `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended on an immediate-write bail with the step still active — sending one continuation`,
+                );
+                await this.sendWithBusyRetry(
+                  handoffSession.id,
+                  renderWriteBailContinuation(dispatchStepId),
+                  sendOptions,
                 );
               }
             }
@@ -4528,11 +4563,24 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
-      })().catch((err) => {
+      })().catch(async (err) => {
+        const detail = err instanceof Error ? err.message : String(err);
         log.error(
-          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}):`,
-          err,
+          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
         );
+        if (this.handoffExhausted && dispatchStepId) {
+          await this.handoffExhausted({
+            taskRef: args.taskRef,
+            stepId: dispatchStepId,
+            gezelId: args.gezelId,
+            detail,
+          }).catch((hookErr: unknown) => {
+            log.warn(
+              `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
+              hookErr instanceof Error ? hookErr.message : hookErr,
+            );
+          });
+        }
       }),
     );
     return { sessionId: handoffSession.id };
@@ -11442,6 +11490,26 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * The model tier `providerName` would execute a gezel's turns with: the
+   * gezel's pinned model, else the install default for that provider,
+   * classified the same way the handoff dispatcher does (catalog
+   * `parameterSize` first, model-id tag second). Cloud providers are
+   * `cloud`. Public so the task execution-mode resolver decides from the
+   * same model the dispatch will actually use.
+   */
+  async classifyExecutionTier(
+    providerName: ProviderName,
+    gezelId?: string,
+  ): Promise<LocalModelTier> {
+    return classifyExecutionTierFor({
+      store: this.store,
+      catalog: this.catalog,
+      providerName,
+      ...(gezelId ? { gezelId } : {}),
+    });
+  }
+
+  /**
    * Cheap, side-effect-free route preview for the composer. The send path
    * recomputes the same plan authoritatively; this endpoint exists so users
    * can see and tune the heuristic before committing the turn.
@@ -14243,6 +14311,9 @@ export class ChatManager extends LocalEngineRuntime {
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
+      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
+        ? { generalistSteps: taskContext.task.craftbook.steps }
+        : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       onCapTrim: ({ before, after }) => {
@@ -14351,8 +14422,8 @@ export class ChatManager extends LocalEngineRuntime {
           ? false
           : (config.mlxSharedBandPrefix?.enabled ?? true));
 
-    const executionDensity = resolveExecutionDensity(
-      config.executionDensity,
+    const generalistKickoff = resolveGeneralistKickoff(
+      effectiveGeneralistModeSetting(config),
       record.providerName,
       localModelTier,
     );
@@ -14369,7 +14440,7 @@ export class ChatManager extends LocalEngineRuntime {
         : {}),
       role: gezel?.role,
       providerName: record.providerName,
-      executionDensity,
+      generalistKickoff,
       project,
       hasObservationTables: hasTables,
       workspaceFiles,
@@ -14632,6 +14703,9 @@ export class ChatManager extends LocalEngineRuntime {
             ? 'Assigned records opened.'
             : 'Checkpoint written for validation.',
           maxClosingChars: 120,
+          ...(artifactCheckpointAction && step.advanceWhen?.file
+            ? { onlyWhenArgEquals: { arg: 'path', value: step.advanceWhen.file } }
+            : {}),
         };
         if (fixedEvidenceAction) {
           // This is a mechanical capability invocation, not a reasoning
@@ -15208,7 +15282,7 @@ export class ChatManager extends LocalEngineRuntime {
         GEZEL_PROJECT_ID: record.projectId,
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
-        GEZEL_EXECUTION_DENSITY: executionDensity,
+        GEZEL_GENERALIST_KICKOFF: generalistKickoff,
         // The session model's context window, so the mcp child can budget its
         // own tool output (the `search` renderer) — the subprocess otherwise
         // knows nothing about the model it serves. Runtime (post-admission)
@@ -15808,6 +15882,9 @@ export class ChatManager extends LocalEngineRuntime {
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
+      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
+        ? { generalistSteps: taskContext.task.craftbook.steps }
+        : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),
@@ -17214,66 +17291,6 @@ function memoryExtractionDisabledByEnv(): boolean {
   return raw === '1' || raw?.toLowerCase() === 'true';
 }
 
-// Deterministic last-resort context fit. LLM-summary compaction
-// (`compactInFlight`) is preferred but can't always run: it needs enough older
-// messages to summarize, and for ds4 its one-shot can't even acquire an engine
-// — ds4-server is a hard singleton, so the pool's attempt to spawn a second
-// replica for the summarization call is refused. So this no-LLM force-fit is
-// the ACTUAL overflow defense for ds4: shrink the largest message CONTENTS
-// (never the structure — roles / tool_calls / pairing stay intact) until the
-// transcript fits, so the next request can't trip the engine's context limit.
-const CONTEXT_FORCEFIT_RATIO = 0.8; // leave 20% of numCtx for generation + slack
-const FORCEFIT_CHARS_PER_TOKEN = 4; // matches the chars/4 token estimate above
-const FORCEFIT_MIN_KEEP_CHARS = 2_000; // never shrink a message below this
-const FORCEFIT_MARKER = '\n\n[… truncated to fit the model context window …]\n\n';
-
-/**
- * Middle-out truncate a message's `content` to ~`targetLen` chars, keeping a
- * head + tail around {@link FORCEFIT_MARKER}. Unchanged when already small.
- */
-function truncateMessageContent(m: ChatMessage, targetLen: number): ChatMessage {
-  const content = typeof m.content === 'string' ? m.content : '';
-  if (content.length <= targetLen) return m;
-  const keep = Math.max(0, targetLen - FORCEFIT_MARKER.length);
-  const headLen = Math.ceil(keep * 0.6);
-  const tailLen = keep - headLen;
-  const head = content.slice(0, headLen);
-  const tail = tailLen > 0 ? content.slice(content.length - tailLen) : '';
-  return { ...m, content: `${head}${FORCEFIT_MARKER}${tail}` };
-}
-
-/**
- * Shrink the largest message contents until total content size ≤ `budgetChars`,
- * keeping ≥ {@link FORCEFIT_MIN_KEEP_CHARS} of any truncated message. Pure and
- * structure-preserving (only the `content` string changes), so tool-call /
- * result pairing is never broken. Exported for tests.
- */
-export function fitMessagesToBudget(
-  messages: ChatMessage[],
-  budgetChars: number,
-): { messages: ChatMessage[]; truncatedCount: number; savedChars: number } {
-  const charsOf = (m: ChatMessage) => (typeof m.content === 'string' ? m.content.length : 0);
-  let total = messages.reduce((n, m) => n + charsOf(m), 0);
-  if (total <= budgetChars) return { messages, truncatedCount: 0, savedChars: 0 };
-  const out = messages.slice();
-  // Largest content first — truncating the biggest contributors fits fastest.
-  const order = out.map((m, i) => ({ i, len: charsOf(m) })).sort((a, b) => b.len - a.len);
-  let truncatedCount = 0;
-  let savedChars = 0;
-  for (const { i, len } of order) {
-    if (total <= budgetChars) break;
-    if (len <= FORCEFIT_MIN_KEEP_CHARS) continue;
-    const targetLen = Math.max(FORCEFIT_MIN_KEEP_CHARS, len - (total - budgetChars));
-    const cut = len - targetLen;
-    if (cut <= 0) continue;
-    out[i] = truncateMessageContent(out[i]!, targetLen);
-    total -= cut;
-    savedChars += cut;
-    truncatedCount += 1;
-  }
-  return { messages: out, truncatedCount, savedChars };
-}
-
 /**
  * Per-send self-chat guard. A single user-initiated `runSend` should
  * compact at most once on a healthy long turn. If we cross this threshold
@@ -17700,12 +17717,6 @@ function isSessionGoneError(err: unknown): boolean {
  * recovery couldn't help; the message match is the belt-and-braces
  * fallback for providers that surface the same failure as prose.
  */
-function isContextOverflowError(err: unknown): boolean {
-  if (!err) return false;
-  if ((err as { code?: string }).code === 'context-overflow') return true;
-  const msg = err instanceof Error ? err.message : String(err);
-  return /ran out of working memory|exceeds the available context size/i.test(msg);
-}
 
 /**
  * Signature of the frontmatter fields the growth system mutates. A live

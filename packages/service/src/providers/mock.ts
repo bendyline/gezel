@@ -78,6 +78,7 @@ export class MockProvider implements LLMProvider {
    */
   ollamaContextConfig?: { numCtx: number; promptChars: () => number };
   private readonly responseQueue: string[] = [];
+  private readonly writeBailQueue: boolean[] = [];
   /** Private-reasoning chunks to emit before the next scripted reply. */
   private readonly reasoningQueue: string[][] = [];
   private readonly engineTelemetryQueue: Array<{
@@ -152,6 +153,18 @@ export class MockProvider implements LLMProvider {
    */
   script(...responses: string[]): void {
     for (const r of responses) this.responseQueue.push(r);
+  }
+
+  /**
+   * Make the next `sendAndWait` report that the provider closed the turn on
+   * an immediate-write bail (`LLMSession.lastTurnBail`).
+   */
+  scriptWriteBail(): void {
+    this.writeBailQueue.push(true);
+  }
+
+  nextScriptedWriteBail(): boolean {
+    return this.writeBailQueue.shift() ?? false;
   }
 
   /**
@@ -466,6 +479,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
     // Reset captured calls — each turn surfaces only its own emissions.
     this._capturedExternalCalls = [];
     this.lastTurnReasoning = undefined;
+    this.lastTurnBail = this.provider.nextScriptedWriteBail() ? 'immediate-write' : null;
 
     const scriptedFailure = this.provider.nextScriptedSendFailure();
     if (scriptedFailure) {

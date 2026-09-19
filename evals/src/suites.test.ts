@@ -64,6 +64,16 @@ const COMPLEX_WORK_SCENARIO_IDS = [
   'craftbook-author-fanout',
 ] as const;
 
+const GENERALIST_SCENARIO_IDS = [
+  'fanout-tally',
+  'fanout-stories',
+  'schema-migration',
+  'craftbook-invoice-run',
+  'craftbook-author-linear',
+  'craftbook-codemod-sweep',
+  'craftbook-refactor-module',
+] as const;
+
 /**
  * Suites whose members must each declare an explicit max duration.
  *
@@ -82,6 +92,8 @@ const BUDGETED_SUITE_IDS = [
   'developer-smoke',
   'complex-work',
   'complex-work-smoke',
+  'generalist',
+  'generalist-smoke',
 ] as const;
 
 /**
@@ -99,6 +111,8 @@ const CEILINGED_SUITE_IDS = [
   'developer-smoke',
   'complex-work',
   'complex-work-smoke',
+  'generalist',
+  'generalist-smoke',
 ] as const;
 
 /**
@@ -215,11 +229,19 @@ describe('eval suites', () => {
     expect(SUITES['complex-work']!.scenarios).toEqual(COMPLEX_WORK_SCENARIO_IDS);
   });
 
+  // The generalist A/B suite deliberately shares `schema-migration` with
+  // core: it is the one Meester-kickoff member, kept as the kickoff-shape
+  // canary. Everything else is task-driven, which is what the mode changes.
+  it('pins the generalist A/B suite membership and run order', () => {
+    expect(SUITES.generalist!.scenarios).toEqual(GENERALIST_SCENARIO_IDS);
+    expect(SUITES.generalist!.scenarios.filter((sid) => sid.startsWith('fanout-'))).toHaveLength(2);
+  });
+
   // Both new suites are deliberately hard, which makes cheapest-first
   // ordering matter MORE than it does for productivity: a run that gets cut
   // short mid-sweep should still have spent its time on the members most
   // likely to have produced a verdict.
-  it.each(['developer', 'complex-work'])(
+  it.each(['developer', 'complex-work', 'generalist'])(
     'orders the %s suite cheapest-first so a cut-short run still says something',
     (suiteId) => {
       const budgets = suiteScenarios(suiteId).map((s) => s.timeoutMs ?? 0);
@@ -230,6 +252,7 @@ describe('eval suites', () => {
   it.each([
     ['developer-smoke', 'developer'],
     ['complex-work-smoke', 'complex-work'],
+    ['generalist-smoke', 'generalist'],
   ])('keeps %s a strict subset of %s', (smokeId, fullId) => {
     const full = new Set(SUITES[fullId]!.scenarios);
     for (const sid of SUITES[smokeId]!.scenarios) {

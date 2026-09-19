@@ -458,6 +458,45 @@ export const SUITES: Record<string, EvalSuite> = {
       'Hunt exemplar.',
     scenarios: ['job-hunt-track'],
   },
+
+  // Generalist mode v2 (docs/generalist-mode.md): the A/B suite for
+  // stepwise-vs-generalist execution. Members are multi-step, gated,
+  // task-driven scenarios — the shape the mode changes — plus the two
+  // hermetic fanout probes (fanout is the mechanic the mode must keep) and
+  // `schema-migration`, a plain-chat refactor sent straight to a pre-recruited
+  // Developer — no task, no kickoff — kept as the same-work control that the
+  // setting must leave untouched, even though `core` also bills it. Ordered
+  // cheapest-first. Arms force `--generalist on|off`; `auto` is never an arm.
+  generalist: {
+    id: 'generalist',
+    description:
+      'Generalist-mode A/B suite (7 scenarios, <=7h10m at --count 1): two hermetic fanout ' +
+      'probes, the plain-chat refactor control, and four multi-step gated craftbook runs, ' +
+      'ordered cheapest-first. Run each arm with --generalist on and --generalist off.',
+    scenarios: [
+      'fanout-tally', // 25m — create-time fanout, arithmetic oracle
+      'fanout-stories', // 30m — create-time fanout, prose, host-vs-child work split
+      'schema-migration', // 35m — plain chat to a pre-recruited Developer; the setting must not move it
+      'craftbook-invoice-run', // 50m — gilde step-time fanout, five host steps
+      'craftbook-author-linear', // 80m — authored three-gated-step book run to completion
+      'craftbook-codemod-sweep', // 90m — dispatched multi-step code task
+      'craftbook-refactor-module', // 120m — longest gated chain; the compaction stressor
+    ],
+  },
+
+  // One member per kind of work the suite grades: hermetic fanout, gilde
+  // fanout, and a multi-step code chain. The dry-run and n=3 subset.
+  'generalist-smoke': {
+    id: 'generalist-smoke',
+    description:
+      'Generalist-mode A/B pulse check (3 scenarios, <=2h50m): hermetic fanout, gilde fanout, ' +
+      'and a multi-step code chain. Not a scorecard — use generalist for that.',
+    scenarios: [
+      'fanout-stories', // 30m
+      'craftbook-invoice-run', // 50m
+      'craftbook-codemod-sweep', // 90m
+    ],
+  },
 };
 
 /** The suite a bare "evaluate this model" request should run. */

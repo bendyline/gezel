@@ -70,6 +70,8 @@ export interface EngineStatsEvent {
 }
 
 export abstract class StreamingSessionBase {
+  /** See `LLMSession.lastTurnBail`. Providers reset it per turn and set it at their bail sites. */
+  lastTurnBail: 'immediate-write' | null = null;
   private readonly deltaHandlers = new Set<(chunk: string) => void>();
   private readonly reasoningDeltaHandlers = new Set<(chunk: string) => void>();
   private readonly usageHandlers = new Set<(usage: TurnUsage) => void>();

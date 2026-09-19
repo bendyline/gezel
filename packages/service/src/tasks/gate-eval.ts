@@ -956,7 +956,7 @@ async function evalCheckInner(
             : 'and get it passing before you advance';
         return {
           ok: false,
-          detail: `${result.runs.length === 0 ? `No ${verb} run was observed during this step` : `Only ${result.runs.length} ${verb} run(s) were observed during this step (need ${minRuns})`}. ${need} ${outcome}. If the command is awaiting user approval, say so and pause rather than retrying.`,
+          detail: `${result.runs.length === 0 ? `No ${verb} run was observed during this step` : `Only ${result.runs.length} ${verb} run(s) were observed during this step (need ${minRuns})`}. ${need} ${outcome}. If the command is awaiting user approval, or \`${runTool}\` is not among your tools, say so and pause rather than retrying.`,
           evidence,
         };
       }

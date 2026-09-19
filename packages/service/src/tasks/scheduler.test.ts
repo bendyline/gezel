@@ -1561,6 +1561,56 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
   });
 
+  it('does not re-drive a step whose handoff the runner already holds', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+      // A queued handoff (fanout admission, provider backpressure) is work the
+      // runner will start on its own schedule, not a stall.
+      runner: () => ({ hasHandoffFor: () => true }),
+    });
+    await scheduler.sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(0);
+  });
+
+  it('does not re-drive a spawn host held by the fanout barrier until its children settle', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const parent = await tasks.create('cron', {
+      title: 'Fan out then collect',
+      assignee: { kind: 'gezel', gezelId: 'freja' },
+      steps: [{ id: 'collect', name: 'Collect', prompt: 'Collect the shards.', terminal: true }],
+      entryStepId: 'collect',
+      spawnsSteps: [{ id: 'write', name: 'Write', prompt: 'Write one shard.', terminal: true }],
+    });
+    const child = await tasks.spawnChild(parent.ref);
+    const rec = await store.readTask('cron', parent.num);
+    await store.writeTask({
+      ...rec!,
+      craftbook: {
+        ...rec!.craftbook,
+        steps: rec!.craftbook.steps.map((s) => ({
+          ...s,
+          lastActivatedAt: new Date(now.getTime() - 30 * 60_000).toISOString(),
+        })),
+      },
+    });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered.filter((d) => d.taskRef === parent.ref)).toHaveLength(0);
+
+    // The last child settles: the barrier is gone and the host is fair game.
+    await tasks.setStatus('cron', child.num, 'complete');
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered.filter((d) => d.taskRef === parent.ref)).toHaveLength(1);
+  });
+
   it('skips the re-drive when the voorman IS the assignee under a different spelling', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     // Wild-caught on `space-invaders-clone/2`: the project's voorman was
@@ -1749,6 +1799,33 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     const chat = fakeChat();
     await makeScheduler(chat, now).sweepStuckSteps();
     expect(chat.delivered).toHaveLength(0);
+  });
+
+  it('pauses for help instead of re-driving into a session whose last turn aborted', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    // The assignee's only session aborted its last turn: a re-drive would
+    // land there and replay the failure, and returning silently left an
+    // active task dead for ninety minutes (invoice-run, 2026-09-18).
+    await store.writeSession({
+      version: 1,
+      id: 'freja-poisoned',
+      gezelId: 'freja',
+      projectId: 'cron',
+      providerName: 'copilot',
+      title: 'Scope',
+      createdAt: new Date(now.getTime() - 25 * 60_000).toISOString(),
+      lastActivityAt: new Date(now.getTime() - 20 * 60_000).toISOString(),
+      messages: [],
+      providerState: {},
+      lastTurnError:
+        '[Mac AI] aborting — `write_task_note` was called 5 times this turn without making progress.',
+    });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(0);
+    expect((await store.readTask('cron', num))!.status).toBe('paused');
   });
 
   it('pauses the task for a human once the re-drive budget is spent', async () => {

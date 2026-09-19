@@ -573,8 +573,23 @@ describe('tasks API', () => {
     const resumed = (await resumeRes.json()) as { status: string };
     expect(resumed.status).toBe('active');
 
-    // Complete step 1 → next step activates.
+    // A step naming ITSELF as `next` is refused before anything completes:
+    // the fanout-tally host did exactly that on its final step and turned
+    // "done" into a self-loop the stall sweep had to break (2026-09-18).
     const firstId = task.craftbook.steps[0]!.id;
+    const selfNext = await api('POST', `/api/projects/taskproj/tasks/1/steps/${firstId}/complete`, {
+      next: firstId,
+    });
+    expect(selfNext.status).toBe(400);
+    expect(((await selfNext.json()) as { error: string }).error).toContain('cannot name itself');
+    const unknownNext = await api(
+      'POST',
+      `/api/projects/taskproj/tasks/1/steps/${firstId}/complete`,
+      { next: 'no-such-step' },
+    );
+    expect(unknownNext.status).toBe(400);
+
+    // Complete step 1 → next step activates.
     const advRes = await api(
       'POST',
       `/api/projects/taskproj/tasks/1/steps/${firstId}/complete`,

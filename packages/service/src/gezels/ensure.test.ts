@@ -311,3 +311,55 @@ describe('resolveGildeTemplateForRole', () => {
     expect(res!.frontmatter?.fixedFunction).toBeTruthy();
   });
 });
+
+describe('ensureGezel — exact template id', () => {
+  it('reuses the roster gezel created from that template, whatever it calls itself', async () => {
+    await store.createGezel({ name: 'Wren', role: 'Handyperson', templateId: 'developer' });
+    const res = await ensureGezel({
+      opts: { jobTitle: 'developer', templateId: 'developer' },
+      store,
+      catalog,
+      chat: manager,
+    });
+    expect(res.action).toBe('reused');
+    expect(res.gezelId).toBe('wren');
+    expect(res.templateId).toBe('developer');
+  });
+
+  it('creates from exactly that template when none is on the roster, then reuses it', async () => {
+    const first = await ensureGezel({
+      opts: { jobTitle: 'developer', templateId: 'developer' },
+      store,
+      catalog,
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(first.action).toBe('created-from-gilde');
+    expect(first.templateId).toBe('developer');
+    const created = await store.getGezel(first.gezelId);
+    expect(created?.parsed.frontmatter.templateId).toBe('developer');
+
+    const second = await ensureGezel({
+      opts: { jobTitle: 'developer', templateId: 'developer' },
+      store,
+      catalog,
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(second.action).toBe('reused');
+    expect(second.gezelId).toBe(first.gezelId);
+  });
+
+  it('falls through to the fuzzy jobTitle path when the catalog lacks the template', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Designer' });
+    const res = await ensureGezel({
+      opts: { jobTitle: 'designer', templateId: 'no-such-template-anywhere' },
+      store,
+      catalog,
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(res.action).toBe('reused');
+    expect(res.gezelId).toBe('maya');
+  });
+});

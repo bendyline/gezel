@@ -1185,7 +1185,101 @@ describe('postSniffFeedback', () => {
   });
 });
 
+describe('runtime repair policy', () => {
+  it('holds every harness repair turn when the trial runs under the runtime policy', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-09-19T03:00:00Z' }],
+      gezels: [{ id: 'builder-1', role: 'Developer' }],
+    });
+    const ctx = { ...makeCtx(client), repairPolicy: 'runtime' as const };
+    const sniff: SniffResult = {
+      ok: false,
+      signals: [],
+      score: 3,
+      failReason: 'tests-present did not fire',
+      missingRequiredSignals: ['tests-present', 'tsc-clean'],
+    };
+    expect(await postSniffFeedback(ctx, 'tests/migrate.test.ts', sniff)).toEqual({
+      status: 'held',
+    });
+    await postMissingDeliverableFeedback(ctx, 'tests/migrate.test.ts', { minPolls: 1 });
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+  });
+});
+
 describe('postMissingDeliverableFeedback', () => {
+  it('pins the nudge to the task owner and never recruits when targetGezelId is set', async () => {
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'jules', lastActivityAt: '2026-09-18T16:28:00Z', projectId: 'office' },
+      ],
+      gezels: [{ id: 'jules', role: 'Office manager' }],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'report.md', {
+      minPolls: 1,
+      projectId: 'office',
+      targetGezelId: 'jules',
+    });
+
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    const [target, body] = client.messageGezel.mock.calls[0]!;
+    expect(target).toBe('jules');
+    expect(body.projectId).toBe('office');
+    expect(body.text).toContain('report.md');
+  });
+
+  it('pins to an owner who has no session yet rather than falling back to a recruit', async () => {
+    const client = makeClient({ gezels: [{ id: 'jules', role: 'Office manager' }] });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'report.md', {
+      minPolls: 1,
+      projectId: 'office',
+      targetGezelId: 'jules',
+    });
+
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('jules');
+  });
+
+  it('scores a Generalist as an implementer when no owner is pinned', async () => {
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'gen-1', lastActivityAt: '2026-09-18T16:28:00Z', projectId: 'office' },
+      ],
+      gezels: [{ id: 'gen-1', role: 'Generalist' }],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'report.md', { minPolls: 1, projectId: 'office' });
+
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('gen-1');
+  });
+
+  it('still recruits a Developer for an unpinned roster with no implementer (the confound the pin exists for)', async () => {
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'jules', lastActivityAt: '2026-09-18T16:28:00Z', projectId: 'office' },
+      ],
+      gezels: [{ id: 'jules', role: 'Office manager' }],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'report.md', { minPolls: 1, projectId: 'office' });
+
+    expect(client.ensureGezel).toHaveBeenCalledWith({ jobTitle: 'Developer' });
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('ensured-dev-1');
+  });
+
   it('nudges the active specialist to write the missing HTML workspace file', async () => {
     const client = makeClient({
       sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-06-02T05:00:00Z' }],

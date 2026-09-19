@@ -299,6 +299,15 @@ export interface SessionOpts {
     closingArg?: string;
     fallbackText: string;
     maxClosingChars?: number;
+    /**
+     * Only a call whose `arg` equals `value` is terminal. An artifact
+     * checkpoint step advances on ONE file, but its procedure may write
+     * others first: treating the first `write_artifact` as terminal ended
+     * the turn on `scope.md`, the recovery restarted the procedure from
+     * the top, and whether `billables.json` ever got written came down to
+     * luck (invoice-run on gemma4-12b-q4, 2026-09-19).
+     */
+    onlyWhenArgEquals?: { arg: string; value: string };
   };
   /**
    * Authoritative expected output path paired with
@@ -757,6 +766,15 @@ export interface LLMSession {
   readonly numCtx?: number;
   /** Model actually used by this session (diagnostics + pressure warnings). */
   readonly model?: string;
+  /**
+   * Set when the provider itself cut the last `sendAndWait` short:
+   * `'immediate-write'` means the write clamp closed the turn the moment the
+   * requested file landed, before the model could do anything else. `null`
+   * or absent means the model ended the turn. A task handoff reads it to
+   * send one continuation instead of leaving an active step to the stall
+   * sweep.
+   */
+  readonly lastTurnBail?: 'immediate-write' | null;
   /**
    * Cheap estimate of the complete prompt currently held by this session,
    * including system bands, prior messages, and tool schemas.

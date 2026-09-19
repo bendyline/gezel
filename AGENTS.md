@@ -416,6 +416,16 @@ the resolved security policy. Copilot's SDK-native built-ins (`bash`,
 bypass those layers. An explicit install-level or per-gezel
 `sandboxCopilot: false` is the deliberate compatibility escape hatch.
 
+### Generalist mode
+
+One switch — `config.generalistMode: 'auto' | 'on' | 'off'` (Settings → Artificial Intelligence → "Run in generalist mode") — decides how much orchestration wraps a piece of work. Resolvers live in [core/src/generalist-mode.ts](packages/core/src/generalist-mode.ts); the full contract is in [docs/generalist-mode.md](docs/generalist-mode.md).
+
+- **Task execution.** A task runs `generalist` (one owner gezel pinned on every step, one continuous session across steps, the union of every step's tools, the whole outline in the prompt, every step gate still enforced, no per-step model routing) or `stepwise` (a specialist per `suggestedRole`, a fresh session per gezel change, a per-step kit). `auto` is generalist for hosted frontier providers (copilot, anthropic, anthropic-cli, openai, codex-cli) and stepwise for every on-device model until the eval says otherwise. Resolved **once** at create (or draft activation) by `TaskManager.applyExecutionMode` through the closure `product-service.ts` wires, stamped as `Task.executionMode`, inherited by fanout children, never re-evaluated. An explicit assignee stays the owner; only role resolution is overridden, and `assignee.kind === 'user'` steps are never re-pinned. An auto-assigned generalist task gets the **Generalist** gezel (gilde template `generalist`, canonical role `generalist`, one per install, reused by template id). The solo-project persona stays the **Builder**.
+- **Kickoff.** The Meester's `start_project` routes to a solo Builder-led project when generalist kickoff is on: `auto` there also keeps the measured local-`medium` exception (paired A/B 2026-07-17). The MCP child reads `GEZEL_GENERALIST_KICKOFF=on|off` (was `GEZEL_EXECUTION_DENSITY`).
+- **Continuity rules** (`ChatManager.startHandoffSession`): a generalist task continues its one transcript even with a queued send (the re-pin waits for the queue to drain) and whatever the handoff was labelled; a provider/model change opens a fresh session with a `generalist continuity broken` warning; a retry whose transcript ended in a context overflow or compaction-loop halt starts fresh instead of replaying the failure. The runner passes no `capabilityFloor` for generalist tasks.
+- **Migration.** `executionDensity` (`flat` ≙ `on`, `scaffold` ≙ `off`) is migrated once by `Store.ensureLayout`; the schema still declares it (a non-strict object would otherwise strip it before the migration saw it). Evals: `--generalist auto|on|off` replaces `--render-mode`.
+- **Log marker.** `[tasks] <ref> generalist-mode resolved=<mode> setting=<s> provider=<p> tier=<t>` at create — the eval harness reads it; keep the shape.
+
 ### History (audit log)
 
 A first-class, append-only log of meaningful events across the install. Stored as JSONL at `~/.gezel/history.jsonl` (global) and `~/.gezel/projects/{id}/history.jsonl` (per-project). `HistoryManager` (in `packages/service/src/history/manager.ts`) owns both writes and reads.
@@ -592,6 +602,7 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | A drafting shard wrote into the wrong pack folder | Its step used `{{task.num}}`, which `TaskManager.create` already froze to the HOST's number. Spawn steps address their own pack with `{{diffpack.dir}}` |
 | Applying a proposal 409s with `drifted` | The target file changed since the proposal was sealed (`baseHash` mismatch). The UI names the files and offers to apply anyway |
 | A task was created but nobody started it ("active", no chat) | Nothing resolved for the entry step, so `dispatchTaskEntry` returned `no-entry-gezel` — check the step's `suggestedRole`/`assignee` |
+| A task recruited specialists although generalist mode is on, or ran stepwise on a frontier provider | `task.executionMode` is stamped once at create (or draft activation) and never re-evaluated — find the `generalist-mode resolved=` line in the service log for the setting, provider and tier it saw. An explicit assignee stays the owner (that is by design), and a Generalist pinned to a local model resolves stepwise under `auto` |
 | A timeout reports far less elapsed than the log shows | The host slept through it. Look for a silent gap in the service log followed by several unrelated timers firing within milliseconds of each other, then confirm with `pmset -g log \| grep -E "Entering Sleep state\|DarkWake"`. The budget should have been an `AwakeBudget` |
 | A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Documents live in that project's index, not `global.db` |
 | A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` |

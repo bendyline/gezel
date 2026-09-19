@@ -425,7 +425,7 @@ export interface SniffFeedbackOptions {
 }
 
 export type SniffFeedbackResult =
-  | { status: 'no-op' | 'deduped' | 'deferred' | 'unroutable' | 'send-failed' }
+  | { status: 'no-op' | 'deduped' | 'deferred' | 'unroutable' | 'send-failed' | 'held' }
   | { status: 'sent'; stage: 0 | 1 | 2; attempts: number }
   | { status: 'exhausted'; attempts: number; failure: EvalTerminalFailure };
 
@@ -520,6 +520,19 @@ export async function postSniffFeedback(
   const hasMissing = sniff.missingRequiredSignals && sniff.missingRequiredSignals.length > 0;
   const hasFailReason = !!sniff.failReason;
   if (!hasMissing && !hasFailReason) return { status: 'no-op' };
+  // The runtime repair policy silences every harness repair turn, not only
+  // the craftbook scenario's own routing: hand-written scenarios call this
+  // poster directly, and one of them exhausted its ladder and ended a trial
+  // under a `runtime` campaign (schema-migration on gemma4-12b-q4,
+  // 2026-09-19). The watchdogs still bound a genuine stall.
+  if (ctx.repairPolicy === 'runtime') {
+    logFeedbackDeferral(
+      ctx,
+      `runtime-policy:${filePath}`,
+      `[sniff-feedback] held — the trial runs under the runtime repair policy; no harness repair turn for ${filePath}`,
+    );
+    return { status: 'held' };
+  }
 
   let posted = nudgeMemory.get(ctx);
   if (!posted) {
@@ -1272,6 +1285,16 @@ export interface MissingDeliverableFeedbackOptions {
   coordinatorFallbackAfterPolls?: number;
   targetGracePolls?: number;
   projectId?: string;
+  /**
+   * Pin the recipient. Set for a craftbook task with an assignee: the runtime
+   * already has an owner for the deliverable, so the harness must neither
+   * score the roster for an "implementation specialist" nor recruit one.
+   * Wild-caught on the generalist A/B dry run (2026-09-18): the invoice
+   * book's worker was an Office manager, which scores 0 for `report.md`, so
+   * after 24 polls the harness ensured a Developer who wrote the book's last
+   * deliverable outside the task, and the trial was failed on that file.
+   */
+  targetGezelId?: string;
   repairDirective?: string;
   /**
    * Surface the deliverable is graded on. Defaults to `'workspace'`, which
@@ -1313,6 +1336,14 @@ export async function postMissingDeliverableFeedback(
   filePath: string,
   opts: MissingDeliverableFeedbackOptions = {},
 ): Promise<void> {
+  if (ctx.repairPolicy === 'runtime') {
+    logFeedbackDeferral(
+      ctx,
+      `runtime-policy:missing:${filePath}`,
+      `[sniff-feedback] held — the trial runs under the runtime repair policy; no missing-deliverable nudge for ${filePath}`,
+    );
+    return;
+  }
   const minPolls = opts.minPolls ?? 24; // ~2 min at the 5s poll cadence
   const repeatEvery = opts.repeatEvery ?? 30; // ~2.5 min between re-nudges
   const maxNudges = opts.maxNudges ?? 3;
@@ -1331,10 +1362,13 @@ export async function postMissingDeliverableFeedback(
 
   if (state.absentPolls < minPolls) return;
 
-  const minimumScore = missingDeliverableMinimumTargetScore(filePath);
+  const minimumScore = opts.targetGezelId
+    ? undefined
+    : missingDeliverableMinimumTargetScore(filePath);
   const specialist = await pickTargetGezel(ctx, filePath, {
     minimumScore,
     projectId: opts.projectId,
+    ...(opts.targetGezelId ? { targetGezelId: opts.targetGezelId } : {}),
   });
   const coordinatorFallback =
     !specialist && minimumScore != null && state.absentPolls >= coordinatorFallbackAfterPolls;
@@ -1371,7 +1405,7 @@ export async function postMissingDeliverableFeedback(
   const nearMissKey = opts.nearMiss ? opts.nearMiss.location : undefined;
   const newNearMiss = !!nearMissKey && state.lastNearMissKey !== nearMissKey;
   const urgentWrongSurfaceNearMiss =
-    newNearMiss && isExactWrongSurfaceNearMiss(filePath, opts.nearMiss);
+    !opts.targetGezelId && newNearMiss && isExactWrongSurfaceNearMiss(filePath, opts.nearMiss);
   const newTarget = !!specialist?.gezelId && specialist.gezelId !== state.lastTargetGezelId;
   if (state.nudgesSent >= maxNudges && !newNearMiss && !newTarget) return;
   if (
@@ -1727,6 +1761,19 @@ async function targetInflightTurn(
   }
 }
 
+/**
+ * Is this gezel mid-turn in the project right now? Scenario-side callers use
+ * it to hold a nudge entirely, rather than defer-then-send the way the
+ * feedback posters do.
+ */
+export function gezelTurnInflight(
+  ctx: EvalContext,
+  gezelId: string,
+  projectId?: string,
+): Promise<{ elapsedMs: number } | null> {
+  return targetInflightTurn(ctx, { gezelId, ...(projectId ? { projectId } : {}) }, projectId);
+}
+
 function inferSingleActiveProjectId(candidates: TargetGezel[]): string | undefined {
   const projectIds = new Set(
     candidates
@@ -1761,12 +1808,12 @@ function targetScoreForFile(role: string | null, filePath: string): number {
   if (!role) return 0;
   if (isImageFile(filePath)) return /image|visual|designer|artist/.test(role) ? 3 : 0;
   if (/\.(?:md|markdown|txt)$/i.test(filePath)) {
-    if (/developer|builder|engineer/.test(role)) return 4;
+    if (/developer|builder|engineer|generalist/.test(role)) return 4;
     if (/review|research|writer|copy|sre|operator/.test(role)) return 3;
     if (/voorman|foreman/.test(role)) return 1;
     return 0;
   }
-  if (/developer|builder|engineer|frontend|front-end|web/.test(role)) return 3;
+  if (/developer|builder|engineer|generalist|frontend|front-end|web/.test(role)) return 3;
   if (/voorman|foreman/.test(role)) return 1;
   return 0;
 }

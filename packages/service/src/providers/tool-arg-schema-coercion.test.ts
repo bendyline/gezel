@@ -53,6 +53,15 @@ describe('coerceArgsToSchema', () => {
     expect(repaired.sort()).toEqual(['autoTemplates', 'source', 'targets']);
   });
 
+  it('accepts the capitalised booleans textual markup carries', () => {
+    const yes = coerceArgsToSchema({ autoTemplates: 'True' }, CONVERT_SCHEMA);
+    expect(yes.args.autoTemplates).toBe(true);
+    expect(yes.repaired).toEqual(['autoTemplates']);
+    const no = coerceArgsToSchema({ autoTemplates: 'FALSE' }, CONVERT_SCHEMA);
+    expect(no.args.autoTemplates).toBe(false);
+    expect(coerceArgsToSchema({ themeId: 'True' }, CONVERT_SCHEMA).args.themeId).toBe('True');
+  });
+
   it('never reinterprets a string the schema actually declares as a string', () => {
     // The regression this guards: `write_file` shipping a JSON document.
     // Blind "parse anything that starts with a brace" corrupts it into an

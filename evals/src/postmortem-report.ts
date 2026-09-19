@@ -203,6 +203,43 @@ function evidenceSection(name: string, axis: AxisScore): string[] {
   return lines;
 }
 
+/**
+ * Continuity facts (steps, sessions, compaction, fanout, budget) — advisory,
+ * outside the composite. Present only when `facts.continuity` was captured;
+ * the generalist-mode A/B (docs/generalist-mode.md) reads these cells.
+ */
+export function continuitySection(facts: TrialFacts): string[] {
+  const c = facts.continuity;
+  if (!c) return [];
+  const fill = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(0)}%`);
+  const num = (v: number | null, digits = 2) => (v === null ? '—' : v.toFixed(digits));
+  const compaction = c.compaction.observable
+    ? `${c.compaction.betweenTurn} between-turn / ${c.compaction.midTurn} mid-turn / ${c.compaction.forceFit} force-fit`
+    : 'n/a (compacted inside the provider)';
+  return [
+    '## Continuity',
+    '',
+    'Continuity is reported separately and does not affect the capability composite.',
+    '',
+    '| Metric | Value | Source |',
+    '|---|---:|---|',
+    `| Generalist setting / resolved | ${c.mode ?? 'default'} / ${c.resolvedModes.generalist}g ${c.resolvedModes.stepwise}s | \`continuity.mode\`, \`continuity.resolvedModes\` |`,
+    `| Steps activated → completed | ${c.steps.activated} → ${c.steps.completed} | \`continuity.steps\` |`,
+    `| Gate rejections / redrives | ${c.steps.gateRejections} / ${c.steps.redrives} | \`continuity.steps\` |`,
+    `| Median step wall-clock | ${c.steps.medianStepMs === null ? '—' : `${Math.round(c.steps.medianStepMs / 1000)}s`} | \`continuity.steps.medianStepMs\` |`,
+    `| Task sessions / sessions per step | ${c.sessions.taskScoped} / ${num(c.sessions.sessionsPerStep)} | \`continuity.sessions\` |`,
+    `| Sessions reused across steps | ${c.sessions.reusedAcrossSteps} (${c.sessions.continuityReuses} reuses, ${c.sessions.continuityBreaks} breaks) | \`continuity.sessions\` |`,
+    `| Compactions | ${compaction} | \`continuity.compaction\` |`,
+    `| Max context fill | ${fill(c.compaction.maxContextFill)} | \`continuity.compaction.maxContextFill\` |`,
+    `| Compaction loop halts | ${c.compaction.loopHalts} | \`continuity.compaction.loopHalts\` |`,
+    `| Fanout children spawned / completed / failed | ${c.fanout.childrenSpawned} / ${c.fanout.childrenCompleted} / ${c.fanout.childrenFailed} | \`continuity.fanout\` |`,
+    `| Fanout barrier holds / releases | ${c.fanout.barrierHolds} / ${c.fanout.barrierReleases}${c.fanout.barrierReleaseFailures > 0 ? ` (${c.fanout.barrierReleaseFailures} failed)` : ''} | \`continuity.fanout\` |`,
+    `| Task budget soft / hard trips | ${c.budget.taskBudgetSoft} / ${c.budget.taskBudgetHard} | \`continuity.budget\` |`,
+    `| Tool-repeat aborts | ${c.budget.toolRepeatAborts} | \`continuity.budget.toolRepeatAborts\` |`,
+    '',
+  ];
+}
+
 /** Render only evidence-backed sections; analysis/recommendations are a separate phase. */
 export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRubricScore): string {
   const outcome = facts.outcome.success ? 'success' : (facts.outcome.failureMode ?? 'failed');
@@ -238,6 +275,7 @@ export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRub
     '|---|---:|---|',
     ...performanceRows(facts),
     '',
+    ...continuitySection(facts),
     ...nativeReliabilitySection(facts),
     '## Evidence map',
     '',

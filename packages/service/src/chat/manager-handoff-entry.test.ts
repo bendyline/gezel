@@ -359,6 +359,91 @@ describe('handoff seed wording', () => {
     ).toBe(true);
   });
 
+  it('reports a handoff that spent its bounded sends so the task can be paused for help', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Review a patch that keeps aborting',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.scriptSendFailure('first abort');
+    mock.scriptSendFailure('second abort');
+    mock.scriptSendFailure('third abort');
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(3);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledWith({
+      taskRef: task.ref,
+      stepId: 'review',
+      gezelId: 'worker',
+      detail: expect.stringContaining('third abort'),
+    });
+  });
+
+  it('sends one continuation when a local write-bail closes the turn with the step still active', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Write a story',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        { id: 'write', name: 'Write', prompt: 'Write the story to stories/lighthouse.md now.' },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    // The scripted reply claims nothing about a file: a bare write claim
+    // with no file on disk wakes the claim-check nudge, a different path.
+    mock.scriptWriteBail();
+    mock.script('Draft saved.');
+    mock.script('Advanced the step.');
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'write',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(2);
+    expect(String(sends[1]!.prompt)).toContain('still active');
+    expect(String(sends[1]!.prompt)).toContain('advance_task_step');
+    const full = await store.getSession('worker', sessionId);
+    expect(full?.messages.some((message) => message.content === 'Advanced the step.')).toBe(true);
+  });
+
+  it('leaves a handoff turn the model ended itself alone', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Write a story',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'write', name: 'Write', prompt: 'Write the story to stories/harbor.md now.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.script('Draft saved; finishing next turn.');
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'write',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+  });
+
   it('retries a fixed-action handoff that returns text without publishing its checkpoint', async () => {
     const task = await tasks.create('p1', {
       title: 'Publish a review checkpoint',
@@ -398,6 +483,9 @@ describe('handoff seed wording', () => {
     expect(sends).toHaveLength(3);
     expect(sends[1]?.prompt).toContain('ended before fixed-action step');
     expect(sends[1]?.prompt).toContain('Do not call `read_task_notes` or `advance_task_step`');
+    // The recovery names the checkpoint the step advances on, so a model
+    // that wrote a different deliverable first does not restart from the top.
+    expect(sends[1]?.prompt).toContain('once `observations.md` is written');
     expect((await store.readTask('p1', task.num))?.activeStepId).toBe('review');
   });
 
@@ -743,5 +831,160 @@ describe('handoff seed wording', () => {
     const timeline = await store.listTimeline({ projectId: 'p1', limit: 50 });
     const seedRow = timeline.messages.find((m) => m.role === 'user');
     expect(seedRow?.origin).toBe('system');
+  });
+});
+
+describe('generalist task session continuity', () => {
+  const at = () => new Date().toISOString();
+
+  it('keeps one session across every step and points the seed at the task outline', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Generalist run',
+      description: 'Three steps, one owner, one conversation from first step to last.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      executionMode: 'generalist',
+      steps: [
+        { id: 'research', name: 'Research', prompt: 'Look things up with read_file.' },
+        { id: 'build', name: 'Build', prompt: 'Write the deliverable with write_file.' },
+        {
+          id: 'review',
+          name: 'Review',
+          prompt: 'Check the result with read_file.',
+          terminal: true,
+        },
+      ],
+      entryStepId: 'research',
+      createdBy: { kind: 'user' },
+    });
+    expect(task.executionMode).toBe('generalist');
+    expect(task.craftbook.steps.every((s) => s.assignee?.kind === 'gezel')).toBe(true);
+    await tasks.completeStep('p1', task.num, 'research');
+
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'research',
+    });
+    prior.messages.push({ role: 'assistant', content: 'Research done.', at: at() });
+    await store.writeSession(prior);
+
+    mock.script('Building.');
+    const handoff = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'build',
+      fromGezelId: 'worker',
+      fromGezelName: 'Worker',
+    });
+    await manager.drainBackground();
+    expect(handoff.sessionId).toBe(prior.id);
+    const carried = await store.getSession('worker', prior.id);
+    expect(carried?.stepId).toBe('build');
+    const seed =
+      [...(carried?.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+    expect(seed).toContain('has advanced to the next step');
+    expect(seed).toContain('Task outline in your prompt');
+
+    await tasks.completeStep('p1', task.num, 'build');
+    mock.script('Reviewing.');
+    const again = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      fromGezelId: 'worker',
+    });
+    await manager.drainBackground();
+    expect(again.sessionId).toBe(prior.id);
+    const sessions = (await store.listSessions({ gezelId: 'worker', projectId: 'p1' })).filter(
+      (session) => session.taskRef === task.ref,
+    );
+    expect(sessions).toHaveLength(1);
+    expect((await store.getSession('worker', prior.id))?.stepId).toBe('review');
+  });
+
+  it('a retry after a compaction-loop halt starts fresh for a generalist task and resumes for a stepwise one', async () => {
+    for (const mode of ['generalist', 'stepwise'] as const) {
+      const task = await tasks.create('p1', {
+        title: `Retry ${mode}`,
+        description: 'A single step whose last attempt halted on repeated compaction.',
+        assignee: { kind: 'gezel', gezelId: 'worker' },
+        executionMode: mode,
+        steps: [
+          { id: 'work', name: 'Work', prompt: 'Do the work with write_file.', terminal: true },
+        ],
+        entryStepId: 'work',
+        createdBy: { kind: 'user' },
+      });
+      const prior = await manager.createSession({
+        gezelId: 'worker',
+        projectId: 'p1',
+        taskRef: task.ref,
+        stepId: 'work',
+      });
+      prior.messages.push(
+        { role: 'user', content: 'Go.', at: at() },
+        {
+          role: 'assistant',
+          content: 'This turn triggered context compaction twice without making progress.',
+          at: at(),
+          synthetic: 'context-loop-halt',
+        },
+      );
+      await store.writeSession(prior);
+
+      mock.script('Trying again.');
+      const retried = await manager.startHandoffSession({
+        gezelId: 'worker',
+        projectId: 'p1',
+        taskRef: task.ref,
+        stepId: 'work',
+        kind: 'retry',
+        resumeExisting: true,
+      });
+      await manager.drainBackground();
+      if (mode === 'generalist') {
+        expect(retried.sessionId).not.toBe(prior.id);
+      } else {
+        expect(retried.sessionId).toBe(prior.id);
+      }
+    }
+  });
+
+  it('opens a fresh session when the prior transcript ran on another provider', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Provider moved',
+      description: 'Two steps; the first ran before the default provider changed.',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      executionMode: 'generalist',
+      steps: [
+        { id: 'a', name: 'A', prompt: 'Start with read_file.' },
+        { id: 'b', name: 'B', prompt: 'Finish with write_file.', terminal: true },
+      ],
+      entryStepId: 'a',
+      createdBy: { kind: 'user' },
+    });
+    await tasks.completeStep('p1', task.num, 'a');
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'a',
+    });
+    prior.providerName = 'openai';
+    await store.writeSession(prior);
+
+    mock.script('ok');
+    const handoff = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'b',
+      fromGezelId: 'worker',
+    });
+    await manager.drainBackground();
+    expect(handoff.sessionId).not.toBe(prior.id);
   });
 });

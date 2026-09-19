@@ -12,6 +12,8 @@ import { decoyResearchScenario } from './decoy-research.ts';
 import { docblocksIntegrationScenarios } from './docblocks-integration.ts';
 import { docblocksThemeRoundtripScenario } from './docblocks-theme-roundtrip.ts';
 import { failingTestsSpecScenario } from './failing-tests-spec.ts';
+import { fanoutStoriesScenario } from './fanout-stories.ts';
+import { fanoutTallyScenario } from './fanout-tally.ts';
 import { fantasyFictionScenario } from './fantasy-fiction.ts';
 import { fictionalSdkScenario } from './fictional-sdk.ts';
 import { fixSquisqBugsScenario } from './fix-squisq-bugs.ts';
@@ -174,6 +176,11 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // (two-gezel crew, seeded stores, named script-tools), then one coach
   // turn that must persist an application into the workspace pipeline.
   [jobHuntScenario.id]: jobHuntScenario,
+  // Hermetic declarative-fanout probes (create-time fanout, no gilde book):
+  // one host, N children, a held-then-released host step. Members of the
+  // `generalist` suites; cheap enough for local models in both modes.
+  [fanoutStoriesScenario.id]: fanoutStoriesScenario,
+  [fanoutTallyScenario.id]: fanoutTallyScenario,
   ...CRAFTBOOK_SCENARIOS,
   // Craftbook SELECTION + AUTHORING probes. These were opt-in (runnable by
   // name only) until they became members of the `complex-work` suite —
