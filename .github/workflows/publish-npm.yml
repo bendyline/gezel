@@ -98,6 +98,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      # `pnpm validate` runs the embedding-backed service suites. Prewarm the
+      # shared test model before Vitest workers can race a cold or partial
+      # download, matching the unit, coverage, and stability jobs in Quality.
+      - uses: ./.github/actions/setup-test-embedder
+
       - name: Install Chromium
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
 
