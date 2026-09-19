@@ -75,6 +75,23 @@ export interface ToolFailureTrackerOpts {
    * missed) and just aborted, with delegate_* tools sitting unused.
    */
   delegationAvailable?: boolean;
+  /**
+   * Whether `write_artifact` / `write_file` are on this turn's roster. A
+   * read that keeps answering "not found" is usually a deliverable the
+   * model was told to CREATE, so the corrective names the writer — but only
+   * one the turn actually wired.
+   */
+  artifactWriterAvailable?: boolean;
+  workspaceWriterAvailable?: boolean;
+}
+
+/** What a provider keeps of the failing call that ended its tool loop. */
+export interface ToolFailureLoop {
+  tool: string;
+  count: number;
+  sourceFailureKind?: 'truncated' | 'not-persisted';
+  transportFailure?: boolean;
+  missingPath?: boolean;
 }
 
 export interface ToolFailureResult {
@@ -88,6 +105,8 @@ export interface ToolFailureResult {
   sourceFailureKind?: 'truncated' | 'not-persisted';
   /** The shared internal MCP/service transport failed, not this tool's schema. */
   transportFailure?: boolean;
+  /** The failing calls were reads of a path that does not exist. */
+  missingPath?: boolean;
 }
 
 export class ToolFailureTracker {
@@ -97,12 +116,16 @@ export class ToolFailureTracker {
   private readonly hardAbortAt: number;
   private readonly surgicalEditsAvailable: boolean;
   private readonly delegationAvailable: boolean;
+  private readonly artifactWriterAvailable: boolean;
+  private readonly workspaceWriterAvailable: boolean;
 
   constructor(opts: ToolFailureTrackerOpts = {}) {
     this.softWarningAt = opts.softWarningAt ?? SOFT_WARNING_AT_DEFAULT;
     this.hardAbortAt = opts.hardAbortAt ?? HARD_ABORT_AT_DEFAULT;
     this.surgicalEditsAvailable = opts.surgicalEditsAvailable ?? false;
     this.delegationAvailable = opts.delegationAvailable ?? false;
+    this.artifactWriterAvailable = opts.artifactWriterAvailable ?? false;
+    this.workspaceWriterAvailable = opts.workspaceWriterAvailable ?? false;
   }
 
   /**
@@ -175,6 +198,25 @@ export class ToolFailureTracker {
         count: fails,
       };
     }
+    if (isMissingPathReadFailure(toolName, output)) {
+      // The call shape is fine; the path is not there. On invoice-run
+      // (2026-09-18) a gate named `tasks/1/scope.md` as missing and the model
+      // spent five `read_file` calls looking for it, then was told it
+      // "couldn't find a working call shape" — the one diagnosis that could
+      // not help, since the file was its own deliverable to create.
+      if (fails >= this.hardAbortAt) {
+        return { output, shouldAbort: true, count: fails, missingPath: true };
+      }
+      if (fails >= this.softWarningAt) {
+        return {
+          output: `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive \`${toolName}\` on a path that does not exist. The call shape is fine — the file is not there, and reading it again cannot create it. ${missingPathRemedy(this.artifactWriterAvailable, this.workspaceWriterAvailable)}`,
+          shouldAbort: false,
+          count: fails,
+          missingPath: true,
+        };
+      }
+      return { output, shouldAbort: false, count: fails, missingPath: true };
+    }
     if (fails >= this.hardAbortAt) {
       return { output, shouldAbort: true, count: fails };
     }
@@ -226,7 +268,14 @@ export class ToolFailureTracker {
     /** See {@link ToolFailureResult.sourceFailureKind}. */
     sourceFailureKind?: 'truncated' | 'not-persisted';
     transportFailure?: boolean;
+    /** See {@link ToolFailureResult.missingPath}. */
+    missingPath?: boolean;
+    artifactWriterAvailable?: boolean;
+    workspaceWriterAvailable?: boolean;
   }): string {
+    if (opts.missingPath) {
+      return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` answered "not found" ${opts.count} times in a row this turn. The path does not exist and reading it again cannot create it. ${missingPathRemedy(opts.artifactWriterAvailable ?? false, opts.workspaceWriterAvailable ?? false)}`;
+    }
     if (opts.transportFailure) {
       return `[${opts.providerLabel}] aborting — Gezel's internal tool connection failed ${opts.count} times in this turn. The calls were not rejected by their schemas; the local service backchannel was unavailable, so changing tools or arguments cannot recover this turn.`;
     }
@@ -258,7 +307,11 @@ export class ToolFailureTracker {
     count: number;
     delegationAvailable?: boolean;
     transportFailure?: boolean;
+    missingPath?: boolean;
   }): string {
+    if (opts.missingPath) {
+      return 'The model kept reading a file that does not exist, so the turn was stopped. Try sending your message again.';
+    }
     if (opts.transportFailure) {
       return `Gezel lost its internal tool connection, so the turn was stopped after ${opts.count} failed calls. Your chat and completed tool history were preserved; retry after the service reconnects.`;
     }
@@ -277,6 +330,34 @@ export class ToolFailureTracker {
    * instead of `new Error(buildAbortMessage(...))` so both audiences are
    * carried through to the chat manager's catch.
    */
+  /** Build the abort for a provider's tool loop from what it kept of the failure. */
+  static buildLoopAbort(args: {
+    providerLabel: string;
+    loop: ToolFailureLoop;
+    surgicalEditsAvailable: boolean;
+    delegationAvailable: boolean;
+    artifactWriterAvailable: boolean;
+    workspaceWriterAvailable: boolean;
+  }): TurnAbortError {
+    const { loop } = args;
+    return ToolFailureTracker.buildAbort({
+      providerLabel: args.providerLabel,
+      toolName: loop.tool,
+      count: loop.count,
+      surgicalEditsAvailable: args.surgicalEditsAvailable,
+      delegationAvailable: args.delegationAvailable,
+      ...(loop.sourceFailureKind ? { sourceFailureKind: loop.sourceFailureKind } : {}),
+      ...(loop.transportFailure ? { transportFailure: true } : {}),
+      ...(loop.missingPath
+        ? {
+            missingPath: true,
+            artifactWriterAvailable: args.artifactWriterAvailable,
+            workspaceWriterAvailable: args.workspaceWriterAvailable,
+          }
+        : {}),
+    });
+  }
+
   static buildAbort(opts: {
     providerLabel: string;
     toolName: string;
@@ -285,12 +366,50 @@ export class ToolFailureTracker {
     delegationAvailable?: boolean;
     sourceFailureKind?: 'truncated' | 'not-persisted';
     transportFailure?: boolean;
+    missingPath?: boolean;
+    artifactWriterAvailable?: boolean;
+    workspaceWriterAvailable?: boolean;
   }): TurnAbortError {
     return new TurnAbortError(
       ToolFailureTracker.buildAbortMessage(opts),
       ToolFailureTracker.buildUserMessage(opts),
     );
   }
+}
+
+const MISSING_PATH_READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_file',
+  'read_files',
+  'read_artifact',
+  'read_artifacts',
+  'stat',
+  'list_dir',
+  'list_artifacts',
+  'grep_files',
+  'grep_artifact',
+  'validate',
+  'read_doc_as_markdown',
+]);
+
+function isMissingPathReadFailure(toolName: string, output: string): boolean {
+  return MISSING_PATH_READ_TOOLS.has(toolName) && /\bnot found\b/i.test(output);
+}
+
+/**
+ * Name only the writer the turn actually wired — a hint that prescribes an
+ * absent tool is the McKinley Park shape (ADR 0001).
+ */
+function missingPathRemedy(artifactWriter: boolean, workspaceWriter: boolean): string {
+  if (artifactWriter && workspaceWriter) {
+    return 'If a gate or check named this path as YOUR deliverable, create it now: paths under `tasks/<n>/` are artifacts — `write_artifact`; other paths are workspace files — `write_file`. Otherwise list the directory once and read the real path.';
+  }
+  if (artifactWriter) {
+    return 'If a gate or check named this path as YOUR deliverable, create it now with `write_artifact` at exactly that path. Otherwise list the directory once and read the real path.';
+  }
+  if (workspaceWriter) {
+    return 'If a gate or check named this path as YOUR deliverable, create it now with `write_file` at exactly that path. Otherwise list the directory once and read the real path.';
+  }
+  return 'This roster cannot create files: record the blocker in a task note and end the turn instead of reading the path again.';
 }
 
 function isSourceEditFailureTool(toolName: string): boolean {

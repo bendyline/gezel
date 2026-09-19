@@ -140,6 +140,52 @@ afterEach(async () => {
 });
 
 describe('TaskRunner — dispatch + FIFO', () => {
+  it('pauses the task for help when a dispatch fails permanently', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 't1',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'plan',
+          name: 'plan',
+          assignee: { kind: 'gezel', gezelId: 'bea' },
+          createdAt: now,
+        },
+      ]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    // The dispatcher rejecting stands for `startHandoffSession` having spent
+    // its own bounded retries (three sends, each a repeat-loop abort).
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]), async () => {
+      throw new Error('[Mac AI] aborting — `write_task_note` was called 5 times this turn');
+    });
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const pauseAfterFailedDispatch = vi.fn(async () => {});
+    const runner = new TaskRunner({ store, dispatcher, pauseAfterFailedDispatch });
+
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.wake();
+
+    expect(pauseAfterFailedDispatch).toHaveBeenCalledTimes(1);
+    expect(pauseAfterFailedDispatch).toHaveBeenCalledWith({
+      projectId: 'p1',
+      num: 1,
+      stepId: 'plan',
+      taskRef: 'p1/1',
+      detail: expect.stringContaining('write_task_note'),
+    });
+  });
+
   it('preserves a handoff enqueued while a serialized tick is in flight', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });
@@ -994,6 +1040,73 @@ describe('TaskRunner — cancellation via task status', () => {
     });
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(1);
+
+    dispatcher.activeSessionIds.delete('session-1');
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual([]);
+  });
+
+  it('does not cancel the turn that completed a self-routing step and re-armed it', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    const tasks = new TaskManager(store);
+    tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
+      const gezelId =
+        newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+      if (!gezelId || !newStep.lastActivatedAt) return;
+      runner.adoptActiveDispatchActivation({
+        taskRef: task.ref,
+        stepId: newStep.id,
+        gezelId,
+        activationAt: newStep.lastActivatedAt,
+      });
+    });
+    // The night-shift oversight shape: one step whose `next` is its own id.
+    const task = await tasks.create('p1', {
+      title: 'Oversight',
+      description: 'Re-arms itself after every run.',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      steps: [
+        {
+          id: 'oversight',
+          name: 'Oversight',
+          assignee: { kind: 'gezel', gezelId: 'bea' },
+          next: 'oversight',
+        },
+      ] as never,
+    });
+    const originalActivation = task.craftbook.steps[0]?.lastActivatedAt;
+    expect(originalActivation).toBeTruthy();
+    if (!originalActivation) return;
+
+    runner.enqueueHandoff({
+      taskRef: task.ref,
+      stepId: 'oversight',
+      gezelId: 'bea',
+      projectId: 'p1',
+      activationAt: originalActivation,
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
+
+    const outcome = await tasks.completeStepChecked('p1', task.num, 'oversight', undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('advanced');
+    const rearmed = await tasks.get('p1', task.num);
+    expect(rearmed?.status).toBe('active');
+    expect(rearmed?.activeStepId).toBe('oversight');
+    expect(rearmed?.craftbook.steps[0]?.lastActivatedAt).not.toBe(originalActivation);
+
+    // The prune sweep used to read the new activation as a superseding
+    // dispatch and cancel the turn while it was still streaming its close.
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual([]);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
 
     dispatcher.activeSessionIds.delete('session-1');
     await runner.tick();
@@ -1874,9 +1987,13 @@ describe('TaskRunner — night quota reserve gating', () => {
 });
 
 describe('TaskRunner — capability-floor derivation at dispatch', () => {
-  async function writeFloorTask(step: Partial<TaskCraftbookStep> & { id: string }): Promise<void> {
+  async function writeFloorTask(
+    step: Partial<TaskCraftbookStep> & { id: string },
+    extras: Partial<import('@bendyline/gezel').Task> = {},
+  ): Promise<void> {
     const now = new Date().toISOString();
     await store.writeTask({
+      ...extras,
       projectId: 'p1',
       num: 1,
       ref: 'p1/1',
@@ -1934,6 +2051,18 @@ describe('TaskRunner — capability-floor derivation at dispatch', () => {
 
   it('neither floor nor role → no floor fields on the dispatch', async () => {
     await writeFloorTask({ id: 'work' });
+    const dispatch = await dispatchOnce();
+    expect(dispatch.capabilityFloor).toBeUndefined();
+    expect(dispatch.bookCatalogId).toBeUndefined();
+  });
+
+  it('a generalist task dispatches with no floor even when its step declares one', async () => {
+    // Per-step routing would move the one owner between models as floors
+    // change, and a model change is what breaks the shared transcript.
+    await writeFloorTask(
+      { id: 'work', suggestedRole: 'developer', capabilityFloor: 'large' },
+      { executionMode: 'generalist' },
+    );
     const dispatch = await dispatchOnce();
     expect(dispatch.capabilityFloor).toBeUndefined();
     expect(dispatch.bookCatalogId).toBeUndefined();
@@ -2074,5 +2203,17 @@ describe('TaskRunner — waitingStates', () => {
     await runner.tick();
 
     expect(runner.waitingStates()).toEqual([]);
+  });
+});
+
+describe('TaskRunner.hasHandoffFor', () => {
+  it('reports a queued handoff for the exact task step and nothing else', () => {
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    const runner = new TaskRunner({ store, dispatcher });
+    expect(runner.hasHandoffFor('p1/1', 'work')).toBe(false);
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'work', gezelId: 'bea', projectId: 'p1' });
+    expect(runner.hasHandoffFor('p1/1', 'work')).toBe(true);
+    expect(runner.hasHandoffFor('p1/1', 'other')).toBe(false);
+    expect(runner.hasHandoffFor('p1/2', 'work')).toBe(false);
   });
 });

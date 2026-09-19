@@ -25,7 +25,7 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type Task,
-  resolveExecutionDensity,
+  resolveGeneralistKickoff,
   resolveSecurityPolicy,
   securityPolicyForLevel,
 } from '@bendyline/gezel';
@@ -633,7 +633,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               about,
               role: roleManifest.role,
               providerName: provider,
-              executionDensity: resolveExecutionDensity(undefined, provider, tier),
+              generalistKickoff: resolveGeneralistKickoff(undefined, provider, tier),
               gezelId: session.gezelId,
               project: PROJECT,
               workspaceFiles: scenario.workspaceFiles,

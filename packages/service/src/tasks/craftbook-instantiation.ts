@@ -400,3 +400,24 @@ export function inlineStepsToCraftbook(
     updatedAt: now,
   };
 }
+
+/**
+ * Pin one gezel as the owner of every step (generalist mode). For each step
+ * that is not explicitly a human's (`assignee.kind === 'user'`) and not
+ * explicitly another gezel's, drop any role-resolved `suggestedGezelId` and
+ * set `assignee` to the owner. `suggestedRole` is deliberately KEPT: it still
+ * carries the step's capability floor, research intent and gate kit, and
+ * `maybeResolveStepRole` short-circuits on the explicit assignee, so no
+ * specialist is recruited. Mutates in place, like `interpolateStepsContext`.
+ *
+ * This is the solo-project `collapseToGezelId` transform (mcp `server.ts`)
+ * minus its overwrite of user steps — a human-in-the-loop step stays one.
+ */
+export function pinCraftbookOwner(steps: TaskCraftbookStep[], ownerGezelId: string): void {
+  for (const step of steps) {
+    if (step.assignee?.kind === 'user') continue;
+    if (step.assignee?.kind === 'gezel' && step.assignee.gezelId !== ownerGezelId) continue;
+    delete step.suggestedGezelId;
+    step.assignee = { kind: 'gezel', gezelId: ownerGezelId };
+  }
+}

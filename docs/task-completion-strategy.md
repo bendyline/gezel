@@ -87,10 +87,13 @@ graph; the engine renders it per executor tier:
   "validated-affordance" lesson: tiny models succeed when the hard part
   moves into the tool/gate).
 - **medium**: the book as authored.
-- **frontier**: gates only. Steps become a checklist the model may satisfy
-  in any order; the gate graph is the contract, the procedure is advisory.
-  (Frontier models lose more to scaffolding overhead than they gain from
-  procedure — let the gate be the only hard structure.)
+- **generalist** (frontier providers by default, any model by setting): the
+  book as authored, walked by ONE gezel in ONE session — every step, every
+  gate, disclosed one step at a time with the whole outline in view and the
+  union of every step's tools on the bench. Shipped as generalist mode v2
+  (`docs/generalist-mode.md`). The earlier "gates only" idea was dropped: the
+  per-step gates are the quality floor, and progressive disclosure is what
+  keeps a long single-session run on the rails.
 
 Implementation note: this is a *rendering* concern (like solo-collapse),
 not 3× book authoring. Books gain optional `tierHints` per step; the

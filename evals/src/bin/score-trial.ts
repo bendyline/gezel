@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { type ContinuityFacts, summarizeContinuityForRunDir } from '../continuity-facts.ts';
 import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
 import { summarizeKeurmeesterCasesSync } from '../keurmeester-metrics.ts';
 import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
@@ -57,6 +58,12 @@ export interface TrialFacts {
    * says the model produced the artifact, not that the recipe works.
    */
   craftbook?: CraftbookDroveSummary;
+  /**
+   * Steps walked, sessions used, compactions, fanout mechanics and budget
+   * trips — see `summarizeContinuity`. Absent for a run dir that predates
+   * history capture. The generalist-mode A/B reads this block.
+   */
+  continuity?: ContinuityFacts;
 
   outcome: {
     success: boolean;
@@ -688,6 +695,8 @@ export function score(runDir: string): TrialFacts {
     reason: string;
     failureMode?: string;
     modelTier?: string;
+    generalistMode?: string;
+    engine?: string;
     finalSniff?: TrialFinalSniff;
     nativeEngineIncidents?: NativeEngineIncidentSummary;
   }>(join(runDir, 'result.json'));
@@ -1036,6 +1045,10 @@ export function score(runDir: string): TrialFacts {
   // Keurmeester's contribution without parsing raw JSONL.
   const keurmeester = summarizeKeurmeesterCasesSync(runDir);
   const craftbook = summarizeCraftbookDrove(runDir, result.scenarioId);
+  const continuity = summarizeContinuityForRunDir(runDir, {
+    ...(result.generalistMode ? { generalistMode: result.generalistMode } : {}),
+    ...(result.engine ? { engine: result.engine } : {}),
+  });
   const { timeToFirstTokenMs, firstTurnTtftMs } = parseFirstTokenTiming(
     readLines(join(runDir, 'daemon.log')).join('\n'),
     result.startedAt,
@@ -1052,6 +1065,7 @@ export function score(runDir: string): TrialFacts {
     ...(judge ? { judge } : {}),
     ...(keurmeester ? { keurmeester } : {}),
     ...(craftbook ? { craftbook } : {}),
+    ...(continuity ? { continuity } : {}),
     ...(result.nativeEngineIncidents
       ? { nativeEngineIncidents: result.nativeEngineIncidents }
       : {}),

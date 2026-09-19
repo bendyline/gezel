@@ -248,6 +248,20 @@ export interface TaskRunnerOptions {
     stepId: string,
   ) => Promise<{ count: number; exhausted: boolean }>;
   /**
+   * Pause a task for help after its dispatch failed permanently. The
+   * dispatcher has spent its own bounded retries by the time it rejects, so
+   * dropping the handoff left the task active with nothing queued — and the
+   * stall sweep will not nudge into a session whose last turn aborted. An
+   * invoice-run task sat dead like that for ninety minutes (2026-09-18).
+   */
+  pauseAfterFailedDispatch?: (args: {
+    projectId: string;
+    num: number;
+    stepId: string;
+    taskRef: string;
+    detail: string;
+  }) => Promise<void>;
+  /**
    * Tick cadence. 5000ms is plenty — a tick too fast is noise; too
    * slow and the queue feels sluggish after a provider drains.
    */
@@ -289,6 +303,7 @@ export class TaskRunner {
   private readonly dispatcher: TaskRunnerDispatcher;
   private readonly prepareActiveStep: TaskRunnerOptions['prepareActiveStep'];
   private readonly noteRestartResume: TaskRunnerOptions['noteRestartResume'];
+  private readonly pauseAfterFailedDispatch: TaskRunnerOptions['pauseAfterFailedDispatch'];
   private readonly tickIntervalMs: number;
   private readonly now: () => number;
   private readonly isNightShiftActive: () => boolean;
@@ -329,6 +344,7 @@ export class TaskRunner {
     this.dispatcher = opts.dispatcher;
     this.prepareActiveStep = opts.prepareActiveStep;
     this.noteRestartResume = opts.noteRestartResume;
+    this.pauseAfterFailedDispatch = opts.pauseAfterFailedDispatch;
     this.tickIntervalMs = opts.tickIntervalMs ?? 5_000;
     this.now = opts.now ?? Date.now;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
@@ -377,6 +393,23 @@ export class TaskRunner {
       enqueuedAt: this.now(),
       id: this.nextId++,
     });
+  }
+
+  /**
+   * True while this step already has a handoff queued (for example, held by
+   * fanout admission or provider backpressure) or a dispatch in flight. The
+   * stuck-step sweep consults this before re-driving: a queued handoff is
+   * work the runner will start on its own schedule, not a stall — re-driving
+   * it through `messageGezel` bypasses admission and starts N concurrent
+   * turns on a one-slot engine (wild-caught: five fanout children of
+   * `fanout-stories` blasted at once onto MLX at the 8-minute stall bar).
+   */
+  hasHandoffFor(taskRef: string, stepId: string): boolean {
+    if (this.pending.some((h) => h.taskRef === taskRef && h.stepId === stepId)) return true;
+    for (const dispatch of this.activeDispatches.values()) {
+      if (dispatch.taskRef === taskRef && dispatch.stepId === stepId) return true;
+    }
+    return false;
   }
 
   /**
@@ -945,10 +978,16 @@ export class TaskRunner {
       // stamps `suggestedGezelId`, so the role is available here).
       const step = task.craftbook?.steps.find((s) => s.id === handoff.stepId);
       // Effective floor = explicit step floor, else max(role floor,
-      // whole-book floor) — see effectiveCapabilityFloor.
-      const floor = step
-        ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
-        : undefined;
+      // whole-book floor) — see effectiveCapabilityFloor. A generalist task
+      // passes NO floor: per-step routing would move the owner between
+      // models as floors change, and the dispatcher refuses to share a
+      // transcript across a model change — silently turning "one session
+      // across every step" back into a session per step on local engines.
+      // One model per run; the owner's pin or the install default decides.
+      const floor =
+        step && task.executionMode !== 'generalist'
+          ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
+          : undefined;
 
       // Dispatch. `startHandoffSession` is itself fire-and-forget
       // internally (spawns a session, detaches the first send), so
@@ -993,14 +1032,34 @@ export class TaskRunner {
         }
         inTickDispatches.set(providerName, (inTickDispatches.get(providerName) ?? 0) + 1);
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         log.error(
           `[task-runner] dispatch failed for ${handoff.taskRef}/${handoff.stepId}:`,
-          err instanceof Error ? err.message : err,
+          detail,
         );
         // On failure we drop — retrying indefinitely would loop on a
-        // permanent fault (deleted gezel, bad config). The task stays
-        // active on disk so a user can retry via `advance_task_step`
-        // to re-enqueue.
+        // permanent fault (deleted gezel, bad config). The dispatcher has
+        // spent its own bounded retries by now, so the task is paused for
+        // help with the reason on record rather than left active with
+        // nothing queued; a user retries via `advance_task_step` or by
+        // setting it active again.
+        if (this.pauseAfterFailedDispatch) {
+          const current = await this.store.readTask(task.projectId, task.num).catch(() => null);
+          if (current && current.status === 'active' && current.activeStepId === handoff.stepId) {
+            await this.pauseAfterFailedDispatch({
+              projectId: task.projectId,
+              num: task.num,
+              stepId: handoff.stepId,
+              taskRef: handoff.taskRef,
+              detail,
+            }).catch((pauseErr: unknown) => {
+              log.warn(
+                `[task-runner] could not pause ${handoff.taskRef} after its failed dispatch:`,
+                pauseErr instanceof Error ? pauseErr.message : pauseErr,
+              );
+            });
+          }
+        }
       }
     }
 

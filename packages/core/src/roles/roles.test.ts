@@ -27,6 +27,9 @@ describe('role registry — resolution', () => {
   it('resolves aliases, web-flavored before generic developer', () => {
     expect(resolveRoleId('Backend Engineer')).toBe('developer');
     expect(resolveRoleId('Builder')).toBe('developer');
+    expect(resolveRoleId('Generalist')).toBe('generalist');
+    expect(resolveRoleId('Generalist Developer')).toBe('generalist');
+    expect(resolveRoleId('Ambachtsman')).toBe('generalist');
     expect(resolveRoleId('Full Stack Developer')).toBe('web-developer');
     expect(resolveRoleId('Frontend dev')).toBe('web-developer');
     expect(resolveRoleId('Research Analyst')).toBe('researcher');

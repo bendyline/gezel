@@ -18,6 +18,13 @@ export interface EnsureGezelOptions {
   jobTitle: string;
   /** Caller-supplied first name. Only used when creating. */
   preferredName?: string;
+  /**
+   * Exact gilde template id. When set, a roster gezel created from that
+   * template is reused, else one is created from exactly that template.
+   * Falls through to the fuzzy `jobTitle` path only when the installed
+   * catalog does not carry the template (an older content pin).
+   */
+  templateId?: string;
 }
 
 export type EnsureGezelAction = 'reused' | 'created-from-gilde' | 'created-bespoke';
@@ -70,8 +77,50 @@ export async function ensureGezel(args: {
   const query = opts.jobTitle.trim();
   if (!query) throw new Error('ensureGezel: jobTitle is required');
 
-  // 1. Reuse: score the existing roster.
   const existing = await store.listGezels();
+
+  // 0. Exact template, when the caller names one: the roster gezel made
+  // from it, else a fresh gezel from precisely that template. Identity is
+  // the template id, not a fuzzy score — a "Generalist" must never resolve
+  // to whichever roster member happens to describe themselves as broad.
+  if (opts.templateId) {
+    const fromTemplate = existing.find((g) => g.templateId === opts.templateId);
+    if (fromTemplate) {
+      return {
+        gezelId: fromTemplate.id,
+        name: fromTemplate.name,
+        role: fromTemplate.role ?? opts.jobTitle,
+        action: 'reused',
+        templateId: opts.templateId,
+      };
+    }
+    const exact = await resolveGildeTemplateForRole(catalog, opts.templateId);
+    if (exact && exact.templateId === opts.templateId) {
+      const { name: chosenName, gender: chosenGender } = pickNameAndGender({
+        preferredName: opts.preferredName,
+        ...(exact.nameSuggestions ? { suggestions: exact.nameSuggestions } : {}),
+      });
+      const created = await store.createGezel({
+        name: chosenName,
+        role: exact.role,
+        gender: chosenGender,
+        about: exact.about,
+        templateId: exact.templateId,
+        templateVersion: exact.templateVersion,
+        ...(exact.frontmatter ? { frontmatter: exact.frontmatter } : {}),
+      });
+      return {
+        gezelId: created.id,
+        name: created.name,
+        role: created.role ?? exact.role,
+        action: 'created-from-gilde',
+        matchScore: exact.matchScore,
+        templateId: exact.templateId,
+      };
+    }
+  }
+
+  // 1. Reuse: score the existing roster.
   const rosterCandidates: MatchCandidate[] = existing.map((g) => ({
     id: g.id,
     role: g.role,

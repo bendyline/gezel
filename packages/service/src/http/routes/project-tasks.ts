@@ -34,7 +34,11 @@ import { z } from 'zod';
 import { ConnectorPrepError } from '../../connectors/task-prep.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
-import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from '../../tasks/manager.js';
+import {
+  ConnectorSetupRequiredError,
+  CraftbookSetupRequiredError,
+  StepCompletionBlockedError,
+} from '../../tasks/manager.js';
 import { retryPausedTask } from '../../tasks/retry.js';
 import type { ServiceContext } from '../context.js';
 
@@ -290,13 +294,62 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = CompleteStepRequestSchema.parse(await c.req.json().catch(() => ({})));
-    const outcome = await ctx.tasks.completeStepChecked(
-      projectId,
-      num,
-      c.req.param('stepId'),
-      body.next,
-      body.force ? { force: true, cause: 'user' } : { cause: 'model' },
-    );
+    // An explicit jump target that is not one of this task's steps used to
+    // surface as an unhandled 500. A model reaching for a step it read about
+    // elsewhere (a fanout child naming its host's `collect`) gets the step
+    // list back instead, so its next call can be right.
+    if (body.next && body.next !== 'next') {
+      const current = await ctx.tasks.get(projectId, num);
+      const stepId = c.req.param('stepId');
+      if (current && !current.craftbook.steps.some((s) => s.id === body.next)) {
+        return c.json(
+          {
+            error: `task ${current.ref}: no step "${body.next}" to activate. This task's steps: ${current.craftbook.steps.map((s) => s.id).join(', ')}. Omit \`next\` to follow the craftbook's own order.`,
+          },
+          400,
+        );
+      }
+      // A step naming ITSELF as `next` completed and then re-activated
+      // itself: the fanout-tally host did that on its terminal `merge` step
+      // (2026-09-18), turning "done" into a self-loop the stall sweep had to
+      // break nine minutes later. The same goes for any `next` on a final
+      // step — completing it closes the task.
+      if (current && body.next === stepId) {
+        return c.json(
+          {
+            error: `task ${current.ref}: step "${stepId}" cannot name itself as \`next\`. Omit \`next\` to complete it and let the craftbook's own order decide what follows.`,
+          },
+          400,
+        );
+      }
+      const currentStep = current?.craftbook.steps.find((s) => s.id === stepId);
+      if (current && currentStep?.terminal) {
+        return c.json(
+          {
+            error: `task ${current.ref}: "${stepId}" is the final step — completing it closes the task. Omit \`next\`.`,
+          },
+          400,
+        );
+      }
+    }
+    let outcome: Awaited<ReturnType<typeof ctx.tasks.completeStepChecked>>;
+    try {
+      outcome = await ctx.tasks.completeStepChecked(
+        projectId,
+        num,
+        c.req.param('stepId'),
+        body.next,
+        body.force ? { force: true, cause: 'user' } : { cause: 'model' },
+      );
+    } catch (err) {
+      // A completion the task's state refuses is a 409 the caller renders,
+      // never a 500 — the catch-all scrubs the body, and the message IS
+      // the instruction.
+      if (err instanceof StepCompletionBlockedError) {
+        return c.json({ error: err.message, code: err.code, reason: err.reason }, 409);
+      }
+      throw err;
+    }
     if (outcome.status === 'held') {
       // 200 + structured gate info — a rejection is a first-class result
       // the caller renders (MCP tool text, UI banner), not a transport

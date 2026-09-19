@@ -9,8 +9,11 @@ import {
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { basename, delimiter, dirname, join } from 'node:path';
 import {
+  GENERALIST_TEMPLATE_ID,
   type GezelConfig,
+  type ProviderName,
   createLogger,
+  effectiveGeneralistModeSetting,
   formatNightShiftSummary,
   formatSuspension,
   isEngagementAllowed,
@@ -20,6 +23,7 @@ import {
   onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
@@ -151,6 +155,7 @@ import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
 import type { LLMProvider } from './providers/types.js';
@@ -187,7 +192,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
-import { TaskManager } from './tasks/manager.js';
+import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
@@ -741,10 +746,14 @@ export async function startProductService(
   // TaskScheduler needs ChatManager (for ambient voorman nudges) so it's
   // constructed after `chat` is ready. Task-cron ticks work without chat,
   // but we route both through the same scheduler to avoid two timers.
+  // The runner is constructed below; the scheduler reads it lazily so the
+  // stuck-step sweep can tell a queued handoff from a stall.
+  const schedulerRunner: { current: TaskRunner | undefined } = { current: undefined };
   const scheduler = new TaskScheduler({
     manager: tasks,
     chat,
     store,
+    runner: () => schedulerRunner.current,
     debug,
     isNightShiftWindowOpen: () => nightShift.isWindowOpen(),
     currentNightShiftDayKey: () => nightShift.currentDayKey(),
@@ -759,10 +768,58 @@ export async function startProductService(
   // Late-bound: IndexEnrichmentManager is constructed after the runner; the
   // closure reads through this ref so night dispatch can hold on catch-up.
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
+  // One exit for a handoff the runtime could not carry: the runner reaches it
+  // when the dispatch itself rejects, the chat manager when the detached sends
+  // spend their bounded retries. Both re-check the step is still the live one
+  // so a task that moved on (or was paused by a person) is left alone.
+  const pauseTaskAfterFailedHandoff = async ({
+    projectId,
+    num,
+    stepId,
+    taskRef,
+    detail,
+  }: {
+    projectId: string;
+    num: number;
+    stepId: string;
+    taskRef: string;
+    detail: string;
+  }): Promise<void> => {
+    const current = await tasks.get(projectId, num);
+    if (!current || current.status !== 'active' || current.activeStepId !== stepId) return;
+    await tasks
+      .appendNote(projectId, num, {
+        text: `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`,
+        author: { kind: 'user' },
+        stepId,
+      })
+      .catch(() => {});
+    await tasks.setStatus(projectId, num, 'paused');
+    const paused = await tasks.get(projectId, num);
+    if (paused) {
+      await tasks.emitNeedsHelp({
+        projectId,
+        task: paused,
+        stepId,
+        reason: 'step_stalled',
+        detail: `Handoff for step "${stepId}" failed after bounded retries: ${detail}`,
+      });
+    }
+    log.warn(
+      `[tasks] ${taskRef} step "${stepId}": handoff failed after bounded retries — paused for help`,
+    );
+  };
+  chat.setHandoffExhaustedHandler(async ({ taskRef, stepId, detail }) => {
+    const [projectId, numText] = taskRef.split('/');
+    const num = Number(numText);
+    if (!projectId || !Number.isFinite(num)) return;
+    await pauseTaskAfterFailedHandoff({ projectId, num, stepId, taskRef, detail });
+  });
   const taskRunner = new TaskRunner({
     store,
     prepareActiveStep: (projectId, num) => tasks.ensureActiveStepEntered(projectId, num),
     noteRestartResume: (projectId, num, stepId) => tasks.noteRestartResume(projectId, num, stepId),
+    pauseAfterFailedDispatch: pauseTaskAfterFailedHandoff,
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
       cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId, 'task-superseded'),
@@ -784,6 +841,7 @@ export async function startProductService(
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
+  schedulerRunner.current = taskRunner;
   // A parent's lifecycle is a runtime gate for its whole descendant tree.
   // Reconcile immediately on every durable status transition: inactive
   // ancestors prune queued/running child turns, while a resumed ancestor
@@ -971,6 +1029,64 @@ export async function startProductService(
     }
   };
   tasks.setRoleResolver(roleResolverClosure);
+
+  // Execution mode (generalist v2): decided once per task from the install
+  // setting and the provider that will actually run it, then stamped on
+  // the task. An auto-assigned generalist task gets the Generalist gezel
+  // (one per install, reused by template id) pulled onto the project;
+  // a task whose caller pinned an owner keeps that owner. Errors fall back
+  // to stepwise inside TaskManager, the behavior every task had before.
+  tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
+    const config = await store.readConfig();
+    const setting = effectiveGeneralistModeSetting(config);
+    let providerName: ProviderName | undefined;
+    let tier: string | undefined;
+    let mode: 'generalist' | 'stepwise';
+    if (requested === 'generalist' || requested === 'stepwise') {
+      mode = requested;
+    } else {
+      providerName = assigneeGezelId
+        ? await chat.providerForGezel(assigneeGezelId, { nightShift: Boolean(nightShift) })
+        : resolveDefaultProviderName(config);
+      tier = await chat.classifyExecutionTier(providerName, assigneeGezelId);
+      mode = resolveTaskExecutionMode(setting, providerName, tier);
+    }
+    const base = {
+      ...(setting ? { setting } : {}),
+      ...(providerName ? { providerName } : {}),
+      ...(tier ? { tier } : {}),
+    };
+    if (mode !== 'generalist' || assigneeGezelId) return { mode, ...base };
+    const generalist = await ensureGezel({
+      opts: { jobTitle: 'Generalist', templateId: GENERALIST_TEMPLATE_ID },
+      store,
+      catalog,
+      chat,
+      bespokeMode: 'static',
+    });
+    await store.addGezelToProject(projectId, generalist.gezelId, { source: 'task' }).catch(() => {
+      /* roster add is best-effort */
+    });
+    // The Generalist may carry its own provider pin (a user parked it on a
+    // local model). Under `auto` that pin decides, not the install default:
+    // a single-session run on a model the rule says is not ready for it is
+    // exactly what `auto` exists to avoid.
+    if (requested === 'auto') {
+      const ownerProvider = await chat.providerForGezel(generalist.gezelId, {
+        nightShift: Boolean(nightShift),
+      });
+      if (ownerProvider !== providerName) {
+        const ownerTier = await chat.classifyExecutionTier(ownerProvider, generalist.gezelId);
+        if (resolveTaskExecutionMode(setting, ownerProvider, ownerTier) !== 'generalist') {
+          log.info(
+            `[tasks] generalist ${generalist.gezelId} is pinned to ${ownerProvider} (${ownerTier}); running stepwise under auto`,
+          );
+          return { mode: 'stepwise', ...base, providerName: ownerProvider, tier: ownerTier };
+        }
+      }
+    }
+    return { mode: 'generalist', ownerGezelId: generalist.gezelId, ...base };
+  });
 
   // Install a craftbook's bundled scripts into the project's scripts/
   // folder the first time a task is created from it. Idempotent — the
@@ -1407,23 +1523,26 @@ export async function startProductService(
       }
     }
 
-    const assigneeGezelId =
-      newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+    // The same three-level resolution entry dispatch uses. A task created
+    // with a task-level assignee and unbound steps (a create-time fanout
+    // host, an ad-hoc task with plain steps) has no step binding at all in
+    // stepwise mode; reading only the step here made every such barrier
+    // release a silent no-op, and the host sat idle until the eight-minute
+    // stall sweep messaged it (every stepwise fanout cell of the 2026-09
+    // campaign; Opus: 63s generalist vs 536s stepwise on identical work).
+    const assigneeGezelId = stepOwnerGezelId(task, newStep);
     if (!assigneeGezelId) return;
-    const prevGezelId =
-      completedStep.assignee?.kind === 'gezel'
-        ? completedStep.assignee.gezelId
-        : completedStep.suggestedGezelId;
-    // Self-handoff: normally we don't start a new session when the same
-    // gezel owned both steps. But a craftbook step CHANGE means a new
-    // procedure (and, in a crew, different role tools) — so when the new
-    // step carries its own `prompt`, start a fresh, clean, task-scoped
-    // session even for the same gezel. This is what lets a solo-collapsed
-    // multi-step craftbook (every step = the one specialist) actually
-    // advance through its phases: without it, no transition ever
-    // re-engages the worker with the next step's instructions. A
-    // procedure-less step keeps the old skip (a redundant session would
-    // just confuse them).
+    const prevGezelId = stepOwnerGezelId(task, completedStep);
+    // Self-handoff: when the same gezel owns both steps and the new step
+    // carries its own `prompt`, still enqueue a handoff — the runner then
+    // re-engages the SAME task session (`ChatManager.startHandoffSession`
+    // reuses it for adjacent same-gezel steps and for every step of a
+    // generalist task), rebuilding the step prompt and exact tool surface
+    // once the prior turn is idle. Without this, no transition would ever
+    // put the next step's instructions in front of the worker. A
+    // procedure-less step keeps the old skip: its activation already
+    // reached the model inside the `advance_task_step` result it is
+    // reading, and a redundant turn would only confuse it.
     if (prevGezelId === assigneeGezelId && !newStep.prompt) return;
     // If the project is read-only or inactive, don't dispatch the
     // handoff. The step-advance tool call itself still mutates task

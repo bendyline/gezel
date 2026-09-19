@@ -113,6 +113,9 @@ export async function postRuntimeFeedback(
   fileContent?: string,
   options: RuntimeFeedbackOptions = {},
 ): Promise<void> {
+  // See postSniffFeedback: the runtime repair policy holds every harness
+  // repair turn, including runtime-assertion nudges.
+  if (ctx.repairPolicy === 'runtime') return;
   if (!report.ran || report.failed.length === 0) return;
 
   let posted = nudgeMemory.get(ctx);

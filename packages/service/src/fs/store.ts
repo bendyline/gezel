@@ -100,6 +100,7 @@ import {
   isSafeEntityId,
   isSharedLibraryProject,
   isValidKokoroVoice,
+  legacyDensityToGeneralistMode,
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
@@ -685,6 +686,7 @@ export class Store {
     await this.backfillRoleBasedNames();
     await this.backfillVoices();
     await this.migrateLegacyTemperatureField();
+    await this.migrateLegacyExecutionDensity();
     await this.migrateLegacyGhCheckouts();
     await this.cleanStaleWorkspaceBootstraps();
   }
@@ -1023,6 +1025,37 @@ export class Store {
    * effort: read / write failures log and skip rather than abort
    * layout init.
    */
+  /**
+   * One-shot: the pre-v2 `executionDensity` key becomes `generalistMode`.
+   * `flat` routed kickoff to a solo lead → `on`; `scaffold` forced the crew
+   * → `off`; `auto` stays `auto`. A config that already carries
+   * `generalistMode` keeps it and only loses the stale key. The schema still
+   * declares the legacy key so `readConfig` can hand it to us (it is a
+   * non-strict object and would otherwise strip it); nothing else reads it.
+   */
+  private async migrateLegacyExecutionDensity(): Promise<void> {
+    let config: GezelConfig;
+    try {
+      config = await this.readConfig();
+    } catch {
+      return;
+    }
+    if (config.executionDensity === undefined) return;
+    const mapped = legacyDensityToGeneralistMode(config.executionDensity);
+    const patch: Partial<Record<keyof GezelConfig, unknown>> = { executionDensity: null };
+    if (config.generalistMode === undefined && mapped !== undefined) patch.generalistMode = mapped;
+    try {
+      await this.writeConfig(patch);
+      log.info(
+        `[store] migrated legacy executionDensity=${config.executionDensity} to generalistMode=${config.generalistMode ?? mapped ?? 'unset'}`,
+      );
+    } catch (err) {
+      log.warn(
+        `[store] failed to migrate legacy executionDensity: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   private async migrateLegacyTemperatureField(): Promise<void> {
     let all: GezelSummary[];
     try {

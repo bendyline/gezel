@@ -34,6 +34,19 @@ describe('taskStepMutationRejection', () => {
     expect(message).toContain('active step is now "outline"');
   });
 
+  it('tells a session that also owns the new active step to end its turn, not to yield to someone else', () => {
+    const message = taskStepMutationRejection({
+      taskRef: 'default/10',
+      sessionStepId: 'evaluate',
+      activeStepId: 'repair',
+      transitionCompleted: false,
+      activeStepOwnedBySession: true,
+    });
+    expect(message).toContain('active step is now "repair"');
+    expect(message).toContain('That step is yours as well');
+    expect(message).not.toContain("yield to the active step's gezel");
+  });
+
   it('does not constrain ordinary non-task sessions', () => {
     expect(
       taskStepMutationRejection({

@@ -30,9 +30,10 @@ import {
   parseArgs,
   parseDuration,
   printScenarios,
+  resolveGeneralistFlag,
   resolveKeurmeesterFlag,
   resolveProviderFlag,
-  resolveRenderModeFlag,
+  resolveRepairPolicyFlag,
 } from './args.ts';
 
 async function main() {
@@ -90,7 +91,8 @@ async function main() {
       : [];
   const forceBehaviors = parseCsv(args.flags['force-behaviors']);
   const removeBehaviors = parseCsv(args.flags['remove-behaviors']);
-  const renderMode = resolveRenderModeFlag(args.flags);
+  const generalistMode = resolveGeneralistFlag(args.flags);
+  const repairPolicy = resolveRepairPolicyFlag(args.flags);
   const keurmeester = resolveKeurmeesterFlag(args.flags);
 
   const deviceLock = acquireEvalDeviceLockIfNeeded({
@@ -105,7 +107,8 @@ async function main() {
       ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
       ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
       engine: provider,
-      ...(renderMode ? { executionDensity: renderMode } : {}),
+      ...(generalistMode ? { generalistMode } : {}),
+      ...(repairPolicy ? { repairPolicy } : {}),
       ...(keurmeester ? { keurmeester } : {}),
       ...(args.flags['mlx-source-home']
         ? { mlxSourceHome: String(args.flags['mlx-source-home']) }

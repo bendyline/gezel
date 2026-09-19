@@ -606,6 +606,49 @@ describe('completion gates — self-loop recovery ownership', () => {
     expect(activations).toEqual([]);
   });
 
+  it('dispatches the target when a model-owned rejection routes to a DIFFERENT step', async () => {
+    // The live turn is pinned to the gated step's procedure and the write
+    // guard refuses writes for a step that is no longer active, so it cannot
+    // carry out another step's procedure. Without a handoff the owner sat
+    // idle until the stall sweep (Opus codemod-sweep, 2026-09-19).
+    const task = await tasks.create('default', {
+      title: 'Review routes to repair',
+      description: 'A REVISE verdict sends the work back to a repair step.',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        {
+          id: 'repair',
+          name: 'Repair',
+          assignee: { kind: 'gezel', gezelId: 'ada' },
+          next: 'check',
+        },
+        {
+          id: 'check',
+          name: 'Check',
+          assignee: { kind: 'gezel', gezelId: 'ada' },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'out.md', bytes: 500 }],
+            onReject: 'repair',
+          },
+        },
+      ] as never,
+    });
+    const activations: string[] = [];
+    tasks.setStepActivatedHook(async ({ newStep }) => {
+      activations.push(newStep.id);
+    });
+    await writeWorkspaceFile('out.md', 'short');
+    await tasks.activateStep('default', task.num, 'check');
+    activations.length = 0;
+
+    const held = await tasks.completeStepChecked('default', task.num, 'check', undefined, {
+      cause: 'model',
+    });
+    expect(held.status).toBe('held');
+    expect(activations).toEqual(['repair']);
+  });
+
   it('dispatches recovery when an idle sweep has no current model turn', async () => {
     const { num, stepId } = await createSelfLoopTask();
     const activations: string[] = [];

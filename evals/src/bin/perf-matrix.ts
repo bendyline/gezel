@@ -16,11 +16,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generalistArmLabel } from '../generalist-arm.ts';
 
 interface TrialRow {
   scenarioId: string;
   modelId: string;
   engine: string;
+  arm?: string;
   success: boolean;
   failureMode?: string;
   durationMs: number;
@@ -78,6 +80,7 @@ function collect(runsDir: string): TrialRow[] {
       success?: boolean;
       durationMs?: number;
       failureMode?: string;
+      generalistMode?: string;
     }>(join(dir, 'result.json'));
     if (!result?.modelId || !result?.scenarioId) continue;
     const metrics = readJson<{
@@ -92,10 +95,12 @@ function collect(runsDir: string): TrialRow[] {
     }>(join(dir, 'metrics.json'));
     const host = readJson<{ framework?: string }>(join(dir, 'host.json'));
     const d = metrics?.derived ?? {};
+    const arm = generalistArmLabel(result.generalistMode);
     rows.push({
       scenarioId: result.scenarioId,
       modelId: result.modelId,
       engine: host?.framework ?? 'unknown',
+      ...(arm ? { arm } : {}),
       success: Boolean(result.success),
       ...(result.failureMode ? { failureMode: result.failureMode } : {}),
       durationMs: result.durationMs ?? 0,
@@ -141,7 +146,7 @@ function main(): void {
 
   if (tsv) {
     console.log(
-      'model\tengine\tscenario\tsuccess\tfailureMode\tdurationMs\tgenTps\tpromptTps\tpeakRssMb\tinTok\toutTok',
+      'model\tengine\tscenario\tsuccess\tfailureMode\tdurationMs\tgenTps\tpromptTps\tpeakRssMb\tinTok\toutTok\tarm',
     );
     for (const r of rows) {
       console.log(
@@ -157,6 +162,7 @@ function main(): void {
           r.peakRssMb ?? '',
           r.inputTokens ?? '',
           r.outputTokens ?? '',
+          r.arm ?? '',
         ].join('\t'),
       );
     }
@@ -165,7 +171,7 @@ function main(): void {
 
   const byModel = new Map<string, TrialRow[]>();
   for (const r of rows) {
-    const key = `${r.modelId} (${r.engine})`;
+    const key = `${r.modelId}${r.arm ? ` ${r.arm}` : ''} (${r.engine})`;
     const list = byModel.get(key);
     if (list) list.push(r);
     else byModel.set(key, [r]);

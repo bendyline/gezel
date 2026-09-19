@@ -8,6 +8,7 @@ import {
 } from '../mock/mock-server.ts';
 import {
   type MissingDeliverableNearMiss,
+  gezelTurnInflight,
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
@@ -59,6 +60,17 @@ const WORKSPACE_EVAL_TOOLSET_IDS = [
   'builtin.memory',
   'builtin.documents',
   'builtin.web',
+  // Suite-verifying books (codemod-sweep, refactor-module, bug-fix-tdd) tell
+  // the assignee to run the tests with `run_package_script`, and their
+  // `commandEvidence` gates accept nothing but that runner's receipts. The
+  // stepwise arm hid this hole: a recruited developer brings the group in
+  // its own role kit. A generalist arm pins the worker on every step, so the
+  // worker's roster IS the surface — without the group the verify step is
+  // unpassable by construction (Opus, 2026-09-19). The same group carries
+  // `run_script`, which a cli-shim mock is used through; it used to be
+  // installed only for specs that declare such a mock (wild-caught: four
+  // ship-pilot attempts where no prompt or feedback could ever work).
+  'builtin.code-execution',
 ] as const;
 
 const CRAFTBOOK_TASK_EVAL_TOOLSET_IDS = ['builtin.artifacts', 'builtin.tasks'] as const;
@@ -168,8 +180,8 @@ const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
  * absent from the session surface entirely — wild-caught in the
  * cbmx-20260720 sweep: character-sheet / character-turnaround /
  * tileset-batch workers wrote .json stubs because `render_image` never
- * reached the model's function schema. Same precedent as the cli-shim
- * `code-execution` install below.
+ * reached the model's function schema. Same precedent as the
+ * `code-execution` entry in the workspace set above.
  */
 function directWorkerNeedsImageToolset(spec: CraftbookEvalSpec): boolean {
   const checks: CraftbookEvalGateCheck[] = [
@@ -191,8 +203,8 @@ function directWorkerNeedsImageToolset(spec: CraftbookEvalSpec): boolean {
  * A spec that GRADES an artifact-drawer file can only pass when the worker can
  * call `write_artifact` / `read_artifact`.
  *
- * This is the third instance of the same trap the `images` and cli-shim
- * `code-execution` installs above already document: installing any per-gezel
+ * This is the third instance of the same trap the `images` install and the
+ * `code-execution` roster entry above already document: installing any per-gezel
  * builtin group creates an override that REPLACES the worker's role kit, so a
  * worker outfitted with workspace tools silently loses `artifacts`. It stayed
  * latent only because artifact-task specs almost never graded an artifact —
@@ -458,10 +470,41 @@ const SEEDED_READ_TOOL_NAMES = new Set([
   'read_doc_as_markdown',
   'read',
   'view',
+  // The artifact readers fall through to the workspace file when the path
+  // is not an artifact (the cross-drawer reroute), and on the Claude CLI,
+  // where `read_file` is hidden, that is how a model that goes looking for
+  // a workspace reader ends up opening the sources: Opus read all five
+  // seeded refactor-module inputs through one `read_artifacts` call, shipped
+  // a passing refactor, and was failed for never having read them
+  // (2026-09-19). Path matching below keeps a genuine artifact read from
+  // counting: an artifact path never equals a seeded workspace path.
+  'read_artifact',
+  'read_artifacts',
 ]);
 
 function isSeededReadTool(name: string | undefined): boolean {
   return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
+}
+
+/**
+ * Tools whose only input is the project's `package.json`: the sandbox runner
+ * opens the manifest to resolve the script or binary before it runs anything.
+ * A seeded `package.json` exists so `npm run test` can run, not as a source
+ * the model must quote, and a book that says "run the suite with
+ * `run_package_script`" never asks anyone to open it. Requiring a literal
+ * read of it failed an otherwise complete codemod-sweep in both arms (Opus,
+ * 2026-09-19), so a successful call to one of these counts as reading it.
+ */
+const PACKAGE_MANIFEST_TOOL_NAMES = new Set([
+  'run_package_script',
+  'list_package_scripts',
+  'run_npx',
+  'npm_install',
+  'list_packages',
+]);
+
+function consumesPackageManifest(name: string | undefined): boolean {
+  return !!name && PACKAGE_MANIFEST_TOOL_NAMES.has(bareToolName(name));
 }
 
 function sessionReadPaths(
@@ -471,7 +514,11 @@ function sessionReadPaths(
   const read = new Set<string>();
   for (const message of session.messages ?? []) {
     for (const call of message.toolCalls ?? []) {
-      if (!isSeededReadTool(call.name) || call.success === false) continue;
+      if (call.success === false) continue;
+      if (consumesPackageManifest(call.name) && seededPaths.includes('package.json')) {
+        read.add('package.json');
+      }
+      if (!isSeededReadTool(call.name)) continue;
       for (const path of seededPaths) {
         if (toolCallReferencesPath(call, path)) read.add(path);
       }
@@ -1561,6 +1608,22 @@ function executableFailureDependencyDeliverable(
  */
 const VIRTUAL_TARGET_PLATEAU_LIMIT = 12;
 
+/**
+ * Polls a RUNNING workflow gets to itself before the virtual target may tell
+ * its owner it has not finished. About two minutes at the 5s cadence — the
+ * same reading grace `postMissingDeliverableFeedback` gives a missing file.
+ *
+ * The generalist A/B dry run (2026-09-18) sent "has not reached a terminal
+ * step" to the task owner 20 ms after the task was created, in a plain
+ * session that raced the task's own first turn for the engine. The 27B read
+ * the task ref as a file path ten times, then edited the ledger fixture back
+ * and forth under the real session's feet. A workflow that has just started
+ * has, by definition, not reached a terminal step; the message can only be
+ * useful once the runtime has demonstrably stopped, which is also why the
+ * nudge is held for as long as the owner is mid-turn.
+ */
+export const RUNNING_WORKFLOW_GRACE_POLLS = 24;
+
 function repairVirtualTargetForFailures(
   spec: CraftbookEvalSpec,
   failures: readonly string[],
@@ -1824,6 +1887,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
    * with the sniff score unmoved. See {@link VIRTUAL_TARGET_PLATEAU_LIMIT}.
    */
   let virtualTargetPlateau = { score: -1, polls: 0 };
+  let pollsSeen = 0;
   // Advisory judge wiring from the book's test.json rubric: --llm-judge
   // scores these axes against the primary artifact. Never affects
   // pass/fail — deterministic checks alone decide that.
@@ -1887,19 +1951,6 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             `[craftbook:${spec.craftbookId}] installed artifacts eval toolset for ${workerId} (graded artifact deliverable)`,
           );
         }
-        // A cli-shim mock is USED via `run_script` — that tool lives in
-        // the code-execution builtin toolset, which the workspace set
-        // above does not include. Without this install the probe tool is
-        // absent from the MCP bridge entirely (wild-caught: four ship
-        // pilot attempts where no prompt or feedback could ever work).
-        if (spec.mocks?.some((mock) => mock.kind === 'cli')) {
-          await ctx.client.installToolset('builtin.code-execution', {
-            scope: { kind: 'gezel', gezelId: workerId },
-          });
-          ctx.log(
-            `[craftbook:${spec.craftbookId}] installed code-execution toolset for ${workerId} (cli-shim mocks)`,
-          );
-        }
         if (directWorkerNeedsImageToolset(spec)) {
           await ctx.client.installToolset('builtin.images', {
             scope: { kind: 'gezel', gezelId: workerId },
@@ -1953,6 +2004,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       }
     },
     async successCheck(ctx): Promise<SuccessCheckResult> {
+      pollsSeen += 1;
       const projectName = spec.setup?.projectName;
       if (!projectName) return { done: false };
       const projectId = await findProjectId(ctx.client, projectName);
@@ -2106,7 +2158,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       // Final artifacts are expected to be absent during research and planning.
       // Full production-workflow probes let the craftbook's own gates route
       // repairs; injected file-writing turns can bypass roles and stage order.
-      if (spec.repairPolicy === 'runtime') {
+      if ((ctx.repairPolicy ?? spec.repairPolicy) === 'runtime') {
         return taskGraph?.workflowRunning
           ? { done: false }
           : { done: true, success: false, reason: repairFailures.join(' | ') };
@@ -2166,6 +2218,32 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         virtualRepairTarget !== undefined &&
         virtualTargetPlateau.polls >= VIRTUAL_TARGET_PLATEAU_LIMIT;
       if (virtualRepairTarget && !virtualTargetStarving) {
+        const runningWorkflowOnly =
+          virtualRepairTarget.path === 'task-graph.md' &&
+          taskGraph?.workflowRunning === true &&
+          virtualRepairTarget.failures.every((failure) =>
+            failure.startsWith('task sourced from craftbook'),
+          );
+        if (runningWorkflowOnly) {
+          if (pollsSeen <= RUNNING_WORKFLOW_GRACE_POLLS) {
+            noWriteRepairState = null;
+            ctx.logChanged(
+              `${spec.scenarioId}:virtual-hold`,
+              `[sniff-feedback] holding the task-graph.md nudge: workflow running, start-up grace poll ${pollsSeen}/${RUNNING_WORKFLOW_GRACE_POLLS}`,
+            );
+            return { done: false };
+          }
+          const owner = taskGraph?.authoringGezelId;
+          const ownerTurn = owner ? await gezelTurnInflight(ctx, owner, projectId) : null;
+          if (ownerTurn) {
+            noWriteRepairState = null;
+            ctx.logChanged(
+              `${spec.scenarioId}:virtual-hold`,
+              `[sniff-feedback] holding the task-graph.md nudge: owner ${owner} is mid-turn (${Math.round(ownerTurn.elapsedMs / 1000)}s)`,
+            );
+            return { done: false };
+          }
+        }
         virtualTargetPlateau.polls += 1;
         noWriteRepairState = null;
         await postSniffFeedback(
@@ -2238,6 +2316,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           );
           await postMissingDeliverableFeedback(ctx, repairDeliverable.path, {
             projectId,
+            ...(taskGraph?.authoringGezelId ? { targetGezelId: taskGraph.authoringGezelId } : {}),
             nearMiss,
             expectedSurface: repairDeliverable.artifact ? 'artifact' : 'workspace',
             repairDirective: craftbookMissingDeliverableRepairDirective(spec, failures),

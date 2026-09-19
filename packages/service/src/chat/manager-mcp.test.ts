@@ -1233,6 +1233,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       toolNames: ['write_artifact'],
       fallbackText: 'Checkpoint written for validation.',
       maxClosingChars: 120,
+      // Only the checkpoint file's write ends the turn; a procedure that
+      // writes another deliverable first keeps going (invoice-run, 2026-09-19).
+      onlyWhenArgEquals: { arg: 'path', value: 'tasks/review/observations.md' },
     });
     expect(createOpts?.tuning?.toolChoice).toBe('required');
     expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);

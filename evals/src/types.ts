@@ -46,6 +46,13 @@ export interface EvalContext {
   client: GezelClient;
   meesterId: string;
   /**
+   * Effective repair policy for this trial: the scenario's own, or the
+   * `--repair-policy` override the runner applied. Craftbook scenarios read
+   * this before their spec so an A/B bin can switch the harness channel off
+   * without touching the book's `test.json`.
+   */
+  repairPolicy?: 'harness' | 'runtime';
+  /**
    * Live mock-service runtime for this trial, present when the scenario
    * declared `mockServices`. The runner boots the fake HTTPS services
    * BEFORE the daemon spawns (the daemon needs NODE_EXTRA_CA_CERTS +
@@ -362,13 +369,27 @@ export interface TrialOptions {
    */
   imageModelId?: string;
   /**
-   * Execution density for the trial daemon (`--render-mode`). `flat` routes
-   * the meester to a solo Builder (collapsed craftbook) instead of a
-   * crew; `scaffold` is the full team; `auto` picks by provider. Threaded
-   * into the daemon's `config.executionDensity`. Omitted ⇒ daemon default
-   * (`scaffold`). The A/B lever for frontier-adaptive execution.
+   * Generalist mode for the trial daemon (`--generalist auto|on|off`).
+   * `on` runs every craftbook task in generalist execution — one gezel, one
+   * continuous session across all steps, the union of every step's tools,
+   * the task outline in view, gates unchanged, fanout children still
+   * separate tasks — and routes Meester kickoff to a solo lead; `off` is
+   * stepwise execution with a crew; `auto` picks by provider (generalist for
+   * hosted frontier providers, stepwise for local models). Threaded into the
+   * daemon's `config.generalistMode`. Omitted ⇒ daemon default (`auto`).
+   * The A/B lever for generalist mode v2; arms should force `on`/`off`.
    */
-  executionDensity?: 'auto' | 'flat' | 'scaffold';
+  generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Override a craftbook scenario's repair policy for this trial. `runtime`
+   * silences every harness-injected repair turn (sniff nudges, missing-
+   * deliverable kicks, Developer recruitment, poisoned-session recovery,
+   * plateau kills) so the run measures the runtime's own gates, retries and
+   * stall handling; the progress watchdogs still bound a hang. Ignored by
+   * scenarios that do not take part in the repair protocol — see
+   * `withRepairPolicy`.
+   */
+  repairPolicy?: 'harness' | 'runtime';
   /** Override the default poll cadence (ms). */
   pollIntervalMs?: number;
   /**
@@ -524,6 +545,19 @@ export interface TrialResult {
    * rate rendering at tiny tier in the reporting bins.
    */
   modelTier?: import('@bendyline/gezel').ModelTier;
+  /**
+   * The generalist-mode setting the trial daemon ran with (`--generalist`),
+   * so an A/B arm is queryable from `result.json` / `facts.json` without
+   * parsing `log.txt`. Absent when the run left the daemon default.
+   */
+  generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Repair policy the trial actually ran under (the scenario's own or the
+   * `--repair-policy` override). Absent for scenarios outside the protocol.
+   */
+  repairPolicy?: 'harness' | 'runtime';
+  /** Chat provider the trial ran against (was only in the transient status.json). */
+  engine?: TrialOptions['engine'];
   startedAt: string;
   finishedAt: string;
   durationMs: number;

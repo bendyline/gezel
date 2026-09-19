@@ -112,7 +112,7 @@ import {
   terminalToolClosingText,
 } from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
-import { ToolFailureTracker } from '../tool-failure-tracker.js';
+import { type ToolFailureLoop, ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   BatchCapability,
@@ -1221,6 +1221,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
   }
 
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
+    this.lastTurnBail = null;
     // Queue-bypass path: sync consultations spawned via ask_specialist /
     // ask_gezel would otherwise deadlock behind the asker's held slot
     // (the asker is parked in `bridges.callTool` waiting for the
@@ -1372,6 +1373,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // Delegation tools on the roster ⇒ repeated edit failures can hand the
     // file to a more capable model instead of thrashing to a plain abort.
     const delegationAvailable = [...knownToolNames].some((n) => n.startsWith('delegate_'));
+    const writerFlags = {
+      artifactWriterAvailable: knownToolNames.has('write_artifact'),
+      workspaceWriterAvailable: knownToolNames.has('write_file'),
+    };
     // Counter for the model self-correction loop: each malformed tool
     // call we nudge the model about counts against this budget. Not
     // reset between iterations — a turn with two consecutive bad calls
@@ -1402,7 +1407,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // validation error every iteration, "diagnosing" the schema in
     // chat, and re-trying the same wrong shape forever. See the
     // tracker's docstring for the threshold rationale.
-    const failureTracker = new ToolFailureTracker({ surgicalEditsAvailable, delegationAvailable });
+    const failureTracker = new ToolFailureTracker({
+      surgicalEditsAvailable,
+      delegationAvailable,
+      ...writerFlags,
+    });
     // Per-turn same-(name, args) repeat tracker. Catches the
     // "narrative spinning" loop where the model re-reads the same
     // files (read_task_notes, read_file, etc.) iteration after
@@ -3535,12 +3544,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           content: turnContent || null,
           tool_calls: toolCalls,
         });
-        let abortDueToFailureLoop: {
-          tool: string;
-          count: number;
-          sourceFailureKind?: 'truncated' | 'not-persisted';
-          transportFailure?: boolean;
-        } | null = null;
+        let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let asyncHandoffCount = 0;
         let terminalActionClosing: string | null = null;
         const immediateFileWritePaths: string[] = [];
@@ -3776,6 +3780,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 ? { sourceFailureKind: tracked.sourceFailureKind }
                 : {}),
               ...(tracked.transportFailure ? { transportFailure: true } : {}),
+              ...(tracked.missingPath ? { missingPath: true } : {}),
             };
             break;
           }
@@ -3805,16 +3810,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq} END abort-failure-loop afterMs=${Date.now() - start} ` +
               `tool=${failedTool} consecutiveFails=${failCount}`,
           );
-          throw ToolFailureTracker.buildAbort({
+          throw ToolFailureTracker.buildLoopAbort({
             providerLabel: 'Mac AI',
-            toolName: failedTool,
-            count: failCount,
+            loop: abortDueToFailureLoop,
             surgicalEditsAvailable,
             delegationAvailable,
-            ...(abortDueToFailureLoop.sourceFailureKind
-              ? { sourceFailureKind: abortDueToFailureLoop.sourceFailureKind }
-              : {}),
-            ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
+            ...writerFlags,
           });
         }
         this.turnPolicy.checkpoint();
@@ -3852,6 +3853,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           }
           const closingText = immediateFileWriteClosing(immediateFileWritePaths);
           this.messages.push({ role: 'assistant', content: closingText });
+          this.lastTurnBail = 'immediate-write';
           fullText = closingText;
           log.info(
             `turn#${seq} END immediate-write-bail afterMs=${Date.now() - start} ` +

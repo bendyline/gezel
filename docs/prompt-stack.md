@@ -35,7 +35,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | # | Layer | Included when | Size (approx) |
 |---|---|---|---|
 | 1 | Role header (`Your role is "<role>".`; neutral gezel fallback when unset) | always | 1 line |
-| 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); crew-density installs emit it only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); flat-density installs emit it for any delegation role | ~2.3K ch |
+| 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); with generalist kickoff off it is emitted only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); with generalist kickoff on (`config.generalistMode`, see docs/generalist-mode.md) it is emitted for any delegation role | ~2.3K ch |
 | 3 | About intro + **the gezel's `about.md`, verbatim** | always | meester template ~4.6K ch |
 | 4 | `### Traits` | frontmatter traits present | varies |
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
@@ -190,7 +190,7 @@ What a meester session in a project actually receives:
 | Vendor rules of the road | — | — | Claude Code's full prompt | — (replaced) | — |
 | about.md + project context | yes | yes | yes | yes | yes |
 | Conduct core (~450 tok) | yes | yes | yes (duplicates vendor's, harmlessly) | yes | yes |
-| Routing guardrail | flat installs only | flat installs only | yes | flat installs only | flat installs only |
+| Routing guardrail | generalist-kickoff installs only | generalist-kickoff installs only | yes | generalist-kickoff installs only | generalist-kickoff installs only |
 | Cookbook rules (manifest-declared) | condensed (~690 tok) | full (~2.3K tok) + terse-reply + edit-by-line | — | — | — |
 | Tools block | names-only | names-only | — (native tools) | — (native tools) | — (cloud tier) |
 | Two-band cache split | yes | yes | — | — | — |
@@ -552,3 +552,21 @@ noted); read nudge deltas against the noise floor above.
    gemma4-e4b's detector-count signal (stage 2, the high-power metric). Keep the block
    at tiny/small as cheap insurance backed by that signal; treat any future tiny-tier
    prompt claims as unmeasurable without count metrics or n≥3.
+
+## Generalist tasks
+
+A task stamped `executionMode: 'generalist'` (see
+[generalist-mode.md](generalist-mode.md)) adds two things to the stack above,
+both in the volatile band:
+
+- **`### Task outline`** inside the task block — the book's goal and every
+  step marked done / active / pending, fanout steps annotated — followed by a
+  one-sentence ownership statement. Rendered by `renderTaskOutline` in
+  `chat/instructions.ts`; it names `advance_task_step` only when the turn
+  wired it. The recency anchor gains the same ownership clause. The per-step
+  procedure and gate contract stay the authoritative instructions.
+- **A union tool surface** — the deliverable kit, mandated tools, conditional
+  built-ins and research intent are unions over every step of the task
+  (`generalistSteps` in `chat/session-tool-surface.ts`), so the tools block is
+  identical on every step of the run and prefix caches keep it. Only the
+  active step's authored `toolPolicy` narrows per step.

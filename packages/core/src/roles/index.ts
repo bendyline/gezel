@@ -20,4 +20,5 @@ export {
   toolsetGroupsForRole,
   type RoleDefinition,
   type RoleId,
+  GENERALIST_TEMPLATE_ID,
 } from './registry.js';

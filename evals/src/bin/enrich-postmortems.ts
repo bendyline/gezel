@@ -3,6 +3,7 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { FixedRubricScore } from '../fixed-rubric.ts';
+import { generalistArmLabel } from '../generalist-arm.ts';
 import { discoverTrialCandidates } from '../postmortem-report.ts';
 import type { TrialFacts } from './score-trial.ts';
 
@@ -159,6 +160,20 @@ async function atomicReplace(path: string, content: string): Promise<void> {
   }
 }
 
+/**
+ * The comparison key for "same model". An A/B root holds two trials per
+ * model and scenario, one per generalist-mode arm, and they are peers of
+ * each other only in the continuity table: everywhere else a model's
+ * stepwise and generalist runs are compared as two rows, never merged.
+ * Exported for the test.
+ */
+export function modelLabel(entry: {
+  facts: { modelId: string; continuity?: { mode?: string | null } };
+}): string {
+  const arm = generalistArmLabel(entry.facts.continuity?.mode);
+  return arm ? `${entry.facts.modelId} (${arm})` : entry.facts.modelId;
+}
+
 async function loadEntries(roots: string[]): Promise<TrialEntry[]> {
   const entries: TrialEntry[] = [];
   for (const rawRoot of roots) {
@@ -180,18 +195,18 @@ async function loadEntries(roots: string[]): Promise<TrialEntry[]> {
   }
   const byPair = new Map<string, TrialEntry>();
   for (const entry of entries) {
-    const key = `${entry.facts.modelId}\u0000${entry.facts.scenarioId}`;
+    const key = `${modelLabel(entry)}\u0000${entry.facts.scenarioId}`;
     const existing = byPair.get(key);
     if (existing) {
       throw new Error(
-        `duplicate model/scenario pair: ${entry.facts.modelId}/${entry.facts.scenarioId}\n${existing.dir}\n${entry.dir}`,
+        `duplicate model/arm/scenario triple: ${modelLabel(entry)}/${entry.facts.scenarioId}\n${existing.dir}\n${entry.dir}`,
       );
     }
     byPair.set(key, entry);
   }
   return entries.sort(
     (a, b) =>
-      a.facts.modelId.localeCompare(b.facts.modelId) ||
+      modelLabel(a).localeCompare(modelLabel(b)) ||
       a.facts.scenarioId.localeCompare(b.facts.scenarioId),
   );
 }
@@ -218,15 +233,23 @@ function topTool(entry: TrialEntry): [string, number] | null {
   );
 }
 
-function tuningTarget(entry: TrialEntry): ModelTuningTarget {
-  const target = MODEL_TUNING[entry.facts.modelId];
-  if (!target) throw new Error(`missing model tuning target for ${entry.facts.modelId}`);
-  return target;
+/**
+ * `null` for a model without a registered manifest: hosted models (Opus via
+ * anthropic-cli) have no local tuning surface at all, and an unlisted local
+ * model should degrade to generic advice rather than abort the whole sweep.
+ */
+function tuningTarget(entry: TrialEntry): ModelTuningTarget | null {
+  return MODEL_TUNING[entry.facts.modelId] ?? null;
 }
 
 function tacticalFix(entry: TrialEntry): string[] {
   const facts = entry.facts;
   const target = tuningTarget(entry);
+  if (!target) {
+    return [
+      `- **No per-model tuning manifest is registered for \`${facts.modelId}\`** (hosted models have none; a local model needs an entry in this script's \`MODEL_TUNING\` table). The remaining tactical levers are model-conditional prompt behaviors in \`packages/service/src/model-profile/behaviors/\` and the craftbook's own step gates; pick from the negatives above.`,
+    ];
+  }
   const redFlag = facts.toolUse.redFlags[0];
   if (redFlag) {
     if (!target.compactToolSchemas) {
@@ -414,11 +437,10 @@ function renderEnrichment(
   summaryPath: string,
 ): string {
   const scenarioPeers = byScenario.get(entry.facts.scenarioId) ?? [];
-  const modelPeers = byModel.get(entry.facts.modelId) ?? [];
+  const modelPeers = byModel.get(modelLabel(entry)) ?? [];
   const peerScores = scenarioPeers.map((peer) => peer.score.composite);
   const sortedPeers = [...scenarioPeers].sort(
-    (a, b) =>
-      b.score.composite - a.score.composite || a.facts.modelId.localeCompare(b.facts.modelId),
+    (a, b) => b.score.composite - a.score.composite || modelLabel(a).localeCompare(modelLabel(b)),
   );
   const rank = sortedPeers.findIndex((peer) => peer === entry) + 1;
   const modelIncluded = modelPeers.filter(
@@ -426,12 +448,12 @@ function renderEnrichment(
   );
   const sameSignature = modelPeers.filter((peer) => signature(peer) === signature(entry));
   const globalSignature = all.filter((peer) => signature(peer) === signature(entry));
-  const signatureModels = new Set(globalSignature.map((peer) => peer.facts.modelId)).size;
+  const signatureModels = new Set(globalSignature.map((peer) => modelLabel(peer))).size;
   const unrelated = chooseUnrelated(entry, modelPeers);
   const peerList = sortedPeers
     .map(
       (peer) =>
-        `${peer.facts.modelId} ${fmt1(peer.score.composite)}${peer.facts.outcome.success ? ' pass' : ' fail'}${peer.score.eligibility.includedInModelAggregate ? '' : ' excluded'}`,
+        `${modelLabel(peer)} ${fmt1(peer.score.composite)}${peer.facts.outcome.success ? ' pass' : ' fail'}${peer.score.eligibility.includedInModelAggregate ? '' : ' excluded'}`,
     )
     .join('; ');
   const modelScores = modelIncluded.map((peer) => peer.score.composite);
@@ -465,7 +487,7 @@ function renderEnrichment(
     '',
     '### Cross-scenario generalization check',
     '',
-    `- Within ${entry.facts.modelId}, the eligible ${modelIncluded.length}-scenario aggregate has median **${fmt1(median(modelScores))}** and mean **${fmt1(mean(modelScores))}**; this trial is ${deltaFromModelMedian >= 0 ? '+' : ''}${fmt1(deltaFromModelMedian)} from that median. The exact rubric signature \`${signature(entry)}\` occurs in ${sameSignature.length}/${modelPeers.length} trials for this model and ${globalSignature.length}/${all.length} trials across ${signatureModels} model(s).`,
+    `- Within ${modelLabel(entry)}, the eligible ${modelIncluded.length}-scenario aggregate has median **${fmt1(median(modelScores))}** and mean **${fmt1(mean(modelScores))}**; this trial is ${deltaFromModelMedian >= 0 ? '+' : ''}${fmt1(deltaFromModelMedian)} from that median. The exact rubric signature \`${signature(entry)}\` occurs in ${sameSignature.length}/${modelPeers.length} trials for this model and ${globalSignature.length}/${all.length} trials across ${signatureModels} model(s).`,
     unrelated
       ? `- Unrelated comparison: \`${unrelated.facts.scenarioId}\` scored **${fmt1(unrelated.score.composite)}** with signature \`${signature(unrelated)}\` (${cite('sibling score.json.composite', unrelated.score.composite)}; ${cite('sibling facts.outcome.success', unrelated.facts.outcome.success)}). This is the required guard against tuning only the current scenario.`
       : '- No unrelated scenario was available in this matrix.',
@@ -513,10 +535,10 @@ function countBy<T>(items: T[], key: (item: T) => string): Array<[string, number
 }
 
 function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
-  const models = [...new Set(entries.map((entry) => entry.facts.modelId))].sort();
+  const models = [...new Set(entries.map((entry) => modelLabel(entry)))].sort();
   const scenarios = [...new Set(entries.map((entry) => entry.facts.scenarioId))].sort();
   const byModel = new Map(
-    models.map((model) => [model, entries.filter((entry) => entry.facts.modelId === model)]),
+    models.map((model) => [model, entries.filter((entry) => modelLabel(entry) === model)]),
   );
   const byScenario = new Map(
     scenarios.map((scenario) => [
@@ -571,6 +593,47 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     );
   }
 
+  // Continuity per (model, generalist-mode setting) — the generalist-mode A/B
+  // read-out (docs/generalist-mode.md). Only trials with `facts.continuity`
+  // appear; CLI-wrapper and Copilot arms report compaction as n/a because
+  // they compact inside their own process.
+  const withContinuity = entries.filter((entry) => entry.facts.continuity);
+  if (withContinuity.length > 0) {
+    lines.push(
+      '',
+      '## Continuity by model and mode (separate from capability)',
+      '',
+      '| Model | Mode | Trials | Pass | Median steps | Median sessions/step | Reused sessions | Compactions b/m/f | Max context fill | Fanout done/spawned | Budget hard trips |',
+      '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
+    );
+    const cells = new Map<string, TrialEntry[]>();
+    for (const entry of withContinuity) {
+      const key = `${entry.facts.modelId}\u0001${entry.facts.continuity!.mode ?? 'default'}`;
+      cells.set(key, [...(cells.get(key) ?? []), entry]);
+    }
+    for (const key of [...cells.keys()].sort()) {
+      const group = cells.get(key)!;
+      const [model, mode] = key.split('\u0001');
+      const cont = group.map((entry) => entry.facts.continuity!);
+      const steps = cont.map((c) => c.steps.activated);
+      const perStep = cont.flatMap((c) =>
+        c.sessions.sessionsPerStep === null ? [] : [c.sessions.sessionsPerStep],
+      );
+      const fills = cont.flatMap((c) =>
+        c.compaction.maxContextFill === null ? [] : [c.compaction.maxContextFill],
+      );
+      const observable = cont.every((c) => c.compaction.observable);
+      const compactions = observable
+        ? `${cont.reduce((n, c) => n + c.compaction.betweenTurn, 0)}/${cont.reduce((n, c) => n + c.compaction.midTurn, 0)}/${cont.reduce((n, c) => n + c.compaction.forceFit, 0)}`
+        : 'n/a';
+      const spawned = cont.reduce((n, c) => n + c.fanout.childrenSpawned, 0);
+      const completed = cont.reduce((n, c) => n + c.fanout.childrenCompleted, 0);
+      lines.push(
+        `| ${model} | ${mode} | ${group.length} | ${group.filter((entry) => entry.facts.outcome.success).length} (${pct(group.filter((entry) => entry.facts.outcome.success).length, group.length)}) | ${steps.length ? fmt1(median(steps)) : 'n/a'} | ${perStep.length ? median(perStep).toFixed(2) : 'n/a'} | ${cont.reduce((n, c) => n + c.sessions.reusedAcrossSteps, 0)} | ${compactions} | ${fills.length ? `${(Math.max(...fills) * 100).toFixed(0)}%` : 'n/a'} | ${spawned > 0 ? `${completed}/${spawned}` : 'n/a'} | ${cont.reduce((n, c) => n + c.budget.taskBudgetHard, 0)} |`,
+      );
+    }
+  }
+
   const universalSuccess = scenarios.filter((scenario) =>
     (byScenario.get(scenario) ?? []).every((entry) => entry.facts.outcome.success),
   );
@@ -605,7 +668,7 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     `|---|---:|${models.map(() => '---:').join('|')}|`,
   );
   for (const item of spreads.slice(0, 25)) {
-    const byId = new Map(item.group.map((entry) => [entry.facts.modelId, entry.score.composite]));
+    const byId = new Map(item.group.map((entry) => [modelLabel(entry), entry.score.composite]));
     lines.push(
       `| ${item.scenario} | ${fmt1(item.spread)} | ${models.map((model) => fmt1(byId.get(model) ?? 0)).join(' | ')} |`,
     );
@@ -679,8 +742,9 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     '',
   );
   for (const model of models) {
-    const target = MODEL_TUNING[model];
     const all = byModel.get(model) ?? [];
+    // `model` carries the arm label; the tuning table is keyed by bare id.
+    const target = all[0] ? tuningTarget(all[0]) : null;
     if (!target) continue;
     const parse = all.filter(isCriticalOutput).length;
     const stalled = all.filter(noProducedOutput).length;
@@ -761,7 +825,7 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     '## Limitations and recovery record',
     '',
     '- One trial per model/scenario pair: rankings are a complete matrix, but not statistical confidence intervals.',
-    `- The sweep spans ${roots.length} root${roots.length === 1 ? '' : 's'}; the final set contains no duplicate model/scenario pairs.`,
+    `- The sweep spans ${roots.length} root${roots.length === 1 ? '' : 's'}; the final set contains no duplicate model/arm/scenario triples.`,
     '- Infra/operator/grader-classified terminal trials remain documented but are excluded from model capability means.',
     '- Performance reflects this host and llama.cpp/CUDA configuration; it is not part of the capability composite.',
     '',
@@ -810,7 +874,7 @@ async function main(): Promise<void> {
       ...(byScenario.get(entry.facts.scenarioId) ?? []),
       entry,
     ]);
-    byModel.set(entry.facts.modelId, [...(byModel.get(entry.facts.modelId) ?? []), entry]);
+    byModel.set(modelLabel(entry), [...(byModel.get(modelLabel(entry)) ?? []), entry]);
   }
   let written = 0;
   const summaryPath = resolve(args.out);

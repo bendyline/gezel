@@ -50,9 +50,10 @@ except Exception:
 FRAMEWORK_RULES = {
     "daemon-crash", "spawn-error", "engine-hung",
     "chat-template-500", "scheduler-voorman-deadlock", "scheduler-draft-deadlock",
+    "compaction-degraded", "cli-resume-failed", "fanout-skipped", "fanout-barrier-stuck",
     "render-killed",
 }
-ENVIRONMENT_RULES = {"capacity-denial", "context-overflow"}
+ENVIRONMENT_RULES = {"capacity-denial", "context-overflow", "cloud-context-overflow"}
 
 
 def _read_json(path):

@@ -556,7 +556,11 @@ export function lastEngineProgressMarker(text: string): string | null {
  * legitimate generation) or never (rathole forever); the two-tier
  * design kills exactly when product progress has stalled.
  */
-export function digestFingerprint(fp: ProgressFingerprint): { hard: string; soft: string } {
+export function digestFingerprint(fp: ProgressFingerprint): {
+  hard: string;
+  soft: string;
+  deliverable: string;
+} {
   const workspaceEntries = Object.keys(fp.workspace)
     .sort()
     .map((id) => [id, fp.workspace[id]] as const);
@@ -602,9 +606,22 @@ export function digestFingerprint(fp: ProgressFingerprint): { hard: string; soft
         }
       : null,
   });
+  // The deliverable digest is the hard digest minus the activity counters:
+  // only workspace bytes and the sniff verdict. A trial that has stopped
+  // delivering can still rack up tool calls and sessions — a Meester
+  // check-in every few minutes did exactly that for 100 minutes on a dead
+  // invoice-run task (2026-09-18) — so ceiling extensions under the runtime
+  // repair policy key off this one.
+  const deliverablePayload = JSON.stringify({
+    workspace: workspaceEntries,
+    sniff: fp.sniffState
+      ? { key: fp.sniffState.key, score: fp.sniffState.score, bytes: fp.sniffState.bytes }
+      : null,
+  });
   return {
     hard: createHash('sha1').update(hardPayload).digest('hex').slice(0, 16),
     soft: createHash('sha1').update(softPayload).digest('hex').slice(0, 16),
+    deliverable: createHash('sha1').update(deliverablePayload).digest('hex').slice(0, 16),
   };
 }
 

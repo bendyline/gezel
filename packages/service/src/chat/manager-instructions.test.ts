@@ -7,7 +7,7 @@ function promptWithTools(names: string[]): string {
     name: 'Tomas',
     role: 'Meester',
     about: 'Route work to the right specialist.',
-    executionDensity: 'flat',
+    generalistKickoff: 'on',
     availableTools: names.map((name) => ({ name, description: `${name} tool` })),
   } as unknown as BuildInstructionsOptions).full;
 }
@@ -74,7 +74,7 @@ describe('buildInstructions coordinator routing', () => {
       name: 'Tomas',
       role: 'Meester',
       about: 'Route work to the right specialist.',
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       project: { id: 'default', name: 'Default' } as ProjectDetail,
       workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
       retrievalFirstHint: true,
@@ -89,7 +89,7 @@ describe('buildInstructions coordinator routing', () => {
       name: 'Tomas',
       role: 'Meester',
       about: 'Route work to the right specialist.',
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       project: { id: 'default', name: 'Default' } as ProjectDetail,
       workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
       retrievalFirstHint: true,
@@ -112,7 +112,7 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
       name: 'Kiran',
       role: 'Chief Security Officer',
       about: 'Audit the stack.',
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       availableTools: names.map((name) => ({ name, description: `${name} tool` })),
       ...extra,
     } as unknown as BuildInstructionsOptions).full;
@@ -185,7 +185,7 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
       role: 'Meester',
       about: 'Route work to a specialist.',
       project,
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       workspaceFiles: [{ path: 'brief.md', isDirectory: false }],
       availableTools: [{ name: 'message_gezel', description: 'Send a handoff.' }],
     } as unknown as BuildInstructionsOptions).full;
@@ -200,7 +200,7 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
       role: 'Meester',
       about: 'Route work to a specialist.',
       project,
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       workspaceFiles: [{ path: 'brief.md', isDirectory: false }],
       availableTools: [],
     } as unknown as BuildInstructionsOptions).full;
@@ -218,7 +218,7 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
         role: 'Developer',
         about: 'Work on the project.',
         project,
-        executionDensity: 'flat',
+        generalistKickoff: 'on',
         workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
         availableTools: names.map((name) => ({ name, description: `${name} tool` })),
       } as unknown as BuildInstructionsOptions).full;
@@ -241,7 +241,7 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
       role: 'Meester',
       about: 'Route work to a specialist.',
       project,
-      executionDensity: 'flat',
+      generalistKickoff: 'on',
       documentFiles: [{ path: 'guidelines.md', isDirectory: false }],
       availableTools: [{ name: 'message_gezel', description: 'Send a handoff.' }],
     } as unknown as BuildInstructionsOptions).full;
@@ -851,5 +851,117 @@ describe('buildInstructions workspace inventory', () => {
       availableTools: [{ name: 'read_file', description: 'Read a file.' }],
     } as unknown as Parameters<typeof buildInstructions>[0]).full;
     expect(readOnly).not.toContain('larger than you can hold at once');
+  });
+});
+
+describe('generalist task outline', () => {
+  const steps = () => [
+    {
+      id: 'research',
+      name: 'Research',
+      description: 'Collect the facts.',
+      prompt: 'Read the brief with `read_file`.',
+      completedAt: '2026-09-18T09:00:00.000Z',
+      createdAt: '2026-09-18T08:00:00.000Z',
+    },
+    {
+      id: 'build',
+      name: 'Build',
+      description: 'Write the page.',
+      prompt: 'Write `index.html` with `write_file`.',
+      createdAt: '2026-09-18T08:00:00.000Z',
+    },
+    {
+      id: 'fanout',
+      name: 'Draft chapters',
+      prompt: 'The runtime fans out here.',
+      spawnFanout: true,
+      createdAt: '2026-09-18T08:00:00.000Z',
+    },
+    {
+      id: 'review',
+      name: 'Review',
+      prompt: 'Check the result with `read_file`.',
+      terminal: true,
+      createdAt: '2026-09-18T08:00:00.000Z',
+    },
+  ];
+  const render = (over: {
+    executionMode?: 'generalist' | 'stepwise';
+    tools?: string[];
+    focused?: boolean;
+  }) => {
+    const all = steps();
+    const active = all[1]!;
+    return buildInstructions({
+      ...(over.focused ? { focusedTaskContext: true } : {}),
+      name: 'Wren',
+      role: 'Generalist',
+      about: 'You carry a task from first step to last.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'cloud',
+      availableTools: (
+        over.tools ?? ['read_file', 'write_file', 'write_task_note', 'advance_task_step']
+      ).map((name) => ({ name, description: `${name} tool` })),
+      task: {
+        task: {
+          ref: 'gezel/7',
+          title: 'Ship the landing page',
+          description: 'A four-step landing-page task.',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'wren' },
+          ...(over.executionMode ? { executionMode: over.executionMode } : {}),
+          activeStepId: 'build',
+          craftbook: {
+            description: 'Ship a small landing page with a chapter per feature.',
+            steps: all,
+            entryStepId: 'research',
+          },
+        },
+        step: active,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+  };
+
+  it('lists every step with its state, the goal, and the fanout marker for a generalist task', () => {
+    const rendered = render({ executionMode: 'generalist' });
+    expect(rendered).toContain('### Task outline');
+    expect(rendered).toContain('Goal: Ship a small landing page with a chapter per feature.');
+    expect(rendered).toContain('1. Research (done) — Collect the facts.');
+    expect(rendered).toContain('2. Build (active) — Write the page.');
+    expect(rendered).toContain(
+      '3. Draft chapters (pending) [fanout: the runtime spawns one child task per item',
+    );
+    expect(rendered).toContain('4. Review (pending)');
+    expect(rendered).toContain('finish and pass them before `advance_task_step` reveals the next');
+    expect(rendered).toContain('You own every step of this task in this conversation');
+    // The outline sits above the per-step procedure, which stays authoritative.
+    expect(rendered.indexOf('### Task outline')).toBeLessThan(
+      rendered.indexOf('#### Step procedure'),
+    );
+  });
+
+  it('never names advance_task_step when the turn did not wire it', () => {
+    const rendered = render({
+      executionMode: 'generalist',
+      tools: ['read_file', 'write_file', 'write_task_note'],
+    });
+    expect(rendered).toContain('### Task outline');
+    expect(rendered).toContain('finish and pass them before the next step is revealed');
+    expect(rendered).not.toContain('`advance_task_step` reveals');
+  });
+
+  it('survives the focused prompt profile, which drops the standing stack', () => {
+    const rendered = render({ executionMode: 'generalist', focused: true });
+    expect(rendered).toContain('### Task outline');
+    expect(rendered).toContain('2. Build (active)');
+    expect(rendered).not.toContain('### About this project');
+  });
+
+  it('is absent for a stepwise task, whose anchor keeps the old wording', () => {
+    const rendered = render({});
+    expect(rendered).not.toContain('### Task outline');
+    expect(rendered).not.toContain('You own every step of this task');
+    expect(rendered).toContain('#### Step procedure');
   });
 });

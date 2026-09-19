@@ -133,6 +133,30 @@ const CAPACITY_DENIAL =
 const CONTEXT_OVERFLOW =
   /On-device model ran out of working memory|context overflow: [\d,]+ tokens|exceeds the available context size/;
 const ENGINE_HUNG_REASON = /engine appears hung|no daemon activity for|image render wedged/;
+/**
+ * Hosted-provider overflow phrasings. The local `CONTEXT_OVERFLOW` shapes
+ * never match these, so a generalist run that outgrew a cloud context window
+ * (the `anthropic` SDK replays its whole transcript with no compaction)
+ * booked as `model/timeout`. Same class as the local overflow: the box/model
+ * cannot fit the work, or a craftbook over-feeds context.
+ */
+const CLOUD_CONTEXT_OVERFLOW =
+  /prompt is too long|maximum context length|context_length_exceeded|input length and `?max_tokens`? exceed|exceeds the model's maximum context|request too large for the model/i;
+/** The per-send compaction budget ran out: the model kept re-filling the window without progress. */
+const COMPACTION_LOOP_HALT =
+  /context compaction \d+ times without making progress|compactions exceeded the per-send budget/;
+const COMPACT_FAILED = /COMPACT-END[^\n]*\bnope\b/;
+const FORCE_FIT = /FORCE-FIT truncated=/;
+const CLI_RESUME_FAILED = /could not resume|SessionResumeError|resume id not found/i;
+const TASK_BUDGET_HARD = /\[task-budget\] \S+ HARD threshold/;
+/** Read-shaped tools whose repeat aborts point at a stuck orientation loop, not a stuck write. */
+const READ_TOOL_REPEAT_ABORT =
+  /aborting — `(?:read_task_notes|get_task|read_file|read_files|list_artifacts|read_artifact|list_dir)`/;
+const FANOUT_SKIPPED = /\[fanout\][^\n]*skipping fanout/;
+const FANOUT_BARRIER_FAILED = /fanout barrier release failed/;
+/** LLM compaction failing twice while force-fit carries the session is a degraded window, not a capable-model problem. */
+const COMPACTION_DEGRADED_MIN_OCCURRENCES = 2;
+const READ_TOOL_REPEAT_ABORT_MIN_OCCURRENCES = 3;
 const NATIVE_ENGINE_CRASH_REASON = /native-engine-crash|on-device engine crashed/i;
 const CUDA_INVALID_ARGUMENT = /CUDA error:\s*invalid (?:configuration )?argument/i;
 const LLAMA_SIGABRT = /\[llama-server\][^\n]*(?:signal=SIGABRT|"signal":"SIGABRT")/i;
@@ -196,6 +220,10 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   const overflow = findInReasonOrLog(input, CONTEXT_OVERFLOW);
   if (overflow) {
     return { failureClass: 'infra', rule: 'context-overflow', evidence: overflow };
+  }
+  const cloudOverflow = findInReasonOrLog(input, CLOUD_CONTEXT_OVERFLOW);
+  if (cloudOverflow) {
+    return { failureClass: 'infra', rule: 'cloud-context-overflow', evidence: cloudOverflow };
   }
 
   const incidentText = input.nativeIncidentLog ?? '';
@@ -275,6 +303,52 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
         failureClass: 'infra',
         rule: 'scheduler-draft-deadlock',
         evidence: `${draftSkips}× "[scheduler] skip meester nudge — only draft task(s) await activation" (nothing in an unattended trial can activate a draft)`,
+      };
+    }
+    // Generalist-mode continuity failures (docs/generalist-mode.md). Infra
+    // first: a fanout that never fanned out, a barrier that never released,
+    // a CLI session that could not be resumed, or a context window kept alive
+    // only by force-fit are runtime defects; a compaction loop, a hard budget
+    // trip or a read-tool repeat storm are the model failing inside a working
+    // runtime.
+    const fanoutSkipped = findInReasonOrLog(input, FANOUT_SKIPPED);
+    if (fanoutSkipped) {
+      return { failureClass: 'infra', rule: 'fanout-skipped', evidence: fanoutSkipped };
+    }
+    const barrierFailed = findInReasonOrLog(input, FANOUT_BARRIER_FAILED);
+    if (barrierFailed) {
+      return { failureClass: 'infra', rule: 'fanout-barrier-stuck', evidence: barrierFailed };
+    }
+    const resumeFailed = findInReasonOrLog(input, CLI_RESUME_FAILED);
+    if (resumeFailed) {
+      return { failureClass: 'infra', rule: 'cli-resume-failed', evidence: resumeFailed };
+    }
+    const compactFailed = countInLog(input, COMPACT_FAILED);
+    const forceFits = countInLog(input, FORCE_FIT);
+    if (
+      compactFailed >= COMPACTION_DEGRADED_MIN_OCCURRENCES &&
+      forceFits >= COMPACTION_DEGRADED_MIN_OCCURRENCES
+    ) {
+      return {
+        failureClass: 'infra',
+        rule: 'compaction-degraded',
+        evidence: `${compactFailed}× LLM compaction returned nothing and ${forceFits}× FORCE-FIT carried the window`,
+      };
+    }
+    const loopHalt = findInReasonOrLog(input, COMPACTION_LOOP_HALT);
+    if (loopHalt) {
+      return { failureClass: 'model', rule: 'compaction-loop', evidence: loopHalt };
+    }
+    const budgetHard = findInReasonOrLog(input, TASK_BUDGET_HARD);
+    if (budgetHard) {
+      return { failureClass: 'model', rule: 'task-budget-hard-pause', evidence: budgetHard };
+    }
+    const readAborts = countInLog(input, READ_TOOL_REPEAT_ABORT);
+    if (readAborts >= READ_TOOL_REPEAT_ABORT_MIN_OCCURRENCES) {
+      return {
+        failureClass: 'model',
+        rule: 'tool-repeat-abort-storm',
+        evidence: `${readAborts}× read-tool repeat aborts in one trial`,
       };
     }
   }

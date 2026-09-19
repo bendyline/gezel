@@ -1315,6 +1315,23 @@ describe('re-engage nudge state', () => {
     expect(nudge.text).not.toContain('existing checked workspace file');
     expect(nudge.text).toContain("deliverable hasn't landed");
   });
+
+  it('never fabricates a quoted path when the sniff names no file', () => {
+    // The daemon's read-pacing guard lifts the target from a quoted
+    // `write_file({ path: "..." })`, so a quoted placeholder became the
+    // expected file of a real turn: codemod-sweep's Codebase Analyst was
+    // aborted six reads into `enumerate` for not writing
+    // `<workspace-relative-file>` (2026-09-18).
+    const nudge = buildReEngageNudge({
+      downstream: true,
+      sniff: { key: 'craftbook-codemod-sweep', score: 11, bytes: 0, deliverableMissing: true },
+    });
+
+    expect(nudge.filePath).toBeNull();
+    expect(nudge.text).toContain('write_file');
+    expect(nudge.text).not.toMatch(/path:\s*["'`]</);
+    expect(nudge.text).not.toContain('<workspace-relative-file>');
+  });
 });
 
 describe('llamaCppEvalLaunchOverridesForModel', () => {

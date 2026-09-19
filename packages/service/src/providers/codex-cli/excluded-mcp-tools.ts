@@ -37,11 +37,11 @@ export const CODEX_CLI_EXCLUDED_MCP_TOOLS = [
   // Web ops — Codex has built-in web_search.
   'fetch_url',
   'web_search',
-  // Execution ops — Codex shell handles these.
+  // Execution ops — Codex shell handles these. `run_package_script`,
+  // `run_npx` and `list_package_scripts` stay advertised for the same reason
+  // as on the Claude CLI: they write the run receipts a `commandEvidence`
+  // gate checks, and a shell run leaves none (see the Claude list's header).
   'npm_install',
-  'list_package_scripts',
-  'run_package_script',
-  'run_npx',
   'run_nodejs_script',
   'run_playwright_script',
   'list_packages',

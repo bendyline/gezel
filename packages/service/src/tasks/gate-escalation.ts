@@ -241,6 +241,19 @@ export function buildStageOneNudge(opts: {
     return `GATE_EVIDENCE_REQUIRED: Continue by performing the missing reads named below. This gate measures tool results delivered by read_artifact/read_artifacts; writing, editing, or merely claiming completion cannot satisfy it. Call the exact read tool now, cover every named record and line range, then call advance_task_step once.\n\n${opts.failingBullets}`;
   }
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
+  const missing =
+    !note && !!opts.file && deliverableMissingInVerdict(opts.file, opts.failingBullets);
+  if (missing) {
+    const drawer = artifact ? 'artifacts drawer' : 'workspace';
+    const create = artifact
+      ? 'Create it now: save the complete content with write_artifact at exactly that path. A file saved with write_file lands in the workspace, which this gate does not read.'
+      : 'Create it now with write_file at exactly that path in the workspace, not the artifacts drawer.';
+    return `GATE_TARGETED_EDIT: Continue. The deliverable still does not exist — reading, planning and narrating do not create it. The ${artifact ? 'artifact' : 'file'} ${fileRef} does NOT exist yet: the gate found nothing at that path in the ${drawer}, and fails exactly these checks:
+
+${opts.failingBullets}
+
+${create} Do NOT reply that it already exists.`;
+  }
   const opener = note
     ? opts.frozen
       ? 'Continue. You wrote the SAME note again and the gate rejected it for the same reason — reposting unchanged content cannot pass.'
@@ -263,6 +276,39 @@ export function buildStageOneNudge(opts: {
 ${opts.failingBullets}
 
 ${fix}`;
+}
+
+/**
+ * Whether the verdict says the deliverable is absent rather than present
+ * and failing. The stage-one wording opens with "EXISTS but fails", and on
+ * codemod-sweep (2026-09-18) that sentence sat directly above three bullets
+ * reading "tasks/1/sites.md not found": the model concluded the gate was
+ * stale, kept re-reading a same-named workspace file, and never wrote the
+ * artifact.
+ */
+export function deliverableMissingInVerdict(file: string, failingBullets: string): boolean {
+  return failingBullets.includes(`${file} not found`);
+}
+
+/**
+ * First-rejection drawer hint. The raw verdict says "not found — write the
+ * deliverable before advancing" and nothing about WHERE; on invoice-run
+ * (2026-09-18) the model answered a missing `tasks/1/scope.md` by reading
+ * that path five times with the workspace tool. Stage one and two carry
+ * their own wording; this covers the very first verdict.
+ */
+export function withMissingDeliverableHint(
+  verdict: string,
+  file: string | undefined,
+  surface: DeliverableSurface | undefined,
+): string {
+  if (!file || (surface !== 'artifact' && surface !== 'workspace')) return verdict;
+  if (!deliverableMissingInVerdict(file, verdict)) return verdict;
+  const hint =
+    surface === 'artifact'
+      ? `\`${file}\` does not exist yet. It lives in the artifacts drawer: create it with write_artifact at exactly that path — a write_file lands in the workspace, which this gate does not read, and reading the path cannot create it.`
+      : `\`${file}\` does not exist yet. Create it with write_file at exactly that path in the workspace (not the artifacts drawer); reading the path cannot create it.`;
+  return `${verdict}\n\n${hint}`;
 }
 
 /**

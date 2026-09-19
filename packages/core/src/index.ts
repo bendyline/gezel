@@ -51,7 +51,7 @@ export * from './craftbook-categories.js';
 export * from './craftbook-collapse.js';
 export * from './craftbook-doc.js';
 export * from './skills/index.js';
-export * from './execution-density.js';
+export * from './generalist-mode.js';
 export * from './plan/plan-document.js';
 export * from './mentions.js';
 export * from './pnpm-invocation.js';

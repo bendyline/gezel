@@ -1017,7 +1017,16 @@ export function evaluateSchemaMigrationHandlers(
       unmet.push('render-card-signature');
     } else {
       const renderUsage = returnValueUsage(render, renderParameter);
-      if (!propertiesUseMigratedNameFields(renderUsage.properties)) {
+      // Composing the name through the file's own `formatDisplayName` is
+      // the shape a careful engineer writes and the summary check already
+      // accepts; that helper's own body is judged by
+      // `format-display-full-name`. Rejecting it here failed a correct
+      // migration in both arms and, under the runtime repair policy, left
+      // the model with nobody to tell it what was missing (Opus, 2026-09-19).
+      if (
+        !propertiesUseMigratedNameFields(renderUsage.properties) &&
+        !renderUsage.calls.has('formatDisplayName')
+      ) {
         unmet.push('render-card-full-name');
       }
       if (!renderUsage.properties.has('email')) unmet.push('render-card-email');

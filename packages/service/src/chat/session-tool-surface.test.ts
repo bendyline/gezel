@@ -1745,3 +1745,86 @@ describe('the count cap keeps what the active step positively instructs', () => 
     expect((await surfaceWithStepPrompt(SILENT)).has('copy_artifact_to_workspace')).toBe(false);
   });
 });
+
+describe('resolveSessionToolSurface — generalist union surface', () => {
+  const session = {
+    id: 's-gen',
+    gezelId: 'wren',
+    projectId: 'p1',
+    providerName: 'anthropic',
+    taskRef: 'p1/7',
+    stepId: 'notes',
+    title: '',
+    messages: [],
+    createdAt: '2026-09-18T00:00:00.000Z',
+    lastActivityAt: '2026-09-18T00:00:00.000Z',
+  } as unknown as ChatSession;
+  const base = {
+    surface: 'prompt' as const,
+    session,
+    role: 'Developer',
+    mode: 'always' as const,
+    provider: 'anthropic' as const,
+    toolsetsGroupOverride: [] as readonly string[],
+    githubLinked: false,
+    isGitRepo: false,
+    tier: 'cloud' as const,
+    latestUserMessage: 'Task p1/7 has advanced to the next step — `notes`, which is yours as well.',
+  };
+  const notesStep = {
+    name: 'Write notes',
+    prompt: 'Call `write_file` to save the summary as `notes.md`.',
+    advanceWhen: { file: 'notes.md', minBytes: 10 },
+  };
+  const heroStep = {
+    name: 'Render hero',
+    prompt: 'Call `generate_image` to render the hero, then call `write_task_note` with its path.',
+    advanceWhen: { file: 'assets/hero.png', minBytes: 10 },
+  };
+
+  it('a single step keeps the narrow per-step surface', async () => {
+    const { allowlist } = await resolveSessionToolSurface({ ...base, activeStep: notesStep });
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('generate_image')).toBe(false);
+  });
+
+  it('every step of a generalist run widens the surface to the union of their kits and mandates', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...base,
+      activeStep: notesStep,
+      generalistSteps: [notesStep, heroStep],
+    });
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('generate_image')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+  });
+
+  it("the active step's authored allowTools still clamps the union", async () => {
+    const fixedAction = {
+      ...notesStep,
+      toolPolicy: {
+        outputMedium: 'none' as const,
+        allowTools: ['read_artifact', 'read_artifacts'],
+      },
+    };
+    const { allowlist } = await resolveSessionToolSurface({
+      ...base,
+      activeStep: fixedAction,
+      generalistSteps: [fixedAction, heroStep],
+    });
+    expect(allowlist).not.toBeNull();
+    expect([...allowlist!].sort()).toEqual(['read_artifact', 'read_artifacts']);
+  });
+
+  it('a one-step generalist run is byte-identical to the stepwise surface', async () => {
+    const stepwise = await resolveSessionToolSurface({ ...base, activeStep: notesStep });
+    const generalist = await resolveSessionToolSurface({
+      ...base,
+      activeStep: notesStep,
+      generalistSteps: [notesStep],
+    });
+    expect([...generalist.allowlist!].sort()).toEqual([...stepwise.allowlist!].sort());
+  });
+});

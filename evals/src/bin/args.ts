@@ -48,7 +48,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
  * Flags consumed by the shared resolvers rather than read directly from
  * `flags` in a bin, so a bin's own flag list would otherwise miss them.
  */
-export const SHARED_FLAGS = ['provider', 'engine', 'render-mode', 'keurmeester'] as const;
+export const SHARED_FLAGS = [
+  'provider',
+  'engine',
+  'generalist',
+  'render-mode',
+  'repair-policy',
+  'keurmeester',
+] as const;
 
 function editDistance(a: string, b: string): number {
   const rows = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -127,21 +134,58 @@ export function parseDuration(value: string): number {
 }
 
 /**
- * Resolve the `--render-mode flat|scaffold|auto` flag into a
- * `TrialOptions.executionDensity`. Returns `undefined` when unset (the
- * daemon then uses its own default, `scaffold`). Exits with a clear error
- * on an unknown value — a typo would otherwise silently fall through to
- * the default and quietly invalidate an A/B arm.
+ * Resolve the `--generalist auto|on|off` flag into a
+ * `TrialOptions.generalistMode`. Returns `undefined` when unset (the daemon
+ * then uses its own default, `auto`). Exits with a clear error on an unknown
+ * value — a typo would otherwise silently fall through to the default and
+ * quietly invalidate an A/B arm. The pre-v2 `--render-mode` spelling is
+ * recognised only to say what replaced it: `flat` roughly became `on` and
+ * `scaffold` became `off`, but the semantics widened (task execution, not
+ * just kickoff), so a silent alias would misdescribe old arms.
  */
-export function resolveRenderModeFlag(
+export function resolveGeneralistFlag(
   flags: Record<string, string | boolean>,
-): 'auto' | 'flat' | 'scaffold' | undefined {
-  const raw = flags['render-mode'];
-  if (raw === undefined || raw === true || raw === false) return undefined;
+): 'auto' | 'on' | 'off' | undefined {
+  if (flags['render-mode'] !== undefined) {
+    console.error(
+      '--render-mode was renamed to --generalist auto|on|off (flat ≈ on, scaffold ≈ off — but v2 also changes task execution; see docs/generalist-mode.md).',
+    );
+    process.exit(2);
+  }
+  const raw = flags.generalist;
+  if (raw === undefined || raw === false) return undefined;
+  if (raw === true) {
+    console.error('The --generalist flag needs a value: --generalist auto|on|off.');
+    process.exit(2);
+  }
   const value = String(raw).trim();
   if (value.length === 0) return undefined;
-  if (value !== 'auto' && value !== 'flat' && value !== 'scaffold') {
-    console.error(`Unknown --render-mode "${value}". Expected one of: auto, flat, scaffold.`);
+  if (value !== 'auto' && value !== 'on' && value !== 'off') {
+    console.error(`Unknown --generalist "${value}". Expected one of: auto, on, off.`);
+    process.exit(2);
+  }
+  return value;
+}
+
+/**
+ * Resolve `--repair-policy harness|runtime` into `TrialOptions.repairPolicy`.
+ * Applies only to scenarios in the harness-repair protocol (craftbook
+ * scenarios); `runtime` makes the trial measure the runtime's own gates and
+ * retries with no injected repair turns. See `withRepairPolicy`.
+ */
+export function resolveRepairPolicyFlag(
+  flags: Record<string, string | boolean>,
+): 'harness' | 'runtime' | undefined {
+  const raw = flags['repair-policy'];
+  if (raw === undefined || raw === false) return undefined;
+  if (raw === true) {
+    console.error('The --repair-policy flag needs a value: --repair-policy harness|runtime.');
+    process.exit(2);
+  }
+  const value = String(raw).trim();
+  if (value.length === 0) return undefined;
+  if (value !== 'harness' && value !== 'runtime') {
+    console.error(`Unknown --repair-policy "${value}". Expected one of: harness, runtime.`);
     process.exit(2);
   }
   return value;

@@ -86,3 +86,82 @@ describe('seeded source reads', () => {
     },
   );
 });
+
+// The sandbox runner reads package.json to resolve a script or binary, and a
+// seeded manifest exists so the suite can run, not as a source to quote. An
+// otherwise complete codemod-sweep failed only on "package.json has not been
+// read yet" in both arms (Opus, 2026-09-19).
+describe('package manifest consumption', () => {
+  const WITH_MANIFEST = ['package.json', 'src/admin.ts'];
+
+  it.each([
+    'run_package_script',
+    'mcp__gezel__run_package_script',
+    'list_package_scripts',
+    'run_npx',
+  ])('counts a successful %s call as reading a seeded package.json', (name) => {
+    const session = {
+      id: 's1',
+      messages: [{ toolCalls: [{ name, success: true, argsFull: 'name: test' }] }],
+    };
+    expect([...sessionReadPaths(session, WITH_MANIFEST)]).toEqual(['package.json']);
+  });
+
+  it('does not credit a failed runner call, and never marks other seeded files', () => {
+    const session = {
+      id: 's1',
+      messages: [
+        { toolCalls: [{ name: 'run_package_script', success: false, argsFull: 'name: test' }] },
+      ],
+    };
+    expect([...sessionReadPaths(session, WITH_MANIFEST)]).toEqual([]);
+  });
+
+  it('is inert when package.json is not a seeded input', () => {
+    const session = {
+      id: 's1',
+      messages: [
+        { toolCalls: [{ name: 'run_package_script', success: true, argsFull: 'name: test' }] },
+      ],
+    };
+    expect([...sessionReadPaths(session, SEEDED)]).toEqual([]);
+  });
+});
+
+// The artifact readers reroute to the workspace when the path is not an
+// artifact; on the Claude CLI (no `read_file`) that is a common way to open
+// the sources. Opus opened all five refactor-module inputs through one
+// `read_artifacts` call and was failed for never reading them (2026-09-19).
+describe('cross-drawer reads', () => {
+  it('counts read_artifacts naming seeded workspace paths, namespaced or not', () => {
+    const session = {
+      id: 's1',
+      messages: [
+        {
+          toolCalls: [
+            {
+              name: 'mcp__gezel__read_artifacts',
+              success: true,
+              argsFull: 'paths:\n[\n  "docs/security.md",\n  "src/admin.ts",\n  "package.json"\n]',
+            },
+          ],
+        },
+      ],
+    };
+    expect([...sessionReadPaths(session, SEEDED)].sort()).toEqual([
+      'docs/security.md',
+      'src/admin.ts',
+    ]);
+  });
+
+  it('counts a single read_artifact of a seeded path and ignores one of another file', () => {
+    const session = {
+      id: 's1',
+      messages: [
+        { toolCalls: [{ name: 'read_artifact', success: true, path: 'src/profile.ts' }] },
+        { toolCalls: [{ name: 'read_artifact', success: true, path: 'tasks/1/review.md' }] },
+      ],
+    };
+    expect([...sessionReadPaths(session, SEEDED)]).toEqual(['src/profile.ts']);
+  });
+});

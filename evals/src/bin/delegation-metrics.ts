@@ -35,9 +35,9 @@ interface SessionFile {
 // correct orchestrator would delegate the build to. Underscore + hyphen
 // variants both accepted (tool slug is underscore; jobTitle is hyphen).
 const SCENARIO_EXPECTED_DELEGATION_ROLES: Record<string, string[]> = {
-  tictactoe: ['developer', 'builder'],
-  tankcombat: ['developer', 'builder'],
-  petshop: ['developer', 'builder', 'designer', 'image_generator', 'image-generator'],
+  tictactoe: ['developer', 'builder', 'generalist'],
+  tankcombat: ['developer', 'builder', 'generalist'],
+  petshop: ['developer', 'builder', 'generalist', 'designer', 'image_generator', 'image-generator'],
   'tool-routing-image': ['image_generator', 'image-generator'],
 };
 

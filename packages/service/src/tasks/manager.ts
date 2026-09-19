@@ -22,6 +22,7 @@ import {
   type TaskCraftbook,
   type TaskCraftbookSource,
   type TaskCraftbookStep,
+  type TaskExecutionMode,
   type TaskFanout,
   type TaskNote,
   type TaskNoteAuthor,
@@ -68,12 +69,14 @@ import {
   interpolateContext,
   interpolateContextDeep,
   interpolateStepsContext,
+  pinCraftbookOwner,
   resolveCraftbookParamDefaults,
   resolveRuntimeTokensInParams,
   snapshotCraftbookForTask,
   taskInterpolationContext,
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
+import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
 import {
   type DeliverableSurface,
   type EscalationStage,
@@ -89,6 +92,7 @@ import {
   gateRemaining,
   plateauScore,
   stageForPlateau,
+  withMissingDeliverableHint,
 } from './gate-escalation.js';
 import {
   type GateCheckOutcome,
@@ -98,7 +102,12 @@ import {
 } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
+import {
+  StepCompletionBlockedError,
+  formatGateScriptDiagnostics,
+} from './step-completion-errors.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
+export { StepCompletionBlockedError };
 import {
   bumpStepActivation,
   findBranchGoto,
@@ -329,6 +338,7 @@ export type TaskNeedsHelpHook = (ctx: {
  * doesn't block step activation.
  */
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
+export type { ExecutionModeResolution, ExecutionModeResolver } from './execution-mode.js';
 
 /**
  * The gezel a step is bound to on its OWN terms — an explicit assignee,
@@ -424,19 +434,6 @@ export type StepEntranceOutcome = {
   task: Task;
 };
 
-function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
-  return runs
-    .filter((run) => run.error || run.logsTail)
-    .map((run) => {
-      const lines = [`- Script: \`${run.scriptName}\``];
-      if (run.runId) lines.push(`  - Run ID: \`${run.runId}\``);
-      if (run.error) lines.push(`  - Error: ${run.error}`);
-      if (run.logsTail) lines.push(`  - Log tail:\n\n    \`\`\`\n${run.logsTail}\n    \`\`\``);
-      return lines.join('\n');
-    })
-    .join('\n');
-}
-
 /** Thrown by the legacy `completeStep` wrapper when completion is held. */
 export class GateRejectionError extends Error {
   constructor(
@@ -462,6 +459,7 @@ export class TaskManager {
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
+  private executionModeResolver?: ExecutionModeResolver;
   /**
    * Join concurrent replays of the same step transition. Local models can
    * retry an MCP call when its response is slow; without single-flight both
@@ -737,6 +735,11 @@ export class TaskManager {
    */
   setRoleResolver(fn: RoleResolver): void {
     this.roleResolver = fn;
+  }
+
+  /** Wire the execution-mode resolver (generalist vs stepwise). See {@link ExecutionModeResolver}. */
+  setExecutionModeResolver(fn: ExecutionModeResolver): void {
+    this.executionModeResolver = fn;
   }
 
   /**
@@ -1117,9 +1120,24 @@ export class TaskManager {
       craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
+    const requestedExecutionMode = input.executionMode ?? 'auto';
+    // A draft resolves nothing yet (like roles) — `activate()` does, reading
+    // an explicit request back off the stamp. Everything else resolves now.
+    let executionMode: TaskExecutionMode | undefined =
+      isDraft && requestedExecutionMode !== 'auto' ? requestedExecutionMode : undefined;
     if (!isDraft) {
       // First activation of the entry step → attemptCount 1.
       craftbook.steps = bumpStepActivation(craftbook.steps, activeStepId, now);
+
+      executionMode = await applyExecutionMode(this.executionModeResolver, {
+        projectId,
+        ref: buildTaskRef(projectId, num),
+        craftbook,
+        spawnsCraftbook,
+        requested: requestedExecutionMode,
+        ...(input.assignee?.kind === 'gezel' ? { assigneeGezelId: input.assignee.gezelId } : {}),
+        ...(input.nightShift?.enabled ? { nightShift: true } : {}),
+      });
 
       // Resolve the entry step's `suggestedRole` (if any) into a concrete
       // gezel id BEFORE writing the task. Without this the very first
@@ -1151,6 +1169,7 @@ export class TaskManager {
       status: isDraft ? 'draft' : 'active',
       assignee,
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
+      ...(executionMode ? { executionMode } : {}),
       craftbook,
       ...(input.trustScripts
         ? {
@@ -1210,6 +1229,7 @@ export class TaskManager {
         status: task.status,
         steps: craftbook.steps.map((s) => ({ id: s.id, name: s.name })),
         assignee: task.assignee,
+        ...(executionMode ? { executionMode } : {}),
         ...(spawnsCraftbook ? { spawnSteps: spawnsCraftbook.steps.length } : {}),
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
@@ -1573,6 +1593,17 @@ export class TaskManager {
       activeStepId: entry,
       updatedAt: now,
     };
+    next.executionMode = await applyExecutionMode(this.executionModeResolver, {
+      projectId,
+      ref: next.ref,
+      craftbook: next.craftbook,
+      spawnsCraftbook: next.spawnsCraftbook,
+      requested: task.executionMode ?? 'auto',
+      ...(!task.assigneeAuto && task.assignee.kind === 'gezel'
+        ? { assigneeGezelId: task.assignee.gezelId }
+        : {}),
+      ...(task.nightShift?.enabled ? { nightShift: true } : {}),
+    });
     await this.maybeResolveStepRole(next.craftbook, entry, projectId);
     // A draft created without a named owner has been carrying an interim
     // `{kind:'user'}` assignee — the entry step's role only just resolved,
@@ -2292,16 +2323,18 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         );
         return { status: 'advanced', task };
       }
-      throw new Error(
+      throw new StepCompletionBlockedError(
         `task ${task.ref}: step "${stepId}" is not active ` +
           `(active step: "${task.activeStepId ?? '(none)'}")`,
+        'step_not_active',
       );
     }
 
     const effectiveStatus = await this.effectiveStatusFor(task);
     if (effectiveStatus !== 'active') {
-      throw new Error(
-        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}`,
+      throw new StepCompletionBlockedError(
+        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
+        'task_not_active',
       );
     }
 
@@ -2392,7 +2425,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         newActive = completedStep.next;
       } else {
         const following = task.craftbook.steps[idx + 1];
-        if (following) newActive = following.id;
+        if (following) {
+          newActive = following.id;
+        } else {
+          // A last step with no `next` ends the book. Left as-is, `newActive`
+          // still held this step's id and the book re-activated itself (gemma's
+          // invoice-run children re-ran `draft-invoice` three times each and the
+          // fanout barrier never released, 2026-09-19); an intended self-loop says so with `next`.
+          terminating = true;
+          newActive = undefined;
+        }
       }
     }
 
@@ -2571,6 +2613,23 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           status: 'advanced',
           task: (await this.get(projectId, preparedTask.num)) ?? preparedTask,
         };
+      }
+    } else if (newActive && (opts.cause === 'model' || opts.cause === 'auto')) {
+      // A step that routes to itself (`next` names its own id, as the
+      // night-shift oversight re-arm does) was re-activated by the turn that
+      // completed it. Hand that dispatch the fresh activation now, exactly as
+      // a gate hold does, or the runner's stale sweep reads the new
+      // `lastActivatedAt` as a superseding dispatch, cancels the turn while
+      // it is still streaming its close, and re-runs the whole step (Opus
+      // oversight, 2026-09-19).
+      const newStep = finalSteps.find((s) => s.id === newActive);
+      if (newStep) {
+        this.onCurrentTurnStepReactivated?.({
+          projectId,
+          task: updated,
+          newStep,
+          gatedStep: newStep,
+        });
       }
     }
     return { status: 'advanced', task: updated };
@@ -3339,7 +3398,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             })
           : converging
             ? `${buildProgressPreamble({ previousRemaining: previousRemaining!, remaining: remaining! })}\n\n${rawMessage}`
-            : rawMessage;
+            : withMissingDeliverableHint(rawMessage, deliverableFile, rejectSurface);
     const fingerprint = gateMessageFingerprint(message);
     const now = nowIso();
     const trailEntry: GateAttemptRecord = {
@@ -3810,12 +3869,17 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       summary: `Gate looped ${next.ref} back to "${target.name}"`,
       details: { ref: next.ref, stepId: targetId },
     });
-    // Model/tool and observable-progress attempts already have a live chat
-    // turn that receives the gate verdict and continues the repair loop.
-    // Starting a second handoff here creates two workers for the same
-    // activation. Non-chat drivers (idle sweep/user/runtime routing) still
+    // A self-route stays with the live turn: it already holds the verdict and
+    // the step's procedure, and a second handoff would mean two workers on
+    // one activation. A route to a DIFFERENT step cannot: that turn is pinned
+    // to the gated step's procedure and the step-scope write guard refuses
+    // its writes, so the target needs its own dispatch — a same-owner
+    // continuity re-pin once this turn ends, or a handoff to the other gezel
+    // (Opus codemod-sweep: a REVISE left the owner idle for 22 minutes,
+    // 2026-09-19). Non-chat drivers (idle sweep/user/runtime routing) always
     // need a fresh handoff because no current model turn can consume it.
-    if (newStep && this.onStepActivated && !currentTurnOwnsRecovery) {
+    const routesElsewhere = targetId !== gatedStep.id;
+    if (newStep && this.onStepActivated && (!currentTurnOwnsRecovery || routesElsewhere)) {
       try {
         await this.onStepActivated({ projectId, task: next, newStep, completedStep: gatedStep });
       } catch (err) {
@@ -4345,6 +4409,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       ...(plan ? { plan } : {}),
       status: 'active',
       assignee: inheritedAssignee,
+      // Same run, same mode — never re-resolved for a child.
+      ...(parent.executionMode ? { executionMode: parent.executionMode } : {}),
       craftbook: childCraftbook,
       ...(parent.cliTrustedScriptHashes
         ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }

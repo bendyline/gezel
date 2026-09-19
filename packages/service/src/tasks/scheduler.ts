@@ -27,6 +27,7 @@ import {
   stageForPlateau,
 } from './gate-escalation.js';
 import type { TaskManager } from './manager.js';
+import type { TaskRunner } from './runner.js';
 
 const log = createLogger('tasks');
 
@@ -36,6 +37,12 @@ export interface SchedulerOptions {
   chat?: ChatManager;
   /** Required for the project-nudge sweep. Omit to disable nudges. */
   store?: Store;
+  /**
+   * The TaskRunner, read lazily (it is constructed after the scheduler). The
+   * stuck-step sweep asks it whether a step's handoff is already queued or in
+   * flight before treating the step as stalled.
+   */
+  runner?: () => Pick<TaskRunner, 'hasHandoffFor'> | undefined;
   intervalMs?: number;
   /** Clock override for tests. */
   now?: () => Date;
@@ -136,6 +143,7 @@ export class TaskScheduler {
   private readonly manager: TaskManager;
   private readonly chat?: ChatManager;
   private readonly store?: Store;
+  private readonly runner?: () => Pick<TaskRunner, 'hasHandoffFor'> | undefined;
   private readonly intervalMs: number;
   private readonly now: () => Date;
   private readonly debug?: { isEnabled(): boolean };
@@ -151,6 +159,7 @@ export class TaskScheduler {
     this.manager = opts.manager;
     this.chat = opts.chat;
     this.store = opts.store;
+    this.runner = opts.runner;
     this.intervalMs = opts.intervalMs ?? 30_000;
     this.now = opts.now ?? (() => new Date());
     if (opts.debug) this.debug = opts.debug;
@@ -298,6 +307,33 @@ export class TaskScheduler {
     // parked consultation counts — the asker's turn is still in flight, so we
     // correctly wait it out).
     if (this.chat.isGezelActive(assignee)) return;
+    // A handoff the runner already holds for this step is not a stall: it is
+    // waiting on fanout admission or provider backpressure and will start on
+    // the runner's schedule. Re-driving it here goes around that queue —
+    // `messageGezel` opens the step session directly — so a one-slot local
+    // engine got five fanout children at once, and the sweep's own dispatch
+    // then made the real barrier release look like a duplicate handoff.
+    if (this.runner?.()?.hasHandoffFor(task.ref, step.id)) {
+      log.debug(
+        `[scheduler] ${task.ref} step "${step.id}": skip re-drive — a handoff for this step is already queued or in flight`,
+      );
+      return;
+    }
+    // A spawn host's post-fanout step is held by the fanout barrier while its
+    // children work (`onStepActivated` declines to dispatch it); the settle
+    // hook re-dispatches it when the last child settles. Until then the host
+    // is waiting, not stuck — the children own the progress.
+    if (task.spawnsCraftbook && !step.spawnFanout) {
+      const activeChildren = await this.manager
+        .listChildren(task.ref, { status: 'active' })
+        .catch(() => []);
+      if (activeChildren.length > 0) {
+        log.debug(
+          `[scheduler] ${task.ref} step "${step.id}": skip re-drive — ${activeChildren.length} fanout child(ren) still active`,
+        );
+        return;
+      }
+    }
     // Someone ELSE mid-turn in this project gates only the rungs that START a
     // model turn (re-drive, escalate). It used to gate the whole ladder,
     // including the pure-bookkeeping auto-advance below — and on a 1-slot
@@ -347,7 +383,18 @@ export class TaskScheduler {
     const idleSinceMs = Math.max(stepActivityMs(step), taskSessionLastMs);
     if (idleSinceMs === 0) return; // nothing to measure against — don't act blind
     if (opts.nowMs - idleSinceMs < opts.stallMs) return; // not stale yet
-    if (landingPoisoned) return;
+    if (landingPoisoned) {
+      // The session a re-nudge lands on aborted its last turn, so nudging
+      // there replays the failure. Returning silently here left an active
+      // task dead for ninety minutes (invoice-run, 2026-09-18): the handoff
+      // had spent its retries and nothing else would ever touch the step.
+      // Pause for help instead — the same exit as a spent re-drive budget.
+      log.warn(
+        `[scheduler] ${task.ref} step "${step.id}": stalled and the landing session's last turn aborted — pausing for help instead of re-driving into it`,
+      );
+      await this.escalateStuckStep(task, step, assignee, opts.maxRedrives, 'poisoned');
+      return;
+    }
 
     // 1. Auto-advance if the deliverable already satisfies the gate. On
     //    'held' the completion gate ran a FRESH rejection this tick — the
@@ -498,26 +545,33 @@ export class TaskScheduler {
     step: TaskCraftbookStep,
     assignee: string,
     maxRedrives: number,
+    cause: 'redrives' | 'poisoned' = 'redrives',
   ): Promise<void> {
     if (!this.store) return;
+    const why =
+      cause === 'poisoned'
+        ? `${assignee}'s last turn on it was aborted by the runtime, so an automatic re-drive would replay the failure`
+        : `re-driven ${maxRedrives}x without producing its deliverable or advancing`;
     // When the step carries a gate-attempt trail, pause with the full
     // diagnosis (what was tried, what the gate said each time) instead of
     // the bare "re-driven N times" note — whoever resumes starts with the
     // investigation done.
     const noteText =
-      step.gateAttemptHistory && step.gateAttemptHistory.length >= 2
-        ? buildPlateauDiagnosisNote({
-            stepName: step.name,
-            stepId: step.id,
-            trail: step.gateAttemptHistory,
-            lastMessage: step.lastGateReject?.message ?? '(no gate verdict recorded)',
-          })
-        : // A terminal step's stall is a different problem, and saying so
-          // saves whoever picks it up from hunting for missing work: the
-          // procedure ran out, only the close is missing.
-          step.terminal
-          ? `# Task never closed — paused for help\n\nThe final step "${step.name}" (\`${step.id}\`) of this task stayed open: ${assignee} was re-driven ${maxRedrives}× and never called \`advance_task_step\` to complete it. The step's work may well be finished — check the deliverables, then complete the step yourself, or re-assign it.`
-          : `# Step stalled — paused for help\n\nStep "${step.name}" (\`${step.id}\`) was re-driven ${maxRedrives}× without producing its deliverable or advancing, and ${assignee} isn't making progress unattended. Pausing the task so you can look — re-assign, clarify the step, or advance it manually, then set it active again.`;
+      cause === 'poisoned'
+        ? `# Step stalled on a failed turn — paused for help\n\nStep "${step.name}" (\`${step.id}\`) has been idle past the stall bar and ${why}. Pausing the task so you can look — check the last turn's error, then retry, reassign or clarify the step and set the task active again.`
+        : step.gateAttemptHistory && step.gateAttemptHistory.length >= 2
+          ? buildPlateauDiagnosisNote({
+              stepName: step.name,
+              stepId: step.id,
+              trail: step.gateAttemptHistory,
+              lastMessage: step.lastGateReject?.message ?? '(no gate verdict recorded)',
+            })
+          : // A terminal step's stall is a different problem, and saying so
+            // saves whoever picks it up from hunting for missing work: the
+            // procedure ran out, only the close is missing.
+            step.terminal
+            ? `# Task never closed — paused for help\n\nThe final step "${step.name}" (\`${step.id}\`) of this task stayed open: ${assignee} was re-driven ${maxRedrives}× and never called \`advance_task_step\` to complete it. The step's work may well be finished — check the deliverables, then complete the step yourself, or re-assign it.`
+            : `# Step stalled — paused for help\n\nStep "${step.name}" (\`${step.id}\`) was re-driven ${maxRedrives}× without producing its deliverable or advancing, and ${assignee} isn't making progress unattended. Pausing the task so you can look — re-assign, clarify the step, or advance it manually, then set it active again.`;
     await this.manager
       .appendNote(task.projectId, task.num, {
         text: noteText,
@@ -531,17 +585,22 @@ export class TaskScheduler {
       task,
       stepId: step.id,
       reason: 'step_stalled',
-      detail: `Step "${step.name}" was re-driven ${maxRedrives}x without producing its deliverable or advancing.`,
+      detail: `Step "${step.name}" stalled: ${why}.`,
     });
     await this.store.historyManager?.log({
       kind: 'task.step.stalled',
       projectId: task.projectId,
       gezelId: assignee,
-      summary: `Paused ${task.ref}: step "${step.name}" stalled after ${maxRedrives} re-drives`,
-      details: { ref: task.ref, stepId: step.id, maxRedrives },
+      summary:
+        cause === 'poisoned'
+          ? `Paused ${task.ref}: step "${step.name}" stalled on an aborted turn`
+          : `Paused ${task.ref}: step "${step.name}" stalled after ${maxRedrives} re-drives`,
+      details: { ref: task.ref, stepId: step.id, maxRedrives, cause },
     });
     log.warn(
-      `[scheduler] ${task.ref} step "${step.id}" stalled after ${maxRedrives} re-drives — pausing`,
+      cause === 'poisoned'
+        ? `[scheduler] ${task.ref} step "${step.id}" stalled on an aborted turn — pausing`
+        : `[scheduler] ${task.ref} step "${step.id}" stalled after ${maxRedrives} re-drives — pausing`,
     );
   }
 
