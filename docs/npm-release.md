@@ -471,10 +471,16 @@ re-pointed.
 
 After publishing, `verify-published-npm-release.mjs` downloads every exact
 version in the shared package list and runs the strict consumer checks.
-It refreshes npm metadata on each attempt and retries every 15 seconds for
-five minutes (21 attempts, plus npm request time), since npm can acknowledge
-a publish before the version becomes readable. Exhausted download retries or
-failed consumer checks still fail the release job.
+It checks each artifact independently, refreshes npm metadata every 15 seconds,
+and allows up to 40 minutes of wall-clock time. Artifacts that become available
+are retained while slower siblings remain pending, so large packages are not
+re-downloaded on every pass. [npm scans new package versions before making them
+installable](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/);
+the usual delay is about five minutes, but npm documents 15-minute or longer
+scans at peak times or for some package contents and sizes. The verifier
+therefore reports the exact versions still pending instead of treating the
+first `ETARGET` as the whole result. An exhausted deadline or failed consumer
+check still fails the release job.
 
 Locally, `pnpm exec multi-semantic-release --dry-run` shows the computed
 versions and notes without touching anything.

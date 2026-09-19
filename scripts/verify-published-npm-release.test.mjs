@@ -4,11 +4,26 @@ import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { PUBLISHED_PACKAGE_DIRS, readPublishedManifest } from './published-packages.mjs';
-import { verifyPublishedNpmRelease } from './verify-published-npm-release.mjs';
+import {
+  REGISTRY_AVAILABILITY_TIMEOUT_MS,
+  verifyPublishedNpmRelease,
+} from './verify-published-npm-release.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const publishedSpecs = PUBLISHED_PACKAGE_DIRS.map((dir) => {
+  const manifest = readPublishedManifest(repoRoot, dir);
+  return `${manifest.name}@${manifest.version}`;
+});
+const serviceSpec = publishedSpecs.find((spec) => spec.startsWith('@bendyline/gezel-service@'));
+if (!serviceSpec) throw new Error('published package list must include @bendyline/gezel-service');
 
-function registryFixture({ availableAfterMs = 0, consumerStatus = 0, spawnError } = {}) {
+function registryFixture({
+  availableAfterMs = 0,
+  delayedSpec,
+  consumerStatus = 0,
+  spawnError,
+  availabilityTimeoutMs,
+} = {}) {
   const packs = [];
   const consumers = [];
   const waits = [];
@@ -24,7 +39,9 @@ function registryFixture({ availableAfterMs = 0, consumerStatus = 0, spawnError 
         if (command === 'npm') {
           packs.push(args);
           if (spawnError) return { error: spawnError, status: null };
-          return { status: elapsedMs >= availableAfterMs ? 0 : 1 };
+          const spec = args.find((arg) => arg.startsWith('@bendyline/'));
+          const delayed = delayedSpec === undefined || spec === delayedSpec;
+          return { status: !delayed || elapsedMs >= availableAfterMs ? 0 : 1 };
         }
         assert.equal(command, process.execPath);
         consumers.push(args);
@@ -34,9 +51,13 @@ function registryFixture({ availableAfterMs = 0, consumerStatus = 0, spawnError 
         waits.push(ms);
         elapsedMs += ms;
       },
+      now() {
+        return elapsedMs;
+      },
       log(message) {
         logs.push(message);
       },
+      availabilityTimeoutMs,
     },
   };
 }
@@ -51,22 +72,20 @@ test('downloads every exact package version, including gezk, before strict consu
   const fixture = registryFixture();
   verifyPublishedNpmRelease(fixture.options);
 
-  assert.equal(fixture.packs.length, 1);
-  const args = fixture.packs[0];
-  assert.equal(args[0], 'pack');
-  assert.ok(args.includes('--prefer-online'), 'cached registry metadata must be revalidated');
-  const specs = args.filter((arg) => arg.startsWith('@bendyline/'));
-  const expected = PUBLISHED_PACKAGE_DIRS.map((dir) => {
-    const manifest = readPublishedManifest(repoRoot, dir);
-    return `${manifest.name}@${manifest.version}`;
+  assert.equal(fixture.packs.length, publishedSpecs.length);
+  const specs = fixture.packs.map((args) => {
+    assert.equal(args[0], 'pack');
+    assert.ok(args.includes('--prefer-online'), 'cached registry metadata must be revalidated');
+    return args.find((arg) => arg.startsWith('@bendyline/'));
   });
-  assert.deepEqual(specs, expected);
+  assert.deepEqual(specs, publishedSpecs);
   assert.ok(specs.some((spec) => spec.startsWith('@bendyline/gezk@')));
+  const tarballDir = fixture.packs[0][fixture.packs[0].indexOf('--pack-destination') + 1];
   assert.deepEqual(fixture.consumers, [
     [
       resolve(repoRoot, 'scripts/check-package-consumers.mjs'),
       '--tarball-dir',
-      args[args.indexOf('--pack-destination') + 1],
+      tarballDir,
       '--require-release-stamp',
     ],
   ]);
@@ -74,32 +93,49 @@ test('downloads every exact package version, including gezk, before strict consu
   assertCleanedUp(fixture);
 });
 
-test('survives registry propagation lasting longer than the former 45-second retry window', () => {
-  const fixture = registryFixture({ availableAfterMs: 105_000 });
+test('survives an eight-minute publish-time scan without redownloading ready siblings', () => {
+  const fixture = registryFixture({
+    availableAfterMs: 8 * 60_000 + 15_000,
+    delayedSpec: serviceSpec,
+  });
   verifyPublishedNpmRelease(fixture.options);
 
   assert.equal(
     fixture.waits.reduce((sum, ms) => sum + ms, 0),
-    105_000,
+    8 * 60_000 + 15_000,
   );
   assert.equal(fixture.consumers.length, 1);
-  for (const args of fixture.packs) assert.deepEqual(args, fixture.packs[0]);
+  const attemptsBySpec = Map.groupBy(fixture.packs, (args) =>
+    args.find((arg) => arg.startsWith('@bendyline/')),
+  );
+  assert.ok(attemptsBySpec.get(serviceSpec).length > 1);
+  for (const [spec, attempts] of attemptsBySpec) {
+    if (spec !== serviceSpec)
+      assert.equal(attempts.length, 1, `${spec} should only be downloaded once`);
+  }
+  assert.equal(REGISTRY_AVAILABILITY_TIMEOUT_MS, 40 * 60_000);
   assertCleanedUp(fixture);
 });
 
-test('fails after five minutes of retries without accepting a missing release', () => {
-  const fixture = registryFixture({ availableAfterMs: Number.POSITIVE_INFINITY });
+test('fails at the wall-clock deadline and names the artifact still being scanned', () => {
+  const fixture = registryFixture({
+    availableAfterMs: Number.POSITIVE_INFINITY,
+    delayedSpec: serviceSpec,
+    availabilityTimeoutMs: 45_000,
+  });
   assert.throws(
     () => verifyPublishedNpmRelease(fixture.options),
-    /could not download the exact published artifacts after 21 attempts \(1\)/,
+    new RegExp(
+      `could not download 1/${publishedSpecs.length} exact published artifacts within 0\\.75 minutes: ${serviceSpec}`,
+    ),
   );
 
-  assert.equal(fixture.packs.length, 21);
-  assert.equal(fixture.waits.length, 20);
+  assert.equal(fixture.waits.length, 3);
   assert.equal(
     fixture.waits.reduce((sum, ms) => sum + ms, 0),
-    300_000,
+    45_000,
   );
+  assert.match(fixture.logs.at(-1), new RegExp(serviceSpec));
   assert.equal(fixture.consumers.length, 0);
   assertCleanedUp(fixture);
 });
@@ -111,7 +147,7 @@ test('consumer failures remain fatal and do not restart registry retries', () =>
     /published artifact consumer checks failed \(1\)/,
   );
 
-  assert.equal(fixture.packs.length, 1);
+  assert.equal(fixture.packs.length, PUBLISHED_PACKAGE_DIRS.length);
   assert.equal(fixture.consumers.length, 1);
   assert.deepEqual(fixture.waits, []);
   assertCleanedUp(fixture);
