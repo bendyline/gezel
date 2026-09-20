@@ -74,6 +74,40 @@ describe('parseGemmaNativeToolCall', () => {
     expect(parsed?.arguments.content).toBe('path: C:\\Users\\test');
   });
 
+  it('recovers a trailing path when the model closed the content with plain quotes', () => {
+    // Verbatim shape from a gemma4-12b-q4 invoice child: native opener,
+    // Python-style triple-quote closer, then the path argument.
+    const body = `call:write_file{content:<|"|><!DOCTYPE html>
+<html lang="en">
+<body>
+    <div class="total-section"><span class="amount">$975.00</span></div>
+</body>
+</html>
+""", path: "invoices/2026-044.html"}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.name).toBe('write_file');
+    expect(parsed?.arguments.path).toBe('invoices/2026-044.html');
+    expect(parsed?.arguments.content).toMatch(/^<!DOCTYPE html>/);
+    expect(parsed?.arguments.content).toMatch(/<\/html>\n$/);
+    expect(parsed?.arguments.content).not.toContain('path:');
+  });
+
+  it('does not split inside content that merely contains a ", key:" sequence', () => {
+    const body = `call:write_file{content:<|"|>const cfg = {"a": "b", c: 1};
+</html>
+""", path: "src/cfg.js"}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.arguments.path).toBe('src/cfg.js');
+    expect(parsed?.arguments.content).toBe('const cfg = {"a": "b", c: 1};\n</html>\n');
+  });
+
+  it('recovers a single-quote-closed content followed by the closing brace', () => {
+    const body = `call:write_file{path:<|"|>notes.md<|"|>,content:<|"|># Notes
+Done."}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.arguments).toEqual({ path: 'notes.md', content: '# Notes\nDone.' });
+  });
+
   it('parses an unterminated string at end-of-buffer (ramble cut-off)', () => {
     const body = `call:write_artifact{content:<|"|><!DOCTYPE html>\n<html><body>incomplete...`;
     const parsed = parseGemmaNativeToolCall(body, TOOLS);

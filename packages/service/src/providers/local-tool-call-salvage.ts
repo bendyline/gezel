@@ -242,6 +242,37 @@ export function stripGemmaNativeToolCallsFromText(
 }
 
 /**
+ * Locate the run of one to three plain double quotes that closes an
+ * unterminated native string. Candidates are quote runs followed by another
+ * argument (`, key:`), tried from the last one backwards, and accepted only
+ * when everything after them parses as the rest of the argument object
+ * through its closing brace — so a `", key:` sequence inside the content
+ * itself cannot win. With no such candidate, a quote run right before the
+ * closing brace ends the string. Returns the span or null.
+ */
+function lastMisclosedStringBoundary(rest: string): { start: number; end: number } | null {
+  const argBoundary = /"{1,3}(?=\s*,\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*:)/g;
+  const candidates = [...rest.matchAll(argBoundary)];
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const match = candidates[i]!;
+    const end = match.index + match[0].length;
+    const probeText = `{${rest.slice(end).replace(/^\s*,/, '')}`;
+    const probe = new GemmaNativeBodyParser(probeText, 0);
+    const parsed = probe.readValue();
+    const tail = probeText
+      .slice(probe.endPos())
+      .replace(/<tool_call\|>/, '')
+      .trim();
+    if (isPlainObject(parsed) && tail === '') return { start: match.index, end };
+  }
+  const closing = rest.match(/"{1,3}(?=\s*\}\s*(?:<tool_call\|>)?\s*$)/);
+  if (closing && closing.index !== undefined) {
+    return { start: closing.index, end: closing.index + closing[0].length };
+  }
+  return null;
+}
+
+/**
  * Char-by-char parser for Gemma 4's native tool-call argument format.
  * Public types this file already imports.
  */
@@ -290,7 +321,22 @@ class GemmaNativeBodyParser {
     const closer = '<|"|>';
     const end = this.text.indexOf(closer, this.pos);
     if (end === -1) {
+      // A string the model opened with the native token but closed with
+      // ordinary quotes (a Python habit: `content:<|"|>...</html>""", path:
+      // "invoices/x.html"}`) is not truncated; swallowing the rest of the
+      // buffer turned the trailing `path` into the tail of `content`, and
+      // the validator then rejected the call for a missing `path` ten
+      // times in a row while the model insisted it had sent one
+      // (gemma4-12b-q4 invoice child, 2026-09-19). Split at the LAST run
+      // of plain quotes that is followed by more args or the closing
+      // brace; a genuinely cut-off string has no such boundary and still
+      // takes the whole remainder.
       const rest = this.text.slice(this.pos);
+      const boundary = lastMisclosedStringBoundary(rest);
+      if (boundary) {
+        this.pos += boundary.end;
+        return rest.slice(0, boundary.start);
+      }
       this.pos = this.text.length;
       return rest;
     }

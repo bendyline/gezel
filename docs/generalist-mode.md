@@ -347,6 +347,19 @@ name is a seeded workspace path. Same defect family as the fanout receipts
 and the `package.json` rule above: the harness knowing fewer ways to read a
 file than the provider has.
 
+**Found by the local rates run's gemma `invoice-run` cell (fixed 2026-09-19
+in source; the dist is rebuilt after the run):** the third invoice child
+had its `write_file` rejected ten times for a missing `path` while the
+model insisted, correctly, that it had sent one. It had opened `content`
+with Gemma's native quote token and closed it with a Python-style `"""`
+before writing `, path: "invoices/2026-044.html"}`; the native parser's
+unterminated-string fallback, meant for output that was cut off, took the
+rest of the buffer as the content, path and all. The barrier waited on
+that child for half an hour until the stall sweep and the unresolved-tool
+ledger paused it. The fallback now splits at the last run of plain quotes
+that is followed by another argument or the closing brace; a genuinely
+truncated string still takes the whole remainder.
+
 - **Anthropic SDK replays without compaction.** `checkContextPressure` returns
   early for non-local providers while the `anthropic` provider replays the
   whole transcript. A long generalist run on that provider can overflow. The
