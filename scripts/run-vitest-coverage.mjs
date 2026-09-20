@@ -76,6 +76,12 @@ export const targets = [
     thresholds: { statements: 76, branches: 67, functions: 55, lines: 77 },
   },
   {
+    id: 'script-runtime',
+    root: 'packages/script-runtime',
+    include: sourceInclude,
+    thresholds: { statements: 90, branches: 85, functions: 95, lines: 92 },
+  },
+  {
     id: 'app-sdk',
     root: 'packages/app-sdk',
     include: sourceInclude,

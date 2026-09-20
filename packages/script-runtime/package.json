@@ -1,0 +1,40 @@
+{
+  "name": "@bendyline/gezel-script-runtime",
+  "version": "1.0.10",
+  "description": "Portable, capability-mediated script execution for Gezel.",
+  "license": "MIT",
+  "homepage": "https://github.com/bendyline/gezel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/script-runtime"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./quickjs": { "types": "./dist/quickjs.d.ts", "import": "./dist/quickjs.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "!dist/**/*.map"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bendyline/gezel-sdk": "workspace:*",
+    "quickjs-emscripten": "0.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

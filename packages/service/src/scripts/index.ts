@@ -1,4 +1,5 @@
 export { ScriptRunner } from './runner.js';
+export { QuickJSWorkerExecutor } from './quickjs-executor.js';
 export {
   buildDispatcher,
   CapabilityDeniedError,

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ScriptCapability,
@@ -17,6 +16,7 @@ import {
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { ScriptExecutionResult, ScriptExecutor } from '@bendyline/gezel-script-runtime';
 import {
   projectScriptFile,
   projectScriptRunFile,
@@ -27,25 +27,20 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { redactObject, redactString } from '../providers/mcp-bridge.js';
-import { type SandboxRunResult, runInSandbox } from '../sandbox/runner.js';
 import { type CredentialRegistry, DefaultCredentialRegistry } from '../secrets/registry.js';
 import type { SecretStore } from '../secrets/types.js';
 import type { TaskManager } from '../tasks/manager.js';
-import {
-  CapabilityDeniedError,
-  type DispatcherContext,
-  type DispatcherDeps,
-  EngagementDeniedError,
-  buildDispatcher,
-} from './dispatcher.js';
+import { type DispatcherContext, type DispatcherDeps, buildDispatcher } from './dispatcher.js';
 import { validateScriptInput } from './input-validator.js';
 import { parseScriptMeta } from './meta.js';
-import { SDK_PACKAGE_NAME, resolveSdkDir, shouldVendorSdkPath } from './sdk.js';
+import { NodeScriptExecutor } from './node-executor.js';
 import { stdlibScriptFile } from './stdlib-source.js';
 
 const log = createLogger('scripts');
 
 export interface ScriptRunnerOptions {
+  /** Host-selected execution engine. Scripts cannot select or replace it. */
+  executor?: ScriptExecutor;
   store: Store;
   chat: ChatManager;
   /** Backs the `gezel.memory.*` script API. Injected by service.ts. */
@@ -116,13 +111,14 @@ const MAX_CASCADE_DEPTH = 4;
 
 /**
  * Owns the script execution pipeline: meta read → input validation →
- * scratch setup → sandbox spawn with fd-3 RPC → dispatcher → run
+ * host-selected executor → permission dispatcher → run
  * persistence. One instance per service; callers drive it through
  * `run()` (for chat/manual triggers) or the phase-hook wiring in
  * TaskManager.
  */
 export class ScriptRunner {
   private readonly store: Store;
+  private readonly executor: ScriptExecutor;
   private readonly chat: ChatManager;
   private readonly memory?: MemoryManager;
   private readonly tasks?: TaskManager;
@@ -136,6 +132,7 @@ export class ScriptRunner {
 
   constructor(opts: ScriptRunnerOptions) {
     this.store = opts.store;
+    this.executor = opts.executor ?? new NodeScriptExecutor();
     this.chat = opts.chat;
     this.memory = opts.memory;
     this.tasks = opts.tasks;
@@ -351,10 +348,11 @@ export class ScriptRunner {
       provenanceTrusted &&
       [...allowedCapabilities].every((capability) => capability.endsWith('.read'));
 
-    const scratch = await this.prepareScratch(source, opts.scriptName);
+    let acceptingCallbacks = true;
+    const pendingCalls = new Set<ScriptRunCall>();
     try {
-      const result = await this.runSandbox({
-        scratch,
+      const result = await this.executor.execute({
+        source,
         scriptName: opts.scriptName,
         provenanceTrusted: provenanceTrusted || cliTrusted,
         trustedReadOnlyStandard,
@@ -366,8 +364,31 @@ export class ScriptRunner {
           engagementFlags: { llmAllowed },
         },
         timeoutMs,
-        onRequest: async (method, params) => this.dispatcher.dispatch(ctx, method, params),
+        onRequest: async (method, params) => {
+          if (!acceptingCallbacks) throw new Error('Script execution has ended');
+          const start = Date.now();
+          const call: ScriptRunCall = {
+            at: new Date(start).toISOString(),
+            kind: method,
+            argsSummary: summarize(params).slice(0, 256),
+            durationMs: 0,
+          };
+          run.calls.push(call);
+          pendingCalls.add(call);
+          try {
+            const result = await this.dispatcher.dispatch(ctx, method, params);
+            if (acceptingCallbacks) call.outputSummary = summarize(result).slice(0, 256);
+            return result;
+          } catch (err) {
+            if (acceptingCallbacks) call.error = err instanceof Error ? err.message : String(err);
+            throw err;
+          } finally {
+            if (acceptingCallbacks) call.durationMs = Date.now() - start;
+            pendingCalls.delete(call);
+          }
+        },
         onNotification: (method, params) => {
+          if (!acceptingCallbacks) return;
           if (method === 'script.output') {
             if (outputSeen) {
               return; // already recorded; silently drop
@@ -379,13 +400,12 @@ export class ScriptRunner {
             run.logs += `${args.map(summarize).join(' ')}\n`;
           }
         },
-        recordCall: (call) => {
-          run.calls.push(call);
-        },
         onStdout: (line) => {
+          if (!acceptingCallbacks) return;
           run.logs += `[stdout] ${line}\n`;
         },
         onStderr: (line) => {
+          if (!acceptingCallbacks) return;
           run.logs += `[stderr] ${line}\n`;
         },
       });
@@ -424,7 +444,13 @@ export class ScriptRunner {
       run.status = 'error';
       run.error = err instanceof Error ? err.message : String(err);
     } finally {
-      await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+      acceptingCallbacks = false;
+      for (const call of pendingCalls) {
+        call.durationMs = Date.now() - Date.parse(call.at);
+        call.error =
+          'Script execution ended while this host operation was pending; it may still complete';
+      }
+      pendingCalls.clear();
     }
 
     redactRunInPlace(run, knownSecretValues);
@@ -457,28 +483,6 @@ export class ScriptRunner {
       output: nested.output,
       error: nested.error,
     };
-  }
-
-  private async prepareScratch(source: string, scriptName: string): Promise<string> {
-    // Use the canonical path so Node's permission checks (which compare
-    // resolved paths) line up with the --allow-fs-read/write entries we
-    // pass. On macOS, /var/folders/… canonicalises to /private/var/...,
-    // and Node's ERR_ACCESS_DENIED compares against the canonical form.
-    const { realpath } = await import('node:fs/promises');
-    const raw = await mkdtemp(join(tmpdir(), 'gezel-script-'));
-    const scratch = await realpath(raw);
-    await writeFile(join(scratch, 'user-script.ts'), source, 'utf8');
-    await writeFile(
-      join(scratch, 'package.json'),
-      JSON.stringify(
-        { name: `gezel-script-${scriptName}`, type: 'module', private: true },
-        null,
-        2,
-      ),
-    );
-    // Vendor @bendyline/gezel-sdk into scratch/node_modules
-    await this.vendorSdk(scratch);
-    return scratch;
   }
 
   /**
@@ -580,115 +584,6 @@ export class ScriptRunner {
     );
   }
 
-  private async vendorSdk(scratch: string): Promise<void> {
-    const sdkDir = await resolveSdkDir();
-    const target = join(scratch, 'node_modules', SDK_PACKAGE_NAME);
-    await mkdir(dirname(target), { recursive: true });
-    await cp(sdkDir, target, {
-      recursive: true,
-      filter: (src) => shouldVendorSdkPath(sdkDir, src),
-    });
-  }
-
-  private async runSandbox(opts: {
-    scratch: string;
-    scriptName: string;
-    provenanceTrusted: boolean;
-    trustedReadOnlyStandard: boolean;
-    init: Record<string, unknown>;
-    timeoutMs: number;
-    onRequest: (method: string, params: unknown) => Promise<unknown>;
-    onNotification: (method: string, params: unknown) => void;
-    recordCall: (call: ScriptRunCall) => void;
-    onStdout: (line: string) => void;
-    onStderr: (line: string) => void;
-  }): Promise<SandboxRunResult> {
-    let sendFrame: ((line: string) => void) | null = null;
-
-    return runInSandbox({
-      entry: 'user-script.ts',
-      cwd: opts.scratch,
-      input: `${JSON.stringify(opts.init)}\n`,
-      timeoutMs: opts.timeoutMs,
-      stripTypes: true,
-      // All script network goes through the dispatcher (parent-side
-      // `http.authed` / `llm.oneShot` over the fd-3 RPC channel); the
-      // child itself never needs sockets. Deny egress so a script can't
-      // bypass the `network` capability gate with a raw `fetch()` and
-      // POST workspace data out. (`fetch` IS a reachable Node global —
-      // the prior "not reachable through the SDK" assumption was wrong.)
-      denyNet: true,
-      // Byte-verified first-party scripts may run where no OS network
-      // boundary exists (see isProvenanceTrusted); everything else still
-      // fails closed there.
-      allowMissingNetBoundary: opts.provenanceTrusted,
-      allowMacSandboxStartupFallback: opts.trustedReadOnlyStandard,
-      // Cap heap so a runaway allocation can't OOM the whole host. The
-      // child gets a generous ceiling — enough for normal data-wrangling,
-      // far below total system memory.
-      maxOldSpaceMb: 1024,
-      // Node + the vendored SDK + any userland imports can read from
-      // paths outside a tight allowlist (brew prefix, /private/var/…).
-      // The real fence that matters is write scoping + no network +
-      // per-call capability enforcement at the dispatcher.
-      relaxReads: true,
-      extraEnv: { GEZEL_SCRIPT_RUNTIME: '1' },
-      onStdout: opts.onStdout,
-      onStderr: opts.onStderr,
-      rpcChannel: {
-        onLine: (line) => {
-          let msg: { id?: number; method?: string; params?: unknown };
-          try {
-            msg = JSON.parse(line);
-          } catch {
-            return;
-          }
-          if (typeof msg.id === 'number' && typeof msg.method === 'string') {
-            const start = Date.now();
-            const method = msg.method;
-            const params = msg.params;
-            opts
-              .onRequest(method, params)
-              .then((result) => {
-                const duration = Date.now() - start;
-                opts.recordCall({
-                  at: new Date(start).toISOString(),
-                  kind: method,
-                  argsSummary: summarize(params).slice(0, 256),
-                  outputSummary: summarize(result).slice(0, 256),
-                  durationMs: duration,
-                });
-                sendFrame?.(`${JSON.stringify({ id: msg.id, result })}\n`);
-              })
-              .catch((err: unknown) => {
-                const duration = Date.now() - start;
-                const message = err instanceof Error ? err.message : String(err);
-                const code =
-                  err instanceof CapabilityDeniedError
-                    ? err.code
-                    : err instanceof EngagementDeniedError
-                      ? err.code
-                      : (err as { code?: string } | null)?.code;
-                opts.recordCall({
-                  at: new Date(start).toISOString(),
-                  kind: method,
-                  argsSummary: summarize(params).slice(0, 256),
-                  durationMs: duration,
-                  error: message,
-                });
-                sendFrame?.(`${JSON.stringify({ id: msg.id, error: { message, code } })}\n`);
-              });
-          } else if (typeof msg.method === 'string') {
-            opts.onNotification(msg.method, msg.params);
-          }
-        },
-        onOpen: (send) => {
-          sendFrame = send;
-        },
-      },
-    });
-  }
-
   private async persistRun(run: ScriptRun): Promise<void> {
     const date = run.startedAt.slice(0, 10);
     const runsDir = projectScriptRunsDir(this.store.homePath, run.projectId);
@@ -720,7 +615,7 @@ export function extractScriptFailureFromStderr(stderr: string): string | undefin
   return lines.find((line) => /^(?:Error|[A-Za-z][A-Za-z0-9]*Error):\s+\S/.test(line));
 }
 
-function formatScriptExitFailure(result: SandboxRunResult): string {
+function formatScriptExitFailure(result: ScriptExecutionResult): string {
   const exit = result.signal
     ? `script closed by signal ${result.signal}`
     : `script exited with code ${result.exitCode}`;

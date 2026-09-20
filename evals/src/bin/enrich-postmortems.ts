@@ -174,6 +174,19 @@ export function modelLabel(entry: {
   return arm ? `${entry.facts.modelId} (${arm})` : entry.facts.modelId;
 }
 
+/** "1", or "1 to 3" when a rates root repeats cells. */
+export function trialsPerCellText(entries: TrialEntry[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const key = `${modelLabel(entry)}\u0000${entry.facts.scenarioId}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const values = [...counts.values()];
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  return lo === hi ? String(lo) : `${lo} to ${hi}`;
+}
+
 async function loadEntries(roots: string[]): Promise<TrialEntry[]> {
   const entries: TrialEntry[] = [];
   for (const rawRoot of roots) {
@@ -193,17 +206,10 @@ async function loadEntries(roots: string[]): Promise<TrialEntry[]> {
       }
     }
   }
-  const byPair = new Map<string, TrialEntry>();
-  for (const entry of entries) {
-    const key = `${modelLabel(entry)}\u0000${entry.facts.scenarioId}`;
-    const existing = byPair.get(key);
-    if (existing) {
-      throw new Error(
-        `duplicate model/arm/scenario triple: ${modelLabel(entry)}/${entry.facts.scenarioId}\n${existing.dir}\n${entry.dir}`,
-      );
-    }
-    byPair.set(key, entry);
-  }
+  // A rates root holds several trials per (model, arm, scenario) on
+  // purpose (`--count 3`); every roll-up below groups by model and
+  // scenario and reads fine over repeated cells, so keep them all and let
+  // the summary say how many trials each cell carries.
   return entries.sort(
     (a, b) =>
       modelLabel(a).localeCompare(modelLabel(b)) ||
@@ -668,9 +674,13 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     `|---|---:|${models.map(() => '---:').join('|')}|`,
   );
   for (const item of spreads.slice(0, 25)) {
-    const byId = new Map(item.group.map((entry) => [modelLabel(entry), entry.score.composite]));
+    const byId = new Map<string, number[]>();
+    for (const entry of item.group) {
+      const label = modelLabel(entry);
+      byId.set(label, [...(byId.get(label) ?? []), entry.score.composite]);
+    }
     lines.push(
-      `| ${item.scenario} | ${fmt1(item.spread)} | ${models.map((model) => fmt1(byId.get(model) ?? 0)).join(' | ')} |`,
+      `| ${item.scenario} | ${fmt1(item.spread)} | ${models.map((model) => fmt1(mean(byId.get(model) ?? [0]))).join(' | ')} |`,
     );
   }
 
@@ -825,7 +835,7 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     '## Limitations and recovery record',
     '',
     '- One trial per model/scenario pair: rankings are a complete matrix, but not statistical confidence intervals.',
-    `- The sweep spans ${roots.length} root${roots.length === 1 ? '' : 's'}; the final set contains no duplicate model/arm/scenario triples.`,
+    `- The sweep spans ${roots.length} root${roots.length === 1 ? '' : 's'}; cells carry ${trialsPerCellText(entries)} trial(s) per model, arm and scenario.`,
     '- Infra/operator/grader-classified terminal trials remain documented but are excluded from model capability means.',
     '- Performance reflects this host and llama.cpp/CUDA configuration; it is not part of the capability composite.',
     '',

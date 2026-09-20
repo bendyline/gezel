@@ -626,6 +626,33 @@ failing on a frontier model. The n=3 rates run of the same suite waits for
 the account's weekly reset, and the local-model rates run (runbook step 4)
 is still to come.
 
+### Rates, qwen3.8-27b-q4 and gemma4-12b-q4 on MLX, 2026-09-19/20 (run 10, root `evals/runs/ab-generalist-2026-09-19T15-58-45-120Z`)
+
+Runbook step 4: the smoke suite at n=3 per cell, both arms, both local
+models, 36 cells from 15:58Z to 01:09Z. Same dist as run 9 plus the
+stepwise-barrier, review-reroute and night-shift fixes; the gemma
+quote-closure parser fix landed after this run. Compaction never triggered
+anywhere (maximum context fill 8%).
+
+| Model | Scenario | Stepwise | Generalist | Read-out |
+|---|---|---|---|---|
+| qwen3.8-27b-q4 | `fanout-stories` | 3/3, 6.7 to 11m | 3/3, 8 to 13.5m | Twelve of twelve fanout trials across both models; the stepwise host no longer waits for the sweep. |
+| qwen3.8-27b-q4 | `craftbook-invoice-run` | 0/3 | 0/3 | The qwen3.8 shape from runs 3 to 5 in both arms: `write_artifact` payloads cut off mid-JSON, the salvage layer promoting `write_task_note` instead, three loop-breaker aborts, paused at `scope`. |
+| qwen3.8-27b-q4 | `craftbook-codemod-sweep` | 0/3 | 0/3 | Same first-step wall in both arms: `validate` or `stat` loops on the artifact it never wrote, or four `advance_task_step` calls with nothing written. |
+| gemma4-12b-q4 | `fanout-stories` | 3/3, 6 to 8m | 3/3, 6.5 to 7m | Clean. |
+| gemma4-12b-q4 | `craftbook-invoice-run` | 0/3, 17 to 52m | 3/3, 12m43s, 22m40s, 70m | The mode split of the campaign. Stepwise: three crews drafted their invoices and every host stalled on a `report.md` under the 800-byte gate. Generalist: one session per run carried scope, collect, evaluate and finish. The 70-minute pass lost about 28 minutes to the quote-closure parser defect on one child (§5, fixed after the run) and then cycled evaluate, draft and collect six times because the owner kept advancing `evaluate` without naming `finish`, which is the book's REVISE route. |
+| gemma4-12b-q4 | `craftbook-codemod-sweep` | 0/3, 17 to 33m | 0/3 as booked, 12 to 14m | Stepwise reached `apply` or `verify` and stopped. All three generalist runs completed the book in one session with two receipted suite runs and a passing review, 30 of 32 checks each, and booked as failures on the DONE-note regex (§5) and on seeded files the owner grepped and edited by line range without ever opening. |
+
+Totals as booked: qwen3.8-27b-q4 3/9 in both arms; gemma4-12b-q4 stepwise
+3/9, generalist 6/9. On gemma the generalist arm is the first local-model
+configuration to finish a craftbook in this campaign, and it finished both
+books it faced; the stepwise arm finished neither. On qwen3.8-27b-q4 the
+mode does not move the outcome, because the model fails at the first
+artifact step regardless of who owns the task. This is the first evidence
+on the `auto` question for local `medium`: one model, two books, n=3, all
+pointing the same way. It is a lead, not a decision; the rule stays
+stepwise for on-device models until the next round covers more books.
+
 ---
 
 ## Appendix — original spec: frontier-adaptive execution (2026-07)

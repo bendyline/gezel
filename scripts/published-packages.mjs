@@ -36,6 +36,7 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'core', typed: true },
   { dir: 'client', typed: true },
   { dir: 'sdk', typed: true },
+  { dir: 'script-runtime', typed: true },
   { dir: 'app-sdk', typed: true },
   { dir: 'plugin-sdk', typed: true },
   { dir: 'catalog', typed: true },

@@ -33,6 +33,8 @@ export default defineConfig({
     // synchronous (node:sqlite), so shard scans must run off the daemon
     // loop (docs/gezk-format.md).
     'knowledge/search-worker': 'src/knowledge/search-worker.ts',
+    // Portable guest execution must never occupy the daemon/Electron event loop.
+    'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.
@@ -41,7 +43,7 @@ export default defineConfig({
   format: ['esm'],
   // Only the package's two public import surfaces need bundled declarations.
   // Passing every executable entry to rollup-plugin-dts also makes its worker
-  // typecheck the daemon and all six internal workers as independent roots.
+  // typecheck the daemon and all internal workers as independent roots.
   // Those 13-byte `export {}` worker declarations are not published APIs and
   // can push Node's isolated worker heap over its limit on memory-constrained
   // builds.

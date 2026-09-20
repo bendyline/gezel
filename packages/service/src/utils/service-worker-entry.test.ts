@@ -76,6 +76,15 @@ describe('service worker entry resolution', () => {
     expect(findServiceWorkerEntry(pathToFileURL(entry).href, 'document-convert')).toBe(expected);
   });
 
+  it('uses the TypeScript QuickJS worker in raw-source development', async () => {
+    const root = await tempRoot();
+    const entry = join(root, 'src', 'scripts', 'quickjs-executor.ts');
+    const expected = join(root, 'src', SERVICE_WORKER_ENTRIES.quickjs.source);
+    await touch(entry);
+    await touch(expected);
+    expect(findServiceWorkerEntry(pathToFileURL(entry).href, 'quickjs')).toBe(expected);
+  });
+
   it('returns null when the requested worker is absent', async () => {
     const root = await tempRoot();
     const entry = join(root, 'dist', 'bin', 'gezeld.js');
