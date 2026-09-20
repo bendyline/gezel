@@ -466,6 +466,9 @@ describe('handoff seed wording', () => {
       ],
       createdBy: { kind: 'user' },
     });
+    // A checkpoint that exists but is too short: the recovery must say so, or
+    // a small model writes the same short file on every attempt.
+    await store.writeProjectArtifact('p1', 'observations.md', 'short');
     mock.script('I reviewed the record but did not publish it.');
     mock.script('I still have not used the checkpoint tool.');
     mock.script('The analysis is complete in prose only.');
@@ -486,6 +489,9 @@ describe('handoff seed wording', () => {
     // The recovery names the checkpoint the step advances on, so a model
     // that wrote a different deliverable first does not restart from the top.
     expect(sends[1]?.prompt).toContain('once `observations.md` is written');
+    expect(sends[1]?.prompt).toContain(
+      'Right now `observations.md` is 5 bytes and the check needs at least 20',
+    );
     expect((await store.readTask('p1', task.num))?.activeStepId).toBe('review');
   });
 

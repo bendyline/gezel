@@ -113,6 +113,7 @@ const SCROLL_NEAR_TOP_PX = 80;
 const SCROLLBAR_IDLE_MS = 700;
 /** Stable tail budget consumed by live work before the timeline is allowed to grow. */
 const TIMELINE_WORKING_RESERVE_PX = 300;
+const TIMELINE_MIN_CONVERSATION_HEIGHT_PX = 192;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
 // A terminal "session" is a run of commands inside one
@@ -2517,11 +2518,13 @@ export function ChatTimelineView({
   }, []);
 
   /**
-   * Keep a 300px tail below the timeline, but let live chat/indexing cards
+   * Keep up to a 300px tail below the timeline, but let live chat/indexing cards
    * consume that tail before they increase scrollHeight. The cards remain in
    * their normal chronological/thread positions; only the otherwise-empty
    * runway changes size. ResizeObserver follows streaming bubbles as their
    * text grows without routing token-frequency updates through this parent.
+   * Reserve conversation space first: a phone's entire scrollport can be
+   * shorter than 300px, which otherwise pins every message above the viewport.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: loading and the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
   useLayoutEffect(() => {
@@ -2553,12 +2556,17 @@ export function ChatTimelineView({
           : timelineGap;
         consumed += localGap;
       }
-      runway.style.blockSize = `${Math.max(0, TIMELINE_WORKING_RESERVE_PX - consumed)}px`;
+      const reserve = Math.min(
+        TIMELINE_WORKING_RESERVE_PX,
+        Math.max(0, timeline.clientHeight - TIMELINE_MIN_CONVERSATION_HEIGHT_PX),
+      );
+      runway.style.blockSize = `${Math.max(0, reserve - consumed)}px`;
     };
 
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
+    observer.observe(timeline);
     for (const node of timeline.querySelectorAll<HTMLElement>(
       '[data-msg-id^="live:"], .terminal-group-streaming',
     )) {

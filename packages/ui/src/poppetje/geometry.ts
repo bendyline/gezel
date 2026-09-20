@@ -1,4 +1,4 @@
-import { BODY_ARCHETYPES, type BodyArchetype, FIGURE_SCALES } from '@bendyline/gezel';
+import { BODY_ARCHETYPES, type BodyArchetype, FIGURE_SCALES } from '@bendyline/gezel/poppetje';
 
 export interface ResolvedLayout {
   baseY: number;

@@ -11,7 +11,11 @@ intermediate render.
 | --- | --- |
 | `foundation.css` | Tokens, themes, reset, typography, focus, reduced motion, and document roots |
 | `app-shell.css` | App notices, title bar, global navigation, meters, overlays, and primary sidebar |
+| `primary-navigation.css` | Shared navigation rows and groups used by desktop and native hosts |
+| `../components/ResponsiveAppShell.css` | Shared navigation/content pane layout |
+| `../components/ResponsiveAppShell.mobile.css` | **On demand:** Phone navigation and the desktop mobile preview, loaded by `useResponsiveLayout` |
 | `file-browser.css` | List panes, shared file browser, workspace/index panes, document surfaces, and file previews |
+| `../components/file-browser/FileBrowserPane.css` | **On demand:** Phone list/detail navigation in the shared file browser |
 | `shared-content.css` | Document export, shared content utilities, core chat bubbles/composer chrome, and Squisq integration |
 | `gezels.css` | Gezel identity, appearance, roster, and detail surfaces |
 | `settings-and-status.css` | Settings navigation/panels, machine policy, and project status/index controls |
@@ -22,6 +26,8 @@ intermediate render.
 | `chat.css` | Project chat, tool output, references, timeline, memories, commands, and chat task rail |
 | `catalog-and-primitives.css` | Engine/model settings, catalog/toolsets, transformation flow, and base Radix primitives |
 | `project-surfaces.css` | Project output, remaining tab primitives, questions, creation galleries, mail, and connected project surfaces |
+| `../views/ProjectsView.css` | **On demand:** Responsive project master/detail and phone project controls |
+| `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
 | `github-and-growth.css` | GitHub workspace and gezel growth surfaces |
 | `diffpacks.css` | Change-proposal review pane (the project Proposals tab) |

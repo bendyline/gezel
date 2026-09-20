@@ -61,6 +61,8 @@ export * from './audio.js';
 export * from './script-input.js';
 export * from './handboek.js';
 export * from './storage.js';
+export * from './mobile.js';
+export * from './mobile-provider.js';
 
 export * from './file-turn-intent.js';
 export * from './turn-intent-plan.js';

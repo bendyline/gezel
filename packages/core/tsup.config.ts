@@ -6,6 +6,8 @@ export default defineConfig({
     'src/index.ts',
     'src/paths.ts',
     'src/schemas/index.ts',
+    'src/schemas/mobile-provider.ts',
+    'src/poppetje/index.ts',
     'src/markdown/index.ts',
     // `./native` ships the llama-cpp backend probe + bundled-engine
     // discovery used by BOTH the Electron supervisor (pre-spawn) AND

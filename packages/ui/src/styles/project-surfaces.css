@@ -317,7 +317,7 @@
    non-detail variant could still appear on a too-narrow desktop
    window. The flex/grid swap here keeps the main column on its
    own row. */
-.two-col.is-compact:not(.detail-only) > aside.side {
+.two-col.is-compact:not(.detail-only):not(.showing-project-list) > aside.side {
   display: none;
 }
 .two-col.is-compact:not(.detail-only) {
@@ -347,20 +347,6 @@
 .gz-tabs-trigger[data-state="active"] {
   color: var(--text);
   border-bottom-color: var(--accent, #b0724c);
-}
-
-/* Compact project tab bar: icon-only triggers (word labels swapped for
-   ProjectTabIcon + a native tooltip) so every tab fits without a
-   horizontal scroller. Square-ish padding centers the glyph; the SVG
-   inherits the trigger's muted → active color via currentColor. */
-.gz-tabs-trigger.gz-tab-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.4rem 0.55rem;
-}
-.gz-tabs-trigger.gz-tab-icon svg {
-  display: block;
 }
 
 /* The pane-level stand-in shown while a project's detail is in flight

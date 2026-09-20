@@ -312,6 +312,29 @@ where a link needs forcing back to sans.
 
 ## Foundation
 
+Gezel has one responsive product UX. Window width determines its layout; the
+operating system determines available capabilities. A desktop window around
+400px wide is the mobile experience, with the same projects, documents, crew,
+navigation, and project sections. At 760px and below, the ordinary navigation
+rail becomes the full-width entry surface. Selecting an entity opens the same
+view at full width; Navigation returns to the rail. Wider windows restore the
+side-by-side arrangement and the user's saved rail side and size. Switching
+width or opening navigation must preserve the current view, editor, and draft.
+`?layout=mobile` constrains the same app to a phone width for convenient desktop
+testing; it never switches to a second application or a different data store.
+
+The native shell shares the responsive frame, brand, navigation rows, project
+section tabs, character renderer, palette, typography, and controls. Its current
+portable runtime supports one project and text conversations; unsupported
+capabilities are identified honestly until the existing domain operations/views
+are ported. Do not build a second mobile project/document UX to fill those gaps.
+Model setup belongs in Settings, with a compact link from an unconfigured chat.
+Interactive targets are at least 44px, project tabs retain readable labels,
+and narrow file browsers use list → detail/back while keeping editors mounted.
+The native composer follows the visual viewport above the keyboard and respects
+safe-area insets. Replies render as text without privileged HTML or external
+navigation inside the native web view.
+
 The UI is React + Vite with **plain CSS + CSS variables** — no Tailwind, no
 CSS-in-JS. All complex interactive controls (dialog, select, tabs, popover,
 tooltip, dropdown, alert-dialog) come from **Radix UI Primitives**,

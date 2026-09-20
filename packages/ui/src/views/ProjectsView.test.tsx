@@ -7,6 +7,7 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
+vi.mock('../primitives/Tabs.js', () => primitivesMock.Tabs);
 
 const chatComposerMocks = vi.hoisted(() => ({ queueComposerPrefill: vi.fn() }));
 const documentContainerMocks = vi.hoisted(() => ({
@@ -2059,6 +2060,39 @@ describe('ProjectsView', () => {
       render(<ProjectsView forceProjectId="pj-alpha" compact />);
       const chat = await screen.findByTestId('project-chat');
       expect(chat.getAttribute('data-compact')).toBe('true');
+    });
+
+    it('keeps section names, selected project, and settings drafts when layout changes', async () => {
+      activeWidth = 1024;
+      const { rerender } = render(<ProjectsView forceProjectId="pj-alpha" />);
+      fireEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+      const language = await screen.findByLabelText(/designated language/i);
+      fireEvent.change(language, { target: { value: 'Spanish draft' } });
+
+      rerender(<ProjectsView forceProjectId="pj-alpha" compact />);
+      expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveTextContent('Workspace');
+      expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(screen.getByLabelText(/designated language/i)).toBe(language);
+      expect(language).toHaveValue('Spanish draft');
+    });
+
+    it('lets a phone browse projects and return to the same settings draft', async () => {
+      activeWidth = 390;
+      window.localStorage.removeItem('gezel:projects:selectedId');
+      render(<ProjectsView />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+      fireEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+      const language = screen.getByLabelText(/designated language/i);
+      fireEvent.change(language, { target: { value: 'Spanish draft' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+      expect(language).not.toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Alpha' }));
+      expect(language).toBeVisible();
+      expect(language).toHaveValue('Spanish draft');
+      expect(screen.getByRole('heading', { name: 'Alpha' })).toBeVisible();
     });
   });
 

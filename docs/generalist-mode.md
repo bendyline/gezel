@@ -360,6 +360,17 @@ ledger paused it. The fallback now splits at the last run of plain quotes
 that is followed by another argument or the closing brace; a genuinely
 truncated string still takes the whole remainder.
 
+**Found by the e4b run's generalist `codemod-sweep` cell (fixed 2026-09-20
+in source; not in the dist until after the run):** the owner wrote a
+122-byte `sites.md` against a 500-byte checkpoint, the runtime ended the
+turn on that write, and the bounded recovery told it that the step advances
+"once the file is written and passes its check" without saying what the
+check wanted. It wrote the same 122 bytes twice more and the step paused
+after fifty seconds. The recovery message now reads the checkpoint and
+states the gap: the file does not exist yet, is N bytes against a floor of
+M, or fails its named sniff. Small models act on a number where they do not
+act on "passes its check".
+
 - **Anthropic SDK replays without compaction.** `checkContextPressure` returns
   early for non-local providers while the `anthropic` provider replays the
   whole transcript. A long generalist run on that provider can overflow. The
@@ -652,6 +663,27 @@ artifact step regardless of who owns the task. This is the first evidence
 on the `auto` question for local `medium`: one model, two books, n=3, all
 pointing the same way. It is a lead, not a decision; the rule stays
 stepwise for on-device models until the next round covers more books.
+
+### Rates, gemma4-e4b-q4 on MLX, 2026-09-20 (run 11, root `evals/runs/ab-generalist-2026-09-20T01-28-24-864Z`)
+
+Run at the user's request after run 10, to test the hypothesis that a
+lower-end model does better stepwise. Smoke suite, n=3 per cell, both arms,
+18 cells from 01:28Z to 04:00Z. Note that the runtime classifies E4B as
+`small` (its 8B total parameters), not `tiny`: both arms saw the same
+58-tool surface, so the tier cap that narrows a stepwise kit was not in
+play. Compaction never triggered (peak fill 12%).
+
+| Scenario | Stepwise | Generalist | Read-out |
+|---|---|---|---|
+| `fanout-stories` | 3/3, 2.5 to 3.8m | 3/3, 4.1 to 4.5m | Clean in both arms; the smallest model in the campaign runs the fanout cleanly. |
+| `craftbook-invoice-run` | 0/3, 7.7 to 10.5m | 3/3, 5.6 to 9.2m | Every stepwise crew produced the three invoices and a two-kilobyte report and failed exactly one check: the client skipped at `scope` was never named in the report, because the copywriter who wrote it had never seen the scope step. Every generalist run named it: the same session had written `scope`. |
+| `craftbook-codemod-sweep` | 0/3, 4.5 to 25m | 0/3 as booked, 1 to 24m | Stepwise reached `verify` twice and `finish` once; the finish-step project lead claimed it could not read the review, the Meester's check-in tried to rewrite the task's artifacts (refused by the task-scope guard), and the trial idled out. Generalist: one run paused in fifty seconds on a 122-byte `sites.md` (§5, fixed), the other two completed the whole book and booked as failures on the DONE-note regex, the seeded-read rule, and a 22-byte finish note. |
+
+Totals as booked: stepwise 3/9, generalist 6/9, the same split as
+gemma4-12b-q4. The invoice-run pair is the cleanest evidence in the campaign
+of what the split is: not capability, but working memory across the
+handoff. The stepwise crews did everything except carry one fact from the
+first step to the last.
 
 ---
 

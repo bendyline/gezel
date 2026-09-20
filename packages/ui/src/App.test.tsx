@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
   OUTPUT_PANE_RESTORE_EVENT,
@@ -28,11 +28,19 @@ vi.mock('./components/Sidebar.js', () => ({
   Sidebar: ({
     activeProjectIds,
     activeGezelIds,
+    onSelect,
   }: {
     activeProjectIds?: Set<string>;
     activeGezelIds?: Set<string>;
+    onSelect: (selection: { kind: 'project'; id: string; lastOpenedAt: number }) => void;
   }) => (
     <div data-testid="sidebar-active-turns">
+      <button
+        type="button"
+        onClick={() => onSelect({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 })}
+      >
+        Open mobile project
+      </button>
       <span data-testid="active-project-ids">{[...(activeProjectIds ?? [])].sort().join(',')}</span>
       <span data-testid="active-gezel-ids">{[...(activeGezelIds ?? [])].sort().join(',')}</span>
     </div>
@@ -40,7 +48,10 @@ vi.mock('./components/Sidebar.js', () => ({
 }));
 vi.mock('./components/TabContent.js', () => ({
   TabContent: ({ tab }: { tab: { kind: string; id?: string } }) => (
-    <div>{`${tab.kind}:${tab.id ?? ''}`}</div>
+    <div>
+      {`${tab.kind}:${tab.id ?? ''}`}
+      <input aria-label="Project draft" />
+    </div>
   ),
 }));
 vi.mock('./components/TabErrorBoundary.js', () => ({
@@ -58,6 +69,81 @@ vi.mock('./views/HomeView.js', () => ({ HomeView: () => <div>Home view</div> }))
 
 const { App } = await import('./App.js');
 const { api } = await import('./api.js');
+
+describe('Responsive navigation in the desktop app', () => {
+  let narrow = true;
+  let mediaEvents: EventTarget;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    narrow = true;
+    mediaEvents = new EventTarget();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        get matches() {
+          return narrow;
+        },
+        addEventListener: mediaEvents.addEventListener.bind(mediaEvents),
+        removeEventListener: mediaEvents.removeEventListener.bind(mediaEvents),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.unstubAllGlobals();
+  });
+
+  it('opens navigation on a phone, routes through the same project view, and keeps drafts on resize', async () => {
+    render(<App />);
+    expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
+    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    expect(await screen.findByText('project:mobile-project')).toBeVisible();
+    expect(JSON.parse(window.localStorage.getItem('gezel:nav:selection') ?? '{}').id).toBe(
+      'mobile-project',
+    );
+    const draft = screen.getByRole('textbox', { name: 'Project draft' });
+    fireEvent.change(draft, { target: { value: 'Keep this draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+    expect(draft).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue('Keep this draft');
+
+    act(() => {
+      narrow = false;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
+    expect(draft).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
+    act(() => {
+      narrow = true;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue('Keep this draft');
+  });
+
+  it('can exit the explicit mobile preview without resetting selection or other URL parameters', async () => {
+    narrow = false;
+    window.history.replaceState(null, '', '/?layout=mobile&filter=mine#project');
+    render(<App />);
+    expect(document.querySelector('.app-mobile-preview')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    const draft = await screen.findByRole('textbox', { name: 'Project draft' });
+    fireEvent.change(draft, { target: { value: 'Preview draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Exit mobile preview' }));
+    expect(document.querySelector('.app-mobile-preview')).not.toBeInTheDocument();
+    expect(draft).toHaveValue('Preview draft');
+    expect(window.location.search).toBe('?filter=mine');
+    expect(window.location.hash).toBe('#project');
+    expect(document.documentElement.dataset.layout).toBeUndefined();
+  });
+});
 
 describe('Output pane titlebar restore', () => {
   beforeEach(() => {

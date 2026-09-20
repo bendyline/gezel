@@ -867,6 +867,28 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
   });
 
+  it('opens compact navigation without changing the saved desktop width or collapse state', async () => {
+    window.localStorage.setItem('gezel:nav:sidebar-collapsed', '1');
+    window.localStorage.setItem('gezel:nav:sidebar-width', '320');
+    const { rerender } = render(
+      <Sidebar compact selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+
+    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+    expect(screen.getByTestId('app-sidebar')).toHaveStyle({ width: '100%' });
+    expect(screen.queryByRole('separator', { name: 'Resize sidebar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('sidebar-group-toggle-projects'));
+    expect(window.localStorage.getItem('gezel:nav:sidebar-collapsed')).toBe('1');
+    expect(window.localStorage.getItem('gezel:nav:sidebar-width')).toBe('320');
+
+    rerender(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
+    expect(screen.getByTestId('app-sidebar')).toHaveStyle({ width: '320px' });
+  });
+
   it('grows the default right sidebar when its grip is dragged left', () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const grip = screen.getByRole('separator', { name: 'Resize sidebar' });

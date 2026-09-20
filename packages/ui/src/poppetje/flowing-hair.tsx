@@ -1,4 +1,4 @@
-import type { BangsOption, HairPart, HairShape } from '@bendyline/gezel';
+import type { BangsOption, HairPart, HairShape } from '@bendyline/gezel/poppetje';
 import type { JSX } from 'react';
 
 type StyledHair = Exclude<HairShape, 'bald' | 'shaved'>;

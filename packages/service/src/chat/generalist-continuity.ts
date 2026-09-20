@@ -1,9 +1,16 @@
-import { type ChatSession, type ProviderName, type Task, isLocalProvider } from '@bendyline/gezel';
+import {
+  type ChatSession,
+  type ProviderName,
+  type Task,
+  isLocalProvider,
+  parseTaskRef,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
 import { resolveCatalogIdFromModelId } from '../providers/catalog-model-config.js';
 import { resolveCatalogParameterSize } from './catalog-model-lookup.js';
 import { type LocalModelTier, classifyLocalModelTier } from './local-model-tier.js';
+import { type StepSniffName, runStepSniff } from './step-sniff.js';
 
 /**
  * The pieces of generalist-mode session continuity (docs/generalist-mode.md)
@@ -99,4 +106,47 @@ export async function classifyExecutionTierFor(args: {
     modelId: effectiveModel,
     parameterSize: await resolveCatalogParameterSize(args.catalog, catalogId),
   });
+}
+
+/**
+ * One sentence on why an artifact checkpoint has not satisfied its
+ * `advanceWhen` yet, for the bounded-recovery message. The message used to
+ * say only that the step advances once the file "passes its check", and a
+ * small model that had written 122 bytes against a 500-byte floor wrote the
+ * same 122 bytes twice more and was paused after fifty seconds
+ * (gemma4-e4b-q4 codemod-sweep, 2026-09-20). Null when the file passes.
+ */
+export function describeCheckpointGap(
+  file: string,
+  content: string | null,
+  spec: { minBytes?: number; sniff?: string },
+): string | null {
+  if (content === null) return `\`${file}\` does not exist yet`;
+  const minBytes = spec.minBytes ?? 1;
+  if (content.length < minBytes) {
+    return `\`${file}\` is ${content.length} bytes and the check needs at least ${minBytes}`;
+  }
+  if (spec.sniff && !runStepSniff(spec.sniff as StepSniffName, content)) {
+    return `\`${file}\` exists but fails its \`${spec.sniff}\` check`;
+  }
+  return null;
+}
+
+/**
+ * The gap sentence for a bounded-recovery attempt on an artifact checkpoint
+ * step, or null on the first send and for steps that are not one.
+ */
+export async function checkpointGapForStep(
+  store: Pick<Store, 'readProjectArtifact'>,
+  taskRef: string,
+  step: { advanceWhen?: { file: string; minBytes?: number; sniff?: string } } | undefined,
+  attempt: number,
+  artifactCheckpoint: boolean,
+): Promise<string | null> {
+  if (attempt < 2 || !artifactCheckpoint || !step?.advanceWhen?.file) return null;
+  const parsed = parseTaskRef(taskRef);
+  if (!parsed) return null;
+  const file = step.advanceWhen.file;
+  const content = await store.readProjectArtifact(parsed.projectId, file).catch(() => null);
+  return describeCheckpointGap(file, content, step.advanceWhen);
 }

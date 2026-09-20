@@ -70,6 +70,7 @@ export const VERSIONED_NOT_PUBLISHED = ['app', 'vscode'];
  */
 export const RELEASE_IGNORED_PACKAGE_PATHS = [
   'packages/ui',
+  'packages/mobile',
   'packages/eval-viewer',
   'packages/sharp-compat',
   'packages/ml-runtime',

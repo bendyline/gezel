@@ -2,8 +2,10 @@
 
 This is the first native feasibility slice of the [mobile plan](../../docs/mobile-plan.md).
 It builds the C API from Gezel's existing [`VERSION`](../engines/llama-cpp/VERSION)
-pin as an iOS XCFramework or Android shared libraries. It does not build a server,
-ship an app, or implement the Swift/JNI inference bridge yet.
+pin as an iOS XCFramework or Android shared libraries. It also exposes the
+versioned [`gezel_llama.h`](gezel_llama.h) C ABI for bounded text conversations.
+Native Swift/JNI plugins can call it without depending on llama.cpp's changing
+struct layouts. It does not build a server or promise server/tool-call parity.
 
 ## Build
 
@@ -19,6 +21,9 @@ passes the verified version metadata explicitly.
 # macOS with full Xcode, iOS device SDK, and iOS simulator SDK installed
 python3 native/mobile/build-llama.py ios --check
 python3 native/mobile/build-llama.py ios
+
+# Host CPU contract tests with a generated tiny GGUF; no model download needed
+python3 native/mobile/build-llama.py host
 
 # macOS or Linux x64 with an installed Android NDK r28 or newer
 python3 native/mobile/build-llama.py android --ndk /path/to/android-ndk --check
@@ -50,7 +55,7 @@ required to build these libraries. The final application still needs ordinary
 Apple signing/provisioning.
 
 **Android:** `jniLibs/<abi>/` contains `libllama.so`, `libggml.so`,
-`libggml-base.so`, `libggml-cpu.so`, and the matching NDK's `libc++_shared.so`;
+`libggml-base.so`, `libggml-cpu.so`, `libgezel-llama.so`, and the matching NDK's `libc++_shared.so`;
 public headers are in `include/`. The initial baseline is API 28, arm64-v8a, CPU.
 The mobile app must package every library and use the same C++ runtime for its
 JNI bridge. GPU backends, OpenMP, network dependencies, runtime backend loading,
@@ -70,6 +75,27 @@ across different Xcode/NDK/compiler versions is not claimed.
 Each iOS slice must link a small C API executable before packaging. Android builds
 must link the same probe and verify each shared object's ELF LOAD alignment.
 These catch missing transitive native libraries. The probes do not run inference.
+The `host` target separately runs the real llama.cpp inference path against a
+generated, untrained one-layer model that always emits `a`. It checks role-aware
+prompt formatting, token/context/byte bounds, fresh-transcript reuse, invalid
+UTF-8, unsupported templates, missing/split/oversized models, reload, overlapping
+operations, callback cancellation, cross-thread cancellation, stale cancellation,
+and deadlines. UTF-8 tests split multibyte characters across individual bytes and
+check malformed/truncated input. These are runtime contract tests, not model
+quality or real-device performance tests.
+
+The host test executable can also retain the same deterministic model for an
+app-host simulator smoke test. The fixture is a test output, never a shipped
+model. After a default `host` build, run:
+
+```sh
+native/mobile/.build/host/build/gezel-llama-tests \
+  --write-fixture /tmp/gezel-mobile-fixture.gguf
+```
+
+Use the corresponding executable path if the host build used `--output`.
+Any short user prompt should produce only `a` characters with greedy sampling;
+the mobile plugin's 256-token budget produces 256 characters and a length stop.
 
 ```sh
 python3 -m unittest discover -s native/mobile -p 'test_*.py'
@@ -77,11 +103,52 @@ python3 -m unittest discover -s native/mobile -p 'test_*.py'
 
 The initial build excludes `llama-common`, server chat templates/tool parsing,
 multimodal tools, and the desktop Muse compatibility patch (which modifies
-common/server behavior). It is intentionally the upstream low-level C API.
-Agent chat/tool parity still requires a versioned Gezel bridge, conversation
-formatting, streaming UTF-8 handling, cancellation, model admission, and real-device
-tests. A successful XCFramework link is not evidence of model quality, memory
+common/server behavior). The bridge supports only the built-in templates that
+`llama_chat_apply_template` recognizes. A missing or unsupported model template
+fails explicitly; there is no silent fallback to another chat format. Tool-call
+parity, richer template rendering, device admission, and real-device tests remain.
+A successful XCFramework link is not evidence of model quality, memory
 headroom, runtime Metal support, or a working mobile application.
+
+## C ABI ownership and limits
+
+Start with `gezel_llama_create`, obtain options using the default-options functions,
+and set a unique request ID before each load or generation. IDs are in
+`1..INT64_MAX`. Pass role/content messages (`system`, `user`, `assistant`) ending
+with a user message. Inputs remain caller-owned for the entire synchronous call.
+Each generation starts from the full transcript with cleared decoder memory.
+Run loading and generation on a background serial queue; overlapping load,
+generate, or unload calls return `GEZEL_LLAMA_BUSY`.
+
+The chunk callback runs synchronously on that queue. Its bytes are borrowed until
+the callback returns, contain complete UTF-8 scalars, and must be copied before
+dispatching onto another queue. Malformed model-output byte sequences become
+U+FFFD. Returning nonzero cancels generation. `gezel_llama_cancel(engine, id)` can
+also be called from another thread and only affects the matching active request;
+an older request ID cannot cancel a later operation. Cancellation before a call
+starts has no effect. CPU decode has an abort callback; GPU kernels and portions
+of model loading can delay cancellation/deadline observation until their next
+safe point. Native timeouts use the platform's steady clock.
+
+Every generation writes status, finish reason, and partial prompt/generated-token
+and output-byte counts. Errors have a bounded message and numeric status. After
+failure or cancellation, the context is cleared before it can be reused. A failed
+load releases the previously loaded model once admitted; validation/BUSY errors
+preserve it. Unload is idempotent. Destroy requires
+exclusive lifetime ownership: first finish loading/generation and stop concurrent
+cancel callers. Backend registration is process-wide and outlives engine handles;
+individual model/context allocations are released on unload/destroy.
+
+Version 1 admits 256–8,192 context tokens (also bounded by the model's trained
+context), 1–512 batch tokens, 1–8 threads, up to 128 messages/256 KiB transcript,
+up to 4,096 generated tokens, and up to 4 MiB output. Defaults are conservative;
+the caller must reserve prompt plus requested output within the context. Model
+file limits default to 4 GiB and cannot exceed 8 GiB; split GGUF models are rejected.
+These are allocation/input bounds, **not a hard resident-memory budget**: model
+architecture, KV cache, backend buffers, and app/UI memory still require measured
+device admission. Models must be app-owned immutable files; the opened file
+descriptor remains with the engine until unload. No API here provides downloads,
+filesystem tools, network access, or script execution.
 
 Build choices follow the pinned upstream's
 [`build-xcframework.sh`](https://github.com/ggml-org/llama.cpp/blob/b29c606e28a01b1bc8c1351026a0fa6e616bf6c4/build-xcframework.sh) and

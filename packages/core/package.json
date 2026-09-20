@@ -29,6 +29,10 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./poppetje": {
+      "types": "./dist/poppetje/index.d.ts",
+      "import": "./dist/poppetje/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -40,6 +44,10 @@
     "./schemas": {
       "types": "./dist/schemas/index.d.ts",
       "import": "./dist/schemas/index.js"
+    },
+    "./mobile-providers": {
+      "types": "./dist/schemas/mobile-provider.d.ts",
+      "import": "./dist/schemas/mobile-provider.js"
     },
     "./markdown": {
       "types": "./dist/markdown/index.d.ts",

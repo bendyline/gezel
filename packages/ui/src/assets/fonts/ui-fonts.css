@@ -1,0 +1,67 @@
+/* Shared app typography. Licenses are in ./licenses/. */
+
+/* ── Gezel UX fonts ───────────────────────────────────── */
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./hanken-grotesk-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./hanken-grotesk-400i.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./hanken-grotesk-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./hanken-grotesk-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./hanken-grotesk-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "PT Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./pt-serif-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "PT Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./pt-serif-400i.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "PT Serif";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./pt-serif-700.woff2") format("woff2");
+}

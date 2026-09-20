@@ -158,7 +158,21 @@
     "format:unleased": "biome format --write .",
     "clean": "node scripts/run-with-dependency-lease.mjs clean:unleased",
     "clean:unleased": "pnpm -r --filter \"@bendyline/gezel*\" --filter \"@bendyline/gezk*\" run clean",
-    "poppetje:review": "node packages/ui/scripts/poppetje-review.mjs"
+    "poppetje:review": "node packages/ui/scripts/poppetje-review.mjs",
+    "mobile:build": "node scripts/run-with-dependency-lease.mjs mobile:build:unleased",
+    "mobile:build:unleased": "pnpm --filter @bendyline/gezk run build && pnpm --filter @bendyline/gezel run build && pnpm --filter @bendyline/gezel-mobile run build",
+    "mobile:check": "node scripts/run-with-dependency-lease.mjs mobile:check:unleased",
+    "mobile:check:unleased": "pnpm --filter @bendyline/gezel-mobile typecheck && pnpm --filter @bendyline/gezel-mobile test",
+    "mobile:dev": "node scripts/run-with-dependency-lease.mjs mobile:dev:unleased",
+    "mobile:dev:unleased": "pnpm --filter @bendyline/gezel-mobile dev",
+    "mobile:smoke": "node scripts/run-with-dependency-lease.mjs mobile:smoke:unleased",
+    "mobile:smoke:unleased": "node packages/mobile/scripts/smoke-web.mjs",
+    "mobile:sync:ios": "node scripts/run-with-dependency-lease.mjs mobile:sync:ios:unleased",
+    "mobile:sync:ios:unleased": "pnpm mobile:build && pnpm --filter @bendyline/gezel-mobile run sync:ios",
+    "mobile:sync:android": "node scripts/run-with-dependency-lease.mjs mobile:sync:android:unleased",
+    "mobile:sync:android:unleased": "pnpm mobile:build && pnpm --filter @bendyline/gezel-mobile run sync:android",
+    "mobile:test:android": "node scripts/run-with-dependency-lease.mjs mobile:test:android:unleased",
+    "mobile:test:android:unleased": "pnpm mobile:sync:android && node packages/mobile/scripts/stage-android-test-fixture.mjs && node packages/mobile/scripts/test-android.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

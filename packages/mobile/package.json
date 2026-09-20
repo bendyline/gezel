@@ -1,0 +1,36 @@
+{
+  "name": "@bendyline/gezel-mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Foreground mobile Gezel app with local chat and native inference.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node scripts/stage-web-licenses.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "sync:ios": "cap sync ios && node scripts/sync-native.mjs ios",
+    "sync:android": "cap sync android && node scripts/sync-native.mjs android"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

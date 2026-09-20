@@ -10,8 +10,8 @@ import type {
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
-import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
+import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
@@ -21,6 +21,7 @@ import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
+import { ResponsiveAppShell } from './components/ResponsiveAppShell.js';
 import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
@@ -36,6 +37,7 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { DropdownMenu } from './primitives/index.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
@@ -141,6 +143,8 @@ export function App() {
 }
 
 function FullApp() {
+  const { compact, preview, exitPreview } = useResponsiveLayout();
+  const [navigationOpen, setNavigationOpen] = useState(true);
   // Random vertical slice into the wood texture, picked once per app
   // launch so each session shows a different band of grain across the
   // titlebar. The CSS renders the 1024-tall source compressed to
@@ -249,6 +253,7 @@ function FullApp() {
 
   const commitSelection = useCallback((next: RecentTab | null) => {
     setSelection(next);
+    setNavigationOpen(false);
     try {
       if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
       else window.localStorage.removeItem(SELECTION_STORAGE_KEY);
@@ -678,7 +683,7 @@ function FullApp() {
   }, [openArea, commitSelection]);
 
   return (
-    <div className="app">
+    <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
       {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
           to navigate to Settings → Connected Apps. */}
@@ -703,22 +708,7 @@ function FullApp() {
             } as React.CSSProperties
           }
         >
-          <button
-            type="button"
-            className={`app-header-brand${selection === null ? ' active' : ''}`}
-            onClick={() => commitSelection(null)}
-            title="Meester"
-            aria-label="Meester home"
-          >
-            <span
-              className="app-nav-home-logotype"
-              role="img"
-              aria-label="gezel"
-              style={
-                { ['--gezel-logo-url' as string]: `url(${logotypeUrl})` } as React.CSSProperties
-              }
-            />
-          </button>
+          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
           {pendingQuestionCount > 0 && (
             <button
               type="button"
@@ -813,39 +803,68 @@ function FullApp() {
           </dialog>
         </>
       )}
-      <div className="app-body">
-        <Sidebar
-          selection={selection}
-          onSelect={commitSelection}
-          onOpenArea={openArea}
-          onPreload={preloadSelection}
-          activeProjectIds={activeProjectIds}
-          activeGezelIds={activeGezelIds}
-          pendingByProject={pendingByProject}
-          poisonedProjects={poisonedProjects}
-        />
-        <main className="app-main">
-          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
-            {selection === null ? (
-              <HomeView
-                platform={window.__GEZEL__?.platform}
-                onNavigate={(v) => {
-                  if (v === 'home') commitSelection(null);
-                  else openArea(v);
-                }}
+      {compact && (
+        <div className="app-compact-navigation">
+          {navigationOpen ? (
+            <span className="app-compact-navigation-title">Your workshop</span>
+          ) : (
+            <button type="button" onClick={() => setNavigationOpen(true)}>
+              <span aria-hidden="true">← </span>Navigation
+            </button>
+          )}
+          {outputPaneMaximized && (
+            <button
+              type="button"
+              onClick={requestOutputPaneRestore}
+              aria-label="Restore output pane"
+            >
+              Restore workspace
+            </button>
+          )}
+          {preview && (
+            <button type="button" onClick={exitPreview}>
+              Exit mobile preview
+            </button>
+          )}
+        </div>
+      )}
+      <ResponsiveAppShell
+        compact={compact}
+        navigationOpen={navigationOpen}
+        navigation={
+          <Sidebar
+            compact={compact}
+            selection={selection}
+            onSelect={commitSelection}
+            onOpenArea={openArea}
+            onPreload={preloadSelection}
+            activeProjectIds={activeProjectIds}
+            activeGezelIds={activeGezelIds}
+            pendingByProject={pendingByProject}
+            poisonedProjects={poisonedProjects}
+          />
+        }
+      >
+        <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+          {selection === null ? (
+            <HomeView
+              platform={window.__GEZEL__?.platform}
+              onNavigate={(v) => {
+                if (v === 'home') commitSelection(null);
+                else openArea(v);
+              }}
+            />
+          ) : (
+            <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+              <TabContent
+                tab={selection}
+                activeProjectsByGezel={activeProjectsByGezel}
+                activeTurnsReady={activeTurnsReady}
               />
-            ) : (
-              <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-                <TabContent
-                  tab={selection}
-                  activeProjectsByGezel={activeProjectsByGezel}
-                  activeTurnsReady={activeTurnsReady}
-                />
-              </TabErrorBoundary>
-            )}
-          </Suspense>
-        </main>
-      </div>
+            </TabErrorBoundary>
+          )}
+        </Suspense>
+      </ResponsiveAppShell>
     </div>
   );
 }

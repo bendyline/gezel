@@ -1,8 +1,10 @@
+import './FileBrowserPane.css';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -15,6 +17,7 @@ import {
   compareFilesByMtimeDesc,
   formatRelativeFileTime,
 } from '../file-view-modes.js';
+import { useCompactLayout } from '../useCompactLayout.js';
 import type { FileBrowserSource } from './source.js';
 import type { FileMutations } from './useFileMutations.js';
 
@@ -139,7 +142,36 @@ export function FileBrowserPane({
 }: FileBrowserPaneProps) {
   const [width, setWidth] = useState<number>(() => readStoredFileTreeWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredFileTreeCollapsed());
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const narrow = useCompactLayout(layoutRef, 520);
+  const [viewerOpen, setViewerOpen] = useState(Boolean(selectedPath));
+  const backRef = useRef<HTMLButtonElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    setViewerOpen(Boolean(selectedPath));
+  }, [selectedPath]);
+
+  const selectEntry = (entry: FileEntry, select = onSelect) => {
+    select(entry);
+    setViewerOpen(true);
+    if (narrow) requestAnimationFrame(() => backRef.current?.focus());
+  };
+
+  const showFiles = () => {
+    setViewerOpen(false);
+    requestAnimationFrame(() => {
+      const selectedFile = treeRef.current?.querySelector<HTMLButtonElement>(
+        '.tree-row-selected .tree-label',
+      );
+      (selectedFile ?? treeRef.current)?.focus();
+    });
+  };
+
+  // Phone navigation is temporary; it must never overwrite the desktop
+  // split preference or unmount an editor holding an unsaved draft.
+  const treeCollapsed = !narrow && collapsed;
 
   const commitWidth = useCallback((next: number) => {
     const clamped = clampFileTreeWidth(next);
@@ -234,13 +266,14 @@ export function FileBrowserPane({
 
   return (
     <div
-      className={`project-files-layout has-tree-grip${collapsed ? ' tree-collapsed' : ''}${
+      ref={layoutRef}
+      className={`project-files-layout has-tree-grip${treeCollapsed ? ' tree-collapsed' : ''}${narrow ? ' is-narrow' : ''}${
         extraPane ? ' has-index-pane' : ''
       }${layoutClassName ? ` ${layoutClassName}` : ''}`}
       style={{ ['--file-tree-user-width' as string]: `${width}px` }}
     >
       {mutations.dialogs}
-      {collapsed && (
+      {treeCollapsed && (
         <div className="file-tree-panel file-tree-panel-collapsed">
           <button
             type="button"
@@ -264,8 +297,11 @@ export function FileBrowserPane({
           </button>
         </div>
       )}
-      {!collapsed && (
+      {!treeCollapsed && (
         <div
+          ref={treeRef}
+          tabIndex={-1}
+          hidden={narrow && viewerOpen}
           className={`file-tree-panel document-drop-zone${
             mutations.activeDropZone === 'tree' ? ' document-drop-zone-active' : ''
           }`}
@@ -320,7 +356,7 @@ export function FileBrowserPane({
               <FileFlatList
                 entries={customList.entries}
                 selectedPath={selectedPath}
-                onSelect={customList.onSelect ?? onSelect}
+                onSelect={(entry) => selectEntry(entry, customList.onSelect ?? onSelect)}
                 trailingForEntry={customList.trailingForEntry}
                 detailForEntry={customList.detailForEntry}
                 actionsForEntry={customList.actionsForEntry ?? actionsForEntry}
@@ -338,7 +374,7 @@ export function FileBrowserPane({
                   sortMode={viewMode === 'tree-modified' ? 'modified' : 'alpha'}
                   labelFor={labelFor}
                   selectableFolders={selectableFolders}
-                  onSelect={onSelect}
+                  onSelect={(entry) => selectEntry(entry)}
                   onRename={mutations.rename}
                   onDelete={mutations.remove}
                   onMove={source.kind === 'documents' ? mutations.move : undefined}
@@ -350,7 +386,7 @@ export function FileBrowserPane({
               <FileFlatList
                 entries={flatEntries}
                 selectedPath={selectedPath}
-                onSelect={onSelect}
+                onSelect={(entry) => selectEntry(entry)}
                 trailingForEntry={(entry) => {
                   const hostTrailing = trailingForEntry?.(entry);
                   const modified =
@@ -391,6 +427,7 @@ export function FileBrowserPane({
 
       <div
         role="separator"
+        hidden={narrow}
         aria-orientation="vertical"
         aria-label={`Resize ${listLabel} files`}
         tabIndex={0}
@@ -401,11 +438,20 @@ export function FileBrowserPane({
       />
 
       <div
+        hidden={narrow && !viewerOpen}
         className={`file-viewer-panel document-drop-zone${
           mutations.activeDropZone === 'detail' ? ' document-drop-zone-active' : ''
         }`}
         {...mutations.dropZoneProps('detail', dropDestination(selectedPath, entries))}
       >
+        {narrow && (
+          <div className="file-mobile-navigation">
+            <button ref={backRef} type="button" onClick={showFiles}>
+              Back to files
+            </button>
+            {selectedPath && <span title={selectedPath}>{selectedPath.split('/').at(-1)}</span>}
+          </div>
+        )}
         {viewer}
         {mutations.activeDropZone === 'detail' && (
           <div className="document-drop-overlay" aria-hidden="true">

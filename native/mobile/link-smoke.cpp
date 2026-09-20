@@ -1,11 +1,12 @@
 // Link-only probe: forces the packaged library's CPU/Metal registration and
 // public C API into the binary without downloading a model or running inference.
-#include "llama.h"
+#include "gezel_llama.h"
 
 int main() {
-    llama_backend_init();
-    const auto params = llama_context_default_params();
-    const bool gpu = llama_supports_gpu_offload();
-    llama_backend_free();
-    return params.n_ctx > 0 || gpu ? 0 : 1;
+    auto * engine = gezel_llama_create();
+    auto params = gezel_llama_default_load_options();
+    gezel_llama_error error{};
+    gezel_llama_unload(engine, &error);
+    gezel_llama_destroy(engine);
+    return params.abi_version == gezel_llama_abi_version() && error.code == GEZEL_LLAMA_OK ? 0 : 1;
 }

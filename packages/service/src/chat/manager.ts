@@ -309,6 +309,7 @@ import {
   stripGezelMentions,
 } from './fixed-function-adapters.js';
 import {
+  checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
   renderEntryPreface,
@@ -4487,11 +4488,18 @@ export class ChatManager extends LocalEngineRuntime {
         // host after the provider has already spent its own corrective turns.
         const maxHandoffSendAttempts = 3;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
+          const gap = await checkpointGapForStep(
+            this.store,
+            args.taskRef,
+            dispatchStep,
+            attempt,
+            artifactCheckpointOutcome,
+          );
           const message =
             attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
-                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
+                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);

@@ -1,4 +1,4 @@
-import { HAT_FELTS, PALETTE } from '@bendyline/gezel';
+import { HAT_FELTS, PALETTE } from '@bendyline/gezel/poppetje';
 import { describe, expect, it } from 'vitest';
 import { feltForSkin, mixHex, rgbDistance } from './color.js';
 

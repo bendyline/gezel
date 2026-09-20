@@ -1,3 +1,4 @@
+import './ProjectsView.css';
 import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
@@ -52,6 +53,7 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
+import { ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
@@ -364,12 +366,6 @@ function forgetLegacyOutputVisible(projectId: string): void {
 }
 
 /**
- * Per-tab glyph for the compact (narrow / mobile) project tab bar, where
- * word labels are swapped for icons + tooltips so all tabs fit without a
- * horizontal scroller. All strokes use `currentColor`, so each icon
- * inherits the trigger's muted → active color treatment for free.
- */
-/**
  * The "Village" tab is for codebases and other file-heavy projects. We gate it
  * on the project's auto-detected type (recomputed each content-index scan from
  * the file mix): shown for code-ish / data types and for as-yet-unclassified
@@ -395,139 +391,6 @@ function isEmailProject(p: {
     resolveProjectTypeId(p) === 'email' ||
     (p.connectors ?? []).some((b) => b.type.startsWith('mail-'))
   );
-}
-
-function ProjectTabIcon({ tab }: { tab: ProjectTab }) {
-  // Decorative — the trigger carries the accessible name via aria-label +
-  // title, so the SVG is aria-hidden. One wrapper, per-tab inner shapes.
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {tabIconShapes(tab)}
-    </svg>
-  );
-}
-
-function tabIconShapes(tab: ProjectTab) {
-  switch (tab) {
-    case 'output':
-      return (
-        <>
-          <rect x="1.8" y="2.8" width="12.4" height="8.4" rx="1.2" />
-          <path d="M6.5 5.6 L9.8 7.5 L6.5 9.4 Z" fill="currentColor" stroke="none" />
-          <line x1="5.5" y1="13.4" x2="10.5" y2="13.4" />
-        </>
-      );
-    case 'chat':
-      return (
-        <path d="M2.6 4.2A1.6 1.6 0 0 1 4.2 2.6h7.6a1.6 1.6 0 0 1 1.6 1.6v4.4a1.6 1.6 0 0 1-1.6 1.6H6.4L3.4 13V8.6A1.6 1.6 0 0 1 2.6 7Z" />
-      );
-    case 'about':
-      return (
-        <>
-          <circle cx="8" cy="8" r="6" />
-          <line x1="8" y1="7.4" x2="8" y2="11" />
-          <circle cx="8" cy="5" r="0.5" fill="currentColor" stroke="none" />
-        </>
-      );
-    case 'tasks':
-      return (
-        <>
-          <rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2" />
-          <path d="M5.4 8 L7.2 9.8 L10.6 6" />
-        </>
-      );
-    case 'packages':
-      return (
-        <>
-          <path d="M8 2.4 L12.6 4 V7.2 C12.6 10 10.6 12 8 13.2 C5.4 12 3.4 10 3.4 7.2 V4 Z" />
-          <path d="M6 7.6 L7.4 9 L10 5.9" />
-        </>
-      );
-    case 'workspace':
-      return (
-        <path d="M2.6 5.4 A1 1 0 0 1 3.6 4.4 H6 L7.3 5.8 H12.4 A1 1 0 0 1 13.4 6.8 V11.6 A1 1 0 0 1 12.4 12.6 H3.6 A1 1 0 0 1 2.6 11.6 Z" />
-      );
-    case 'artifacts':
-      return (
-        <>
-          <path d="M4.4 2.6 H8.6 L11.6 5.6 V13 A0.4 0.4 0 0 1 11.2 13.4 H4.4 A0.4 0.4 0 0 1 4 13 V3 A0.4 0.4 0 0 1 4.4 2.6 Z" />
-          <path d="M8.4 2.6 V5.6 H11.4" />
-        </>
-      );
-    case 'github':
-      return (
-        <>
-          <circle cx="4.6" cy="4.2" r="1.5" />
-          <circle cx="4.6" cy="11.8" r="1.5" />
-          <circle cx="11.4" cy="5.6" r="1.5" />
-          <path d="M4.6 5.7 V10.3" />
-          <path d="M11.4 7.1 C11.4 9.4 9.4 9.6 7.2 9.7 C5.6 9.8 4.6 10 4.6 11" />
-        </>
-      );
-    case 'mail':
-      return (
-        <>
-          <rect x="2.5" y="4" width="11" height="8" rx="0.7" />
-          <path d="M2.8 4.6 L8 8.6 L13.2 4.6" />
-        </>
-      );
-    case 'connections':
-      return (
-        <>
-          <path d="M6 10 L4.2 11.8 A2.2 2.2 0 0 1 4.2 8.6 L5.6 7.2" />
-          <path d="M10 6 L11.8 4.2 A2.2 2.2 0 0 1 11.8 7.4 L10.4 8.8" />
-          <path d="M6.4 9.6 L9.6 6.4" />
-        </>
-      );
-    case 'history':
-      return (
-        <>
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 4.6 V8 L10.4 9.4" />
-        </>
-      );
-    case 'map':
-      return (
-        <>
-          <path d="M1.6 13.4 V7.2 L5.6 3.8 L9.6 7.2 V13.4" />
-          <path d="M9.6 13.4 V9 L12 6.9 L14.4 9 V13.4" />
-          <path d="M4.4 13.4 V10.2 H6.8 V13.4" />
-          <path d="M1.2 13.4 H14.8" />
-        </>
-      );
-    case 'overview':
-      return (
-        <>
-          <circle cx="8" cy="8" r="5.8" />
-          <circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" />
-          <line x1="8" y1="2.2" x2="8" y2="4.4" />
-          <line x1="8" y1="11.6" x2="8" y2="13.8" />
-          <line x1="2.2" y1="8" x2="4.4" y2="8" />
-          <line x1="11.6" y1="8" x2="13.8" y2="8" />
-        </>
-      );
-    default:
-      // settings — sliders read more cleanly than a tiny gear at 16px.
-      return (
-        <>
-          <line x1="3" y1="5" x2="13" y2="5" />
-          <line x1="3" y1="11" x2="13" y2="11" />
-          <circle cx="6" cy="5" r="1.5" fill="var(--panel)" />
-          <circle cx="10" cy="11" r="1.5" fill="var(--panel)" />
-        </>
-      );
-  }
 }
 
 interface AvailableCredential {
@@ -597,6 +460,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const editorTheme = useEffectiveTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [browsingProjects, setBrowsingProjects] = useState(false);
+  const showProjectList = effectiveCompact && !detailOnly && (browsingProjects || !selected);
   const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
   const [createMode, setCreateMode] = useState<'crew' | null>(null);
@@ -618,6 +483,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       return false;
     }
   });
+  const sidebarIsCollapsed = sidebarCollapsed && !effectiveCompact;
   useEffect(() => {
     try {
       window.localStorage.setItem('gezel.projectsSidebarCollapsed', sidebarCollapsed ? '1' : '0');
@@ -1309,6 +1175,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (id: string) => {
       const project = await api.getProject(id);
       setSelected(project);
+      setBrowsingProjects(false);
       setOpenFile(null);
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
@@ -1424,6 +1291,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (created: ProjectDetail) => {
       await refresh();
       setSelected(created);
+      setBrowsingProjects(false);
       setOpenFile(null);
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
@@ -2292,6 +2160,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // produced from the listing anymore.
   const handleProjectRowClick = useCallback(
     (id: string) => {
+      if (effectiveCompact && selected?.id === id) {
+        setBrowsingProjects(false);
+        return;
+      }
       void openProject(id);
       if (!detailOnly) {
         try {
@@ -2301,7 +2173,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         }
       }
     },
-    [detailOnly, openProject],
+    [detailOnly, effectiveCompact, openProject, selected?.id],
   );
 
   const toggleSelectedArchive = useCallback(async () => {
@@ -2336,10 +2208,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
             onClick={() => handleProjectRowClick(p.id)}
             title={p.name}
-            aria-label={sidebarCollapsed ? p.name : undefined}
+            aria-label={sidebarIsCollapsed ? p.name : undefined}
           >
             <ProjectIcon project={p} size={18} className="project-rail-mark" />
-            {!sidebarCollapsed && (
+            {!sidebarIsCollapsed && (
               <>
                 <span className="project-rail-label">{p.name}</span>
                 {p.storageScope === 'machine-shared' && (
@@ -2353,7 +2225,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               </>
             )}
           </button>
-          {!sidebarCollapsed && (
+          {!sidebarIsCollapsed && (
             <ProjectActionsMenu
               project={p}
               onDeleted={() => void refresh()}
@@ -2385,7 +2257,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   return (
     <div
       ref={containerRef}
-      className={`two-col${sidebarCollapsed && !detailOnly ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
+      className={`two-col project-view${showProjectList ? ' showing-project-list' : ''}${sidebarIsCollapsed && !detailOnly ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
     >
       {!detailOnly && (
         <NewProjectDialog
@@ -2421,9 +2293,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         />
       )}
       {!detailOnly && (
-        <aside className={`side${sidebarCollapsed ? ' collapsed' : ''}`}>
+        <aside className={`side${sidebarIsCollapsed ? ' collapsed' : ''}`}>
           <div className="area-toolbar">
-            {!sidebarCollapsed && (
+            {!sidebarIsCollapsed && (
               <button
                 type="button"
                 className="area-toolbar-btn"
@@ -2436,13 +2308,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               type="button"
               className="area-toolbar-toggle"
               onClick={() => setSidebarCollapsed((v) => !v)}
-              title={sidebarCollapsed ? 'Expand project list' : 'Collapse project list'}
-              aria-label={sidebarCollapsed ? 'Expand project list' : 'Collapse project list'}
+              title={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
+              aria-label={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
             >
-              {sidebarCollapsed ? '›' : '‹'}
+              {sidebarIsCollapsed ? '›' : '‹'}
             </button>
           </div>
-          {sidebarCollapsed && (
+          {sidebarIsCollapsed && (
             <div className="new-row collapsed-create-row" aria-label="Create">
               <button
                 type="button"
@@ -2461,21 +2333,35 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <ul>{renderProjectRailRows(activeProjects, false)}</ul>
           {archivedProjects.length > 0 && (
             <section
-              className={`project-archive-section${sidebarCollapsed ? ' is-collapsed' : ''}`}
+              className={`project-archive-section${sidebarIsCollapsed ? ' is-collapsed' : ''}`}
               aria-labelledby="archived-projects-heading"
             >
               <h3 id="archived-projects-heading">Archived projects</h3>
               <ul>{renderProjectRailRows(archivedProjects, true)}</ul>
             </section>
           )}
-          {error && !sidebarCollapsed && <p className="error">{error}</p>}
+          {error && !sidebarIsCollapsed && <p className="error">{error}</p>}
         </aside>
       )}
-      <section className="main">
+      <section className="main" hidden={showProjectList}>
         {!detailOnly && !selected ? (
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
+            {effectiveCompact && (
+              <div className="project-compact-heading">
+                {!detailOnly && (
+                  <button
+                    type="button"
+                    className="project-list-back"
+                    onClick={() => setBrowsingProjects(true)}
+                  >
+                    Projects
+                  </button>
+                )}
+                <h2>{selected.name}</h2>
+              </div>
+            )}
             <div className="entity-tabs-row project-tabs-row">
               {/* Wide layout: the toggle shows/hides the side-by-side
                   output pane. In compact mode the pane becomes a tab
@@ -2519,93 +2405,60 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   </svg>
                 </button>
               )}
-              <Tabs.Root value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-                <Tabs.List>
-                  {/* Data-driven so the compact form factor can swap each
-                      word label for an icon + tooltip without duplicating
-                      the trigger markup. 'output' is compact-only (it has
-                      its own pane in the wide layout). */}
-                  {(
-                    [
-                      { value: 'output', label: 'Output', show: compactOutputAvailable },
-                      { value: 'chat', label: 'Chat', show: true },
-                      {
-                        value: 'overview',
-                        label: 'Overview',
-                        show: projectTabIsVisible(selected, 'overview'),
-                      },
-                      {
-                        value: 'tasks',
-                        label: 'Tasks',
-                        show: projectTabIsVisible(selected, 'tasks'),
-                      },
-                      {
-                        value: 'packages',
-                        label: 'Approvals',
-                        show: projectTabIsVisible(selected, 'approvals'),
-                      },
-                      {
-                        value: 'workspace',
-                        label: 'Workspace',
-                        show: projectTabIsVisible(selected, 'workspace'),
-                      },
-                      {
-                        value: 'artifacts',
-                        label: 'Artifacts',
-                        show: projectTabIsVisible(selected, 'artifacts'),
-                      },
-                      // Shown only once the project has proposals: a tab that is
-                      // empty for every project that never ran a fix is noise.
-                      {
-                        value: 'proposals',
-                        label: 'Proposals',
-                        show: diffpackCount > 0,
-                      },
-                      { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
-                      {
-                        value: 'mail',
-                        label: 'Mail',
-                        show: showWorkInProgressFeatures && isEmailProject(selected),
-                      },
-                      {
-                        value: 'map',
-                        label: 'Village',
-                        show: projectTabIsVisible(selected, 'map'),
-                      },
-                      { value: 'about', label: 'Settings', show: true },
-                    ] as Array<{ value: ProjectTab; label: string; show: boolean }>
-                  )
-                    .filter((t) => t.show)
-                    .map((t) =>
-                      effectiveCompact ? (
-                        <Tabs.Trigger
-                          key={t.value}
-                          value={t.value}
-                          data-testid={`project-tab-${t.value}`}
-                          className="gz-tab-icon"
-                          aria-label={t.label}
-                          title={t.label}
-                          onPointerEnter={() => preloadProjectTab(t.value)}
-                          onFocus={() => preloadProjectTab(t.value)}
-                          onPointerDown={() => preloadProjectTab(t.value)}
-                        >
-                          <ProjectTabIcon tab={t.value} />
-                        </Tabs.Trigger>
-                      ) : (
-                        <Tabs.Trigger
-                          key={t.value}
-                          value={t.value}
-                          data-testid={`project-tab-${t.value}`}
-                          onPointerEnter={() => preloadProjectTab(t.value)}
-                          onFocus={() => preloadProjectTab(t.value)}
-                          onPointerDown={() => preloadProjectTab(t.value)}
-                        >
-                          {t.label}
-                        </Tabs.Trigger>
-                      ),
-                    )}
-                </Tabs.List>
-              </Tabs.Root>
+              <ProjectSectionTabs
+                value={tab}
+                onValueChange={(value) => setTab(value as ProjectTab)}
+                onPreload={(value) => preloadProjectTab(value as ProjectTab)}
+                compact={effectiveCompact}
+                items={[
+                  { value: 'output', label: 'Output', show: compactOutputAvailable },
+                  { value: 'chat', label: 'Chat', show: true },
+                  {
+                    value: 'overview',
+                    label: 'Overview',
+                    show: projectTabIsVisible(selected, 'overview'),
+                  },
+                  {
+                    value: 'tasks',
+                    label: 'Tasks',
+                    show: projectTabIsVisible(selected, 'tasks'),
+                  },
+                  {
+                    value: 'packages',
+                    label: 'Approvals',
+                    show: projectTabIsVisible(selected, 'approvals'),
+                  },
+                  {
+                    value: 'workspace',
+                    label: 'Workspace',
+                    show: projectTabIsVisible(selected, 'workspace'),
+                  },
+                  {
+                    value: 'artifacts',
+                    label: 'Artifacts',
+                    show: projectTabIsVisible(selected, 'artifacts'),
+                  },
+                  // Shown only once the project has proposals: a tab that is
+                  // empty for every project that never ran a fix is noise.
+                  {
+                    value: 'proposals',
+                    label: 'Proposals',
+                    show: diffpackCount > 0,
+                  },
+                  { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
+                  {
+                    value: 'mail',
+                    label: 'Mail',
+                    show: showWorkInProgressFeatures && isEmailProject(selected),
+                  },
+                  {
+                    value: 'map',
+                    label: 'Village',
+                    show: projectTabIsVisible(selected, 'map'),
+                  },
+                  { value: 'about', label: 'Settings', show: true },
+                ].filter((item) => item.show)}
+              />
               {selected.archived && (
                 <span className="project-archived-badge" title="Hidden from primary navigation">
                   Archived

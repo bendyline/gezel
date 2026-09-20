@@ -84,7 +84,7 @@ def prerequisites(args):
         info["xcode"] = run(["xcodebuild", "-version"], capture=True).strip()
         for sdk in ("iphoneos", "iphonesimulator"):
             info[sdk] = run(["xcrun", "--sdk", sdk, "--show-sdk-version"], capture=True).strip()
-    else:
+    elif args.target == "android":
         if not args.ndk:
             raise ValueError("Android builds require --ndk /path/to/ndk or ANDROID_NDK_HOME (NDK r28+)")
         args.ndk = Path(args.ndk).expanduser().resolve()
@@ -103,13 +103,14 @@ def prerequisites(args):
 
 
 def configure_build(source, build, flags, jobs):
-    run(["cmake", "-S", source, "-B", build, "-G", "Unix Makefiles", *flags])
-    run(["cmake", "--build", build, "--config", "Release", "--target", "llama", "--parallel", jobs])
+    run(["cmake", "-S", HERE, "-B", build, "-G", "Unix Makefiles", f"-DGEZEL_LLAMA_SOURCE_DIR={source}", *flags])
+    run(["cmake", "--build", build, "--config", "Release", "--target", "gezel-llama", "--parallel", jobs])
 
 
 def copy_headers(source, destination):
     destination.mkdir(parents=True)
     shutil.copy2(source / "include/llama.h", destination)
+    shutil.copy2(HERE / "gezel_llama.h", destination)
     for header in (source / "ggml/include").glob("*.h"):
         shutil.copy2(header, destination)
 
@@ -118,7 +119,7 @@ def build_ios(args, source, output, pin):
     headers = output / "include"
     copy_headers(source, headers)
     (headers / "module.modulemap").write_text(
-        'module GezelLlama {\n  header "llama.h"\n  link "c++"\n'
+        'module GezelLlama {\n  header "gezel_llama.h"\n  header "llama.h"\n  link "c++"\n'
         '  link framework "Accelerate"\n  link framework "Foundation"\n'
         '  link framework "Metal"\n  link framework "MetalKit"\n  export *\n}\n')
     libraries = []
@@ -133,10 +134,10 @@ def build_ios(args, source, output, pin):
             "-DGGML_METAL_TARGET_OS=ios", "-DGGML_ACCELERATE=ON",
         ]
         configure_build(source, build, flags, args.jobs)
-        components = [build / "src/libllama.a", build / "ggml/src/libggml.a",
-                      build / "ggml/src/libggml-base.a", build / "ggml/src/libggml-cpu.a"]
+        components = [build / "libgezel-llama.a", build / "llama/src/libllama.a", build / "llama/ggml/src/libggml.a",
+                      build / "llama/ggml/src/libggml-base.a", build / "llama/ggml/src/libggml-cpu.a"]
         if metal:
-            components.append(build / "ggml/src/ggml-metal/libggml-metal.a")
+            components.append(build / "llama/ggml/src/ggml-metal/libggml-metal.a")
         library = output / "slices" / sdk / "libGezelLlama.a"
         library.parent.mkdir(parents=True)
         run(["xcrun", "libtool", "-static", "-o", library, *components])
@@ -183,7 +184,7 @@ def build_android(args, source, output, pin):
         configure_build(source, build, flags, args.jobs)
         libs = output / "jniLibs" / abi
         libs.mkdir(parents=True)
-        for name in ("llama", "ggml", "ggml-base", "ggml-cpu"):
+        for name in ("gezel-llama", "llama", "ggml", "ggml-base", "ggml-cpu"):
             shutil.copy2(build / "bin" / f"lib{name}.so", libs)
         shutil.copy2(args.ndk_tools / "sysroot/usr/lib" / triples[abi] / "libc++_shared.so", libs)
         for library in libs.glob("*.so"):
@@ -193,14 +194,24 @@ def build_android(args, source, output, pin):
             verify_elf_dependencies(dynamic, [path.name for path in libs.glob("*.so")])
         compiler = args.ndk_tools / "bin" / f"{triples[abi]}{args.android_api}-clang++"
         run([compiler, "-std=c++17", "-I", output / "include", HERE / "link-smoke.cpp",
-             "-L", libs, "-Wl,-rpath-link," + str(libs), "-lllama", "-lggml", "-lggml-base",
+             "-L", libs, "-Wl,-rpath-link," + str(libs), "-lgezel-llama", "-lllama", "-lggml", "-lggml-base",
              "-lggml-cpu", "-o", build / "link-smoke"])
     return {"minimumAPI": args.android_api, "abis": args.abi, "backend": "cpu", "elfPageAlignment": 16384}
 
 
+def build_host(args, source, output, pin):
+    build = output / "build"
+    configure_build(source, build, common_flags(pin) + [
+        "-DBUILD_SHARED_LIBS=OFF", "-DGGML_METAL=OFF", "-DGGML_ACCELERATE=OFF", "-DGEZEL_MOBILE_TESTS=ON",
+    ], args.jobs)
+    run(["cmake", "--build", build, "--target", "gezel-llama-tests", "--parallel", args.jobs])
+    run(["ctest", "--test-dir", build, "--output-on-failure"])
+    return {"backend": "cpu", "contractTests": "passed", "model": "generated tiny deterministic GGUF fixture"}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("target", choices=("ios", "android"))
+    parser.add_argument("target", choices=("ios", "android", "host"))
     parser.add_argument("--source", type=Path, default=ENGINE / ".upstream")
     parser.add_argument("--output", type=Path, help="Empty output directory; defaults to .build/<target>")
     parser.add_argument("--jobs", type=int, default=2)
@@ -229,20 +240,22 @@ def main():
     run(["git", "-C", args.source, "archive", "--format=tar", "-o", archive, pin["commit"]])
     run(["tar", "-xf", archive, "-C", source])
     archive.unlink()
-    settings = (build_ios if args.target == "ios" else build_android)(args, source, output, pin)
+    settings = {"ios": build_ios, "android": build_android, "host": build_host}[args.target](args, source, output, pin)
     shutil.copy2(source / "LICENSE", output / "LICENSE-llama-cpp.txt")
     shutil.copy2(HERE.parent / "licenses/LICENSE-ggml-MIT.txt", output / "LICENSE-ggml.txt")
-    payload = output / ("GezelLlama.xcframework" if args.target == "ios" else "jniLibs")
-    packaged = [path for path in payload.rglob("*") if path.is_file()]
+    payload = output / {"ios": "GezelLlama.xcframework", "android": "jniLibs", "host": "build/gezel-llama-tests"}[args.target]
+    packaged = [payload] if payload.is_file() else [path for path in payload.rglob("*") if path.is_file()]
     packaged.extend(output.glob("LICENSE-*.txt"))
     if args.target == "android":
         packaged.extend((output / "include").glob("*.h"))
     checksums = {str(path.relative_to(output)): hashlib.sha256(path.read_bytes()).hexdigest()
                  for path in sorted(packaged)}
     (output / "manifest.json").write_text(json.dumps({
-        "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": [],
+        "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": [], "gezelABIVersion": 1,
+        "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in
+                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "CMakeLists.txt")},
         "toolchains": toolchains, "settings": settings, "files": checksums,
-        "verification": {"linkSmoke": "passed", "deviceInference": "not-run"},
+        "verification": {"linkSmoke": "passed", "deviceInference": "not-run", "hostContractTests": "passed" if args.target == "host" else "not-run"},
     }, indent=2) + "\n")
     print(f"Mobile llama.cpp library built: {payload}")
 

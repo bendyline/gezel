@@ -1,0 +1,78 @@
+.project-view {
+  container: project-view / inline-size;
+}
+
+@container project-view (max-width: 520px) {
+  .project-about-page {
+    padding: 0.75rem;
+  }
+
+  .project-about-page input:not([type="checkbox"]),
+  .project-about-page select,
+  .project-about-page button,
+  .project-about-page .gz-select-trigger,
+  .project-output-toolbar button,
+  .project-output-toolbar .gz-select-trigger {
+    min-height: 44px;
+  }
+
+  .project-output-btn {
+    min-width: 44px;
+  }
+
+  .project-crew-settings-heading {
+    flex-wrap: wrap;
+  }
+
+  .project-about-page .new-row input:not([type="checkbox"]):not([type="radio"]) {
+    min-width: 0;
+  }
+
+  .gz-connector-field,
+  .gz-connector-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gz-connector-field-label {
+    padding-top: 0;
+  }
+}
+
+.project-view > section.main[hidden] {
+  display: none;
+}
+
+.project-view.is-compact .area-toolbar-toggle {
+  display: none;
+}
+
+.project-view.is-compact .area-toolbar-btn,
+.project-view.is-compact .project-rail-name,
+.project-list-back {
+  min-height: 44px;
+}
+
+.project-list-back {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0.15rem;
+}
+
+.project-compact-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-compact-heading h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-lg);
+}

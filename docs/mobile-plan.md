@@ -1,17 +1,48 @@
 # Gezel on Android, iPhone, and iPad
 
-Implementation plan — 2026-09-19. Based on the current checkout and linked upstream documentation. The first foundations below are implemented; the mobile application and native product/inference bridges remain planned. Effort estimates are planning ranges, not delivery commitments.
+Implementation plan — 2026-09-19. Based on the current checkout and linked upstream documentation. The increments below describe the implemented foreground conversation preview; the broader product architecture and release gates remain planned. Effort estimates are planning ranges, not delivery commitments.
 
 **First implementation increment**
 
 - The SDK now exposes a platform-independent `createGezelSDK(transport)` factory through `@bendyline/gezel-sdk/portable`. Desktop scripts keep the existing default import and fd-3 transport.
 - `ScriptRunner` delegates execution through a host-selected `ScriptExecutor`. The existing Node sandbox remains the default. Metadata validation, capability checks, engagement restrictions, output validation, audit history, and redaction remain in the runner/dispatcher.
 - [`@bendyline/gezel-script-runtime`](../packages/script-runtime/README.md) implements an experimental QuickJS-WASM executor. The desktop service can exercise it in a dedicated worker with the actual SDK and dispatcher, bounded memory/calls/messages, cancellation, and awake-time deadlines. Selection is a trusted host constructor option, never script metadata. This is a portability/conformance harness; mobile native QuickJS integration remains open.
-- [`native/mobile`](../native/mobile/README.md) builds pinned llama.cpp libraries for iOS and Android. The iOS arm64 device/simulator XCFramework built successfully, passed link probes, and imported from Swift. Android preflight requires an installed NDK, absent on the implementation machine; Android compilation is unverified. No model has run on a phone yet.
+- [`native/mobile`](../native/mobile/README.md) builds pinned llama.cpp libraries for iOS and Android. The iOS arm64 device/simulator XCFramework built successfully, passed link probes, and imported from Swift. Android ARM64 libraries and the JNI app compile with NDK r28c, pass link probes and 16 KiB ELF/APK alignment checks, and run deterministic inference on an API 36 emulator. Physical-phone inference remains unverified.
 
-Next is a narrow mobile application slice: native storage and request/event transport, a small crew/chat UI, a Swift/JNI inference bridge, and a persisted offline conversation on actual devices. Apple/Android system AI adapters and desktop companion product authorization remain separate later work. The broader sections below describe that target architecture, not shipped mobile functionality.
+**Second implementation increment**
+
+- [`packages/mobile`](../packages/mobile/README.md) provides a Capacitor shell, a phone/tablet React screen reusing Gezel's characters and visual tokens, and a dedicated product Web Worker connected through typed client requests and snapshot events.
+- A portable, versioned conversation store persists the Meester/default project, explicitly saved poppetje, and local sessions. User messages are durable before inference; interrupted turns recover without automatic reruns. Native storage uses atomic JSON replacement; browser previews use a separate IndexedDB database.
+- Native Swift/Java plugins import GGUF files through document pickers and expose opaque model IDs. The versioned C ABI now supplies bounded text chat, UTF-8 streaming, matching-request cancellation, and structured errors. This does not establish desktop tool-call parity.
+- Real llama.cpp host tests execute a generated untrained tiny GGUF; the iOS app compiles against device/simulator libraries. An app-hosted simulator test verifies native persistence, streamed decoding, cancellation, and engine reuse. Phone/tablet browser checks exercise the actual worker and durable reload. Android instrumentation now exercises real JNI streaming, cancellation, concurrent-operation rejection, callback failures, engine reuse, and storage recovery/confinement. Trained-model quality and physical-device resource testing remain open.
+
+**Third implementation increment — provider and product hardening**
+
+- Strict core provider descriptors carry readiness/reason, on-device locality, context/output budgets, and conservative text-only capabilities. Selection persists across restart and is pinned for each turn; fresh availability checks fail clearly without provider or network fallback. Older v1 snapshots remain readable.
+- The iOS adapter uses Apple Foundation Models explicitly on-device, with role-preserving transcript reconstruction, streaming, token admission, availability reporting, cancellation, and foreground/resource constraints. Real system-model inference and cancellation have run in a simulator. The current adapter compiles with Xcode 27 and weak-links the optional framework so the base app can still run below iOS 26.
+- Android integrates the approved, exact-pinned ML Kit Prompt API `1.0.0-beta4` through its Java futures API. Readiness probes never start downloads; preparation/cancellation are explicit actions. The adapter bounds context/output and closes its SDK client before releasing the turn. The app compiles against the real SDK and correctly reports system AI unavailable on the test emulator; ML Kit preparation/inference still requires eligible physical-device verification.
+- The product slice adds local conversation search, durable rename/delete, confirmed model removal, bounded model inventories and import disk checks, explicit storage/cancellation recovery, and protection against stale browser tabs overwriting state. Failed/empty turn pairs stay out of later prompts. Removing a selected model never silently chooses another.
+- Mobile CI now builds the web bundle separately and runs runtime/bridge tests plus phone/tablet browser smoke. The iOS native suite checks persistence, model removal, readiness, inference, cancellation, and engine reuse. The local Android suite covers storage and JNI contracts plus the actual Capacitor WebView's navigation, model selection, native chat, conversation management, and durable reload. This evidence does not replace a physical-device or model-quality matrix.
+
+This is a working increment of Phase 3, not completion of its full acceptance gate. Remaining work includes resumable verified GGUF catalog downloads, measured device admission tiers, capability-filtered catalog content, scoped native credentials for explicit cloud/paired inference, and representative quality/resource tests on physical devices. The portable store/tools also still need expansion beyond conversation-only use. Desktop companion product authorization remains separate. The broader sections below describe the target architecture rather than shipped mobile functionality.
 
 **Recommendation**
+
+Use one responsive frontend. The existing desktop navigation, project views,
+documents, and crew remain the product model on phones and tablets. Resizing
+the desktop window to roughly 400px must exercise the mobile layout against
+the same backend and user state. The explicit `?layout=mobile` preview is a width
+constraint on that same app. Narrow layout changes navigation and pane placement,
+not domain behavior, entities, or the current draft.
+
+The initial standalone conversation UI was an integration harness and is being
+retired as a separate product direction. Desktop and native now share the shell,
+navigation presentation, brand, and project section tabs. Desktop narrow mode
+runs the existing views; the native runtime still needs the project/document/tool
+operations behind those views extracted through portable ports before full UI
+reuse is possible. Capability gaps must not be filled with fake data or a second
+mobile implementation of each view. Move model setup into Settings and keep the
+Meester/project navigation as the front door.
 
 Build a mobile application that can own its gezels, conversations, documents, and short tasks locally. Reuse the React UI through a Capacitor shell, extract a small portable TypeScript product runtime, embed llama.cpp as a native library, and introduce a QuickJS implementation of the script execution interface. Add Apple and Android system AI as separately evaluated providers. Keep desktop connectivity as a complementary mode for larger models and work requiring a computer.
 
@@ -85,7 +116,7 @@ Suggested module boundaries, introduced only as working slices need them:
 
 | Proposed location | Responsibility |
 | --- | --- |
-| `packages/mobile` | Capacitor app, Swift/Kotlin plugins, lifecycle, platform permissions, mobile composition root |
+| `packages/mobile` | Capacitor app, Swift/Java plugins, lifecycle, platform permissions, mobile composition root |
 | `packages/runtime-core` | Portable session/turn orchestration, Store domain operations, task transitions, capability evaluation; no Node, DOM, or native imports |
 | `packages/script-runtime` | Script execution interface, portable SDK transport, compilation/metadata contract, QuickJS adapter boundary |
 | `native/mobile` | Small stable C ABI over llama.cpp, reproducible iOS/Android library builds, native test harness |
@@ -121,7 +152,7 @@ Treat Metal and Android GPU execution as separate backend implementations. llama
 
 Apple: implement a Swift Foundation Models adapter selecting the on-device model explicitly. Check model readiness and Apple Intelligence/device/region availability at runtime. The framework supports streaming, guided generation, and tool calling; its tool callbacks must re-enter Gezel's authorization and audit path. Availability of the framework must not imply that every provider it can access is local. See [Apple's availability guidance](https://developer.apple.com/documentation/FoundationModels/generating-content-and-performing-tasks-with-foundation-models?changes=_2%2C_2) and [tool-calling introduction](https://developer.apple.com/videos/play/wwdc2025/286/).
 
-Android: implement the current [ML Kit GenAI Prompt API](https://developers.google.com/ml-kit/genai/prompt/android) through Kotlin. Probe support and download/readiness state rather than maintaining a hardcoded phone whitelist. Start with text and structured results; establish tool-call support and reliability experimentally before advertising it as an agent provider. Google's [GenAI overview](https://developers.google.com/ml-kit/genai) documents device-dependent support, per-app quotas, and foreground-only inference; a foreground service does not remove that API restriction.
+Android: integrate the current [ML Kit GenAI Prompt API](https://developers.google.com/ml-kit/genai/prompt/android) through its Java futures API. Probe support and download/readiness state rather than maintaining a hardcoded phone whitelist. The implemented slice advertises text only; structured results and tool-call reliability need evaluation before exposing those capabilities. Google's [GenAI overview](https://developers.google.com/ml-kit/genai) documents device-dependent support, per-app quotas, and foreground-only inference; a foreground service does not remove that API restriction.
 
 Define capability results per provider/model: availability and reason, locality, tools, structured output, modality, context budget, cancellation, and lifecycle restrictions. Existing scripts and craftbooks should require capabilities rather than assume that a provider name guarantees them.
 

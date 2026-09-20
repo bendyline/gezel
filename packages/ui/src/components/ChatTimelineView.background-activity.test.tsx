@@ -59,10 +59,12 @@ const { api } = await import('../api.js');
 
 describe('ChatTimelineView — background one-shot activity', () => {
   let boundsSpy: ReturnType<typeof vi.spyOn>;
+  let heightSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     streamState.mode = 'live';
     window.localStorage.clear();
+    heightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
     Element.prototype.scrollTo = vi.fn() as unknown as Element['scrollTo'];
     Element.prototype.scrollIntoView = vi.fn();
     boundsSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -94,7 +96,63 @@ describe('ChatTimelineView — background one-shot activity', () => {
     } as never);
   });
 
-  afterEach(() => boundsSpy.mockRestore());
+  afterEach(() => {
+    boundsSpy.mockRestore();
+    heightSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps conversation space visible on short viewports and restores the desktop reserve on resize', async () => {
+    streamState.mode = 'completed';
+    heightSpy.mockReturnValue(295);
+    const observers = new Set<{ targets: Set<Element>; notify: () => void }>();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        targets = new Set<Element>();
+        notify: () => void;
+        constructor(callback: () => void) {
+          this.notify = callback;
+          observers.add(this);
+        }
+        observe(target: Element) {
+          this.targets.add(target);
+        }
+        unobserve(target: Element) {
+          this.targets.delete(target);
+        }
+        disconnect() {
+          observers.delete(this);
+        }
+      },
+    );
+    render(
+      <ChatTimelineView
+        scopeKey="global"
+        activeSessionId={undefined}
+        loadTimeline={async () => ({ messages: [], hasMore: false }) as ListTimelineResponse}
+        streamUrl={() => 'https://example.invalid/events'}
+        showProjectName
+      />,
+    );
+    await waitFor(() =>
+      expect(document.querySelector('.timeline-session-divider-activity')).not.toBeInTheDocument(),
+    );
+    const runway = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('.timeline-response-runway');
+      expect(node?.style.blockSize).toBe('103px');
+      return node!;
+    });
+    const timeline = document.querySelector('.chat-timeline')!;
+    const observer = [...observers].find((candidate) => candidate.targets.has(timeline));
+    expect(observer).toBeDefined();
+    heightSpy.mockReturnValue(120);
+    observer?.notify();
+    expect(runway.style.blockSize).toBe('0px');
+    heightSpy.mockReturnValue(600);
+    observer?.notify();
+    expect(runway.style.blockSize).toBe('300px');
+  });
 
   it('names the activity instead of presenting the one-shot as a new chat thread', async () => {
     render(

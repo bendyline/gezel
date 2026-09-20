@@ -1,0 +1,114 @@
+.responsive-app-shell[data-compact="true"] > .responsive-app-navigation:not([hidden]) {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar {
+  width: 100% !important;
+  min-width: 0;
+  box-shadow: none;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar::before,
+.responsive-app-shell[data-compact="true"] .app-sidebar::after {
+  display: none;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar-scroll {
+  padding: 0.75rem;
+  direction: ltr;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar-item,
+.responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
+.responsive-app-shell[data-compact="true"] .app-sidebar-add {
+  min-height: 44px;
+}
+
+.responsive-app-shell[data-compact="true"] > .app-main {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app.app-mobile-preview {
+  width: min(100%, 390px);
+  margin-inline: auto;
+  box-shadow: 0 0 0 1px var(--border), 0 0 3rem var(--titlebar-pane-shadow);
+  position: relative;
+  isolation: isolate;
+}
+
+.app.app-compact {
+  min-width: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app.app-compact .app-header {
+  min-height: 52px;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+:root[data-layout="mobile"] .app.app-compact .app-header {
+  height: auto;
+}
+
+:root[data-layout="mobile"] .app.app-mobile-preview .app-header {
+  padding-inline: 0.75rem;
+  --wco-right: 0px;
+  --wco-left: 0px;
+}
+
+.app.app-compact .app-header-right {
+  display: none;
+}
+
+.app.app-compact .app-header-brand {
+  min-height: 44px;
+}
+
+.app.app-compact .titlebar-search {
+  flex: 1 1 110px;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+}
+
+.app.app-compact .titlebar-search-input {
+  min-height: 44px;
+}
+
+.app-compact-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-compact-navigation > button {
+  min-height: 44px;
+  padding: 0.4rem 0.65rem;
+}
+
+.app-compact-navigation-title {
+  font-weight: 600;
+}
+
+.app.app-compact .app-questions-overlay {
+  width: calc(100% - 1rem);
+  max-width: calc(100% - 1rem);
+  margin-inline: 0.5rem;
+  right: 0;
+}
+
+:root:not([data-platform]) .app.app-compact .app-header {
+  padding-inline: 0.75rem;
+}
