@@ -31,6 +31,11 @@ import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { isPureDelegationRole } from './role-tool-filter.js';
 import { scopeProjectAboutForTier } from './scope-instructions.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
+import {
+  WORKSPACE_PROMPT_ENTRY_CAP,
+  filterWorkspaceFilesForPrompt,
+  roleGetsWorkspaceOrientation,
+} from './workspace-prompt-listing.js';
 
 const log = createLogger('chat');
 
@@ -460,8 +465,8 @@ function truncateDescription(text: string): string {
 }
 
 /**
- * The entire conduct layer in minimal-context mode. Replaces the ~530-token
- * conduct core (act-don't-narrate + ask-when-stuck + markdown) with one
+ * The entire conduct layer in minimal-context mode. Replaces the standard
+ * capability-gated conduct blocks + markdown guidance with one
  * short steer suited to a no-tools chat/writing model. Keeps the
  * anti-fabrication note (small models invent tool calls) but nothing else.
  */
@@ -674,6 +679,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     : '';
   const header = `${displayedRole ? `Your role is "${displayedRole}".` : 'You are a gezel.'}${namingRule}`;
   const body = about.trim().length > 0 ? about.trim() : '(no about.md written yet)';
+  const workspaceOrientationEnabled = roleGetsWorkspaceOrientation(role);
+  const workspacePromptFiles = filterWorkspaceFilesForPrompt(workspaceFiles ?? [], role);
+  const workspaceListingRendered = Boolean(project && workspacePromptFiles.length > 0);
   // Stable-prefix band: traits (identity) then lessons (experience) sit
   // right after the about body so the gezel's earned behaviors and
   // accumulated cross-project knowledge read as part of who it is, not
@@ -1016,11 +1024,16 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         ? `Delegate with ${formatToolList(workspaceDelegationTools)}, passing the exact path, requested change, and acceptance criteria.`
         : 'No delegation tool is wired this turn; explain that the workspace change is blocked instead of inventing a handoff.';
     if (hasReadFile && hasWriteFile) {
+      const listedPathClause = workspaceListingRendered
+        ? ` If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it.`
+        : '';
       const artifactsLine = hasArtifactTools
-        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`tasks/<num>/\` for a task's working files, \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files.${listedPathClause} Conventions: \`tasks/<num>/\` for a task's working files, \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
         : '\n';
       const decisionLine = hasWriteArtifact
-        ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
+        ? workspaceListingRendered
+          ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
+          : 'Decision test: would the user ship this file at release? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
         : 'Use `write_file` only for files the user would ship at release. External `workingDir` projects: `write_file` touches the real directory.';
       projectContext += `
 
@@ -1030,14 +1043,17 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
 ${artifactsLine}
 ${decisionLine}${efficientReadGuidance}${incrementalReadGuidance}`;
     } else if (hasReadFile) {
+      const listedPathClause = workspaceListingRendered
+        ? ` If a path appears in \`### Workspace files\`, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}${batchReadClause}.`
+        : '';
       const artifactsLine = hasArtifactTools
-        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving \`packages/...\`, \`src/...\`, or a path listed in \`### Workspace files\` with an artifact-writing tool creates only a side-drawer copy and does not change the project.\n`
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving a project path such as \`packages/...\` or \`src/...\` with an artifact-writing tool creates only a side-drawer copy and does not change the project. For a workspace path, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}.\n`
         : '\n';
       projectContext += `
 
 ### Where work belongs
 
-- **Workspace reads** (${formatToolList(workspaceReadTools)}) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}${batchReadClause}. You can read; you cannot write.
+- **Workspace reads** (${formatToolList(workspaceReadTools)}) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about.${listedPathClause} You can read; you cannot write.
 ${artifactsLine}
 - **Workspace writes are delegated.** ${workspaceDelegationGuidance} Don't paste source into chat — that can't be applied.`;
       projectContext += efficientReadGuidance;
@@ -1048,17 +1064,23 @@ ${artifactsLine}
 ### Where work belongs
 
 - **Workspace writes** (\`write_file\`) — create the source or deliverable file named by the task directly in the project workspace. Put the complete contents in the tool call; do not paste the file into chat or save it as an artifact.
-- **Workspace reads are not available this turn.** Use the workspace listing and task context already shown here. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
+- **Workspace reads are not available this turn.** Use the task context and any exact paths already supplied${workspaceListingRendered ? ', plus the role-scoped workspace listing below' : ''}. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
     } else {
+      const listedArtifactWarning = workspaceListingRendered
+        ? `; do not treat a path shown in \`### Workspace files\` as an artifact${hasListArtifacts ? ' unless `list_artifacts` returned it too' : ''}`
+        : '';
       const artifactsLine = hasArtifactTools
-        ? `- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, reports, recommendations, and meeting notes. They are not workspace files; do not treat a path shown in \`### Workspace files\` as an artifact${hasListArtifacts ? ' unless `list_artifacts` returned it too' : ''}.\n`
+        ? `- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, reports, recommendations, and meeting notes. They are not workspace files${listedArtifactWarning}.\n`
         : '- **No direct file drawers are available this turn.** If another gezel says they wrote a file, treat their chat reply as a path + precis only. Do not claim you have read or received the full file unless a file-reading tool is actually available and you call it.\n';
+      const workspaceOrientation = workspaceListingRendered
+        ? "- **Workspace files** are listed below as a role-scoped orientation view. You don't have file-read/write tools for them; specialist gezels (developer, designer, reviewer) do."
+        : '- **Workspace files are not preloaded for this role.** Specialists inspect or search the workspace when concrete work requires it; do not ask the user to inventory it.';
       projectContext += `
 
 ### Where work belongs
 
 ${artifactsLine}
-- **Workspace files** are listed below for context — the project's source, configs, and assets. You don't have file-read/write tools for them; specialist gezels (developer, designer, reviewer) do. ${workspaceDelegationGuidance}`;
+${workspaceOrientation} ${workspaceDelegationGuidance}`;
     }
     // Workspace file listing is intentionally NOT folded into
     // projectContext. The listing changes per-turn (file added/removed
@@ -1073,7 +1095,7 @@ ${artifactsLine}
     const contextHints: string[] = [];
     if (hasListArtifacts) {
       contextHints.push(
-        'The artifacts drawer may hold side-drawer work from earlier sessions or other gezels — call `list_artifacts` when picking up an artifact handoff. Paths under `### Workspace files` are workspace files, not artifacts.',
+        `The artifacts drawer may hold side-drawer work from earlier sessions or other gezels — call \`list_artifacts\` when picking up an artifact handoff.${workspaceListingRendered ? ' Paths under `### Workspace files` are workspace files, not artifacts.' : ''}`,
       );
     }
     if (hasMemoryTools) {
@@ -1099,11 +1121,11 @@ ${artifactsLine}
   // Index-derived orientation, rendered upstream (chat/workspace-gestalt.ts)
   // and gated by the `prompt.workspace-gestalt` behavior in buildSessionOpts.
   // Placed before the raw file listing: map first, then inventory.
-  const workspaceGestaltBlock = workspaceGestalt ?? '';
+  const workspaceGestaltBlock = workspaceOrientationEnabled ? (workspaceGestalt ?? '') : '';
   let workspaceFilesBlock = '';
-  if (project && workspaceFiles && workspaceFiles.length > 0) {
-    const listing = workspaceFiles
-      .slice(0, 200)
+  if (workspaceListingRendered) {
+    const listing = workspacePromptFiles
+      .slice(0, WORKSPACE_PROMPT_ENTRY_CAP)
       .map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}${f.isDirectory ? '/' : ''}`)
       .join('\n');
     workspaceFilesBlock = `\n\n---\n\n### Workspace files\n\nFiles currently in the project:\n\`\`\`\n${listing}\n\`\`\``;
@@ -1113,8 +1135,8 @@ ${artifactsLine}
       // listing is breadth-first, so what's missing is the deep tail.
       workspaceFilesBlock +=
         '\n(listing incomplete — deeper files exist beyond these; a path absent above may still exist)';
-    } else if (workspaceFiles.length > 200) {
-      workspaceFilesBlock += `\n(${workspaceFiles.length - 200} more files truncated)`;
+    } else if (workspacePromptFiles.length > WORKSPACE_PROMPT_ENTRY_CAP) {
+      workspaceFilesBlock += `\n(${workspacePromptFiles.length - WORKSPACE_PROMPT_ENTRY_CAP} more relevant entries not shown)`;
     }
     if (retrievalFirstHint) {
       const retrievalTools = toolsFrom(['search', 'grep_files', 'search_code']);
@@ -1189,20 +1211,25 @@ ${artifactsLine}
 
   const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. ${SQUISQ_DIALECT_BRIEF}`;
 
-  const actDontNarrate = `**Act, don't narrate intent.** When you decide to do something, invoke the tool in the same turn — never announce "I will now read X" or "Processing…" and stop. The user can't tell you "go ahead"; they'll see your reply, assume you finished, and move on. The tools you have available are listed in your function-calling schema; trust the list — every entry is real and callable. Reach for one when the work needs it; chain multiple in a turn when the work needs it. Your turn ends when you've produced the final answer or you genuinely need a human decision.`;
+  // Conduct is capability-shaped, not a fixed tax on every conversation.
+  // Production always supplies both tool arrays. Treat an entirely omitted
+  // surface as "unknown" for older embedders/tests, but an explicit empty
+  // surface (or failed bridge) as genuinely tool-less.
+  const toolSurfaceKnown = availableTools !== undefined || thirdPartyToolsetIds !== undefined;
+  const hasCallableTools =
+    bridgeFailed !== true &&
+    (!toolSurfaceKnown ||
+      (availableTools?.length ?? 0) > 0 ||
+      (thirdPartyToolsetIds?.length ?? 0) > 0);
+  const actDontNarrate = hasCallableTools
+    ? `**Act, don't narrate intent.** When you decide to do something, invoke the tool in the same turn — never announce "I will now read X" or "Processing…" and stop. The user can't tell you "go ahead"; they'll see your reply, assume you finished, and move on. The tools you have available are listed in your function-calling schema; trust the list — every entry is real and callable. Reach for one when the work needs it; chain multiple in a turn when the work needs it. Your turn ends when you've produced the final answer or you genuinely need a human decision.`
+    : '';
 
+  // The natural-language fallback does not need teaching. Only pay for this
+  // block when the structured question capability actually exists.
   const decisionGuidance = availableToolNameSet.has('ask_user_question')
     ? `**When you need a decision from the user, call \`ask_user_question\` instead of asking in prose.** Use it for genuine scope decisions ("ship now or wait for review?", "which of these three approaches?"). Prose questions scroll off-screen; the tool puts a structured card in front of the user with a notification badge. End your turn after calling — the user's answer arrives as the next message. Pass \`choices: [...]\` when the answer is bounded (yes/no, one of N).`
-    : '**When you genuinely need a decision from the user, ask one concise question in prose.** No structured question tool is wired this turn, so do not fabricate one.';
-  const taskResumeAction = availableToolNameSet.has('read_task_notes')
-    ? 'call `read_task_notes({ ref })` for the latest, check what is already in the workspace and artifacts, then take the next concrete action. Only use a real task ref shown in a "Current task" / "Tasks assigned to you" block; never invent refs from the project name or words like "review".'
-    : 'use the task snapshot already present above, check what is already in the workspace and artifacts, then take the next concrete action. No task-note read tool is wired this turn, so do not fabricate one.';
-  const noAnchorFallback = availableToolNameSet.has('ask_user_question')
-    ? 'Only fall back to `ask_user_question` when there is genuinely no anchor in the prompt and the message itself is empty of specifics.'
-    : 'Only ask a prose clarification when there is genuinely no anchor in the prompt and the message itself is empty of specifics.';
-  const askWhenStuck = `${decisionGuidance}
-
-**A short user message is NOT a vague prompt when you have project + task context.** Most of your sessions land with a "Current task" / "Active phase" / "About this project" section above. That context resolves the ambiguity — "keep going" / "continue" / "finish this" / "do the next thing" with a current task means **resume that task**: ${taskResumeAction} The user shouldn't have to re-state the project description, the design doc, or what phase you're in — that's what the prompt above is for. ${noAnchorFallback}`;
+    : '';
 
   // Three states, and the fallback wording must name the RIGHT one.
   // When `@playwright/mcp` is wired this turn, teach the script-first
@@ -1611,6 +1638,7 @@ ${artifactsLine}
     ...(localModelTier ? { modelTier: localModelTier } : {}),
     providerName,
     ...(bridgeFailed ? { bridgeFailed: true } : {}),
+    workspaceListingRendered,
   });
 
   // Delegation guardrail goes RIGHT AT THE TOP after the header so it's
@@ -1623,7 +1651,7 @@ ${artifactsLine}
   // We extract the workspace-files listing from projectContext so a
   // file mutation doesn't invalidate the entire stable prefix — that
   // was the main cache win. We keep the instructional prose
-  // (act-don't-narrate, ask-when-stuck, browsing, markdown) and the
+  // (capability-gated action/decision guidance, browsing, markdown) and the
   // tools block in their ORIGINAL late-prompt positions because
   // small models attend strongest to the END of the prompt; moving
   // the discipline directives earlier produced 100k-character "stuck
@@ -1647,8 +1675,8 @@ ${artifactsLine}
   //     assigned tasks
   //     recall hits
   //   [late stable — high-attention zone for action discipline]
-  //     act, don't narrate
-  //     ask when stuck
+  //     act, don't narrate (only with callable tools)
+  //     structured decisions (only with ask_user_question)
   //     browsing guidance
   //     markdown guidance
   //     local hints (tier/family discipline cookbook)
@@ -1811,6 +1839,12 @@ ${artifactsLine}
     ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
     : '';
 
+  const operationalGuidance = [actDontNarrate, decisionGuidance, browsingForRole.trim()]
+    .filter(Boolean)
+    .join('\n\n');
+  const operationalGuidanceSection = operationalGuidance ? `\n\n---\n\n${operationalGuidance}` : '';
+  const responseGuidanceSection = `\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+
   const aboutIntro =
     '\n\nThe section below is your "about" document — it describes your role, what you know, and how you should behave.\n\n---\n\n';
 
@@ -1832,7 +1866,7 @@ ${artifactsLine}
       ['lessons', lessonsBlock, 'stable'],
       ['projectContext (about+mission+github)', projectContext, 'stable'],
       ['actDontNarrate', actDontNarrate, 'stable'],
-      ['askWhenStuck', askWhenStuck, 'stable'],
+      ['decisionGuidance', decisionGuidance, 'stable'],
       ['browsingForRole', browsingForRole, 'stable'],
       ['markdownGuidance', markdownGuidance, 'stable'],
       ['untrustedContent', untrustedContentBlock, 'stable'],
@@ -1886,7 +1920,8 @@ ${artifactsLine}
   // the role identity, exact task/step contract, post-policy tool roster,
   // model-specific tool syntax, and the late recency anchor.
   if (focusedTaskContext && task?.step?.prompt) {
-    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.\n\n${actDontNarrate}\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+    const actionGuidance = actDontNarrate ? `\n\n${actDontNarrate}` : '';
+    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
     const volatile = `${taskContext}${consultationAddendum}${activeTaskAnchor}`
       .replace(/^\n+(?:---\n+)?/, '')
       .trim();
@@ -1908,7 +1943,7 @@ ${artifactsLine}
     // everything up to `taskContext` identically. Concatenation order is
     // unchanged, so `full` stays byte-identical to the single-string form.
     const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
-    const sessionTail = `${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
+    const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
     return { full: `${sharedPrefix}${sessionTail}`, sharedPrefix };
   }
 
@@ -1919,7 +1954,7 @@ ${artifactsLine}
   // prefix (everything before projectContext) is a true byte-prefix of
   // the full stable message, so adapters key `prefix-gezel` ⊂ `prefix-gp`.
   const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
-  const stableSystem = `${gezelPrefix}${projectContext}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+  const stableSystem = `${gezelPrefix}${projectContext}${operationalGuidanceSection}${responseGuidanceSection}`;
 
   // Volatile band → a frozen message injected after the tool block. The
   // recency anchor (`activeTaskAnchor`) rides at the END of this message

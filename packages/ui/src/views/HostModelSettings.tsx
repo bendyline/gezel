@@ -2,14 +2,27 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestBackupRestore } from '../components/BackupRestoreDialog.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { takePendingSettingsSection } from '../settings-nav.js';
+import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
 
 /** Model management is supplied by the host; navigation and preferences stay shared. */
 export function HostModelSettings() {
-  const [section, setSection] = useState('models');
+  const [section, setSection] = useState(() => hostSection(takePendingSettingsSection()));
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ view?: string; section?: string }>).detail;
+      if (detail?.view === 'settings' && detail.section) {
+        takePendingSettingsSection();
+        setSection(hostSection(detail.section));
+      }
+    };
+    window.addEventListener('gezel:navigate', navigate);
+    return () => window.removeEventListener('gezel:navigate', navigate);
+  }, []);
   useEffect(() => {
     void api
       .getConfig()
@@ -37,6 +50,7 @@ export function HostModelSettings() {
           {[
             { id: 'models', label: 'Artificial Intelligence' },
             { id: 'general', label: 'General' },
+            ...(runtimeCapabilities().audio ? [{ id: 'audio', label: 'Audio' }] : []),
             ...(runtimeCapabilities().backups
               ? [{ id: 'backups', label: 'Backup and restore' }]
               : []),
@@ -57,6 +71,8 @@ export function HostModelSettings() {
       <div className="settings-panel" data-testid={`settings-section-${section}`}>
         {section === 'models' ? (
           window.__GEZEL__?.renderModelSettings?.()
+        ) : section === 'audio' ? (
+          <AudioEngineSettings />
         ) : section === 'backups' ? (
           <section>
             <h3>Keep a copy of your work</h3>
@@ -100,4 +116,11 @@ export function HostModelSettings() {
       </div>
     </div>
   );
+}
+
+function hostSection(section: string | null): string {
+  if (section === 'general') return section;
+  if (section === 'audio' && runtimeCapabilities().audio) return section;
+  if (section === 'backups' && runtimeCapabilities().backups) return section;
+  return 'models';
 }

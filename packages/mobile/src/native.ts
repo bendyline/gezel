@@ -15,12 +15,17 @@ import {
   type MobileProviderId,
   MobileProviderListSchema,
 } from '@bendyline/gezel/mobile-providers';
-import type { PortableFileSystem, PortableInference } from '@bendyline/gezel/runtime';
+import type {
+  PortableFileSystem,
+  PortableInference,
+  PortableSpeech,
+} from '@bendyline/gezel/runtime';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { type ExportFilePlugin, type ExportedFile, saveNativeExport } from './export-file.js';
 import type { PublishHtmlPreview } from './html-preview.js';
 import { type ProductFilePlugin, createNativeProductFiles } from './product-files.js';
+import { createNativeSpeech } from './speech.js';
 
 export type { MobileModel } from '@bendyline/gezel/schemas';
 export type ModelInventory = MobileModelInventory;
@@ -65,6 +70,7 @@ export interface GezelMobilePlugin extends ProductFilePlugin, ExportFilePlugin {
 }
 
 export interface MobileHost {
+  speech?: PortableSpeech;
   previewAvailability?(): Promise<boolean>;
   publishHtmlPreview?: PublishHtmlPreview;
   native: boolean;
@@ -92,6 +98,7 @@ export function createNativeHost(nativePlugin: GezelMobilePlugin = plugin): Mobi
   const runs = new Map<string, { cancelled: boolean; started: boolean; released: Promise<void> }>();
   return {
     native: true,
+    speech: createNativeSpeech(),
     previewAvailability: async () =>
       (await nativePlugin.previewAvailability?.())?.available === true,
     publishHtmlPreview: async (html) => {

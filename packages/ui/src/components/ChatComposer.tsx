@@ -13,9 +13,11 @@ import {
 } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
@@ -1063,7 +1065,7 @@ export function ChatComposer({
     try {
       activeSessionId = await ensureSessionId();
     } catch (err) {
-      setError(humanizeTransportError((err as Error).message));
+      setError(humanizeTransportError(apiErrorMessage(err)));
       finishDraftSubmission();
       return;
     }
@@ -1228,7 +1230,7 @@ export function ChatComposer({
     } catch (err) {
       ctrl.abort();
       settleLocalTurn(localTurnId);
-      const raw = (err as Error).message ?? String(err);
+      const raw = apiErrorMessage(err);
       if (/already in flight/i.test(raw)) {
         // A previous turn is stuck. Pull the details so we can show the
         // user what they're actually waiting on + offer a cancel button.
@@ -1369,7 +1371,7 @@ export function ChatComposer({
       if (sentDraftId) draft.markSent();
       clearAcceptedDraft(draftSnapshot);
     } catch (err) {
-      setError(humanizeChatError((err as Error).message ?? String(err)));
+      setError(humanizeChatError(apiErrorMessage(err)));
     } finally {
       finishDraftSubmission();
     }
@@ -1416,7 +1418,7 @@ export function ChatComposer({
         /* the periodic poll remains the recovery path */
       });
     } catch (err) {
-      setError(humanizeChatError((err as Error).message ?? String(err)));
+      setError(humanizeChatError(apiErrorMessage(err)));
     } finally {
       finishDraftSubmission();
     }
@@ -1489,7 +1491,27 @@ export function ChatComposer({
           <span className="chat-composer-error-mark" aria-hidden="true">
             ✗
           </span>
-          <span className="chat-composer-error-text">{error}</span>
+          <div className="chat-composer-error-text">
+            {error}
+            {error.includes('Settings → Artificial Intelligence') && (
+              <div>
+                <button
+                  type="button"
+                  className="gz-key"
+                  onClick={() => {
+                    requestSettingsSection('defaults');
+                    window.dispatchEvent(
+                      new CustomEvent('gezel:navigate', {
+                        detail: { view: 'settings', section: 'defaults' },
+                      }),
+                    );
+                  }}
+                >
+                  Choose a model
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
       <div className="chat-composer-to">

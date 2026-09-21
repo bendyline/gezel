@@ -139,7 +139,8 @@ export const InstalledAudioModelSchema = z.object({
   id: z.string(),
   name: z.string(),
   approxSizeBytes: z.number().int().nonnegative(),
-  installedAt: z.string(),
+  /** Absent for a model supplied as part of the application bundle. */
+  installedAt: z.string().optional(),
 });
 export type InstalledAudioModel = z.infer<typeof InstalledAudioModelSchema>;
 

@@ -33,3 +33,6 @@ export type { PortableContent, PortableCatalogModel } from './content.js';
 export { portableToolNames } from './product-tools.js';
 
 export * from './transform.js';
+export * from './speech.js';
+export * from './speech-bytes.js';
+export * from './speech-pcm.js';

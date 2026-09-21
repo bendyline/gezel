@@ -5,6 +5,40 @@ import WebKit
 
 /// Actual shared React UI, portable service, and native inference on a dedicated simulator.
 final class MobileBridgeTests: XCTestCase {
+    @MainActor
+    func testOfflineSpeechPackRoundTrip() async throws {
+        let plugin = GezelSpeechPlugin()
+        func invoke(_ method: String, _ options: JSObject) async throws -> PluginCallResultData {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<PluginCallResultData, Error>) in
+                let call = CAPPluginCall(callbackId: UUID().uuidString, methodName: method, options: options,
+                    success: { result, _ in continuation.resume(returning: result?.data ?? [:]) },
+                    error: { failure in continuation.resume(throwing: NSError(domain: "OfflineSpeech", code: 1, userInfo: [NSLocalizedDescriptionKey: failure?.message ?? "Speech failed"])) })!
+                if method == "synthesize" { plugin.synthesize(call) }
+                else if method == "transcribe" { plugin.transcribe(call) }
+                else { plugin.status(call) }
+            }
+        }
+        let status = try await invoke("status", [:])
+        XCTAssertEqual((status["kokoro"] as? PluginCallResultData)?["state"] as? String, "ready")
+        XCTAssertGreaterThanOrEqual((status["voices"] as? [PluginCallResultData])?.count ?? 0, 30)
+        for voice in ["af_heart", "bm_george"] {
+            let output = try await invoke("synthesize", ["requestId": UUID().uuidString, "voice": voice, "text": "The blue bicycle is beside the window."])
+            let wav = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(output["wav"] as? String)))
+            XCTAssertEqual(String(data: wav.prefix(4), encoding: .ascii), "RIFF")
+            XCTAssertEqual((output["meta"] as? PluginCallResultData)?["voice"] as? String, voice)
+            let frames = (wav.count - 44) / 2
+            var pcm = Data(capacity: frames * 2 / 3 * 2)
+            for index in 0..<(frames * 2 / 3) {
+                let offset = 44 + (index * 3 / 2) * 2
+                pcm.append(wav[offset]); pcm.append(wav[offset + 1])
+            }
+            let transcript = try await invoke("transcribe", ["requestId": UUID().uuidString, "engine": "whisper", "audio": pcm.base64EncodedString(), "language": "en"])
+            let text = try XCTUnwrap(transcript["text"] as? String).lowercased()
+            XCTAssertTrue(text.contains("bicycle"), text)
+            XCTAssertTrue(text.contains("window"), text)
+        }
+    }
+
     func testUnavailableSystemModelIsRejectedBeforeInference() throws {
         // Invoke the real plugin before loading a provider, independently of
         // other smoke tests that deliberately unload the product WebView.

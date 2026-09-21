@@ -65,6 +65,8 @@ import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
 import { portableScriptTools } from './script-tools.js';
+import { PortableSpeechRoutes } from './speech-routes.js';
+import type { PortableSpeech } from './speech.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
 import { evaluatePortableTaskGate } from './task-gates.js';
@@ -115,6 +117,7 @@ type Turn = {
 };
 
 export class PortableProductService {
+  private readonly audio?: PortableSpeechRoutes;
   readonly capabilities: Readonly<RuntimeCapabilities>;
   private turn: Turn | undefined;
   private textOperation: PortableTextOperation | undefined;
@@ -168,11 +171,19 @@ export class PortableProductService {
     readonly store: PortableStore,
     readonly inference: PortableInference,
     private readonly token: string,
-    host: { htmlPreview?: boolean } = {},
+    host: { htmlPreview?: boolean; speech?: PortableSpeech } = {},
   ) {
+    if (host.speech)
+      this.audio = new PortableSpeechRoutes(
+        store,
+        host.speech,
+        () => this.assertIdle(),
+        () => this.publishStatus(),
+      );
     this.capabilities = Object.freeze({
       ...OFFLINE_RUNTIME_CAPABILITIES,
       htmlPreview: host.htmlPreview === true,
+      audio: !!host.speech,
     });
     this.tasks = new PortableTaskRunner({
       store,
@@ -295,6 +306,8 @@ export class PortableProductService {
     return session;
   }
   private assertIdle(taskOwned = false): void {
+    if (this.audio?.busy)
+      throw new ProductError('Wait for speech to finish, or stop it first.', 409);
     if (this.admittingTurn)
       throw new ProductError('Wait for the response to start, or stop it first.', 409);
     if (this.textOperation)
@@ -371,6 +384,7 @@ export class PortableProductService {
     const stopping = Promise.allSettled([
       turn ? this.inference.cancel(turn.requestId) : Promise.resolve(),
       this.scripts?.cancel() ?? Promise.resolve(),
+      this.audio?.cancel() ?? Promise.resolve(),
     ]);
     const queued = this.handoffs.splice(0);
     for (const item of queued) {
@@ -391,6 +405,7 @@ export class PortableProductService {
       !!this.admittingTurn ||
       !!this.textOperation ||
       !!this.manualScript ||
+      this.audio?.busy === true ||
       this.scripts?.isBusy() === true ||
       this.tasks.isBusy() ||
       this.handoffs.length > 0
@@ -1130,6 +1145,10 @@ export class PortableProductService {
       )
         return json({ error: 'Unauthorized' }, 401);
       if (request.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (url.pathname.startsWith('/api/audio/')) {
+        if (!this.audio) return json({ error: 'Offline speech is unavailable in this host.' }, 503);
+        return await this.audio.handle(request, url);
+      }
       if (
         request.method === 'POST' &&
         ['/api/ai/transform', '/api/ai/rewrite'].includes(url.pathname)
@@ -1393,7 +1412,14 @@ export class PortableProductService {
           const model =
             gezel?.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
           if (inventory && !inventory.models.some((item) => item.id === model))
-            throw new ProductError('Choose an imported model in Settings first.', 409);
+            throw new ProductError(
+              gezel?.parsed.frontmatter.model
+                ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial Intelligence, or change this gezel's model.`
+                : inventory.models.length === 0
+                  ? 'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.'
+                  : 'Choose an available chat model in Settings → Artificial Intelligence, then send your message again.',
+              409,
+            );
           return json(await this.store.createSession({ ...input, providerName, model }));
         }
       }

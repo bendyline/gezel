@@ -2,10 +2,11 @@
 
 import type { TurnIntentPlan } from '@bendyline/gezel';
 import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
-import { streamChatEvents } from '@bendyline/gezel-client';
+import { GezelApiError, streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
+import { takePendingSettingsSection } from '../settings-nav.js';
 import { ChatComposer } from './ChatComposer.js';
 
 function deferred<T>() {
@@ -18,7 +19,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-vi.mock('@bendyline/gezel-client', () => ({ streamChatEvents: vi.fn() }));
+vi.mock('@bendyline/gezel-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@bendyline/gezel-client')>()),
+  streamChatEvents: vi.fn(),
+}));
 vi.mock('../api.js', async () => {
   const { createMockApi } = await import('../test-utils/mockApi.js');
   return { api: createMockApi() };
@@ -504,6 +508,52 @@ describe('ChatComposer lossless draft submission', () => {
     expect(editor.selectionStart).toBe(2);
     expect(editor.selectionEnd).toBe(12);
     expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it('shows the model setup explanation and opens Settings without losing the unsent draft', async () => {
+    const explanation =
+      'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.';
+    vi.mocked(api.createChatSession).mockRejectedValueOnce(
+      new GezelApiError('Gezel API error 409 on POST /api/sessions', 409, { error: explanation }),
+    );
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId={undefined} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(await screen.findByText(explanation)).toBeTruthy();
+    expect(screen.queryByText(/Gezel API error 409/)).toBeNull();
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
+    const navigate = vi.fn();
+    window.addEventListener('gezel:navigate', navigate);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Choose a model' }));
+      expect(navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: { view: 'settings', section: 'defaults' } }),
+      );
+      expect(takePendingSettingsSection()).toBe('defaults');
+      expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
+    } finally {
+      window.removeEventListener('gezel:navigate', navigate);
+    }
+  });
+
+  it('shows the server explanation when sending to an existing session is rejected', async () => {
+    vi.mocked(api.sendToChatSession).mockRejectedValueOnce(
+      new GezelApiError('Gezel API error 409 on POST /api/sessions/session-1/send', 409, {
+        error: 'Wait for speech to finish, or stop it first.',
+      }),
+    );
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    expect(await screen.findByText('Wait for speech to finish, or stop it first.')).toBeTruthy();
+    expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
+    expect(screen.queryByRole('button', { name: 'Choose a model' })).toBeNull();
   });
 
   it.each([

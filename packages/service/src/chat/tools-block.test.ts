@@ -381,6 +381,21 @@ describe('renderAvailableToolsBlock — compact mode (small/medium tier)', () =>
     expect(out).not.toContain('`write_file`');
   });
 
+  it('does not claim a workspace inventory exists when the role does not receive one', () => {
+    const out = renderAvailableToolsBlock({
+      tools: [
+        { name: 'read_file', description: 'Read a workspace file.' },
+        { name: 'read_artifact', description: 'Read an artifact.' },
+      ],
+      modelTier: 'small',
+      providerName: 'mlx',
+      workspaceListingRendered: false,
+    });
+    expect(out).toContain('Project workspace paths use `read_file`');
+    expect(out).toContain('inventory is intentionally not preloaded for this role');
+    expect(out).not.toContain('Workspace paths from "Workspace files"');
+  });
+
   it('uses a shorter framing sentence on compact tiers', () => {
     const out = renderAvailableToolsBlock({
       tools: [{ name: 'save_memory', description: 'x' }],

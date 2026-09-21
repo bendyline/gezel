@@ -66,3 +66,4 @@ export * from './mobile-provider.js';
 export * from './file-turn-intent.js';
 export * from './turn-intent-plan.js';
 export * from './native-capacity.js';
+export * from './offline-speech.js';

@@ -5,6 +5,7 @@ import type { PortableFileEntry, PortableFileSystem } from '../src/runtime/files
 import { type PortableInference, PortableProductService } from '../src/runtime/product-service.js';
 import { PortableStore } from '../src/runtime/store.js';
 import { CatalogItemDetailSchema } from '../src/schemas/catalog.js';
+import type { MobileModelInventory } from '../src/schemas/mobile-provider.js';
 import { ListTimelineResponseSchema } from '../src/schemas/session.js';
 
 class MemoryFiles implements PortableFileSystem {
@@ -108,6 +109,32 @@ async function settled(service: PortableProductService) {
 }
 
 describe('ordinary client against offline product runtime', () => {
+  it('explains missing model setup and admits the unchanged message after a model is selected', async () => {
+    const inventory: MobileModelInventory = { models: [] };
+    const { client, store, service, seen } = await setup({ models: async () => inventory });
+    const gezelId = (await store.readConfig()).meesterGezelId!;
+    await expect(client.createChatSession({ gezelId })).rejects.toMatchObject({
+      status: 409,
+      details: { error: expect.stringContaining('No chat model is installed on this device.') },
+    });
+    expect((await client.listChatSessions({ gezelId })).sessions).toHaveLength(0);
+    expect(seen).toHaveLength(0);
+
+    inventory.models.push({ id: 'test-model', name: 'Test model', sizeBytes: 100 });
+    await expect(client.createChatSession({ gezelId })).rejects.toMatchObject({
+      status: 409,
+      details: { error: expect.stringContaining('Choose an available chat model') },
+    });
+    inventory.selectedModelId = 'test-model';
+    const session = await client.createChatSession({ gezelId });
+    expect(session.model).toBe('test-model');
+    await client.sendToChatSession(session.id, { message: 'Hi' });
+    await settled(service);
+    expect(
+      (await client.getChatSession(session.id)).messages.map((message) => message.content),
+    ).toEqual(['Hi', 'A useful answer']);
+  });
+
   it('saves, reopens, duplicates and sends task-composer drafts through the shared client', async () => {
     const { client, store, service, files, seen } = await setup();
     const gezelId = (await store.readConfig()).meesterGezelId!;

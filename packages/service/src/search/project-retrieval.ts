@@ -14,7 +14,11 @@ import {
 import { looksBinaryText } from '../fs/binary-text.js';
 import type { Store } from '../fs/store.js';
 import { hasDerivedIndexText } from '../index-store/classify.js';
-import { queryTerms, textMatchesAnyTerm } from '../index-store/query-terms.js';
+import {
+  proactiveRetrievalTerms,
+  queryTerms,
+  textMatchesAnyTerm,
+} from '../index-store/query-terms.js';
 import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
 
 const MODE_BUDGET: Record<RetrievalMode, number> = {
@@ -361,7 +365,13 @@ function retrievalQuery(
   }
   const unique = [...new Set(parts)];
   if (unique.length === 0) return null;
-  return unique.join('\n').slice(0, 1_600);
+  const query = unique.join('\n').slice(0, 1_600);
+  // Explicit search deliberately falls back to stopwords for literal queries,
+  // but automatic prompt injection must have a subject. Without this gate a
+  // greeting such as "Hey, how's it going?" runs the vector arm and fills the
+  // turn with whatever happens to be nearest in the workspace and library.
+  if (proactiveRetrievalTerms(query).length === 0) return null;
+  return query;
 }
 
 /** One strong hit per path, then round-robin corpora before second-order noise. */

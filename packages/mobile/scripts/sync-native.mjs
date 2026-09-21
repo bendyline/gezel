@@ -2,6 +2,7 @@ import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { replaceNativeAssets } from './stage-native-assets.mjs';
+import { stageSpeech } from './stage-speech.mjs';
 import { normalizeSwiftPackage } from './swift-package.mjs';
 import { verifyNativeBuild } from './verify-native-build.mjs';
 
@@ -25,6 +26,7 @@ const publicAssets = path.join(
 );
 await access(path.join(publicAssets, 'index.html'));
 const native = await verifyNativeBuild(repo, build, platform);
+const speech = await stageSpeech(repo, mobile, platform);
 const replacements = [];
 if (platform === 'ios') {
   await access(path.join(build, 'GezelLlama.xcframework/Info.plist'));
@@ -49,13 +51,22 @@ if (platform === 'ios') {
     throw new Error('Build the arm64-v8a Android native libraries first.');
   replacements.push({
     target: path.join(mobile, 'android/app/src/main/jniLibs'),
-    files: Object.entries(native.files)
-      .filter(([relative]) => relative.startsWith('jniLibs/'))
-      .map(([relative, sha256]) => ({
-        relative: relative.slice('jniLibs/'.length),
-        source: path.join(build, relative),
-        sha256,
-      })),
+    files: [
+      ...Object.entries(native.files)
+        .filter(([relative]) => relative.startsWith('jniLibs/'))
+        .map(([relative, sha256]) => ({
+          relative: relative.slice('jniLibs/'.length),
+          source: path.join(build, relative),
+          sha256,
+        })),
+      ...Object.entries(speech.manifest.files)
+        .filter(([name]) => name.endsWith('.so'))
+        .map(([name, sha256]) => ({
+          relative: `arm64-v8a/${name}`,
+          source: path.join(speech.root, name),
+          sha256,
+        })),
+    ],
   });
   // JNI and the staged C++ runtime must come from the same NDK revision.
   replacements.push({
@@ -66,11 +77,25 @@ if (platform === 'ios') {
 const licenses = path.join(publicAssets, 'licenses/native');
 replacements.push({
   target: licenses,
-  files: ['LICENSE-llama-cpp.txt', 'LICENSE-ggml.txt'].map((name) => ({
-    relative: name,
-    source: path.join(build, name),
-    sha256: native.files[name],
-  })),
+  files: [
+    ...['LICENSE-llama-cpp.txt', 'LICENSE-ggml.txt'].map((name) => ({
+      relative: name,
+      source: path.join(build, name),
+      sha256: native.files[name],
+    })),
+    ...Object.entries(speech.manifest.files)
+      .filter(([name]) => /^(LICENSE|NOTICE)-/.test(name))
+      .map(([name, sha256]) => ({
+        relative: name,
+        source: path.join(speech.root, name),
+        sha256,
+      })),
+    {
+      relative: 'LICENSE-kokoro.txt',
+      source: path.join(speech.root, 'models/kokoro/LICENSE'),
+      sha256: speech.manifest.files['models/kokoro/LICENSE'],
+    },
+  ],
 });
 await replaceNativeAssets(replacements);
 console.log(`Prepared ${platform} native artifacts and licenses.`);

@@ -42,6 +42,7 @@ final class MainViewController: CAPBridgeViewController {
             previewSnapshots.available = schemeBoundaryReady
         }
         bridge?.registerPluginInstance(GezelMobilePlugin())
+        bridge?.registerPluginInstance(GezelSpeechPlugin())
     }
 }
 

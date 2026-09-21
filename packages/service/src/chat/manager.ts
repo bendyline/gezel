@@ -394,6 +394,7 @@ import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { nativeVisionEnabledFor } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
+import { roleGetsWorkspaceOrientation } from './workspace-prompt-listing.js';
 
 const DEFAULT_PROJECT_ID = 'default';
 
@@ -13944,7 +13945,9 @@ export class ChatManager extends LocalEngineRuntime {
     // rendered/gated inside buildInstructions.
     const retrievalFirstActive = profileHasBehavior(modelProfile, 'prompt.retrieval-first');
     const workspaceGestaltActive =
-      Boolean(project) && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
+      Boolean(project) &&
+      roleGetsWorkspaceOrientation(gezel?.role) &&
+      profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
     const documentDescriptions =
       documentFiles.length > 0 &&
       libraryProjectId &&

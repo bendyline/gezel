@@ -27,10 +27,14 @@ const devices = capture(adb, ['devices'])
   .split('\n')
   .slice(1)
   .map((line) => line.trim().split(/\s+/))
-  .filter(([serial]) => serial);
+  .filter(
+    ([serial]) => serial && (!process.env.ANDROID_SERIAL || serial === process.env.ANDROID_SERIAL),
+  );
 // Test APKs are installed in place on the explicitly named development emulator.
 if (devices.length !== 1 || !devices[0][0].startsWith('emulator-') || devices[0][1] !== 'device') {
-  throw new Error(`Connect only the ${expectedAvd} emulator before running Android tests.`);
+  throw new Error(
+    `Connect only the ${expectedAvd} emulator, or select it with ANDROID_SERIAL, before running Android tests.`,
+  );
 }
 const serial = devices[0][0];
 const avd = capture(adb, ['-s', serial, 'emu', 'avd', 'name']).split('\n')[0].trim();

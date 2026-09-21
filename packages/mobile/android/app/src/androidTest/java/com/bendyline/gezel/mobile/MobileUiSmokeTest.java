@@ -25,11 +25,14 @@ import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Rule;
+import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 
 /** Exercises the shared React app, portable service, Capacitor bridge, and product files together. */
 @RunWith(AndroidJUnit4.class)
 public final class MobileUiSmokeTest {
+    @Rule public final TestName testName = new TestName();
     private final Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
     private final Map<File, byte[]> priorState = new LinkedHashMap<>();
     private MainActivity activity;
@@ -52,21 +55,27 @@ public final class MobileUiSmokeTest {
         productBackup = new File(new File(files, "gezel"), "product-smoke-backup-" + java.util.UUID.randomUUID());
         Files.move(productRoot.toPath(), productBackup.toPath());
         store = new MobileStore(files);
-        for (String name : new String[] { "models.json", "models.json.bak", "models.json.new" }) {
-            File file = new File(new File(files, "gezel"), name);
-            priorState.put(file, file.exists() ? Files.readAllBytes(file.toPath()) : null);
+        // Speech uses no chat model. Keep the model registry completely untouched
+        // for this test, including if the emulator is interrupted.
+        if (!testName.getMethodName().equals("offlineSpeechUsesSharedProductArtifactsAndVoiceIdentity")) {
+            for (String name : new String[] { "models.json", "models.json.bak", "models.json.new" }) {
+                File file = new File(new File(files, "gezel"), name);
+                priorState.put(file, file.exists() ? Files.readAllBytes(file.toPath()) : null);
+            }
+            for (File file : priorState.keySet()) Files.deleteIfExists(file.toPath());
+            if (!testName.getMethodName().equals("missingChatModelOpensSettingsAndPreservesDraft")) {
+                fixtureSource = File.createTempFile("ui-smoke-", ".gguf", instrumentation.getTargetContext().getCacheDir());
+                try (InputStream input = instrumentation.getContext().getAssets().open("fixtures/deterministic-native.gguf");
+                        FileOutputStream output = new FileOutputStream(fixtureSource)) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                }
+                fixtureId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(fixtureSource)).getString("id");
+                store.selectModel(fixtureId);
+                importedFixture = new File(new File(files, "gezel/models"), fixtureId + ".gguf");
+            }
         }
-        for (File file : priorState.keySet()) Files.deleteIfExists(file.toPath());
-        fixtureSource = File.createTempFile("ui-smoke-", ".gguf", instrumentation.getTargetContext().getCacheDir());
-        try (InputStream input = instrumentation.getContext().getAssets().open("fixtures/deterministic-native.gguf");
-                FileOutputStream output = new FileOutputStream(fixtureSource)) {
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-        }
-        fixtureId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(fixtureSource)).getString("id");
-        store.selectModel(fixtureId);
-        importedFixture = new File(new File(files, "gezel/models"), fixtureId + ".gguf");
         // Connect before WebView creation so its virtual accessibility tree is enabled.
         android.accessibilityservice.AccessibilityServiceInfo accessibility = instrumentation.getUiAutomation().getServiceInfo();
         accessibility.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS | android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
@@ -104,6 +113,64 @@ public final class MobileUiSmokeTest {
         }
         if (importedFixture != null) Files.deleteIfExists(importedFixture.toPath());
         if (fixtureSource != null) Files.deleteIfExists(fixtureSource.toPath());
+    }
+
+    @Test public void missingChatModelOpensSettingsAndPreservesDraft() throws Exception {
+        run("""
+            const inventory=await plugin.listModels();
+            check(inventory.models.length===0,'This test must start without a chat model');
+            const config=await api('/api/config');
+            const project=await api('/api/projects','POST',{name:'Model setup workshop',indexingEnabled:false});
+            await api('/api/projects/'+project.id+'/gezels','POST',{gezelId:config.meesterGezelId});
+            await api('/api/projects/'+project.id,'PUT',{voormanGezelId:config.meesterGezelId});
+            return true;
+            """);
+        reload();
+        run("""
+            await openNavigation();
+            await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
+            const editor=await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]'),'shared composer');
+            editor.focus();document.execCommand('insertText',false,'Hello from an empty model library.');editor.blur();
+            const project=(await api('/api/projects')).projects.find(item=>item.name==='Model setup workshop');
+            await until(async()=>(await api('/api/projects/'+project.id+'/prompt-drafts')).drafts.some(item=>item.title.includes('Hello from an empty model library.')),'editor change saved before Send');
+            await clickButton('Send');
+            await until(()=>document.querySelector('.chat-composer-error')?.textContent.includes('No chat model is installed'),'actionable missing model explanation');
+            check(!document.querySelector('.chat-composer-error').textContent.includes('409'),'Raw HTTP status must not replace the explanation');
+            check(editor.textContent.includes('Hello from an empty model library.'),'Rejected send must keep the draft');
+            check((await api('/api/sessions')).sessions.length===0,'Missing model must not leave an empty conversation');
+            check(document.documentElement.scrollWidth<=innerWidth+1,'Error and action must fit a phone');
+            return true;
+            """);
+        JSONObject modelAction=run("""
+            const action=await until(()=>{
+                const button=document.querySelector('.chat-composer-error button');
+                if (!button) return false;
+                const box=button.getBoundingClientRect(),x=box.left+box.width/2,y=box.top+box.height/2;
+                return box.top>=0 && box.bottom<=innerHeight && button.contains(document.elementFromPoint(x,y)) && {x,y,viewportWidth:innerWidth};
+            },'model setup action visible and tappable');
+            return action;
+            """);
+        snapshot("05-missing-chat-model");
+        int[] location=new int[2];int[] viewWidth=new int[1];
+        instrumentation.runOnMainSync(()->{webView.getLocationOnScreen(location);viewWidth[0]=webView.getWidth();});
+        float scale=(float)(viewWidth[0]/modelAction.getDouble("viewportWidth"));
+        float x=location[0]+(float)modelAction.getDouble("x")*scale,y=location[1]+(float)modelAction.getDouble("y")*scale;
+        long now=SystemClock.uptimeMillis();
+        android.view.MotionEvent down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,x,y,0);
+        android.view.MotionEvent up=android.view.MotionEvent.obtain(now,now+80,android.view.MotionEvent.ACTION_UP,x,y,0);
+        down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        try {
+            assertTrue(instrumentation.getUiAutomation().injectInputEvent(down,true));
+            assertTrue(instrumentation.getUiAutomation().injectInputEvent(up,true));
+        } finally {down.recycle();up.recycle();}
+        run("""
+            await until(()=>visible(document.querySelector('[aria-label="On-device models"]')),'model settings from chat');
+            check(visible(button('Import a model')),'Model setup must offer local GGUF import');
+            await openNavigation();
+            await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
+            await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]')?.textContent.includes('Hello from an empty model library.'),'draft after returning from model settings');
+            return true;
+            """);
     }
 
     @Test public void unavailableSystemModelIsRejectedBeforeInference() throws Exception {
@@ -417,6 +484,28 @@ public final class MobileUiSmokeTest {
         evaluate("window.__gezelReloadMarker = true");
         instrumentation.runOnMainSync(() -> webView.reload());
         waitForApp();
+    }
+
+    @Test public void offlineSpeechUsesSharedProductArtifactsAndVoiceIdentity() throws Exception {
+        run("""
+            check(window.__GEZEL__.capabilities.audio, 'Native host must advertise real speech');
+            const status = await api('/api/audio/offline-status');
+            check(status.whisper.state === 'ready' && status.kokoro.state === 'ready', 'Offline models must ship in the app');
+            const voices = await api('/api/audio/voices');
+            check(voices.voices.some(voice => voice.id === 'bm_george'), 'Shared voice identity is missing');
+            const models = await api('/api/audio/stt/models');
+            check(models.models[0].approxSizeBytes > 0, 'Report the actual bundled model size');
+            const spoken = await api('/api/audio/synthesize', 'POST', {text:'The blue bicycle is beside the window.',voice:'bm_george',inline:true});
+            check(spoken.meta.voice === 'bm_george' && spoken.b64Wav, 'Kokoro must preserve the chosen voice');
+            const transcript = await api('/api/audio/transcribe', 'POST', {audio:{artifactPath:spoken.artifactPath}, model:'whisper-tiny',language:'en'});
+            check(/bicycle/i.test(transcript.text) && /window/i.test(transcript.text), 'Whisper did not understand the saved Kokoro artifact: ' + transcript.text);
+            await openNavigation();
+            await clickButton('Settings');
+            await clickButton('Audio');
+            await until(()=>document.body.innerText.includes('Preview a voice'),'shared audio settings');
+            check(!document.body.innerText.includes('Pull a model'), 'Bundled speech must not offer unavailable downloads');
+            return true;
+            """);
     }
 
     private void waitForApp() throws Exception {

@@ -8,6 +8,7 @@ import plistlib
 import re
 import subprocess
 from verify_web_payload import verify_web_payload
+from verify_speech_payload import verify_speech_payload
 
 
 def file_hash(file):
@@ -29,7 +30,10 @@ def verify_archive(archive, version, build_number, web_dir=None):
     for relative in ("PrivacyInfo.xcprivacy", "public/index.html", "public/preview-isolation.js",
                      "public/licenses/LICENSE-gezel.txt", "public/licenses/npm/manifest.json",
                      "public/licenses/native/LICENSE-llama-cpp.txt",
-                     "public/licenses/native/LICENSE-ggml.txt"):
+                     "public/licenses/native/LICENSE-ggml.txt", "public/licenses/native/LICENSE-whisper.txt",
+                     "public/licenses/native/LICENSE-sherpa-onnx.txt", "public/licenses/native/LICENSE-kokoro.txt",
+                     "public/licenses/native/LICENSE-onnxruntime.txt", "public/licenses/native/NOTICE-onnxruntime.txt",
+                     "public/licenses/native/LICENSE-piper-phonemize.txt", "public/licenses/native/LICENSE-espeak-ng.txt"):
         if not (app / relative).is_file():
             raise ValueError(f"Missing release asset: {relative}")
     payload = []
@@ -41,6 +45,8 @@ def verify_archive(archive, version, build_number, web_dir=None):
         if file.is_file():
             payload.append([file.relative_to(app).as_posix(), file.stat().st_size, file_hash(file)])
     binaries = [app / info["CFBundleExecutable"]]
+    if not (app / 'Frameworks/GezelSpeech.framework/GezelSpeech').is_file():
+        raise ValueError('Missing native speech framework')
     for framework in (app / "Frameworks").glob("*.framework"):
         framework_info = plistlib.loads((framework / "Info.plist").read_bytes())
         binaries.append(framework / framework_info["CFBundleExecutable"])
@@ -72,6 +78,7 @@ def verify_archive(archive, version, build_number, web_dir=None):
                                                           ensure_ascii=True).encode()).hexdigest()}
     if web_dir is not None:
         result["webPayload"] = verify_web_payload(web_dir, lambda relative: (app / "public" / relative).open("rb"))
+    result['speechPayload'] = verify_speech_payload(Path(__file__).resolve().parents[1] / '.build/speech/assets/speech', lambda name: (app / 'speech' / name).open('rb'))
     return result
 
 

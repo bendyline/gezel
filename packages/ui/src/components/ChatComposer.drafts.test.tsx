@@ -6,7 +6,10 @@ import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
 import { readActiveDraftId, readDraftText } from './composer-drafts.js';
 
-vi.mock('@bendyline/gezel-client', () => ({ streamChatEvents: vi.fn() }));
+vi.mock('@bendyline/gezel-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@bendyline/gezel-client')>()),
+  streamChatEvents: vi.fn(),
+}));
 vi.mock('../api.js', async () => {
   const { createMockApi } = await import('../test-utils/mockApi.js');
   return { api: createMockApi() };

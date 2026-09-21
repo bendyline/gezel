@@ -1,8 +1,14 @@
-import type { AudioEngineHealth, AudioEngineStatusResponse, AudioVoice } from '@bendyline/gezel';
+import type {
+  AudioEngineHealth,
+  AudioEngineStatusResponse,
+  AudioVoice,
+  InstalledAudioModel,
+} from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AudioModelManager } from '../components/AudioModelManager.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Settings subsection for audio (STT + TTS). Surfaces an honest
@@ -12,9 +18,11 @@ import { AudioModelManager } from '../components/AudioModelManager.js';
  * of one.
  */
 export function AudioEngineSettings() {
+  const managedModels = runtimeCapabilities().audioModelManagement !== false;
   const [status, setStatus] = useState<AudioEngineStatusResponse | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [voices, setVoices] = useState<AudioVoice[]>([]);
+  const [sttModels, setSttModels] = useState<InstalledAudioModel[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('af_heart');
   const [previewText, setPreviewText] = useState('The quick brown fox jumps over the lazy dog.');
   const [previewState, setPreviewState] = useState<
@@ -27,13 +35,15 @@ export function AudioEngineSettings() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, v, cfg] = await Promise.all([
+      const [s, v, cfg, installed] = await Promise.all([
         api.getAudioEngineStatus(),
         api.listAudioVoices(),
         api.getConfig(),
+        managedModels ? Promise.resolve({ models: [] }) : api.listInstalledSttModels(),
       ]);
       setStatus(s);
       setVoices(v.voices);
+      setSttModels(installed?.models ?? []);
       setNarrate(cfg.narrateAssistantReplies ?? false);
       setDefaultSttModel(cfg.defaultSttModel);
       setStatusError(null);
@@ -41,7 +51,7 @@ export function AudioEngineSettings() {
       setStatus(null);
       setStatusError((err as Error).message);
     }
-  }, []);
+  }, [managedModels]);
 
   useEffect(() => {
     void refresh();
@@ -64,19 +74,23 @@ export function AudioEngineSettings() {
     }
   }, []);
 
-  const onSetActiveSttModel = useCallback(async (id: string) => {
-    // Optimistic so the radio moves under the click; the engine restart the
-    // save triggers takes long enough that waiting on it reads as a dead
-    // control.
-    setDefaultSttModel(id);
-    try {
-      const res = await api.updateConfig({ defaultSttModel: id });
-      setDefaultSttModel(res.defaultSttModel);
-    } catch (err) {
-      setDefaultSttModel(undefined);
-      setStatusError((err as Error).message);
-    }
-  }, []);
+  const onSetActiveSttModel = useCallback(
+    async (id: string) => {
+      // Optimistic so the radio moves under the click; the engine restart the
+      // save triggers takes long enough that waiting on it reads as a dead
+      // control.
+      setDefaultSttModel(id);
+      try {
+        const res = await api.updateConfig({ defaultSttModel: id || null });
+        setDefaultSttModel(res.defaultSttModel);
+        await refresh();
+      } catch (err) {
+        setDefaultSttModel(undefined);
+        setStatusError((err as Error).message);
+      }
+    },
+    [refresh],
+  );
 
   const onPreview = useCallback(async () => {
     if (!previewText.trim()) return;
@@ -106,8 +120,15 @@ export function AudioEngineSettings() {
       </div>
 
       <p className="muted small">
-        Speech-to-text via the bundled <code>whisper.cpp</code> engine and text-to-speech via the
-        bundled <code>Kokoro</code> engine — both run locally.
+        {managedModels ? (
+          <>Speech-to-text via Whisper and text-to-speech via Kokoro both run locally.</>
+        ) : (
+          <>
+            Speech recognition prefers this device's offline recognizer and uses Whisper when it is
+            unavailable. Kokoro supplies your gezels' voices. The speech models are included with
+            the app; no connection is needed.
+          </>
+        )}
       </p>
 
       {statusError && <p className="error">Couldn't reach the Gezel service. {statusError}</p>}
@@ -115,24 +136,55 @@ export function AudioEngineSettings() {
       {/* ── Speech-to-text ── */}
       <section style={{ marginTop: '1rem' }}>
         <div className="settings-card-header">
-          <h4 style={{ margin: 0 }}>Speech-to-text (whisper.cpp)</h4>
+          <h4 style={{ margin: 0 }}>
+            {managedModels ? 'Speech-to-text (whisper.cpp)' : 'Speech-to-text'}
+          </h4>
           {status && <EngineStatusPill engine={status.stt} />}
         </div>
-        <EngineGuidance engine={status?.stt} />
-        <AudioModelManager
-          kind="stt"
-          {...(defaultSttModel ? { configuredDefaultModelId: defaultSttModel } : {})}
-          onSetActiveModel={onSetActiveSttModel}
-          {...(engineDisabled(status?.stt)
-            ? {
-                disabledReason:
-                  status?.stt.status === 'not-configured'
-                    ? 'whisper.cpp engine is not wired up — downloading a model now would still leave it unrunnable.'
-                    : 'whisper.cpp engine is not reachable.',
-              }
-            : {})}
-          onModelsChanged={() => void refresh()}
-        />
+        <EngineGuidance engine={status?.stt} managedModels={managedModels} />
+        {!managedModels && (
+          <>
+            <label className="provider-row">
+              <span>Speech recognition</span>
+              <select
+                value={defaultSttModel ?? ''}
+                onChange={(event) => void onSetActiveSttModel(event.target.value)}
+              >
+                <option value="">Automatic (on-device, then Whisper)</option>
+                <option value="system">On-device recognizer only</option>
+                {sttModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+                {defaultSttModel &&
+                  defaultSttModel !== 'system' &&
+                  !sttModels.some((model) => model.id === defaultSttModel) && (
+                    <option value={defaultSttModel}>{defaultSttModel} (unavailable)</option>
+                  )}
+              </select>
+            </label>
+            <p className="muted small">
+              Choose Whisper to transcribe locally without using the system speech service.
+            </p>
+          </>
+        )}
+        {managedModels && (
+          <AudioModelManager
+            kind="stt"
+            {...(defaultSttModel ? { configuredDefaultModelId: defaultSttModel } : {})}
+            onSetActiveModel={onSetActiveSttModel}
+            {...(engineDisabled(status?.stt)
+              ? {
+                  disabledReason:
+                    status?.stt.status === 'not-configured'
+                      ? 'whisper.cpp engine is not wired up — downloading a model now would still leave it unrunnable.'
+                      : 'whisper.cpp engine is not reachable.',
+                }
+              : {})}
+            onModelsChanged={() => void refresh()}
+          />
+        )}
       </section>
 
       {/* ── Text-to-speech ── */}
@@ -141,14 +193,16 @@ export function AudioEngineSettings() {
           <h4 style={{ margin: 0 }}>Text-to-speech (Kokoro)</h4>
           {status && <EngineStatusPill engine={status.tts} />}
         </div>
-        <EngineGuidance engine={status?.tts} />
-        <AudioModelManager
-          kind="tts"
-          {...(engineDisabled(status?.tts)
-            ? { disabledReason: 'Kokoro engine is not configured.' }
-            : {})}
-          onModelsChanged={() => void refresh()}
-        />
+        <EngineGuidance engine={status?.tts} managedModels={managedModels} />
+        {managedModels && (
+          <AudioModelManager
+            kind="tts"
+            {...(engineDisabled(status?.tts)
+              ? { disabledReason: 'Kokoro engine is not configured.' }
+              : {})}
+            onModelsChanged={() => void refresh()}
+          />
+        )}
 
         {status?.tts.status === 'ok' && (
           <div className="ollama-section" style={{ marginTop: '1rem' }}>
@@ -192,6 +246,7 @@ export function AudioEngineSettings() {
               </label>
               <input
                 type="text"
+                aria-label="Voice preview text"
                 value={previewText}
                 onChange={(e) => setPreviewText(e.target.value)}
                 style={{ minWidth: 280, flex: 1 }}
@@ -254,12 +309,17 @@ function EngineStatusPill({ engine }: { engine: AudioEngineHealth }) {
   return <span className="gz-status-pill gz-status-pill--warn">Not configured</span>;
 }
 
-function EngineGuidance({ engine }: { engine: AudioEngineHealth | undefined }) {
+function EngineGuidance({
+  engine,
+  managedModels = true,
+}: { engine: AudioEngineHealth | undefined; managedModels?: boolean }) {
   if (!engine) return null;
   if (engine.status === 'not-configured') {
     return (
       <p className="muted small">
-        Engine isn't wired up on this install yet.
+        {managedModels
+          ? "Engine isn't wired up on this install yet."
+          : 'Offline speech is not ready.'}
         {engine.error ? <> {engine.error}</> : null}
       </p>
     );
@@ -280,7 +340,11 @@ function EngineGuidance({ engine }: { engine: AudioEngineHealth | undefined }) {
   }
   if (engine.status === 'no-model') {
     return (
-      <p className="muted small">Engine is ready — download a model below to start using it.</p>
+      <p className="muted small">
+        {managedModels
+          ? 'Engine is ready — download a model below to start using it.'
+          : (engine.error ?? 'The offline speech pack is missing from this build.')}
+      </p>
     );
   }
   return null;

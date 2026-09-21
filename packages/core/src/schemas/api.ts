@@ -2872,6 +2872,7 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
  *  reset-to-default signal — the store treats null as "delete the
  *  key" so the on-disk read shape stays narrow. */
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
+  defaultSttModel: z.string().nullable().optional(),
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
   microphoneDeviceId: z.string().max(1024).nullable().optional(),

@@ -37,4 +37,5 @@
 
     <!-- ML Kit/AICore may fetch model assets after explicit user preparation. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>

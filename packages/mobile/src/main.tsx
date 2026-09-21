@@ -17,7 +17,10 @@ async function boot() {
       host.publishHtmlPreview &&
       (await host.previewAvailability?.().catch(() => false)),
   );
-  const service = new PortableProductService(store, host.inference, token, { htmlPreview });
+  const service = new PortableProductService(store, host.inference, token, {
+    htmlPreview,
+    speech: host.speech,
+  });
   service.setScripts(createMobileScripts(store));
   service.setContent(content);
   service.setNetworkCancellation(async () => {

@@ -1,0 +1,37 @@
+{
+  "whisper-source": {
+    "url": "https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/f049fff95a089aa9969deb009cdd4892b3e74916",
+    "sha256": "279af4ce60dbf397362868f3bacc75b56a4332ac2541cae155070093f6aaf0e3",
+    "file": "whisper.tar.gz"
+  },
+  "sherpa-source": {
+    "url": "https://codeload.github.com/k2-fsa/sherpa-onnx/tar.gz/refs/tags/v1.13.8",
+    "sha256": "b0374cc56dbc186d442ae73d5de743bb092470b640c4c50ce7b029044c0c4fa8",
+    "file": "sherpa-source.tar.gz"
+  },
+  "sherpa-android": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-android.tar.bz2",
+    "sha256": "2ff63469a71cb6009aa2e3ed5f4a670f8abdcbe4bb9ffd23776afc792a6b4f44",
+    "file": "sherpa-android.tar.bz2"
+  },
+  "sherpa-ios": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/xcframework/sherpa-onnx-v1.13.8-ios-static.xcframework.zip",
+    "sha256": "6b8e769cb153343270fdccbe92e3b3db0d1c421d67fa0989ab01fdf5b2fcf2de",
+    "file": "sherpa-ios.zip"
+  },
+  "onnx-ios": {
+    "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.1/onnxruntime-ios-static-xcframework-1.28.1.xcframework.zip",
+    "sha256": "992d8a0cc6014cccc3a7815c36bbff5e5a06833ea2c4d47dd43ef071f639cf9d",
+    "file": "onnx-ios.zip"
+  },
+  "kokoro-model": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+    "sha256": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
+    "file": "kokoro-model.tar.bz2"
+  },
+  "whisper-model": {
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+    "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+    "file": "ggml-tiny.bin"
+  }
+}

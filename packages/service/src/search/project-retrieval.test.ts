@@ -74,6 +74,54 @@ async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | '
   });
 }
 
+describe('proactive retrieval eligibility', () => {
+  it('does not search or inject for a filler-only greeting', async () => {
+    let searches = 0;
+    const search = {
+      searchProject: async () => {
+        searches++;
+        return { results: [workspaceHit(1)], truncated: false };
+      },
+    } as unknown as SearchService;
+
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: "Hey, how's it going?",
+      messageOrigin: 'direct-user',
+    });
+
+    expect(result).toBeNull();
+    expect(searches).toBe(0);
+  });
+
+  it('still retrieves when a greeting contains a substantive subject', async () => {
+    let searches = 0;
+    const search = {
+      searchProject: async () => {
+        searches++;
+        return { results: [workspaceHit(1)], truncated: false };
+      },
+    } as unknown as SearchService;
+
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'Hey, how is the invoice reconciliation going?',
+      messageOrigin: 'direct-user',
+    });
+
+    expect(searches).toBe(1);
+    expect(result?.hits).toHaveLength(1);
+  });
+});
+
 /**
  * Wild-caught (qwen3.8 27B, France PowerPoint turn): an `artifacts/eval10/
  * contact-sheet.jpg` hit whose index row held a clean vision description was

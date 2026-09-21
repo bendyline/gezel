@@ -22,10 +22,17 @@ pnpm ios
 Each command builds the shared UI and portable packages, syncs the native project
 and its assets, then opens Android Studio or Xcode. Select an emulator/simulator
 and press **Run** in the IDE to compile, install, and launch the native app.
-These commands reuse the existing llama.cpp libraries; the one-time native build
+These commands reuse the existing llama.cpp and speech libraries; the one-time native build
 and toolchain setup below must already be complete. They do not install missing
 SDKs or dependencies. On Android, select an ARM64 emulator such as the existing
 `gezel-api36-tests` device.
+
+Before chatting, open **Settings → Artificial Intelligence** and download a chat
+model from the catalog, or import a GGUF file and select it. Chat model weights
+are not bundled with the app; the bundled speech models do not generate chat
+replies. If Android's system model is unavailable, use a GGUF model. The first
+download needs internet; the selected model then runs offline. A missing-model
+message in chat links to these settings and keeps the unsent draft.
 
 Install approved workspace dependencies through the repository's guarded
 dependency workflow. Node is needed for development only. The app embeds bundled
@@ -37,11 +44,13 @@ pnpm mobile:build
 
 # Build the pinned native bridge. The output path matches the Xcode project.
 python3 native/mobile/build-llama.py ios --output native/mobile/.build/ios-bridge
+pnpm mobile:build:speech ios --fetch
 pnpm mobile:sync:ios
 pnpm --filter @bendyline/gezel-mobile run open:ios
 
 # Android requires a JDK, SDK, and NDK r28+ already installed.
 python3 native/mobile/build-llama.py android --ndk /path/to/android-ndk
+pnpm mobile:build:speech android --ndk /path/to/android-ndk --fetch
 pnpm mobile:sync:android
 pnpm --filter @bendyline/gezel-mobile run open:android
 ```
@@ -55,6 +64,14 @@ Android initially targets arm64-v8a and API 28 or later. Native artifacts stay
 ignored and must be built before native sync; `sync-native.mjs` stages Android
 libraries and both platforms' native licenses. Android sync also pins Gradle's
 NDK version to the native build manifest so JNI and the staged C++ runtime match.
+
+The speech build's `--fetch` flag downloads checksum-pinned dependencies and the
+offline model pack; use it only after authorizing those downloads. Omit it for
+subsequent builds from the verified cache. Speech build commands acquire the
+repository dependency lease. The initial pack is about 260 MiB before compression
+and includes Whisper tiny plus Kokoro voices, so speech can work on first launch
+without a connection. See [offline speech](../../docs/mobile-speech.md) for provider
+selection, supported voices, tests, and remaining device validation.
 
 When iOS assets already exist, launch them directly by opening
 `ios/App/App.xcodeproj` in Xcode, choosing the **App** scheme and an iPhone/iPad

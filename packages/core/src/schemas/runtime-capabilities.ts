@@ -43,6 +43,8 @@ export interface RuntimeCapabilities {
   imageGeneration: boolean;
   multiRecipientChat: boolean;
   audio: boolean;
+  /** False when speech models are supplied with the app rather than managed separately. */
+  audioModelManagement?: boolean;
   mediaExport: boolean;
   chatAttachments: boolean;
   queuedChat: boolean;
@@ -81,6 +83,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   imageGeneration: true,
   multiRecipientChat: true,
   audio: true,
+  audioModelManagement: true,
   mediaExport: true,
   chatAttachments: true,
   queuedChat: true,
@@ -120,6 +123,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   imageGeneration: false,
   multiRecipientChat: false,
   audio: false,
+  audioModelManagement: false,
   mediaExport: false,
   chatAttachments: false,
   queuedChat: false,
