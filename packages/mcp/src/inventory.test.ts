@@ -31,6 +31,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUILTIN_TOOLSETS } from '@bendyline/gezel';
 import ts from 'typescript';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -94,50 +95,7 @@ function stringLiteralText(node: ts.Expression): string | undefined {
 }
 
 function readBuiltinToolsetGroups(): Map<string, string[]> {
-  const sourcePath = resolve(__dirname, '../../catalog/src/builtin-toolsets.ts');
-  const text = readFileSync(sourcePath, 'utf8');
-  const source = ts.createSourceFile(sourcePath, text, ts.ScriptTarget.Latest, true);
-  let builtinArray: ts.ArrayLiteralExpression | undefined;
-
-  function visit(node: ts.Node): void {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'BUILTIN_TOOLSETS' &&
-      node.initializer &&
-      ts.isArrayLiteralExpression(node.initializer)
-    ) {
-      builtinArray = node.initializer;
-      return;
-    }
-    ts.forEachChild(node, visit);
-  }
-
-  visit(source);
-  if (!builtinArray) {
-    throw new Error(`Could not find BUILTIN_TOOLSETS array in ${sourcePath}`);
-  }
-
-  const groups = new Map<string, string[]>();
-  for (const element of builtinArray.elements) {
-    if (!ts.isObjectLiteralExpression(element)) continue;
-    let id: string | undefined;
-    const tools: string[] = [];
-    for (const prop of element.properties) {
-      if (!ts.isPropertyAssignment(prop)) continue;
-      const name = propNameText(prop.name);
-      if (name === 'id') {
-        id = stringLiteralText(prop.initializer);
-      } else if (name === 'tools' && ts.isArrayLiteralExpression(prop.initializer)) {
-        for (const tool of prop.initializer.elements) {
-          const value = stringLiteralText(tool);
-          if (value) tools.push(value);
-        }
-      }
-    }
-    if (id) groups.set(id, tools);
-  }
-  return groups;
+  return new Map(BUILTIN_TOOLSETS.map((group) => [group.id, group.tools]));
 }
 
 /**
