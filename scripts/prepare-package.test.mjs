@@ -33,7 +33,7 @@ async function fixture() {
   // prepare-package imports it to derive the content-compat calendar line.
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
   await copyFile(join(here, 'pnpm-cli.mjs'), join(root, 'scripts', 'pnpm-cli.mjs'));
-  await writeFile(join(root, 'packages', 'core', 'src', 'index.ts'), DECLARATION);
+  await writeFile(join(root, 'packages', 'core', 'src', 'browser.ts'), DECLARATION);
   await writeFile(
     join(root, 'packages', 'core', 'package.json'),
     `${JSON.stringify({ name: '@bendyline/gezel', version: '0.1.0' }, null, 2)}\n`,
@@ -73,7 +73,7 @@ test('preserves release state for an unchanged workspace edge without rebuilding
   try {
     const { stdout } = await run(root, 'packages/cli', ['1.2.3']);
     assert.equal(stdout.trim(), '');
-    assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+    assert.equal(await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'), DECLARATION);
     const releaseState = readReleasePackageState({
       repoRoot: root,
       packageName,
@@ -124,7 +124,7 @@ test('restores workspace dependency specifiers before a non-core release commit'
     const normalized = JSON.parse(await readFile(manifestPath, 'utf8'));
     assert.equal(normalized.dependencies['@bendyline/gezel-client'], 'workspace:*');
     assert.equal(normalized.dependencies.commander, '^15.0.0');
-    assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+    assert.equal(await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'), DECLARATION);
 
     const releaseState = readReleasePackageState({
       repoRoot: root,
@@ -164,7 +164,7 @@ test('rejects a missing or malformed version argument', async () => {
         `expected rejection for ${JSON.stringify(args)}`,
       );
     }
-    assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+    assert.equal(await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'), DECLARATION);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -174,7 +174,7 @@ test('fails loudly when the GEZEL_VERSION declaration has drifted', async () => 
   const root = await fixture();
   try {
     await writeFile(
-      join(root, 'packages', 'core', 'src', 'index.ts'),
+      join(root, 'packages', 'core', 'src', 'browser.ts'),
       'export const GEZEL_VERSION = "0.0.0";\n',
     );
     await assert.rejects(
@@ -193,7 +193,7 @@ test('fails loudly when the GEZEL_CONTENT_COMPAT declaration has drifted', async
   const root = await fixture();
   try {
     await writeFile(
-      join(root, 'packages', 'core', 'src', 'index.ts'),
+      join(root, 'packages', 'core', 'src', 'browser.ts'),
       "export const GEZEL_VERSION = '0.0.0';\n",
     );
     await assert.rejects(
@@ -212,7 +212,7 @@ test('dry run reports both stamps without writing or rebuilding', async () => {
     assert.match(stdout, /would stamp GEZEL_VERSION = '1\.2\.3'/);
     // The compat line is derived from today, not from the published version.
     assert.match(stdout, /GEZEL_CONTENT_COMPAT = '1\.\d{5}'/);
-    assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+    assert.equal(await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'), DECLARATION);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -227,7 +227,7 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
       [
         "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
         "import { resolve } from 'node:path';",
-        "const source = readFileSync(resolve('packages/core/src/index.ts'), 'utf8');",
+        "const source = readFileSync(resolve('packages/core/src/browser.ts'), 'utf8');",
         "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
         "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
         "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
@@ -239,7 +239,7 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
     });
     assert.match(stdout, /core dist carries 1\.2\.3/);
     assert.match(
-      await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'),
+      await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'),
       /GEZEL_VERSION = '1\.2\.3'/,
     );
   } finally {
@@ -286,7 +286,7 @@ test('the release config normalizes package state before committing without crea
 });
 
 test('the real core source carries the declarations the script rewrites', async () => {
-  const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'index.ts'), 'utf8');
+  const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'browser.ts'), 'utf8');
   assert.match(source, /export const GEZEL_VERSION = '[^']*';/);
   assert.match(source, /export const GEZEL_CONTENT_COMPAT = '[^']*';/);
 });

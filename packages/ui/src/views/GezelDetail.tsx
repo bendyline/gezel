@@ -46,6 +46,7 @@ import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
+import './GezelDetail.css';
 
 type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories';
 

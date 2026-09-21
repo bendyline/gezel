@@ -11,6 +11,7 @@ import { useCompactLayout } from '../components/useCompactLayout.js';
 import { Dialog, Tabs } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelDetail as GezelDetailView } from './GezelDetail.js';
+import './GezellenView.css';
 
 type NewGezelTab = 'scratch' | 'template';
 

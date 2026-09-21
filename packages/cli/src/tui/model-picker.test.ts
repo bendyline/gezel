@@ -203,4 +203,9 @@ describe('modelProviderLabel', () => {
     expect(modelProviderLabel('llama-cpp')).toBe('llama.cpp');
     expect(modelProviderLabel('ds4')).toBe('DwarfStar (ds4)');
   });
+
+  it('labels native mobile providers', () => {
+    expect(modelProviderLabel('apple-foundation-models')).toBe('Apple Intelligence');
+    expect(modelProviderLabel('android-mlkit')).toBe('Android system AI');
+  });
 });

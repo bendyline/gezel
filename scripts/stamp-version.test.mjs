@@ -47,7 +47,7 @@ test('release stamping updates packages, runtime constant, service metadata, and
       );
     }
     await writeFile(
-      join(root, 'packages', 'core', 'src', 'index.ts'),
+      join(root, 'packages', 'core', 'src', 'browser.ts'),
       "export const BEFORE = true;\nexport const GEZEL_VERSION = '0.0.0';\nexport const GEZEL_CONTENT_COMPAT = '0.0.0';\n",
     );
 
@@ -78,7 +78,7 @@ test('release stamping updates packages, runtime constant, service metadata, and
 `,
       );
     }
-    const stampedCore = await readFile(join(root, 'packages', 'core', 'src', 'index.ts'), 'utf8');
+    const stampedCore = await readFile(join(root, 'packages', 'core', 'src', 'browser.ts'), 'utf8');
     assert.match(stampedCore, /GEZEL_VERSION = '1\.26123\.45'/);
     // The Electron scheme is already the calendar line, so both constants take
     // the same value here. Stamped explicitly all the same: an npm release sets
@@ -157,7 +157,7 @@ test('a missing runtime version declaration does not partially stamp package fil
       await writeFile(path, `${JSON.stringify({ name: 'fixture', version: '0.0.0' }, null, 2)}\n`);
     }
     await writeFile(
-      join(root, 'packages', 'core', 'src', 'index.ts'),
+      join(root, 'packages', 'core', 'src', 'browser.ts'),
       'export const WRONG_CONSTANT = true;\n',
     );
 
@@ -199,7 +199,7 @@ test('a missing content-compat declaration does not partially stamp package file
       await writeFile(path, `${JSON.stringify({ name: 'fixture', version: '0.0.0' }, null, 2)}\n`);
     }
     await writeFile(
-      join(root, 'packages', 'core', 'src', 'index.ts'),
+      join(root, 'packages', 'core', 'src', 'browser.ts'),
       "export const GEZEL_VERSION = '0.0.0';\n",
     );
 

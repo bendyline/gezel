@@ -17,7 +17,9 @@ intermediate render.
 | `file-browser.css` | List panes, shared file browser, workspace/index panes, document surfaces, and file previews |
 | `../components/file-browser/FileBrowserPane.css` | **On demand:** Phone list/detail navigation in the shared file browser |
 | `shared-content.css` | Document export, shared content utilities, core chat bubbles/composer chrome, and Squisq integration |
-| `gezels.css` | Gezel identity, appearance, roster, and detail surfaces |
+| `gezels.css` | Shared gezel icons, identity badges, and cross-surface form utilities |
+| `../views/GezellenView.css` | **On demand:** Gezellen roster/detail split and compact navigation (owned by `GezellenView`) |
+| `../views/GezelDetail.css` | **On demand:** Gezel appearance and accessory customization (owned by `GezelDetail`) |
 | `settings-and-status.css` | Settings navigation/panels, machine policy, and project status/index controls |
 | `history.css` | History master/detail view |
 | `tasks.css` | Task lists, detail, status controls, step tracker, and phase editor |

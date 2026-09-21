@@ -1,0 +1,94 @@
+/* The gezellen area is a lazy destination. Keep its split-view adjustments
+   with the view so they do not add weight to the startup shell. */
+.two-col.gezellen-view {
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+}
+
+.gezellen-view > section {
+  padding: 1rem 1.25rem;
+}
+
+.two-col.gezellen-view-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gezellen-view-compact > section {
+  min-width: 0;
+  padding: 0.75rem;
+}
+
+.gezellen-back {
+  align-self: flex-start;
+  min-height: 44px;
+  flex-shrink: 0;
+  margin-bottom: 0.5rem;
+}
+
+.gezel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Keep the creation toolbar fixed while a long gezel roster scrolls within
+   the available pane height. */
+.gezels-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gezels-side .gezel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Draw the scrollbar in the pane's right padding without shifting rows. */
+  margin-right: -1rem;
+  scrollbar-gutter: stable;
+}
+
+.side li .gezel-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.side li .gezel-row:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.side li .gezel-row.active {
+  background: rgba(176, 114, 76, 0.15);
+}
+
+.gezel-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.gezel-row-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gezel-row-role {
+  overflow: hidden;
+  color: #888;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -3778,36 +3778,6 @@ body.app-resizing webview {
   min-height: 0;
 }
 
-/* The Gezellen roster needs to remain full-bleed, while each gezel's page
-   should sit inside the same canvas inset as standalone app pages. Replace
-   the generic split-view gutter with padding on the detail column so all
-   four edges get equal breathing room. A slightly narrower roster returns
-   that space to the detail page when the global navigation rail is open. */
-.two-col.gezellen-view {
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 0;
-}
-
-.gezellen-view > section {
-  padding: 1rem 1.25rem;
-}
-
-.two-col.gezellen-view-compact {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.gezellen-view-compact > section {
-  min-width: 0;
-  padding: 0.75rem;
-}
-
-.gezellen-back {
-  align-self: flex-start;
-  min-height: 44px;
-  flex-shrink: 0;
-  margin-bottom: 0.5rem;
-}
-
 /* Make the main column a flex column so its tab panels can fill the
    available height. Without this, `.project-chat`'s `flex: 1` in the
    chat tab collapses to its intrinsic content height, leaving a big
