@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
@@ -99,6 +100,7 @@ describe('Responsive navigation in the desktop app', () => {
     render(<App />);
     expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your workshop')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
     expect(await screen.findByText('project:mobile-project')).toBeVisible();
@@ -107,7 +109,12 @@ describe('Responsive navigation in the desktop app', () => {
     );
     const draft = screen.getByRole('textbox', { name: 'Project draft' });
     fireEvent.change(draft, { target: { value: 'Keep this draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+    const navigation = screen.getByRole('button', { name: 'Navigation' });
+    expect(navigation.closest('header')).toBe(screen.getByTestId('app-header'));
+    expect(navigation.textContent).toBe('');
+    expect(navigation.querySelector('.app-header-navigation-icon')).toBeInTheDocument();
+    expect(document.querySelector('.app-compact-navigation')).not.toBeInTheDocument();
+    fireEvent.click(navigation);
     expect(draft).not.toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
     expect(draft).toBeVisible();
@@ -143,6 +150,48 @@ describe('Responsive navigation in the desktop app', () => {
     expect(window.location.hash).toBe('#project');
     expect(document.documentElement.dataset.layout).toBeUndefined();
   });
+
+  it.each(['desktop', 'mobile', 'preview'])(
+    'opens first-run setup over navigation and a restored project in %s mode',
+    async (mode) => {
+      const bridge = window.__GEZEL__;
+      if (mode === 'mobile')
+        window.__GEZEL__ = { ...bridge!, capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+      if (mode === 'preview') {
+        narrow = false;
+        window.history.replaceState(null, '', '/?layout=mobile');
+      }
+      const getConfig = vi.mocked(api.getConfig).getMockImplementation();
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as never);
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+      window.localStorage.setItem(
+        'gezel:nav:selection',
+        JSON.stringify({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 }),
+      );
+      try {
+        render(<App />);
+        await waitFor(() => expect(screen.getByText('Home view')).toBeVisible());
+        expect(window.localStorage.getItem('gezel:nav:selection')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+        expect(await screen.findByText('project:mobile-project')).toBeVisible();
+        fireEvent.change(screen.getByRole('textbox', { name: 'Project draft' }), {
+          target: { value: 'Keep my offline work' },
+        });
+        await act(async () =>
+          window.dispatchEvent(new CustomEvent('gezel:first-run', { detail: { firstRun: true } })),
+        );
+        expect(screen.getByRole('textbox', { name: 'Project draft' })).toHaveValue(
+          'Keep my offline work',
+        );
+      } finally {
+        window.__GEZEL__ = bridge;
+        vi.mocked(api.getConfig).mockImplementation(getConfig!);
+      }
+    },
+  );
 });
 
 describe('Output pane titlebar restore', () => {

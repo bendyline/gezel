@@ -127,6 +127,31 @@ describe('TitlebarSearch', () => {
     expect(document.activeElement).toBe(screen.getByTestId('titlebar-search-input'));
   });
 
+  it('uses a compact search key that expands into a focused header search mode', () => {
+    render(<TitlebarSearch compact />);
+
+    expect(screen.queryByTestId('titlebar-search-input')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    const input = screen.getByTestId('titlebar-search-input');
+    expect(input).toHaveFocus();
+    expect(screen.getByTestId('titlebar-search')).toHaveAttribute('data-compact-search', 'active');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close search' }));
+    expect(screen.queryByTestId('titlebar-search-input')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
+  });
+
+  it('enters compact search mode from the global shortcut event', () => {
+    render(<TitlebarSearch compact />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('gezel:focus-search', { detail: { mode: 'search' } }));
+    });
+
+    expect(screen.getByTestId('titlebar-search-input')).toHaveFocus();
+  });
+
   it('Escape closes the palette', async () => {
     render(<TitlebarSearch />);
     const input = await typeQuery('space');

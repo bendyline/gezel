@@ -1,15 +1,58 @@
 /* Host mechanics only. Layout, navigation and product views are shared. */
 html {
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-    env(safe-area-inset-left);
-  box-sizing: border-box;
+  --app-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --app-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  overflow: hidden;
 }
 html #root {
-  height: calc(
-    var(--app-viewport-height, 100dvh) -
-    env(safe-area-inset-top) -
-    env(safe-area-inset-bottom)
+  position: fixed;
+  top: var(--app-viewport-top, 0px);
+  left: 0;
+  width: 100%;
+  height: var(--app-viewport-height, 100dvh);
+  box-sizing: border-box;
+  padding: var(--app-safe-top) var(--app-safe-right) var(--app-safe-bottom) var(--app-safe-left);
+}
+/* The compact shell must fill the safe rectangle, not add another full 100dvh
+   inside it. Capacitor already removes the keyboard from Android's viewport. */
+html #root > .app {
+  height: 100%;
+}
+html[data-keyboard="open"] {
+  --app-safe-bottom: 0px;
+}
+html[data-keyboard="open"]
+  .app-compact
+  :is(.app-header, .home-workshop-greeting, .chat-rail-banner) {
+  display: none;
+}
+/* Scroll-container padding is an unshrinkable floor in WebKit flex layouts.
+   Give those pixels to the draft when the keyboard leaves only a sliver of transcript. */
+html[data-keyboard="open"] .app-compact .chat-timeline {
+  padding-block: 0;
+}
+/* Portals live outside #root, so they need the same usable viewport explicitly. */
+html:root[data-platform] .gz-dialog {
+  top: calc(
+    var(--app-viewport-top, 0px) +
+    var(--app-safe-top) +
+    (var(--app-viewport-height, 100dvh) - var(--app-safe-top) - var(--app-safe-bottom)) /
+    2
   );
+  left: calc(var(--app-safe-left) + (100% - var(--app-safe-left) - var(--app-safe-right)) / 2);
+  min-width: 0;
+  max-width: calc(100vw - var(--app-safe-left) - var(--app-safe-right) - 1.5rem);
+  max-height: calc(
+    var(--app-viewport-height, 100dvh) -
+    var(--app-safe-top) -
+    var(--app-safe-bottom) -
+    1.5rem
+  );
+}
+html #root:has(.app-main:not([hidden]) .chat-composer) {
+  background: var(--chat-compose-header-bg);
 }
 .mobile-models {
   margin: 1rem 0;

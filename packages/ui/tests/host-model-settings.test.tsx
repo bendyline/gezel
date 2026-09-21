@@ -71,6 +71,20 @@ function fixture() {
 }
 
 describe('host model settings product boundary', () => {
+  it('keeps the installed-model picker open until a model is selected', async () => {
+    const f = fixture();
+    f.host.listModels.mockResolvedValue({
+      models: [{ id: 'one', name: 'Local chat', sizeBytes: 1024 }],
+    } as never);
+    f.mount();
+    const picker = await screen.findByLabelText('Imported model');
+    await screen.findByRole('option', { name: 'Local chat (1 MB)' });
+    expect(picker.closest('details')).toHaveAttribute('open');
+    fireEvent.change(picker, { target: { value: 'one' } });
+    await waitFor(() => expect(f.host.selectModel).toHaveBeenCalledWith('one'));
+    expect(f.service.setProvider).toHaveBeenCalledWith('llama-cpp');
+  });
+
   it('reacts to native activity and only offers recovery while a reply is unsaved', async () => {
     const f = fixture();
     f.mount();

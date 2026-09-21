@@ -27,9 +27,12 @@ and toolchain setup below must already be complete. They do not install missing
 SDKs or dependencies. On Android, select an ARM64 emulator such as the existing
 `gezel-api36-tests` device.
 
-Before chatting, open **Settings → Artificial Intelligence** and download a chat
-model from the catalog, or import a GGUF file and select it. Chat model weights
-are not bundled with the app; the bundled speech models do not generate chat
+When no usable chat model is selected, Gezel opens the shared **First run setup**
+page, including in a narrow desktop window. Download a model from the expanded
+catalog picker, or import a GGUF file and select it. Choosing a ready model opens
+the Meester's workspace; model management also lives in **Settings → Artificial
+Intelligence**. Chat model weights are not bundled with the app; the bundled
+speech models do not generate chat
 replies. If Android's system model is unavailable, use a GGUF model. The first
 download needs internet; the selected model then runs offline. A missing-model
 message in chat links to these settings and keeps the unsent draft.

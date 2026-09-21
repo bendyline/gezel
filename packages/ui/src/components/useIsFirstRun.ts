@@ -1,3 +1,4 @@
+import { isLocalProvider } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -23,7 +24,9 @@ async function estimateFirstRun(): Promise<boolean> {
     const cfg = await api.getConfig();
     const p = cfg.provider;
     if (!runtimeCapabilities().daemonSettings) {
-      return !(await api.testProvider(p ?? 'llama-cpp')).ok;
+      const provider = p ?? 'llama-cpp';
+      const probe = await api.testProvider(provider);
+      return !probe.ok || (isLocalProvider(provider) && probe.modelCount === 0);
     }
     if (p === 'copilot') {
       // Copilot's runtime is an opt-in download, so "installed" is the real
@@ -54,16 +57,21 @@ export function useIsFirstRun(): boolean {
 
   useEffect(() => {
     let cancelled = false;
+    let revision = 0;
     const recheck = () => {
+      const current = ++revision;
       void estimateFirstRun().then((v) => {
-        if (!cancelled) setFirstRun(v);
+        if (!cancelled && current === revision) setFirstRun(v);
       });
     };
     recheck();
 
     const onFirstRun = (e: Event) => {
       const detail = (e as CustomEvent<{ firstRun?: boolean }>).detail;
-      if (detail && typeof detail.firstRun === 'boolean') setFirstRun(detail.firstRun);
+      if (detail && typeof detail.firstRun === 'boolean') {
+        revision++;
+        setFirstRun(detail.firstRun);
+      }
     };
     window.addEventListener('gezel:first-run', onFirstRun);
     window.addEventListener('gezel:config-updated', recheck);

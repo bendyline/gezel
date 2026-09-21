@@ -44,17 +44,40 @@ async function boot() {
       htmlPreview && host.publishHtmlPreview
         ? createOfflineHtmlPreview(service.fetch, token, host.publishHtmlPreview)
         : undefined,
-    renderModelSettings: () => (
-      <ProductModelSettings host={host} service={service} models={content.models} />
+    renderModelSettings: (options) => (
+      <ProductModelSettings
+        host={host}
+        service={service}
+        models={content.models}
+        setup={options?.setup}
+      />
     ),
   };
   await import('../../ui/src/main.js');
   const viewport = window.visualViewport;
+  let viewportWidth = window.innerWidth;
+  let expandedHeight = window.innerHeight;
   const resize = () => {
-    if (viewport)
-      document.documentElement.style.setProperty('--app-viewport-height', `${viewport.height}px`);
+    if (!viewport || viewport.scale !== 1) return;
+    const root = document.documentElement;
+    if (viewportWidth !== window.innerWidth) {
+      viewportWidth = window.innerWidth;
+      expandedHeight = window.innerHeight;
+    } else expandedHeight = Math.max(expandedHeight, window.innerHeight);
+    root.style.setProperty('--app-viewport-height', `${viewport.height}px`);
+    root.style.setProperty('--app-viewport-top', `${viewport.offsetTop}px`);
+    // WKWebView keeps a layout-sized viewport behind the keyboard. Android's
+    // native host resizes it and supplies a zero bottom inset itself.
+    const editing = document.activeElement?.matches('input, textarea, [contenteditable="true"]');
+    root.dataset.keyboard =
+      root.clientHeight - viewport.height > 120 ||
+      (editing && expandedHeight - viewport.height > 120)
+        ? 'open'
+        : 'closed';
   };
   viewport?.addEventListener('resize', resize);
+  viewport?.addEventListener('scroll', resize);
+  window.addEventListener('resize', resize);
   resize();
   window.addEventListener('pagehide', () => {
     void service.suspend().catch(() => {});

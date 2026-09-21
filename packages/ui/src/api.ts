@@ -69,7 +69,7 @@ declare global {
       /** Runtime operations, not viewport-dependent product variants. */
       capabilities?: Readonly<RuntimeCapabilities>;
       /** Host-owned model acquisition and system-provider controls. */
-      renderModelSettings?: () => ReactNode;
+      renderModelSettings?: (options?: { setup?: boolean }) => ReactNode;
       /** Portable hosts supply isolated, revocable local HTML snapshots. */
       createHtmlPreview?: (request: HostHtmlPreviewRequest) => Promise<HostHtmlPreview>;
       /** Let a native host present its OS file export/share picker. */

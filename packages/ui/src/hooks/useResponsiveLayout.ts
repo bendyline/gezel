@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export const MOBILE_LAYOUT_QUERY = '(max-width: 760px)';
+export const MOBILE_LAYOUT_QUERY = '(max-width: 760px), (max-height: 500px) and (pointer: coarse)';
 
 function isMobilePreview(): boolean {
   return (

@@ -39,8 +39,61 @@
   overflow-y: auto;
 }
 
-.app.app-compact :is(.project-chat-compose-shell, .gezel-chat-tab > .chat-composer) {
+.app.app-compact :is(.project-chat-compose-shell, .chat-composer) {
   flex-shrink: 0;
+}
+
+/* Compact chat is a dock, with no desktop gutters around the compose surface.
+   Text and controls retain their own small inset for touch and focus rings. */
+.app.app-compact .home-workshop-main {
+  padding-inline: 0;
+}
+
+.app.app-compact .home-workshop-greeting {
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.app.app-compact .home-workshop-conversation .chat-rail-main {
+  overflow-y: auto;
+}
+
+.app.app-compact .app-main:has(> .gezel-detail-chat),
+.app.app-compact .two-col > section:has(> .gezel-detail-chat),
+.app.app-compact .task-detail-panel:has(.task-detail-chat-mode) {
+  padding: 0;
+}
+
+.app.app-compact .gezel-detail-chat > :is(.detail-header, .entity-tabs-row),
+.app.app-compact .task-detail-chat-mode > :is(.task-detail-header, .task-bench-row) {
+  padding-inline: 0.75rem;
+}
+
+.app.app-compact .project-chat-compose-shell {
+  margin-inline: 0;
+  padding-bottom: 0;
+}
+
+.app.app-compact
+  :is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat)
+  .chat-composer,
+.app.app-compact .project-chat-compose-main {
+  margin: 0;
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.app.app-compact .chat-composer {
+  padding-bottom: 0.5rem;
+}
+
+/* A phone turned sideways has desktop width but very little vertical room.
+   Keep project navigation and the draft, with secondary chrome out of the way. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .app.app-compact :is(.app-header, .home-workshop-greeting, .chat-rail-banner) {
+    display: none;
+  }
 }
 
 .responsive-app-shell[data-compact="true"] > .app-main {
@@ -99,6 +152,31 @@
 
 .app.app-compact .app-header-brand {
   min-height: 44px;
+}
+
+.app-header-navigation {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app-header-navigation:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.app-header-navigation-icon {
+  width: 19px;
+  height: 19px;
 }
 
 /* Keep the same Settings navigation and sections when the app becomes narrow.
@@ -178,8 +256,44 @@
   min-height: 44px;
 }
 
-.app.app-compact .titlebar-search {
-  flex: 1 1 110px;
+.app.app-compact .titlebar-search-trigger {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app.app-compact .titlebar-search-trigger:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.titlebar-search-trigger-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.app.app-compact .app-header:has(> .titlebar-search[data-compact-search="active"]) {
+  flex-wrap: nowrap;
+}
+
+.app.app-compact
+  .app-header:has(> .titlebar-search[data-compact-search="active"])
+  > :not(.titlebar-search, .search-results-overlay) {
+  display: none;
+}
+
+.app.app-compact .titlebar-search[data-compact-search="active"] {
+  flex: 1 1 100%;
   width: auto;
   min-width: 0;
   max-width: none;
@@ -188,6 +302,34 @@
 
 .app.app-compact .titlebar-search-input {
   min-height: 44px;
+  padding-right: 42px;
+}
+
+.app.app-compact .titlebar-search-close {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  transform: translateY(-50%);
+  color: #2c352a;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app.app-compact .titlebar-search-close:hover {
+  background: rgba(44, 53, 42, 0.1);
+}
+
+.app.app-compact .titlebar-search-close svg {
+  width: 16px;
+  height: 16px;
 }
 
 .app-compact-navigation {
@@ -205,10 +347,6 @@
 .app-compact-navigation > button {
   min-height: 44px;
   padding: 0.4rem 0.65rem;
-}
-
-.app-compact-navigation-title {
-  font-weight: 600;
 }
 
 .app.app-compact .app-questions-overlay {

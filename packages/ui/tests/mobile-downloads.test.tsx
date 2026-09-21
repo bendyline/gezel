@@ -26,7 +26,7 @@ function fixture() {
     selectModel: vi.fn(),
   };
   const readConfig = vi.fn(async () => ({}));
-  const mount = () => {
+  const mount = (setup = false) => {
     const rendered = render(
       <ModelDownloads
         host={host as unknown as MobileHost}
@@ -34,9 +34,10 @@ function fixture() {
         models={[model]}
         disabled={false}
         onInstalled={vi.fn()}
+        setup={setup}
       />,
     );
-    fireEvent.click(screen.getByText('Download a model'));
+    if (!setup) fireEvent.click(screen.getByText('Download a model'));
     fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'small:1.0.0' } });
     return rendered;
   };
@@ -54,6 +55,16 @@ const denied = {
 };
 
 describe('model download controls', () => {
+  it('shows the first-run picker without starting a download before the user asks', async () => {
+    const { host, mount } = fixture();
+    mount(true);
+    expect(screen.getByText('Download a model').closest('details')).toHaveAttribute('open');
+    expect(screen.getByLabelText('Model')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeVisible();
+    await waitFor(() => expect(host.listModelDownloads).toHaveBeenCalled());
+    expect(host.resolveModelSource).not.toHaveBeenCalled();
+    expect(host.startModelDownload).not.toHaveBeenCalled();
+  });
   it('resolves the immutable source to its exact length without auto-selecting it', async () => {
     const { host, mount } = fixture();
     mount();

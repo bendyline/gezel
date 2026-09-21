@@ -1358,17 +1358,26 @@ export class PortableProductService {
     if (resource === 'models' && method === 'GET') {
       const providers = await this.inference.providers();
       const provider = providers.find((item) => item.id === query.get('provider'));
-      if (id === 'test')
+      const inventory = provider?.id === 'llama-cpp' ? await this.inference.models?.() : undefined;
+      if (id === 'test') {
+        if (inventory && !inventory.models.some((model) => model.id === inventory.selectedModelId))
+          return json({
+            ok: false,
+            provider: provider!.id,
+            error: inventory.models.length
+              ? 'Choose an installed chat model to finish setup.'
+              : 'Download or import a chat model to get started.',
+          });
         return json(
           provider?.availability === 'available'
-            ? { ok: true, provider: provider.id, modelCount: 1 }
+            ? { ok: true, provider: provider.id, modelCount: inventory?.models.length ?? 1 }
             : {
                 ok: false,
                 provider: query.get('provider'),
                 error: provider?.reason ?? 'Provider unavailable on this host',
               },
         );
-      const inventory = provider?.id === 'llama-cpp' ? await this.inference.models?.() : undefined;
+      }
       return json({
         provider: query.get('provider'),
         models:

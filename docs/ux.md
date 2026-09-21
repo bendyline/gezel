@@ -315,7 +315,8 @@ where a link needs forcing back to sans.
 Gezel has one responsive product UX. Window width determines its layout; the
 operating system determines available capabilities. A desktop window around
 400px wide is the mobile experience, with the same projects, documents, crew,
-navigation, and project sections. At 760px and below, the ordinary navigation
+navigation, and project sections. At 760px and below (also on a touch screen
+500px high or shorter, such as a landscape phone), the ordinary navigation
 rail becomes the full-width entry surface. Selecting an entity opens the same
 view at full width; Navigation returns to the rail. Wider windows restore the
 side-by-side arrangement and the user's saved rail side and size. Switching
@@ -332,8 +333,15 @@ project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
 Interactive targets are at least 44px, project tabs retain readable labels,
 and narrow file browsers use list → detail/back while keeping editors mounted.
-The native composer follows the visual viewport above the keyboard and respects
-safe-area insets. Replies render as text without privileged HTML or external
+Compact chat composers extend to both edges of their pane, with no outer
+desktop gutter. Only the text and controls keep a small inner inset. Native
+shells reserve the system's safe rectangle for content, including landscape
+cutouts and the home indicator; the composer surface continues through the
+bottom safe area so device corners never clip the draft. Read Capacitor's
+safe-area variables with the browser `env()` values as fallback, and apply
+insets once. The native composer follows the visual viewport above the keyboard,
+as do portaled dialogs. Menus, selects, popovers, and tooltips use that same
+safe app rectangle for collision detection. Replies render as text without privileged HTML or external
 navigation inside the native web view.
 
 The UI is React + Vite with **plain CSS + CSS variables** — no Tailwind, no

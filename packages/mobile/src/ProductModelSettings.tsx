@@ -11,7 +11,13 @@ export function ProductModelSettings({
   host,
   service,
   models = [],
-}: { host: MobileHost; service: PortableProductService; models?: PortableCatalogModel[] }) {
+  setup = false,
+}: {
+  host: MobileHost;
+  service: PortableProductService;
+  models?: PortableCatalogModel[];
+  setup?: boolean;
+}) {
   const status = useSyncExternalStore(
     service.subscribeStatus,
     service.getStatus,
@@ -63,6 +69,16 @@ export function ProductModelSettings({
   }, [refresh, onError]);
   const selected = providers.find(({ id }) => id === provider);
   const modelId = provider === 'llama-cpp' ? inventory.selectedModelId : provider;
+  const downloads = (
+    <ModelDownloads
+      host={guardedHost}
+      service={service}
+      models={models}
+      disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
+      onInstalled={refresh}
+      setup={setup}
+    />
+  );
   return (
     <section aria-label="On-device models">
       <p>
@@ -70,6 +86,7 @@ export function ProductModelSettings({
         while the app is open.
       </p>
       {error && <p role="alert">{error}</p>}
+      {setup && downloads}
       <ProviderPanel
         host={guardedHost}
         providers={providers}
@@ -87,13 +104,7 @@ export function ProductModelSettings({
           setBusy(value);
         }}
       />
-      <ModelDownloads
-        host={guardedHost}
-        service={service}
-        models={models}
-        disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
-        onInstalled={refresh}
-      />
+      {!setup && downloads}
       {selected?.availability === 'available' && modelId && (
         <ModelBudgetSettings
           service={service}

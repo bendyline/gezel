@@ -47,7 +47,14 @@ export function ProviderPanel({
   }
 
   return (
-    <details className="mobile-models" open={!selected || selected.availability !== 'available'}>
+    <details
+      className="mobile-models"
+      open={
+        !selected ||
+        selected.availability !== 'available' ||
+        (selectedProviderId === 'llama-cpp' && !model)
+      }
+    >
       <summary>
         {selectedProviderId === 'llama-cpp' && model
           ? model.name

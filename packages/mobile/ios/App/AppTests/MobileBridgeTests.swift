@@ -124,6 +124,21 @@ final class MobileBridgeTests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
+        func assertSafeChatLayout() async throws {
+            _ = try await run(#"""
+                const viewport=window.visualViewport;
+                await until(()=>{const header=document.querySelector('.app-header');return !visible(header)||header.getBoundingClientRect().top>=safeTop-1;},'header clears the iOS status bar and cutout');
+                const app=document.querySelector('.app').getBoundingClientRect();
+                const bottom=document.documentElement.dataset.keyboard==='open'?0:safeBottom;
+                check(app.bottom<=viewport.offsetTop+viewport.height-bottom+1,'App clears the home indicator and keyboard');
+                const composer=await until(()=>Array.from(document.querySelectorAll('.chat-composer')).find(visible),'visible composer');
+                const frame=(composer.closest('.project-chat-compose-main')||composer).getBoundingClientRect();
+                check(Math.abs(frame.left-app.left)<2&&Math.abs(frame.right-app.right)<2,'Composer reaches both safe edges');
+                await until(()=>composer.querySelector('[contenteditable="true"]').getBoundingClientRect().bottom<=document.querySelector('.app').getBoundingClientRect().bottom+1,'entire draft clears the home indicator and keyboard');
+                check(document.documentElement.scrollWidth<=innerWidth+1,'No horizontal page overflow');
+                return true;
+                """#, ["safeTop": view.safeAreaInsets.top, "safeBottom": view.safeAreaInsets.bottom])
+        }
         try await waitForApp()
         let fm = FileManager.default
         let support = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -155,7 +170,7 @@ final class MobileBridgeTests: XCTestCase {
         }
         let seeded = try await run(#"""
             check(window.Capacitor.getPlatform() === 'ios', 'Native iOS host is required');
-            check(visible(document.querySelector('[data-testid="app-sidebar"]')), 'Shared navigation must be the front door');
+            check(document.querySelector('[data-testid="app-sidebar"]'), 'Shared navigation must remain mounted during setup');
             check(!document.querySelector('.mobile-app'), 'The separate conversation prototype must not be mounted');
             const scriptRun = await api('/api/projects/default/scripts/run', 'POST', {name:'storeRecords',scope:'standard',input:{action:'create',id:'native-quickjs',fields:{title:'offline'},root:'native-script',mode:'single-file'}});
             check(scriptRun.status === 'ok', 'Bundled QuickJS must execute inside the native WebView');
@@ -185,6 +200,14 @@ final class MobileBridgeTests: XCTestCase {
         let gezelId = try XCTUnwrap(seeded?["gezelId"] as? String)
         try await reload()
         _ = try await run(#"""
+            window.dispatchEvent(new CustomEvent('gezel:navigate',{detail:{view:'home'}}));
+            await until(()=>visible(document.querySelector('[data-testid="home-workshop"] .chat-composer')),'Meester composer');
+            return true;
+            """#)
+        try await assertSafeChatLayout()
+        try await attachSnapshot("Safe full-width Meester composer")
+        _ = try await run("await openNavigation();return true;")
+        _ = try await run(#"""
             check(document.documentElement.scrollWidth <= innerWidth + 1, 'Primary navigation overflows');
             await clickButton('Settings', document.querySelector('[data-testid="app-sidebar"]'));
             const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native providers inside shared Settings');
@@ -201,6 +224,24 @@ final class MobileBridgeTests: XCTestCase {
             return true;
             """#)
         try await attachSnapshot("Shared Settings and native providers")
+        _ = try await run(#"""
+            await openNavigation();
+            await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
+            await until(()=>visible(document.querySelector('.project-chat .chat-composer')),'Project composer');
+            return true;
+            """#)
+        try await assertSafeChatLayout()
+        let viewportHeightValue = try await view.evaluateJavaScript("visualViewport.height")
+        let fullViewportHeight = try XCTUnwrap(viewportHeightValue as? Double)
+        _ = try await run(#"""
+            document.querySelector('.project-chat .chat-composer [contenteditable="true"]').focus();
+            await until(()=>visualViewport.height<fullHeight-120,'real iOS keyboard');
+            return true;
+            """#, ["fullHeight": fullViewportHeight])
+        try await assertSafeChatLayout()
+        try await attachSnapshot("Safe project composer above keyboard")
+        view.endEditing(true)
+        _ = try await run("await until(()=>visualViewport.height>=fullHeight-1,'keyboard dismissed');return true;", ["fullHeight": fullViewportHeight])
         let chat = try await run(#"""
             await openNavigation();
             await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));

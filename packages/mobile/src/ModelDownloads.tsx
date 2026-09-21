@@ -11,12 +11,14 @@ export function ModelDownloads({
   models,
   disabled,
   onInstalled,
+  setup = false,
 }: {
   host: MobileHost;
   service: PortableProductService;
   models: PortableCatalogModel[];
   disabled: boolean;
   onInstalled(): Promise<void>;
+  setup?: boolean;
 }) {
   const resolutionEpoch = useRef(0);
   const resolvingRef = useRef(false);
@@ -80,7 +82,7 @@ export function ModelDownloads({
     (model) => `${model.source.catalogId}:${model.source.catalogVersion}` === selected,
   );
   return (
-    <details className="mobile-models">
+    <details className="mobile-models" open={setup}>
       <summary>Download a model</summary>
       <p>
         Choose from the same catalog as desktop. Downloads need internet; verified models work
@@ -151,7 +153,9 @@ export function ModelDownloads({
         <div key={download.id} className="mobile-model-download">
           <p>
             <strong>{download.name}</strong> ·{' '}
-            {download.state === 'complete' ? 'Ready to choose above' : download.state}
+            {download.state === 'complete'
+              ? `Ready to choose ${setup ? 'below' : 'above'}`
+              : download.state}
           </p>
           <progress
             aria-label={`${download.name} download progress`}

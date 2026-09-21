@@ -359,6 +359,35 @@ describe('HomeView', () => {
     expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
   });
 
+  it('uses the shared first-run page for native models and leaves setup when a selected model is ready', async () => {
+    const bridge = window.__GEZEL__;
+    const renderModelSettings = vi.fn(() => <div>Native model download controls</div>);
+    window.__GEZEL__ = { ...bridge!, renderModelSettings };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      meesterGezelId: 'gz-meester',
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({
+      ok: false,
+      error: 'Choose a chat model',
+    } as never);
+    try {
+      render(<HomeView platform="mobile" />);
+      expect(await screen.findByText('First run setup')).toBeVisible();
+      expect(screen.getByText('Native model download controls')).toBeVisible();
+      expect(renderModelSettings).toHaveBeenCalledWith({ setup: true });
+      expect(screen.queryByTestId('home-intro-article')).not.toBeInTheDocument();
+      expect(screen.getByText('Preferences')).toBeVisible();
+      expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 1 } as never);
+      fireEvent(window, new CustomEvent('gezel:config-updated'));
+      expect(await screen.findByTestId('home-workshop')).toBeInTheDocument();
+      expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
+    } finally {
+      window.__GEZEL__ = bridge;
+    }
+  });
+
   it('first run is local-only: shows the on-device engine link, not the provider picker', async () => {
     // Not configured (probe fails) → the onboarding layout renders.
     vi.mocked(api.getConfig).mockResolvedValue({

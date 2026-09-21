@@ -37,6 +37,7 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { DropdownMenu } from './primitives/index.js';
@@ -146,6 +147,8 @@ export function App() {
 
 function FullApp() {
   const { compact, preview, exitPreview } = useResponsiveLayout();
+  const firstRun = useIsFirstRun();
+  const setupOpened = useRef(false);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
   useBackNavigation(compact, navigationOpen, openNavigation);
@@ -265,6 +268,14 @@ function FullApp() {
       /* private mode / quota — selection still lives in memory */
     }
   }, []);
+
+  useEffect(() => {
+    if (!firstRun || setupOpened.current) return;
+    setupOpened.current = true;
+    // Setup must be visible even when compact navigation or a restored project
+    // would otherwise hide Home. Later navigation remains the user's choice.
+    commitSelection(null);
+  }, [firstRun, commitSelection]);
 
   const openArea = useCallback(
     (area: RecentTabArea) => commitSelection(toRecentTab({ kind: 'area', area })),
@@ -701,10 +712,10 @@ function FullApp() {
       {runtimeCapabilities().daemonSettings && (
         <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
       )}
-      {/* The top bar is now status-only — it remains the OS title bar (drag
-          region + native window-control reservations via CSS padding). The
-          brand mark routes to the Meester home; navigation lives in the
-          left Sidebar. */}
+      {/* The top bar remains the OS title bar (drag region + native
+          window-control reservations via CSS padding). The brand mark routes
+          to the Meester home; compact layouts also keep their way back to the
+          navigation beside it instead of spending a separate content row. */}
       <HeaderDensityContext.Provider value={headerDensity}>
         <header
           ref={headerRef}
@@ -718,6 +729,17 @@ function FullApp() {
           }
         >
           <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
+          {compact && !navigationOpen && (
+            <button
+              type="button"
+              className="app-header-navigation"
+              onClick={openNavigation}
+              aria-label="Navigation"
+              title="Navigation"
+            >
+              <NavigationMenuIcon />
+            </button>
+          )}
           {pendingQuestionCount > 0 && (
             <button
               type="button"
@@ -743,7 +765,7 @@ function FullApp() {
             while the pills breathe. */}
           {runtimeCapabilities().search && (
             <>
-              <TitlebarSearch />
+              <TitlebarSearch compact={compact} />
               <SearchResultsOverlay />
             </>
           )}
@@ -820,15 +842,8 @@ function FullApp() {
           </dialog>
         </>
       )}
-      {compact && (
+      {compact && (outputPaneMaximized || preview) && (
         <div className="app-compact-navigation">
-          {navigationOpen ? (
-            <span className="app-compact-navigation-title">Your workshop</span>
-          ) : (
-            <button type="button" onClick={openNavigation}>
-              <span aria-hidden="true">← </span>Navigation
-            </button>
-          )}
           {outputPaneMaximized && (
             <button
               type="button"
@@ -904,6 +919,23 @@ function OutputPaneRestoreIcon() {
       <path d="M9.5 6.5 12.8 3.2" />
       <path d="M3.5 9.5H6.5V12.5" />
       <path d="M6.5 9.5 3.2 12.8" />
+    </svg>
+  );
+}
+
+function NavigationMenuIcon() {
+  return (
+    <svg
+      className="app-header-navigation-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M3 5.25h14M3 10h14M3 14.75h14" />
     </svg>
   );
 }

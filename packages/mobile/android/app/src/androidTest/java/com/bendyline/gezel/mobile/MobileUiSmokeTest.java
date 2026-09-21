@@ -64,16 +64,8 @@ public final class MobileUiSmokeTest {
             }
             for (File file : priorState.keySet()) Files.deleteIfExists(file.toPath());
             if (!testName.getMethodName().equals("missingChatModelOpensSettingsAndPreservesDraft")) {
-                fixtureSource = File.createTempFile("ui-smoke-", ".gguf", instrumentation.getTargetContext().getCacheDir());
-                try (InputStream input = instrumentation.getContext().getAssets().open("fixtures/deterministic-native.gguf");
-                        FileOutputStream output = new FileOutputStream(fixtureSource)) {
-                    byte[] buffer = new byte[8192];
-                    int count;
-                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-                }
-                fixtureId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(fixtureSource)).getString("id");
+                importChatFixture();
                 store.selectModel(fixtureId);
-                importedFixture = new File(new File(files, "gezel/models"), fixtureId + ".gguf");
             }
         }
         // Connect before WebView creation so its virtual accessibility tree is enabled.
@@ -86,6 +78,18 @@ public final class MobileUiSmokeTest {
         instrumentation.runOnMainSync(() -> webView = activity.getBridge().getWebView());
         assertNotNull("Capacitor must host the actual application WebView", webView);
         waitForApp();
+    }
+
+    private void importChatFixture() throws Exception {
+        fixtureSource = File.createTempFile("ui-smoke-", ".gguf", instrumentation.getTargetContext().getCacheDir());
+        try (InputStream input = instrumentation.getContext().getAssets().open("fixtures/deterministic-native.gguf");
+                FileOutputStream output = new FileOutputStream(fixtureSource)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+        }
+        fixtureId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(fixtureSource)).getString("id");
+        importedFixture = new File(new File(instrumentation.getTargetContext().getFilesDir(), "gezel/models"), fixtureId + ".gguf");
     }
 
     @After public void restoreProductFiles() throws Exception {
@@ -117,6 +121,11 @@ public final class MobileUiSmokeTest {
 
     @Test public void missingChatModelOpensSettingsAndPreservesDraft() throws Exception {
         run("""
+            await until(()=>Array.from(document.querySelectorAll('h1')).some(item=>visible(item)&&item.textContent==='First run setup'),'first run visible on launch');
+            check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Navigation must not hide model setup');
+            const downloads=Array.from(document.querySelectorAll('details')).find(item=>item.querySelector('summary')?.textContent==='Download a model');
+            check(downloads?.open&&visible(downloads.querySelector('select')),'First run must show the model download choices without expanding a panel');
+            check(!document.querySelector('[data-testid="chat-composer"]'),'First run must not offer chat before a model is ready');
             const inventory=await plugin.listModels();
             check(inventory.models.length===0,'This test must start without a chat model');
             const config=await api('/api/config');
@@ -125,8 +134,10 @@ public final class MobileUiSmokeTest {
             await api('/api/projects/'+project.id,'PUT',{voormanGezelId:config.meesterGezelId});
             return true;
             """);
+        snapshot("00-first-run-model-setup");
         reload();
         run("""
+            await until(()=>Array.from(document.querySelectorAll('h1')).some(item=>visible(item)&&item.textContent==='First run setup')&&!visible(document.querySelector('[data-testid="app-sidebar"]')),'first run after restart');
             await openNavigation();
             await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
             const editor=await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]'),'shared composer');
@@ -169,8 +180,127 @@ public final class MobileUiSmokeTest {
             await openNavigation();
             await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
             await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]')?.textContent.includes('Hello from an empty model library.'),'draft after returning from model settings');
+            window.dispatchEvent(new CustomEvent('gezel:navigate',{detail:{view:'home'}}));
+            await until(()=>document.body.innerText.includes('First run setup'),'return to first run');
             return true;
             """);
+        importChatFixture();
+        run("""
+            await clickButton('Check availability');
+            const choice=await until(()=>Array.from(document.querySelectorAll('[aria-label="On-device models"] select')).find(select=>visible(select)&&Array.from(select.options).some(option=>option.value===%s)),'visible imported model in shared first-run controls');
+            check(document.body.innerText.includes('First run setup'),'An unselected download must not complete setup');
+            choice.value=%s;choice.dispatchEvent(new Event('change',{bubbles:true}));
+            await until(()=>visible(document.querySelector('[data-testid="home-workshop"]')),'model selection completes first run without reload');
+            check((await plugin.listModels()).selectedModelId===%s,'The native model choice must persist');
+            return true;
+            """.formatted(JSONObject.quote(fixtureId),JSONObject.quote(fixtureId),JSONObject.quote(fixtureId)));
+        reload();
+        run("""
+            check(visible(document.querySelector('[data-testid="app-sidebar"]')),'Configured launches return to ordinary mobile navigation');
+            await until(()=>document.querySelector('[data-testid="home-workshop"]'),'configured app skips first run after restart');
+            await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
+            await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]')?.textContent.includes('Hello from an empty model library.'),'draft survives setup and restart');
+            return true;
+            """);
+    }
+
+    @Test public void compactChatRespectsSystemInsetsAndKeyboard() throws Exception {
+        run("""
+            window.dispatchEvent(new CustomEvent('gezel:navigate',{detail:{view:'home'}}));
+            await until(()=>visible(document.querySelector('[data-testid="home-workshop"] .chat-composer')),'Meester composer');
+            return true;
+            """);
+        assertSafeChatLayout(true);
+        snapshot("10-safe-home-composer");
+        run("""
+            const config=await api('/api/config');
+            window.dispatchEvent(new CustomEvent('gezel:open-tab',{detail:{kind:'gezel',id:config.meesterGezelId}}));
+            await until(()=>visible(document.querySelector('.gezel-chat-tab .chat-composer')),'Crew member composer');
+            return true;
+            """);
+        assertSafeChatLayout(true);
+        run("""
+            const config=await api('/api/config');
+            const project=await api('/api/projects','POST',{name:'Safe area workshop',indexingEnabled:false});
+            await api('/api/projects/'+project.id+'/gezels','POST',{gezelId:config.meesterGezelId});
+            window.dispatchEvent(new CustomEvent('gezel:open-tab',{detail:{kind:'project',id:project.id}}));
+            await until(()=>visible(document.querySelector('.project-chat .chat-composer')),'Project composer');
+            return true;
+            """);
+        assertSafeChatLayout(true);
+        run("""
+            const editor=document.querySelector('.chat-composer [contenteditable="true"]');
+            editor.focus();document.execCommand('insertText',false,'Keep this draft above the keyboard.');
+            return true;
+            """);
+        instrumentation.runOnMainSync(()->{
+            webView.requestFocus();
+            ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).showSoftInput(webView,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
+        boolean[] keyboard={false};
+        for(int attempt=0;attempt<100&&!keyboard[0];attempt++) {
+            instrumentation.runOnMainSync(()->keyboard[0]=androidx.core.view.ViewCompat.getRootWindowInsets(webView).isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()));
+            SystemClock.sleep(50);
+        }
+        assertTrue("The real Android keyboard must be shown",keyboard[0]);
+        assertSafeChatLayout(true);
+        snapshot("11-safe-project-keyboard");
+        instrumentation.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(webView.getWindowToken(),0));
+        run("""
+            await until(()=>visualViewport.height>500,'keyboard dismissed');
+            check(document.querySelector('.chat-composer [contenteditable="true"]').textContent.includes('Keep this draft above the keyboard.'),'Layout changes must preserve the draft');
+            document.querySelector('.chat-composer [role="combobox"]').click();
+            const menu=await until(()=>document.querySelector('.gz-select-content'),'thread menu');
+            await until(()=>{const box=menu.getBoundingClientRect(),app=document.querySelector('.app').getBoundingClientRect();return box.top>=app.top-1&&box.bottom<=app.bottom+1&&box.left>=app.left-1&&box.right<=app.right+1;},'thread menu inside the safe rectangle');
+            menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+            return true;
+            """);
+        instrumentation.runOnMainSync(()->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+        try {
+            run("await until(()=>innerWidth>innerHeight,'landscape rotation');return true;");
+            assertSafeChatLayout(false);
+            snapshot("12-safe-landscape");
+            run("""
+                await openNavigation();
+                await clickButton('New project',document.querySelector('[data-testid="app-sidebar"]'));
+                const dialog=await until(()=>document.querySelector('[role="dialog"]'),'new project dialog');
+                await until(()=>{const box=dialog.getBoundingClientRect(),app=document.querySelector('.app').getBoundingClientRect();return box.top>=app.top-1&&box.bottom<=app.bottom+1&&box.left>=app.left-1&&box.right<=app.right+1;},'landscape dialog inside the safe rectangle');
+                await clickButton('Cancel',dialog);
+                return true;
+                """);
+        } finally {
+            instrumentation.runOnMainSync(()->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));
+        }
+    }
+
+    private void assertSafeChatLayout(boolean edgeToEdge) throws Exception {
+        int[] limits=new int[4];
+        instrumentation.runOnMainSync(()->{
+            androidx.core.view.WindowInsetsCompat insets=androidx.core.view.ViewCompat.getRootWindowInsets(webView);
+            androidx.core.graphics.Insets safe=insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()|androidx.core.view.WindowInsetsCompat.Type.displayCutout());
+            int[] origin=new int[2];webView.getLocationInWindow(origin);
+            limits[0]=Math.max(0,safe.top-origin[1]);
+            limits[1]=Math.max(0,safe.left-origin[0]);
+            limits[2]=Math.max(0,origin[0]+webView.getWidth()-(activity.getWindow().getDecorView().getWidth()-safe.right));
+            limits[3]=insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())?0:Math.max(0,origin[1]+webView.getHeight()-(activity.getWindow().getDecorView().getHeight()-safe.bottom));
+        });
+        float density=activity.getResources().getDisplayMetrics().density;
+        run("""
+            const top=%s,left=%s,right=%s,bottom=%s;
+            await until(()=>{const header=document.querySelector('.app-header');return !visible(header)||header.getBoundingClientRect().top>=top-1;},'header below status bar and cutout');
+            const app=document.querySelector('.app').getBoundingClientRect();
+            check(app.left>=left-1&&app.right<=innerWidth-right+1,'App clears landscape cutouts');
+            check(app.bottom<=visualViewport.height+visualViewport.offsetTop-bottom+1,'App clears keyboard and home indicator');
+            const composer=await until(()=>Array.from(document.querySelectorAll('.chat-composer')).find(visible),'visible composer');
+            const frame=(composer.closest('.project-chat-compose-main')||composer).getBoundingClientRect();
+            if(%s)check(Math.abs(frame.left-app.left)<2&&Math.abs(frame.right-app.right)<2,'Composer reaches both safe edges: '+JSON.stringify({frame:frame.toJSON(),app:app.toJSON()}));
+            await until(()=>composer.querySelector('[contenteditable="true"]').getBoundingClientRect().bottom<=document.querySelector('.app').getBoundingClientRect().bottom+1,'entire draft above the home indicator or keyboard');
+            const send=composer.querySelector('[aria-label="Send"]')||composer.querySelector('[aria-label="Stop"]');
+            const control=send.getBoundingClientRect();
+            check(control.top>=top&&control.bottom<=app.bottom+1,'Send remains above the keyboard and system navigation');
+            check(document.documentElement.scrollWidth<=innerWidth+1,'No horizontal page overflow');
+            return true;
+            """.formatted(limits[0]/density,limits[1]/density,limits[2]/density,limits[3]/density,edgeToEdge));
     }
 
     @Test public void unavailableSystemModelIsRejectedBeforeInference() throws Exception {

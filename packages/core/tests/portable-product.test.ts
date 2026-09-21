@@ -113,6 +113,7 @@ describe('ordinary client against offline product runtime', () => {
     const inventory: MobileModelInventory = { models: [] };
     const { client, store, service, seen } = await setup({ models: async () => inventory });
     const gezelId = (await store.readConfig()).meesterGezelId!;
+    expect(await client.testProvider('llama-cpp')).toMatchObject({ ok: false });
     await expect(client.createChatSession({ gezelId })).rejects.toMatchObject({
       status: 409,
       details: { error: expect.stringContaining('No chat model is installed on this device.') },
@@ -121,11 +122,13 @@ describe('ordinary client against offline product runtime', () => {
     expect(seen).toHaveLength(0);
 
     inventory.models.push({ id: 'test-model', name: 'Test model', sizeBytes: 100 });
+    expect(await client.testProvider('llama-cpp')).toMatchObject({ ok: false });
     await expect(client.createChatSession({ gezelId })).rejects.toMatchObject({
       status: 409,
       details: { error: expect.stringContaining('Choose an available chat model') },
     });
     inventory.selectedModelId = 'test-model';
+    expect(await client.testProvider('llama-cpp')).toMatchObject({ ok: true, modelCount: 1 });
     const session = await client.createChatSession({ gezelId });
     expect(session.model).toBe('test-model');
     await client.sendToChatSession(session.id, { message: 'Hi' });

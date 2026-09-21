@@ -1,6 +1,7 @@
 import * as RadixSelect from '@radix-ui/react-select';
 import type { CSSProperties, ReactNode } from 'react';
 import { DropdownChevron } from './DropdownChevron.js';
+import { appCollisionBoundary } from './appCollisionBoundary.js';
 
 export const Root = RadixSelect.Root;
 export const Value = RadixSelect.Value;
@@ -49,6 +50,7 @@ export function Content(props: RadixSelect.SelectContentProps) {
       <RadixSelect.Content
         {...rest}
         position={position}
+        collisionBoundary={rest.collisionBoundary ?? appCollisionBoundary()}
         sideOffset={sideOffset}
         className={className ? `gz-select-content ${className}` : 'gz-select-content'}
       >
