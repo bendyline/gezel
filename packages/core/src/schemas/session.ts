@@ -228,6 +228,8 @@ export const ChatSessionSchema = z.object({
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */
   stepId: z.string().optional(),
+  /** Host-owned lifecycle identity; repeating the same step revokes the previous activation. */
+  stepActivationId: z.string().optional(),
   /** Session that contains this child in the visible thread hierarchy. */
   parentSession: SessionParentSchema.optional(),
   /** Immediate task-step session that handed work to this session. */

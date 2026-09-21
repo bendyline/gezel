@@ -26,7 +26,7 @@ import org.json.JSONObject;
  * concurrently; close() completes before the plugin admits another request. */
 final class MlKitPrompt {
     static final int CONTEXT_TOKENS = 4096;
-    static final int MAX_OUTPUT_TOKENS = 256;
+    static final int MAX_OUTPUT_TOKENS = 1024;
     private static final int MAX_OUTPUT_CHARS = 64_000;
     private GenerativeModelFutures model;
     private ListenableFuture<?> pending;
@@ -121,7 +121,13 @@ final class MlKitPrompt {
             throw new IllegalStateException("Android's on-device AI has not finished downloading");
     }
 
-    Reply generate(String[] roles, String[] contents, int maxTokens,
+    static void requireContextBudget(int promptTokens, int maxTokens, int requestedContext, int modelContext) {
+        int limit = Math.min(requestedContext, Math.min(CONTEXT_TOKENS, modelContext));
+        if (requestedContext < 512 || requestedContext > CONTEXT_TOKENS || maxTokens < 1 || maxTokens > MAX_OUTPUT_TOKENS || modelContext <= 0 || promptTokens < 0 || promptTokens >= 4000 || promptTokens > limit - maxTokens)
+            throw new IllegalArgumentException("This conversation is too long for Android's on-device AI. Start a new conversation.");
+    }
+
+    Reply generate(String[] roles, String[] contents, int maxTokens, int contextSize,
                    BooleanSupplier cancelled, Delta delta) throws Exception {
         GenerativeModelFutures client = model();
         if (await(client.checkStatus(), 15) != FeatureStatus.AVAILABLE)
@@ -148,8 +154,7 @@ final class MlKitPrompt {
         int count = await(client.countTokens(request), 15).getTotalTokens();
         int limit = Math.min(CONTEXT_TOKENS, await(client.getTokenLimit(), 15));
         // Conservatively reserve output even on SDK builds counting it already.
-        if (count < 0 || count >= 4000 || count + maxTokens > limit)
-            throw new IllegalArgumentException("This conversation is too long for Android's on-device AI. Start a new conversation.");
+        requireContextBudget(count, maxTokens, contextSize, limit);
         if (cancelled.getAsBoolean()) throw new CancellationException();
         AtomicReference<RuntimeException> streamError = new AtomicReference<>();
         StringBuilder streamed = new StringBuilder();

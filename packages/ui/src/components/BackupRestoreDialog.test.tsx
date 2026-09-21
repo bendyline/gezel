@@ -1,4 +1,9 @@
-import type { BackupPlan, RestoreReview, StorageJob } from '@bendyline/gezel';
+import {
+  type BackupPlan,
+  OFFLINE_RUNTIME_CAPABILITIES,
+  type RestoreReview,
+  type StorageJob,
+} from '@bendyline/gezel';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,6 +85,7 @@ beforeEach(() => {
   vi.mocked(api.scanRestore).mockResolvedValue(review());
   vi.mocked(api.confirmRestore).mockResolvedValue({ jobId: 'job-1' });
   vi.mocked(api.getStorageJob).mockResolvedValue(job());
+  vi.mocked(api.cancelRestore).mockResolvedValue({ cancelled: true });
   chooseSavePath.mockResolvedValue({ path: '/Users/someone/gezel-backup.zip' });
   chooseOpenPath.mockResolvedValue({ path: '/Users/someone/gezel-backup.zip' });
   (window as unknown as { __GEZEL__: unknown }).__GEZEL__ = {
@@ -237,5 +243,55 @@ describe('BackupRestoreDialog — without the desktop shell', () => {
     await open();
     expect(await screen.findByText(/needs the desktop app/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Choose where to save/ })).toBeDisabled();
+  });
+});
+
+describe('BackupRestoreDialog — portable host', () => {
+  it('uses the native save picker for real ZIP bytes and preserves failure for retry', async () => {
+    const user = userEvent.setup();
+    const saveExportedFile = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Export cancelled'))
+      .mockResolvedValue(undefined);
+    window.__GEZEL__ = {
+      token: 'test',
+      platform: 'mobile',
+      capabilities: OFFLINE_RUNTIME_CAPABILITIES,
+      saveExportedFile,
+    };
+    vi.mocked(api.exportPortableBackup).mockResolvedValue(new Uint8Array([80, 75, 3, 4]));
+    await open();
+    await user.click(await screen.findByRole('button', { name: /Choose where to save/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Export cancelled');
+    expect(screen.queryByText('Backup exported.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Choose where to save/ }));
+    expect(await screen.findByText('Backup exported.')).toBeInTheDocument();
+    expect(saveExportedFile).toHaveBeenLastCalledWith({
+      name: expect.stringMatching(/^gezel-backup-.*\.zip$/),
+      mimeType: 'application/zip',
+      bytes: new Uint8Array([80, 75, 3, 4]),
+    });
+    expect(api.startBackup).not.toHaveBeenCalled();
+  });
+
+  it('inspects an uploaded file before any restore and discards its review on cancellation', async () => {
+    const user = userEvent.setup();
+    window.__GEZEL__ = {
+      token: 'test',
+      platform: 'mobile',
+      capabilities: OFFLINE_RUNTIME_CAPABILITIES,
+    };
+    vi.mocked(api.scanPortableRestore).mockResolvedValue(review());
+    vi.mocked(api.cancelRestore).mockResolvedValue({ cancelled: true });
+    await open({ tab: 'restore' });
+    const file = new File([new Uint8Array([80, 75])], 'backup.zip', { type: 'application/zip' });
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: async () => new Uint8Array([80, 75]).buffer,
+    });
+    await user.upload(screen.getByLabelText('Backup file'), file);
+    expect(await screen.findByText('Tamsin')).toBeInTheDocument();
+    expect(api.confirmPortableRestore).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(api.cancelRestore).toHaveBeenCalledWith('restore-1'));
   });
 });

@@ -2,6 +2,7 @@ import type { ScriptTemplateId } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { CapabilityPills } from './CapabilityPills.js';
 import { setPendingDraft } from './script-editor/pending-drafts.js';
 
@@ -91,6 +92,7 @@ export function NewScriptDialog({
   /** Called with the new script's name after it exists on disk. */
   onCreated: (name: string) => void;
 }) {
+  const capabilities = runtimeCapabilities();
   const [name, setName] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
   const [description, setDescription] = useState('');
@@ -167,25 +169,33 @@ export function NewScriptDialog({
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="When this phase starts, fetch the PR diff and post a one-paragraph summary…"
+                placeholder={
+                  capabilities.scriptAiDrafting
+                    ? 'When this phase starts, fetch the PR diff and post a one-paragraph summary…'
+                    : 'When this phase starts, check the prepared files and post a task note…'
+                }
                 rows={3}
                 disabled={busy}
               />
             </label>
-            <div className="new-script-ai">
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || !description.trim() || !nameValid}
-                onClick={() => void create(true)}
-              >
-                Draft it with AI
-              </button>
-              <span className="muted small">or pick a starting point:</span>
-            </div>
+            {capabilities.scriptAiDrafting && (
+              <div className="new-script-ai">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || !description.trim() || !nameValid}
+                  onClick={() => void create(true)}
+                >
+                  Draft it with AI
+                </button>
+                <span className="muted small">or pick a starting point:</span>
+              </div>
+            )}
 
             <div className="new-script-templates" aria-label="Starter template">
-              {TEMPLATES.map((t) => (
+              {TEMPLATES.filter(
+                (t) => !capabilities.scriptTemplates || capabilities.scriptTemplates.includes(t.id),
+              ).map((t) => (
                 <button
                   key={t.id}
                   type="button"

@@ -2,9 +2,12 @@ import type {
   GezmodelEngine,
   GezmodelImportProgress,
   GezmodelImportReview,
+  RuntimeCapabilities,
   SecurityPolicy,
 } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
+import type { ReactNode } from 'react';
+import type { HostHtmlPreview, HostHtmlPreviewRequest } from './html-preview-host.js';
 
 /**
  * Where an app update has got to. Mirrors the union the Electron main process
@@ -63,6 +66,18 @@ declare global {
   interface Window {
     __GEZEL__?: {
       token: string;
+      /** Runtime operations, not viewport-dependent product variants. */
+      capabilities?: Readonly<RuntimeCapabilities>;
+      /** Host-owned model acquisition and system-provider controls. */
+      renderModelSettings?: () => ReactNode;
+      /** Portable hosts supply isolated, revocable local HTML snapshots. */
+      createHtmlPreview?: (request: HostHtmlPreviewRequest) => Promise<HostHtmlPreview>;
+      /** Let a native host present its OS file export/share picker. */
+      saveExportedFile?: (file: {
+        name: string;
+        mimeType: string;
+        bytes: Uint8Array;
+      }) => Promise<void>;
       baseUrl?: string;
       platform?: 'darwin' | 'win32' | 'linux' | string;
       /**

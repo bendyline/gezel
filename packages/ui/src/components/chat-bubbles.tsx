@@ -47,6 +47,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { Tooltip } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
@@ -479,7 +480,10 @@ function formatEstimatedTokens(bytes: number): string {
   return `~${tokens.toLocaleString()} ${tokens === 1 ? 'token' : 'tokens'}`;
 }
 
-function openRetrievalSource(hit: RetrievalDisplayHit, activeProjectId?: string): void {
+function openRetrievalSource(
+  hit: Pick<RetrievalDisplayHit, 'source' | 'path' | 'projectId' | 'line' | 'lineEnd'>,
+  activeProjectId?: string,
+): void {
   if (!hit.path) return;
   if (hit.source === 'shared') {
     runNavActions([openTabAction({ kind: 'document', path: hit.path })]);
@@ -947,6 +951,7 @@ export function MessageBubble({
         <MessageActions
           markdown={body}
           side="right"
+          saveProjectId={role === 'assistant' ? projectId : undefined}
           {...(debugMode && sessionId && role === 'assistant'
             ? { debug: { sessionId, ...(messageAt ? { messageAt } : {}) } }
             : {})}
@@ -1100,6 +1105,7 @@ export function MessageBubble({
       <MessageActions
         markdown={content}
         side={isUser ? 'left' : 'right'}
+        saveProjectId={isUser ? undefined : projectId}
         {...(debugMode && sessionId && !isUser
           ? { debug: { sessionId, ...(messageAt ? { messageAt } : {}) } }
           : {})}
@@ -1126,9 +1132,11 @@ function MessageActions({
   markdown,
   side,
   debug,
+  saveProjectId,
 }: {
   markdown: string;
   side: 'left' | 'right';
+  saveProjectId?: string;
   /**
    * When set, renders a second debug-only button below the regular
    * copy button. The button fetches the session's freshly-computed
@@ -1139,6 +1147,32 @@ function MessageActions({
   debug?: { sessionId: string; messageAt?: string };
 }) {
   const [copied, setCopied] = useState(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveResponse = async () => {
+    if (!saveProjectId || saving || savedPath || !runtimeCapabilities().artifacts) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const path = `responses/response-${crypto.randomUUID()}.md`;
+      await api.writeProjectArtifactBinary(
+        saveProjectId,
+        path,
+        new Blob([markdown], { type: 'text/markdown' }),
+        'text/markdown',
+        { createOnly: true },
+      );
+      setSavedPath(path);
+      window.dispatchEvent(
+        new CustomEvent('gezel:artifact-updated', { detail: { projectId: saveProjectId, path } }),
+      );
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
   const [debugCopied, setDebugCopied] = useState<'idle' | 'copied' | 'error'>('idle');
   const handleCopy = useCallback(async () => {
     try {
@@ -1204,6 +1238,39 @@ function MessageActions({
             {debugCopied === 'copied' ? '✓' : debugCopied === 'error' ? '!' : '🐛'}
           </button>
         )}
+        {saveProjectId && runtimeCapabilities().artifacts && (
+          <>
+            {savedPath ? (
+              <button
+                type="button"
+                className="msg-action-button"
+                onClick={() =>
+                  openRetrievalSource({ source: 'artifacts', path: savedPath }, saveProjectId)
+                }
+                title={`Open saved response: ${savedPath}`}
+                aria-label="Open saved response in project artifacts"
+              >
+                Open
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="msg-action-button"
+                onClick={() => void saveResponse()}
+                disabled={saving}
+                title="Save response to project artifacts"
+                aria-label="Save response to project artifacts"
+                aria-busy={saving}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
+            <output className="sr-only" aria-live="polite">
+              {savedPath ? `Response saved to project artifacts: ${savedPath}` : ''}
+            </output>
+          </>
+        )}
+        {saveError && <span role="alert">{saveError}</span>}
       </div>
     </div>
   );

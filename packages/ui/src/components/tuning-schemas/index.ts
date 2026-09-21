@@ -15,6 +15,9 @@ export { CLOUD_TUNING_SCHEMA, LLAMA_CPP_TUNING_SCHEMA, MLX_TUNING_SCHEMA, OLLAMA
  */
 export function tuningSchemaForProvider(provider: ProviderName): SquisqAnnotatedSchema {
   switch (provider) {
+    case 'apple-foundation-models':
+    case 'android-mlkit':
+      return { type: 'object', title: 'System AI', properties: {}, additionalProperties: false };
     case 'llama-cpp':
     case 'ds4':
       return LLAMA_CPP_TUNING_SCHEMA;

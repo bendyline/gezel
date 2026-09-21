@@ -80,7 +80,7 @@ export function ProviderPanel({
       </label>
       <p>
         {selected?.availability === 'available'
-          ? 'Runs on this device. Changing models keeps your conversation here.'
+          ? 'Runs on this device. New conversations use your selected model; existing conversations keep their model and history.'
           : (selected?.reason ??
             'This provider is unavailable on this device. Choose an available model.')}
       </p>

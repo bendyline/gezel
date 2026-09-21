@@ -1,6 +1,7 @@
 import type { ChatEventEnvelope, Task, TaskWaitState } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 
 /** Debounce for task re-reads triggered by a burst of `task_event`s. */
@@ -38,6 +39,10 @@ export function useProjectActiveTasks({
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (!runtimeCapabilities().tasks) {
+      setLoading(false);
+      return;
+    }
     try {
       const res = await api.listProjectTasks(projectId, { status: 'active' });
       setTasks(res.tasks);
@@ -57,6 +62,7 @@ export function useProjectActiveTasks({
 
   const refreshTimer = useRef<number | null>(null);
   useEffect(() => {
+    if (!runtimeCapabilities().tasks) return;
     const ctrl = new AbortController();
     const schedule = () => {
       if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);

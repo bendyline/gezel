@@ -25,6 +25,7 @@ import {
   type FileViewMode,
   coerceFileViewMode,
 } from '../components/file-view-modes.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
 import { useDocumentSearch } from './useDocumentSearch.js';
@@ -249,9 +250,11 @@ export function DocumentsView() {
   const searchResultList = search.hits
     ? {
         entries: search.hits.map((hit) => hit.entry),
-        emptyMessage: search.unavailable
-          ? 'The library is still being indexed — search will work shortly.'
-          : `Nothing in the library mentions “${search.query.trim()}”.`,
+        emptyMessage: search.error
+          ? `Search failed: ${search.error}`
+          : search.unavailable
+            ? 'Document search is not available right now.'
+            : `Nothing in the library mentions “${search.query.trim()}”.`,
         // Under the name, not beside it: a match is a document plus the reason
         // it surfaced, and the two don't fit on one line.
         detailForEntry: (entry: FileEntry) => {
@@ -276,20 +279,29 @@ export function DocumentsView() {
       <FileBrowserPane
         source={source}
         titleReplacement={
-          <div className="documents-search">
-            <input
-              type="search"
-              className="documents-search-input"
-              placeholder={`${source.title} - search`}
-              aria-label="Search document contents"
-              value={search.query}
-              onChange={(e) => search.setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') search.clear();
-              }}
-            />
-            {search.searching && <span className="muted documents-search-status">searching…</span>}
-          </div>
+          runtimeCapabilities().search ? (
+            <div className="documents-search">
+              <input
+                type="search"
+                className="documents-search-input"
+                placeholder={`${source.title} - search`}
+                aria-label="Search document contents"
+                value={search.query}
+                onChange={(e) => search.setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') search.clear();
+                }}
+              />
+              {search.searching && (
+                <span className="muted documents-search-status">searching…</span>
+              )}
+              {!search.searching && search.partial && (
+                <output className="muted documents-search-status">
+                  Results may be incomplete. Refine your search.
+                </output>
+              )}
+            </div>
+          ) : undefined
         }
         customList={searchResultList}
         layoutClassName="project-files-layout-documents"
@@ -321,7 +333,9 @@ export function DocumentsView() {
           project locked out of the index status/controls (it is hidden from
           the sidebar, so no project tab could ever host this for it). Git
           chrome self-hides; what remains is the index pill + scan controls. */}
-      {libraryProjectId ? <ProjectGitStatusBar projectId={libraryProjectId} /> : null}
+      {libraryProjectId && (runtimeCapabilities().git || runtimeCapabilities().index) ? (
+        <ProjectGitStatusBar projectId={libraryProjectId} />
+      ) : null}
     </div>
   );
 }

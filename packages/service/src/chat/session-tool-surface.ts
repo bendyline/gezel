@@ -4,6 +4,7 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
+  applyStepToolPolicy,
   deliverableKindForStep,
   isLocalProvider,
   normalizeScriptRefs,
@@ -11,10 +12,7 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
-import {
-  builtinToolsetIdsDisabledForStep,
-  outputMediaForStep,
-} from '../craftbook/step-toolsets.js';
+import { outputMediaForStep } from '../craftbook/step-toolsets.js';
 import type { LocalModelTier } from './local-model-tier.js';
 import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
 import {
@@ -38,8 +36,8 @@ import {
   gateRepairToolsForKind,
   repairClampDisabled,
   stepGateRepairActive,
-  stepToolKit,
   stepToolKitDisabled,
+  unionStepKit,
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { shouldConstrainToExactCraftbookInvocation } from './turn-intent-plan.js';
@@ -192,35 +190,6 @@ export interface ResolveSessionToolSurfaceOptions {
 }
 
 type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>;
-type StepKitLike = NonNullable<ReturnType<typeof stepToolKit>>;
-
-/**
- * The kit for a generalist run: the active step's kit widened by every
- * other step's. `kind`/`path` stay the ACTIVE step's so the tier cap's
- * priority prefix still ranks the current deliverable's producers first.
- * Null only when no step in the run targets a file.
- */
-function unionStepKit(
-  activeStep: StepSurfaceInput,
-  steps: ReadonlyArray<StepSurfaceInput>,
-): StepKitLike | null {
-  const active = stepToolKit(activeStep);
-  if (steps.length <= 1) return active;
-  const tools = new Set<string>(active?.tools ?? []);
-  let kind = active?.kind;
-  let path = active?.path;
-  let anyKit = active !== null;
-  for (const step of steps) {
-    const kit = stepToolKit(step);
-    if (!kit) continue;
-    anyKit = true;
-    for (const tool of kit.tools) tools.add(tool);
-    kind ??= kit.kind;
-    path ??= kit.path;
-  }
-  if (!anyKit || kind === undefined) return null;
-  return { kind, path, tools } as StepKitLike;
-}
 
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
@@ -236,8 +205,6 @@ export function stepAllowsOnlyBuiltinTools(
   return !!names?.length && names.every((name) => Object.hasOwn(TOOL_REGISTRY, name));
 }
 
-const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
-
 /** Materialize the primary built-in roster when an unrestricted surface must be subtracted. */
 function allModelFacingBuiltinTools(): Set<string> {
   const out = new Set<string>();
@@ -247,70 +214,11 @@ function allModelFacingBuiltinTools(): Set<string> {
   return out;
 }
 
-/**
- * Apply the active step's authored JSON policy as a hard, subtractive
- * ceiling. This runs after role/kit grants so a prompt mention, planner
- * exception, tier floor, or explicit gezel toolset selection cannot revive
- * a tool the craftbook declared irrelevant for this phase.
- */
 export function applyActiveStepToolPolicy(
   allowlist: Set<string> | null,
   step: ResolveSessionToolSurfaceOptions['activeStep'],
 ): Set<string> | null {
-  const disabledGroups = builtinToolsetIdsDisabledForStep(step);
-  const exactAllowedTools = step?.toolPolicy?.allowTools;
-  const disabledTools = step?.toolPolicy?.disallowTools ?? [];
-  const explicitMedium = step?.toolPolicy?.outputMedium;
-  if (
-    disabledGroups.size === 0 &&
-    !exactAllowedTools &&
-    disabledTools.length === 0 &&
-    !explicitMedium
-  )
-    return allowlist;
-
-  const next = allowlist ? new Set(allowlist) : allModelFacingBuiltinTools();
-  for (const name of expandToolsetGroups([...disabledGroups])) next.delete(name);
-  for (const name of disabledTools) next.delete(name);
-  if (exactAllowedTools) {
-    const ceiling = new Set(exactAllowedTools);
-    for (const name of next) if (!ceiling.has(name)) next.delete(name);
-  }
-
-  if (explicitMedium) {
-    const allowedMedia = outputMediaForStep(step);
-    const workspaceWriters = expandToolsetGroups(['workspace-fs-write']);
-    const stripWorkspace = (): void => {
-      for (const name of workspaceWriters) next.delete(name);
-      // `derive_file` is grouped with execution but persists into workspace.
-      next.delete('derive_file');
-    };
-    const stripArtifact = (): void => {
-      next.delete('write_artifact');
-    };
-    const stripTaskNote = (): void => {
-      next.delete('write_task_note');
-    };
-    for (const name of SHARED_DOCUMENT_MUTATION_TOOLS) next.delete(name);
-
-    if (!allowedMedia.has('workspace')) stripWorkspace();
-    if (!allowedMedia.has('artifact')) stripArtifact();
-    if (!allowedMedia.has('task-note')) stripTaskNote();
-  }
-
-  // A broad subtractive policy may slim the task group, but it must not make
-  // the active workflow impossible to move or impossible to ask for a
-  // decision. An authored `allowTools`, however, is genuinely exact. Adding
-  // lifecycle escape hatches to a fixed-action step lets local models select
-  // the escape hatch instead of the one required action (wild-caught in the
-  // PR-review corpus opener, which repeated set_task_status indefinitely).
-  const workflowSafetyTools = exactAllowedTools
-    ? []
-    : ['advance_task_step', 'set_task_status', 'ask_user_question'];
-  for (const name of workflowSafetyTools) {
-    if (allowlist === null || allowlist.has(name)) next.add(name);
-  }
-  return next;
+  return applyStepToolPolicy(allowlist, step, allModelFacingBuiltinTools);
 }
 
 let platformUnavailableToolNames: ReadonlySet<string> | undefined;

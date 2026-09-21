@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { CraftbookParamForm } from './CraftbookParamForm.js';
 import { CraftbookToolsetSetup } from './CraftbookToolsetSetup.js';
 import { craftbookCommandName, renderCraftbookCommand } from './craftbook-command.js';
@@ -111,12 +112,13 @@ export function CommandsPanel({
   onStageCommand,
 }: Props) {
   const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
-  const showCommands = section === 'all' || section === 'commands';
-  const showScripts = section === 'all' || section === 'scripts';
-  const showCraftbooks = section === 'all' || section === 'tasks';
+  const showCommands =
+    runtimeCapabilities().terminal && (section === 'all' || section === 'commands');
+  const showScripts = runtimeCapabilities().index && (section === 'all' || section === 'scripts');
+  const showCraftbooks = runtimeCapabilities().tasks && (section === 'all' || section === 'tasks');
   // Skills + their pending imports ride with craftbooks in the `tasks`
   // slice, and stand alone in `skills`.
-  const showSkills = showCraftbooks || section === 'skills';
+  const showSkills = runtimeCapabilities().index && (showCraftbooks || section === 'skills');
   // The workspace index backs both the scripts groups and the machine-tools
   // group; the tasks- and skills-scoped panels skip it entirely.
   const needsIndex = showCommands || showScripts;

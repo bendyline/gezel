@@ -15,6 +15,7 @@ import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { SubmitArrow } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
@@ -615,6 +616,7 @@ export function ChatComposer({
       return;
     }
     if (addressChanged) setTurnIntentPlan(null);
+    if (!runtimeCapabilities().tasks) return;
     const timer = window.setTimeout(() => {
       void api
         .previewTurnIntent({
@@ -945,7 +947,12 @@ export function ChatComposer({
 
   const openSuggestions = useMemo(
     () =>
-      openCommandQuery === null ? [] : openChatSuggestions(openCommandQuery, recentReferences),
+      openCommandQuery === null
+        ? []
+        : openChatSuggestions(openCommandQuery, recentReferences).filter(
+            (suggestion) =>
+              runtimeCapabilities().externalFolders || suggestion.target.type !== 'folder',
+          ),
     [openCommandQuery, recentReferences],
   );
 
@@ -969,6 +976,9 @@ export function ChatComposer({
       setError(null);
       try {
         if (target.type === 'folder') {
+          if (!runtimeCapabilities().externalFolders) {
+            throw new Error('Open folders from the project’s Workspace or Artifacts tab.');
+          }
           await api.revealProject(projectId, target.folder);
         } else if (onOpenReference) {
           onOpenReference(target.reference);
@@ -1180,8 +1190,10 @@ export function ChatComposer({
         passiveCcGezelIds?: string[];
         draftId?: string;
       } = { message: userText };
-      if (mentionIds.length > 0) body.mentions = mentionIds;
-      if (ccIds.length > 0) body.passiveCcGezelIds = ccIds;
+      if (runtimeCapabilities().multiRecipientChat && mentionIds.length > 0)
+        body.mentions = mentionIds;
+      if (runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
+        body.passiveCcGezelIds = ccIds;
       if (sentDraftId) body.draftId = sentDraftId;
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
@@ -1336,7 +1348,7 @@ export function ChatComposer({
    */
   const queueNudge = useCallback(async () => {
     const sid = liveSessionIdRef.current;
-    if (!gezelId || !sid || engagementOff) return;
+    if (!runtimeCapabilities().queuedChat || !gezelId || !sid || engagementOff) return;
     const draftSnapshot = beginDraftSubmission();
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
@@ -1380,7 +1392,7 @@ export function ChatComposer({
    */
   const interruptWithDraft = useCallback(async () => {
     const sid = liveSessionIdRef.current;
-    if (!gezelId || !sid || engagementOff) return;
+    if (!runtimeCapabilities().queuedChat || !gezelId || !sid || engagementOff) return;
     const draftSnapshot = beginDraftSubmission();
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
@@ -1550,6 +1562,7 @@ export function ChatComposer({
           <ChatRecipientPicker
             gezels={recipientGezels}
             primaryGezelId={gezelId}
+            allowAdditionalRecipients={runtimeCapabilities().multiRecipientChat}
             additionalRecipientIds={additionalRecipientIds}
             roleBasedNameOnlyMode={roleBasedNameOnlyMode}
             onSelectPrimary={(nextGezelId) => {
@@ -1627,7 +1640,7 @@ export function ChatComposer({
           // it in Write and removes the document-oriented view tabs while
           // leaving one semantic hook for future chat-toolbar trimming.
           hostMode="chat"
-          mediaProvider={mediaProvider}
+          mediaProvider={runtimeCapabilities().chatAttachments ? mediaProvider : null}
           mentionProvider={mentionProvider}
           {...(placeholder ? { placeholder } : {})}
           imageDisplayMode="thumbnail"
@@ -1648,16 +1661,20 @@ export function ChatComposer({
           // The direct shortcuts upload into Squisq's accessory bin. Keep its
           // toggle available once populated and open the bin when the first
           // attachment arrives so non-image files have a visible home.
-          showFilesToggle
+          showFilesToggle={runtimeCapabilities().chatAttachments}
           {...CHAT_ACCESSORY_BIN_PROPS}
           fullWidth
           thinMargins
           toolbarSlotAfterActions={
-            <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+            runtimeCapabilities().chatAttachments ? (
+              <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+            ) : null
           }
           toolbarSlotRight={
             <>
-              <ComposerImageClipboard onError={setError} />
+              {runtimeCapabilities().chatAttachments && (
+                <ComposerImageClipboard onError={setError} />
+              )}
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
               {turnIntentPlan && (
                 <output
@@ -1669,12 +1686,14 @@ export function ChatComposer({
                   <span>{compactTurnIntentLabel(turnIntentPlan)}</span>
                 </output>
               )}
-              <ComposerNarrateButton
-                projectId={projectId}
-                disabled={!gezelId || engagementOff || draftSubmissionPending}
-                onAppendTranscript={appendNarratedText}
-                onError={setError}
-              />
+              {runtimeCapabilities().audio && (
+                <ComposerNarrateButton
+                  projectId={projectId}
+                  disabled={!gezelId || engagementOff || draftSubmissionPending}
+                  onAppendTranscript={appendNarratedText}
+                  onError={setError}
+                />
+              )}
               {openCommandQuery !== null ? (
                 <button
                   type="button"
@@ -1688,7 +1707,7 @@ export function ChatComposer({
                 </button>
               ) : turnActive ? (
                 <>
-                  {draftNonEmpty && !engagementOff && (
+                  {runtimeCapabilities().queuedChat && draftNonEmpty && !engagementOff && (
                     <>
                       <button
                         type="button"

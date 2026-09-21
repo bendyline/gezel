@@ -95,7 +95,9 @@ native/mobile/.build/host/build/gezel-llama-tests \
 
 Use the corresponding executable path if the host build used `--output`.
 Any short user prompt should produce only `a` characters with greedy sampling;
-the mobile plugin's 256-token budget produces 256 characters and a length stop.
+the smoke tests explicitly request a 256-token output budget and expect 256
+characters and a length stop. The ordinary app default is 1,024 output tokens,
+with per-model settings and a maximum of 4,096.
 
 ```sh
 python3 -m unittest discover -s native/mobile -p 'test_*.py'

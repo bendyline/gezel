@@ -38,9 +38,17 @@ enum AppleFoundationProvider {
         }
     }
 
+    static func requireContextBudget(promptTokens: Int, maxTokens: Int, contextSize: Int, modelContext: Int) throws {
+        let limit = min(contextSize, min(modelContext, 4096))
+        guard (512...4096).contains(contextSize), (1...maximumOutputTokens).contains(maxTokens),
+              modelContext > 0, promptTokens >= 0, promptTokens <= limit - maxTokens - 256 else {
+            throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.")
+        }
+    }
+
     @available(iOS 26.0, *)
     static func generate(
-        turns: [MobileChatTurn], maxTokens: Int,
+        turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
         onDelta: (String) throws -> Void
     ) async throws -> String {
         let readiness = availability()
@@ -84,9 +92,7 @@ enum AppleFoundationProvider {
             // conservatively bound this adapter's admission; no history is cut.
             promptTokens = turns.reduce(0, { $0 + $1.content.utf8.count + 32 })
         }
-        guard promptTokens + maxTokens + 256 <= readiness.contextTokens else {
-            throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.")
-        }
+        try requireContextBudget(promptTokens: promptTokens, maxTokens: maxTokens, contextSize: contextSize, modelContext: readiness.contextTokens)
         try Task.checkCancellation()
         // Fresh state on every turn. All prior messages come from the durable
         // app transcript; no hidden provider session can drift after restart.

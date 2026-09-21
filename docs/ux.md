@@ -325,9 +325,10 @@ testing; it never switches to a second application or a different data store.
 
 The native shell shares the responsive frame, brand, navigation rows, project
 section tabs, character renderer, palette, typography, and controls. Its current
-portable runtime supports one project and text conversations; unsupported
-capabilities are identified honestly until the existing domain operations/views
-are ported. Do not build a second mobile project/document UX to fill those gaps.
+portable runtime supports projects, crews, files, conversations, scripts and
+foreground tasks through the shared views. Host capability flags identify
+operations that require the desktop daemon. Do not build a second mobile
+project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
 Interactive targets are at least 44px, project tabs retain readable labels,
 and narrow file browsers use list → detail/back while keeping editors mounted.

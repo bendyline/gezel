@@ -218,6 +218,8 @@ export const BackupManifestSchema = z.object({
   createdAt: z.string(),
   gezelVersion: z.string(),
   platform: z.string(),
+  /** A replace restore must preserve the target's omitted working files. */
+  excludedWorkspaces: z.boolean().optional(),
   /**
    * The source install's external folder configuration, recorded for
    * diagnosis only. Restore never applies it: another machine's paths are

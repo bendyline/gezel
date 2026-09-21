@@ -79,9 +79,11 @@ async function packageLicenseFiles(packagePath) {
   return files.sort((a, b) => a.localeCompare(b));
 }
 
-async function stageDependencyLicenses() {
-  const inventory = readProductionLicenseInventory();
-  const textsDir = join(destination, 'npm', 'texts');
+export async function stageDependencyLicenses(
+  destinationRoot = destination,
+  inventory = readProductionLicenseInventory(),
+) {
+  const textsDir = join(destinationRoot, 'npm', 'texts');
   await mkdir(textsDir, { recursive: true });
   const records = [];
   const missing = [];
@@ -195,7 +197,7 @@ async function stageDependencyLicenses() {
     packages: records,
   };
   await writeFile(
-    join(destination, 'npm', 'manifest.json'),
+    join(destinationRoot, 'npm', 'manifest.json'),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
   return records.length;

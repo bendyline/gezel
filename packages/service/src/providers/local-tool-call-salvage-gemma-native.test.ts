@@ -101,6 +101,49 @@ describe('parseGemmaNativeToolCall', () => {
     expect(parsed?.arguments.content).toBe('const cfg = {"a": "b", c: 1};\n</html>\n');
   });
 
+  it('recovers a backtick-closed content followed by the path argument', () => {
+    // gemma4-12b closed a multi-line HTML string with a JS template-literal
+    // backtick; the whole tail, path included, became content and the
+    // validator rejected eight identical calls in a row (2026-09-20).
+    const body = `call:write_file{content:<|"|><!DOCTYPE html>
+<html lang="en">
+<body>
+    <p>Please make checks payable to Fieldnote Studio.</p>
+</body>
+</html>
+\`, path: "invoices/2026-043.html"}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.name).toBe('write_file');
+    expect(parsed?.arguments.path).toBe('invoices/2026-043.html');
+    expect(parsed?.arguments.content).toMatch(/^<!DOCTYPE html>/);
+    expect(parsed?.arguments.content).toMatch(/<\/html>\n$/);
+    expect(parsed?.arguments.content).not.toContain('path:');
+  });
+
+  it('recovers a triple-quote-closed content when the next value opens with the native quote', () => {
+    // The path value's opening <|"|> read as content's closer, so content
+    // swallowed `""",path:` and fifteen identical calls lost their path
+    // (gemma4-12b-q4 invoice child, 2026-09-21).
+    const body = `call:write_file{content:<|"|><!DOCTYPE html>
+<html><body>
+    <div class="total-section">Total: $975.00</div>
+</body>
+</html>
+""",path:<|"|>invoices/2026-044.html<|"|>}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.name).toBe('write_file');
+    expect(parsed?.arguments.path).toBe('invoices/2026-044.html');
+    expect(parsed?.arguments.content).toMatch(/^<!DOCTYPE html>/);
+    expect(parsed?.arguments.content).toMatch(/<\/html>\n$/);
+    expect(parsed?.arguments.content).not.toContain('path:');
+  });
+
+  it('keeps a native-quoted value that merely ends in quotes before a real closer', () => {
+    const body = `call:write_file{path:<|"|>notes.md<|"|>,content:<|"|>He said "done"<|"|>}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.arguments).toEqual({ path: 'notes.md', content: 'He said "done"' });
+  });
+
   it('recovers a single-quote-closed content followed by the closing brace', () => {
     const body = `call:write_file{path:<|"|>notes.md<|"|>,content:<|"|># Notes
 Done."}`;

@@ -3,6 +3,7 @@ import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
+import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
@@ -25,6 +26,8 @@ export const ProviderNameSchema = z.enum([
   'codex-cli',
   'ollama',
   'llama-cpp',
+  'apple-foundation-models',
+  'android-mlkit',
   'mlx',
   // DwarfStar/ds4 — antirez's specialized DeepSeek/GLM/Qwen MoE engine. Like
   // llama-cpp/mlx it serves an OpenAI-compatible HTTP API from a supervised
@@ -64,9 +67,16 @@ export type GezelGender = z.infer<typeof GezelGenderSchema>;
  * `p === 'ollama' || p === 'llama-cpp'` — adding a new local engine
  * should mean editing this list, not hunting down every site.
  */
-export const LOCAL_PROVIDER_NAMES: readonly ProviderName[] = ['ollama', 'llama-cpp', 'mlx', 'ds4'];
+export const LOCAL_PROVIDER_NAMES: readonly ProviderName[] = [
+  'ollama',
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+  'android-mlkit',
+];
 export function isLocalProvider(name: ProviderName): boolean {
-  return name === 'ollama' || name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
+  return LOCAL_PROVIDER_NAMES.includes(name);
 }
 
 /**
@@ -679,9 +689,17 @@ export type ContextCompaction = z.infer<typeof ContextCompactionSchema>;
  * inter-gezel handoff rather than a human composer turn.
  */
 export const ChatMessageSchema = z.object({
+  /** Stable per-message identity and durable foreground turn state, when supplied by the host. */
+  id: z.string().optional(),
+  status: z.enum(['complete', 'streaming', 'interrupted', 'error']).optional(),
+  error: z.string().optional(),
+  stopReason: z.enum(['stop', 'length', 'cancelled']).optional(),
+  providerId: ProviderNameSchema.optional(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   at: z.string(),
+  /** Durable per-turn execution hint; never a filesystem authorization grant. */
+  fileTurnIntent: FileTurnIntentSchema.optional(),
   from: z
     .object({
       gezelId: z.string(),

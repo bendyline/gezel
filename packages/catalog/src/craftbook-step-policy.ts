@@ -5,9 +5,13 @@ import type {
   NewCraftbookStep,
 } from '@bendyline/gezel';
 import {
+  additionalOutputMediaForStep,
   deliverableKindForStep,
-  requiredOutputMediaForGate,
-  stepOnEnterProducesAdvanceFile,
+  outputMediumForCraftbookBlueprint,
+} from '@bendyline/gezel';
+export {
+  outputMediumForCraftbookBlueprint,
+  outputMediaForCraftbookBlueprint,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from './builtin-toolsets.js';
 
@@ -44,9 +48,6 @@ const DECLARED_TOOLSET_SIGNALS: Readonly<Record<string, RegExp>> = {
   'microsoft-playwright-mcp': /\b(?:playwright|browser_|browser automation|headless browser)\b/i,
 };
 
-const TASK_NOTE_OUTPUT_SIGNAL =
-  /\bwrite_task_note\b|\b(?:write|record|append|summarize)[^.!?\n]{0,100}\b(?:task\s+)?notes?\b|\bwrite\s+PASS\s*\/\s*FAIL\b/i;
-
 function procedureText(step: NewCraftbookStep): string {
   return [step.name, step.description, step.prompt, step.suggestedRole].filter(Boolean).join('\n');
 }
@@ -56,84 +57,6 @@ function gateChecks(step: NewCraftbookStep): Array<Record<string, unknown>> {
   return gate && 'checks' in gate && Array.isArray(gate.checks)
     ? (gate.checks as Array<Record<string, unknown>>)
     : [];
-}
-
-/** Resolve the authored blueprint's primary result drawer without prompt inference. */
-export function outputMediumForCraftbookBlueprint(
-  step: NewCraftbookStep,
-): CraftbookStepOutputMedium {
-  const gateRequiredMedia = [...requiredOutputMediaForGate(step.gate)];
-  const runtimeOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
-  if (step.toolPolicy?.outputMedium) {
-    // A gate is an executable exit contract. It outranks a contradictory
-    // `none` annotation, which would otherwise author a step that cannot
-    // produce the state its own gate inspects.
-    if (step.toolPolicy.outputMedium === 'none' && gateRequiredMedia[0]) {
-      return gateRequiredMedia[0];
-    }
-    const advanceSurface = step.advanceWhen?.artifact ? 'artifact' : 'workspace';
-    if (runtimeOwnsAdvanceFile && step.toolPolicy.outputMedium === advanceSurface) {
-      return gateRequiredMedia[0] ?? 'none';
-    }
-    return step.toolPolicy.outputMedium;
-  }
-  if (step.deliverable?.path) return step.deliverable.artifact ? 'artifact' : 'workspace';
-  if (step.advanceWhen?.file && !runtimeOwnsAdvanceFile) {
-    return step.advanceWhen.artifact ? 'artifact' : 'workspace';
-  }
-  if (runtimeOwnsAdvanceFile) return gateRequiredMedia[0] ?? 'none';
-  const fileCheck = gateChecks(step).find(
-    (check) => typeof check.file === 'string' && check.file.length > 0,
-  );
-  if (fileCheck) return fileCheck.artifact === true ? 'artifact' : 'workspace';
-  if (gateRequiredMedia[0]) return gateRequiredMedia[0];
-  const text = procedureText(step);
-  if (
-    /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b/i.test(
-      text,
-    )
-  ) {
-    return 'workspace';
-  }
-  if (/\bwrite_artifact\b/i.test(text)) return 'artifact';
-  return TASK_NOTE_OUTPUT_SIGNAL.test(text) ? 'task-note' : 'none';
-}
-
-/**
- * Every output surface the authored step procedure requires after applying
- * the same inference used to persist generated policies. Runtime consumers
- * use this as a compatibility floor for tasks embedded from an older catalog
- * whose generated `additionalOutputMedia` predates the current detector.
- */
-export function outputMediaForCraftbookBlueprint(
-  step: NewCraftbookStep,
-): ReadonlySet<CraftbookStepWritableOutputMedium> {
-  const primary = outputMediumForCraftbookBlueprint(step);
-  return new Set([
-    ...(primary === 'none' ? [] : [primary]),
-    ...additionalOutputMediaForStep(step, primary),
-  ] as CraftbookStepWritableOutputMedium[]);
-}
-
-function additionalOutputMediaForStep(
-  step: NewCraftbookStep,
-  primary: CraftbookStepOutputMedium,
-): CraftbookStepWritableOutputMedium[] {
-  if (primary === 'none') return [];
-  const text = procedureText(step);
-  const out = new Set(step.toolPolicy?.additionalOutputMedia ?? []);
-  for (const medium of requiredOutputMediaForGate(step.gate)) out.add(medium);
-  if (
-    /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b|\b(?:edit|change|patch|fix)\b[^.!?\n]{0,80}\b(?:actual|workspace|source|project)\s+files?\b/i.test(
-      text,
-    )
-  ) {
-    out.add('workspace');
-  }
-  if (/\bwrite_artifact\b/i.test(text)) out.add('artifact');
-  if (TASK_NOTE_OUTPUT_SIGNAL.test(text)) out.add('task-note');
-  out.delete(primary as CraftbookStepWritableOutputMedium);
-  return [...out].sort();
 }
 
 function groupToolMentioned(groupId: string, text: string): boolean {

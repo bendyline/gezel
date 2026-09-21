@@ -84,7 +84,7 @@ describe('GreetingBand', () => {
   it('offers a Status report tab and renders the report panel when selected', () => {
     const onTabChange = vi.fn();
     renderBand({ statusReport: REPORT, onTabChange });
-    fireEvent.click(screen.getByRole('tab', { name: 'Status report' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Status report' }));
     expect(onTabChange).toHaveBeenCalledWith('status');
 
     renderBand({ statusReport: REPORT, tab: 'status' });

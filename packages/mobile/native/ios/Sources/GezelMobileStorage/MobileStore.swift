@@ -4,6 +4,7 @@ public struct MobileModel: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let sizeBytes: Int64
+    public var source: MobileModelSource? = nil
 }
 
 public struct MobileModelLibrary: Codable, Equatable, Sendable {
@@ -33,6 +34,7 @@ public final class MobileStore: @unchecked Sendable {
     public static let maximumStateBytes = 16 * 1024 * 1024
     public static let maximumModelBytes: Int64 = 4 * 1024 * 1024 * 1024
     private static let maximumLibraryBytes = 1024 * 1024
+    public let productFiles: ProductFiles
     private let root: URL
     private let modelsRoot: URL
     private let lock = NSRecursiveLock()
@@ -40,6 +42,7 @@ public final class MobileStore: @unchecked Sendable {
 
     public init(root: URL) throws {
         self.root = root
+        self.productFiles = try ProductFiles(root: root.appendingPathComponent("product", isDirectory: true))
         self.modelsRoot = root.appendingPathComponent("models", isDirectory: true)
         try fm.createDirectory(at: modelsRoot, withIntermediateDirectories: true)
         var modelDirectory = modelsRoot
@@ -104,6 +107,49 @@ public final class MobileStore: @unchecked Sendable {
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else { throw MobileStoreError.invalidState }
     }
 
+    public func downloadsDirectory() throws -> URL {
+        try synchronized {
+            let folder = root.appendingPathComponent("model-downloads", isDirectory: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            guard try folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { throw MobileStoreError.invalidModel }
+            var target = folder; var attributes = URLResourceValues(); attributes.isExcludedFromBackup = true
+            try target.setResourceValues(attributes)
+            return folder
+        }
+    }
+    public func downloadModelURL(id: String) throws -> URL {
+        guard Self.canonicalID(id) else { throw MobileStoreError.invalidModel }
+        return modelsRoot.appendingPathComponent("\(id).gguf")
+    }
+    /// The manager hashes the confined source before calling this atomic publication boundary.
+    public func publishDownloadedModel(id: String, name: String, source: MobileModelSource, file: URL) throws -> MobileModel {
+        try synchronized {
+            try source.validate(exact: true)
+            var library = try readLibrary()
+            if let existing = library.models.first(where: { $0.id == id }) {
+                guard existing.source == source else { throw MobileStoreError.invalidModel }
+                _ = try checkedModelURL(existing)
+                return existing
+            }
+            guard library.models.count < 100 else { throw MobileStoreError.libraryFull }
+            guard !name.isEmpty, name.utf16.count <= 200, !name.contains("\0") else { throw MobileStoreError.invalidModel }
+            let target = try downloadModelURL(id: id)
+            let partial = try downloadsDirectory().appendingPathComponent(id).appendingPathComponent("model.part")
+            guard file == target || file == partial else { throw MobileStoreError.invalidModel }
+            let values = try file.resourceValues(forKeys: [.fileSizeKey,.isRegularFileKey,.isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true, Int64(values.fileSize ?? 0) == source.sizeBytes else { throw MobileStoreError.invalidModel }
+            let input = try FileHandle(forReadingFrom: file); defer { try? input.close() }
+            guard try input.read(upToCount: 4) == Data("GGUF".utf8) else { throw MobileStoreError.invalidModel }
+            let model = MobileModel(id: id, name: name, sizeBytes: source.sizeBytes!, source: source)
+            if file != target { try fm.moveItem(at: file, to: target) }
+            library.models.append(model)
+            // A surviving file before the inventory commit is rehashed by the
+            // durable download id on resume. It is never selected implicitly.
+            try writeLibrary(library)
+            return model
+        }
+    }
+
     public func listModels() throws -> MobileModelLibrary {
         try synchronized { try readLibrary() }
     }
@@ -116,6 +162,15 @@ public final class MobileStore: @unchecked Sendable {
             library.selectedModelId = id
             try writeLibrary(library)
             return model
+        }
+    }
+
+    public func modelURL(id: String) throws -> (MobileModel, URL) {
+        try synchronized {
+            guard let model = try readLibrary().models.first(where: { $0.id == id }) else {
+                throw MobileStoreError.unknownModel
+            }
+            return (model, try checkedModelURL(model))
         }
     }
 
@@ -206,6 +261,7 @@ public final class MobileStore: @unchecked Sendable {
               library.models.allSatisfy({ Self.canonicalID($0.id) && !$0.name.isEmpty && $0.name.utf16.count <= 200 && !$0.name.contains("\0") && (4...Self.maximumModelBytes).contains($0.sizeBytes) }),
               library.selectedModelId == nil || library.models.contains(where: { $0.id == library.selectedModelId })
         else { throw MobileStoreError.invalidLibrary }
+        for model in library.models { if let source = model.source { try source.validate(exact: true); guard source.sizeBytes == model.sizeBytes else { throw MobileStoreError.invalidLibrary } } }
     }
 
     private func readLibrary() throws -> MobileModelLibrary {

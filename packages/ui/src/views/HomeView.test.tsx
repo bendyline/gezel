@@ -677,11 +677,11 @@ describe('HomeView', () => {
     await waitFor(() => {
       expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     });
-    const tourTab = screen.getByRole('tab', { name: tourName });
-    expect(tourTab).toHaveAttribute('aria-selected', 'false');
+    const tourTab = screen.getByRole('button', { name: tourName });
+    expect(tourTab).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(tourTab);
     // The tour content replaces the greeting + tip in the left column.
-    expect(tourTab).toHaveAttribute('aria-selected', 'true');
+    expect(tourTab).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
   });

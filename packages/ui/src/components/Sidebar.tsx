@@ -19,6 +19,7 @@ import {
 import { api } from '../api.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { ContextMenu, Tooltip } from '../primitives/index.js';
+import { runtimeCapabilities, supportsArea } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
@@ -277,6 +278,7 @@ export function Sidebar({
   const currentArea = selection?.kind === 'area' ? selection.area : null;
   const areaLinks = useMemo(() => {
     const links = AREA_LINKS.filter((area) => {
+      if (!supportsArea(area)) return false;
       if (area === 'scripts') return showAdvancedFeatures;
       // Knowledge appears the moment the user registers ≥1 catalog — the
       // rail flips exactly at that count, never from machine inventory.
@@ -290,7 +292,12 @@ export function Sidebar({
     // reachable by default through the Home "Save a routine" tip, which routes
     // to Scripts while Scripts is gated off. Group-backed areas are excluded:
     // they light their own Group header instead and would double-render.
-    if (currentArea && !links.includes(currentArea) && !GROUP_BACKED_AREAS.has(currentArea)) {
+    if (
+      currentArea &&
+      supportsArea(currentArea) &&
+      !links.includes(currentArea) &&
+      !GROUP_BACKED_AREAS.has(currentArea)
+    ) {
       const settingsAt = links.indexOf('settings');
       links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
     }
@@ -1033,7 +1040,7 @@ export function Sidebar({
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                       </button>
-                    ) : (
+                    ) : runtimeCapabilities().background ? (
                       <Tooltip.Hint
                         text={PROJECT_STATUS_DESCRIPTIONS[status]}
                         side="left"
@@ -1046,7 +1053,7 @@ export function Sidebar({
                           aria-label={`${p.name}: ${PROJECT_STATUS_DESCRIPTIONS[status]}`}
                         />
                       </Tooltip.Hint>
-                    )}
+                    ) : null}
                   </span>
                 </li>
               );
@@ -1069,12 +1076,14 @@ export function Sidebar({
           addTitle="New document"
           dropTarget={documentDropTarget}
           contextMenu={
-            <ContextMenu.Item
-              className="app-nav-menu-item"
-              onSelect={() => void revealDocumentsFolder()}
-            >
-              {documentsFolderContextLabel(window.__GEZEL__?.platform)}
-            </ContextMenu.Item>
+            runtimeCapabilities().externalFolders ? (
+              <ContextMenu.Item
+                className="app-nav-menu-item"
+                onSelect={() => void revealDocumentsFolder()}
+              >
+                {documentsFolderContextLabel(window.__GEZEL__?.platform)}
+              </ContextMenu.Item>
+            ) : undefined
           }
         >
           {quickDocs.length === 0 ? (

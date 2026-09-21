@@ -31,7 +31,7 @@ static void write_fixture(const char * path, const char * chat_template = "chatm
     CHECK(context && file);
     gguf_set_val_str(file, "general.architecture", "llama");
     gguf_set_val_str(file, "general.name", "Gezel deterministic native test fixture");
-    gguf_set_val_u32(file, "llama.context_length", 2048);
+    gguf_set_val_u32(file, "llama.context_length", 8192);
     gguf_set_val_u32(file, "llama.embedding_length", 32);
     gguf_set_val_u32(file, "llama.block_count", 1);
     gguf_set_val_u32(file, "llama.feed_forward_length", 64);

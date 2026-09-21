@@ -11,6 +11,7 @@ interface ChatRecipientPickerProps {
   roleBasedNameOnlyMode: boolean;
   onSelectPrimary: (gezelId: string) => void;
   onAddRecipient: (gezelId: string) => void;
+  allowAdditionalRecipients?: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export function ChatRecipientPicker({
   roleBasedNameOnlyMode,
   onSelectPrimary,
   onAddRecipient,
+  allowAdditionalRecipients = true,
 }: ChatRecipientPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -130,7 +132,7 @@ export function ChatRecipientPicker({
                 </button>
                 {isPrimary || isAdded ? (
                   <span className="chat-recipient-option-state">{isPrimary ? 'To' : 'Added'}</span>
-                ) : (
+                ) : allowAdditionalRecipients ? (
                   <button
                     type="button"
                     className="chat-recipient-add"
@@ -142,7 +144,7 @@ export function ChatRecipientPicker({
                       +
                     </span>
                   </button>
-                )}
+                ) : null}
               </div>
             );
           })}

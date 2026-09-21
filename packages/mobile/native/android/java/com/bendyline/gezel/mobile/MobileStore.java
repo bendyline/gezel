@@ -25,6 +25,7 @@ final class MobileStore {
     static final int MAX_MODELS = 100;
     static final long MAX_MODEL = 4L * 1024 * 1024 * 1024;
     private static final long DISK_RESERVE = 64L * 1024 * 1024;
+    final ProductFiles productFiles;
     private final File root;
     private final File models;
 
@@ -36,6 +37,7 @@ final class MobileStore {
         requireUnaliased(root);
         requireUnaliased(models);
         if (!models.isDirectory() && !models.mkdirs()) throw new IOException("Cannot create model storage");
+        productFiles = new ProductFiles(new File(root, "product"));
         File[] files = models.listFiles();
         if (files != null) for (File file : files) if (file.getName().endsWith(".partial")) file.delete();
     }
@@ -112,7 +114,13 @@ final class MobileStore {
             if (!UUID.fromString(id).toString().equals(id) || !ids.add(id) || name.isEmpty() || name.length() > 200
                     || !Double.isFinite(size) || size < 4 || size > MAX_MODEL || size != Math.rint(size))
                 throw new IOException("Invalid model library");
-            clean.put(new JSONObject().put("id", id).put("name", name).put("sizeBytes", (long) size));
+            JSONObject entry = new JSONObject().put("id", id).put("name", name).put("sizeBytes", (long) size);
+            if (model.has("source")) {
+                JSONObject source=ModelDownloadSource.validate(model.getJSONObject("source"),true);
+                if(source.getLong("sizeBytes")!=(long)size)throw new IOException("Model source length changed");
+                entry.put("source",source);
+            }
+            clean.put(entry);
         }
         JSONObject result = new JSONObject().put("models", clean);
         if (value.has("selectedModelId")) {
@@ -133,6 +141,43 @@ final class MobileStore {
         byte[] bytes = validateLibrary(value).toString().getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_LIBRARY) throw new IOException("The model library exceeds its size limit");
         atomicWrite(new File(root, "models.json"), bytes);
+    }
+
+    synchronized File downloadsRoot() throws IOException {
+        File folder = new File(root, "model-downloads");
+        requireUnaliased(folder);
+        if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Cannot create download storage");
+        return folder;
+    }
+    synchronized File downloadModelPath(String id) throws Exception { return modelPath(id); }
+    /** Called only after the transfer manager independently hashes this private file. */
+    synchronized JSObject publishDownloadedModel(String id, String name, JSONObject source, File partial) throws Exception {
+        source = ModelDownloadSource.validate(source, true);
+        JSONObject inventory = library();
+        JSONArray entries = inventory.getJSONArray("models");
+        for (int i=0; i<entries.length(); i++) if (entries.getJSONObject(i).getString("id").equals(id)) {
+            JSONObject existing = entries.getJSONObject(i);
+            if (!existing.has("source") || !existing.getJSONObject("source").toString().equals(source.toString())) throw new IOException("Downloaded model identity changed");
+            checkedPath(existing);
+            return JSObject.fromJSONObject(existing);
+        }
+        if (entries.length() >= MAX_MODELS) throw new IOException("The model library is full");
+        if (name.isEmpty() || name.length() > 200) throw new IOException("Invalid model name");
+        File target = modelPath(id);
+        File expected = new File(new File(downloadsRoot(), id), "model.part");
+        if (!partial.equals(target) && !partial.equals(expected)) throw new IOException("Invalid model staging path");
+        requireUnaliased(partial);
+        if (!partial.isFile() || partial.length() != source.getLong("sizeBytes")) throw new IOException("Downloaded model length changed");
+        try (FileInputStream file = new FileInputStream(partial)) {
+            if (file.read() != 'G' || file.read() != 'G' || file.read() != 'U' || file.read() != 'F') throw new IOException("Downloaded file is not a GGUF model");
+        }
+        JSONObject model = new JSONObject().put("id", id).put("name", name).put("sizeBytes", source.getLong("sizeBytes")).put("source", source);
+        if (!partial.equals(target)) Files.move(partial.toPath(), target.toPath());
+        entries.put(model);
+        // A crash between the rename and inventory write leaves the verified
+        // file discoverable by this download's durable id; resume rehashes it.
+        writeLibrary(inventory);
+        return JSObject.fromJSONObject(model);
     }
 
     synchronized JSObject listModels() throws Exception { return JSObject.fromJSONObject(library()); }
@@ -187,6 +232,11 @@ final class MobileStore {
             if (input.readInt() != 0x47475546) throw new IOException("Model is not a GGUF file");
         }
         return file;
+    }
+
+    synchronized String[] model(String id) throws Exception {
+        JSONObject entry = findModel(library(), id);
+        return new String[] { entry.getString("id"), checkedPath(entry).getAbsolutePath() };
     }
 
     synchronized String[] selectedModel() throws Exception {

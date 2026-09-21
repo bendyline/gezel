@@ -77,6 +77,7 @@ import {
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
 import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
+import { gateDampingHash } from './gate-damping.js';
 import {
   type DeliverableSurface,
   type EscalationStage,
@@ -2787,38 +2788,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         ...(extra ? { extra } : {}),
       });
 
-    // Repeat-reject damping: when the gated deliverable is byte-identical
-    // to what this gate last rejected, skip the re-evaluation — zero
-    // sandbox spawns, no attempt bump. Legacy behavior returned the cached
-    // rejection whose fingerprint the chat layer then deduped into
-    // SILENCE — a frozen resubmitter stopped being nudged entirely (the
-    // verified gap). Model-driven frozen resubmits now climb
-    // the escalation ladder instead: fresh stage directive, fresh
-    // fingerprint, so the nudge actually delivers.
-    //
-    // The hash covers ONE input: the `advanceWhen` deliverable. A gate
-    // script reads whatever it likes — `checkTaskNoteContains` reads the
-    // task NOTES — so for a scripted gate "byte-identical deliverable"
-    // does not imply "same verdict", and damping on it caches a verdict
-    // the model has already earned its way out of. Pull Request Review's
-    // `scope` gate is the wild-caught case: its deliverable is the batch
-    // file the runtime publishes onEnter and the prompt forbids touching,
-    // so the hash was immutable by construction while the note the script
-    // actually judges was rewritten twice. Three of four recorded
-    // "failures" never ran the check, and the ladder paused the task with
-    // a verdict that was false when it was replayed. Scripted gates
-    // re-evaluate; the plateau ladder in the rejection path below still
-    // terminates the loop, on verdicts that came from a real run.
-    let contentHash: string | undefined;
-    if (step.advanceWhen?.file && gate.scripts.length === 0) {
-      const content = await (step.advanceWhen.artifact
-        ? this.store.readProjectArtifact(projectId, step.advanceWhen.file)
-        : this.store.readProjectWorkspaceFile(projectId, step.advanceWhen.file)
-      ).catch(() => null);
-      if (content !== null) {
-        contentHash = createHash('sha256').update(content).digest('hex');
-      }
-    }
+    // Repeat-reject damping: when every file the gate reads is byte-identical
+    // to what it last rejected, skip the re-evaluation — zero sandbox spawns,
+    // no attempt bump. Legacy behavior returned the cached rejection whose
+    // fingerprint the chat layer then deduped into SILENCE — a frozen
+    // resubmitter stopped being nudged entirely (the verified gap).
+    // Model-driven frozen resubmits now climb the escalation ladder instead:
+    // fresh stage directive, fresh fingerprint, so the nudge actually
+    // delivers. Which inputs are hashed, and why scripted gates and
+    // multi-input checks are never damped, is gate-damping.ts's contract.
+    const contentHash = await gateDampingHash(gate, step, (file, artifact) =>
+      (artifact
+        ? this.store.readProjectArtifact(projectId, file)
+        : this.store.readProjectWorkspaceFile(projectId, file)
+      ).catch(() => null),
+    );
     if (
       contentHash !== undefined &&
       step.lastGateReject?.contentHash !== undefined &&

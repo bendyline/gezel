@@ -8,6 +8,7 @@ import { extractPlainText, parseMarkdown } from '@bendyline/squisq/markdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { ProgressiveNarrationPlayer } from './progressive-narration-player.js';
 
 type NarrationScope = 'document' | 'selection';
@@ -75,7 +76,11 @@ function triggerDownload(blob: Blob, name: string): void {
  * and playback live in a body-portaled transport so they survive view changes
  * inside the editor.
  */
-export function DocumentNarration({ fileName, projectId }: DocumentNarrationProps) {
+export function DocumentNarration(props: DocumentNarrationProps) {
+  return runtimeCapabilities().audio ? <AvailableDocumentNarration {...props} /> : null;
+}
+
+function AvailableDocumentNarration({ fileName, projectId }: DocumentNarrationProps) {
   const { markdownDoc, markdownSource } = useEditorContext();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCleanupRef = useRef<(() => void) | null>(null);

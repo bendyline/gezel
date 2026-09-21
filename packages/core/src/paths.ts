@@ -2,6 +2,18 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { assertSafeEntityId } from './entity-id.js';
+import {
+  PROJECT_DIFFPACKS_DIR_NAME,
+  PROJECT_PROMPTS_DIR_NAME,
+  PROJECT_SHADOW_DIR_NAME,
+  PROJECT_TABULAR_DIR_NAME,
+} from './storage-names.js';
+export {
+  PROJECT_DIFFPACKS_DIR_NAME,
+  PROJECT_PROMPTS_DIR_NAME,
+  PROJECT_SHADOW_DIR_NAME,
+  PROJECT_TABULAR_DIR_NAME,
+} from './storage-names.js';
 import { KnowledgeIdSchema, KnowledgeVersionSchema } from './schemas/knowledge.js';
 
 /**
@@ -496,7 +508,6 @@ export function projectArtifactsDir(
  * workspace, which may be read-only — and is a regenerable cache: write-denied
  * to gezels/users, safe to delete, rebuilt by indexing.
  */
-export const PROJECT_SHADOW_DIR_NAME = 'shadow';
 
 /** Per-project `artifacts/shadow/` root. */
 export function projectShadowDir(
@@ -525,7 +536,6 @@ export function projectShadowDir(
  * and `a.csv` cannot collide with `a.xlsx` — the same reasoning as the shadow
  * tree's `_files` convention.
  */
-export const PROJECT_TABULAR_DIR_NAME = 'tabular';
 
 /** Suffix marking one source file's companion directory under `tabular/`. */
 export const TABULAR_COMPANION_SUFFIX = '_tables';
@@ -570,7 +580,6 @@ export const OBSERVATION_TABLE_STATE_FILE = 'state.json';
  * `manifest.json`. Lives under artifacts — never the workspace, which is the
  * whole point: the gezel proposes, the user applies.
  */
-export const PROJECT_DIFFPACKS_DIR_NAME = 'diffpacks';
 
 /** Per-project `artifacts/diffpacks/` root. */
 export function projectDiffpacksDir(
@@ -598,7 +607,6 @@ export function projectDiffpackDir(
  * association, status, sent stamps). Lives under artifacts so a draft is an
  * ordinary inspectable file the user can open, back up, and grep.
  */
-export const PROJECT_PROMPTS_DIR_NAME = 'prompts';
 
 /** Per-project `artifacts/prompts/` root. */
 export function projectPromptsDir(

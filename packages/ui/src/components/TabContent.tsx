@@ -1,5 +1,6 @@
 import type { RecentTab } from '@bendyline/gezel';
 import { lazy } from 'react';
+import { CapabilityUnavailable, supportsTab } from '../runtime-capabilities.js';
 import {
   loadBenchmarksViewModule,
   loadCraftbookScriptEditorViewModule,
@@ -88,6 +89,8 @@ interface TabContentProps {
 
 export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: TabContentProps) {
   const debugMode = useDebugMode();
+  if (!supportsTab(tab))
+    return <CapabilityUnavailable feature={tab.kind === 'area' ? tab.area : tab.kind} />;
   switch (tab.kind) {
     case 'project':
       return <ProjectDetailView projectId={tab.id} />;

@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { DropdownChevron, DropdownMenu, Tabs } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
@@ -342,7 +343,7 @@ export function ChatReferences({
   // keeps empty project chats full-width and notices newly-added skills or
   // pending imports without requiring a reload.
   useEffect(() => {
-    if (!skillsProjectId) {
+    if (!runtimeCapabilities().index || !skillsProjectId) {
       setSkillsAvailableProjectId(null);
       return;
     }
@@ -1609,7 +1610,8 @@ function ReferenceViewer({
               reportPath={resolvedKind === 'artifact' ? reference.path : undefined}
               displayMode={isPresentation(reference.path) ? 'slideshow' : 'linear'}
             />
-          ) : isHtml(reference.path) &&
+          ) : runtimeCapabilities().htmlPreview &&
+            isHtml(reference.path) &&
             (resolvedKind === 'artifact' || resolvedKind === 'workspace') ? (
             // Artifact or workspace HTML both go through the shared
             // `HtmlPreviewFrame` primitive, which first mints a scoped

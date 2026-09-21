@@ -1,4 +1,5 @@
 import { api } from '../../api.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import type { FileEntry } from '../FileTree.js';
 
 /**
@@ -64,9 +65,13 @@ export function documentsFileSource(): FileBrowserSource {
     rename: async (fromPath, toPath) => {
       await api.renameDocument(fromPath, toPath);
     },
-    reveal: async () => {
-      await api.revealDocuments();
-    },
+    ...(runtimeCapabilities().externalFolders
+      ? {
+          reveal: async () => {
+            await api.revealDocuments();
+          },
+        }
+      : {}),
     changeEventPrefix: 'gezel:document',
   };
 }
@@ -113,8 +118,12 @@ export function projectFileSource(
       if (workspace) await api.renameProjectWorkspacePath(projectId, { fromPath, toPath });
       else await api.renameProjectArtifactPath(projectId, fromPath, toPath);
     },
-    reveal: async () => {
-      await api.revealProject(projectId, kind);
-    },
+    ...(runtimeCapabilities().externalFolders
+      ? {
+          reveal: async () => {
+            await api.revealProject(projectId, kind);
+          },
+        }
+      : {}),
   };
 }

@@ -198,22 +198,33 @@ export function HtmlPreviewFrame({
 
   useEffect(() => {
     let cancelled = false;
+    let dispose: (() => void) | undefined;
+    const hostPreview = window.__GEZEL__?.createHtmlPreview;
     onUrlReady?.(null);
-    const request =
-      source === 'workspace'
+    const request = hostPreview
+      ? hostPreview({ projectId, source, path })
+      : source === 'workspace'
         ? api.createProjectWorkspacePreviewUrl(projectId, path)
         : source === 'type'
           ? api.createProjectTypePreviewUrl(projectId, path)
           : api.createProjectPreviewUrl(projectId, path);
     void request
       .then((lease) => {
-        if (cancelled) return;
+        if ('dispose' in lease) dispose = lease.dispose;
+        if (cancelled) {
+          dispose?.();
+          return;
+        }
         // The in-app iframe stays on the same-origin HTTPS URL — a plain-HTTP
         // src would be blocked as mixed content. `onUrlReady` (external-browser
         // "open in browser") prefers the plain-HTTP URL when the daemon offers
         // one, so the system browser doesn't hit the self-signed-cert warning.
         setLoadState({ requestKey, status: 'ready', url: lease.url });
-        onUrlReady?.(lease.browserUrl ?? lease.url);
+        onUrlReady?.(
+          hostPreview
+            ? null
+            : (('browserUrl' in lease ? lease.browserUrl : undefined) ?? lease.url),
+        );
       })
       .catch((err) => {
         if (cancelled) return;
@@ -225,6 +236,7 @@ export function HtmlPreviewFrame({
       });
     return () => {
       cancelled = true;
+      dispose?.();
     };
   }, [projectId, path, source, requestKey, onUrlReady]);
 
@@ -493,6 +505,16 @@ export function HtmlPreviewFrame({
       };
       if (!data) return;
 
+      // Snapshot previews carry only the selected files. They never relay
+      // page reads, tools, watches or refresh messages into the product API.
+      if (
+        window.__GEZEL__?.createHtmlPreview &&
+        (data.__gezelPreviewLog !== true ||
+          data.__gezelPage === 1 ||
+          data.__gezelPageInvoke === true ||
+          data.__gezelPageRefresh === true)
+      )
+        return;
       if (data.__gezelPage === 1 && typeof (data as { kind?: unknown }).kind === 'string') {
         handleV1Message(data as unknown as Record<string, unknown>);
         return;
@@ -617,6 +639,12 @@ export function HtmlPreviewFrame({
       {...(src ? { src } : {})}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
+      {...(window.__GEZEL__?.createHtmlPreview
+        ? {
+            allow:
+              "camera 'none'; microphone 'none'; geolocation 'none'; accelerometer 'none'; gyroscope 'none'; magnetometer 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'",
+          }
+        : {})}
       {...(className ? { className } : {})}
     />
   );

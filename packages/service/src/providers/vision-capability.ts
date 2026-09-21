@@ -58,6 +58,8 @@ const VISION_NATIVE: Record<ProviderName, 'always' | 'never' | 'per-model'> = {
    */
   ollama: 'never',
   'llama-cpp': 'per-model',
+  'apple-foundation-models': 'never',
+  'android-mlkit': 'never',
   mlx: 'per-model',
   /**
    * ds4 accepts OpenAI image content only when its model-matched encoder was

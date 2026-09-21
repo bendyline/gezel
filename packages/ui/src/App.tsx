@@ -37,8 +37,10 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { DropdownMenu } from './primitives/index.js';
+import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -145,6 +147,8 @@ export function App() {
 function FullApp() {
   const { compact, preview, exitPreview } = useResponsiveLayout();
   const [navigationOpen, setNavigationOpen] = useState(true);
+  const openNavigation = useCallback(() => setNavigationOpen(true), []);
+  useBackNavigation(compact, navigationOpen, openNavigation);
   // Random vertical slice into the wood texture, picked once per app
   // launch so each session shows a different band of grain across the
   // titlebar. The CSS renders the 1024-tall source compressed to
@@ -302,10 +306,11 @@ function FullApp() {
         setEngagementMode((cfg.aiEngagementMode ?? 'proactive') as EngagementMode);
       })
       .catch(() => {});
-    api
-      .getNightShiftStatus()
-      .then(setNightShift)
-      .catch(() => {});
+    if (runtimeCapabilities().background)
+      api
+        .getNightShiftStatus()
+        .then(setNightShift)
+        .catch(() => {});
     // Reconcile the local theme cache against the server-side pref —
     // localStorage strands itself across Electron's ephemeral-port
     // shuffle, so the gezel config is the cross-boot source of truth.
@@ -471,6 +476,7 @@ function FullApp() {
   }, []);
 
   const refreshUsage = useCallback(() => {
+    if (!runtimeCapabilities().daemonSettings) return;
     api
       .getUsage()
       .then(setUsage)
@@ -488,6 +494,7 @@ function FullApp() {
   // envelope arrives — same global stream the Home pane subscribes to,
   // so a single source feeds both surfaces.
   const refreshPendingCount = useCallback(() => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     api
       .listQuestions({ pending: true })
       .then((r) => {
@@ -687,11 +694,13 @@ function FullApp() {
       {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
           to navigate to Settings → Connected Apps. */}
-      <GrantConsentDialog />
-      <MacUninstallDialog />
-      <StorageCleanupDialog />
-      <BackupRestoreDialog />
-      <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
+      {runtimeCapabilities().connections && <GrantConsentDialog />}
+      {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
+      {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}
+      {runtimeCapabilities().backups && <BackupRestoreDialog />}
+      {runtimeCapabilities().daemonSettings && (
+        <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
+      )}
       {/* The top bar is now status-only — it remains the OS title bar (drag
           region + native window-control reservations via CSS padding). The
           brand mark routes to the Meester home; navigation lives in the
@@ -732,23 +741,31 @@ function FullApp() {
             because only its right edge moves when it shrinks, the results
             palette hangs off its left edge (`align="start"`) and holds still
             while the pills breathe. */}
-          <TitlebarSearch />
-          <SearchResultsOverlay />
+          {runtimeCapabilities().search && (
+            <>
+              <TitlebarSearch />
+              <SearchResultsOverlay />
+            </>
+          )}
           {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
-            <QueueMeter />
-            <BoekwachterPill />
-            <EngineStatusPill />
-            <ClaudeCliPoolPill />
-            <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-            <TaskSpeedMenu
-              mode={engagementMode}
-              nightShift={nightShift}
-              onNightShiftChange={setNightShift}
-            />
+            {runtimeCapabilities().daemonSettings && (
+              <>
+                <QueueMeter />
+                <BoekwachterPill />
+                <EngineStatusPill />
+                <ClaudeCliPoolPill />
+                <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
+                <TaskSpeedMenu
+                  mode={engagementMode}
+                  nightShift={nightShift}
+                  onNightShiftChange={setNightShift}
+                />
+              </>
+            )}
             {outputPaneMaximized && (
               <button
                 type="button"
@@ -808,7 +825,7 @@ function FullApp() {
           {navigationOpen ? (
             <span className="app-compact-navigation-title">Your workshop</span>
           ) : (
-            <button type="button" onClick={() => setNavigationOpen(true)}>
+            <button type="button" onClick={openNavigation}>
               <span aria-hidden="true">← </span>Navigation
             </button>
           )}

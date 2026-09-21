@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type CraftbookTemplateManifest, createLogger } from '@bendyline/gezel';
+export { craftbookScriptHeader, craftbookScriptProvenance } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   craftbookShardPrefix,
@@ -236,23 +237,6 @@ export async function installCraftbookScripts(
     );
   }
   return { installed, skipped };
-}
-
-/**
- * True iff the given on-disk script came from a craftbook (the first
- * line matches the provenance marker). Used by the uninstall path
- * and by audit views to flag "this script is managed by craftbook X."
- */
-export function craftbookScriptProvenance(content: string): string | null {
-  if (!content.startsWith(PROVENANCE_MARKER)) return null;
-  const newlineIdx = content.indexOf('\n');
-  const line = newlineIdx === -1 ? content : content.slice(0, newlineIdx);
-  return line.slice(PROVENANCE_MARKER.length).trim();
-}
-
-/** Helper exported for tests so they can construct expected file content. */
-export function craftbookScriptHeader(craftbookId: string, version: string): string {
-  return `${PROVENANCE_MARKER} ${craftbookId}@${version}\n`;
 }
 
 const IMPORT_MARKER = '// @gezel-import:';

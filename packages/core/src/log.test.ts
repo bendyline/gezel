@@ -67,6 +67,27 @@ describe('logger', () => {
     expect(err.lines.some((l) => l.includes('ERROR [test] boom'))).toBe(true);
   });
 
+  it('logs through the browser console when no process exists', () => {
+    setLogLevel('info');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logger = createLogger('browser');
+    vi.stubGlobal('process', undefined);
+    try {
+      logger.info('Ready', { local: true });
+      logger.warn('A listener failed');
+      logger.debug('Filtered');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('INFO  [browser] Ready'), {
+      local: true,
+    });
+    expect(error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('WARN  [browser] A listener failed'),
+    );
+  });
+
   it('silent drops everything', () => {
     setLogLevel('silent');
     const out = captureStdout();

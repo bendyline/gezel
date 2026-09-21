@@ -1,4 +1,9 @@
-import type { GezelSummary, Project, RecentTab } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  OFFLINE_RUNTIME_CAPABILITIES,
+  type Project,
+  type RecentTab,
+} from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -84,6 +89,7 @@ describe('Sidebar', () => {
       ...window.__GEZEL__,
       token: window.__GEZEL__?.token ?? 'test-token',
       platform: 'linux',
+      capabilities: undefined,
     };
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
@@ -1035,5 +1041,41 @@ describe('Sidebar', () => {
       expect(onOpenArea).toHaveBeenCalledWith('settings');
       expect(navigated).toContainEqual({ view: 'settings', section: 'about' });
     });
+  });
+});
+
+describe('Sidebar on an offline host', () => {
+  it('keeps the desktop entity groups and hides unavailable areas even when restored', async () => {
+    const bridge = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test-token', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      vi.mocked(api.getConfig).mockResolvedValue({ showAdvancedFeatures: true } as never);
+      vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
+      vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
+      vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
+      const view = render(
+        <Sidebar
+          selection={{ kind: 'area', area: 'tasks' } as RecentTab}
+          onSelect={() => {}}
+          onOpenArea={() => {}}
+          activeProjectIds={new Set()}
+          activeGezelIds={new Set()}
+          pendingByProject={new Map()}
+          poisonedProjects={new Map()}
+        />,
+      );
+      await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+      expect(screen.getByText('Projects')).toBeInTheDocument();
+      expect(screen.getByText('Documents')).toBeInTheDocument();
+      expect(screen.getByText('Gezellen')).toBeInTheDocument();
+      expect(screen.getByText('Tasks')).toBeInTheDocument();
+      expect(await screen.findByText('Scripts')).toBeInTheDocument();
+      expect(screen.queryByText('Craftbooks')).not.toBeInTheDocument();
+      expect(screen.queryByText('History')).not.toBeInTheDocument();
+      expect(api.listKnowledgeCatalogs).not.toHaveBeenCalled();
+      view.unmount();
+    } finally {
+      window.__GEZEL__ = bridge;
+    }
   });
 });

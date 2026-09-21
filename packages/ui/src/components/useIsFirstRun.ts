@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Whether the app is still in first-run onboarding — no working AI provider
@@ -21,6 +22,9 @@ async function estimateFirstRun(): Promise<boolean> {
   try {
     const cfg = await api.getConfig();
     const p = cfg.provider;
+    if (!runtimeCapabilities().daemonSettings) {
+      return !(await api.testProvider(p ?? 'llama-cpp')).ok;
+    }
     if (p === 'copilot') {
       // Copilot's runtime is an opt-in download, so "installed" is the real
       // question — a stored PAT with no SDK on disk still can't chat. Fall

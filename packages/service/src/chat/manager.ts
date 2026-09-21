@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { taskTranscriptCompatible } from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
@@ -54,6 +55,7 @@ import {
   normalizeScriptRefs,
   normalizeStepGate,
   nowIso,
+  oneShotSystemMessage,
   parseGezelMentionId,
   parseTaskRef,
   profileKind,
@@ -4073,12 +4075,6 @@ export class ChatManager extends LocalEngineRuntime {
         previous?.gezelId === args.gezelId &&
         previous.stepId !== dispatchStepId) ||
       (generalistTask && previous?.gezelId === args.gezelId);
-    const desiredModel =
-      dispatchGezel?.parsed.frontmatter.model ??
-      configuredNightShiftModel ??
-      routed?.model ??
-      dispatchConfig.defaultModel?.[dispatchProviderName];
-
     // Preserve the transcript across adjacent same-gezel steps. This is
     // particularly important for fixed-action evidence steps: their durable
     // History receipt proves the read happened, while the provider transcript
@@ -4091,11 +4087,16 @@ export class ChatManager extends LocalEngineRuntime {
     let reusedAcrossSteps = false;
     let resumedExisting = false;
     let session: ChatSession | null = null;
-    const compatibleTranscript = (prior: ChatSession): boolean =>
-      prior.providerName === dispatchProviderName &&
-      (desiredModel === undefined || prior.model === desiredModel) &&
-      Boolean(prior.nightShift) === Boolean(args.nightShift) &&
-      (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode;
+    const transcriptTarget = {
+      providerName: dispatchProviderName,
+      model:
+        dispatchGezel?.parsed.frontmatter.model ??
+        configuredNightShiftModel ??
+        routed?.model ??
+        dispatchConfig.defaultModel?.[dispatchProviderName],
+      nightShift: args.nightShift,
+      roleBasedNameOnlyMode,
+    };
     if (
       args.kind !== 'entry' &&
       args.kind !== 'retry' &&
@@ -4111,12 +4112,12 @@ export class ChatManager extends LocalEngineRuntime {
       ((this.pendingSends.get(previous.id)?.length ?? 0) === 0 || generalistTask)
     ) {
       const prior = await this.store.getSession(args.gezelId, previous.id);
-      if (prior && compatibleTranscript(prior)) {
+      if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
         session = prior;
         reusedAcrossSteps = true;
       } else if (prior && generalistTask) {
         log.warn(
-          `[chat] generalist continuity broken for ${args.taskRef}: session ${prior.id.slice(0, 8)} ran on ${prior.providerName}/${prior.model ?? 'default'}, step "${dispatchStepId}" dispatches on ${dispatchProviderName}/${desiredModel ?? 'default'}; opening a fresh session`,
+          `[chat] generalist continuity broken for ${args.taskRef}: session ${prior.id.slice(0, 8)} ran on ${prior.providerName}/${prior.model ?? 'default'}, step "${dispatchStepId}" dispatches on ${dispatchProviderName}/${transcriptTarget.model ?? 'default'}; opening a fresh session`,
         );
       }
     }
@@ -4166,7 +4167,7 @@ export class ChatManager extends LocalEngineRuntime {
             candidate.stepId !== dispatchStepId,
         );
         const prior = adjacent ? await this.store.getSession(args.gezelId, adjacent.id) : null;
-        if (prior && compatibleTranscript(prior)) {
+        if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
           session = prior;
           resumedExisting = true;
           reusedAcrossSteps = true;
@@ -11265,9 +11266,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    const baseSystem =
-      'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
-    const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const systemMessage = oneShotSystemMessage(personaAbout);
     const sessionDefaults = opts.tuningProfileId
       ? await wait(
           this.resolveModelSessionDefaults(effectiveProviderName, model, {

@@ -8,7 +8,7 @@ import type {
   Task,
 } from '@bendyline/gezel';
 import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab } from './nav-actions.js';
@@ -1095,6 +1095,7 @@ function PendingForm({
   choiceDescriptions?: (string | undefined)[];
   skipHint?: string;
 }) {
+  const promptId = useId();
   const allowWriteIn = question.allowWriteIn ?? true;
   const multi = question.multiSelect ?? false;
   const choices = question.choices ?? [];
@@ -1179,13 +1180,13 @@ function PendingForm({
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
       {kicker && <span className="pending-question-label muted">{kicker}</span>}
-      <div className="pending-question-prompt">
+      <div className="pending-question-prompt" id={promptId}>
         <RenderedMarkdown markdown={question.prompt} />
       </div>
       {choices.length > 0 && (
-        <div
+        <fieldset
           className={`pending-question-choices${multi ? ' is-multi' : ''}`}
-          role={multi ? 'group' : 'radiogroup'}
+          aria-labelledby={promptId}
         >
           {choices.map((choice, i) =>
             autoSubmit ? (
@@ -1218,11 +1219,13 @@ function PendingForm({
               </button>
             ),
           )}
-        </div>
+        </fieldset>
       )}
       {allowWriteIn && (
         <textarea
           className="pending-question-write-in"
+          aria-label={choices.length > 0 ? 'Add a note (optional)' : 'Your answer'}
+          aria-describedby={promptId}
           placeholder={choices.length > 0 ? 'Add a note (optional)…' : 'Type your answer…'}
           rows={2}
           value={writeIn}
@@ -1230,7 +1233,11 @@ function PendingForm({
           disabled={submitting}
         />
       )}
-      {error && <p className="pending-question-error">{error}</p>}
+      {error && (
+        <p className="pending-question-error" role="alert">
+          {error}
+        </p>
+      )}
       <div className="pending-question-actions">
         {!autoSubmit && (
           <>

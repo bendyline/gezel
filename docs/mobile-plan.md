@@ -1,30 +1,16 @@
 # Gezel on Android, iPhone, and iPad
 
-Implementation plan — 2026-09-19. Based on the current checkout and linked upstream documentation. The increments below describe the implemented foreground conversation preview; the broader product architecture and release gates remain planned. Effort estimates are planning ranges, not delivery commitments.
+Implementation plan — 2026-09-19. Based on the current checkout and linked upstream documentation. The status below describes the shared offline product increment; the broader product architecture and release gates remain planned. Effort estimates are planning ranges, not delivery commitments.
 
-**First implementation increment**
+**Current implementation — shared product correction (2026-09-20)**
 
-- The SDK now exposes a platform-independent `createGezelSDK(transport)` factory through `@bendyline/gezel-sdk/portable`. Desktop scripts keep the existing default import and fd-3 transport.
-- `ScriptRunner` delegates execution through a host-selected `ScriptExecutor`. The existing Node sandbox remains the default. Metadata validation, capability checks, engagement restrictions, output validation, audit history, and redaction remain in the runner/dispatcher.
-- [`@bendyline/gezel-script-runtime`](../packages/script-runtime/README.md) implements an experimental QuickJS-WASM executor. The desktop service can exercise it in a dedicated worker with the actual SDK and dispatcher, bounded memory/calls/messages, cancellation, and awake-time deadlines. Selection is a trusted host constructor option, never script metadata. This is a portability/conformance harness; mobile native QuickJS integration remains open.
-- [`native/mobile`](../native/mobile/README.md) builds pinned llama.cpp libraries for iOS and Android. The iOS arm64 device/simulator XCFramework built successfully, passed link probes, and imported from Swift. Android ARM64 libraries and the JNI app compile with NDK r28c, pass link probes and 16 KiB ELF/APK alignment checks, and run deterministic inference on an API 36 emulator. Physical-phone inference remains unverified.
+Mobile now boots the actual desktop React app through its existing typed client and injected Fetch transport. `@bendyline/gezel/runtime` supplies ordinary projects, named crew, Meester identity, the shared document-library project, workspace/artifact files, drafts, sessions, and chat events through confined filesystem and native inference ports. A viewport breakpoint controls presentation; runtime capabilities control available operations. The separate mobile chat screen, snapshot client, and worker protocol have been retired. There is no migration because mobile has not shipped.
 
-**Second implementation increment**
+The foreground runtime now executes bounded crew handoffs, audited file/memory/task tools, bundled QuickJS scripts, and task steps with durable checkpoints and completion gates. It includes lexical search, ordinary daily memories, and reviewed ZIP backup/restore through the shared UI. Role kits, step tool restrictions, script policy, metadata parsing, and deterministic gate predicates share implementations with desktop. Catalog templates and compatible craftbooks are bundled from the pinned Gilde package; mobile does not maintain a second content collection.
 
-- [`packages/mobile`](../packages/mobile/README.md) provides a Capacitor shell, a phone/tablet React screen reusing Gezel's characters and visual tokens, and a dedicated product Web Worker connected through typed client requests and snapshot events.
-- A portable, versioned conversation store persists the Meester/default project, explicitly saved poppetje, and local sessions. User messages are durable before inference; interrupted turns recover without automatic reruns. Native storage uses atomic JSON replacement; browser previews use a separate IndexedDB database.
-- Native Swift/Java plugins import GGUF files through document pickers and expose opaque model IDs. The versioned C ABI now supplies bounded text chat, UTF-8 streaming, matching-request cancellation, and structured errors. This does not establish desktop tool-call parity.
-- Real llama.cpp host tests execute a generated untrained tiny GGUF; the iOS app compiles against device/simulator libraries. An app-hosted simulator test verifies native persistence, streamed decoding, cancellation, and engine reuse. Phone/tablet browser checks exercise the actual worker and durable reload. Android instrumentation now exercises real JNI streaming, cancellation, concurrent-operation rejection, callback failures, engine reuse, and storage recovery/confinement. Trained-model quality and physical-device resource testing remain open.
+Imported models are pinned per conversation and use persisted context/reply budgets with native memory/thermal admission checks. Verified resumable downloads resolve exact size and enforce immutable source identities and hashes. Apple Foundation Models and Android ML Kit remain explicit native text providers. Offline TypeScript authoring, embedded craftbook scripts, nested QuickJS execution, and isolated native HTML previews now share the desktop product surfaces. The portable adapter implements a strict JSON tool protocol above the native text providers; trained-model tool reliability and physical-device support tiers still require evaluation. Semantic indexing, background orchestration, broad desktop craftbook/tool coverage, companion authorization, signing, and distribution remain release work. See [the parity status](mobile-parity.md) for the implemented boundaries and outstanding gates.
 
-**Third implementation increment — provider and product hardening**
-
-- Strict core provider descriptors carry readiness/reason, on-device locality, context/output budgets, and conservative text-only capabilities. Selection persists across restart and is pinned for each turn; fresh availability checks fail clearly without provider or network fallback. Older v1 snapshots remain readable.
-- The iOS adapter uses Apple Foundation Models explicitly on-device, with role-preserving transcript reconstruction, streaming, token admission, availability reporting, cancellation, and foreground/resource constraints. Real system-model inference and cancellation have run in a simulator. The current adapter compiles with Xcode 27 and weak-links the optional framework so the base app can still run below iOS 26.
-- Android integrates the approved, exact-pinned ML Kit Prompt API `1.0.0-beta4` through its Java futures API. Readiness probes never start downloads; preparation/cancellation are explicit actions. The adapter bounds context/output and closes its SDK client before releasing the turn. The app compiles against the real SDK and correctly reports system AI unavailable on the test emulator; ML Kit preparation/inference still requires eligible physical-device verification.
-- The product slice adds local conversation search, durable rename/delete, confirmed model removal, bounded model inventories and import disk checks, explicit storage/cancellation recovery, and protection against stale browser tabs overwriting state. Failed/empty turn pairs stay out of later prompts. Removing a selected model never silently chooses another.
-- Mobile CI now builds the web bundle separately and runs runtime/bridge tests plus phone/tablet browser smoke. The iOS native suite checks persistence, model removal, readiness, inference, cancellation, and engine reuse. The local Android suite covers storage and JNI contracts plus the actual Capacitor WebView's navigation, model selection, native chat, conversation management, and durable reload. This evidence does not replace a physical-device or model-quality matrix.
-
-This is a working increment of Phase 3, not completion of its full acceptance gate. Remaining work includes resumable verified GGUF catalog downloads, measured device admission tiers, capability-filtered catalog content, scoped native credentials for explicit cloud/paired inference, and representative quality/resource tests on physical devices. The portable store/tools also still need expansion beyond conversation-only use. Desktop companion product authorization remains separate. The broader sections below describe the target architecture rather than shipped mobile functionality.
+See [the mobile host README](../packages/mobile/README.md) for current commands, persistence guarantees, test coverage, and limitations. The phases below describe the broader target and release gates; they are not a claim of complete desktop parity.
 
 **Recommendation**
 
@@ -35,14 +21,7 @@ the same backend and user state. The explicit `?layout=mobile` preview is a widt
 constraint on that same app. Narrow layout changes navigation and pane placement,
 not domain behavior, entities, or the current draft.
 
-The initial standalone conversation UI was an integration harness and is being
-retired as a separate product direction. Desktop and native now share the shell,
-navigation presentation, brand, and project section tabs. Desktop narrow mode
-runs the existing views; the native runtime still needs the project/document/tool
-operations behind those views extracted through portable ports before full UI
-reuse is possible. Capability gaps must not be filled with fake data or a second
-mobile implementation of each view. Move model setup into Settings and keep the
-Meester/project navigation as the front door.
+The initial standalone conversation screen was an integration harness. The native host now uses the existing App, Sidebar, Projects, Gezellen, Documents, file editor, timeline, composer, and Settings. Capability gaps are explicit and cannot be filled with fake data or another mobile view. Further porting belongs behind the same client/domain boundary.
 
 Build a mobile application that can own its gezels, conversations, documents, and short tasks locally. Reuse the React UI through a Capacitor shell, extract a small portable TypeScript product runtime, embed llama.cpp as a native library, and introduce a QuickJS implementation of the script execution interface. Add Apple and Android system AI as separately evaluated providers. Keep desktop connectivity as a complementary mode for larger models and work requiring a computer.
 
@@ -108,16 +87,16 @@ flowchart TD
   Models --> Network[Paired inference or cloud]
 ```
 
-The trusted product runtime runs as bundled JavaScript in a dedicated Web Worker for the foreground-first release. A small main-thread bridge forwards typed messages to native plugins; do not assume Capacitor plugins work directly inside a worker. Native inference, file I/O, downloads, and script evaluation run off the UI thread. Lifecycle events checkpoint the runtime before suspension when possible; durability must also withstand termination without a final callback.
+The implemented foreground host runs the bundled portable product runtime beside the shared UI, behind the client's asynchronous Fetch boundary. Native inference and filesystem operations run on native queues. The former custom worker protocol has been removed. A worker can be introduced behind this same boundary if measured CPU work requires it; it must not introduce a second product API. Durability must withstand termination without a final lifecycle callback.
 
-Do not run user scripts in that worker or the UI's JavaScript context. Do not use QuickJS as a way to boot the existing Node daemon. App-owned TypeScript and untrusted script execution have different requirements.
+Future user scripts must execute in an isolated QuickJS runtime, outside the trusted product/UI JavaScript context. Do not use QuickJS as a way to boot the existing Node daemon. App-owned TypeScript and untrusted script execution have different requirements.
 
 Suggested module boundaries, introduced only as working slices need them:
 
 | Proposed location | Responsibility |
 | --- | --- |
 | `packages/mobile` | Capacitor app, Swift/Java plugins, lifecycle, platform permissions, mobile composition root |
-| `packages/runtime-core` | Portable session/turn orchestration, Store domain operations, task transitions, capability evaluation; no Node, DOM, or native imports |
+| `packages/core/src/runtime` (`@bendyline/gezel/runtime`) | Implemented portable Store, foreground turns, and shared event bus; subsequent extractions belong here behind host ports, with no Node or native imports |
 | `packages/script-runtime` | Script execution interface, portable SDK transport, compilation/metadata contract, QuickJS adapter boundary |
 | `native/mobile` | Small stable C ABI over llama.cpp, reproducible iOS/Android library builds, native test harness |
 | Existing service and client | Desktop adapters, HTTP transport, and contracts shared with the mobile transport |
@@ -194,7 +173,7 @@ Terminal commands, arbitrary npm imports, Python, CLI providers, and stdio MCP r
 
 **7. Storage, tools, and lifecycle**
 
-Preserve ordinary Markdown/JSON for canonical crew, project, session, and task data inside the app container. Extract a storage port beneath Store; do not create a second persistence system in React or let UI components write product files directly. Require serialized writes, atomic replacement where supported, transaction recovery, versioned migrations, and interruption tests. On mobile, credentials live in Keychain/Keystore-backed native storage rather than renderer storage.
+Preserve ordinary Markdown/JSON for canonical crew, project, session, and task data inside the app container. Extract a storage port beneath Store; do not create a second persistence system in React or let UI components write product files directly. Require serialized writes, atomic replacement where supported, transaction recovery, versioned schemas, and interruption tests. On mobile, credentials live in Keychain/Keystore-backed native storage rather than renderer storage.
 
 External files are scoped resources: Android's [Storage Access Framework](https://developer.android.com/training/data-storage/shared/documents-files) returns granted URIs; iOS uses [document-picker directory access](https://developer.apple.com/documentation/uikit/providing-access-to-directories). Add a workspace-resource abstraction above platform locators. Keep internal relative paths distinct from desktop `workingDir`, security-scoped bookmarks, and content URIs. For the first release, import/export documents; add durable external-folder access after grant expiry and provider behavior are tested.
 
@@ -241,7 +220,7 @@ Assume two experienced engineers, covering TypeScript and Swift/Kotlin/C++, with
 | 2. Standalone alpha | Real crew/project UI, persistence, downloaded local model, imported files, built-in tools, one short craftbook | Create gezel → import document → produce artifact offline → force-kill/reopen → recover valid state | 3–5 weeks |
 | 3. Provider and product hardening | Apple/Android system adapters, downloads, search, scoped credentials, lifecycle recovery, capability-filtered catalog | Device matrix and representative quality gates pass; unavailable models and denied tools fail clearly | 3–5 weeks |
 | 4. Desktop companion | Product principal/grants and dedicated listener, native trust, desktop-owned tasks and artifact retrieval; may overlap after Phase 1 | Pair/revoke/restart/offline tests; no inference token can reach product routes; reconnect cannot duplicate mutations | 4–6 weeks |
-| 5. Release readiness | Accessibility, sustained-load tests, packaged-build validation, migrations, store submissions and documented support tiers | Signed installable builds; recovery and resource budgets pass on lowest supported devices | 2–4 weeks |
+| 5. Release readiness | Accessibility, sustained-load tests, packaged-build validation, store submissions and documented support tiers | Signed installable builds; recovery and resource budgets pass on lowest supported devices | 2–4 weeks |
 
 A useful standalone alpha is plausibly about 8–13 weeks with that staffing; a hardened standalone beta is roughly 3–5 months. Full companion authorization or unrestricted scripting can extend the program. Re-estimate after Phase 0 using measured portability and device results. Do not make local mobile shipping depend on completion of the remote accounts design.
 
@@ -262,6 +241,6 @@ CI should build the mobile UI separately from the service bundle, compile iOS si
 
 Physical-device tests should include the lowest supported memory tier, a current iPhone, an iPad, Android devices with different SoCs, and devices without usable system AI. Measure time to first token, decode rate, sustained thermal behavior, peak memory, idle residency, bridge event overhead, battery consumption, cancellation, and installation/download size. Choose numeric release budgets after the spike rather than inventing universal tokens-per-second promises.
 
-Task-quality tests should cover document summarization with evidence, structured extraction, creating a project/gezel through tools, artifact creation, a two-step craftbook, invalid tool arguments, unavailable capabilities, prompt injection in imported material, and recovery around a side effect. The mobile subset should include both deterministic assertions and real-model trials; deterministic gate scripts must give equivalent decisions across runtimes. This planning change does not run or modify evals.
+Task-quality tests should cover document summarization with evidence, structured extraction, creating a project/gezel through tools, artifact creation, a two-step craftbook, invalid tool arguments, unavailable capabilities, prompt injection in imported material, and recovery around a side effect. The [native product eval harness](../packages/mobile/evals/README.md) now separates packaged deterministic contracts, mobile workflow probes, and adaptations of the unchanged desktop core scenarios. Deterministic gate scripts must give equivalent decisions across runtimes. The [parity checkpoint](mobile-parity.md) records actual verification and outstanding quality/device gates; this delivery sequence remains the broader target.
 
 The first release succeeds when someone can assemble a small crew, chat and work on imported material offline, obtain inspectable artifacts, and return after interruption without losing or duplicating work. It includes a deliberately limited set of portable tools and workflows. Terminal/browser automation, arbitrary package installation, desktop CLI logins, large image/video pipelines, full editor parity, continuous mobile agents, and bidirectional sync are later increments or explicitly desktop-executed capabilities.

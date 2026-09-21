@@ -355,10 +355,21 @@ export const ScriptRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   scriptName: z.string(),
+  /** Resolution and exact source identity for hosts that record it. */
+  scope: ScriptScopeSchema.optional(),
+  sourceHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  sourceCraftbook: z
+    .object({ id: z.string(), version: z.string().optional(), sourceId: z.string().optional() })
+    .optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   status: ScriptRunStatusSchema,
   trigger: ScriptRunTriggerSchema,
+  /** Host-invoked gate/lifecycle child retains its step trigger and parent audit link. */
+  parentRunId: z.string().optional(),
   inputs: z.record(z.string(), z.unknown()),
   output: z.unknown().optional(),
   calls: z.array(ScriptRunCallSchema),

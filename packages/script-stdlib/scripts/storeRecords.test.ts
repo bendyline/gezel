@@ -117,6 +117,8 @@ describe.each([
       scoped({ action: 'create', fields: { slug: 'Ada Lovelace', role: 'engineer' } }),
     );
     expect(created).toEqual({
+      records: [],
+      total: null,
       ok: true,
       action: 'create',
       id: 'ada-lovelace',
@@ -124,6 +126,8 @@ describe.each([
     });
 
     expect(await run(scoped({ action: 'get', id: 'ada-lovelace' }))).toEqual({
+      records: [],
+      total: null,
       ok: true,
       action: 'get',
       id: 'ada-lovelace',
@@ -134,6 +138,8 @@ describe.each([
       scoped({ action: 'update', id: 'ada-lovelace', fields: { role: 'chief', level: 3 } }),
     );
     expect(updated).toEqual({
+      records: [],
+      total: null,
       ok: true,
       action: 'update',
       id: 'ada-lovelace',
@@ -149,6 +155,9 @@ describe.each([
     ]);
 
     expect(await run(scoped({ action: 'delete', id: 'zeb' }))).toEqual({
+      records: [],
+      total: null,
+      record: null,
       ok: true,
       action: 'delete',
       id: 'zeb',
@@ -255,6 +264,8 @@ describe('storeRecords folder-per-record layout', () => {
 
   it('lists an empty or missing root as zero records', async () => {
     expect(await run(folder({ action: 'list' }))).toEqual({
+      id: null,
+      record: null,
       ok: true,
       action: 'list',
       records: [],

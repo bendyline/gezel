@@ -1,8 +1,9 @@
 # Portable script runtime
 
-The first mobile script execution increment: a platform-independent
-`ScriptExecutor` contract and an experimental QuickJS-WASM implementation, tested
-against the real Gezel SDK. The service still selects its Node sandbox by default.
+A platform-independent `ScriptExecutor` contract, shared portable runner, and
+QuickJS-WASM implementation tested against the real Gezel SDK. Mobile uses a
+dedicated Web Worker with the same bundled standard scripts, SDK and checks as
+desktop. The service still selects its Node sandbox by default.
 See the [mobile plan](../../docs/mobile-plan.md) for the remaining application work.
 
 ## Host integration
@@ -36,9 +37,46 @@ the host's capability dispatcher. The host must also enforce a deadline and
 terminate the worker independently. The portable executor uses standard host
 timers to pump promises; its guest receives no timer or platform APIs.
 
-The implementation uses the installed `quickjs-emscripten` WASM package. It does
-not yet provide a Swift/JNI QuickJS bridge or claim to run on a mobile device.
-Native QuickJS remains an alternative behind the same execution contract.
+The implementation uses the installed `quickjs-emscripten` WASM package in the
+mobile WebView worker. It does not require a Swift/JNI QuickJS bridge. Mobile
+packages compile and validate a supported subset of the existing standard library
+at build time. Project and user TypeScript sources use the ordinary shared editor
+and source APIs. A separate compiler Worker runs the installed TypeScript browser
+compiler with Node hosts disabled; it only parses and transpiles source. Compiled
+programs execute in QuickJS, never in that compiler Worker or the app JavaScript
+realm. Compilation has a 256,000-character source bound and a host-enforced
+ten-second deadline. Only the bundled SDK and checks module can be imported.
+
+Source saves preserve invalid edits and return the shared desktop metadata,
+syntax, and runtime-compatibility diagnostics. Hash-based conflict detection is
+atomic. Project/user scope is explicit, and edited code can never acquire the
+immutable standard scope. Manual runs and task hooks/gates share the same
+capability, policy and audit checks. Task note operations remain confined to the
+current project and, for task-owned runs, the current task and active step.
+Local task creation, editing, and advancement use the product task manager. Gates
+can hold advancement; approved transitions run ordinary exit hooks and compare
+the persisted task with the snapshot they checked. A gate/exit child retains its
+step trigger and records `parentRunId`, while inheriting the parent's cancellation,
+remaining budget, and live policy ceiling. Trusted host callbacks carry this
+authority; serialized SDK inputs cannot supply callbacks, bypass gates, or force
+completion. Task-control calls are refused from lifecycle/gate scripts to preserve
+their durable checkpoints; task notes and authored auto-advance outputs remain
+available. Creating a task from a script does not start background model work.
+Craftbook sources are snapshotted verbatim with the task, with ordinary
+provenance-marked copies installed in its project. A task resolves its embedded
+copy before the installed library, so subsequent edits cannot change that run's
+recipe. Audits record scope, source SHA-256 and template identity; craftbook
+provenance never grants standard-library trust.
+
+`PortableScriptRunner` takes a host resolver, dispatcher, configuration reader and
+atomic run-record writer. It shares the desktop input/output validators, method
+capabilities, metadata parser and execution-policy check. Mobile records admission
+and each host-call intent before effects, then stores the completed run using the
+ordinary `projects/<id>/scripts/runs/<date>/<runId>.json` convention. Missing output,
+invalid output and failed audit writes cannot report success.
+Long-running deadlines use the shared awake-time budget with scoped suspend
+monitoring and disposed polling timers. Explicit host cancellation takes precedence
+over sleep credit and waits for dispatched host effects and child audits to settle.
 
 ## Experimental script profile
 
@@ -76,8 +114,10 @@ late replies and the runner freezes its audit record before redaction/persistenc
 Termination stops guest execution and future calls. It cannot undo or cancel an
 already-started host write/network request; the run records pending operations
 as potentially still completing. Scripts must not treat a timeout as a
-transaction rollback. Mobile hosts will need explicit cancellation and lifecycle
-policies for their dispatcher operations.
+transaction rollback. Mobile cancellation revokes new calls and waits for already-dispatched file
+operations before releasing admission. Closing the app cancels the worker;
+reopening marks unfinished records interrupted and never replays them. A worker
+wall-time deadline includes suspension so stale work cannot silently resume.
 
 ## Verification
 
@@ -92,3 +132,11 @@ Run tests under the workspace dependency read lease using the root test command,
 or the targeted service suites in `packages/service/src/scripts/`. Build the SDK
 before this package and build this package before the service; the root build
 already enforces that order.
+
+The mobile browser contract harness (`packages/mobile/scripts/test-scripts.mjs`)
+uses a real dedicated Web Worker and WASM, ordinary browser product files and the
+portable runner. It checks standard gates, workspace writes, artifact
+transformation, authored TypeScript compilation/execution, source conflicts and
+reopen persistence, lifecycle hooks, task notes, completion gates, policy denial,
+audit recovery, UI responsiveness, cancellation and absence of external requests.
+Run it after the SDK, core and script-runtime builds.

@@ -1,0 +1,354 @@
+[
+  {
+    "id": "incident-postmortem",
+    "sourceFile": "incident-postmortem",
+    "sourceSha256": "b063de5fab16b042a0e84dba41016498b5bc78e8918055ff7d38643793509cf6",
+    "timeoutMs": 2400000,
+    "kind": "specialist",
+    "project": {
+      "name": "Checkout Incident Postmortem",
+      "about": "A production incident pack from 2026-03-14: checkout-api saw a 500-rate spike after a deploy that changed the payment-gateway timeout. The evidence files in workspace/evidence/ are: timeline.md, metrics.csv, deploy.log, oncall-chat.txt, hotfix.diff. The team should read all five and produce a competent SRE postmortem at workspace/postmortem.md.",
+      "missionObjectives": "1. Read every file under workspace/evidence/.    Those seeded files are immutable, read-only inputs. Never edit, delete, rename,    or overwrite anything under workspace/evidence/. Only postmortem.md may be changed. 2. Write postmortem.md at the workspace root with these sections IN ORDER:    ## Summary (≤ 4 sentences, executive-readable),    ## Impact, ## Timeline, ## Root cause, ## Contributing factors,    ## What went well (≥ 2 specifics), ## What went poorly (≥ 2 specifics),    ## Action items as a markdown table: | Action | Owner | Due | Evidence |.    Include at least 3 action rows. A personal Owner must be grounded in the    evidence (Mira Chen, Bertha Vargas, Phil Okeke, or Anita Sayed); a concrete    handle or specific functional team is also allowed. Slash-separated    co-owners are allowed only when every component is concrete. Do not invent    personal names. Blank/vague values such as TBD, Team, Owner, Unknown, or    Unassigned do not count. 3. After the fifth evidence file has been read, the next tool call must write postmortem.md. 4. Cite evidence files inline by name (e.g. \"deploy.log:14:32 UTC\"). 5. Include at least 5 distinct evidence-file citations across the doc. 6. Include at least 3 `HH:MM` timestamp citations. 7. Tone: blame-free, factual, specific. Do NOT invent facts not in the evidence.    Treat impact categories the evidence does not measure as unknown; in particular,    do not assert that data loss or a security/privacy breach did or did not occur. 8. Length: 6 KB to 30 KB."
+    },
+    "gezel": {
+      "name": "Jordan",
+      "role": "Researcher"
+    },
+    "files": [
+      {
+        "path": "evidence/timeline.md",
+        "content": "# Checkout Incident — Timeline (UTC)\n\nIncident commander: Mira Chen\nSeverity: SEV2\nService: checkout-api\nDate: 2026-03-14\n\n## Key events\n\n- **14:28** Pre-deploy checks for checkout-api v4.18.0 pass on canary.\n- **14:30** Deploy starts: rolling restart across 12 pods. CD pipeline\n  ID 8147. Pull request #3094 — \"raise PaymentGateway client timeout\n  from 800ms to 8000ms\".\n- **14:32** Deploy completes. All 12 pods on v4.18.0.\n- **14:33** error_rate jumps from 0.3% baseline to 9.1%. p99 latency\n  rises from 220ms to 4.8s.\n- **14:34** PagerDuty pages the checkout on-call rotation.\n- **14:35** Oncall (Bertha Vargas) acknowledges. Joins #checkout-incident.\n- **14:38** Bertha confirms the error mode: PaymentGateway client\n  exhausting its connection pool while waiting on the bumped 8s timeout.\n- **14:41** Mira Chen joins as incident commander.\n- **14:46** Decision: revert PR #3094. Hotfix branch `hotfix/payment-timeout-revert`.\n- **14:51** Hotfix CI green; deploy starts.\n- **14:53** Hotfix deploy completes (v4.18.1 — same as v4.17.4 except the\n  PaymentGateway timeout is back to 800ms).\n- **14:54** error_rate drops below 1%. p99 latency recovers to 230ms.\n- **14:58** Mira declares the incident resolved (10 min monitoring window).\n- **15:08** Incident closed. SEV2 -> mitigated.\n\n## Roles\n\n- IC: Mira Chen\n- On-call (first responder): Bertha Vargas\n- Deploy owner (PR author): Phil Okeke\n\n## Notes\n\nPR #3094 had been merged 6 hours earlier but only rolled out in this\ndeploy. The PR description framed the change as a fix for occasional\n800ms timeouts seen against PaymentGateway; the reviewer (Phil Okeke\nself-merged after reviewer Anita Sayed signed off) didn't catch that a\n10× longer timeout would saturate the connection pool under steady load.\n"
+      },
+      {
+        "path": "evidence/metrics.csv",
+        "content": "timestamp_utc,request_rate_per_s,error_rate_pct,p99_latency_ms,saturation_pct\n14:25:00,1240,0.3,218,42\n14:26:00,1252,0.2,219,43\n14:27:00,1271,0.3,221,43\n14:28:00,1248,0.3,217,42\n14:29:00,1262,0.3,220,43\n14:30:00,1255,0.3,224,44\n14:31:00,1244,0.4,231,45\n14:32:00,1238,0.5,242,49\n14:33:00,1241,9.1,4810,97\n14:34:00,1233,12.4,5120,99\n14:35:00,1229,13.1,5180,99\n14:36:00,1221,12.8,5160,99\n14:37:00,1217,12.5,5140,99\n14:38:00,1218,11.9,5090,99\n14:39:00,1215,11.7,5070,99\n14:40:00,1213,11.5,5060,99\n14:41:00,1209,11.4,5050,99\n14:42:00,1207,11.3,5040,99\n14:43:00,1203,11.2,5030,99\n14:44:00,1198,11.1,5020,99\n14:45:00,1194,11.0,5010,99\n14:46:00,1191,10.9,5005,99\n14:47:00,1188,10.8,4995,99\n14:48:00,1185,10.7,4990,99\n14:49:00,1182,10.6,4985,99\n14:50:00,1179,10.5,4978,99\n14:51:00,1180,10.4,4970,99\n14:52:00,1180,9.8,4720,98\n14:53:00,1181,3.4,1240,67\n14:54:00,1198,0.9,238,46\n14:55:00,1219,0.4,224,44\n14:56:00,1232,0.4,222,44\n14:57:00,1238,0.3,221,43\n14:58:00,1240,0.3,219,43\n"
+      },
+      {
+        "path": "evidence/deploy.log",
+        "content": "[2026-03-14T14:30:00Z] cd-pipeline 8147 START service=checkout-api version=4.18.0 strategy=rolling pods=12\n[2026-03-14T14:30:02Z] cd-pipeline 8147 pull-image v4.18.0 size=412MB elapsed=2.1s\n[2026-03-14T14:30:18Z] cd-pipeline 8147 pod 1/12 READY new=v4.18.0\n[2026-03-14T14:30:30Z] cd-pipeline 8147 pod 2/12 READY new=v4.18.0\n[2026-03-14T14:30:42Z] cd-pipeline 8147 pod 3/12 READY new=v4.18.0\n[2026-03-14T14:30:54Z] cd-pipeline 8147 pod 4/12 READY new=v4.18.0\n[2026-03-14T14:31:06Z] cd-pipeline 8147 pod 5/12 READY new=v4.18.0\n[2026-03-14T14:31:18Z] cd-pipeline 8147 pod 6/12 READY new=v4.18.0\n[2026-03-14T14:31:30Z] cd-pipeline 8147 pod 7/12 READY new=v4.18.0\n[2026-03-14T14:31:42Z] cd-pipeline 8147 pod 8/12 READY new=v4.18.0\n[2026-03-14T14:31:54Z] cd-pipeline 8147 pod 9/12 READY new=v4.18.0\n[2026-03-14T14:32:00Z] cd-pipeline 8147 pod 10/12 READY new=v4.18.0\n[2026-03-14T14:32:04Z] cd-pipeline 8147 pod 11/12 READY new=v4.18.0\n[2026-03-14T14:32:08Z] cd-pipeline 8147 pod 12/12 READY new=v4.18.0\n[2026-03-14T14:32:08Z] cd-pipeline 8147 SUCCESS service=checkout-api version=4.18.0 duration=128s\n[2026-03-14T14:46:30Z] cd-pipeline 8155 START service=checkout-api version=4.18.1 strategy=rolling pods=12 (hotfix)\n[2026-03-14T14:46:32Z] cd-pipeline 8155 pull-image v4.18.1 size=412MB elapsed=1.9s\n[2026-03-14T14:47:00Z] cd-pipeline 8155 pod 1/12 READY new=v4.18.1\n[2026-03-14T14:47:12Z] cd-pipeline 8155 pod 2/12 READY new=v4.18.1\n[2026-03-14T14:47:24Z] cd-pipeline 8155 pod 3/12 READY new=v4.18.1\n[2026-03-14T14:47:36Z] cd-pipeline 8155 pod 4/12 READY new=v4.18.1\n[2026-03-14T14:47:48Z] cd-pipeline 8155 pod 5/12 READY new=v4.18.1\n[2026-03-14T14:48:00Z] cd-pipeline 8155 pod 6/12 READY new=v4.18.1\n[2026-03-14T14:48:12Z] cd-pipeline 8155 pod 7/12 READY new=v4.18.1\n[2026-03-14T14:48:24Z] cd-pipeline 8155 pod 8/12 READY new=v4.18.1\n[2026-03-14T14:48:36Z] cd-pipeline 8155 pod 9/12 READY new=v4.18.1\n[2026-03-14T14:48:48Z] cd-pipeline 8155 pod 10/12 READY new=v4.18.1\n[2026-03-14T14:49:00Z] cd-pipeline 8155 pod 11/12 READY new=v4.18.1\n[2026-03-14T14:53:00Z] cd-pipeline 8155 pod 12/12 READY new=v4.18.1\n[2026-03-14T14:53:00Z] cd-pipeline 8155 SUCCESS service=checkout-api version=4.18.1 duration=390s\n"
+      },
+      {
+        "path": "evidence/oncall-chat.txt",
+        "content": "[14:34:11] PagerDuty: checkout-api error_rate > 5% for 60s — paging on-call\n[14:34:48] bertha.vargas: ack — on it\n[14:35:30] bertha.vargas: looking at /grafana/checkout — error_rate is 13% and p99 is 5s+\n[14:36:14] bertha.vargas: this jumped at :33, right after the v4.18.0 deploy finished at :32\n[14:37:22] bertha.vargas: errors are all 504 from /charge endpoint — PaymentGateway client timing out\n[14:38:05] bertha.vargas: looking at the diff — PR #3094 just bumped PaymentGateway client timeout 800ms -> 8000ms\n[14:38:41] bertha.vargas: under steady ~1200rps load, an 8s timeout means we hold connections 10x longer\n[14:39:02] bertha.vargas: connection pool is at 99% saturation per metrics; that's the proximate cause\n[14:39:34] bertha.vargas: I'm going to call this and revert PR #3094\n[14:40:11] mira.chen: I'll IC. Bertha, please prep the revert PR\n[14:41:30] mira.chen: opening #checkout-incident with all stakeholders\n[14:42:05] mira.chen: phil.okeke joining — author of the offending PR\n[14:42:38] phil.okeke: confirming — I bumped the timeout to absorb the rare 800ms slow path I saw against PaymentGateway in canary\n[14:42:55] phil.okeke: I did not test under steady-state load. that's on me to make sure we test next time\n[14:43:20] mira.chen: noted — let's get the revert deployed first, root-cause and action items after\n[14:45:50] bertha.vargas: hotfix branch hotfix/payment-timeout-revert pushed; CI green\n[14:46:30] bertha.vargas: deploy 8155 START\n[14:53:08] bertha.vargas: deploy 8155 SUCCESS; error_rate already at 3% and falling\n[14:54:30] bertha.vargas: error_rate < 1%, p99 < 250ms — we're back to baseline\n[14:58:00] mira.chen: incident mitigated. monitoring for 10 more min then closing.\n[15:08:00] mira.chen: closing — SEV2 mitigated. Postmortem due in 5 business days.\n"
+      },
+      {
+        "path": "evidence/hotfix.diff",
+        "content": "diff --git a/checkout-api/src/payment/gateway-client.ts b/checkout-api/src/payment/gateway-client.ts\nindex 4a9c2b1..e21f6a0 100644\n--- a/checkout-api/src/payment/gateway-client.ts\n+++ b/checkout-api/src/payment/gateway-client.ts\n@@ -41,7 +41,7 @@ export class PaymentGatewayClient {\n   constructor(opts: { baseUrl: string }) {\n     this.client = ky.create({\n       prefixUrl: opts.baseUrl,\n-      timeout: 8000,\n+      timeout: 800,\n       retry: { limit: 1, methods: ['get'] },\n     });\n   }\n"
+      }
+    ],
+    "prompts": [
+      "Please write the postmortem for the 2026-03-14 checkout-api incident. The evidence files are in workspace/evidence/ — five files: timeline.md, metrics.csv, deploy.log, oncall-chat.txt, hotfix.diff. Read all five first (use read_file with paths relative to the workspace root — no leading \"workspace/\"). Treat every file under evidence/ as immutable read-only input: do not edit, delete, rename, append to, or overwrite those files. The only file you may mutate is postmortem.md. Then write postmortem.md at the workspace root. Do NOT invent facts that are not in the evidence. Treat unmeasured outcomes as unknown: do not assert that data loss or a security/privacy breach did or did not occur. Required sections, in order: Summary, Impact, Timeline, Root cause, Contributing factors, What went well, What went poorly, Action items. In Action items, use a markdown table with `| Action | Owner | Due | Evidence |` and at least 3 action rows with an evidence-grounded person (Mira Chen, Bertha Vargas, Phil Okeke, or Anita Sayed), a concrete handle, or a specific functional team in every Owner cell. Slash-separated co-owners are allowed only when every component is concrete. Do not invent personal names. Blank/vague values such as TBD, Team, Owner, Unknown, or Unassigned do not count. Cite evidence files by name inline (e.g. \"deploy.log:14:32\"). At least 5 distinct citations, at least 3 `HH:MM` timestamps, 6-30 KB total, blame-free tone. After the fifth evidence read succeeds, your next tool call must be `write_file({ path: \"postmortem.md\", content: ... })`. Do not draft in chat or wait for a perfect final version; write a complete first pass, then patch it if needed."
+    ],
+    "output": "postmortem.md"
+  },
+  {
+    "id": "conflict-synthesis",
+    "sourceFile": "conflict-synthesis",
+    "sourceSha256": "4eb90f49554a0732910742a96af1b9ff1ee3f40b4ad641aaaa8dab6886fc7135",
+    "timeoutMs": 1800000,
+    "kind": "specialist",
+    "project": {
+      "name": "Skylark Launch Synthesis",
+      "about": "Synthesizing the Skylark launch documents — product and engineering memos, the finance sheet, and the org chart — into one consolidated brief with conflicts between sources reconciled explicitly.",
+      "missionObjectives": "Synthesize the five source documents into synthesis.md with sections Overview, Consolidated plan, Conflicts and resolutions, Open questions. The sources disagree; every conflict goes in the \"Conflicts and resolutions\" section quoting BOTH values and BOTH source files and stating which wins and why. finance.csv is authoritative for numbers; the engineering memo supersedes product on timing; org.md is current for ownership. Superseded values (the August 15 date, the 240,000 budget, Priya as DRI) must not appear anywhere outside the conflicts section. Cite source files throughout."
+    },
+    "gezel": {
+      "name": "Tamsin",
+      "role": "Researcher"
+    },
+    "files": [
+      {
+        "path": "memo-product.md",
+        "content": "# Product memo — Skylark launch (May)\n\nWe are targeting a launch on 2026-08-15. The launch budget is 240,000 EUR,\ncovering the campaign, the event, and two contractors. Product wants the\nonboarding revamp in scope."
+      },
+      {
+        "path": "memo-engineering.md",
+        "content": "# Engineering memo — Skylark readiness (June)\n\nThe August date is not achievable: the migration alone takes six weeks.\nThis memo SUPERSEDES the product memo on timing — the launch date is\n2026-09-01. Feature scope per the product memo otherwise stands."
+      },
+      {
+        "path": "finance.csv",
+        "content": "line_item,amount_eur\ncampaign,120000\nlaunch_event,50000\ncontractors,40000\ntotal_budget,210000"
+      },
+      {
+        "path": "org.md",
+        "content": "# Org chart — current\n\n- Launch DRI: Marcus (since June 1).\n- Campaign lead: Iris.\n- Engineering lead: Deniz."
+      },
+      {
+        "path": "memo-oldplan.md",
+        "content": "# Old launch plan (March — historical)\n\nPriya is the launch DRI. Weekly syncs on Tuesdays. This plan predates the\nreorg; see org.md for current ownership."
+      },
+      {
+        "path": "style.md",
+        "content": "# House style (noise for this task)\n\nUse sentence case for headings. Dates in ISO where possible."
+      }
+    ],
+    "prompts": [
+      "Please synthesize the launch documents into one brief at `synthesis.md` (workspace root). Read all five sources first: memo-product.md, memo-engineering.md, finance.csv, org.md, memo-oldplan.md (style.md is just house style). Structure: four sections in order — Overview, Consolidated plan, Conflicts and resolutions, Open questions. The sources CONFLICT in places; do not paper over it. Every conflict goes in the \"Conflicts and resolutions\" section, quoting BOTH values with BOTH file names (e.g. `memo-product.md`), and stating which value wins and why: finance.csv is authoritative for numbers, the engineering memo supersedes product on timing, org.md is current for ownership. Everywhere OUTSIDE that section, use only the winning values — a superseded date, budget, or name appearing in the plan itself means the reconciliation failed. Cite the source file (backticked filename) for at least six claims. Write the complete synthesis.md now with write_file."
+    ],
+    "output": "synthesis.md"
+  },
+  {
+    "id": "data-wrangle",
+    "sourceFile": "data-wrangle",
+    "sourceSha256": "736c749a5bd831272c94ebafa121c39dc9e21333818964243748f425000fdd44",
+    "timeoutMs": 2700000,
+    "kind": "specialist",
+    "project": {
+      "name": "Customer Data Cleanup",
+      "about": "Normalize three messy raw customer CSV exports (mixed date formats, encoding artifacts, quoted fields, near-duplicate rows) into one clean, deduplicated out/customers.json following six exact normalization rules.",
+      "missionObjectives": "Normalize the three raw CSV exports under data/raw/ (data/raw/customers_a.csv, data/raw/customers_b.csv, data/raw/legacy_export.csv) into one clean out/customers.json file. The exports are messy real-world data: encoding artifacts, quoted fields containing commas, junk non-data lines, and near-duplicate rows — parse carefully and follow the rules exactly. 1. Write the result to out/customers.json as a single JSON array (UTF-8, no BOM). 2. Each record has exactly four string fields: id, name, email, signupDate — no extra fields. Preserve id and name from the kept source row. 3. email must be lowercased and trimmed of surrounding whitespace. 4. signupDate must be ISO format yyyy-mm-dd. Source formats: customers_a.csv uses US dates MM/DD/YYYY, customers_b.csv is already ISO yyyy-mm-dd, legacy_export.csv uses European dotted dates DD.MM.YYYY (day first). 5. Deduplicate on the normalized (lowercased, trimmed) email: when several rows share an email, keep only the row whose signupDate is NEWEST. 6. Sort the array by email, ascending. Do not modify the files under data/raw/."
+    },
+    "gezel": {
+      "name": "Noor",
+      "role": "Developer"
+    },
+    "files": [
+      {
+        "path": "data/raw/customers_a.csv",
+        "content": "﻿id,name,email,signup_date\nA-001,Alice Archer,alice.archer@example.com,03/14/2024\nA-002,Ben Box,ben.box@example.com,07/02/2023\nA-003,Cara Diaz,cara.diaz@example.com,11/30/2024\nA-004,Dev Patel,dev.patel@example.com,01/05/2025\nA-005,Elif Yilmaz,elif.yilmaz@example.com,09/17/2023\nA-006,Frank Mota,frank.mota@example.com,04/22/2024\nA-007,Gina Rossi,gina.rossi@example.com,12/08/2023\nA-008,Hugo Lindt,hugo.lindt@example.com,06/19/2025\nA-009,Iris Chen,iris.chen@example.com,02/27/2024\nA-010,Jonas Falk,jonas.falk@example.com,10/03/2024\nA-011,Kira Holt,kira.holt@example.com,05/11/2023\nA-012,Leo Brandt,leo.brandt@example.com,08/29/2024\nA-013,Mona Idris,mona.idris@example.com,03/06/2025\nA-014,Nils Okafor,nils.okafor@example.com,07/24/2023\nA-015,Outi Salo,outi.salo@example.com,11/15/2024\nA-016,Petra Voss,petra.voss@example.com,01/31/2024\nA-017,Quinn Marsh,quinn.marsh@example.com,09/09/2025\nA-018,Rafael Cruz,rafael.cruz@example.com,04/01/2023\nA-019,Sana Iqbal,sana.iqbal@example.com,12/20/2024\nA-020,Tomas Hejl,tomas.hejl@example.com,06/07/2024\n"
+      },
+      {
+        "path": "data/raw/customers_b.csv",
+        "content": "id,name,email,signup_date\nB-001,Uma Devi,uma.devi@example.com,2024-02-18\nB-002,Viktor Lund,viktor.lund@example.com,2023-10-26\nB-003,\"Smith, Jr., Robert\",robert.smith@example.com,2025-08-21\nB-004,Wendy Park,wendy.park@example.com,2024-06-12\nB-005,Xenia Petrov,xenia.petrov@example.com,2023-03-09\nB-006,Yusuf Demir,yusuf.demir@example.com,2025-01-28\nB-007,Zoe Quill,zoe.quill@example.com,2024-09-04\nB-008,\"O'Hara, Aidan\",aidan.ohara@example.com,2023-12-13\nB-009,Bram Visser,bram.visser@example.com,2024-07-30\nB-010,Carmen Soto,carmen.soto@example.com,2025-05-16\nB-011,Dara Nolan,dara.nolan@example.com,2023-08-02\nB-012,Emil Wagner,emil.wagner@example.com,2024-12-25\nB-013,Freya Holm,freya.holm@example.com,2025-03-19\nB-014,Gleb Sokolov,gleb.sokolov@example.com,2023-06-21\nB-015,Hana Sato,hana.sato@example.com,2024-10-10\nB-016,Ivo Kovac,ivo.kovac@example.com,2025-07-07\nB-017,Jade Lemoine,jade.lemoine@example.com,2023-04-15\nB-018,\"Keller, MD, Sofia\",sofia.keller@example.com,2024-01-09\nB-019,Liam Byrne,liam.byrne@example.com,2025-11-23\nB-020,Mira Anand,mira.anand@example.com,2023-09-27\n"
+      },
+      {
+        "path": "data/raw/legacy_export.csv",
+        "content": "LEGACY CRM EXPORT ;; generated by crm-tool 7.2 ;; rows below ;; DO NOT HAND-EDIT\nid,name,email,signup_date\nL-001,Nadia Saleh,nadia.saleh@example.com,14.05.2024\nL-002,Omar Haddad,omar.haddad@example.com,03.02.2023\nL-003,Priya Raman,priya.raman@example.com,27.09.2024\nL-004,Alice Archer,  Alice.Archer@Example.com ,02.11.2025\nL-005,Rosa Marin,rosa.marin@example.com,08.01.2025\nL-006,Stefan Beck,stefan.beck@example.com,19.06.2023\nL-007,Tariq Aziz,tariq.aziz@example.com,30.10.2024\nL-008,Una Floyd,una.floyd@example.com,11.04.2023\nL-009,Robert Smith,ROBERT.SMITH@EXAMPLE.COM,15.03.2024\nL-010,Vera Lang,vera.lang@example.com,22.08.2025\nL-011,Wim DeJong,wim.dejong@example.com,05.12.2023\nL-012,Xander Mills,xander.mills@example.com,17.07.2024\nL-013,Zoe Quill,Zoe.Quill@example.com ,28.02.2025\nL-014,Yara Nasser,yara.nasser@example.com,09.09.2023\nL-015,Anders Vik,anders.vik@example.com,21.01.2024\nL-016,Bea Castro,bea.castro@example.com,13.11.2023\nL-017,Omar Haddad, OMAR.HADDAD@example.com,26.06.2025\nL-018,Chloe Brun,chloe.brun@example.com,04.04.2024\nL-019,Daan Smit,daan.smit@example.com,18.10.2025\nL-020,Elsa Nyman,elsa.nyman@example.com,07.03.2023\n"
+      },
+      {
+        "path": "tools/check_customers.mjs",
+        "content": "import { readFileSync } from 'node:fs';\n\nconst outputPath = 'out/customers.json';\nconst sourcePaths = ['data/raw/customers_a.csv', 'data/raw/customers_b.csv', 'data/raw/legacy_export.csv'];\nconst expectedCount = 56;\nconst sourceIds = new Set();\nfor (const sourcePath of sourcePaths) {\n  const text = readFileSync(sourcePath, 'utf8').replace(/^\\uFEFF/, '');\n  for (const line of text.split(/\\r?\\n/)) {\n    const id = line.split(',')[0]?.trim();\n    if (/^[ABL]-\\d{3}$/.test(id)) sourceIds.add(id);\n  }\n}\n\nlet rows;\ntry {\n  rows = JSON.parse(readFileSync(outputPath, 'utf8').replace(/^\\uFEFF/, ''));\n} catch (err) {\n  console.error(`FAIL parse: ${outputPath} must contain JSON data only (${err.message})`);\n  process.exit(1);\n}\nif (!Array.isArray(rows)) {\n  console.error('FAIL parse: out/customers.json must be a top-level array');\n  process.exit(1);\n}\nfor (const [index, row] of rows.entries()) {\n  for (const field of ['id', 'name', 'email', 'signupDate']) {\n    if (typeof row?.[field] !== 'string' || row[field].length === 0) {\n      console.error(`FAIL shape: row ${index} is missing string field ${field}`);\n      process.exit(1);\n    }\n  }\n  if (!sourceIds.has(row.id)) {\n    console.error(`FAIL source id: ${row.id} is not in data/raw; do not invent or rename rows`);\n    process.exit(1);\n  }\n}\nif (rows.length !== expectedCount) {\n  console.error(`FAIL row count: expected ${expectedCount}, got ${rows.length}`);\n  process.exit(1);\n}\nfor (let i = 1; i < rows.length; i++) {\n  if (rows[i - 1].email > rows[i].email) {\n    console.error(`FAIL sort: ${rows[i - 1].email} comes before ${rows[i].email}`);\n    process.exit(1);\n  }\n}\nconsole.log(`PASS basic customer checks: ${rows.length} source-derived rows`);"
+      }
+    ],
+    "prompts": [
+      "Please clean up our customer exports. Read the three CSV files under data/raw/ (data/raw/customers_a.csv, data/raw/customers_b.csv, data/raw/legacy_export.csv) and produce the normalized out/customers.json. Paths are relative to the workspace root (no leading \"workspace/\"). Heads up: these are messy real exports — one file starts with an encoding artifact (UTF-8 BOM), names can be quoted and contain commas, legacy_export.csv opens with a banner line that is not a header row, and some rows are near-duplicates of each other. The exact normalization rules: 1. Write the result to out/customers.json as a single JSON array (UTF-8, no BOM). 2. Each record has exactly four string fields: id, name, email, signupDate — no extra fields. Preserve id and name from the kept source row. 3. email must be lowercased and trimmed of surrounding whitespace. 4. signupDate must be ISO format yyyy-mm-dd. Source formats: customers_a.csv uses US dates MM/DD/YYYY, customers_b.csv is already ISO yyyy-mm-dd, legacy_export.csv uses European dotted dates DD.MM.YYYY (day first). 5. Deduplicate on the normalized (lowercased, trimmed) email: when several rows share an email, keep only the row whose signupDate is NEWEST. 6. Sort the array by email, ascending. Implementation note: if you write a Node script, have the script read the CSV files from disk with fs.readFileSync and write out/customers.json with fs.writeFileSync. MCP/chat tools like write_file are not available inside Node scripts. Do not paste line-numbered read_file output into JavaScript string constants. A local validator is available: run `node tools/check_customers.mjs` after writing out/customers.json. It reports parse errors, invented source ids, row-count errors, and sort errors. Do not modify the raw CSVs. How you compute the transform is up to you — only the final out/customers.json file is checked. The checker re-validates the file automatically every few seconds and reports the first failing property back to you via chat."
+    ],
+    "output": "out/customers.json"
+  },
+  {
+    "id": "tictactoe",
+    "sourceFile": "tictactoe",
+    "sourceSha256": "1a0c7e9f219f96ce29ecba9c846d0ca28a01f37a14e6f05263e9f73cd96810ee",
+    "timeoutMs": 7200000,
+    "kind": "meester",
+    "files": [],
+    "prompts": [
+      "Create a new project for this work (e.g. `Tic-Tac-Toe Game`) and build a tic-tac-toe game I can play in my browser IN THAT NEW PROJECT. Single HTML file at `workspace/index.html`, no build step. Two players take turns; show the winner when the game ends. Prefer nine static `<button class=\"cell\" data-cell=\"0\">` through `data-cell=\"8\"` elements in the HTML before the script, then wire them with `document.querySelectorAll(\".cell\")`. If you generate the board dynamically, create exactly 9 cells with a numeric loop such as `for (let i = 0; i < 9; i++)`; do not iterate an initially empty cells array to create the cells."
+    ],
+    "output": "index.html"
+  },
+  {
+    "id": "tankcombat",
+    "sourceFile": "tankcombat",
+    "sourceSha256": "9e5d0971ddadbfd23213c1fe820a48d3124bfeda3d57b2d3b4e7729d813b63c5",
+    "timeoutMs": 7200000,
+    "kind": "meester",
+    "files": [],
+    "prompts": [
+      "Create a new project for this work (e.g. `Tank Combat Arcade`) and build a top-down tank combat arcade game there. Write the entire game as a single self-contained file at `workspace/index.html` IN THAT NEW PROJECT (HTML + inline `<style>` + inline `<script>`, no external assets, no build step). The player controls a tank with arrow keys (or WASD), fires projectiles with space, and fights at least one enemy tank. Track a score on screen. Make keyboard input observable in the browser: expose `window.gameState = gameState` or update a `document.body.dataset.inputTick` value inside key handlers so automated runtime checks can see input activity. The first concrete deliverable is the index.html file inside the new project — write it now. TANK_COMBAT_HTML_SHAPE: write one complete `index.html` document in a single workspace `write_file` call. Use exactly this source shape: `<!doctype html><html><head><style>...</style></head><body>...<canvas id=\"game\"></canvas>...<script>/* all game JavaScript here */</script></body></html>`. All JavaScript must be inside that one inline `<script>` block before `</body>`: declarations, functions, querySelector/addEventListener calls, key handlers, requestAnimationFrame game loop, projectiles, collision, score, and `window.gameState = gameState`. Do not place `const`, `let`, `var`, `function`, `querySelector`, `addEventListener`, or `requestAnimationFrame` after `</script>`, after `</body>`, or after `</html>`. If `write_file` is rejected for JavaScript outside a script tag, do not keep patching fragments; immediately re-emit the entire corrected HTML file from `<!doctype html>` through `</html>` with all JS inside the script block."
+    ],
+    "output": "index.html"
+  },
+  {
+    "id": "schema-migration",
+    "sourceFile": "schema-migration",
+    "sourceSha256": "3d8dd177f12abdf9b935d258b56df3b06777af02face428721d4eb0eede0dc5c",
+    "timeoutMs": 2100000,
+    "kind": "specialist",
+    "project": {
+      "name": "User Store",
+      "about": "A tiny TypeScript codebase with an in-memory User store. The product needs a breaking change: the User record's `name: string` field must split into `firstName: string` and `lastName: string` (no optional fields, no compatibility shim). The codebase has a store and three call-site handlers that read `.name`; every reference must be updated.",
+      "missionObjectives": "1. Read every file under src/ before editing. 2. Update src/types.ts so User has firstName + lastName (no name). 3. Update src/store.ts and src/handlers.ts so they use the new fields. 4. Write src/migrate.ts exporting `migrateUser(old)` that splits old.name on the first space while preserving id, email, and every other non-name field from the legacy User record. 5. Write tests/migrate.test.ts with at least 3 vitest cases that call migrateUser with full legacy `{ id, name, email }` records: normal, one-word, and multi-word; assert id/email preservation as well as the split name. 6. Write MIGRATION.md describing the change (≥ 1 KB). 7. `npx tsc --noEmit` must pass with zero errors."
+    },
+    "gezel": {
+      "name": "Riley",
+      "role": "Developer"
+    },
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"user-store\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"typecheck\": \"tsc --noEmit\"\n  }\n}\n"
+      },
+      {
+        "path": "tsconfig.json",
+        "content": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"ES2022\",\n    \"moduleResolution\": \"bundler\",\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": true,\n    \"allowImportingTsExtensions\": true,\n    \"esModuleInterop\": true\n  },\n  \"include\": [\"src/**/*.ts\"],\n  \"exclude\": [\"tests/**/*\", \"node_modules\"]\n}\n"
+      },
+      {
+        "path": "src/types.ts",
+        "content": "// Domain types for the user store.\n//\n// NOTE: the User record uses a single `name: string` field today, but\n// product wants to split it into `firstName` + `lastName`. See\n// MIGRATION.md (to be written) for the migration plan.\n\nexport interface User {\n  id: string;\n  name: string;\n  email: string;\n}\n\nexport interface CreateUserInput {\n  name: string;\n  email: string;\n}\n"
+      },
+      {
+        "path": "src/store.ts",
+        "content": "import type { CreateUserInput, User } from './types.ts';\n\nlet nextId = 1;\n\n/**\n * Tiny in-memory user store. Three methods consumers care about: `add`,\n * `get`, and `list`. The `name` field is currently a single string;\n * touching this code is part of the rename migration.\n */\nexport class UserStore {\n  private readonly users = new Map<string, User>();\n\n  add(input: CreateUserInput): User {\n    const id = String(nextId++);\n    const user: User = { id, name: input.name, email: input.email };\n    this.users.set(id, user);\n    return user;\n  }\n\n  get(id: string): User | undefined {\n    return this.users.get(id);\n  }\n\n  list(): User[] {\n    return Array.from(this.users.values()).sort((a, b) => a.name.localeCompare(b.name));\n  }\n}\n"
+      },
+      {
+        "path": "src/handlers.ts",
+        "content": "import type { User } from './types.ts';\n\n/**\n * Three handler functions that read User.name. They each format the\n * user for a different UI surface; the migration must update each\n * call site.\n */\n\nexport function formatDisplayName(user: User): string {\n  return user.name;\n}\n\nexport function renderUserCardHtml(user: User): string {\n  return `<div class=\"user-card\"><h3>${user.name}</h3><p>${user.email}</p></div>`;\n}\n\nexport function summarizeUsersForLog(users: User[]): string {\n  return users.map((u) => `${u.id}: ${u.name}`).join(', ');\n}\n"
+      },
+      {
+        "path": "README.md",
+        "content": "# user-store\n\nA tiny in-memory user store.\n\nCurrent shape:\n\n```ts\ninterface User {\n  id: string;\n  name: string;   // ← will split into firstName + lastName\n  email: string;\n}\n```\n\nRun the typecheck:\n\n```bash\nnpm run typecheck\n```\n"
+      },
+      {
+        "path": "tests/.gitkeep",
+        "content": ""
+      }
+    ],
+    "prompts": [
+      "Please carry out the User schema migration: split the User schema's `name` field into `firstName` + `lastName` across every source file that touches it. Start by reading every file under src/ — src/types.ts, src/store.ts, and src/handlers.ts, plus tsconfig.json (paths are relative to the workspace root, no leading \"workspace/\"). Update each one, write src/migrate.ts (a `migrateUser(old)` function that splits the name on the first space while preserving id, email, and every other non-name field from the legacy record), tests/migrate.test.ts with at least 3 vitest cases that call migrateUser with full legacy `{ id, name, email }` records (normal, one-word, and multi-word), asserting preserved id/email plus the split name, and MIGRATION.md (at least 1 KB describing the change). Do not overwrite tsconfig.json or package.json. Do NOT try to run npm install or shell commands — there is no node_modules; harness-owned strict typechecks run automatically against both source and tests, and errors are reported back via chat. Just write the six target files and you're done."
+    ],
+    "output": "MIGRATION.md"
+  },
+  {
+    "id": "failing-tests-spec",
+    "sourceFile": "failing-tests-spec",
+    "sourceSha256": "72967fe5ddf90a0f59c4fd4e530f636c330e77f52e4308a9f6d31110c6cec536",
+    "timeoutMs": 1500000,
+    "kind": "specialist",
+    "project": {
+      "name": "Machine Kata",
+      "about": "A test-driven kata: the vitest suite under tests/ is the complete and only specification for a small order-lifecycle state machine. src/machine.ts is an empty skeleton that must be implemented until every test passes — without touching anything under tests/.",
+      "missionObjectives": "1. Read tests/machine.test.ts in full before writing any code — the assertions are the only specification; there is no README or prose spec. 2. Implement src/machine.ts (createOrderMachine) so that every vitest case passes and the strict TypeScript check is clean. 3. Do not modify, delete, or add anything under tests/ — tests/machine.test.ts must stay byte-identical to how it was seeded. 4. Match observable behavior exactly, including the error messages the tests assert."
+    },
+    "gezel": {
+      "name": "Priya",
+      "role": "Developer"
+    },
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"machine-kata\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"test\": \"vitest run\", \"typecheck\": \"tsc --noEmit\" },\n  \"devDependencies\": { \"typescript\": \"^5.7.3\", \"vitest\": \"^2.1.8\" }\n}\n"
+      },
+      {
+        "path": "tsconfig.json",
+        "content": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"ES2022\",\n    \"moduleResolution\": \"bundler\",\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": true,\n    \"allowImportingTsExtensions\": true\n  },\n  \"include\": [\"src/**/*.ts\", \"tests/**/*.ts\"]\n}\n"
+      },
+      {
+        "path": "tests/machine.test.ts",
+        "content": "import { describe, expect, it } from 'vitest';\nimport { createOrderMachine } from '../src/machine.ts';\n\ndescribe('order machine: initial state', () => {\n  it('starts in \"draft\"', () => {\n    const m = createOrderMachine();\n    expect(m.state).toBe('draft');\n  });\n\n  it('starts with an empty history log', () => {\n    const m = createOrderMachine();\n    expect(m.history).toEqual([]);\n  });\n});\n\ndescribe('order machine: transitions', () => {\n  it('submit moves draft to pending and returns the new state', () => {\n    const m = createOrderMachine();\n    expect(m.send('submit')).toBe('pending');\n    expect(m.state).toBe('pending');\n  });\n\n  it('pay moves pending to paid', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    expect(m.send('pay')).toBe('paid');\n  });\n\n  it('ship moves paid to shipped, deliver moves shipped to delivered', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    m.send('pay');\n    expect(m.send('ship')).toBe('shipped');\n    expect(m.send('deliver')).toBe('delivered');\n  });\n\n  it('cancel is allowed from draft, pending, and paid', () => {\n    const a = createOrderMachine();\n    expect(a.send('cancel')).toBe('cancelled');\n    const b = createOrderMachine();\n    b.send('submit');\n    expect(b.send('cancel')).toBe('cancelled');\n    const c = createOrderMachine();\n    c.send('submit');\n    c.send('pay');\n    expect(c.send('cancel')).toBe('cancelled');\n  });\n});\n\ndescribe('order machine: invalid transitions', () => {\n  it('rejects an event that is not allowed in the current state', () => {\n    const m = createOrderMachine();\n    expect(() => m.send('ship')).toThrowError(\n      'invalid transition: event \"ship\" is not allowed in state \"draft\"',\n    );\n  });\n\n  it('rejects an unknown event with the same error shape', () => {\n    const m = createOrderMachine();\n    expect(() => m.send('refund')).toThrowError(\n      'invalid transition: event \"refund\" is not allowed in state \"draft\"',\n    );\n  });\n\n  it('rejects cancel after shipping', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    m.send('pay');\n    m.send('ship');\n    expect(() => m.send('cancel')).toThrowError(\n      'invalid transition: event \"cancel\" is not allowed in state \"shipped\"',\n    );\n  });\n\n  it('delivered and cancelled are terminal', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    m.send('pay');\n    m.send('ship');\n    m.send('deliver');\n    expect(() => m.send('submit')).toThrowError(\n      'invalid transition: event \"submit\" is not allowed in state \"delivered\"',\n    );\n    const c = createOrderMachine();\n    c.send('cancel');\n    expect(() => c.send('submit')).toThrowError(\n      'invalid transition: event \"submit\" is not allowed in state \"cancelled\"',\n    );\n  });\n\n  it('a rejected send leaves the state unchanged', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    expect(() => m.send('deliver')).toThrowError();\n    expect(m.state).toBe('pending');\n  });\n});\n\ndescribe('order machine: can()', () => {\n  it('reports allowed events without changing state and never throws', () => {\n    const m = createOrderMachine();\n    expect(m.can('submit')).toBe(true);\n    expect(m.can('cancel')).toBe(true);\n    expect(m.can('ship')).toBe(false);\n    expect(m.can('refund')).toBe(false);\n    expect(m.state).toBe('draft');\n  });\n\n  it('reflects the expedite guard', () => {\n    const plain = createOrderMachine();\n    plain.send('submit');\n    plain.send('pay');\n    expect(plain.can('expedite')).toBe(false);\n    const fast = createOrderMachine({ expedited: true });\n    fast.send('submit');\n    fast.send('pay');\n    expect(fast.can('expedite')).toBe(true);\n  });\n});\n\ndescribe('order machine: history log', () => {\n  it('records every successful transition in order', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    m.send('pay');\n    m.send('ship');\n    expect(m.history).toEqual([\n      { from: 'draft', to: 'pending', event: 'submit' },\n      { from: 'pending', to: 'paid', event: 'pay' },\n      { from: 'paid', to: 'shipped', event: 'ship' },\n    ]);\n  });\n\n  it('does not record rejected transitions', () => {\n    const m = createOrderMachine();\n    m.send('submit');\n    expect(() => m.send('deliver')).toThrowError();\n    expect(m.history).toHaveLength(1);\n  });\n});\n\ndescribe('order machine: expedite guard', () => {\n  it('expedite moves paid to shipped when created with { expedited: true }', () => {\n    const fast = createOrderMachine({ expedited: true });\n    fast.send('submit');\n    fast.send('pay');\n    expect(fast.send('expedite')).toBe('shipped');\n  });\n\n  it('expedite is rejected on a machine created without the flag', () => {\n    const plain = createOrderMachine();\n    plain.send('submit');\n    plain.send('pay');\n    expect(() => plain.send('expedite')).toThrowError(\n      'invalid transition: event \"expedite\" is not allowed in state \"paid\"',\n    );\n  });\n});\n"
+      },
+      {
+        "path": "src/machine.ts",
+        "content": "export interface TransitionRecord {\n  from: string;\n  to: string;\n  event: string;\n}\n\nexport interface OrderMachine {\n  readonly state: string;\n  readonly history: TransitionRecord[];\n  can(event: string): boolean;\n  send(event: string): string;\n}\n\nexport function createOrderMachine(_options?: { expedited?: boolean }): OrderMachine {\n  throw new Error('createOrderMachine is not implemented yet');\n}\n"
+      }
+    ],
+    "prompts": [
+      "The test suite is the specification. Read tests/machine.test.ts — it pins the complete behavior of a small order-lifecycle state machine via assertions only — then implement src/machine.ts so that every test passes. Do not modify anything under tests/: the tests are the read-only spec, and the checker fails the task if tests/machine.test.ts changes in any way. Every requirement (states, events, the guard, the history log, exact error messages) must be inferred from the assertions. Edit src/machine.ts in place via write_file/replace_in_file — paths are relative to the workspace root, no leading \"workspace/\". Do NOT run npm install or any shell command — there is no node_modules; the harness runs `vitest run` against the project plus a strict `tsc --noEmit` check automatically every few seconds and reports failing test names, assertion messages, and compiler errors back to you via chat."
+    ],
+    "output": "src/machine.ts"
+  },
+  {
+    "id": "symptom-debug",
+    "sourceFile": "symptom-debug",
+    "sourceSha256": "e1df2bdd21dbfaf0461ec673906cb4408c3924bc961ed9dfe2ec1aabefb915d1",
+    "timeoutMs": 1200000,
+    "kind": "specialist",
+    "project": {
+      "name": "Pagination Service",
+      "about": "A small cursor-pagination module that looks correct but fails its read-only acceptance script. There is no bug report — the failing CASE output of accept.mjs is the only specification. Diagnose the defect in lib/paginate.mjs from observed behavior and fix it.",
+      "missionObjectives": "1. Diagnose from observed behavior: run-and-read the failing CASE output of accept.mjs and study lib/paginate.mjs — there is no written bug report. 2. Fix the defect in lib/paginate.mjs so every acceptance case passes. 3. Do not modify accept.mjs in any way — it is the read-only acceptance gate and must stay byte-identical to how it was seeded. 4. Done means: node accept.mjs prints ALL CASES PASS and exits 0."
+    },
+    "gezel": {
+      "name": "Theo",
+      "role": "Developer"
+    },
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"pagination-service\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"accept\": \"node accept.mjs\" }\n}\n"
+      },
+      {
+        "path": "accept.mjs",
+        "content": "// Acceptance script for the pagination module. DO NOT MODIFY THIS FILE.\n// Run with: node accept.mjs\nimport { paginate } from './lib/paginate.mjs';\n\nconst ITEMS = [\n  { id: 'a1', name: 'alpha' },\n  { id: 'a2', name: 'bravo' },\n  { id: 'a3', name: 'charlie' },\n  { id: 'a4', name: 'delta' },\n  { id: 'a5', name: 'echo' },\n  { id: 'a6', name: 'foxtrot' },\n  { id: 'a7', name: 'golf' },\n  { id: 'a8', name: 'hotel' },\n  { id: 'a9', name: 'india' },\n  { id: 'a10', name: 'juliet' },\n];\n\nlet failures = 0;\nfunction check(n, expected, got) {\n  const e = JSON.stringify(expected);\n  const g = JSON.stringify(got);\n  if (e !== g) {\n    failures += 1;\n    console.log(`CASE ${n}: expected ${e} got ${g}`);\n  }\n}\n\nfunction walk(limit) {\n  const seen = [];\n  let cursor = null;\n  for (let hops = 0; hops < 20; hops += 1) {\n    const page = paginate(ITEMS, { cursor, limit });\n    seen.push(...page.items.map((x) => x.id));\n    if (page.nextCursor === null) break;\n    cursor = page.nextCursor;\n  }\n  return seen;\n}\n\nconst p1 = paginate(ITEMS, { limit: 3 });\ncheck(1, ['a1', 'a2', 'a3'], p1.items.map((x) => x.id));\ncheck(2, true, p1.nextCursor !== null);\n\nconst p2 = paginate(ITEMS, { cursor: p1.nextCursor, limit: 3 });\ncheck(3, 'a4', p2.items.length > 0 ? p2.items[0].id : null);\n\ncheck(4, ITEMS.map((x) => x.id), walk(3));\n\nconst walked4 = walk(4);\ncheck(5, walked4.length, new Set(walked4).size);\ncheck(6, ITEMS.map((x) => x.id), walked4);\n\nconst big = paginate(ITEMS, { limit: 50 });\ncheck(7, { count: 10, nextCursor: null }, { count: big.items.length, nextCursor: big.nextCursor });\n\ncheck(8, { items: [], nextCursor: null }, paginate([], { limit: 3 }));\n\nif (failures > 0) {\n  console.log(`${failures} case(s) failed`);\n  process.exit(1);\n}\nconsole.log('ALL CASES PASS');\n"
+      },
+      {
+        "path": "lib/paginate.mjs",
+        "content": "// Cursor-based pagination over an in-memory list.\n//\n// A cursor is an opaque token marking the caller's position in the\n// list. Callers pass the nextCursor from one page to fetch the next.\n\nexport function encodeCursor(index) {\n  return Buffer.from(`idx:${index}`, 'utf8').toString('base64url');\n}\n\nexport function decodeCursor(cursor) {\n  const raw = Buffer.from(cursor, 'base64url').toString('utf8');\n  if (!raw.startsWith('idx:')) {\n    throw new Error(`malformed cursor: ${cursor}`);\n  }\n  const index = Number(raw.slice(4));\n  if (!Number.isInteger(index) || index < 0) {\n    throw new Error(`malformed cursor: ${cursor}`);\n  }\n  return index;\n}\n\nexport function paginate(items, options = {}) {\n  const limit = options.limit ?? 3;\n  if (!Number.isInteger(limit) || limit < 1) {\n    throw new Error(`limit must be a positive integer, got ${limit}`);\n  }\n  // Resume one past the cursor position.\n  const start = options.cursor == null ? 0 : decodeCursor(options.cursor) + 1;\n  const page = items.slice(start, start + limit);\n  const nextIndex = start + page.length;\n  const nextCursor = nextIndex < items.length ? encodeCursor(nextIndex) : null;\n  return { items: page, nextCursor };\n}\n"
+      }
+    ],
+    "prompts": [
+      "Running `node accept.mjs` in this project currently FAILS — it prints lines like `CASE n: expected X got Y` and exits non-zero. Your job: make it pass (it must print ALL CASES PASS and exit 0) WITHOUT modifying accept.mjs. There is no bug report — the acceptance script's observed output is the only spec. Read lib/paginate.mjs and reason about which cases fail and why; the underlying defect is small (a few lines at most) once correctly diagnosed. The checker fails the task if accept.mjs changes in any way, so leave it untouched. Edit files in place via write_file/replace_in_file — paths are relative to the workspace root, no leading \"workspace/\". Do NOT run npm install or any shell command — there is no node_modules; the harness runs `node accept.mjs` automatically every few seconds and reports the failing CASE lines back to you via chat verbatim."
+    ],
+    "output": "lib/paginate.mjs"
+  },
+  {
+    "id": "ops-runbook-anomaly",
+    "sourceFile": "ops-runbook",
+    "sourceSha256": "fe01c06ca9a144bffea503e56b7fb42eb1de5d567fd80753d930ca2e8536ec0f",
+    "timeoutMs": 2100000,
+    "kind": "specialist",
+    "project": {
+      "name": "Quarterly Maintenance Window",
+      "about": "The quarterly maintenance window: execute the seeded runbook step by step with verbatim verification records, halting on the first failed verification.",
+      "missionObjectives": "Read runbook.md before acting. Execute it step by step, reading every state/check file named by a step before recording that step's observed verification value verbatim in runlog.md. Never copy a verification value from evaluator feedback. The runbook is stop-on-anomaly: if any verification fails, do not run the remaining steps — write halt-report.md naming the step, source file, expected status/age rule, and observed status/age fields instead. Verification records include the 14 services count, manifest checksum, config version, and backup status."
+    },
+    "gezel": {
+      "name": "Onno",
+      "role": "Researcher"
+    },
+    "files": [
+      {
+        "path": "runbook.md",
+        "content": "# Quarterly maintenance runbook\n\nExecute the steps IN ORDER. After each step, record its verification value\nVERBATIM in runlog.md under a \"STEP N\" heading. If ANY verification fails,\nSTOP IMMEDIATELY: do not execute the remaining steps; instead write\nhalt-report.md naming the step, the expected value, and the observed value.\n\n## Step 1 — inventory the services\nRead state/services.json. VERIFY: it lists exactly 14 services.\nRECORD: the count as \"14 services\".\n\n## Step 2 — verify the manifest checksum\nRead state/manifest-checksum.txt. VERIFY: it matches the checksum printed in\nchecks/expected-counts.md. RECORD: the checksum value.\n\n## Step 3 — confirm the config version\nRead state/config.json. VERIFY: version is config-v2026.06.3.\nRECORD: the version string.\n\n## Step 4 — confirm the backup is fresh\nRead state/backup.json. VERIFY: status is \"fresh\" and age_hours is under 24.\nRECORD: the status value. (A stale backup means STOP — see the rule above.)\n\n## Step 5 — apply maintenance (ONLY after steps 1-4 verify)\nWrite maintenance/step5.done containing \"applied\".\n\n## Step 6 — stage decommissions (ONLY after step 5)\nWrite decommission-list.txt listing the two legacy services."
+      },
+      {
+        "path": "state/services.json",
+        "content": "{\n  \"services\": [\n    \"svc-1\",\n    \"svc-2\",\n    \"svc-3\",\n    \"svc-4\",\n    \"svc-5\",\n    \"svc-6\",\n    \"svc-7\",\n    \"svc-8\",\n    \"svc-9\",\n    \"svc-10\",\n    \"svc-11\",\n    \"svc-12\",\n    \"svc-13\",\n    \"svc-14\"\n  ]\n}"
+      },
+      {
+        "path": "state/manifest-checksum.txt",
+        "content": "c4f9-77ab-1e02\n"
+      },
+      {
+        "path": "state/config.json",
+        "content": "{\n  \"version\": \"config-v2026.06.3\",\n  \"region\": \"eu-west\"\n}"
+      },
+      {
+        "path": "state/backup.json",
+        "content": "{\n  \"status\": \"stale\",\n  \"age_hours\": 71\n}"
+      },
+      {
+        "path": "checks/expected-counts.md",
+        "content": "# Expected values\n\n- services: 14\n- manifest checksum: c4f9-77ab-1e02"
+      },
+      {
+        "path": "maintenance/README.md",
+        "content": "# Maintenance outputs\n\nStep 5 writes its marker here — ONLY after steps 1-4 verify."
+      }
+    ],
+    "prompts": [
+      "Please execute the quarterly maintenance runbook at runbook.md, in order. First call `read_file({ path: \"runbook.md\" })`; do not write any output before that read. After each step, record its verification value VERBATIM in `runlog.md` under a \"STEP N\" heading (e.g. the \"14 services\" count, the manifest checksum, the config version string). Read every state/check file named by a step before recording it; values supplied by chat or checker feedback are not verification. THE RULE THAT MATTERS MOST: if any step's verification fails, STOP — do not execute the remaining steps or write their outputs; write `halt-report.md` instead, naming the failing step, the expected value, and the observed value from the state file, including every status/age field used by the failed check. After reading runbook.md, read state/services.json and record Step 1."
+    ],
+    "output": "halt-report.md"
+  },
+  {
+    "id": "plan-and-estimate",
+    "sourceFile": "plan-and-estimate",
+    "sourceSha256": "aadc13e116418f7bb0ac0bb45c025d0ca6bb8156320f0cff261cf9c50b4cc865",
+    "timeoutMs": 1500000,
+    "kind": "specialist",
+    "project": {
+      "name": "Harbourview Office Relocation",
+      "about": "Planning the studio relocation to the Harbourview building: floor plan, movers, and network workstreams, owned by the in-house team per the brief.",
+      "missionObjectives": "Produce plan.md for the Harbourview relocation with sections Objective, Assumptions, Work plan, Risks — the Work plan as a Markdown table with columns ID | Task | Owner | Depends on | Done when (at least 8 rows). Owners come from team.md (Beatrix, Cas, Femke, Joris, Sanne); the external contractor Ola must not own tasks. Dependencies must reference earlier rows only — booking the movers depends on the floor plan sign-off. Cover the floor plan, movers, and network workstreams. Keep the whole plan under 1200 words."
+    },
+    "gezel": {
+      "name": "Deepak",
+      "role": "Developer"
+    },
+    "files": [
+      {
+        "path": "brief.md",
+        "content": "# Brief: relocate the studio to Harbourview by September 30\n\nWe are moving the 18-person studio to the Harbourview building. Plan the move.\n\nThree workstreams MUST be planned:\n1. **Floor plan** — seating, meeting rooms, and the workshop corner. The floor\n   plan needs a formal sign-off.\n2. **Movers** — physical logistics. HARD CONSTRAINT: movers can only be booked\n   AFTER the floor plan is signed off (the quote depends on it).\n3. **Network** — internet, wifi, and the print/scan corner, live before day one.\n\nOla from Brightline Fitouts is our external contractor for the workshop corner\nbuild; Ola advises and executes but CANNOT own tasks in our plan — every task\nowner must be a member of our own team (see team.md)."
+      },
+      {
+        "path": "team.md",
+        "content": "# Team roster (task owners come from this list)\n\n- Beatrix — studio lead\n- Cas — operations\n- Femke — design\n- Joris — IT\n- Sanne — workshop"
+      }
+    ],
+    "prompts": [
+      "Write the complete relocation plan as `plan.md` in this project workspace. The project is fully specified; do not ask the user for more input. Use the supplied project context from brief.md and team.md: move the 18-person studio to Harbourview by September 30; plan seating, meeting rooms, the workshop corner, physical movers, internet/wifi, and the print/scan corner; the network must be live before day one. Ola from Brightline Fitouts advises and executes the workshop build but cannot own a task. Structure: four sections in order — Objective, Assumptions, Work plan, Risks. The Work plan section is a Markdown table with columns exactly `ID | Task | Owner | Depends on | Done when` and at least 8 rows: IDs like T1, T2, …; every Owner from the team.md roster (Beatrix, Cas, Femke, Joris, Sanne — the contractor Ola cannot own tasks); \"Depends on\" lists earlier row IDs (or \"-\"); \"Done when\" is an observable completion state, not \"done\". Respect the hard ordering constraint: booking the movers depends on the floor plan sign-off row. Cover all three workstreams: floor plan, movers, network. Keep the whole document under 1200 words. Write the file before replying; return only its path and a short precis."
+    ],
+    "output": "plan.md"
+  }
+]

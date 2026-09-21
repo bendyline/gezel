@@ -182,11 +182,10 @@ export function GreetingBand({
         {/* The date label and the tour share a tab strip — the tour reads
             as a second tab beside the greeting rather than a panel that
             adds height below. */}
-        <div className="home-workshop-tabs" role="tablist" aria-label="Home view">
+        <fieldset className="home-workshop-tabs" aria-label="Home view">
           <button
             type="button"
-            role="tab"
-            aria-selected={tab === 'greeting'}
+            aria-pressed={tab === 'greeting'}
             className={`home-workshop-tab${tab === 'greeting' ? ' is-active' : ''}`}
             onClick={() => onTabChange('greeting')}
           >
@@ -195,8 +194,7 @@ export function GreetingBand({
           {report && (
             <button
               type="button"
-              role="tab"
-              aria-selected={tab === 'status'}
+              aria-pressed={tab === 'status'}
               className={`home-workshop-tab${tab === 'status' ? ' is-active' : ''}`}
               onClick={() => onTabChange('status')}
             >
@@ -206,8 +204,7 @@ export function GreetingBand({
           {nightReview && (
             <button
               type="button"
-              role="tab"
-              aria-selected={tab === 'night'}
+              aria-pressed={tab === 'night'}
               className={`home-workshop-tab${tab === 'night' ? ' is-active' : ''}`}
               onClick={() => onTabChange('night')}
             >
@@ -216,14 +213,13 @@ export function GreetingBand({
           )}
           <button
             type="button"
-            role="tab"
-            aria-selected={tab === 'tour'}
+            aria-pressed={tab === 'tour'}
             className={`home-workshop-tab${tab === 'tour' ? ' is-active' : ''}`}
             onClick={() => onTabChange('tour')}
           >
             New here? What is gezel
           </button>
-        </div>
+        </fieldset>
         <button
           type="button"
           className="home-workshop-collapse-btn"

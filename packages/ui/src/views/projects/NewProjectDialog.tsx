@@ -19,6 +19,7 @@ import { connectMailboxOAuth, linkImapMailbox } from '../../components/mail-link
 import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import {
   NewProjectBrief,
   type PaneSelection,
@@ -279,7 +280,7 @@ export function NewProjectDialog({
   // Load the custom project types offered in the gallery, once per open.
   // `email` is excluded — it has its own kind (with mailbox linking) above.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !runtimeCapabilities().catalog) return;
     let cancelled = false;
     const projectTypesRequest = api.listCatalogItems('project-type');
     const connectorBooksRequest = showWorkInProgressFeatures
@@ -514,7 +515,14 @@ export function NewProjectDialog({
       ? (selectedType.manifest.params as SquisqAnnotatedSchema | undefined)
       : undefined;
   const availableProjectKinds = useMemo(
-    () => PROJECT_KINDS.filter((item) => showWorkInProgressFeatures || item.id !== 'email'),
+    () =>
+      PROJECT_KINDS.filter((item) => {
+        const caps = runtimeCapabilities();
+        if (item.id === 'folder' && !caps.externalFolders) return false;
+        if (item.id === 'github' && !caps.git) return false;
+        if (item.id === 'email' && !caps.connections) return false;
+        return showWorkInProgressFeatures || item.id !== 'email';
+      }),
     [showWorkInProgressFeatures],
   );
   const normalizedProjectTypeQuery = projectTypeQuery.trim().toLowerCase();

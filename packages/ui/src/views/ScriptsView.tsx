@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { CapabilityPills } from '../components/CapabilityPills.js';
 import { NewScriptDialog } from '../components/NewScriptDialog.js';
 import { RunResult, ScriptInputFields, buildDefaultInputs } from '../components/ScriptRunForm.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 type ScriptEntry = ListScriptsResponse['scripts'][number];
 
@@ -14,6 +15,7 @@ type ScriptEntry = ListScriptsResponse['scripts'][number];
  * attach them, which is what makes it the place to put anything shared.
  */
 const SHARED_LIBRARY = 'shared-library';
+const STANDARD_LIBRARY = 'standard-library';
 
 /**
  * Shared scripts still need a project to run *in* — the runner scopes a
@@ -28,8 +30,12 @@ export interface ScriptsViewProps {
 }
 
 export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
+  const canAuthor = runtimeCapabilities().scriptAuthoring;
+  const [targetProject, setTargetProject] = useState(projectId ?? SHARED_RUN_PROJECT);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [source, setSource] = useState<string>(projectId ?? SHARED_LIBRARY);
+  const [source, setSource] = useState<string>(
+    canAuthor ? (projectId ?? SHARED_LIBRARY) : STANDARD_LIBRARY,
+  );
   const [scripts, setScripts] = useState<ScriptEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,27 +45,30 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
   const [creating, setCreating] = useState(false);
 
   const shared = source === SHARED_LIBRARY;
-  const runProjectId = shared ? (projectId ?? SHARED_RUN_PROJECT) : source;
+  const standard = source === STANDARD_LIBRARY;
+  const runProjectId = shared || standard ? (projectId ?? targetProject) : source;
 
   useEffect(() => {
     if (projectId !== undefined) {
-      setSource(projectId);
+      setSource(canAuthor ? projectId : STANDARD_LIBRARY);
       return;
     }
     api
       .listProjects()
       .then((r) => setProjects(r.projects))
       .catch((err) => setError((err as Error).message));
-  }, [projectId]);
+  }, [projectId, canAuthor]);
 
   const refresh = useCallback(async (src: string) => {
     try {
       const res =
-        src === SHARED_LIBRARY
-          ? await api.listUserScripts()
-          : src
-            ? await api.listProjectScripts(src)
-            : { scripts: [] };
+        src === STANDARD_LIBRARY
+          ? await api.listStandardScripts()
+          : src === SHARED_LIBRARY
+            ? await api.listUserScripts()
+            : src
+              ? await api.listProjectScripts(src)
+              : { scripts: [] };
       setScripts(res.scripts);
     } catch (err) {
       setError((err as Error).message);
@@ -101,7 +110,7 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
     try {
       const res = await api.runProjectScript(runProjectId, {
         name: selectedScript.name,
-        ...(shared ? { scope: 'user' as const } : {}),
+        ...(standard ? { scope: 'standard' as const } : shared ? { scope: 'user' as const } : {}),
         input: inputValues,
       });
       setLastRun(res);
@@ -110,7 +119,7 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
     } finally {
       setRunning(false);
     }
-  }, [selectedScript, runProjectId, shared, inputValues]);
+  }, [selectedScript, runProjectId, shared, standard, inputValues]);
 
   const openEditor = useCallback(
     (name: string) => {
@@ -120,13 +129,17 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
             kind: 'script',
             projectId: runProjectId,
             name,
-            ...(shared ? { scope: 'user' as const } : {}),
+            ...(standard
+              ? { scope: 'standard' as const }
+              : shared
+                ? { scope: 'user' as const }
+                : {}),
             activate: true,
           },
         }),
       );
     },
-    [runProjectId, shared],
+    [runProjectId, shared, standard],
   );
 
   return (
@@ -144,10 +157,27 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
                   setSelected(null);
                 }}
               >
-                <option value={SHARED_LIBRARY}>Shared library</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
+                {canAuthor && <option value={SHARED_LIBRARY}>Shared library</option>}
+                <option value={STANDARD_LIBRARY}>Standard library</option>
+                {canAuthor &&
+                  projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+          {standard && projectId === undefined && (
+            <label className="scripts-view__field">
+              <span>Run in project</span>
+              <select
+                value={targetProject}
+                onChange={(event) => setTargetProject(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
                   </option>
                 ))}
               </select>
@@ -167,13 +197,15 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            className="primary scripts-view__new"
-            onClick={() => setCreating(true)}
-          >
-            New script
-          </button>
+          {canAuthor && (
+            <button
+              type="button"
+              className="primary scripts-view__new"
+              onClick={() => setCreating(true)}
+            >
+              New script
+            </button>
+          )}
         </div>
       </header>
 
@@ -190,6 +222,7 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
           <ScriptDetail
             entry={selectedScript}
             shared={shared}
+            readOnly={standard}
             inputValues={inputValues}
             onInputChange={setInputValues}
             running={running}
@@ -200,18 +233,20 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
         ) : null}
       </div>
 
-      <NewScriptDialog
-        open={creating}
-        projectId={runProjectId}
-        {...(shared ? { scope: 'user' as const } : {})}
-        onClose={() => setCreating(false)}
-        onCreated={(name) => {
-          setCreating(false);
-          void refresh(source);
-          setSelected(name);
-          openEditor(name);
-        }}
-      />
+      {canAuthor && (
+        <NewScriptDialog
+          open={creating}
+          projectId={runProjectId}
+          {...(shared ? { scope: 'user' as const } : {})}
+          onClose={() => setCreating(false)}
+          onCreated={(name) => {
+            setCreating(false);
+            void refresh(source);
+            setSelected(name);
+            openEditor(name);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -219,6 +254,7 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
 function ScriptDetail({
   entry,
   shared,
+  readOnly,
   inputValues,
   onInputChange,
   running,
@@ -228,6 +264,7 @@ function ScriptDetail({
 }: {
   entry: ScriptEntry;
   shared: boolean;
+  readOnly: boolean;
   inputValues: Record<string, unknown>;
   onInputChange: (next: Record<string, unknown>) => void;
   running: boolean;
@@ -270,7 +307,7 @@ function ScriptDetail({
           {running ? 'Running…' : 'Run'}
         </button>
         <button type="button" onClick={onEdit}>
-          Edit code
+          {readOnly ? 'View code' : 'Edit code'}
         </button>
       </div>
 

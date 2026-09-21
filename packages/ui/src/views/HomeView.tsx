@@ -239,6 +239,25 @@ export function HomeView({
 
   useEffect(() => () => cancelOllamaRetries(), [cancelOllamaRetries]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void api
+        .getConfig()
+        .then((next) => {
+          if (cancelled) return;
+          setConfig(next);
+          void runProbe(next.provider ?? UI_FALLBACK_PROVIDER);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('gezel:config-updated', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('gezel:config-updated', refresh);
+    };
+  }, [runProbe]);
+
   // A healthy local engine is not yet usable without a model on disk. Keep
   // every local provider in onboarding until its inventory is non-empty so
   // the first-run download affordance remains visible. Cloud/frontier
@@ -348,6 +367,22 @@ export function HomeView({
         banner={banner}
         onNavigate={onNavigate}
       />
+    );
+  }
+
+  if (window.__GEZEL__?.renderModelSettings) {
+    return (
+      <div className="home-view">
+        <div className="home-firstrun-columns">
+          <div className="home-firstrun-main">
+            <h1 className="home-firstrun-heading">First run setup</h1>
+            <p className="home-firstrun-lede muted">
+              Choose an AI model to start working with your gezellen.
+            </p>
+            {window.__GEZEL__.renderModelSettings()}
+          </div>
+        </div>
+      </div>
     );
   }
 

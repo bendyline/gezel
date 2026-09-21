@@ -1,3 +1,11 @@
+import {
+  EnsureGezelInputSchema,
+  ListDirectoryInputSchema,
+  ReadDocumentInputSchema,
+  ReadTaskNotesInputSchema,
+  WriteDocumentInputSchema,
+  WriteTaskNoteInputSchema,
+} from '@bendyline/gezel';
 /**
  * Gezel MCP Server
  *
@@ -1568,9 +1576,7 @@ if (process.env.GEZEL_TABLES_ENABLED === '1') {
 server.tool(
   'list_dir',
   'List the files and subdirectories at a path in the project. The project root is the default. When this project links other projects, list `..` to discover them and use `../<project-id>/...` to browse one with this same tool.',
-  {
-    path: z.string().optional().describe('Subdirectory path to list (default: project root).'),
-  },
+  ListDirectoryInputSchema.shape,
   async ({ path }) => {
     try {
       const target = await workspaceTarget(path ?? '');
@@ -4384,13 +4390,7 @@ server.tool(
 server.tool(
   'read_document',
   'Read one document from the shared library by path, or a knowledge-catalog article by its knowledge:// URI (from a `search` result with the knowledge source). Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
-  {
-    path: z
-      .string()
-      .describe(
-        'File path relative to the documents root (e.g. "guidelines/coding.md"), or a knowledge:// URI (e.g. "knowledge://world-history/1234#line=10-40")',
-      ),
-  },
+  ReadDocumentInputSchema.shape,
   async ({ path }) => {
     const knowledgeUri = parseKnowledgeUri(path);
     if (knowledgeUri) {
@@ -4418,12 +4418,7 @@ server.tool(
 server.tool(
   'write_document',
   'Create or update a document in the shared documents library (markdown preferred). Use for durable cross-project knowledge — guidelines, policies, style rules. For knowledge specific to one project, use a folder named after that project (e.g. "acme-site/decisions.md"). Deliverables for the current job belong in the workspace or artifacts, not here.',
-  {
-    path: z
-      .string()
-      .describe('File path relative to the documents root (e.g. "guidelines/coding.md")'),
-    content: z.string().describe('File content to write (markdown recommended)'),
-  },
+  WriteDocumentInputSchema.shape,
   async ({ path, content }) => {
     const redirected = await redirectExpectedDeliverableWriteToWorkspace(
       path,
@@ -6113,13 +6108,7 @@ server.tool(
 server.tool(
   'ensure_gezel',
   "Make sure a gezel exists who can handle a given job (designer, dev, copywriter, …) and return them, creating one if nothing fits. Prefer this over the `list_gezels` → `list_gilde` → `create_gezel` sequence: one fuzzy, idempotent call reuses a good roster match or creates from the matching gilde template. Gezels are shared across projects, so reuse preserves their memory of the user's preferences. Use `create_gezel` only when you explicitly need a separate new gezel, an exact templateId, or a custom about.md.",
-  {
-    jobTitle: z
-      .string()
-      .describe(
-        'The role you need filled — "designer", "dev", "UX researcher", "copywriter", etc. Fuzzy-matched against the roster + templates.',
-      ),
-  },
+  EnsureGezelInputSchema.shape,
   async ({ jobTitle }) => {
     const res = await api.ensureGezel({
       jobTitle,
@@ -9521,10 +9510,7 @@ server.tool(
 server.tool(
   'read_task_notes',
   'Read the chronological feed of timestamped notes for a task (or a specific step). Omit stepId to read the whole task feed across every step. Each entry has an author (a gezel or the user) and was appended at a known time — newest first.',
-  {
-    ref: z.string(),
-    stepId: z.string().optional(),
-  },
+  ReadTaskNotesInputSchema.shape,
   async ({ ref, stepId }) => {
     const parsed = await parseRef(ref);
     const effectiveStep = stepId?.trim() || undefined;
@@ -9548,27 +9534,7 @@ server.tool(
 server.tool(
   'write_task_note',
   'Append one focused, dated, attributed note to a task. Prefer many small notes over a long blob — teammates and you will read this feed later. Author is auto-attributed to you.',
-  {
-    ref: z.string(),
-    text: z
-      .string()
-      .min(1)
-      .optional()
-      .describe('The note body. Markdown ok. Required unless you pass `note` / `content` instead.'),
-    // `note` and `content` are the two names models reach for on a tool
-    // called `write_task_note`. `write_task_note` is the single most common
-    // argument-validation failure in the whole eval corpus, and `content` is
-    // not even a guess — the shipped `investigate` and `pull-request-review`
-    // craftbooks instruct the assignee to call
-    // `write_task_note({ ref, content: … })`, so following the catalog
-    // verbatim earns a -32602. The rejection happens in the SDK's schema
-    // validation before the handler runs, so no coercion layer downstream can
-    // rescue it: the model burns a turn re-reading the schema. Same precedent
-    // as `ask_user_question`'s `prompt` / `description` aliases.
-    note: z.string().min(1).optional().describe('Alias for `text`.'),
-    content: z.string().min(1).optional().describe('Alias for `text`.'),
-    stepId: z.string().optional(),
-  },
+  WriteTaskNoteInputSchema.shape,
   async ({ ref, text, note, content, stepId }) => {
     const body = text ?? note ?? content;
     if (!body) {

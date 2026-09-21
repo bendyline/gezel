@@ -32,6 +32,7 @@ import {
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -539,7 +540,7 @@ export function ChatTimelineView({
   // for the *actively-viewed* session — we don't pre-warm every
   // open chat (that's an opt-in operator setting for later).
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!runtimeCapabilities().daemonSettings || !activeSessionId) return;
     void api.warmSessionCache(activeSessionId).catch(() => {
       // Best-effort. Engine may not be ready, may not support warming,
       // or session may have no prior history. None of those are
@@ -861,27 +862,28 @@ export function ChatTimelineView({
         // while their own message is queued would see nothing until
         // the queue drained — then the bubble would pop in, read as
         // a delay rather than a pending state.
-        try {
-          const q = await api.getQueueStatus();
-          if (cancelled) return;
-          for (const sess of q.sessions) {
-            if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(sess.sessionId)) {
-              continue;
+        if (runtimeCapabilities().queuedChat)
+          try {
+            const q = await api.getQueueStatus();
+            if (cancelled) return;
+            for (const sess of q.sessions) {
+              if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(sess.sessionId)) {
+                continue;
+              }
+              queuedRef.current.set(
+                sess.sessionId,
+                sess.entries.map((e) => ({
+                  id: e.queueId,
+                  preview: e.preview,
+                  enqueuedAt: e.enqueuedAt,
+                  ...(e.nudge ? { nudge: true } : {}),
+                })),
+              );
             }
-            queuedRef.current.set(
-              sess.sessionId,
-              sess.entries.map((e) => ({
-                id: e.queueId,
-                preview: e.preview,
-                enqueuedAt: e.enqueuedAt,
-                ...(e.nudge ? { nudge: true } : {}),
-              })),
-            );
+            if (q.sessions.length > 0) liveStore.markStructureChanged();
+          } catch {
+            /* non-fatal */
           }
-          if (q.sessions.length > 0) liveStore.markStructureChanged();
-        } catch {
-          /* non-fatal */
-        }
         // Close the initial snapshot → SSE subscription race. A turn can
         // finish after the first disk read but before this component's stream
         // is attached; in that window it is absent from both `inflight` and
@@ -1081,6 +1083,7 @@ export function ChatTimelineView({
   // form when the user re-loads the timeline. SSE refreshes the same
   // map below.
   const refreshQuestions = useCallback(async () => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     try {
       // Pull pending across every project AND a per-project full list
       // for the few projects that actually have any. The pending-only
@@ -1114,6 +1117,7 @@ export function ChatTimelineView({
   // file as well. This keeps answered cards collapsed in place after submit
   // and after reload instead of reverting to a raw tool-only summary.
   useEffect(() => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     const projectIds = new Set<string>();
     for (const message of messages) {
       if (!message.pendingQuestionId && !messageAskedUserQuestion(message)) continue;
@@ -2523,8 +2527,9 @@ export function ChatTimelineView({
    * their normal chronological/thread positions; only the otherwise-empty
    * runway changes size. ResizeObserver follows streaming bubbles as their
    * text grows without routing token-frequency updates through this parent.
-   * Reserve conversation space first: a phone's entire scrollport can be
-   * shorter than 300px, which otherwise pins every message above the viewport.
+   * Reserve conversation space first, including the last completed reply and
+   * its sticky context. A short viewport must not scroll that reply out of view
+   * just to make room for artificial blank space after it.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: loading and the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
   useLayoutEffect(() => {
@@ -2558,22 +2563,33 @@ export function ChatTimelineView({
       }
       const reserve = Math.min(
         TIMELINE_WORKING_RESERVE_PX,
-        Math.max(0, timeline.clientHeight - TIMELINE_MIN_CONVERSATION_HEIGHT_PX),
+        Math.max(
+          0,
+          timeline.clientHeight -
+            Math.max(
+              TIMELINE_MIN_CONVERSATION_HEIGHT_PX,
+              (lastReply?.getBoundingClientRect().height ?? 0) + stickyHeightRef.current + 24,
+            ),
+        ),
       );
       runway.style.blockSize = `${Math.max(0, reserve - consumed)}px`;
     };
 
+    const lastReply = [
+      ...timeline.querySelectorAll<HTMLElement>('[data-msg-id^="msg:"][data-msg-id$=":assistant"]'),
+    ].at(-1);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(timeline);
+    if (lastReply) observer.observe(lastReply);
     for (const node of timeline.querySelectorAll<HTMLElement>(
       '[data-msg-id^="live:"], .terminal-group-streaming',
     )) {
       observer.observe(node);
     }
     return () => observer.disconnect();
-  }, [loading, liveStructureVersion, terminalLiveStructureVersion]);
+  }, [loading, liveStructureVersion, terminalLiveStructureVersion, rows.length]);
 
   /**
    * Align a locally-submitted prompt after its row has rendered. The target

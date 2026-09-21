@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Gate for the Knowledge area: true once the user has ≥1 registered catalog.
@@ -12,6 +13,7 @@ import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inv
 export function useHasKnowledgeCatalogs(): boolean {
   const [has, setHas] = useState(false);
   useEffect(() => {
+    if (!runtimeCapabilities().knowledge) return;
     let cancelled = false;
     const refresh = () => {
       api

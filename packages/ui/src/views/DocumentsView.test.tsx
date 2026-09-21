@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -184,6 +185,23 @@ describe('DocumentsView', () => {
     // Reset localStorage between tests so a stale selectedPath from a
     // prior test doesn't leak in.
     window.localStorage.clear();
+  });
+
+  it('keeps document browsing on a host without content search', async () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = {
+      token: 'test',
+      capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, search: false },
+    };
+    try {
+      vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+      render(<DocumentsView />);
+      await screen.findByTestId('select-mission.md');
+      expect(screen.queryByRole('searchbox', { name: 'Search document contents' })).toBeNull();
+      expect(api.searchDocuments).not.toHaveBeenCalled();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
   });
 
   it('renders the empty-state hint when no documents exist', async () => {

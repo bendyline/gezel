@@ -1123,6 +1123,8 @@ export const GezelConfigSchema = z.object({
       'codex-cli': z.string().optional(),
       ollama: z.string().optional(),
       'llama-cpp': z.string().optional(),
+      'apple-foundation-models': z.string().optional(),
+      'android-mlkit': z.string().optional(),
       mlx: z.string().optional(),
       ds4: z.string().optional(),
       // A namespaced `remote:<remoteId>/<model>` default. Rarely set — remote
@@ -1141,6 +1143,8 @@ export const GezelConfigSchema = z.object({
       'codex-cli': z.string().optional(),
       ollama: z.string().optional(),
       'llama-cpp': z.string().optional(),
+      'apple-foundation-models': z.string().optional(),
+      'android-mlkit': z.string().optional(),
       mlx: z.string().optional(),
       ds4: z.string().optional(),
       remote: z.string().optional(),
@@ -5718,7 +5722,10 @@ export type DocumentSearchResult = z.infer<typeof DocumentSearchResultSchema>;
 export const SearchDocumentsResponseSchema = z.object({
   results: z.array(DocumentSearchResultSchema),
   /** `hybrid`/`semantic` once the library carries embeddings. */
-  engine: z.enum(['hybrid', 'semantic', 'fts', 'unavailable']),
+  engine: z.enum(['hybrid', 'semantic', 'fts', 'lexical', 'unavailable']),
+  /** Source scans are bounded, and expose incomplete coverage honestly. */
+  truncated: z.boolean().optional(),
+  sourcesIncomplete: z.boolean().optional(),
 });
 export type SearchDocumentsResponse = z.infer<typeof SearchDocumentsResponseSchema>;
 

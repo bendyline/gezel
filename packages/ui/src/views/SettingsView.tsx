@@ -36,9 +36,9 @@ import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
-import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-side.js';
-import { type ThemePref, getThemePref, setThemePref } from '../theme.js';
 import { GeneralistModeSection } from './GeneralistModeSection.js';
+import { HostModelSettings } from './HostModelSettings.js';
+import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
 import {
   AutostartToggle,
   BackgroundServiceStatus,
@@ -333,6 +333,11 @@ function buildSections(platform: string | undefined): SettingsSection[] {
 }
 
 export function SettingsView() {
+  if (window.__GEZEL__?.renderModelSettings) return <HostModelSettings />;
+  return <DaemonSettingsView />;
+}
+
+function DaemonSettingsView() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string>('');
@@ -4394,48 +4399,6 @@ function QuotaBucketCard({ bucket }: { bucket: QuotaBucket }) {
 
 function humanizeBucketName(name: string): string {
   return name.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function ThemePicker() {
-  const [pref, setPref] = useState<ThemePref>(getThemePref);
-  return (
-    <div className="provider-switch">
-      {(['system', 'light', 'dark'] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          className={`provider-pill${pref === value ? ' provider-pill-active' : ''}`}
-          onClick={() => {
-            setThemePref(value);
-            setPref(value);
-          }}
-        >
-          {value === 'system' ? 'Follow system' : value === 'light' ? 'Light' : 'Dark'}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function SidebarSidePicker() {
-  const [side, setSide] = useState<SidebarSide>(getSidebarSide);
-  return (
-    <div className="provider-switch">
-      {(['left', 'right'] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          className={`provider-pill${side === value ? ' provider-pill-active' : ''}`}
-          onClick={() => {
-            setSidebarSide(value);
-            setSide(value);
-          }}
-        >
-          {value === 'left' ? 'Left' : 'Right'}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 interface MemorySectionProps {

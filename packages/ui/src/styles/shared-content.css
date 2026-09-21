@@ -329,9 +329,9 @@
   pointer-events: auto;
 }
 .msg-action-button {
-  width: 26px;
-  height: 26px;
-  padding: 0;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0.2rem 0.35rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -347,6 +347,27 @@
   background: var(--accent);
   color: var(--titlebar-ink, #fff);
   border-color: var(--accent);
+}
+
+/* Touch screens and compact windows keep actions in the message flow, where
+   they remain visible and cannot overflow the narrow chat gutter. */
+@media (hover: none), (max-width: 600px) {
+  .msg-actions-anchor {
+    position: static;
+    height: auto;
+    padding: 0.5rem 0 0;
+  }
+  .msg-actions {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .msg-action-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* Debug-only "copy debug bundle" button — same shape as the regular

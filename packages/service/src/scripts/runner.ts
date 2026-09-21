@@ -10,10 +10,12 @@ import {
   type ScriptRunStatus,
   type ScriptRunTrigger,
   type ScriptScope,
+  assertScriptExecutionAllowed,
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
-  resolveSecurityPolicy,
+  narrowScriptSecurityCapabilities,
+  validateScriptOutput,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ScriptExecutionResult, ScriptExecutor } from '@bendyline/gezel-script-runtime';
@@ -129,6 +131,7 @@ export class ScriptRunner {
   private dispatcher: ReturnType<typeof buildDispatcher>;
   private mcpCall: DispatcherDeps['mcpCall'];
   private indexAccess: DispatcherDeps['index'];
+  private readonly activePolicies = new Map<string, { check(): Promise<void>; depth: number }>();
 
   constructor(opts: ScriptRunnerOptions) {
     this.store = opts.store;
@@ -187,6 +190,13 @@ export class ScriptRunner {
     if (depth > this.maxNestedDepth) {
       throw new Error(`nested script depth exceeded (max ${this.maxNestedDepth})`);
     }
+    const parent =
+      opts.trigger.kind === 'nested'
+        ? this.activePolicies.get(opts.trigger.parentRunId)
+        : undefined;
+    if (opts.trigger.kind === 'nested' && !parent)
+      throw new Error('Parent script execution has ended');
+    await parent?.check();
 
     const scope = opts.scope ?? 'project';
     if (opts.inlineSource !== undefined && scope === 'standard') {
@@ -227,7 +237,7 @@ export class ScriptRunner {
     // Validate input against meta, applying defaults and required checks.
     const validatedInput = validateScriptInput(meta, rawInputs);
 
-    // Resolve engagement mode once at the start of the run.
+    // Initial guest flags describe admission; host dispatch rechecks live policy.
     const config = await this.store.readConfig();
     const llmAllowed = isEngagementAllowed(config);
     const engagementMode = getEngagementMode(config);
@@ -241,16 +251,7 @@ export class ScriptRunner {
     // STANDARD-scope scripts are exempt too: they are packed into the app,
     // read-only, and resolution only ever reads from the app's own stdlib
     // directory — running them is running the product, not user code.
-    const securityPolicy = resolveSecurityPolicy(config);
-    if (
-      !securityPolicy.allowScriptExecution &&
-      scope !== 'standard' &&
-      (opts.trigger.kind === 'chat' || opts.trigger.kind === 'step')
-    ) {
-      throw new Error(
-        'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to let gezels run scripts.',
-      );
-    }
+    assertScriptExecutionAllowed(config, scope, opts.trigger);
 
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -259,6 +260,8 @@ export class ScriptRunner {
       id: runId,
       projectId: opts.projectId,
       scriptName: opts.scriptName,
+      scope,
+      sourceHash: createHash('sha256').update(source).digest('hex'),
       startedAt,
       status: 'running',
       trigger: opts.trigger,
@@ -275,18 +278,7 @@ export class ScriptRunner {
     const stripCapability = (cap: ScriptCapability, reason: string) => {
       if (allowedCapabilities.delete(cap)) strippedCapabilities.set(cap, reason);
     };
-    // Security ceiling: when external services are off, deny a script the
-    // `network` and `credential:*` capabilities even if its meta requests
-    // them. The dispatcher then raises CapabilityDeniedError on any
-    // mcp.call / http.authed the script attempts — no silent egress.
-    if (!securityPolicy.allowExternalServices) {
-      const reason =
-        'external services are disabled by the security policy (Settings → Security & Compliance)';
-      stripCapability('network', reason);
-      for (const cap of [...allowedCapabilities]) {
-        if (cap.startsWith('credential:')) stripCapability(cap, reason);
-      }
-    }
+    narrowScriptSecurityCapabilities(config, allowedCapabilities, strippedCapabilities);
     // Per-project write gate: `workspace.write` follows the same
     // contract as every other workspace-write surface (internal
     // workspaces writable, external dirs opt-in, explicit per-project
@@ -297,25 +289,22 @@ export class ScriptRunner {
     // library, so it stays on the global file-edits posture. Artifacts
     // stay writable — the locked-down "write to the sandbox, not the
     // source" escape hatch.
-    if (allowedCapabilities.has('workspace.write')) {
-      const writeGate = await this.store.assertWorkspaceWritable(opts.projectId, {
-        initiatedByGezel: true,
-      });
-      if (!writeGate.ok) {
-        stripCapability(
-          'workspace.write',
-          writeGate.reason === 'external-consent-required'
-            ? `gezel writes to this project's external working directory require "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings`
-            : 'gezel workspace writes are turned off for this project (Project → Settings)',
-        );
+    const narrowWorkspaceCapability = async () => {
+      if (allowedCapabilities.has('workspace.write')) {
+        const writeGate = await this.store.assertWorkspaceWritable(opts.projectId, {
+          initiatedByGezel: true,
+        });
+        if (!writeGate.ok) {
+          stripCapability(
+            'workspace.write',
+            writeGate.reason === 'external-consent-required'
+              ? `gezel writes to this project's external working directory require "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings`
+              : 'gezel workspace writes are turned off for this project (Project → Settings)',
+          );
+        }
       }
-    }
-    if (!securityPolicy.allowFileEdits) {
-      stripCapability(
-        'documents.write',
-        'file edits are disabled by the security policy (Settings → Security & Compliance)',
-      );
-    }
+    };
+    await narrowWorkspaceCapability();
     const knownSecretValues = new Set<string>();
     const ctx: DispatcherContext = {
       projectId: opts.projectId,
@@ -323,7 +312,7 @@ export class ScriptRunner {
       scriptName: opts.scriptName,
       engagementFlags: { llmAllowed },
       allowedCapabilities,
-      ...(strippedCapabilities.size > 0 ? { strippedCapabilities } : {}),
+      strippedCapabilities,
       knownSecretValues,
     };
 
@@ -350,6 +339,17 @@ export class ScriptRunner {
 
     let acceptingCallbacks = true;
     const pendingCalls = new Set<ScriptRunCall>();
+    const checkPolicy = async () => {
+      if (!acceptingCallbacks) throw new Error('Script execution has ended');
+      await parent?.check();
+      const current = await this.store.readConfig();
+      assertScriptExecutionAllowed(current, scope, opts.trigger);
+      narrowScriptSecurityCapabilities(current, allowedCapabilities, strippedCapabilities);
+      await narrowWorkspaceCapability();
+      ctx.engagementFlags.llmAllowed = isEngagementAllowed(current);
+      if (!acceptingCallbacks) throw new Error('Script execution has ended');
+    };
+    this.activePolicies.set(runId, { check: checkPolicy, depth });
     try {
       const result = await this.executor.execute({
         source,
@@ -376,6 +376,7 @@ export class ScriptRunner {
           run.calls.push(call);
           pendingCalls.add(call);
           try {
+            await checkPolicy();
             const result = await this.dispatcher.dispatch(ctx, method, params);
             if (acceptingCallbacks) call.outputSummary = summarize(result).slice(0, 256);
             return result;
@@ -432,7 +433,7 @@ export class ScriptRunner {
         run.status = 'ok';
         if (outputSeen) {
           try {
-            run.output = coerceOutput(meta, outputStamped);
+            run.output = validateScriptOutput(meta, outputStamped);
           } catch (err) {
             run.status = 'error';
             run.error = err instanceof Error ? err.message : String(err);
@@ -445,6 +446,7 @@ export class ScriptRunner {
       run.error = err instanceof Error ? err.message : String(err);
     } finally {
       acceptingCallbacks = false;
+      this.activePolicies.delete(runId);
       for (const call of pendingCalls) {
         call.durationMs = Date.now() - Date.parse(call.at);
         call.error =
@@ -470,12 +472,14 @@ export class ScriptRunner {
     name: string,
     input?: Record<string, unknown>,
   ): Promise<{ runId: string; status: 'ok' | 'error'; output?: unknown; error?: string }> {
+    const parent = this.activePolicies.get(parentCtx.runId);
+    if (!parent) throw new Error('Parent script execution has ended');
     const nested = await this.run({
       projectId: parentCtx.projectId,
       scriptName: name,
       inputs: input,
       trigger: { kind: 'nested', parentRunId: parentCtx.runId },
-      depth: 1,
+      depth: parent.depth + 1,
     });
     return {
       runId: nested.id,
@@ -640,63 +644,6 @@ function summarize(value: unknown): string {
   } catch {
     return String(value);
   }
-}
-
-/**
- * Validate the stamped output against `meta.outputs` if declared.
- * Coerces but does not aggressively reshape — we want to catch type
- * mismatches that would mislead downstream consumers, not nit-pick.
- */
-function coerceOutput(meta: ScriptMeta, value: unknown): unknown {
-  if (!meta.outputs) return value;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('script output must be an object when meta.outputs is declared');
-  }
-  const src = value as Record<string, unknown>;
-  for (const [name, spec] of Object.entries(meta.outputs)) {
-    const v = src[name];
-    if (v === undefined) {
-      throw new Error(`output is missing declared field "${name}"`);
-    }
-    if (v === null) {
-      if (spec.type === 'string' || spec.type === 'number' || spec.type === 'boolean') {
-        if ((spec as { nullable?: boolean }).nullable) continue;
-      }
-      if (spec.type === 'json') continue;
-      throw new Error(`output field "${name}" is null but type ${spec.type} is not nullable`);
-    }
-    const expected = expectedTypeOf(v);
-    switch (spec.type) {
-      case 'string':
-        if (typeof v !== 'string') throw typeErr(name, 'string', expected);
-        break;
-      case 'number':
-        if (typeof v !== 'number' || !Number.isFinite(v)) throw typeErr(name, 'number', expected);
-        break;
-      case 'boolean':
-        if (typeof v !== 'boolean') throw typeErr(name, 'boolean', expected);
-        break;
-      case 'array':
-        if (!Array.isArray(v)) throw typeErr(name, 'array', expected);
-        break;
-      case 'object':
-        if (typeof v !== 'object' || Array.isArray(v)) throw typeErr(name, 'object', expected);
-        break;
-      case 'json':
-        break;
-    }
-  }
-  return src;
-}
-
-function expectedTypeOf(v: unknown): string {
-  if (v === null) return 'null';
-  if (Array.isArray(v)) return 'array';
-  return typeof v;
-}
-
-function typeErr(field: string, expected: string, got: string): Error {
-  return new Error(`output field "${field}" must be ${expected}, got ${got}`);
 }
 
 /**

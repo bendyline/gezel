@@ -103,6 +103,8 @@ export interface UsageSummary {
     'codex-cli'?: ProviderUsage;
     ollama?: ProviderUsage;
     'llama-cpp'?: ProviderUsage;
+    'apple-foundation-models'?: ProviderUsage;
+    'android-mlkit'?: ProviderUsage;
     mlx?: ProviderUsage;
     ds4?: ProviderUsage;
     remote?: ProviderUsage;

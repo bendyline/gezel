@@ -494,7 +494,7 @@ export function ProjectOutputPane({
       title: maximized ? 'Restore (F5)' : 'Maximize (F5)',
       ariaLabel: maximized ? 'Restore output pane' : 'Maximize output pane',
     },
-  ];
+  ].filter((action) => action.key !== 'open' || !window.__GEZEL__?.createHtmlPreview);
   if (!maximized) {
     actions.push({
       key: 'close',

@@ -18,6 +18,7 @@ import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, Select } from '../../primitives/index.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { ProjectGlyph } from '../projects/new-project-meta.js';
 import {
   type BookItem,
@@ -276,7 +277,7 @@ export function NewTaskDialog({
   useEffect(() => {
     const sequence = ++pullHintSequence.current;
     setPullHint(null);
-    if (!open || !resolvesPullAtLaunch || !projectId) return;
+    if (!runtimeCapabilities().git || !open || !resolvesPullAtLaunch || !projectId) return;
     void (async () => {
       try {
         const [status, openPulls] = await Promise.all([

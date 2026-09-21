@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import type { Project, ScriptInputField, ScriptMeta } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -189,6 +190,7 @@ describe('ScriptsView', () => {
       scripts: [{ name: 'beta-script', meta: makeMeta('Beta only') }],
     } as never);
 
+    await screen.findByRole('option', { name: 'Beta' });
     fireEvent.change(screen.getByRole('combobox', { name: 'Scripts from' }), {
       target: { value: 'pj-beta' },
     });
@@ -271,5 +273,45 @@ describe('ScriptsView', () => {
     await user.click(screen.getByRole('button', { name: 'New script' }));
     expect(await screen.findByText(/Draft it with AI/)).toBeInTheDocument();
     expect(screen.getByText('Fetch a URL and summarize it')).toBeInTheDocument();
+  });
+  it('offers the same offline source editor with working starter templates', async () => {
+    const previous = window.__GEZEL__;
+    window.__GEZEL__ = { token: '', ...previous, capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      render(<ScriptsView projectId="pj-beta" />);
+      await screen.findByText('Hello World');
+      await userEvent.click(screen.getByRole('button', { name: 'New script' }));
+      expect(screen.getByText('Check files and decide')).toBeInTheDocument();
+      expect(screen.getByText('Start blank')).toBeInTheDocument();
+      expect(screen.queryByText('Draft it with AI')).not.toBeInTheDocument();
+      expect(screen.queryByText('Fetch a URL and summarize it')).not.toBeInTheDocument();
+    } finally {
+      window.__GEZEL__ = previous;
+    }
+  });
+  it('uses the same run form for a host with bundled scripts and no authoring', async () => {
+    const previous = window.__GEZEL__;
+    window.__GEZEL__ = {
+      token: '',
+      ...previous,
+      capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, scriptAuthoring: false },
+    };
+    vi.mocked(api.listStandardScripts).mockResolvedValue({
+      scripts: [{ name: 'checkFileExists', meta: makeMeta('Check file') }],
+    } as never);
+    try {
+      render(<ScriptsView projectId="pj-beta" />);
+      await screen.findByText('Check file');
+      expect(screen.queryByRole('button', { name: 'New script' })).not.toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'View code' })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /^Run$/ }));
+      expect(api.runProjectScript).toHaveBeenCalledWith('pj-beta', {
+        name: 'checkFileExists',
+        scope: 'standard',
+        input: {},
+      });
+    } finally {
+      window.__GEZEL__ = previous;
+    }
   });
 });

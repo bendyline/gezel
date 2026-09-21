@@ -2,6 +2,7 @@ import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
 import { useMemo, useState } from 'react';
 import { crewLeadLabelLower } from '../labels.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelIcon } from './GezelIcon.js';
 import {
   ProjectAddGezelDialog,
@@ -145,54 +146,58 @@ export function ProjectCrewRoster({
           No gezellen are assigned to this project yet.
         </p>
       )}
-      <div
-        className={`project-autonomous-role${
-          projectBoekwachter ? ' project-autonomous-role-active' : ''
-        }`}
-      >
-        <div className="project-autonomous-role-copy">
-          <span className="project-autonomous-role-title">
-            AI indexing {projectBoekwachter ? 'on' : 'off'}
-          </span>
-          <span className="muted small">
-            {projectBoekwachter
-              ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
-              : 'Structural file and symbol search stays available. Add the Boekwachter to this crew for background AI summaries, reviews, and digests.'}
-          </span>
+      {runtimeCapabilities().index && (
+        <div
+          className={`project-autonomous-role${
+            projectBoekwachter ? ' project-autonomous-role-active' : ''
+          }`}
+        >
+          <div className="project-autonomous-role-copy">
+            <span className="project-autonomous-role-title">
+              AI indexing {projectBoekwachter ? 'on' : 'off'}
+            </span>
+            <span className="muted small">
+              {projectBoekwachter
+                ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
+                : 'Structural file and symbol search stays available. Add the Boekwachter to this crew for background AI summaries, reviews, and digests.'}
+            </span>
+          </div>
+          {projectBoekwachter ? (
+            <button
+              type="button"
+              className="subtle"
+              disabled={boekwachterBusy || !onRemoveGezel}
+              onClick={() => void changeBoekwachter('remove')}
+            >
+              {boekwachterBusy ? 'Updating…' : 'Remove Boekwachter'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="subtle"
+              disabled={boekwachterBusy || !designatedBoekwachter || !onAddGezel}
+              onClick={() => void changeBoekwachter('add')}
+            >
+              {boekwachterBusy
+                ? 'Updating…'
+                : designatedBoekwachter
+                  ? `Add ${designatedBoekwachter.name}`
+                  : 'No Boekwachter available'}
+            </button>
+          )}
         </div>
-        {projectBoekwachter ? (
-          <button
-            type="button"
-            className="subtle"
-            disabled={boekwachterBusy || !onRemoveGezel}
-            onClick={() => void changeBoekwachter('remove')}
-          >
-            {boekwachterBusy ? 'Updating…' : 'Remove Boekwachter'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="subtle"
-            disabled={boekwachterBusy || !designatedBoekwachter || !onAddGezel}
-            onClick={() => void changeBoekwachter('add')}
-          >
-            {boekwachterBusy
-              ? 'Updating…'
-              : designatedBoekwachter
-                ? `Add ${designatedBoekwachter.name}`
-                : 'No Boekwachter available'}
-          </button>
-        )}
-      </div>
+      )}
       {boekwachterError && (
         <p className="error small project-autonomous-role-error">{boekwachterError}</p>
       )}
-      <SuggestedNightWork
-        projectId={project.id}
-        projectProperties={project.properties}
-        refreshKey={[project.voormanGezelId ?? '', ...(project.gezelIds ?? [])].join('|')}
-        recentlyAddedGezelId={recentlyAddedGezelId}
-      />
+      {runtimeCapabilities().background && (
+        <SuggestedNightWork
+          projectId={project.id}
+          projectProperties={project.properties}
+          refreshKey={[project.voormanGezelId ?? '', ...(project.gezelIds ?? [])].join('|')}
+          recentlyAddedGezelId={recentlyAddedGezelId}
+        />
+      )}
       {onAddGezel && onCreateTemplateGezel && (
         <ProjectAddGezelDialog
           open={showAddGezel}

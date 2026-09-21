@@ -1,6 +1,6 @@
 # Android on-device providers
 
-`GezelMobilePlugin` offers `llama-cpp` (a selected app-private GGUF) and
+`GezelMobilePlugin` offers `llama-cpp` (an explicitly identified app-private GGUF) and
 `android-mlkit` (Android AICore/Gemini Nano through ML Kit). Requests specify
 `providerId`; omission retains the existing llama.cpp behavior. A failed or
 unavailable provider never falls back to another model.
@@ -27,7 +27,7 @@ collection disclosures. Conversation inference uses the on-device API.
   preparation observer and waits for its client to close and its reservation to
   release. It does not target a later generation. Availability reports the
   current preparation as downloading immediately, without waiting in its queue.
-- `generate({requestId, providerId, messages, maxTokens?, contextSize?})` processes
+- `generate({requestId, providerId, modelId?, messages, maxTokens?, contextSize?})` processes
   one foreground request at a time. ML Kit receives a fresh transcript encoded
   as role/content JSON. The first system message uses `SystemInstruction` when
   supported; otherwise it is included as instructions in the prompt. No hidden
@@ -40,7 +40,7 @@ collection disclosures. Conversation inference uses the on-device API.
   library entry. Removing the selected model clears selection; it never chooses
   another model. Chat history is retained.
 
-ML Kit admission reserves a maximum of 256 output tokens against its reported
+ML Kit admission reserves a maximum of 1024 output tokens against its reported
 limit, capped at 4096 total tokens, and rejects inputs counted at 4000 tokens or
 more. This deliberately conservative check may reserve output twice on SDK
 versions whose count already includes it. Streams and final text are capped at
@@ -83,13 +83,15 @@ set `GEZEL_ANDROID_TEST_FIXTURE` to its GGUF path. The staging helper includes t
 small untrained model only in the test APK. It is never bundled with the app.
 
 The guarded test command builds and syncs current web assets, stages the fixture,
-and runs Android instrumentation. It requires exactly one connected ARM64
+and runs Android instrumentation using already resolved Gradle dependencies in
+offline mode. It requires exactly one connected ARM64
 emulator with the expected name so Gradle cannot install tests on an unrelated
 device. Set `GEZEL_ANDROID_TEST_AVD` to use a differently named test emulator.
-Gradle writes its report under
-`android/app/build/reports/androidTests/connected/debug/index.html`.
-Screenshots are retained under
-`android/app/build/outputs/connected_android_test_additional_output/debugAndroidTest/connected/`.
+The preserving runner installs the app/test APKs in place and invokes
+instrumentation directly. Its printed output directory contains
+`instrumentation.log`, `summary.json`, and screenshots; set
+`GEZEL_ANDROID_TEST_OUTPUT_DIR` to choose that directory. The app remains installed
+with its original product data and model inventory restored after testing.
 Use hardware/automatic graphics for visual checks. On this Apple Silicon host,
 the emulator's SwiftShader backend produced stale white WebView tiles; `-gpu host`
 rendered the same app correctly. Software WebView captures alone would have
@@ -103,8 +105,13 @@ storage directories and model files without changing files outside app storage.
 inference, Unicode paths, streaming, cancellation, concurrent-operation rejection,
 callback failures, and next-turn reuse. Native tests use isolated cache folders.
 `MobileUiSmokeTest` launches the actual Capacitor WebView and checks shared phone
-navigation, model Settings, a native chat reply, conversation management, and
-durable reload. It restores the saved state and model inventory after testing.
+navigation, model Settings, a native chat reply, project artifacts, shared documents,
+and durable reload. Projects and crew are seeded through the authenticated product
+API; chat and file navigation use the rendered shared UI. It checks ordinary
+config/project/session files and restores the product tree and model inventory.
+The standalone host-JDK `native/android/tests/ProductFilesTest.java` exercises the
+same production filesystem class for binary reopening, directory rename, size
+bounds, traversal/symlink rejection, and failed-mutation preservation.
 
 ML Kit hardware tests must still use an eligible physical device and exercise
 preparation, streaming, stop/next-turn reuse, and background interruption. The
@@ -117,11 +124,14 @@ against the approved Google Maven AAR bytecode. Inspected SHA-256 values:
 - `genai-prompt:1.0.0-beta4`: `675192b6ba91334ddbfb8cc429a8afb94cba370d927d7dba79525818b7186f6d`
 - `genai-common:1.0.0-beta4`: `2926c5e3f19fc679a0eba8cab2edadeb0c0f1ae2ba14de9bac6bd7a352ae5a56`
 
-No AAR, model, or SDK binary is committed. Android compilation and all 15
-instrumentation tests (five JNI, nine storage, one complete WebView flow) passed
+No AAR, model, or SDK binary is committed. Android compilation and the expanded
+instrumentation suite (32 passing tests and one explicit quality skip) passed
 on the ARM64 API 36 emulator using JDK 21, Gradle 8.14.3, NDK 28.2.13676358, and
-CMake 3.31.6. The five captured screens were checked with host graphics. Testing
-caught and fixed a model
+CMake 3.31.6. It covers the shared product, storage, JNI inference, verified model
+downloads, system-provider budgets, and native HTML preview isolation. The
+shared-product run captures screens with host graphics;
+DOM/persistence assertions do not replace visual review of timeline scrolling.
+Testing caught and fixed a model
 import failure caused by Android's equivalent app-directory paths. All seven
 packaged native libraries pass 16 KiB ELF alignment checks, and the APK passes
 `zipalign -c -P 16 4`. The emulator uses a 4 KiB kernel; startup on a 16 KiB
@@ -130,3 +140,21 @@ physical device remains a separate release check.
 References: [ML Kit setup](https://developers.google.com/ml-kit/genai/prompt/android/get-started),
 [Java futures API](https://developers.google.com/android/reference/com/google/mlkit/genai/prompt/java/GenerativeModelFutures),
 [model lifecycle](https://developers.google.com/android/reference/com/google/mlkit/genai/prompt/GenerativeModel).
+
+
+Model identity is pinned in the ordinary conversation record. `modelId` is required
+for llama.cpp; changing the globally selected import cannot redirect an existing
+conversation. Missing or removed IDs fail explicitly. Settings stores conversation
+capacity in `modelContextOverrides["llama-cpp:<id>"]` and output limits in the same
+`modelTuning[id].sampling.maxTokens` fields used by desktop. Defaults are 4096/1024;
+llama.cpp accepts 512–8192 context tokens and 1–4096 reply tokens with input
+headroom. The native bridge rejects contexts beyond the GGUF's trained window.
+Memory/thermal admission precedes load and generation; these checks do not replace
+physical-device working-set and sustained-use measurements.
+
+
+Backup export stages ordered 256 KiB chunks in app-private cache with a 72 MiB
+archive limit. `saveExport` invokes Android's `ACTION_CREATE_DOCUMENT`; only the
+user-selected URI receives the stream. Duplicate offsets, incomplete staging,
+unsafe filenames, and oversize chunks fail. Cancel removes the staging file and
+releases native mutation ownership; no pathname is supplied by the WebView.

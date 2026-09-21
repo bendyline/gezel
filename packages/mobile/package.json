@@ -2,7 +2,7 @@
   "name": "@bendyline/gezel-mobile",
   "version": "0.0.0",
   "private": true,
-  "description": "Foreground mobile Gezel app with local chat and native inference.",
+  "description": "Responsive mobile host for offline Gezel projects, crews, tasks, and native inference.",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -12,11 +12,12 @@
     "test": "vitest run",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
-    "sync:ios": "cap sync ios && node scripts/sync-native.mjs ios",
-    "sync:android": "cap sync android && node scripts/sync-native.mjs android"
+    "sync:ios": "node scripts/verify-native-build.mjs ios && cap sync ios && node scripts/sync-native.mjs ios",
+    "sync:android": "node scripts/verify-native-build.mjs android && cap sync android && node scripts/sync-native.mjs android"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-script-runtime": "workspace:*",
     "@capacitor/android": "8.5.2",
     "@capacitor/core": "8.5.2",
     "@capacitor/ios": "8.5.2",

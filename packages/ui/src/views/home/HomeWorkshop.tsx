@@ -10,6 +10,7 @@ import type {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { MeesterConversation } from './MeesterConversation.js';
@@ -86,6 +87,7 @@ export function HomeWorkshop({
   );
 
   const refreshQuestions = useCallback(() => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     api
       .listQuestions({ pending: true })
       .then((r) => setQuestions(r.questions ?? []))
@@ -107,6 +109,7 @@ export function HomeWorkshop({
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const refreshTasks = useCallback(() => {
+    if (!runtimeCapabilities().tasks) return;
     const pid = activeProjectIdRef.current;
     if (!pid) {
       setTasks([]);
@@ -133,6 +136,7 @@ export function HomeWorkshop({
   // stream — `meester_status` events flip the "writing…" state and
   // trigger a refetch when a run lands, so no polling is needed.
   const refreshStatus = useCallback(() => {
+    if (!runtimeCapabilities().background) return;
     api
       .getMeesterStatus()
       .then((r) => {
@@ -184,6 +188,7 @@ export function HomeWorkshop({
   // window's end is recent (~12h) and the shift actually did something.
   const [nightReview, setNightReview] = useState<NightShiftReviewResponse | null>(null);
   useEffect(() => {
+    if (!runtimeCapabilities().background) return;
     let cancelled = false;
     api
       .getNightShiftReview()
@@ -236,7 +241,7 @@ export function HomeWorkshop({
         onTabChange={setTab}
         statusReport={statusReport}
         statusRunning={statusRunning}
-        onRunStatusReport={runStatusReport}
+        onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
         nightReview={nightReview}
         onNavigate={onNavigate}
       />

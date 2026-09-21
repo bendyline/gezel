@@ -26,6 +26,23 @@
   min-height: 44px;
 }
 
+.responsive-app-shell[data-compact="true"]
+  :is(.app-sidebar-item-label, .app-sidebar-group-label, .app-sidebar-item-role) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+/* Large text and an open phone keyboard can make the compose controls taller
+   than the pane. Keep them reachable without changing the user's draft. */
+.app.app-compact :is(.project-chat, .gezel-chat-tab) {
+  overflow-y: auto;
+}
+
+.app.app-compact :is(.project-chat-compose-shell, .gezel-chat-tab > .chat-composer) {
+  flex-shrink: 0;
+}
+
 .responsive-app-shell[data-compact="true"] > .app-main {
   min-width: 0;
   max-width: 100%;
@@ -62,11 +79,102 @@
   --wco-left: 0px;
 }
 
+/* Portaled dialogs live outside .app. The layout marker also covers the
+   desktop mobile preview, whose browser viewport may still be wide. */
+:root[data-layout="mobile"] .gz-dialog {
+  min-width: 0;
+  max-width: min(366px, calc(100vw - 1.5rem));
+}
+
+/* Question dialogs are portaled outside the compact App. Their shared
+   controls still need the same touch targets as inline question cards. */
+:root:has(.app-compact) .pending-question button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .app.app-compact .app-header-right {
   display: none;
 }
 
 .app.app-compact .app-header-brand {
+  min-height: 44px;
+}
+
+/* Keep the same Settings navigation and sections when the app becomes narrow.
+   The navigation gets a bounded scroll area above the full-width form, so a
+   fixed desktop rail cannot squeeze model controls outside the viewport. */
+.app.app-compact .settings-layout {
+  flex-direction: column;
+}
+
+.app.app-compact .settings-nav {
+  width: auto;
+  max-height: min(35%, 14rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.app.app-compact .settings-nav h2 {
+  margin-bottom: 0.5rem;
+  padding: 0.75rem 0.75rem 0;
+}
+
+.app.app-compact .settings-nav ul {
+  padding: 0 0.75rem 0.5rem;
+}
+
+.app.app-compact .settings-nav-item,
+.app.app-compact .settings-nav-group-toggle {
+  min-height: 44px;
+}
+
+.app.app-compact .settings-panel {
+  padding: 0.75rem;
+}
+
+.app.app-compact .settings-panel :is(input, select, textarea) {
+  max-width: 100%;
+}
+
+.app.app-compact .memories-pane {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 35%) minmax(0, 1fr);
+}
+
+.app.app-compact .memories-tree {
+  width: auto;
+  max-height: none;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tasks-view.tasks-view-compact .tasks-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tasks-view.tasks-view-compact [hidden] {
+  display: none !important;
+}
+
+.tasks-view.tasks-view-compact > button {
+  min-height: 44px;
+  align-self: flex-start;
+  margin-block: 0.5rem;
+}
+
+.app.app-compact .task-detail-header,
+.app.app-compact .task-detail-actions {
+  flex-wrap: wrap;
+}
+
+.app.app-compact
+  :is(
+    .task-detail-actions button,
+    .task-step-panel .gz-select-trigger,
+    .gezel-chat-project-select,
+    .gezel-chat-session-select
+  ) {
+  min-width: 44px;
   min-height: 44px;
 }
 
@@ -84,6 +192,7 @@
 
 .app-compact-navigation {
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;

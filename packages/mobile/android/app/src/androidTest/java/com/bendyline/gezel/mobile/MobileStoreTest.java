@@ -43,6 +43,20 @@ public final class MobileStoreTest {
         assertEquals(saved, store.readState());
         assertTrue(document("state.json").isFile());
     }
+
+    @Test public void pinnedModelDoesNotFollowSelectionOrFallBackAfterRemoval() throws Exception {
+        String first = UUID.randomUUID().toString(), second = UUID.randomUUID().toString();
+        JSONObject library = new JSONObject().put("models", new JSONArray().put(model(first)).put(model(second)))
+            .put("selectedModelId", second);
+        Files.write(document("models.json").toPath(), library.toString().getBytes(StandardCharsets.UTF_8));
+        for (String id : new String[] { first, second })
+            Files.write(document("models/" + id + ".gguf").toPath(), new byte[] { 'G', 'G', 'U', 'F' });
+        assertEquals(first, store.model(first)[0]);
+        assertEquals(second, store.selectedModel()[0]);
+        store.removeModel(first);
+        assertThrows(Exception.class, () -> store.model(first));
+        assertEquals(second, store.selectedModel()[0]);
+    }
     @Test public void rejectsCorruptOrOversizedLibrary() throws Exception {
         String id = UUID.randomUUID().toString();
         JSONObject duplicate = new JSONObject().put("models", new JSONArray().put(model(id)).put(model(id)));

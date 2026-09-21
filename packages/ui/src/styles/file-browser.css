@@ -182,6 +182,11 @@ button.danger {
 }
 
 .gezel-name-editable {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
   cursor: text;
   border-bottom: 1px dashed transparent;
   transition: border-color 0.15s;

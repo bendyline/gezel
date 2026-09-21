@@ -12,6 +12,8 @@ import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 const appShellCss = readFileSync(resolve(import.meta.dirname, '../styles/app-shell.css'), 'utf8');
+const layout = vi.hoisted(() => ({ compact: false }));
+vi.mock('../components/useCompactLayout.js', () => ({ useCompactLayout: () => layout.compact }));
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
@@ -52,6 +54,7 @@ const GEZELS: GezelSummary[] = [
 
 describe('GezellenView', () => {
   beforeEach(() => {
+    layout.compact = false;
     vi.mocked(pickRandomNameWithGender)
       .mockReset()
       .mockReturnValue({ name: 'Ada', gender: 'female' });
@@ -77,6 +80,17 @@ describe('GezellenView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
     });
+  });
+
+  it('uses the same roster and detail one at a time in narrow windows', async () => {
+    layout.compact = true;
+    render(<GezellenView />);
+    fireEvent.click(await screen.findByRole('button', { name: /Maya.*Researcher/ }));
+    expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
+    expect(screen.queryByText('Bob')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to gezellen' }));
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+    expect(screen.queryByTestId('gezel-detail')).toBeNull();
   });
 
   it('shows which gezel is working in the full roster', async () => {

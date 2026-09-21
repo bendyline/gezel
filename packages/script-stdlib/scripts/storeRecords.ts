@@ -383,4 +383,6 @@ async function run(): Promise<Fields> {
   }
 }
 
-gezel.output(await run());
+// Every declared output is stamped on every action, including inapplicable fields.
+// The shared runner validates the complete contract before accepting a run.
+gezel.output({ id: null, record: null, records: [], total: null, ...(await run()) });

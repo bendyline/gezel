@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AwakeBudget,
+  acquireSuspendMonitor,
   awakeNow,
   awakeTimeoutSignal,
   createAwakeTimeout,
@@ -41,6 +42,28 @@ describe('suspend clock', () => {
     sleepHost(900_000);
     expect(awakeNow()).toBe(Date.now());
     expect(totalSuspendedMs()).toBe(0);
+  });
+  it('shares a work-owned monitor and releases it only after its last user', () => {
+    const first = acquireSuspendMonitor();
+    const second = acquireSuspendMonitor();
+    expect(isSuspendMonitorRunning()).toBe(true);
+    first();
+    first();
+    expect(isSuspendMonitorRunning()).toBe(true);
+    second();
+    expect(isSuspendMonitorRunning()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('never stops a daemon monitor that predates or replaces a work lease', () => {
+    startSuspendMonitor();
+    const release = acquireSuspendMonitor();
+    release();
+    expect(isSuspendMonitorRunning()).toBe(true);
+    stopSuspendMonitor();
+    const replaced = acquireSuspendMonitor();
+    startSuspendMonitor();
+    replaced();
+    expect(isSuspendMonitorRunning()).toBe(true);
   });
 
   it('credits a host suspension so awake time barely advances across it', () => {

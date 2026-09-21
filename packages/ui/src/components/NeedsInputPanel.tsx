@@ -1,6 +1,7 @@
 import type { ChatEventEnvelope, GezelSummary, Project, Question } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { GezelIcon } from './GezelIcon.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
@@ -51,6 +52,7 @@ export function NeedsInputPanel({
   }, []);
 
   const refresh = useCallback(async () => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     try {
       const res = await api.listQuestions({ pending: true });
       setQuestions(res.questions);
@@ -119,7 +121,13 @@ export function NeedsInputPanel({
   }, [projectId, scoped.length, onEmpty]);
 
   if (scoped.length === 0) {
-    return <div className="needs-input-empty muted">No pending questions right now.</div>;
+    return (
+      <div className="needs-input-empty muted">
+        {runtimeCapabilities().structuredQuestions
+          ? 'No pending questions right now.'
+          : 'Structured questions are not available on this device.'}
+      </div>
+    );
   }
 
   const active = scoped[Math.min(activeIndex, scoped.length - 1)];

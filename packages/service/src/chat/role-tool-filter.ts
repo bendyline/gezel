@@ -23,36 +23,9 @@ import { classifyLocalModelTier, classifyModelTier } from './local-model-tier.js
  */
 export type WebSearchBackendName = 'brave' | 'wikipedia' | 'tavily' | 'mock';
 
-const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((g) => [g.id, g]));
-
-/**
- * Backward-compat aliases for builtin group ids that have been split
- * or renamed since launch. Lookup happens before the BUILTIN_BY_ID
- * miss-and-skip path so an installed toolset that still references the old id keeps
- * resolving to the right tools.
- *
- * - `workspace-fs` was split into `workspace-fs-read` + `workspace-fs-write`
- *   (the voorman-needs-read-access fix). Anyone who had
- *   the old composite group in a toolsetsGroupOverride keeps both halves
- *   without manual migration.
- */
-const LEGACY_GROUP_ALIASES: Record<string, readonly string[]> = {
-  'workspace-fs': ['workspace-fs-read', 'workspace-fs-write'],
-};
-
-/** Expand a list of group ids to the flat set of MCP tool names. */
-export function expandToolsetGroups(groupIds: readonly string[]): Set<string> {
-  const out = new Set<string>();
-  for (const id of groupIds) {
-    const expandedIds = LEGACY_GROUP_ALIASES[id] ?? [id];
-    for (const expandedId of expandedIds) {
-      const g = BUILTIN_BY_ID.get(expandedId);
-      if (!g) continue;
-      for (const t of g.tools) out.add(t);
-    }
-  }
-  return out;
-}
+export { expandToolsetGroups } from '@bendyline/gezel';
+import { expandToolsetGroups, roleHasTeamScope } from '@bendyline/gezel';
+export { roleHasTeamScope } from '@bendyline/gezel';
 
 /**
  * Resolve a free-form role/job-title to its canonical key, or null. Thin
@@ -91,10 +64,6 @@ export function roleToolAllowlist(role: string | undefined): Set<string> {
  * / voorman / planner) gets `team` and may operate across projects; a plain
  * worker doesn't and is confined to its session's project.
  */
-export function roleHasTeamScope(role: string | undefined, projectMode?: 'crew' | 'solo'): boolean {
-  if (projectMode === 'solo') return false;
-  return roleToolsetGroups(role).includes('team-management');
-}
 
 /**
  * Strip `team-management` from a list of group ids. Used for solo

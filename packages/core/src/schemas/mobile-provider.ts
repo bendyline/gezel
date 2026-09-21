@@ -39,6 +39,68 @@ export const MobileProviderListSchema = z
     message: 'Duplicate mobile provider id',
   });
 
+/** Immutable identity from the canonical catalog, before native HEAD resolves length. */
+export const MobileModelSourceIdentitySchema = z
+  .object({
+    catalogId: z.string().min(1).max(160),
+    catalogVersion: z.string().min(1).max(80),
+    sourceId: z.string().min(1).max(160),
+    huggingfaceRepo: z
+      .string()
+      .regex(/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/)
+      .max(200),
+    revision: z.string().regex(/^[a-f0-9]{40}$/),
+    filename: z
+      .string()
+      .min(6)
+      .max(400)
+      .refine(
+        (value) =>
+          value.endsWith('.gguf') &&
+          value.split('/').every((part) => part !== '' && part !== '.' && part !== '..') &&
+          !value.includes('\\') &&
+          [...value].every(
+            (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
+          ),
+        'Expected a confined GGUF filename',
+      ),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+export type MobileModelSourceIdentity = z.infer<typeof MobileModelSourceIdentitySchema>;
+export const MobileModelSourceSchema = MobileModelSourceIdentitySchema.extend({
+  sizeBytes: z
+    .number()
+    .int()
+    .min(4)
+    .max(4 * 1024 * 1024 * 1024),
+}).strict();
+export type MobileModelSource = z.infer<typeof MobileModelSourceSchema>;
+
+export const MobileModelDownloadSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().min(1).max(200),
+    source: MobileModelSourceSchema,
+    state: z.enum(['queued', 'downloading', 'paused', 'verifying', 'complete', 'failed']),
+    downloadedBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(4 * 1024 * 1024 * 1024),
+    error: z.string().max(1000).optional(),
+    modelId: z.string().uuid().optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.downloadedBytes <= value.source.sizeBytes,
+    'Download exceeds expected model size',
+  );
+export type MobileModelDownload = z.infer<typeof MobileModelDownloadSchema>;
+export const MobileModelDownloadsSchema = z
+  .object({ downloads: z.array(MobileModelDownloadSchema).max(16) })
+  .strict();
+
 export const MobileModelSchema = z
   .object({
     id: z
@@ -47,6 +109,7 @@ export const MobileModelSchema = z
       .max(128)
       .regex(/^[a-zA-Z0-9_-]+$/),
     name: z.string().min(1).max(200),
+    source: MobileModelSourceSchema.optional(),
     sizeBytes: z
       .number()
       .int()
@@ -70,3 +133,32 @@ export const MobileModelInventorySchema = z
       ctx.addIssue({ code: 'custom', message: 'The selected mobile model is missing' });
   });
 export type MobileModelInventory = z.infer<typeof MobileModelInventorySchema>;
+
+/** Host admission limits, separate from the model's trained window. Native
+ * inference still validates the actual tokenized prompt before generation. */
+export const MobileInferenceBudgetSchema = z
+  .object({
+    contextSize: z.number().int().min(512).max(8192),
+    maxTokens: z.number().int().min(1).max(4096),
+  })
+  .strict()
+  .refine(({ contextSize, maxTokens }) => maxTokens + 128 < contextSize, {
+    message: 'Leave room for conversation and instructions before the reply budget',
+  });
+export type MobileInferenceBudget = z.infer<typeof MobileInferenceBudgetSchema>;
+
+/** Explicit choices fail instead of being silently replaced by defaults. */
+export function resolveMobileInferenceBudget(
+  provider: Pick<MobileProvider, 'contextTokens' | 'maxOutputTokens'>,
+  requested: Partial<MobileInferenceBudget> = {},
+): MobileInferenceBudget {
+  const contextSize = requested.contextSize ?? Math.min(4096, provider.contextTokens);
+  const budget = MobileInferenceBudgetSchema.parse({
+    contextSize,
+    maxTokens:
+      requested.maxTokens ?? Math.min(1024, provider.maxOutputTokens, Math.floor(contextSize / 4)),
+  });
+  if (budget.contextSize > provider.contextTokens || budget.maxTokens > provider.maxOutputTokens)
+    throw new Error('These token limits exceed what this on-device provider supports');
+  return budget;
+}

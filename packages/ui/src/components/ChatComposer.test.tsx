@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { TurnIntentPlan } from '@bendyline/gezel';
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -851,6 +852,33 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
     expect(await screen.findByRole('button', { name: /stop/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^nudge$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^interrupt$/i })).toBeNull();
+  });
+
+  it('keeps the draft editable without offering unavailable audio or queued sends', async () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      render(
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+        />,
+      );
+      await screen.findByRole('button', { name: /stop/i });
+      fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+      expect(screen.queryByRole('button', { name: /^nudge$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^interrupt$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Narrate prompt' })).toBeNull();
+      pressSendShortcut();
+      expect(api.sendToChatSession).not.toHaveBeenCalled();
+      expect(api.interruptChatSession).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
+      expect(api.previewTurnIntent).not.toHaveBeenCalled();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
   });
 
   it('typing mid-turn reveals Nudge + Interrupt, and Nudge queues with the flag', async () => {

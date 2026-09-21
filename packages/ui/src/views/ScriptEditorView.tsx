@@ -21,6 +21,7 @@ import {
 } from '../components/script-editor/ScriptEditorTabs.js';
 import { takePendingDraft } from '../components/script-editor/pending-drafts.js';
 import { Tabs } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Full-screen script editor tab: Monaco with typed `gezel.*` IntelliSense
@@ -234,7 +235,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
     load
       .then((res) => {
         if (cancelled) return;
-        const draft = readDraft(draftKey);
+        const draft = isStandard ? null : readDraft(draftKey);
         lastSavedRef.current = res.source;
         setData(draft !== null && draft !== res.source ? { ...res, source: draft } : res);
         setDirty(draft !== null && draft !== res.source);
@@ -251,7 +252,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
         // it into the buffer unsaved so the user reviews before it can
         // ever run. Failure leaves the scaffold + a note, never blocks.
         const draftDescription = takePendingDraft(draftKey);
-        if (draftDescription) {
+        if (draftDescription && runtimeCapabilities().scriptAiDrafting) {
           setAiDrafting('busy');
           api
             .draftProjectScript(projectId, { name: scriptName, description: draftDescription })
@@ -283,7 +284,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
     return () => {
       cancelled = true;
     };
-  }, [projectId, scriptName, scope, draftKey]);
+  }, [projectId, scriptName, scope, draftKey, isStandard]);
 
   // ── Edits ───────────────────────────────────────────────────────────
   const handleChangeContent = useCallback(
@@ -633,14 +634,16 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
         <div className="script-editor-banner script-editor-banner--warn">
           <span>
             {provenance.kind === 'standard'
-              ? 'Standard library — packed into the app and read-only. Duplicate it into this project to customize.'
+              ? runtimeCapabilities().scriptAuthoring
+                ? 'Standard library — packed into the app and read-only. Duplicate it into this project to customize.'
+                : 'Standard library — packed into the app and read-only.'
               : provenance.kind === 'user'
                 ? 'From your machine-wide library (~/.gezel/scripts). Edits here apply everywhere it is referenced.'
                 : provenance.kind === 'craftbook'
                   ? `Part of the ${provenance.ref} craftbook — updates to the craftbook replace this file, so direct edits would be lost.`
                   : `Generated from import ${provenance.ref} — re-syncing the import replaces this file.`}
           </span>
-          {provenance.kind !== 'user' && (
+          {runtimeCapabilities().scriptAuthoring && provenance.kind !== 'user' && (
             <button type="button" onClick={() => void makeOwnCopy()}>
               {provenance.kind === 'standard' ? 'Duplicate into this project' : 'Make my own copy'}
             </button>

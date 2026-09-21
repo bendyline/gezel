@@ -681,6 +681,43 @@ const SCENARIO_EXPECTED_ROLES: Record<string, string[]> = {
   // developer/builder — too contested to encode here.
 };
 
+/** Shared trace inspection for native and daemon eval evidence. */
+export function sessionBehaviorRedFlags(
+  gezel: string,
+  messages: SessionMessage[],
+): TrialFacts['toolUse']['redFlags'] {
+  const flags: TrialFacts['toolUse']['redFlags'] = [];
+  messages.forEach((message, atTurn) => {
+    if (message.role !== 'assistant') return;
+    for (const call of message.toolCalls ?? [])
+      for (const rule of RED_FLAGS) {
+        if (rule.test(call))
+          flags.push({
+            gezel,
+            tool: call.name,
+            argsSummary: call.argsSummary ?? '',
+            atTurn,
+            pattern: rule.pattern,
+            explanation: rule.explanation,
+          });
+      }
+  });
+  for (const rule of SESSION_RED_FLAGS)
+    for (const hit of rule.test(messages, gezel)) {
+      flags.push({ gezel, ...hit, pattern: rule.pattern, explanation: rule.explanation });
+    }
+  return flags;
+}
+
+export function missingScenarioRoles(scenarioId: string, rolesCreated: string[]): string[] {
+  const normalize = (role: string) => role.toLowerCase().replace(/[\s_-]+/g, '');
+  const created = rolesCreated.map(normalize);
+  return (SCENARIO_EXPECTED_ROLES[scenarioId] ?? []).filter((role) => {
+    const expected = normalize(role);
+    return !created.some((item) => item === expected || item.includes(expected));
+  });
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 export function score(runDir: string): TrialFacts {
@@ -738,20 +775,7 @@ export function score(runDir: string): TrialFacts {
       // skip bad line
     }
   }
-  const expectedRoles = SCENARIO_EXPECTED_ROLES[result.scenarioId] ?? [];
-  // Normalize role names before comparing: gezel-template display names
-  // are "Title Case With Spaces" (e.g. "Image Generator") but the
-  // SPECIALIST_ROLES enum + scenario expectations are "kebab-case"
-  // ("image-generator"). Drop hyphens/spaces + lowercase for a stable
-  // comparison. Accept descriptive role strings too ("image-generator
-  // for AI-created PNG logo") so the scorer doesn't penalize correct
-  // delegation just because the Meester made the job title concrete.
-  const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '');
-  const createdNorm = rolesCreated.map(norm);
-  const missingExpectedRoles = expectedRoles.filter((r) => {
-    const expected = norm(r);
-    return !createdNorm.some((created) => created === expected || created.includes(expected));
-  });
+  const missingExpectedRoles = missingScenarioRoles(result.scenarioId, rolesCreated);
 
   // Tool calls from sessions/*.json.
   const sessionFiles = (() => {
@@ -820,8 +844,8 @@ export function score(runDir: string): TrialFacts {
     const sess = readJson<SessionFile>(sessPath);
     if (!sess?.messages) continue;
     const gezelFromFilename = (sessPath.split('/').pop() ?? '').split('--')[0] ?? 'unknown';
-    sess.messages.forEach((msg, idx) => {
-      if (msg.role !== 'assistant') return;
+    for (const msg of sess.messages) {
+      if (msg.role !== 'assistant') continue;
       const calls = msg.toolCalls ?? [];
       for (const c of calls) {
         totalToolCalls++;
@@ -832,19 +856,6 @@ export function score(runDir: string): TrialFacts {
           const atMs = isoToMsSince(result.startedAt, msg.at);
           if (firstArtifactAt === null || atMs < firstArtifactAt) firstArtifactAt = atMs;
           if (lastArtifactAt === null || atMs > lastArtifactAt) lastArtifactAt = atMs;
-        }
-        // Red flags.
-        for (const rf of RED_FLAGS) {
-          if (rf.test(c)) {
-            redFlags.push({
-              gezel: gezelFromFilename,
-              tool: c.name,
-              argsSummary: c.argsSummary ?? '',
-              atTurn: idx,
-              pattern: rf.pattern,
-              explanation: rf.explanation,
-            });
-          }
         }
         // (Session-level red flag scanning happens once per session
         // after this per-call loop completes — see SESSION_RED_FLAGS.)
@@ -869,24 +880,8 @@ export function score(runDir: string): TrialFacts {
           }
         }
       }
-    });
-    // Session-level red flags. These look across the message stream
-    // for patterns the per-call loop can't see — most importantly
-    // "model emitted a long-form deliverable as chat content without
-    // a write_file in the same turn." Run once per session, not once
-    // per call.
-    for (const srf of SESSION_RED_FLAGS) {
-      for (const hit of srf.test(sess.messages, gezelFromFilename)) {
-        redFlags.push({
-          gezel: gezelFromFilename,
-          tool: hit.tool,
-          argsSummary: hit.argsSummary,
-          atTurn: hit.atTurn,
-          pattern: srf.pattern,
-          explanation: srf.explanation,
-        });
-      }
     }
+    redFlags.push(...sessionBehaviorRedFlags(gezelFromFilename, sess.messages));
   }
 
   if (totalToolCalls === 0 && projectHistoryToolCalls > 0) {

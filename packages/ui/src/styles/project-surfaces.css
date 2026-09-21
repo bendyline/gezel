@@ -592,6 +592,10 @@
 }
 
 .pending-question-choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;

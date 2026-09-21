@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import {
+  CapabilityDeniedError,
+  EngagementDeniedError,
+  assertScriptMethodAllowed,
+  toScriptTaskStep as toTaskStep,
+} from '@bendyline/gezel';
+export { CapabilityDeniedError, EngagementDeniedError } from '@bendyline/gezel';
 import type {
   CreateTaskRequest,
   IndexReadinessReport,
   ScriptCapability,
-  TaskCraftbookStep,
   UpdateTaskRequest,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
@@ -113,26 +119,6 @@ export interface DispatcherDeps {
       opts: { waitBudgetMs?: number; reviews?: boolean },
     ): Promise<IndexReadinessReport>;
   };
-}
-
-export class CapabilityDeniedError extends Error {
-  readonly code = 'CAPABILITY_DENIED';
-  constructor(capability: ScriptCapability, method: string, strippedReason?: string) {
-    super(
-      strippedReason
-        ? `script attempted to call "${method}" (capability: ${capability}); the capability is declared in meta.requires but is currently denied: ${strippedReason}`
-        : `script attempted to call "${method}" (capability: ${capability}) but did not declare it in meta.requires`,
-    );
-    this.name = 'CapabilityDeniedError';
-  }
-}
-
-export class EngagementDeniedError extends Error {
-  readonly code = 'ENGAGEMENT_DENIED';
-  constructor(method: string) {
-    super(`script called "${method}" but AI engagement mode is set to "off"`);
-    this.name = 'EngagementDeniedError';
-  }
 }
 
 interface ParamsShape {
@@ -592,13 +578,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
   ): Promise<unknown> {
     const entry = handlers[method];
     if (!entry) throw new Error(`unknown method "${method}"`);
-    if (entry.capability && !ctx.allowedCapabilities.has(entry.capability)) {
-      throw new CapabilityDeniedError(
-        entry.capability,
-        method,
-        ctx.strippedCapabilities?.get(entry.capability),
-      );
-    }
+    assertScriptMethodAllowed(method, ctx.allowedCapabilities, ctx.strippedCapabilities);
     return entry.handler(ctx, params);
   }
 
@@ -725,24 +705,4 @@ function splitRef(ref: string, ctx: DispatcherContext): [string, string] {
     throw new Error(`invalid project id in task ref "${ref}"`);
   }
   return [projectId, ref.slice(idx + 1)];
-}
-
-/**
- * Project a task's embedded craftbook step down to the curated, read-only
- * `TaskStep` view the SDK exposes — the internal routing machinery (gates,
- * branches, hook script refs) is dropped, and a lifecycle `status` is
- * derived from the task's `activeStepId` and the step's `completedAt`.
- */
-function toTaskStep(step: TaskCraftbookStep, activeStepId: string | undefined) {
-  const isActive = step.id === activeStepId;
-  return {
-    id: step.id,
-    name: step.name,
-    ...(step.description !== undefined ? { description: step.description } : {}),
-    status: isActive ? 'active' : step.completedAt ? 'complete' : 'pending',
-    isActive,
-    ...(step.completedAt !== undefined ? { completedAt: step.completedAt } : {}),
-    ...(step.attemptCount !== undefined ? { attemptCount: step.attemptCount } : {}),
-    ...(step.terminal !== undefined ? { terminal: step.terminal } : {}),
-  };
 }

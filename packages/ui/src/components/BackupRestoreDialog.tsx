@@ -2,6 +2,7 @@ import type { BackupPlan, RestoreReview, StorageJob } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { formatBytes } from './model-memory-copy.js';
 
 /**
@@ -46,6 +47,9 @@ export function BackupRestoreDialog() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const portable = !runtimeCapabilities().daemonSettings;
+  const pendingReview = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
@@ -53,6 +57,8 @@ export function BackupRestoreDialog() {
   }, []);
 
   const reset = useCallback(() => {
+    if (pendingReview.current) void api.cancelRestore(pendingReview.current).catch(() => {});
+    pendingReview.current = null;
     setPlan(null);
     setReview(null);
     setReplace(new Set());
@@ -111,6 +117,35 @@ export function BackupRestoreDialog() {
   const startBackup = async () => {
     if (busy) return;
     setError(null);
+    if (portable) {
+      setBusy(true);
+      try {
+        const bytes = await api.exportPortableBackup({ excludeWorkspaces });
+        if (window.__GEZEL__?.saveExportedFile) {
+          await window.__GEZEL__.saveExportedFile({
+            name: defaultBackupName(),
+            mimeType: 'application/zip',
+            bytes,
+          });
+          setDone('Backup exported.');
+        } else if (['ios', 'android', 'mobile'].includes(window.__GEZEL__?.platform ?? '')) {
+          throw new Error('File export is not available in this version of the app.');
+        } else {
+          const url = URL.createObjectURL(new Blob([bytes.slice()], { type: 'application/zip' }));
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = defaultBackupName();
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+          setDone('Backup downloaded.');
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const picked = await filePicker?.chooseSavePath(defaultBackupName());
     if (!picked?.path) return;
     setBusy(true);
@@ -127,15 +162,43 @@ export function BackupRestoreDialog() {
 
   const pickRestoreFile = async () => {
     setError(null);
+    if (portable) {
+      uploadInput.current?.click();
+      return;
+    }
     const picked = await filePicker?.chooseOpenPath();
     if (!picked?.path) return;
     setBusy(true);
     try {
-      setReview(await api.scanRestore({ path: picked.path }));
+      const next = await api.scanRestore({ path: picked.path });
+      pendingReview.current = next.restoreId;
+      setReview(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const inspectUpload = async (file?: File) => {
+    if (!file || busy) return;
+    setError(null);
+    if (file.size > 72 * 1024 * 1024) {
+      setError('Choose a backup smaller than 72 MiB.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (pendingReview.current) await api.cancelRestore(pendingReview.current);
+      const next = await api.scanPortableRestore(new Uint8Array(await file.arrayBuffer()));
+      pendingReview.current = next.restoreId;
+      setReview(next);
+      setReplace(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      if (uploadInput.current) uploadInput.current.value = '';
     }
   };
 
@@ -145,13 +208,24 @@ export function BackupRestoreDialog() {
     setError(null);
     try {
       const items = review.items
-        .filter((item) => item.conflict === 'none' || replace.has(item.id))
+        .filter((item) => item.conflict === 'none' || replace.has(`${item.kind}:${item.id}`))
         .map((item) => ({
           kind: item.kind,
           id: item.id,
           action: item.conflict === 'exists' ? ('replace' as const) : ('add' as const),
         }));
-      const { jobId } = await api.confirmRestore(review.restoreId, { items });
+      const settings = items.some((item) => item.kind === 'settings-file');
+      if (portable) {
+        const result = await api.confirmPortableRestore(review.restoreId, { items, settings });
+        pendingReview.current = null;
+        setDone(`Restored ${result.restored} item(s). Reopening your workspace…`);
+        window.location.reload();
+        return;
+      }
+      const { jobId } = await api.confirmRestore(review.restoreId, {
+        items,
+        ...(settings ? { settings: true } : {}),
+      });
       poll(jobId, (finished) => {
         if (finished.status === 'done') setDone(`Restored ${items.length} item(s).`);
       });
@@ -172,6 +246,8 @@ export function BackupRestoreDialog() {
         if (!next && !busy) {
           stopPolling();
           setOpen(false);
+          if (pendingReview.current) void api.cancelRestore(pendingReview.current).catch(() => {});
+          pendingReview.current = null;
         }
       }}
     >
@@ -214,130 +290,142 @@ export function BackupRestoreDialog() {
             </button>
           </div>
 
-          {!filePicker && (
-            <p className="muted small">
-              Choosing a file needs the desktop app. From a terminal, use <code>gezel backup</code>{' '}
-              and <code>gezel restore</code>.
-            </p>
-          )}
+          <div className="gz-backup-body">
+            {!filePicker && !portable && (
+              <p className="muted small">
+                Choosing a file needs the desktop app. From a terminal, use{' '}
+                <code>gezel backup</code> and <code>gezel restore</code>.
+              </p>
+            )}
+            {portable && (
+              <input
+                ref={uploadInput}
+                type="file"
+                accept=".zip,application/zip"
+                aria-label="Backup file"
+                hidden
+                onChange={(event) => void inspectUpload(event.target.files?.[0])}
+              />
+            )}
 
-          {tab === 'backup' && !done && (
-            <>
-              {plan && (
-                <>
-                  <ul className="storage-list">
-                    {plan.items.length === 0 && (
-                      <li>
-                        <span className="storage-list-label">Nothing to back up yet.</span>
-                      </li>
+            {tab === 'backup' && !done && (
+              <>
+                {plan && (
+                  <>
+                    <ul className="storage-list">
+                      {plan.items.length === 0 && (
+                        <li>
+                          <span className="storage-list-label">Nothing to back up yet.</span>
+                        </li>
+                      )}
+                      {plan.items.map((item) => (
+                        <li key={`${item.kind}:${item.id}`}>
+                          <span className="storage-list-label">{item.label}</span>
+                          <span className="storage-list-bytes">{formatBytes(item.bytes)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="muted small">About {formatBytes(plan.totalBytes)} in total.</p>
+                    <label className="gz-backup-exclude">
+                      <input
+                        type="checkbox"
+                        checked={excludeWorkspaces}
+                        disabled={busy}
+                        onChange={(e) => {
+                          setExcludeWorkspaces(e.target.checked);
+                          void loadPlan(e.target.checked);
+                        }}
+                      />
+                      <span>Leave out project working files (smaller backup)</span>
+                    </label>
+                    {plan.warnings.map((warning) => (
+                      <p className="muted small" key={warning}>
+                        {warning}
+                      </p>
+                    ))}
+                  </>
+                )}
+                {!plan && !error && <p className="muted small">Measuring…</p>}
+              </>
+            )}
+
+            {tab === 'restore' && !done && (
+              <>
+                {!review && (
+                  <p className="muted small">
+                    Choose a backup file to see what it holds. Nothing changes until you confirm.
+                  </p>
+                )}
+                {review && (
+                  <>
+                    <ul className="storage-list">
+                      {review.items.map((item) => (
+                        <li key={`${item.kind}:${item.id}`}>
+                          <span className="storage-list-label">
+                            {item.label}
+                            {item.conflict === 'exists' && (
+                              <label className="gz-backup-replace">
+                                <input
+                                  type="checkbox"
+                                  checked={replace.has(`${item.kind}:${item.id}`)}
+                                  disabled={busy}
+                                  onChange={(e) =>
+                                    setReplace((prev) => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.add(`${item.kind}:${item.id}`);
+                                      else next.delete(`${item.kind}:${item.id}`);
+                                      return next;
+                                    })
+                                  }
+                                />
+                                <span>replace the one already here</span>
+                              </label>
+                            )}
+                          </span>
+                          <span className="storage-list-bytes">{formatBytes(item.bytes)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {conflicts.length > 0 && (
+                      <p className="gz-cleanup-warning small" role="alert">
+                        {conflicts.length} item(s) already exist here. They are left alone unless
+                        you tick replace — replacing overwrites what is here now.
+                      </p>
                     )}
-                    {plan.items.map((item) => (
-                      <li key={`${item.kind}:${item.id}`}>
-                        <span className="storage-list-label">{item.label}</span>
-                        <span className="storage-list-bytes">{formatBytes(item.bytes)}</span>
-                      </li>
+                    {review.warnings.map((warning) => (
+                      <p className="muted small" key={warning}>
+                        {warning}
+                      </p>
                     ))}
-                  </ul>
-                  <p className="muted small">About {formatBytes(plan.totalBytes)} in total.</p>
-                  <label className="gz-backup-exclude">
-                    <input
-                      type="checkbox"
-                      checked={excludeWorkspaces}
-                      disabled={busy}
-                      onChange={(e) => {
-                        setExcludeWorkspaces(e.target.checked);
-                        void loadPlan(e.target.checked);
-                      }}
-                    />
-                    <span>Leave out project working files (smaller backup)</span>
-                  </label>
-                  {plan.warnings.map((warning) => (
-                    <p className="muted small" key={warning}>
-                      {warning}
-                    </p>
-                  ))}
-                </>
-              )}
-              {!plan && !error && <p className="muted small">Measuring…</p>}
-            </>
-          )}
+                  </>
+                )}
+              </>
+            )}
 
-          {tab === 'restore' && !done && (
-            <>
-              {!review && (
-                <p className="muted small">
-                  Choose a backup file to see what it holds. Nothing changes until you confirm.
-                </p>
-              )}
-              {review && (
-                <>
-                  <ul className="storage-list">
-                    {review.items.map((item) => (
-                      <li key={`${item.kind}:${item.id}`}>
-                        <span className="storage-list-label">
-                          {item.label}
-                          {item.conflict === 'exists' && (
-                            <label className="gz-backup-replace">
-                              <input
-                                type="checkbox"
-                                checked={replace.has(item.id)}
-                                disabled={busy}
-                                onChange={(e) =>
-                                  setReplace((prev) => {
-                                    const next = new Set(prev);
-                                    if (e.target.checked) next.add(item.id);
-                                    else next.delete(item.id);
-                                    return next;
-                                  })
-                                }
-                              />
-                              <span>replace the one already here</span>
-                            </label>
-                          )}
-                        </span>
-                        <span className="storage-list-bytes">{formatBytes(item.bytes)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {conflicts.length > 0 && (
-                    <p className="gz-cleanup-warning small" role="alert">
-                      {conflicts.length} item(s) already exist here. They are left alone unless you
-                      tick replace — replacing overwrites what is here now.
-                    </p>
-                  )}
-                  {review.warnings.map((warning) => (
-                    <p className="muted small" key={warning}>
-                      {warning}
-                    </p>
-                  ))}
-                </>
-              )}
-            </>
-          )}
+            {busy && job && (
+              <p className="muted small" aria-live="polite">
+                {job.phase === 'write' && `Writing ${job.currentLabel ?? '…'}`}
+                {job.phase === 'extract' && 'Reading the backup…'}
+                {job.phase === 'publish' && `Restoring ${job.currentLabel ?? '…'}`}
+                {job.totalItems > 0 && ` (${job.itemsDone}/${job.totalItems})`}
+              </p>
+            )}
 
-          {busy && job && (
-            <p className="muted small" aria-live="polite">
-              {job.phase === 'write' && `Writing ${job.currentLabel ?? '…'}`}
-              {job.phase === 'extract' && 'Reading the backup…'}
-              {job.phase === 'publish' && `Restoring ${job.currentLabel ?? '…'}`}
-              {job.totalItems > 0 && ` (${job.itemsDone}/${job.totalItems})`}
-            </p>
-          )}
+            {done && (
+              <div className="gz-cleanup-outcome">
+                <p>{done}</p>
+                {job?.restartRequired && (
+                  <p className="muted small">Restart Gezel to see restored content.</p>
+                )}
+              </div>
+            )}
 
-          {done && (
-            <div className="gz-cleanup-outcome">
-              <p>{done}</p>
-              {job?.restartRequired && (
-                <p className="muted small">Restart Gezel to see restored content.</p>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <p className="gz-dialog-error" role="alert">
-              {error}
-            </p>
-          )}
+            {error && (
+              <p className="gz-dialog-error" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
 
           <AlertDialog.Actions>
             <AlertDialog.Cancel asChild>
@@ -349,7 +437,7 @@ export function BackupRestoreDialog() {
               <AlertDialog.Action asChild>
                 <button
                   type="button"
-                  disabled={busy || !filePicker || (plan?.items.length ?? 0) === 0}
+                  disabled={busy || (!filePicker && !portable) || (plan?.items.length ?? 0) === 0}
                   onClick={(event) => {
                     event.preventDefault();
                     void startBackup();
@@ -363,7 +451,9 @@ export function BackupRestoreDialog() {
               <AlertDialog.Action asChild>
                 <button
                   type="button"
-                  disabled={busy || !filePicker || (review !== null && restorable === 0)}
+                  disabled={
+                    busy || (!filePicker && !portable) || (review !== null && restorable === 0)
+                  }
                   onClick={(event) => {
                     event.preventDefault();
                     if (review) void startRestore();

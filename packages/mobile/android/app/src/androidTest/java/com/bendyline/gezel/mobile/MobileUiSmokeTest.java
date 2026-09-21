@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.SystemClock;
-import android.util.Log;
 import android.webkit.WebView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -28,7 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Exercises the packaged React app, worker, Capacitor bridge, and private storage together. */
+/** Exercises the shared React app, portable service, Capacitor bridge, and product files together. */
 @RunWith(AndroidJUnit4.class)
 public final class MobileUiSmokeTest {
     private final Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
@@ -39,13 +38,21 @@ public final class MobileUiSmokeTest {
     private File fixtureSource;
     private File importedFixture;
     private String fixtureId;
+    private File productRoot;
+    private File productBackup;
 
-    @Before public void launchWithIsolatedConversations() throws Exception {
+    @Before public void launchWithIsolatedProductFiles() throws Exception {
         File files = instrumentation.getTargetContext().getFilesDir();
+        File[] previous = new File(files, "gezel").listFiles();
+        if (previous != null) for (File entry : previous)
+            assertFalse("Recover the preserved product backup before another smoke test: " + entry,
+                entry.isDirectory() && (entry.getName().startsWith("product-eval-backup-") || entry.getName().startsWith("product-smoke-backup-")));
         store = new MobileStore(files);
-        // Preserve even AtomicFile recovery sidecars when this runs on a developer's device.
-        for (String name : new String[] { "state.json", "state.json.bak", "state.json.new",
-                "models.json", "models.json.bak", "models.json.new" }) {
+        productRoot = new File(new File(files, "gezel"), "product");
+        productBackup = new File(new File(files, "gezel"), "product-smoke-backup-" + java.util.UUID.randomUUID());
+        Files.move(productRoot.toPath(), productBackup.toPath());
+        store = new MobileStore(files);
+        for (String name : new String[] { "models.json", "models.json.bak", "models.json.new" }) {
             File file = new File(new File(files, "gezel"), name);
             priorState.put(file, file.exists() ? Files.readAllBytes(file.toPath()) : null);
         }
@@ -58,7 +65,12 @@ public final class MobileUiSmokeTest {
             while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
         }
         fixtureId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(fixtureSource)).getString("id");
+        store.selectModel(fixtureId);
         importedFixture = new File(new File(files, "gezel/models"), fixtureId + ".gguf");
+        // Connect before WebView creation so its virtual accessibility tree is enabled.
+        android.accessibilityservice.AccessibilityServiceInfo accessibility = instrumentation.getUiAutomation().getServiceInfo();
+        accessibility.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS | android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+        instrumentation.getUiAutomation().setServiceInfo(accessibility);
         Intent launch = new Intent(instrumentation.getTargetContext(), MainActivity.class);
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         activity = (MainActivity) instrumentation.startActivitySync(launch);
@@ -67,7 +79,7 @@ public final class MobileUiSmokeTest {
         waitForApp();
     }
 
-    @After public void restoreConversations() throws Exception {
+    @After public void restoreProductFiles() throws Exception {
         if (activity != null) {
             GezelMobilePlugin plugin = (GezelMobilePlugin) activity.getBridge().getPlugin("GezelMobile").getInstance();
             Field queueField = GezelMobilePlugin.class.getDeclaredField("storageQueue");
@@ -78,6 +90,14 @@ public final class MobileUiSmokeTest {
             // A failed UI turn can leave a save queued; it must not overwrite the restored state.
             assertTrue("Activity storage must finish before restoring test state", storageQueue.awaitTermination(30, TimeUnit.SECONDS));
         }
+        if (productBackup != null && productBackup.isDirectory()) {
+            if (productRoot.isDirectory()) {
+                try (java.util.stream.Stream<java.nio.file.Path> paths = Files.walk(productRoot.toPath())) {
+                    for (java.nio.file.Path path : (Iterable<java.nio.file.Path>) paths.sorted(java.util.Comparator.reverseOrder())::iterator) Files.delete(path);
+                }
+            }
+            Files.move(productBackup.toPath(), productRoot.toPath());
+        }
         for (Map.Entry<File, byte[]> entry : priorState.entrySet()) {
             Files.deleteIfExists(entry.getKey().toPath());
             if (entry.getValue() != null) Files.write(entry.getKey().toPath(), entry.getValue());
@@ -86,186 +106,311 @@ public final class MobileUiSmokeTest {
         if (fixtureSource != null) Files.deleteIfExists(fixtureSource.toPath());
     }
 
-    @Test public void sharedNavigationSettingsAndConversationPersistence() throws Exception {
-        JSONObject initial = run("""
+    @Test public void unavailableSystemModelIsRejectedBeforeInference() throws Exception {
+        run("""
+            for (const modelId of ['model-from-another-provider', '']) {
+                let failure;
+                try {
+                    await window.Capacitor.Plugins.GezelMobile.generate({
+                        requestId:'invalid-system-model',providerId:'android-mlkit',modelId,
+                        messages:[{role:'user',content:'Must not run'}],contextSize:4096,maxTokens:1
+                    });
+                } catch (error) { failure=error; }
+                check(failure?.code === 'MODEL_UNAVAILABLE', 'An unavailable system model must be rejected before inference');
+            }
+            return true;
+            """);
+    }
+
+    @Test public void hardwareBackDismissesOverlaysAndPreservesDraft() throws Exception {
+        run("""
+            const project = await api('/api/projects', 'POST', {name:'Back workshop',indexingEnabled:false});
+            const crew = await api('/api/gezels', 'POST', {name:'Back tester',role:'Helper',about:'Reply briefly.'});
+            await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
+            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
+            await api('/api/config', 'PUT', {provider:'llama-cpp',meesterGezelId:crew.id});
+            return true;
+            """);
+        reload();
+        run("""
+            await clickButton('Back workshop', document.querySelector('[data-testid="app-sidebar"]'));
+            const editor=await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]'),'shared composer');
+            editor.focus();document.execCommand('insertText',false,'An unfinished mobile draft.');editor.blur();
+            await until(()=>editor.textContent.includes('An unfinished mobile draft.'),'retained draft');
+            await clickButton('Choose recipients');
+            await until(()=>visible(document.querySelector('.chat-recipient-popover')),'recipient picker');
+            return true;
+            """);
+        hardwareBack();
+        run("""
+            await until(()=>!visible(document.querySelector('.chat-recipient-popover')),'Back dismisses picker');
+            check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'First Back must keep project chat open');
+            window.dispatchEvent(new CustomEvent('gezel:show-backup-restore'));
+            await until(()=>visible(document.querySelector('[role="alertdialog"]')),'shared backup dialog');
+            return true;
+            """);
+        hardwareBack();
+        run("""
+            await until(()=>!visible(document.querySelector('[role="alertdialog"]')),'Back dismisses dialog');
+            check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Modal Back must keep project chat open');
+            return true;
+            """);
+        hardwareBack();
+        run("""
+            await until(()=>visible(document.querySelector('[data-testid="app-sidebar"]')),'Back returns to navigation');
+            await clickButton('Back workshop',document.querySelector('[data-testid="app-sidebar"]'));
+            const editor=await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]'),'same composer');
+            check(editor.textContent.includes('An unfinished mobile draft.'),'Hardware Back discarded the draft');
+            return true;
+            """);
+    }
+
+    @Test public void sharedHtmlViewerLoadsRelativeAssetsAndRunsAnOfflineButton() throws Exception {
+        run("""
+            const project=await api('/api/projects','POST',{name:'Preview workshop',indexingEnabled:false});
+            const files={
+                'offline-game.html':`<link rel="stylesheet" href="assets/style.css"><button id="play" onclick="parent.postMessage({nativeViewerClicked:true}, '*')">Play offline</button><img id="icon" src="assets/icon.svg"><script src="assets/game.js"></script>`,
+                'assets/style.css':'#play{color:rgb(12,34,56);padding:16px;font-size:20px}',
+                'assets/icon.svg':'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>',
+                'assets/game.js':"addEventListener('load',()=>parent.postMessage({nativeViewerReady:true,color:getComputedStyle(document.getElementById('play')).color,width:document.getElementById('icon').naturalWidth,button:document.getElementById('play').getBoundingClientRect().toJSON()},'*'));"
+            };
+            for(const [path,content] of Object.entries(files))await api('/api/projects/'+project.id+'/artifacts/write','PUT',{path,content});
+            return true;
+            """);
+        reload();
+        run("""
+            check(window.__GEZEL__.capabilities.htmlPreview,'Verified native HTML capability must be enabled');
+            window.__nativeViewerReady=null;window.__nativeViewerClicked=false;
+            window.addEventListener('message',event=>{
+                const frame=document.querySelector('iframe[src*="/__gezel_preview/"]');
+                if(event.source!==frame?.contentWindow)return;
+                if(event.data?.nativeViewerReady)window.__nativeViewerReady=event.data;
+                if(event.data?.nativeViewerClicked)window.__nativeViewerClicked=true;
+            });
+            await clickButton('Preview workshop',document.querySelector('[data-testid="app-sidebar"]'));
+            const filesTab=await until(()=>document.querySelector('[data-testid="project-tab-artifacts"]'),'shared files tab');
+            filesTab.focus();filesTab.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+            await clickButton('offline-game.html');
+            const receipt=await until(()=>window.__nativeViewerReady,'HTML page loaded in shared file viewer');
+            check(receipt.color==='rgb(12, 34, 56)'&&receipt.width===8,'Relative CSS and image were not copied into the native preview');
+            const frame=document.querySelector('iframe[src*="/__gezel_preview/"]');
+            check(frame.getAttribute('sandbox')==='allow-scripts','Shared viewer must retain opaque script-only sandbox');
+            return true;
+            """);
+        snapshot("04-shared-html-ready");
+        android.view.accessibility.AccessibilityNodeInfo accessibilityRoot=instrumentation.getUiAutomation().getRootInActiveWindow();
+        java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> pendingNodes=new java.util.ArrayDeque<>();
+        if(accessibilityRoot!=null)pendingNodes.add(accessibilityRoot);
+        int inspected=0;boolean accessibleButton=false;
+        while(!pendingNodes.isEmpty()&&inspected++<512) {
+            android.view.accessibility.AccessibilityNodeInfo node=pendingNodes.removeFirst();
+            String text=String.valueOf(node.getText());
+            if(text.equals("Play offline")&&node.isVisibleToUser()&&node.isClickable())accessibleButton=true;
+            for(int child=0;child<node.getChildCount();child++) {
+                android.view.accessibility.AccessibilityNodeInfo next=node.getChild(child);if(next!=null)pendingNodes.add(next);
+            }
+        }
+        assertTrue("The HTML button must be visible and clickable in the native accessibility tree",accessibleButton);
+        JSONObject point=run("""
+            const frame=document.querySelector('iframe[src*="/__gezel_preview/"]').getBoundingClientRect();
+            const bounds=window.__nativeViewerReady.button;
+            const x=frame.left+bounds.x+bounds.width/2,y=frame.top+bounds.y+bounds.height/2;
+            check(x>0&&x<innerWidth&&y>0&&y<innerHeight,'Authored button must be on screen');
+            return {x,y,viewportWidth:innerWidth};
+            """);
+        int[] location=new int[2];int[] viewWidth=new int[1];
+        instrumentation.runOnMainSync(()->{webView.getLocationOnScreen(location);viewWidth[0]=webView.getWidth();});
+        float scale=(float)(viewWidth[0]/point.getDouble("viewportWidth"));
+        float x=location[0]+(float)point.getDouble("x")*scale,y=location[1]+(float)point.getDouble("y")*scale;
+        long now=SystemClock.uptimeMillis();
+        android.view.MotionEvent down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,x,y,0);
+        android.view.MotionEvent up=android.view.MotionEvent.obtain(now,now+80,android.view.MotionEvent.ACTION_UP,x,y,0);
+        down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        try {
+            assertTrue("Native touch down must reach the displayed HTML page",instrumentation.getUiAutomation().injectInputEvent(down,true));
+            assertTrue("Native touch up must reach the displayed HTML page",instrumentation.getUiAutomation().injectInputEvent(up,true));
+        } finally {down.recycle();up.recycle();}
+        run("await until(()=>window.__nativeViewerClicked,'Authored button click in native HTML preview'); return true;");
+        snapshot("04-shared-html-preview");
+    }
+
+    private void hardwareBack() throws Exception {
+        instrumentation.runOnMainSync(() -> {
+            android.view.inputmethod.InputMethodManager keyboard = (android.view.inputmethod.InputMethodManager) activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+            keyboard.hideSoftInputFromWindow(webView.getWindowToken(), 0);
+        });
+        SystemClock.sleep(250);
+        assertTrue("System Back must be delivered", instrumentation.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));
+    }
+
+    @Test public void sharedProductNavigationNativeChatAndFilePersistence() throws Exception {
+        JSONObject seeded = run("""
             check(window.Capacitor?.getPlatform() === 'android', 'Must use the native Android host');
             check(innerWidth <= 760, 'Run the UI smoke on a phone-sized emulator or device');
-            check(document.documentElement.scrollWidth <= innerWidth, 'Phone navigation overflows horizontally');
-            const navigation = document.querySelector('[aria-label="Primary navigation"]');
-            check(visible(navigation), 'Phone must open at shared primary navigation');
-            check(!visible(document.querySelector('.mobile-main')), 'Project must not cover initial navigation');
-            check(button('Documents', navigation)?.disabled, 'Unsupported Documents must not appear usable');
-            const saved = await read();
-            check(saved.sessions.length === 1, 'Isolated app should create one initial conversation');
-            return {projectName:saved.project.name};
+            check(visible(document.querySelector('[data-testid="app-sidebar"]')), 'Phone must open at the shared desktop navigation');
+            check(!document.querySelector('.mobile-app'), 'The separate conversation prototype must not be mounted');
+            const scriptRun = await api('/api/projects/default/scripts/run', 'POST', {name:'storeRecords',scope:'standard',input:{action:'create',id:'native-quickjs',fields:{title:'offline'},root:'native-script',mode:'single-file'}});
+            check(scriptRun.status === 'ok', 'Bundled QuickJS must execute inside the native WebView');
+            check((await api('/api/projects/default/script-runs/' + scriptRun.runId)).status === 'ok', 'Native script audit must persist');
+            const scriptOutput = await api('/api/projects/default/workspace/read?path=native-script.json');
+            check(scriptOutput.content.includes('native-quickjs') && scriptOutput.content.includes('offline'), 'QuickJS must write through the native product file store');
+            const exportToken = (await plugin.beginExport({name:'test-backup.zip',mimeType:'application/zip',sizeBytes:3})).token;
+            let staleExportRejected = false;
+            try { await plugin.saveExport({token:'stale'}); } catch { staleExportRejected = true; }
+            check(staleExportRejected, 'Stale export must not cancel the current staged file');
+            await plugin.appendExport({token:exportToken,offset:0,data:'AQID'});
+            let exportRejected = false;
+            try { await plugin.appendExport({token:exportToken,offset:0,data:'AQID'}); } catch { exportRejected = true; }
+            check(exportRejected, 'Export chunks must reject duplicate offsets');
+            await plugin.cancelExport({token:exportToken});
+            const project = await api('/api/projects', 'POST', {name:'Native workshop',about:'A native mobile product test.',missionObjectives:'Keep projects, crew and files on this device.',indexingEnabled:false});
+            const crew = await api('/api/gezels', 'POST', {name:'Native tester',role:'Helper',about:'Reply briefly.'});
+            await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
+            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
+            const modelId = (await plugin.listModels()).selectedModelId;
+            await api('/api/config', 'PUT', {provider:'llama-cpp',meesterGezelId:crew.id,modelContextOverrides:{['llama-cpp:'+modelId]:8192},modelTuning:{[modelId]:{sampling:{maxTokens:256}}}});
+            await api('/api/documents/write', 'PUT', {path:'Android notes.md',content:'# Android notes\\n\\nSaved through the shared product API.'});
+            await api('/api/projects/' + project.id + '/artifacts/write', 'PUT', {path:'Native report.md',content:'# Native report\\n\\nThe same artifact drawer works on Android.'});
+            return {projectId:project.id,gezelId:crew.id};
             """);
-        snapshot("01-navigation");
-
-        JSONObject readiness = run("""
-            await enterProject();
-            const send = document.querySelector('.mobile-send');
-            check(visible(send) && send.getBoundingClientRect().bottom <= innerHeight + 1,
-                'Composer must fit within the phone viewport');
-            check(visible(document.querySelector('[data-testid="project-tab-chat"]')), 'Shared project Chat tab is missing');
-            await openNavigation();
-            await clickButton('Settings', document.querySelector('[aria-label="Primary navigation"]'));
-            await until(() => visible(document.querySelector('.mobile-settings')), 'global Settings');
-            const models = document.querySelector('.mobile-models');
-            if (!models.open) models.querySelector('summary').click();
-            const chooser = models.querySelector('select');
-            await until(() => Array.from(chooser.options).some(option => option.value === 'android-mlkit'),
-                'native Android provider in the packaged chooser');
-            await until(() => !button('Check availability', models).disabled, 'enabled model controls');
-            await clickButton('Check availability', models);
-            await until(() => !button('Check availability', models).disabled, 'completed readiness refresh');
-            const providers = (await plugin.providers()).providers;
-            for (const id of ['llama-cpp', 'android-mlkit']) {
-                const provider = providers.find(item => item.id === id);
-                check(provider?.locality === 'on-device', 'Missing native descriptor: ' + id);
-                check(provider.capabilities.tools === false, 'Text-only provider must not advertise tools');
-                const option = Array.from(chooser.options).find(item => item.value === id);
-                check(option, 'Native provider did not reach Settings: ' + id);
-                if (provider.availability !== 'available') {
-                    check(option.textContent.includes('not ready'), 'Unavailable provider must be labeled not ready');
-                    check(option.disabled || chooser.value === id, 'Unavailable provider must not be newly selectable');
-                    if (provider.availability === 'unavailable') {
-                        check(provider.reason?.length > 0, 'Unavailable provider must explain why');
-                        check(models.textContent.includes(provider.reason), 'Settings must show provider unavailability reason');
-                    }
-                }
-            }
-            return {providers:providers.map(({id,availability,reason}) => ({id,availability,reason}))};
-            """);
-        Log.i("GezelUiSmoke", "Native provider readiness: " + readiness);
+        // Exercise the actual Android document picker, then cancel without
+        // creating a file outside the dedicated app's private test data.
         run("""
-            const models = document.querySelector('.mobile-models');
-            const imported = models.querySelector('.mobile-model-library select');
-            await until(() => visible(imported) && !imported.disabled, 'enabled imported-model chooser');
-            check(Array.from(imported.options).some(option => option.value === %s),
-                'Imported fixture must appear in the real model library');
-            imported.value = %s;
-            imported.dispatchEvent(new Event('change', {bubbles:true}));
-            await until(async () => (await plugin.listModels()).selectedModelId === %s
-                && (await plugin.providers()).providers.find(item => item.id === 'llama-cpp').availability === 'available'
-                && !imported.disabled, 'fixture selected through Settings');
-            check((await read()).selectedProviderId === 'llama-cpp', 'Settings must save the chosen provider');
-            if (!models.open) models.querySelector('summary').click();
-            await until(() => visible(imported), 'expanded selected-model Settings');
+            const token = (await plugin.beginExport({name:'gezel-native-picker-test.zip',mimeType:'application/zip',sizeBytes:3})).token;
+            await plugin.appendExport({token,offset:0,data:'AQID'});
+            window.__nativeExportOutcome = null;
+            plugin.saveExport({token}).then(() => {window.__nativeExportOutcome = {saved:true};}, error => {window.__nativeExportOutcome = {code:error.code};});
             return true;
-            """.formatted(JSONObject.quote(fixtureId), JSONObject.quote(fixtureId), JSONObject.quote(fixtureId)));
-        snapshot("02-settings");
-
+            """);
+        boolean pickerVisible = false;
+        for (int attempt = 0; attempt < 100; attempt++) {
+            android.view.accessibility.AccessibilityNodeInfo root = instrumentation.getUiAutomation().getRootInActiveWindow();
+            if (root != null && String.valueOf(root.getPackageName()).contains("documentsui")) {
+                pickerVisible = true; break;
+            }
+            SystemClock.sleep(100);
+        }
+        assertTrue("Export must open Android's Save document picker", pickerVisible);
+        assertTrue("The system picker must allow cancellation", instrumentation.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));
+        run("""
+            const outcome = await until(() => window.__nativeExportOutcome, 'native document picker cancellation');
+            check(outcome.code === 'CANCELLED', 'Cancelling Save must report cancellation');
+            const token = (await plugin.beginExport({name:'gezel-native-picker-test.zip',mimeType:'application/zip',sizeBytes:1})).token;
+            await plugin.cancelExport({token});
+            return true;
+            """);
+        reload();
+        run("""
+            check(document.documentElement.scrollWidth <= innerWidth + 1, 'Primary navigation overflows');
+            const sidebar = document.querySelector('[data-testid="app-sidebar"]');
+            check(visible(button('Documents', sidebar)), 'Shared Documents navigation must be available');
+            await clickButton('Settings', sidebar);
+            const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native provider controls inside shared Settings');
+            await until(() => models.querySelector('select')?.options.length > 0, 'native provider inventory');
+            const navigation = document.querySelector('.app-compact-navigation');
+            if (visible(navigation)) {
+                const rect = navigation.getBoundingClientRect();
+                check(rect.top >= -1 && rect.bottom <= innerHeight + 1 && rect.height >= 40, 'Navigation must remain fully visible in Settings');
+            }
+            const providers = (await plugin.providers()).providers;
+            const llama = providers.find(item => item.id === 'llama-cpp');
+            check(llama?.availability === 'available', 'Imported fixture must be available');
+            check(providers.every(item => item.locality === 'on-device' && !item.capabilities.tools), 'Providers must report their real capability limits');
+            check((await api('/api/config')).provider === 'llama-cpp', 'Product config must select the native provider');
+            return true;
+            """);
+        snapshot("01-shared-settings");
+        run("""
+            const modelId = (await plugin.listModels()).selectedModelId;
+            const longer = await plugin.generate({requestId:'longer-smoke',providerId:'llama-cpp',modelId,contextSize:2048,maxTokens:512,messages:[{role:'user',content:'Hello'}]});
+            check(longer.text === 'a'.repeat(512) && longer.stopReason === 'length', 'Explicit reply budgets above 256 must work');
+            let rejected = false;
+            try { await plugin.generate({requestId:'missing-model',providerId:'llama-cpp',modelId:'missing',contextSize:2048,maxTokens:8,messages:[{role:'user',content:'Hello'}]}); }
+            catch { rejected = true; }
+            check(rejected, 'Missing pinned model must fail instead of using selected model');
+            return true;
+            """);
         JSONObject chat = run("""
             await openNavigation();
-            await enterProject();
-            const before = await read();
-            const sessionId = before.activeSessionId;
-            const textarea = document.querySelector('textarea');
-            await until(() => !textarea.disabled, 'available native model in composer');
-            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Say hello.');
-            textarea.dispatchEvent(new Event('input', {bubbles:true}));
-            await until(() => !document.querySelector('.mobile-send').disabled, 'enabled native chat Send');
+            await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
+            await until(() => visible(document.querySelector('[data-testid="project-tab-chat"]')), 'ordinary project Chat tab');
+            check(document.querySelector('.project-compact-heading h2')?.textContent === 'Native workshop', 'Current project name is missing');
+            const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
+            const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
+            editor.focus();
+            document.execCommand('insertText', false, 'Say hello.');
+            await until(() => editor.textContent.includes('Say hello.'), 'composer draft');
             let streamed = '';
             const listener = await plugin.addListener('chatDelta', event => { streamed += event.delta; });
             try {
-                document.querySelector('form.mobile-composer').requestSubmit();
-                const reply = await until(async () => {
-                    const state = await read();
-                    const messages = state.sessions.find(item => item.id === sessionId).messages;
-                    const assistant = messages[1];
-                    if (assistant?.status === 'error') throw new Error(assistant.error || 'Native UI generation failed');
-                    return assistant?.status === 'complete' && assistant;
-                }, 'native response persisted by the worker');
-                check(reply.providerId === 'llama-cpp', 'UI chat must use the explicitly selected native provider');
-                check(reply.content === 'a'.repeat(256), 'Native fixture must generate the deterministic reply');
-                await until(() => streamed === reply.content, 'native streaming deltas matching saved response');
-                await until(() => document.querySelector('[role="log"]').textContent.includes(reply.content), 'rendered assistant response');
-                await until(() => visible(document.querySelector('.mobile-send')), 'finished native turn');
-                return {sessionId,text:reply.content};
+                await until(() => { const send = composer.querySelector('[aria-label="Send"]'); return send && !send.disabled && send; }, 'enabled Send');
+                composer.querySelector('[aria-label="Send"]').click();
+                const completed = await until(async () => {
+                    const sessions = (await api('/api/sessions?project=' + %s)).sessions;
+                    for (const summary of sessions) {
+                        const session = await api('/api/sessions/' + summary.id);
+                        if (session.lastTurnError) throw new Error(session.lastTurnError);
+                        const answer = session.messages.find(item => item.role === 'assistant' && item.status === 'complete');
+                        if (answer) return {session,answer};
+                    }
+                }, 'native response persisted as an ordinary session');
+                check(completed.answer.providerId === 'llama-cpp', 'Native provider identity must be persisted');
+                check(completed.answer.content === 'a'.repeat(256), 'Native fixture returned the wrong text');
+                await until(() => streamed === completed.answer.content, 'streamed native deltas');
+                await until(() => document.body.textContent.includes(completed.answer.content), 'rendered shared chat response');
+                check(document.documentElement.scrollWidth <= innerWidth + 1, 'Project chat overflows');
+                return {sessionId:completed.session.id};
             } finally { await listener.remove(); }
-            """);
-        assertEquals(256, chat.getString("text").length());
-        snapshot("03-native-chat");
-
-        JSONObject created = run("""
-            await clickButton('Conversations');
-            await until(() => visible(document.querySelector('.mobile-conversations')), 'conversation list');
-            await clickButton('New', document.querySelector('.mobile-conversations'));
-            await until(async () => (await read()).sessions.length === 2 && visible(document.querySelector('.mobile-chat')),
-                'new conversation persisted through worker and native bridge');
-            await clickButton('Conversations');
-            await until(() => visible(document.querySelector('.mobile-conversations')), 'conversation list after creation');
-            const options = document.querySelector('.mobile-conversation-options');
-            if (!options.open) options.querySelector('summary').click();
-            await clickButton('Rename', options);
-            const input = Array.from(options.querySelectorAll('label')).find(label => label.textContent.includes('Conversation name')).querySelector('input');
-            await setInput(input, 'Android smoke recovery notes');
-            await until(() => !button('Save name', options).disabled, 'rename form');
-            await clickButton('Save name', options);
-            const state = await until(async () => {
-                const saved = await read();
-                return saved.sessions.find(item => item.id === saved.activeSessionId)?.title === 'Android smoke recovery notes' && saved;
-            }, 'renamed conversation persisted');
-            await until(() => button('Android smoke recovery notes'), 'renamed conversation in the list');
-            const search = document.querySelector('.mobile-conversations input[type="search"]');
-            await setInput(search, 'recovery');
-            await until(() => document.querySelector('[aria-label="Conversations"]').querySelectorAll('button').length === 1,
-                'conversation search');
-            check(document.documentElement.scrollWidth <= innerWidth, 'Conversation list overflows horizontally');
-            return {sessionId:state.activeSessionId};
-            """);
-        snapshot("04-conversations");
-        JSONObject persisted = new JSONObject(store.readState());
-        assertEquals(created.getString("sessionId"), persisted.getString("activeSessionId"));
-        assertEquals(2, persisted.getJSONArray("sessions").length());
-
-        reload();
+            """.formatted(JSONObject.quote(seeded.getString("projectId"))));
+        snapshot("02-shared-native-chat");
         run("""
-            await enterProject();
-            await clickButton('Conversations');
-            await until(() => button('Android smoke recovery notes'), 'saved title after WebView reload');
-            const state = await read();
-            check(state.activeSessionId === %s, 'Active conversation must survive reload');
-            check(state.sessions.length === 2, 'Conversation creation must survive reload');
-            const chat = state.sessions.find(item => item.id === %s);
-            check(chat.messages[0].content === 'Say hello.' && chat.messages[1].content === 'a'.repeat(256)
-                && chat.messages[1].status === 'complete', 'Native chat must survive reload');
-            const options = document.querySelector('.mobile-conversation-options');
-            if (!options.open) options.querySelector('summary').click();
-            await clickButton('Delete conversation', options);
-            await until(() => button('Keep conversation', options), 'delete confirmation');
-            await clickButton('Keep conversation', options);
-            await until(() => !button('Delete permanently', options), 'cancelled deletion');
-            check((await read()).sessions.length === 2, 'Cancelling deletion must keep the conversation');
-            await clickButton('Delete conversation', options);
-            await until(() => button('Delete permanently', options), 'delete confirmation');
-            await clickButton('Delete permanently', options);
-            await until(async () => (await read()).sessions.length === 1 && !button('Android smoke recovery notes'),
-                'confirmed deletion persisted');
-            return true;
-            """.formatted(JSONObject.quote(created.getString("sessionId")), JSONObject.quote(chat.getString("sessionId"))));
-
-        reload();
-        run("""
-            await enterProject();
-            await clickButton('Conversations');
-            await until(() => visible(document.querySelector('.mobile-conversations')), 'conversation list after second reload');
-            check(document.querySelector('[aria-label="Conversations"]').querySelectorAll('button').length === 1,
-                'Deletion must survive reload');
-            check(!button('Android smoke recovery notes'), 'Deleted conversation reappeared');
-            await clickButton('Back to chat');
-            await until(() => visible(document.querySelector('.mobile-chat')), 'return to project chat');
-            const selected = (await read()).selectedProviderId;
-            const descriptor = (await plugin.providers()).providers.find(provider => provider.id === selected);
-            if (descriptor?.availability !== 'available') {
-                check(document.querySelector('textarea').disabled && document.querySelector('.mobile-send').disabled,
-                    'Unavailable models must disable the composer');
-                check(visible(button('Choose a model')), 'Unavailable model must provide a Settings entry point');
-            }
+            const artifactsTab = document.querySelector('[data-testid="project-tab-artifacts"]');
+            artifactsTab.focus();
+            artifactsTab.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+            await clickButton('Native report.md');
+            await until(() => visible(button('Back to files')), 'phone shared file viewer');
+            await until(() => Array.from(document.querySelectorAll('.file-viewer-panel')).find(visible)?.textContent.includes('The same artifact drawer works on Android.'), 'saved artifact in shared editor');
+            await clickButton('Back to files');
+            await until(() => visible(button('Native report.md')), 'artifact list after Back');
+            await openNavigation();
+            await clickButton('Documents', document.querySelector('[data-testid="app-sidebar"]'));
+            await until(() => visible(button('Back to files')) || visible(button('Android notes')), 'shared document library');
+            if (visible(button('Back to files'))) await clickButton('Back to files');
+            await clickButton('Android notes');
+            await until(() => Array.from(document.querySelectorAll('.file-viewer-panel')).find(visible)?.textContent.includes('Saved through the shared product API.'), 'shared document content');
+            check(document.documentElement.scrollWidth <= innerWidth + 1, 'Document viewer overflows');
             return true;
             """);
-        snapshot("05-project");
-        assertEquals(initial.getString("projectName"), new JSONObject(store.readState()).getJSONObject("project").getString("name"));
+        snapshot("03-shared-documents");
+        reload();
+        run("""
+            const project = await api('/api/projects/' + %s);
+            check(project.gezelIds.includes(%s) && project.voormanGezelId === %s, 'Crew assignment must survive reload');
+            const session = await api('/api/sessions/' + %s);
+            check(session.messages.some(item => item.content === 'Say hello.') && session.messages.some(item => item.content === 'a'.repeat(256)), 'Ordinary session messages must survive reload');
+            const savedDocument = await api('/api/documents/read?path=' + encodeURIComponent('Android notes.md'));
+            check(savedDocument.content.includes('Saved through the shared product API.'), 'Shared document must survive reload');
+            const artifact = await api('/api/projects/' + project.id + '/artifacts/read?path=' + encodeURIComponent('Native report.md'));
+            check(artifact.content.includes('The same artifact drawer works on Android.'), 'Artifact must survive reload');
+            await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
+            await until(() => document.body.textContent.includes('a'.repeat(256)), 'restored chat in shared project UI');
+            await until(() => {
+                const timeline = Array.from(document.querySelectorAll('[data-testid="chat-timeline"]')).find(visible);
+                const reply = Array.from(timeline?.querySelectorAll('.msg-assistant .msg-body-rendered') ?? []).find(e => e.textContent.includes('a'.repeat(256)));
+                if (!reply) return false;
+                const box = reply.getBoundingClientRect(), viewport = timeline.getBoundingClientRect();
+                const sticky = timeline.parentElement.querySelector('.chat-sticky-header');
+                const visibleTop = Math.max(viewport.top, visible(sticky) ? sticky.getBoundingClientRect().bottom : viewport.top);
+                const shown = Math.min(box.bottom, viewport.bottom) - Math.max(box.top, visibleTop);
+                return shown >= Math.min(box.height, 80) - 1;
+            }, 'readable reply below sticky context after reload');
+            return true;
+            """.formatted(JSONObject.quote(seeded.getString("projectId")), JSONObject.quote(seeded.getString("gezelId")),
+                JSONObject.quote(seeded.getString("gezelId")), JSONObject.quote(chat.getString("sessionId"))));
+        assertNotNull(store.productFiles.read("config.json"));
+        assertNotNull(store.productFiles.read("projects/" + seeded.getString("projectId") + "/project.json"));
+        assertNotNull(store.productFiles.read("gezels/" + seeded.getString("gezelId") + "/sessions/" + chat.getString("sessionId") + ".json"));
+        snapshot("04-shared-reopened");
     }
 
     private void reload() throws Exception {
@@ -277,7 +422,7 @@ public final class MobileUiSmokeTest {
     private void waitForApp() throws Exception {
         long deadline = SystemClock.elapsedRealtime() + 60_000;
         while (SystemClock.elapsedRealtime() < deadline) {
-            if ("true".equals(evaluate("Boolean(!window.__gezelReloadMarker && document.querySelector('[aria-label=\"Primary navigation\"]') && window.Capacitor?.Plugins?.GezelMobile)"))) return;
+            if ("true".equals(evaluate("Boolean(!window.__gezelReloadMarker && document.querySelector('[data-testid=\"app-sidebar\"]') && window.Capacitor?.Plugins?.GezelMobile)"))) return;
             SystemClock.sleep(100);
         }
         fail("Packaged mobile app did not initialize: " + evaluate("document.body.innerText"));
@@ -295,7 +440,9 @@ public final class MobileUiSmokeTest {
     }
 
     private JSONObject run(String source) throws Exception {
-        evaluate("window.__gezelUiSmoke = null; (async () => {" + HELPERS + source
+        // Clear separately: a syntax error in the next script must not reuse the prior receipt.
+        evaluate("window.__gezelUiSmoke = null");
+        evaluate("(async () => {" + HELPERS + source
             + "})().then(value => window.__gezelUiSmoke = {value}, error => window.__gezelUiSmoke = {error:String(error.stack || error)}); void 0;");
         long deadline = SystemClock.elapsedRealtime() + 90_000;
         while (SystemClock.elapsedRealtime() < deadline) {
@@ -339,43 +486,33 @@ public final class MobileUiSmokeTest {
         const plugin = window.Capacitor.Plugins.GezelMobile;
         const visible = element => Boolean(element?.getClientRects().length);
         const check = (condition, message) => { if (!condition) throw new Error(message); };
-        const button = (text, scope = document) => Array.from(scope.querySelectorAll('button')).find(item => visible(item) && item.textContent.trim() === text);
-        const read = async () => JSON.parse((await plugin.readState()).data);
+        const button = (text, scope = document) => Array.from(scope.querySelectorAll('button')).find(item => visible(item) && (item.textContent.trim() === text || item.getAttribute('aria-label') === text));
+        const api = async (path, method='GET', body) => {
+            const host = window.__GEZEL__;
+            const response = await host.fetch(new Request(host.baseUrl + path, {method,headers:{Authorization:'Bearer ' + host.token,...(body ? {'Content-Type':'application/json'} : {})},...(body ? {body:JSON.stringify(body)} : {})}));
+            const value = await response.json();
+            if (!response.ok) throw new Error(path + ': ' + (value.error || response.status));
+            return value;
+        };
         const until = async (action, description) => {
             for (let attempt = 0; attempt < 450; attempt++) {
-                const result = await action();
-                if (result) return result;
-                const alert = document.querySelector('[role="alert"]');
-                if (visible(alert)) throw new Error(description + ': ' + alert.textContent);
+                const value = await action();
+                if (value) return value;
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
-            throw new Error('Timed out: ' + description);
+            throw new Error('Timed out: ' + description + ': ' + document.body.innerText.slice(-4000));
         };
         const clickButton = async (text, scope = document) => {
-            const element = await until(() => {
-                const candidate = button(text, scope);
-                return candidate && !candidate.disabled && candidate;
-            }, 'enabled visible button: ' + text);
+            const element = await until(() => { const candidate = button(text, scope); return candidate && !candidate.disabled && candidate; }, 'enabled visible button: ' + text);
             element.click();
             await new Promise(resolve => requestAnimationFrame(resolve));
         };
-        const setInput = async (input, value) => {
-            check(visible(input) && !input.disabled, 'Expected an editable input');
-            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
-            input.dispatchEvent(new Event('input', {bubbles:true}));
-            await new Promise(resolve => requestAnimationFrame(resolve));
-        };
         const openNavigation = async () => {
-            if (!visible(document.querySelector('[aria-label="Primary navigation"]'))) await clickButton('Navigation');
-            await until(() => visible(document.querySelector('[aria-label="Primary navigation"]')), 'primary navigation');
-        };
-        const enterProject = async () => {
-            const state = await read();
-            await clickButton(state.project.name, document.querySelector('[aria-label="Primary navigation"]'));
-            await until(() => visible(document.querySelector('.mobile-chat')), 'project Meester conversation');
-            check(!visible(document.querySelector('.mobile-settings')), 'Settings must not cover the project');
-            check(document.querySelector('.mobile-project-heading h1').textContent === state.project.name,
-                'Project heading must show the saved project');
+            if (!visible(document.querySelector('[data-testid="app-sidebar"]'))) {
+                const navigation = await until(() => document.querySelector('.app-compact-navigation button'), 'Navigation control');
+                navigation.click();
+            }
+            await until(() => visible(document.querySelector('[data-testid="app-sidebar"]')), 'shared primary navigation');
         };
         """;
 }

@@ -1,3 +1,5 @@
+import { GezelApiError } from './api-error.js';
+export { GezelApiError } from './api-error.js';
 import type {
   AppToolCallResultRequest,
   AudioEngineStatusResponse,
@@ -367,6 +369,7 @@ import type {
   SecurityScanResponse,
   SendChatRequest,
   SendChatResponse,
+  SendToSessionRequest,
   SessionDebugSnapshot,
   SessionTelemetry,
   SessionTelemetryListResponse,
@@ -453,6 +456,7 @@ import {
 } from '@bendyline/gezel/schemas';
 import { z } from 'zod';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
+import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
 import {
   type ConsumeSseJsonOptions,
   SseResponseError,
@@ -578,6 +582,8 @@ export interface UsageResponse {
     'codex-cli'?: ProviderUsage;
     ollama?: ProviderUsage;
     'llama-cpp'?: ProviderUsage;
+    'apple-foundation-models'?: ProviderUsage;
+    'android-mlkit'?: ProviderUsage;
     mlx?: ProviderUsage;
     ds4?: ProviderUsage;
     remote?: ProviderUsage;
@@ -1142,6 +1148,8 @@ export interface ConfigResponse {
     'codex-cli'?: string;
     ollama?: string;
     'llama-cpp'?: string;
+    'apple-foundation-models'?: string;
+    'android-mlkit'?: string;
     mlx?: string;
     ds4?: string;
     /** Namespaced `remote:<remoteId>/<model>` default; rarely set. */
@@ -1155,6 +1163,8 @@ export interface ConfigResponse {
     'codex-cli'?: string;
     ollama?: string;
     'llama-cpp'?: string;
+    'apple-foundation-models'?: string;
+    'android-mlkit'?: string;
     mlx?: string;
     ds4?: string;
     remote?: string;
@@ -2064,17 +2074,6 @@ export interface RunWorkspaceCommandResult {
   declined?: string;
 }
 
-export class GezelApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = 'GezelApiError';
-  }
-}
-
 function describeTransportError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const cause = (error as Error & { cause?: unknown }).cause;
@@ -2960,6 +2959,26 @@ export class GezelClient {
     if (opts?.excludeWorkspaces) params.set('excludeWorkspaces', '1');
     const query = params.toString();
     return this.request('GET', `/api/storage/backup/plan${query ? `?${query}` : ''}`);
+  }
+
+  /** Portable hosts return a bounded archive for the OS save/share picker. */
+  exportPortableBackup(
+    options: Pick<BackupRequest, 'include' | 'excludeWorkspaces'> = {},
+  ): Promise<Uint8Array> {
+    return exportPortableBackup(this.fetchImpl, this.baseUrl, this.token, options);
+  }
+
+  /** Uploads content for inspection only; confirmation remains a separate call. */
+  scanPortableRestore(bytes: Uint8Array): Promise<RestoreReview> {
+    return scanPortableRestore(this.fetchImpl, this.baseUrl, this.token, bytes);
+  }
+
+  confirmPortableRestore(restoreId: string, body: RestoreConfirm): Promise<{ restored: number }> {
+    return this.request(
+      'POST',
+      `/api/storage/restore/${encodeURIComponent(restoreId)}/confirm`,
+      body,
+    );
   }
 
   /**
@@ -4896,16 +4915,7 @@ export class GezelClient {
 
   sendToChatSession(
     sessionId: string,
-    body:
-      | string
-      | {
-          message: string;
-          mentions?: string[];
-          passiveCcGezelIds?: string[];
-          nudge?: boolean;
-          /** The prompt draft this message was written in. */
-          draftId?: string;
-        },
+    body: string | SendToSessionRequest,
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);

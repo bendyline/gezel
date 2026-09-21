@@ -1,5 +1,6 @@
 import {
   type GezelSummary,
+  OFFLINE_RUNTIME_CAPABILITIES,
   type Task,
   type TaskNote,
   initialPoppetjeForGezel,
@@ -120,6 +121,25 @@ describe('TaskDetail', () => {
     vi.mocked(api.updateTask).mockImplementation(
       async (_pid, _num, patch) => ({ ...TASK, ...patch }) as never,
     );
+  });
+
+  it('offers shared task editing and explicit foreground execution on the offline host', async () => {
+    const previous = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+      await screen.findByText('Initial findings.');
+      expect(screen.getByRole('button', { name: 'Post note' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit note' })).toBeInTheDocument();
+      expect(screen.getByTitle('Remove this note')).toBeInTheDocument();
+      expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
+      expect(api.listTaskChildren).not.toHaveBeenCalled();
+      vi.mocked(api.retryTask).mockResolvedValue({ task: TASK, dispatched: true } as never);
+      fireEvent.click(screen.getByRole('button', { name: 'Run step' }));
+      await waitFor(() => expect(api.retryTask).toHaveBeenCalledWith('pj-alpha', 42));
+    } finally {
+      window.__GEZEL__ = previous;
+    }
   });
 
   it('renders the header with ref, project name, and title', async () => {
@@ -291,17 +311,19 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('switching to the Chat tab mounts the chat pane', async () => {
+  it('switching the task view exposes its selected button and mounts the chat pane', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
     expect(screen.queryByTestId('task-chat-pane')).not.toBeInTheDocument();
 
-    // The Task/Chat view switch is two role=tab buttons left of the bench.
-    const chatTab = screen.getByRole('tab', { name: /^Chat/ });
-    fireEvent.click(chatTab);
+    const views = within(screen.getByRole('group', { name: 'Task view' }));
+    const chat = views.getByRole('button', { name: /^Chat/ });
+    fireEvent.click(chat);
 
     await waitFor(() => {
       expect(screen.getByTestId('task-chat-pane')).toBeInTheDocument();
     });
+    expect(chat).toHaveAttribute('aria-pressed', 'true');
+    expect(views.getByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('a catalog-craftbook draft shows the Fire button without plan guardrails', async () => {

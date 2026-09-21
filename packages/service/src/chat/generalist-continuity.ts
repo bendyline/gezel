@@ -1,10 +1,4 @@
-import {
-  type ChatSession,
-  type ProviderName,
-  type Task,
-  isLocalProvider,
-  parseTaskRef,
-} from '@bendyline/gezel';
+import { type ProviderName, type Task, isLocalProvider, parseTaskRef } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
 import { resolveCatalogIdFromModelId } from '../providers/catalog-model-config.js';
@@ -33,27 +27,7 @@ export function renderWriteBailContinuation(stepId: string): string {
   return `Your file write landed and the runtime closed that turn early. Step \`${stepId}\` is still active: it is not complete until its gate passes. Finish anything the step procedure in your prompt still requires, then call \`advance_task_step\` once.`;
 }
 
-export function isContextOverflowError(err: unknown): boolean {
-  if (!err) return false;
-  if ((err as { code?: string }).code === 'context-overflow') return true;
-  const msg = err instanceof Error ? err.message : String(err);
-  return /ran out of working memory|exceeds the available context size/i.test(msg);
-}
-
-/**
- * True when a session's most recent turn ended because its accumulated
- * context was the problem — a compaction-loop halt (the per-send compaction
- * budget ran out without progress) or a context overflow. Resuming such a
- * transcript replays the failure; a generalist retry starts fresh instead.
- */
-export function sessionContextPoisoned(record: ChatSession): boolean {
-  if (record.lastTurnError && isContextOverflowError(record.lastTurnError)) return true;
-  for (let i = record.messages.length - 1; i >= 0; i -= 1) {
-    const message = record.messages[i]!;
-    if (message.role === 'assistant') return message.synthetic === 'context-loop-halt';
-  }
-  return false;
-}
+export { isContextOverflowError, sessionContextPoisoned } from '@bendyline/gezel';
 
 /**
  * Entry preface: a fresh-launch gezel has never seen this task before, so

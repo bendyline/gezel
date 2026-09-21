@@ -863,7 +863,7 @@ export function SessionSwitcher({
         }}
         disabled={busy || (isFreshThread && !hasThreadChoices)}
       >
-        <Select.Trigger className="gezel-chat-session-select">
+        <Select.Trigger className="gezel-chat-session-select" aria-label="Conversation">
           {/* Nothing picked means the next message opens a thread — the row
               the user just chose, or the resting state with auto-pick off.
               The trigger names that destination rather than sitting blank

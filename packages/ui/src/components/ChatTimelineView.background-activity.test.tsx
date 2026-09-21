@@ -1,4 +1,8 @@
-import type { ChatEventEnvelope, ListTimelineResponse } from '@bendyline/gezel';
+import {
+  type ChatEventEnvelope,
+  type ListTimelineResponse,
+  OFFLINE_RUNTIME_CAPABILITIES,
+} from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -102,6 +106,29 @@ describe('ChatTimelineView — background one-shot activity', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps task-capable foreground hosts from querying unsupported structured questions', async () => {
+    const previous = window.__GEZEL__;
+    window.__GEZEL__ = {
+      token: 'test',
+      capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, structuredQuestions: false },
+    };
+    try {
+      const view = render(
+        <ChatTimelineView
+          scopeKey="portable"
+          activeSessionId={undefined}
+          loadTimeline={async () => ({ messages: [], hasMore: false }) as ListTimelineResponse}
+          streamUrl={() => 'https://example.invalid/events'}
+        />,
+      );
+      await waitFor(() => expect(api.listGezels).toHaveBeenCalled());
+      expect(api.listQuestions).not.toHaveBeenCalled();
+      view.unmount();
+    } finally {
+      window.__GEZEL__ = previous;
+    }
+  });
+
   it('keeps conversation space visible on short viewports and restores the desktop reserve on resize', async () => {
     streamState.mode = 'completed';
     heightSpy.mockReturnValue(295);
@@ -152,6 +179,56 @@ describe('ChatTimelineView — background one-shot activity', () => {
     heightSpy.mockReturnValue(600);
     observer?.notify();
     expect(runway.style.blockSize).toBe('300px');
+  });
+
+  it('does not hide a completed reply under the sticky header to preserve blank space', async () => {
+    streamState.mode = 'completed';
+    heightSpy.mockReturnValue(336);
+    boundsSpy.mockImplementation(function (this: Element) {
+      const height = this.matches('[data-msg-id$=":assistant"]') ? 314 : 0;
+      return {
+        x: 0,
+        y: 0,
+        width: 390,
+        height,
+        top: 0,
+        right: 390,
+        bottom: height,
+        left: 0,
+        toJSON: () => ({}),
+      };
+    });
+    const at = new Date().toISOString();
+    render(
+      <ChatTimelineView
+        scopeKey="project:website"
+        activeSessionId="s1"
+        loadTimeline={async () => ({
+          hasMore: false,
+          messages: [
+            {
+              sessionId: 's1',
+              gezelId: 'mhairi',
+              projectId: 'website',
+              sessionTitle: 'Field notes',
+              sessionCreatedAt: at,
+              sessionLastActivityAt: at,
+              sessionProviderName: 'llama-cpp',
+              role: 'assistant',
+              content: 'The saved reply must remain readable.',
+              at,
+            },
+          ],
+        })}
+        streamUrl={() => 'https://example.invalid/events'}
+      />,
+    );
+    await screen.findByText('The saved reply must remain readable.');
+    await waitFor(() =>
+      expect(
+        document.querySelector<HTMLElement>('.timeline-response-runway')?.style.blockSize,
+      ).toBe('0px'),
+    );
   });
 
   it('names the activity instead of presenting the one-shot as a new chat thread', async () => {

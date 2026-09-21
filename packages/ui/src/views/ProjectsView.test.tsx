@@ -1,6 +1,7 @@
 import type { Project } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OutsideInLayout } from '../components/SquisqIntegration/outside-in.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -17,6 +18,13 @@ const documentContainerMocks = vi.hoisted(() => ({
 }));
 vi.mock('../components/composer-prefill.js', () => ({
   queueComposerPrefill: chatComposerMocks.queueComposerPrefill,
+}));
+
+const outsideInMocks = vi.hoisted(() => ({
+  resolveLayout: vi.fn<(path: string) => OutsideInLayout | null>(() => null),
+  chooseSource: vi.fn<() => string | null>(() => null),
+  importDocument: vi.fn(),
+  createContainer: vi.fn(() => ({})),
 }));
 
 const editorMocks = vi.hoisted(() => ({
@@ -111,20 +119,21 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   createDataReferenceContainer: (container: unknown) => container,
   createDocumentsContentContainer: () => ({}),
   createArtifactsContentContainer: documentContainerMocks.createArtifacts,
-  createProjectContentContainer: () => ({}),
+  createProjectContentContainer: outsideInMocks.createContainer,
   createDocumentMediaProvider: documentContainerMocks.createMedia,
   createVersionCompatibleContentContainer: documentContainerMocks.createVersionCompatible,
   createDocumentLinkProvider: () => async () => [],
-  chooseOutsideInSource: () => null,
-  importOutsideInDocument: vi.fn(),
+  chooseOutsideInSource: outsideInMocks.chooseSource,
+  importOutsideInDocument: outsideInMocks.importDocument,
   isOutsideInMarkdownEditingEnabled: () => false,
   isOutsideInInternalPath: () => false,
   relativePath: (from: string, to: string) => `${from}:${to}`,
   renderOutsideInDocument: vi.fn(),
-  resolveOutsideInLayout: () => null,
+  resolveOutsideInLayout: outsideInMocks.resolveLayout,
+  supportsOutsideInMarkdownEditing: () => true,
   runtimePathForTarget: () => '_squisq/squisq-player.js',
   withOutsideInMetadata: (source: string) => source,
-  withOutsideInMarkdownEditing: (source: string) => source,
+  withOutsideInMarkdownEditing: (source: string) => `squisq-updatefrommarkdown: true\n${source}`,
   deriveContainerScope: (p: string) => ({
     root: `${p.replace(/\.[^.]+$/, '')}_files`,
     parentDirectory: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
@@ -156,11 +165,17 @@ vi.mock('../components/FileTree.js', () => ({
     onRename,
     onDelete,
     trailingForEntry,
+    actionsForEntry,
   }: {
     entries: Array<{ name: string; path: string; isDirectory: boolean }>;
     onSelect: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onRename?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     onDelete?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    actionsForEntry?: (entry: { name: string; path: string; isDirectory: boolean }) => readonly {
+      label: string;
+      disabled?: boolean;
+      onSelect: () => void;
+    }[];
     trailingForEntry?: (entry: {
       name: string;
       path: string;
@@ -183,13 +198,35 @@ vi.mock('../components/FileTree.js', () => ({
               delete {entry.name}
             </button>
           )}
+          {actionsForEntry?.(entry).map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              disabled={action.disabled}
+              onClick={action.onSelect}
+            >
+              {action.label}
+            </button>
+          ))}
           {trailingForEntry?.(entry)}
         </div>
       ))}
     </div>
   ),
 }));
-vi.mock('../components/HtmlPreviewFrame.js', () => ({ HtmlPreviewFrame: () => null }));
+vi.mock('../components/HtmlPreviewFrame.js', () => ({
+  HtmlPreviewFrame: ({
+    path,
+    source,
+    className,
+  }: { path: string; source: string; className: string }) => (
+    <div
+      data-testid={className === 'html-file-viewer-iframe' ? 'html-preview' : 'output-preview'}
+      data-path={path}
+      data-source={source}
+    />
+  ),
+}));
 vi.mock('../components/ProjectChat.js', () => ({
   ProjectChat: ({ compact }: { compact?: boolean }) => (
     <div data-testid="project-chat" data-compact={compact ? 'true' : 'false'}>
@@ -218,6 +255,10 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    outsideInMocks.resolveLayout.mockReset().mockReturnValue(null);
+    outsideInMocks.chooseSource.mockReset().mockReturnValue(null);
+    outsideInMocks.importDocument.mockReset();
+    outsideInMocks.createContainer.mockReset().mockReturnValue({});
     chatComposerMocks.queueComposerPrefill.mockClear();
     documentContainerMocks.createArtifacts.mockClear();
     documentContainerMocks.createMedia.mockClear();
@@ -1577,6 +1618,143 @@ describe('ProjectsView', () => {
       'report',
       expect.anything(),
       expect.anything(),
+    );
+  });
+
+  describe('rendered document opening', () => {
+    const htmlLayout: OutsideInLayout = {
+      targetPath: 'reports/report.html',
+      format: 'html',
+      parentDirectory: 'reports',
+      stem: 'report',
+      companionName: 'report_files',
+      companionDirectory: 'reports/report_files',
+      markdownFilename: 'report.md',
+      markdownPath: 'reports/report_files/report.md',
+      relativeTargetPath: '../report.html',
+      backupDirectory: 'reports/report_files/.original',
+      backupFilename: 'original.html',
+      backupPath: 'reports/report_files/.original/original.html',
+    };
+
+    async function openRenderedFile(
+      layout = htmlLayout,
+      source: 'Artifacts' | 'Workspace' = 'Artifacts',
+    ) {
+      const entry = {
+        name: `report.${layout.format}`,
+        path: layout.targetPath,
+        isDirectory: false,
+      };
+      outsideInMocks.resolveLayout.mockImplementation((path) =>
+        path === entry.path ? layout : null,
+      );
+      const list = source === 'Workspace' ? api.listProjectWorkspace : api.listProjectArtifacts;
+      vi.mocked(list).mockResolvedValue({ files: [entry], truncated: false } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      fireEvent.click(screen.getByRole('tab', { name: source }));
+      fireEvent.click(await screen.findByRole('button', { name: entry.name }));
+    }
+
+    it.each(['Artifacts', 'Workspace'] as const)(
+      'opens standalone HTML in %s without importing or writing a companion',
+      async (source) => {
+        const read =
+          source === 'Workspace' ? api.readProjectWorkspaceFile : api.readProjectArtifact;
+        vi.mocked(read).mockResolvedValue({
+          path: htmlLayout.targetPath,
+          content: '<button>Play</button>',
+        } as never);
+        await openRenderedFile(htmlLayout, source);
+        expect(await screen.findByTestId('html-preview')).toHaveAttribute(
+          'data-path',
+          htmlLayout.targetPath,
+        );
+        expect(read).toHaveBeenCalledWith('pj-alpha', htmlLayout.targetPath);
+        expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
+        expect(api.writeProjectArtifact).not.toHaveBeenCalled();
+        expect(api.writeProjectWorkspaceFile).not.toHaveBeenCalled();
+        expect(screen.queryByTestId('editor')).toBeNull();
+      },
+    );
+
+    it('opens HTML with an existing companion in the document editor', async () => {
+      outsideInMocks.chooseSource.mockReturnValue(htmlLayout.markdownPath);
+      vi.mocked(api.readProjectArtifact).mockResolvedValue({
+        path: htmlLayout.markdownPath,
+        content: '# Existing document',
+      } as never);
+      await openRenderedFile();
+      expect(await screen.findByTestId('editor')).toHaveAttribute(
+        'data-initial',
+        '# Existing document\n',
+      );
+      expect(api.readProjectArtifact).toHaveBeenCalledWith('pj-alpha', htmlLayout.markdownPath);
+      expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('html-preview')).toBeNull();
+    });
+
+    it('imports and backs up standalone HTML only after explicit Markdown-editing opt-in', async () => {
+      const writeDocument = vi.fn().mockResolvedValue(undefined);
+      outsideInMocks.createContainer.mockReturnValue({ writeDocument });
+      outsideInMocks.importDocument.mockResolvedValue({
+        markdown: '# Imported document',
+        container: { listFiles: async () => [] },
+      });
+      const original = new Blob(['<h1>Imported document</h1>'], { type: 'text/html' });
+      vi.mocked(api.fetchProjectArtifactBlob).mockResolvedValue(original);
+      vi.mocked(api.readProjectArtifact).mockResolvedValue({
+        path: htmlLayout.targetPath,
+        content: '<h1>Imported document</h1>',
+      } as never);
+      await openRenderedFile();
+      await screen.findByTestId('html-preview');
+      fireEvent.click(screen.getByRole('button', { name: 'Allow editing via markdown' }));
+      expect(await screen.findByTestId('editor')).toHaveAttribute(
+        'data-initial',
+        expect.stringContaining('squisq-updatefrommarkdown: true'),
+      );
+      expect(outsideInMocks.importDocument).toHaveBeenCalledWith(
+        expect.any(ArrayBuffer),
+        htmlLayout,
+      );
+      expect(writeDocument).toHaveBeenCalledWith('# Imported document', 'report.md');
+      expect(api.writeProjectArtifactBinary).toHaveBeenCalledWith(
+        'pj-alpha',
+        htmlLayout.backupPath,
+        original,
+        'text/html',
+        { createOnly: true },
+      );
+      expect(api.writeProjectArtifact).toHaveBeenCalledWith(
+        'pj-alpha',
+        htmlLayout.markdownPath,
+        expect.stringContaining('squisq-updatefrommarkdown: true'),
+      );
+      expect(screen.queryByTestId('html-preview')).toBeNull();
+    });
+
+    it.each(['docx', 'pdf', 'pptx', 'xlsx', 'csv'] as const)(
+      'still imports a %s document when its companion is absent',
+      async (format) => {
+        const layout = { ...htmlLayout, format, targetPath: `reports/report.${format}` };
+        const writeDocument = vi.fn().mockResolvedValue(undefined);
+        outsideInMocks.createContainer.mockReturnValue({ writeDocument });
+        outsideInMocks.importDocument.mockResolvedValue({
+          markdown: '# Imported office document',
+          container: { listFiles: async () => [] },
+        });
+        vi.mocked(api.fetchProjectArtifactBlob).mockResolvedValue(new Blob(['office bytes']));
+        await openRenderedFile(layout);
+        expect(await screen.findByTestId('editor')).toHaveAttribute(
+          'data-initial',
+          '# Imported office document\n',
+        );
+        expect(outsideInMocks.importDocument).toHaveBeenCalledWith(expect.any(ArrayBuffer), layout);
+        expect(writeDocument).toHaveBeenCalledWith('# Imported office document', 'report.md');
+        expect(screen.queryByTestId('html-preview')).toBeNull();
+      },
     );
   });
 

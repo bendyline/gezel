@@ -1,3 +1,5 @@
+import { pickRoleBasedName, slugifyEntityName as slugify } from '@bendyline/gezel/runtime';
+export { pickRoleBasedName } from '@bendyline/gezel/runtime';
 import { ConfigStore } from './config-store.js';
 import {
   readProjectCraftbookDocument,
@@ -7260,14 +7262,6 @@ function mergeGitHubPatch(
   };
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -7275,33 +7269,6 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Choose a `roleBasedName` for a gezel given its role and the set of
- * names already in use on this install. Exported for tests; the
- * stateful wrapper lives on `Store.computeRoleBasedName`.
- *
- *   - With role: base = `slugify(role)`. If unused, return it. Else
- *     append `-2`, `-3`, … until free.
- *   - Without role (or role slugifies to empty): return the first
- *     unused `gezel-N` starting from `gezel-1`.
- */
-export function pickRoleBasedName(role: string | undefined, taken: ReadonlySet<string>): string {
-  const base = role ? slugify(role) : '';
-  if (base) {
-    if (!taken.has(base)) return base;
-    for (let i = 2; i < 10000; i++) {
-      const candidate = `${base}-${i}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-    throw new Error(`roleBasedName collision overflow for role "${role}"`);
-  }
-  for (let i = 1; i < 10000; i++) {
-    const candidate = `gezel-${i}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  throw new Error('roleBasedName collision overflow for roleless gezel');
 }
 
 function defaultAboutMarkdown(role?: string): string {

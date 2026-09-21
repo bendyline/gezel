@@ -60,6 +60,20 @@ final class MobileStoreTests: XCTestCase {
         XCTAssertTrue(try store.listModels().models.isEmpty)
     }
 
+    func testPinnedModelDoesNotFollowGlobalSelectionOrFallBackAfterRemoval() throws {
+        let source = root.appendingPathComponent("tiny.gguf")
+        try Data("GGUFfixture".utf8).write(to: source)
+        let store = try MobileStore(root: root.appendingPathComponent("app"))
+        let first = try store.importModel(from: source)
+        let second = try store.importModel(from: source)
+        _ = try store.selectModel(id: second.id)
+        XCTAssertEqual(try store.modelURL(id: first.id).0.id, first.id)
+        XCTAssertEqual(try store.listModels().selectedModelId, second.id)
+        try store.removeModel(id: first.id)
+        XCTAssertThrowsError(try store.modelURL(id: first.id))
+        XCTAssertEqual(try store.selectedModelURL().0.id, second.id)
+    }
+
     func testModelSymlinksCannotEscapeThePrivateStore() throws {
         let source = root.appendingPathComponent("tiny.gguf")
         try Data("GGUFfixture".utf8).write(to: source)

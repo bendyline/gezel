@@ -29,11 +29,19 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
     "./poppetje": {
       "types": "./dist/poppetje/index.d.ts",
       "import": "./dist/poppetje/index.js"
     },
     ".": {
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "import": "./dist/browser.js"
+      },
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },

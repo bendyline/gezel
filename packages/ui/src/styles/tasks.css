@@ -1413,6 +1413,9 @@ button.bench-step-foot:disabled {
 }
 
 .task-tab-rail {
+  border: 0;
+  margin: 0;
+  min-width: 0;
   flex: 0 0 auto;
   /* Sit at the BOTTOM of the (taller) bench row rather than stretching to fill
      it — the tabs' bottom edge feeds straight into the view below, while the

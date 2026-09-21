@@ -151,16 +151,24 @@ describe('ScriptRunner executor boundary', () => {
   });
 
   it('freezes the audit trace when a terminated guest leaves a host operation pending', async () => {
+    let entered!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     let finishWrite!: () => void;
     const write = new Promise<void>((resolve) => {
       finishWrite = resolve;
     });
-    vi.spyOn(store, 'writeProjectArtifact').mockImplementation(() => write);
+    vi.spyOn(store, 'writeProjectArtifact').mockImplementation(() => {
+      entered();
+      return write;
+    });
     let hostCall!: Promise<unknown>;
     let callbacks!: ScriptExecutionOptions;
     const runner = runnerWith(async (options) => {
       callbacks = options;
       hostCall = options.onRequest('artifact.write', { path: 'slow.txt', content: 'pending' });
+      await writing;
       return { ...success, exitCode: 1, timedOut: true };
     });
     const run = await runner.run({ ...invocation, inlineSource: source(['artifacts.write']) });
