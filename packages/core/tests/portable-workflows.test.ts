@@ -3,6 +3,14 @@ import { GezelClient } from '../../client/src/client.js';
 import { type PortableInference, PortableProductService } from '../src/runtime/product-service.js';
 import { portableFixture } from '../src/runtime/test-files.js';
 
+/** The step the model reads from its prompt; the scripted models look it up. */
+async function activeStep(
+  store: { getTask(ref: string): Promise<{ activeStepId?: string } | null | undefined> },
+  ref: string,
+) {
+  return (await store.getTask(ref))?.activeStepId;
+}
+
 async function setup(generate?: PortableInference['generate']) {
   const { store, files } = portableFixture();
   let selected = 'model-a';
@@ -139,9 +147,9 @@ describe('offline product workflows through the ordinary client', () => {
           content: '# Weekend\nTake a walk and read a book.',
         });
       if (calls === 3) {
-        const ref = request.messages[0]!.content.match(/\((weekend-notes\/\d+)\)/)?.[1];
+        const ref = request.messages[0]!.content.match(/Current task: (weekend-notes\/\d+)/)?.[1];
         expect(ref).toBe('weekend-notes/1');
-        return tool('advance_task_step', { ref });
+        return tool('advance_task_step', { ref, stepId: await activeStep(f.store, ref!) });
       }
       return { text: 'The report is saved in weekend.md.', stopReason: 'stop' };
     });
@@ -190,7 +198,11 @@ describe('offline product workflows through the ordinary client', () => {
       let calls = 0;
       const f = await setup(async (request) => {
         calls++;
-        if (calls === 1) return tool('advance_task_step', { ref: 'default/1' });
+        if (calls === 1)
+          return tool('advance_task_step', {
+            ref: 'default/1',
+            stepId: await activeStep(f.store, 'default/1'),
+          });
         if (calls === 2) {
           expect(request.messages.at(-1)?.content).toContain('"decision":"reject"');
           if (!repair)
@@ -200,7 +212,10 @@ describe('offline product workflows through the ordinary client', () => {
             content: '# Report\nA useful report with enough detail to pass its check.',
           });
         }
-        return tool('advance_task_step', { ref: 'default/1' });
+        return tool('advance_task_step', {
+          ref: 'default/1',
+          stepId: await activeStep(f.store, 'default/1'),
+        });
       });
       const lead = await f.client.createGezel({ name: 'Noor', role: 'Generalist' });
       await f.client.updateProject('default', { voormanGezelId: lead.id });
@@ -263,13 +278,20 @@ describe('offline product workflows through the ordinary client', () => {
     let calls = 0;
     const f = await setup(async () => {
       calls++;
-      if (calls === 1) return tool('advance_task_step', { ref: 'default/1' });
+      if (calls === 1)
+        return tool('advance_task_step', {
+          ref: 'default/1',
+          stepId: await activeStep(f.store, 'default/1'),
+        });
       if (calls === 2)
         return tool('write_artifact', {
           path: 'tasks/1/report.md',
           content: '# Report\nA useful offline report with supporting detail.',
         });
-      return tool('advance_task_step', { ref: 'default/1' });
+      return tool('advance_task_step', {
+        ref: 'default/1',
+        stepId: await activeStep(f.store, 'default/1'),
+      });
     });
     const task = await f.client.createTask('default', {
       title: 'Offline report',

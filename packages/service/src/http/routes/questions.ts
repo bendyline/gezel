@@ -3,10 +3,13 @@ import {
   AnswerQuestionRequestSchema,
   AskQuestionRequestSchema,
   type Question,
+  answeredQuestion,
   createLogger,
+  findQuestion,
   nowIso,
   parseTaskRef,
   prettifyToolName,
+  resolveAsk,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
@@ -44,30 +47,22 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // reach this route — approval cards carry an `intent` and are written
     // via other paths — so `outstandingSessionQuestion`'s intent-less
     // filter never touches them.
-    const outstanding = outstandingSessionQuestion(
-      await ctx.store.listProjectQuestions(body.projectId),
-      body.sessionId,
-    );
-    if (outstanding) {
-      log.info(
-        `[questions] dedup: session ${body.sessionId} already has unanswered question ${outstanding.id}; suppressing re-ask`,
-      );
-      return c.json({ questionId: outstanding.id, deduped: true }, 200);
+    let resolved: ReturnType<typeof resolveAsk>;
+    try {
+      resolved = resolveAsk(await ctx.store.listProjectQuestions(body.projectId), body, {
+        id: randomUUID(),
+        at: nowIso(),
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
-
-    const question: Question = {
-      id: randomUUID(),
-      projectId: body.projectId,
-      gezelId: body.gezelId,
-      sessionId: body.sessionId,
-      prompt: body.prompt,
-      ...(body.choices && body.choices.length > 0 ? { choices: body.choices } : {}),
-      ...(body.allowWriteIn !== undefined ? { allowWriteIn: body.allowWriteIn } : {}),
-      ...(body.multiSelect !== undefined ? { multiSelect: body.multiSelect } : {}),
-      ...(body.taskRef ? { taskRef: body.taskRef } : {}),
-      ...(body.documentPath ? { documentPath: body.documentPath } : {}),
-      createdAt: nowIso(),
-    };
+    const { question, deduped } = resolved;
+    if (deduped) {
+      log.info(
+        `[questions] dedup: session ${body.sessionId} already has unanswered question ${question.id}; suppressing re-ask`,
+      );
+      return c.json({ questionId: question.id, deduped: true }, 200);
+    }
     await ctx.store.writeQuestion(question);
     // Correlate the question with its chat bubble. During an active model
     // turn ChatManager holds the id until that turn's assistant message is
@@ -127,7 +122,7 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // don't know which from the URL. Pull every pending question and
     // match by id; cheap because the file is small.
     const all = await ctx.store.listAllPendingQuestions();
-    const q = all.find((x) => x.id === id);
+    const q = findQuestion(all, id);
     // Fall back to scanning all-and-answered too, so the API behaves
     // correctly when a stale UI submits twice.
     let question = q;
@@ -149,21 +144,14 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       return c.json(question);
     }
 
-    question = {
-      ...question,
-      answer: {
-        ...(body.selectedChoices && body.selectedChoices.length > 0
-          ? { selectedChoices: body.selectedChoices }
-          : {}),
-        ...(body.writeIn ? { writeIn: body.writeIn } : {}),
-        ...(body.declined ? { declined: true } : {}),
-        ...(body.silentSkip ? { silentSkip: true } : {}),
-        ...(body.npmInstallDecisions && body.npmInstallDecisions.length > 0
-          ? { npmInstallDecisions: body.npmInstallDecisions }
-          : {}),
-        at: nowIso(),
-      },
-    };
+    // Plain questions are checked against their choices the way the portable
+    // host checks them. Intent questions belong to desktop-only flows whose
+    // answer shapes are those flows' own.
+    try {
+      question = answeredQuestion(question, body, nowIso(), { validate: !question.intent });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
     await ctx.store.writeQuestion(question);
 
     ctx.chatEvents.publish(

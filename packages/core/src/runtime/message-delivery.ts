@@ -3,6 +3,7 @@ import {
   isExpectedImageDeliverablePath,
 } from '../deliverable-paths.js';
 import { displayName } from '../gezel-display.js';
+import { inferTargetProject } from '../project-routing.js';
 import type { MessageGezelRequest } from '../schemas/api.js';
 import type { FileTurnIntent } from '../schemas/file-turn-intent.js';
 import type { ChatMessage } from '../schemas/gezel.js';
@@ -71,14 +72,8 @@ export async function preparePortableMessage(
   const target = direct ?? (names.length === 1 ? names[0] : undefined);
   if (!target) throw new Error('Choose an unambiguous gezel id or display name from the crew.');
   if (target.id === sender.id) throw new Error('A gezel cannot message itself');
-  let projectId = body.projectId ?? origin?.projectId ?? 'default';
   const sessions = await store.listSessions({ gezelId: target.id });
-  if (!body.projectId && projectId === 'default') {
-    const projects = new Set(
-      sessions.filter((s) => !s.archived && s.projectId !== 'default').map((s) => s.projectId),
-    );
-    if (projects.size === 1) projectId = [...projects][0]!;
-  }
+  const projectId = inferTargetProject(sessions, body.projectId, origin?.projectId);
   if (!(await store.getProject(projectId))) throw new Error('Project not found');
   const config = await store.readConfig();
   const latest = sessions

@@ -11,18 +11,13 @@ import {
   type BackupRequest,
   type StorageJob,
 } from '@bendyline/gezel';
-import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
 import {
-  gezelDir,
-  gezelMemoriesDir,
-  gezelPaths,
-  gezelToolsetsInstallDir,
-  projectIndexDir,
-  projectPrivateDir,
-  projectShadowDir,
-  projectStorageDir,
-  projectToolsetsInstallDir,
-} from '@bendyline/gezel/paths';
+  BACKUP_DERIVED_SUBPATHS,
+  createLogger,
+  isSharedLibraryProject,
+  selectBackupItems,
+} from '@bendyline/gezel';
+import { gezelDir, gezelPaths, projectStorageDir } from '@bendyline/gezel/paths';
 import * as yazl from 'yazl';
 import { isPathInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -45,20 +40,14 @@ const log = createLogger('storage');
 /** Warn above this: a multi-GB repo inside a project surprises people. */
 const LARGE_WORKSPACE_BYTES = 2 * 1024 ** 3;
 
-/** Derived state a fresh install rebuilds; carrying it wastes GBs. */
-function gezelExclusions(home: string, id: string): string[] {
-  return [join(gezelMemoriesDir(home, id, undefined), 'index'), gezelToolsetsInstallDir(home, id)];
-}
-
-function projectExclusions(home: string, id: string): string[] {
-  return [
-    projectIndexDir(home, id),
-    projectShadowDir(home, id, undefined),
-    projectToolsetsInstallDir(home, id),
-    join(projectPrivateDir(home, id), 'index'),
-    join(projectPrivateDir(home, id), 'terminals'),
-    join(projectPrivateDir(home, id), 'scripts', 'runs'),
-  ];
+/**
+ * Derived state a fresh install rebuilds; carrying it wastes GBs. The list
+ * is the shared backup policy, so a phone reading this archive skips the
+ * same subtrees. Script-run audits are a desktop-only extra: the portable
+ * host deliberately carries its own.
+ */
+function derivedExclusions(dir: string, kind: 'gezel' | 'project'): string[] {
+  return BACKUP_DERIVED_SUBPATHS[kind].map((sub) => join(dir, ...sub.split('/')));
 }
 
 /** Settings files worth carrying to a new machine. */
@@ -133,7 +122,7 @@ async function collectItems(deps: BackupDeps, excludeWorkspaces: boolean): Promi
 
   for (const gezel of await store.listGezels().catch(() => [])) {
     const dir = gezelDir(home, gezel.id, external);
-    const exclude = gezelExclusions(home, gezel.id);
+    const exclude = derivedExclusions(dir, 'gezel');
     const size = await measureTree(dir, exclude);
     if (size.fileCount === 0) continue;
     items.push({
@@ -154,7 +143,7 @@ async function collectItems(deps: BackupDeps, excludeWorkspaces: boolean): Promi
     // in whatever shared project the target install already booted with.
     if (isSharedLibraryProject(project)) continue;
     const dir = projectStorageDir(home, project.id);
-    const exclude = projectExclusions(home, project.id);
+    const exclude = [...derivedExclusions(dir, 'project'), join(dir, 'scripts', 'runs')];
     if (excludeWorkspaces) exclude.push(join(dir, 'workspace'));
     const size = await measureTree(dir, exclude);
     if (size.fileCount === 0) continue;
@@ -223,7 +212,7 @@ export async function runBackup(
   try {
     jobs.setPhase(job.id, 'scan');
     const all = await collectItems(deps, request.excludeWorkspaces === true);
-    const selected = filterRequested(all, request);
+    const selected = selectBackupItems(all, request.include);
     if (selected.length === 0) throw new Error('Nothing selected to back up.');
 
     jobs.update(job.id, {
@@ -291,17 +280,6 @@ export async function runBackup(
     jobs.finish(job.id, { error: reason });
     throw err;
   }
-}
-
-function filterRequested(items: SourceItem[], request: BackupRequest): SourceItem[] {
-  const include = request.include;
-  if (!include) return items;
-  return items.filter((item) => {
-    if (item.kind === 'gezel') return include.gezels?.includes(item.id) ?? true;
-    if (item.kind === 'project') return include.projects?.includes(item.id) ?? true;
-    if (item.kind === 'document-root') return include.documents !== false;
-    return include.settings !== false;
-  });
 }
 
 const PRECOMPRESSED =

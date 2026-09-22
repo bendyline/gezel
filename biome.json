@@ -13,6 +13,7 @@
       "**/dist-embedded/**",
       "**/dist-e2e/**",
       "**/.build/**",
+      "**/android/app/src/main/assets/**",
       "**/node_modules/**",
       "**/.cache/**",
       "**/.pnpm-store/**",

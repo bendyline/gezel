@@ -616,7 +616,8 @@ describe('ordinary client against offline product runtime', () => {
         body: '{}',
       },
     );
-    expect(malformed.status).toBe(400);
+    // Validation failures are 422 on both hosts, every issue named.
+    expect(malformed.status).toBe(422);
     expect((await client.getPromptDraft('default', draft.id)).content).toBe('Please make a plan.');
     const invalidDelete = await service.fetch(
       `https://gezel.local/api/projects/default/prompt-drafts/${draft.id}/content`,

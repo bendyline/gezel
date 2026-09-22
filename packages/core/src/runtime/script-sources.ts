@@ -2,8 +2,10 @@ import { type GetScriptSourceResponse, ScriptNameSchema } from '../schemas/scrip
 import type { Task } from '../schemas/task.js';
 import { craftbookScriptHeader, craftbookScriptProvenance } from '../scripts/provenance.js';
 import { encodeText } from './files.js';
+import { HttpStatusError } from './http/errors.js';
 import { projectRoot, requireProject } from './projects.js';
 import type { PortableRepository } from './repository.js';
+import { SCRIPT_EXISTS_MESSAGE, saveConflictResponse, saveConflicts } from './script-responses.js';
 
 export type EditableScriptScope = { scope: 'user' } | { scope: 'project'; projectId: string };
 async function folder(repo: PortableRepository, scope: EditableScriptScope, writing = false) {
@@ -59,13 +61,8 @@ export async function saveScriptSource(
   if (input.source.length > 256_000) throw new Error('Script source exceeds 256000 characters');
   const root = await folder(repo, scope, true);
   const previous = await readScriptSource(repo, scope, input.name);
-  if (input.create && previous) throw new Error('A script with this name already exists');
-  if (input.baseHash !== undefined && input.baseHash !== (previous?.hash ?? ''))
-    return {
-      status: 'conflict' as const,
-      currentHash: previous?.hash ?? '',
-      currentSource: previous?.source ?? '',
-    };
+  if (input.create && previous) throw new HttpStatusError(SCRIPT_EXISTS_MESSAGE, 409);
+  if (saveConflicts(input.baseHash, previous)) return saveConflictResponse(previous);
   await repo.transactions.commit(new Map([[`${root}/${input.name}.ts`, encodeText(input.source)]]));
   return { status: 'saved' as const, hash: await portableScriptSourceHash(input.source) };
 }
@@ -75,7 +72,9 @@ export async function deleteScriptSource(
   name: string,
 ) {
   ScriptNameSchema.parse(name);
+  if (!(await readScriptSource(repo, scope, name))) return false;
   await repo.transactions.commit(new Map(), [`${await folder(repo, scope, true)}/${name}.ts`]);
+  return true;
 }
 
 /** Stage alongside task creation. The task snapshot is authoritative; preserve unrelated authored files. */

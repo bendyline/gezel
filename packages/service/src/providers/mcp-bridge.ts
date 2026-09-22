@@ -6,6 +6,9 @@
  * results as function-call outputs.
  */
 
+import { redactObject, redactString } from '@bendyline/gezel';
+
+export { redactObject, redactString };
 import {
   type HookPhase,
   type HookResult,
@@ -1385,17 +1388,6 @@ export class McpBridge {
   }
 }
 
-/** Replace any known secret value in `input` with `[REDACTED]`. */
-export function redactString(input: string, secrets: Set<string>): string {
-  if (!input || secrets.size === 0) return input;
-  let out = input;
-  for (const s of secrets) {
-    if (s.length === 0) continue;
-    out = out.split(s).join('[REDACTED]');
-  }
-  return out;
-}
-
 /**
  * Construct the SDK transport for a given spec. Centralized so the
  * bridge's `start()` stays transport-agnostic and so unit tests can
@@ -1487,23 +1479,6 @@ export function describeBridgeError(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
   const code = (err as NodeJS.ErrnoException).code;
   return `${err.name}: ${err.message}${code ? ` [${code}]` : ''}`;
-}
-
-/** Recursively redact string values inside a plain object/array. */
-export function redactObject<T>(value: T, secrets: Set<string>): T {
-  if (secrets.size === 0) return value;
-  if (typeof value === 'string') return redactString(value, secrets) as T;
-  if (Array.isArray(value)) {
-    return value.map((v) => redactObject(v, secrets)) as T;
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = redactObject(v, secrets);
-    }
-    return out as T;
-  }
-  return value;
 }
 
 /**

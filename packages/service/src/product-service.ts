@@ -5,6 +5,7 @@ import {
   migrateInstalledModelIds,
   reclaimStaleModelDownloads,
 } from './models/startup-maintenance.js';
+import { recoverInterruptedScriptRuns } from './scripts/runs.js';
 
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { basename, delimiter, dirname, join } from 'node:path';
@@ -371,6 +372,14 @@ export async function startProductService(
   const store = new Store({ home, history, external, serviceRole, privateUserHome });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();
+  // The runner persists after every host call, so a daemon that died mid-run
+  // leaves records saying `running`. Settle them; never replay them.
+  await recoverInterruptedScriptRuns(
+    home,
+    (await store.listProjects()).map((p) => p.id),
+  ).catch((err: unknown) =>
+    log.warn(`[scripts] run recovery skipped: ${err instanceof Error ? err.message : String(err)}`),
+  );
   let sharedProject: { id: string; created: boolean } | null = null;
   await store.ensureDefaultProject();
   sharedProject = await store.ensureSharedProject();

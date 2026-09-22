@@ -8,6 +8,15 @@ import {
   ScriptNameSchema,
 } from '@bendyline/gezel';
 import { projectScriptFile } from '@bendyline/gezel/paths';
+import {
+  SCRIPT_EXISTS_MESSAGE,
+  notFoundBody,
+  saveConflictResponse,
+  saveConflicts,
+  savedSourceResponse,
+  scriptCreatedResponse,
+  scriptRunResponse,
+} from '@bendyline/gezel/runtime';
 import { Hono } from 'hono';
 import { listProjectScripts, readProjectScriptRun } from '../../scripts/catalog.js';
 import { draftScript } from '../../scripts/draft.js';
@@ -52,23 +61,16 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
     const projectId = c.req.param('projectId');
     const name = ScriptNameSchema.parse(c.req.query('name'));
     const result = await readScriptSource(ctx.home, projectId, name);
-    if (!result) return c.json({ error: 'not found' }, 404);
+    if (!result) return c.json(notFoundBody('script'), 404);
     return c.json(result);
   });
 
   app.put('/:projectId/scripts/source', async (c) => {
     const projectId = c.req.param('projectId');
     const body = SaveScriptSourceRequestSchema.parse(await c.req.json());
-    if (body.baseHash) {
+    if (body.baseHash !== undefined) {
       const current = await readScriptSource(ctx.home, projectId, body.name);
-      if (current && current.hash !== body.baseHash) {
-        const conflict: SaveScriptSourceResponse = {
-          status: 'conflict',
-          currentHash: current.hash,
-          currentSource: current.source,
-        };
-        return c.json(conflict);
-      }
+      if (saveConflicts(body.baseHash, current)) return c.json(saveConflictResponse(current));
     }
     const { hash } = await writeScriptSource(ctx.home, projectId, body.name, body.source);
     const file = projectScriptFile(ctx.home, projectId, body.name);
@@ -79,21 +81,14 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
     } catch {
       /* already surfaced as a meta diagnostic */
     }
-    const saved: SaveScriptSourceResponse = {
-      status: 'saved',
-      hash,
-      metaOk: meta !== undefined,
-      ...(meta ? { meta } : {}),
-      diagnostics,
-    };
-    return c.json(saved);
+    return c.json(savedSourceResponse(hash, { meta, diagnostics }));
   });
 
   app.delete('/:projectId/scripts/source', async (c) => {
     const projectId = c.req.param('projectId');
     const name = ScriptNameSchema.parse(c.req.query('name'));
     const deleted = await deleteScriptSource(ctx.home, projectId, name);
-    if (!deleted) return c.json({ error: 'not found' }, 404);
+    if (!deleted) return c.json(notFoundBody('script'), 404);
     return c.json({ ok: true });
   });
 
@@ -101,11 +96,11 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
     const projectId = c.req.param('projectId');
     const body = CreateScriptRequestSchema.parse(await c.req.json());
     if (await scriptSourceExists(ctx.home, projectId, body.name)) {
-      return c.json({ error: 'exists' }, 409);
+      return c.json({ error: SCRIPT_EXISTS_MESSAGE }, 409);
     }
     const source = body.source ?? scaffoldScript(body.name, body.description, body.template);
     const { hash } = await writeScriptSource(ctx.home, projectId, body.name, source);
-    return c.json({ name: body.name, source, hash });
+    return c.json(scriptCreatedResponse(body.name, source, hash), 201);
   });
 
   app.post('/:projectId/scripts/draft', async (c) => {
@@ -157,24 +152,14 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
     // exact detail models need to self-correct ("Illegal move… Legal
     // moves: …") and the editor needs to render a failed run. Genuine
     // infra failures still throw and surface as sanitized 500s.
-    return c.json({
-      runId: run.id,
-      status: run.status,
-      output: run.output,
-      callsSummary: run.calls.map((call) => ({
-        kind: call.kind,
-        durationMs: call.durationMs,
-        ...(call.error ? { error: call.error } : {}),
-      })),
-      ...(run.error ? { error: run.error } : {}),
-    });
+    return c.json(scriptRunResponse(run));
   });
 
   app.get('/:projectId/script-runs/:runId', async (c) => {
     const projectId = c.req.param('projectId');
     const runId = c.req.param('runId');
     const run = await readProjectScriptRun(ctx.home, projectId, runId);
-    if (!run) return c.json({ error: 'not found' }, 404);
+    if (!run) return c.json(notFoundBody('script run'), 404);
     return c.json(run);
   });
 

@@ -305,7 +305,7 @@ describe('portable tool authority and durable effects', () => {
       store,
       session,
       'advance_task_step',
-      { ref: task.ref },
+      { ref: task.ref, stepId: task.activeStepId },
       { ...actions, completeTask },
     );
     expect(completeTask).toHaveBeenCalledTimes(1);
@@ -315,7 +315,7 @@ describe('portable tool authority and durable effects', () => {
         store,
         session,
         'advance_task_step',
-        { ref: task.ref },
+        { ref: task.ref, stepId: (await store.getTask(task.ref))!.activeStepId },
         { ...actions, completeTask },
       ),
     ).rejects.toThrow('current task step');
@@ -330,7 +330,7 @@ describe('portable tool authority and durable effects', () => {
         store,
         userStepSession,
         'advance_task_step',
-        { ref: task.ref },
+        { ref: task.ref, stepId: userStepSession.stepId },
         { ...actions, completeTask },
       ),
     ).rejects.toThrow('awaits the user');
@@ -385,7 +385,10 @@ describe('portable tool authority and durable effects', () => {
       steps: [{ name: 'Finish', terminal: true }],
     });
     const generate = vi.fn(async () => ({
-      text: JSON.stringify({ name: 'advance_task_step', arguments: { ref: task.ref } }),
+      text: JSON.stringify({
+        name: 'advance_task_step',
+        arguments: { ref: task.ref, stepId: task.activeStepId },
+      }),
       stopReason: 'stop' as const,
     }));
     let cancelled = false;

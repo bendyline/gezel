@@ -1,3 +1,4 @@
+import { PORTABLE_PATH_RULES, type PathRuleCode, findPathRuleViolation } from '../path-rules.js';
 export interface PortableFileEntry {
   name: string;
   isDirectory: boolean;
@@ -19,37 +20,28 @@ export interface PortableFileSystem {
   rename(from: string, to: string): Promise<void>;
 }
 
-const RESERVED = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
+const PATH_RULE_MESSAGES: Record<PathRuleCode, string> = {
+  empty: 'A bounded relative file path is required',
+  'too-long': 'A bounded relative file path is required',
+  'too-deep': 'File path exceeds its supported segment or nesting limit',
+  'segment-too-long': 'File path exceeds its supported segment or nesting limit',
+  nul: 'File path must stay inside its workspace',
+  'control-char': 'File path must stay inside its workspace',
+  backslash: 'File path must stay inside its workspace',
+  unc: 'File path must stay inside its workspace',
+  absolute: 'File path must stay inside its workspace',
+  colon: 'File path must stay inside its workspace',
+  'empty-segment': 'File path contains an unsafe segment',
+  'dot-segment': 'File path contains an unsafe segment',
+  'trailing-space-or-dot': 'File path contains an unsafe segment',
+  'reserved-name': 'File path contains an unsafe segment',
+  'template-placeholder': 'File path contains an unresolved template',
+};
 
+/** The shared rule table, with this host's messages. */
 export function validatePortablePath(path: string, allowRoot = false): string {
-  if (typeof path !== 'string' || path.length > 1024 || (!path && !allowRoot))
-    throw new Error('A bounded relative file path is required');
-  if (!path) return path;
-  const segments = path.split('/');
-  if (
-    segments.length > 128 ||
-    segments.some((segment) => new TextEncoder().encode(segment).byteLength > 255)
-  )
-    throw new Error('File path exceeds its supported segment or nesting limit');
-  if (
-    path.includes('\\') ||
-    path.startsWith('/') ||
-    path.includes(':') ||
-    Array.from(path).some(
-      (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-    )
-  )
-    throw new Error('File path must stay inside its workspace');
-  if (
-    path
-      .split('/')
-      .some(
-        (part) =>
-          !part || part === '.' || part === '..' || /[ .]$/.test(part) || RESERVED.test(part),
-      )
-  )
-    throw new Error('File path contains an unsafe segment');
-  if (/\{\{.*?\}\}/.test(path)) throw new Error('File path contains an unresolved template');
+  const violation = findPathRuleViolation(path, { ...PORTABLE_PATH_RULES, allowRoot });
+  if (violation) throw new Error(PATH_RULE_MESSAGES[violation.code]);
   return path;
 }
 

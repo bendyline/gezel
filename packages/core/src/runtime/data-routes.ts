@@ -2,17 +2,10 @@ import { z } from 'zod';
 import { MemorySearchRequestSchema, UnifiedSearchRequestSchema } from '../schemas/api.js';
 import { BackupRequestSchema, RestoreConfirmSchema } from '../schemas/storage.js';
 import { PORTABLE_BACKUP_LIMITS } from './backup-zip.js';
+import { json } from './http/json.js';
 import { type PortableMemoryScope, PortableSaveMemorySchema } from './memories.js';
 import type { PortableStore } from './store.js';
 
-// `Response.json()` is a static the WebView on this project's iOS floor (16.4)
-// does not have; Safari gained it in 17. Build the response by hand so every
-// supported device can read a route's reply.
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
 const ContentSchema = z.object({ content: z.string() }).strict();
 const ExportSchema = BackupRequestSchema.omit({ outPath: true }).strict();
 export interface PortableDataRouteOptions {

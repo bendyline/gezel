@@ -11,8 +11,7 @@ export interface QuickJSWorkerData {
 
 export type QuickJSWorkerMessage = {
   runId: string;
-} & /** Sent the moment the worker has its instructions, before QuickJS starts. */
-(
+} /** Sent the moment the worker has its instructions, before QuickJS starts. */ & (
   | { kind: 'started' }
   | { kind: 'request'; id: number; method: string; params?: unknown }
   | { kind: 'notification'; method: string; params?: unknown }

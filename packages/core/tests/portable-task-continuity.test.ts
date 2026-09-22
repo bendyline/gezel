@@ -34,7 +34,13 @@ async function fixture(driftModel = false) {
           if (driftModel) await f.store.updateGezelSettings(owner, { model: 'second-model' });
         }
         return {
-          text: JSON.stringify({ name: 'advance_task_step', arguments: { ref: 'default/1' } }),
+          text: JSON.stringify({
+            name: 'advance_task_step',
+            arguments: {
+              ref: 'default/1',
+              stepId: (await f.store.getTask('default/1'))?.activeStepId,
+            },
+          }),
           stopReason: 'stop',
         };
       },

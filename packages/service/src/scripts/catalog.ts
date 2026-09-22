@@ -42,28 +42,4 @@ export async function listProjectScripts(
   return out;
 }
 
-export async function readProjectScriptRun(
-  home: string,
-  projectId: string,
-  runId: string,
-): Promise<ScriptRun | null> {
-  const runsDir = projectScriptRunsDir(home, projectId);
-  let dates: string[];
-  try {
-    dates = await readdir(runsDir);
-  } catch {
-    return null;
-  }
-  for (const date of dates) {
-    const file = projectScriptRunFile(home, projectId, date, runId);
-    try {
-      const s = await stat(file);
-      if (!s.isFile()) continue;
-      const raw = await readFile(file, 'utf8');
-      return JSON.parse(raw) as ScriptRun;
-    } catch {
-      /* not in this date dir, keep looking */
-    }
-  }
-  return null;
-}
+export { readProjectScriptRun } from './runs.js';

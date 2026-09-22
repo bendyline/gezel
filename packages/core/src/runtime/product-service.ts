@@ -1,11 +1,7 @@
-/**
- * Foreground product service for hosts without a Node daemon. The wire boundary
- * is the ordinary GezelClient API; neither the React app nor persisted entities
- * get a mobile-specific shape. Native engines and files are injected ports.
- */
 import { z } from 'zod';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
+import { checkHandoffChain } from '../handoff-limits.js';
 import { pickRandomNameWithGender } from '../names.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
@@ -45,6 +41,7 @@ import { CreateChatSessionRequestSchema, SendToSessionRequestSchema } from '../s
 import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
+import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { ChatEventBus } from './chat-events.js';
 import type { PortableContent } from './content.js';
@@ -53,7 +50,15 @@ import { handlePortableDataRequest } from './data-routes.js';
 import { draftMatchesSession } from './draft-address.js';
 import { decodeText, encodeText } from './files.js';
 import { portableWorkspaceHtmlPages } from './html-pages.js';
+/**
+ * Foreground product service for hosts without a Node daemon. The wire boundary
+ * is the ordinary GezelClient API; neither the React app nor persisted entities
+ * get a mobile-specific shape. Native engines and files are injected ports.
+ */
+import { HttpStatusError as ProductError, errorToResponse } from './http/errors.js';
+import { json } from './http/json.js';
 import { portableInputLimitError } from './inference-limits.js';
+import { PORTABLE_HANDOFF_LIMITS } from './inference-limits.js';
 import {
   portableFileTurnContext,
   preparePortableMessage,
@@ -92,16 +97,6 @@ export interface PortableInference {
   ): Promise<{ text: string; stopReason: 'stop' | 'length' | 'cancelled' }>;
   cancel(requestId: string): Promise<void>;
 }
-class ProductError extends Error {
-  constructor(
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-  }
-}
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 const requiredString = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || !value.trim()) throw new ProductError(`${name} is required`);
   return value;
@@ -621,18 +616,10 @@ export class PortableProductService {
       const instructions = [
         context.gezel.about,
         activeTask &&
-          `### Current task\n${activeTask.title} (${activeTask.ref})\n${activeTask.description}\nWorking artifacts folder: ${activeTask.artifactDir}`,
-        activeTask?.executionMode === 'generalist' &&
-          `### Task outline\n${activeTask.craftbook.steps.map((step) => `${step.id}: ${step.name}${step.id === activeTask.activeStepId ? ' (active)' : ''}\n${step.prompt}`).join('\n\n')}\nComplete the active step and its gate before proceeding. Explicit human handoffs still await the user.`,
-        activeStep && `### Current step\n${activeStep.name}\n${activeStep.prompt}`,
-        activeStep &&
-          activeTask?.lastGateHandoff?.toStepId === activeStep.id &&
-          `### Handoff from the completion gate\n${activeTask.lastGateHandoff.message}${
-            activeTask.lastGateHandoff.params
-              ? `\nContext: ${JSON.stringify(activeTask.lastGateHandoff.params)}`
-              : ''
-          }`,
-
+          renderTaskContextBlock(
+            { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
+            { availableToolNames: new Set(inventoryTools.map((tool) => tool.name)) },
+          ),
         `Current project: ${context.project.name}`,
         context.crew.length &&
           `Project crew: ${context.crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
@@ -839,7 +826,7 @@ export class PortableProductService {
               name: manifest.name,
               description: manifest.description,
             })),
-          createTask: (input) => this.store.createTask(session.projectId, input),
+          createTask: (input, projectId) => this.store.createTask(projectId, input),
           completeTask: (ref, next) => this.completeTask(ref, next),
           message: (gezelId, projectId, message) =>
             this.queueHandoff(turn, gezelId, projectId, message),
@@ -1055,9 +1042,10 @@ export class PortableProductService {
   private assertHandoffAllowed(turn: Turn, gezelId?: string): void {
     if (turn.cancelled) throw new Error('This response was stopped');
     if (
-      (gezelId !== undefined && turn.ancestors.includes(gezelId)) ||
-      turn.ancestors.length >= 3 ||
-      this.handoffCount >= 6
+      checkHandoffChain(
+        { ancestors: turn.ancestors, target: gezelId, count: this.handoffCount },
+        PORTABLE_HANDOFF_LIMITS,
+      )
     )
       throw new Error('The crew handoff limit was reached; send a message to continue.');
   }
@@ -1273,10 +1261,9 @@ export class PortableProductService {
       return await this.serial(() => this.route(request, url));
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      return json(
-        { error: error instanceof Error ? error.message : String(error) },
-        error instanceof ProductError ? error.status : 400,
-      );
+      // This host answers its own page, so an unknown error may say what went wrong.
+      const reply = errorToResponse(error, { exposeUnknown: true });
+      return json(reply.body, reply.status);
     }
   };
 

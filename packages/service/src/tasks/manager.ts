@@ -30,11 +30,13 @@ import {
   type TaskVariation,
   type UpdateTaskRequest,
   type UpdateTaskStepRequest,
+  applyGateRejection,
   applyStepPatch,
   assertCraftbookGraph,
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
+  gateHandoffNoteText,
   isEngagementAllowed,
   nightShiftDayKey,
   normalizeScriptRefs,
@@ -45,8 +47,10 @@ import {
   projectManagedWorkspaceWritable,
   removeStepAndCleanEdges,
   reorderStepsArray,
+  resolveNextStep,
   resolveSecurityPolicy,
   resolveSteps,
+  stampGateHandoff,
   stepInsertionIndex,
   summarizePlanDocument,
   taskEffectiveStatus,
@@ -2399,45 +2403,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       i === idx ? { ...s, completedAt } : s,
     );
 
-    // Decide next active step.
-    let newActive: string | undefined = task.activeStepId;
-    let terminating = false;
+    // Decide next active step: the shared precedence both hosts follow.
     const stepExists = (id: string | undefined): id is string =>
       id !== undefined && task.craftbook.steps.some((s) => s.id === id);
-
-    if (nextArg && nextArg !== 'next') {
-      const target = task.craftbook.steps.find((s) => s.id === nextArg);
-      if (!target) throw new Error(`task ${task.ref}: no step "${nextArg}" to activate`);
-      newActive = nextArg;
-    } else if (stepExists(gateOutcome?.goto)) {
-      newActive = gateOutcome?.goto;
-    } else if (stepExists(gateOnApprove)) {
-      newActive = gateOnApprove;
-    } else if (completedStep.terminal) {
-      terminating = true;
-      newActive = undefined;
-    } else {
-      const branchTarget = completedStep.branches
-        ? findBranchGoto(completedStep.branches, exitRun?.output)
-        : undefined;
-      if (branchTarget) {
-        newActive = branchTarget;
-      } else if (completedStep.next) {
-        newActive = completedStep.next;
-      } else {
-        const following = task.craftbook.steps[idx + 1];
-        if (following) {
-          newActive = following.id;
-        } else {
-          // A last step with no `next` ends the book. Left as-is, `newActive`
-          // still held this step's id and the book re-activated itself (gemma's
-          // invoice-run children re-ran `draft-invoice` three times each and the
-          // fanout barrier never released, 2026-09-19); an intended self-loop says so with `next`.
-          terminating = true;
-          newActive = undefined;
-        }
-      }
-    }
+    const route = resolveNextStep({
+      steps: task.craftbook.steps,
+      currentId: stepId,
+      ...(nextArg !== undefined ? { override: nextArg } : {}),
+      ...(gateOutcome?.goto !== undefined ? { gateGoto: gateOutcome.goto } : {}),
+      ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
+      branchOutput: exitRun?.output,
+    });
+    if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
+      throw new Error(`task ${task.ref}: no step "${nextArg}" to activate`);
+    const terminating = route.kind === 'terminate';
+    const newActive: string | undefined = route.kind === 'terminate' ? undefined : route.to;
 
     // A route that names no step used to be silently accepted here: the task
     // was written with an `activeStepId` matching nothing, so no handoff
@@ -2487,15 +2467,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       ...(terminating ? { status: 'complete' as TaskStatus } : {}),
       ...(nightShiftPatch ?? {}),
       ...(handoff
-        ? {
-            lastGateHandoff: {
-              fromStepId: stepId,
-              ...(newActive ? { toStepId: newActive } : {}),
-              message: handoff.message,
-              ...(handoff.params ? { params: handoff.params } : {}),
-              at: nowIso(),
-            },
-          }
+        ? { lastGateHandoff: stampGateHandoff(stepId, newActive, handoff, nowIso()) }
         : {}),
       updatedAt: nowIso(),
     };
@@ -2538,13 +2510,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
     // Durable copy of the gate handoff on the receiving step's notes.
     if (handoff && newActive) {
-      const paramLines = handoff.params
-        ? Object.entries(handoff.params)
-            .map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join('\n')
-        : '';
       await this.appendNote(projectId, num, {
-        text: `# Handoff from gate on "${completedStep.name}"\n\n${handoff.message}${paramLines ? `\n\n${paramLines}` : ''}`,
+        text: gateHandoffNoteText(completedStep.name, handoff),
         author: { kind: 'user' },
         stepId: newActive,
       }).catch(() => {});
@@ -2992,6 +2959,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const outcome = await evaluateStepGate({
       gate,
       ws,
+      steps: task.craftbook.steps,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
         // Paths the task itself handed the assignee (invocation params,
@@ -3386,10 +3354,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // size: Pull Request Review's scan step burns one per 25-file batch,
     // so a PR needing more batches than the budget could never finish no
     // matter how well the reviewer worked.
-    const priorProgress = step.gateProgressAttempts ?? 0;
-    const progressAttempts = converging ? priorProgress + 1 : priorProgress;
-    const attempt = converging ? Math.max(priorAttempts, 1) : priorAttempts + 1;
-    const progressExhausted = progressAttempts >= GATE_MAX_PROGRESS_ATTEMPTS;
+    const plan = applyGateRejection({
+      step,
+      gate,
+      verdict: { converging, ...(outcome.goto !== undefined ? { goto: outcome.goto } : {}) },
+      steps: task.craftbook.steps,
+    });
+    const { attempt, progressAttempts, progressExhausted } = plan;
     const message =
       stage === 1
         ? buildStageOneNudge({
@@ -3470,7 +3441,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       );
     }
 
-    if ((attempt >= gate.maxAttempts && !converging) || progressExhausted || stage === 3) {
+    if (plan.paused || stage === 3) {
       // Keurmeester escalation point: the gate budget is spent and the
       // pause-for-help is imminent. Consult first — an applied verdict
       // (corrective message, step/craftbook rewrite, or takeover) keeps

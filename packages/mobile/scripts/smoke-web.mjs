@@ -139,11 +139,20 @@ try {
     }
     console.log(`Passed ${name}`);
   }
+  let booted = false;
   async function navigation() {
     await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     const nav = page.getByRole('navigation', { name: 'Primary navigation', exact: true });
     const open = page.getByRole('button', { name: 'Navigation', exact: true });
+    if (!booted) {
+      // A fresh install boots with the rail open and closes it once the
+      // first-run estimate lands, about 100ms after load. A rail opened before
+      // that settles is closed underneath the next step, and which side of
+      // the close a run lands on moves with bundle size, so wait it out.
+      await open.waitFor();
+      booted = true;
+    }
     // The rail is either already open or sits behind the header button, and
     // which one shows depends on where the app last was. Wait for whichever
     // arrives rather than sampling once: immediately after a load neither is

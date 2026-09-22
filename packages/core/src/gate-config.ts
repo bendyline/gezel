@@ -1,7 +1,6 @@
 import type { NormalizedStepGate } from './schemas/gate.js';
 
-/** Same shape `interpolateStepsContext` substitutes, so this sees exactly what it left behind. */
-const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
+import { TEMPLATE_PLACEHOLDER_SOURCE } from './path-rules.js';
 
 /**
  * Gate fields still carrying a `{{param}}` token at evaluation time.
@@ -33,7 +32,7 @@ export function unresolvedGatePlaceholders(gate: NormalizedStepGate): string[] {
   const found: string[] = [];
   const scan = (value: unknown, path: string): void => {
     if (typeof value === 'string') {
-      const hits = value.match(TEMPLATE_PLACEHOLDER);
+      const hits = value.match(new RegExp(TEMPLATE_PLACEHOLDER_SOURCE, 'g'));
       if (hits) found.push(`${path} (${[...new Set(hits)].join(' ')})`);
       return;
     }

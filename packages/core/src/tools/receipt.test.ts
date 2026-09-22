@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildToolReceipt,
   humanizeToolCall,
   renderFullToolArgs,
   summarizeToolArgs,
   summarizeToolResult,
-} from './args-summary.js';
+} from './receipt.js';
 
 describe('humanizeToolCall — non-nerdy summaries', () => {
   it('renders a message_gezel handoff as a sentence with target, gist, and file', () => {
@@ -118,5 +119,34 @@ describe('summarizeToolResult — bounded response details', () => {
   it('omits empty responses', () => {
     expect(summarizeToolResult(undefined)).toBeUndefined();
     expect(summarizeToolResult('   \n')).toBeUndefined();
+  });
+});
+
+describe('buildToolReceipt', () => {
+  it('fills the persisted fields the same way for every host', () => {
+    const receipt = buildToolReceipt({
+      name: 'write_file',
+      args: { path: 'notes.md', content: 'x'.repeat(500) },
+      startedAtMs: Date.UTC(2026, 8, 22, 10, 0, 0),
+      durationMs: 12,
+      success: true,
+      resultText: 'y'.repeat(10_000),
+    });
+    expect(receipt.at).toBe('2026-09-22T10:00:00.000Z');
+    expect(receipt.argsSummary).toBe('Wrote notes.md');
+    expect(receipt.argsFull).toContain('content:');
+    expect(receipt.resultTruncated).toBe(true);
+    expect(receipt.resultText).toContain('characters omitted');
+    expect(receipt).not.toHaveProperty('errorMessage');
+    const empty = buildToolReceipt({
+      name: 'x',
+      startedAtMs: 0,
+      durationMs: 0,
+      success: false,
+      errorMessage: 'boom',
+    });
+    expect(empty.errorMessage).toBe('boom');
+    expect(empty).not.toHaveProperty('resultText');
+    expect(empty).not.toHaveProperty('resultTruncated');
   });
 });

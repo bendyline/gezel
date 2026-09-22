@@ -10,6 +10,7 @@ import {
 } from '../schemas/session.js';
 import { NEW_THREAD_TITLE } from '../thread-title.js';
 import { draftMatchesSession } from './draft-address.js';
+import { sentDraftMeta } from './drafts.js';
 import { sessionSummary } from './entities.js';
 import { gezelRoot, listGezels, requireGezel } from './gezels.js';
 import { projectRoot, readConfig, requireProject } from './projects.js';
@@ -76,14 +77,9 @@ export async function writeSession(
       throw new Error('The sent message must reference its draft');
     writes.set(
       path,
-      repo.json({
-        ...draft,
-        status: 'sent',
-        updatedAt: repo.now(),
-        sentAt: repo.now(),
-        sentSessionId: session.id,
-        sentMessageAt: message.at,
-      }),
+      repo.json(
+        sentDraftMeta(draft, { sessionId: session.id, at: repo.now(), messageAt: message.at }),
+      ),
     );
   }
   await repo.transactions.commit(writes);

@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ContinuityFacts, summarizeContinuityForRunDir } from '../continuity-facts.ts';
 import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
@@ -342,6 +342,7 @@ interface SessionMessage {
 }
 
 interface SessionFile {
+  id?: string;
   messages?: SessionMessage[];
   [k: string]: unknown;
 }
@@ -777,7 +778,9 @@ export function score(runDir: string): TrialFacts {
   }
   const missingExpectedRoles = missingScenarioRoles(result.scenarioId, rolesCreated);
 
-  // Tool calls from sessions/*.json.
+  // Completed turns persist in sessions; interrupted turns may exist only in
+  // project history. Reconcile per session/tool without double counting the
+  // same calls in both sources. Native CLI tools can be session-only.
   const sessionFiles = (() => {
     try {
       return readdirSync(join(runDir, 'sessions'))
@@ -811,7 +814,8 @@ export function score(runDir: string): TrialFacts {
     if (firstToolCallAt === null || atMs < firstToolCallAt) firstToolCallAt = atMs;
   };
   const projectHistoryToolCounts: Record<string, number> = {};
-  let projectHistoryToolCalls = 0;
+  const historyCountsBySession = new Map<string, Record<string, number>>();
+  const transcriptCountsBySession = new Map<string, Record<string, number>>();
   let projectHistoryFirstArtifactAt: number | null = null;
   let projectHistoryLastArtifactAt: number | null = null;
   // Map question-id → question text, for cross-referencing auto-answer events.
@@ -824,8 +828,13 @@ export function score(runDir: string): TrialFacts {
     if (event.kind === 'tool.called') {
       const name = event.details?.name;
       if (name) {
-        projectHistoryToolCalls++;
         projectHistoryToolCounts[name] = (projectHistoryToolCounts[name] ?? 0) + 1;
+        const sessionId = event.details?.sessionId;
+        if (typeof sessionId === 'string') {
+          const counts = historyCountsBySession.get(sessionId) ?? {};
+          counts[name] = (counts[name] ?? 0) + 1;
+          historyCountsBySession.set(sessionId, counts);
+        }
         if (event.at) noteFirstToolCall(isoToMsSince(result.startedAt, event.at));
       }
     }
@@ -843,13 +852,15 @@ export function score(runDir: string): TrialFacts {
   for (const sessPath of sessionFiles) {
     const sess = readJson<SessionFile>(sessPath);
     if (!sess?.messages) continue;
+    const sessionKey = sess.id ?? basename(sessPath, '.json').split('--').at(-1)!;
+    const sessionCounts = transcriptCountsBySession.get(sessionKey) ?? {};
+    transcriptCountsBySession.set(sessionKey, sessionCounts);
     const gezelFromFilename = (sessPath.split('/').pop() ?? '').split('--')[0] ?? 'unknown';
     for (const msg of sess.messages) {
       if (msg.role !== 'assistant') continue;
       const calls = msg.toolCalls ?? [];
       for (const c of calls) {
-        totalToolCalls++;
-        byTool[c.name] = (byTool[c.name] ?? 0) + 1;
+        sessionCounts[c.name] = (sessionCounts[c.name] ?? 0) + 1;
         if (msg.at) noteFirstToolCall(isoToMsSince(result.startedAt, msg.at));
         // Time-to-artifact.
         if (FILE_WRITE_TOOLS.has(c.name) && c.success !== false && msg.at) {
@@ -884,17 +895,33 @@ export function score(runDir: string): TrialFacts {
     redFlags.push(...sessionBehaviorRedFlags(gezelFromFilename, sess.messages));
   }
 
-  if (totalToolCalls === 0 && projectHistoryToolCalls > 0) {
-    totalToolCalls = projectHistoryToolCalls;
-    for (const [name, count] of Object.entries(projectHistoryToolCounts)) {
-      byTool[name] = count;
+  for (const sessionId of new Set([
+    ...historyCountsBySession.keys(),
+    ...transcriptCountsBySession.keys(),
+  ])) {
+    const history = historyCountsBySession.get(sessionId) ?? {};
+    const transcript = transcriptCountsBySession.get(sessionId) ?? {};
+    for (const name of new Set([...Object.keys(history), ...Object.keys(transcript)])) {
+      byTool[name] = (byTool[name] ?? 0) + Math.max(history[name] ?? 0, transcript[name] ?? 0);
     }
   }
-  if (firstArtifactAt === null && projectHistoryFirstArtifactAt !== null) {
-    firstArtifactAt = projectHistoryFirstArtifactAt;
+  // Older histories omit session IDs. Their totals are a lower bound, not
+  // extra calls to add to transcripts whose overlap cannot be reconstructed.
+  for (const [name, count] of Object.entries(projectHistoryToolCounts)) {
+    byTool[name] = Math.max(byTool[name] ?? 0, count);
   }
-  if (lastArtifactAt === null && projectHistoryLastArtifactAt !== null) {
-    lastArtifactAt = projectHistoryLastArtifactAt;
+  totalToolCalls = Object.values(byTool).reduce((sum, count) => sum + count, 0);
+  if (projectHistoryFirstArtifactAt !== null) {
+    firstArtifactAt = Math.min(
+      firstArtifactAt ?? Number.POSITIVE_INFINITY,
+      projectHistoryFirstArtifactAt,
+    );
+  }
+  if (projectHistoryLastArtifactAt !== null) {
+    lastArtifactAt = Math.max(
+      lastArtifactAt ?? Number.NEGATIVE_INFINITY,
+      projectHistoryLastArtifactAt,
+    );
   }
 
   // Sniff progression from log.txt.

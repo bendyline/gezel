@@ -101,7 +101,13 @@ describe('continuous task execution through the portable client', () => {
         generate: async (request) => {
           requests.push(request.messages[0]!.content);
           return {
-            text: JSON.stringify({ name: 'advance_task_step', arguments: { ref: 'default/1' } }),
+            text: JSON.stringify({
+              name: 'advance_task_step',
+              arguments: {
+                ref: 'default/1',
+                stepId: (await store.getTask('default/1'))?.activeStepId,
+              },
+            }),
             stopReason: 'stop',
           };
         },

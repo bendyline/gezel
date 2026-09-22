@@ -9,10 +9,13 @@ export * from './project-local-id.js';
 export * from './markdown/index.js';
 export * from './fonts.js';
 export * from './engagement.js';
+export * from './backup-policy.js';
 export * from './entity-id.js';
+export * from './path-rules.js';
 export * from './night-shift.js';
 export * from './project-properties.js';
 export * from './project-icons.js';
+export * from './search-ranking.js';
 export * from './shared-project.js';
 export * from './growth-cosmetics.js';
 export * from './security/policy.js';
@@ -125,9 +128,24 @@ export function nowIso(): string {
 export * from './schemas/runtime-capabilities.js';
 
 export * from './scripts/output.js';
+export * from './scripts/errors.js';
+export * from './scripts/redact.js';
+export * from './scripts/runs.js';
 export * from './scripts/policy.js';
 
 export * from './tools/builtin-groups.js';
+export * from './tools/coerce.js';
+export * from './tools/descriptions.js';
+export * from './tools/receipt.js';
+export * from './tools/tool-call-fixtures.js';
+export * from './tasks/gate-fixtures.js';
+export * from './tasks/gate-handoff.js';
+export * from './tasks/gate-checks.js';
+export * from './tasks/gate-accounting.js';
+export * from './tasks/gate-scripts.js';
+export * from './tasks/prompt-context.js';
+export * from './tasks/step-activation.js';
+export * from './tasks/step-routing.js';
 export * from './tools/access.js';
 export * from './tools/envelope.js';
 export * from './tools/inputs.js';
@@ -138,6 +156,8 @@ export * from './tools/step-policy.js';
 export * from './craftbook-params.js';
 
 export * from './question-format.js';
+export * from './project-routing.js';
+export * from './question-policy.js';
 
 export * from './scripts/predicates.js';
 export * from './scripts/task-step.js';
@@ -158,6 +178,7 @@ export * from './deliverable-paths.js';
 export * from './transform/index.js';
 
 export * from './gate-config.js';
+export * from './handoff-limits.js';
 
 export * from './workspace-edits.js';
 export * from './workspace-edit-error.js';

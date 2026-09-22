@@ -45,11 +45,16 @@ export class NodeScriptExecutor implements ScriptExecutor {
     options: ScriptExecutionOptions,
   ): Promise<ScriptExecutionResult> {
     let sendFrame: ((line: string) => void) | null = null;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
     return runInSandbox({
       entry: 'user-script.ts',
       cwd: scratch,
       input: `${JSON.stringify(options.init)}\n`,
       timeoutMs: options.timeoutMs,
+      signal: controller.signal,
       stripTypes: true,
       // Raw Node networking must not bypass the host capability dispatcher.
       denyNet: true,
@@ -81,7 +86,15 @@ export class NodeScriptExecutor implements ScriptExecutor {
                 sendFrame?.(`${JSON.stringify({ id: msg.id, error: { message, code } })}\n`);
               });
           } else if (typeof msg.method === 'string') {
-            options.onNotification(msg.method, msg.params);
+            // The runner refuses some notifications (a second output); the
+            // refusal surfaces on stderr and the run ends, like a guest error.
+            try {
+              options.onNotification(msg.method, msg.params);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              options.onStderr(`Error: ${message}`);
+              abort();
+            }
           }
         },
         onOpen: (send) => {

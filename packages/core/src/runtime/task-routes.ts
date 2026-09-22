@@ -18,6 +18,7 @@ import {
 } from '../schemas/task.js';
 import { scriptShouldAutoAdvance } from '../scripts/predicates.js';
 import { type AwakeBudget, acquireSuspendMonitor, createAwakeTimeout } from '../suspend-clock.js';
+import { json } from './http/json.js';
 import type { PortableStore } from './store.js';
 import { taskActiveAssignee } from './tasks.js';
 import type { PortableTaskGateResult } from './tasks.js';
@@ -62,8 +63,6 @@ export interface PortableTaskCompletionExecution {
   evaluateGate: NonNullable<PortableTaskRunnerOptions['evaluateGate']>;
   authorize(task: Task): Promise<void>;
 }
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 /** Foreground host of ordinary task routes. No work resumes implicitly at boot. */
 export class PortableTaskRunner {
   private readonly running = new Map<string, Promise<void>>();

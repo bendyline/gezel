@@ -1,5 +1,14 @@
 import { posix } from 'node:path';
-import type { GateCheck } from '@bendyline/gezel';
+import {
+  type GateCheck,
+  type GateWorkspaceReader,
+  evaluateDeclarativeCheck,
+  gateCheckLabel,
+  isSharedGateCheck,
+} from '@bendyline/gezel';
+
+export { gateCheckLabel };
+export type { GateWorkspaceReader };
 import { validateFile } from '@bendyline/gezel-mcp';
 import {
   type WorkspaceLike,
@@ -7,20 +16,12 @@ import {
   citationsResolve,
   containsPattern,
   cssMinBytes,
-  csvShape,
   esmImports,
-  explainSniff,
   extractInlineScripts,
-  fileCountByExt,
-  fileMinBytes,
-  jsonPathEquals,
   markdownHeadingsMatch,
   notContainsPattern,
   parseJudgeVerdict,
   planStructure,
-  recordSchema,
-  tableShape,
-  totalMinBytes,
   unsupportedClaims,
   validateJudgeEvidence,
   validateScriptSyntax,
@@ -29,7 +30,6 @@ import {
   wrapperReturnHint,
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
-import { runStepSniff } from '../chat/step-sniff.js';
 import { parseFrontmatter } from '../index-store/frontmatter.js';
 
 /**
@@ -43,12 +43,6 @@ import { parseFrontmatter } from '../index-store/frontmatter.js';
  * fails an `artifact`-flagged check as "not found" — the gate never silently
  * passes a deliverable it couldn't read.
  */
-export type GateWorkspaceReader = WorkspaceLike & {
-  readArtifact?: (file: string) => Promise<string | null>;
-  listArtifacts?: () => Promise<string[]>;
-  /** Artifact-tree sibling of `WorkspaceLike.readBytes` (image-signature checks). */
-  readArtifactBytes?: (file: string) => Promise<Uint8Array | null>;
-};
 
 /**
  * Structured outcome of one configured check. Preserved through the gate
@@ -419,70 +413,6 @@ function globPathRegExp(glob: string): RegExp {
  * discriminator (pattern/path/sniff name). Never includes observed
  * values, so it is hash-stable across attempts.
  */
-export function gateCheckLabel(c: GateCheck): string {
-  switch (c.kind) {
-    case 'minBytes':
-      return `minBytes ${c.file}`;
-    case 'totalMinBytes':
-      return `totalMinBytes ${c.files.join('+')}`;
-    case 'fileCount':
-      return `fileCount ${c.ext.join(',')}${c.dir ? ` ${c.dir}` : ''}`;
-    case 'cssMinBytes':
-      return `cssMinBytes ${c.file ?? 'index.html'}`;
-    case 'sniff':
-      return `sniff ${c.file} ${c.sniff}`;
-    case 'jsonPathEquals':
-      return `jsonPathEquals ${c.file} ${c.path}`;
-    case 'csvShape':
-      return `csvShape ${c.file}`;
-    case 'contains':
-      return `contains ${c.file} /${c.pattern}/`;
-    case 'notContains':
-      return `notContains ${c.file} /${c.pattern}/`;
-    case 'unsupportedClaims':
-      return `unsupportedClaims ${c.file}`;
-    case 'jsParses':
-      return `jsParses ${c.file ?? 'index.html'}`;
-    case 'htmlLint':
-      return `htmlLint ${c.file}`;
-    case 'esmImports':
-      return `esmImports ${c.file}`;
-    case 'sourceParses':
-      return `sourceParses ${c.file}`;
-    case 'tableShape':
-      return `tableShape ${c.file}`;
-    case 'recordSchema':
-      return `recordSchema ${c.file}`;
-    case 'nodeRuns':
-      return `nodeRuns ${c.file}`;
-    case 'citationsResolve':
-      return `citationsResolve ${c.file}`;
-    case 'researchEvidence':
-      return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
-    case 'imageEvidence':
-      return `imageEvidence ${c.file} ${c.imagesKey}`;
-    case 'commandEvidence':
-      return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
-    case 'corpusCoverage':
-      return `corpusCoverage ${c.file} ${c.corpusDir}`;
-    case 'corpusReadEvidence':
-      return `corpusReadEvidence ${c.batchesFile} batch=${c.batchNumber}`;
-    case 'corpusBatchObservations':
-      return `corpusBatchObservations ${c.file} batch=${c.batchNumber}`;
-    case 'corpusBatches':
-      return `corpusBatches ${c.file} ${c.corpusDir}`;
-    case 'markdownHeadingsMatch':
-      return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
-    case 'valueGrounding':
-      return `valueGrounding ${c.file}`;
-    case 'valuesSubsetOf':
-      return `valuesSubsetOf ${c.file}`;
-    case 'judge':
-      return `judge ${c.file}${c.label ? ` ${c.label}` : ''}`;
-    case 'planStructure':
-      return `planStructure ${c.file}`;
-  }
-}
 
 function checkFile(c: GateCheck): string | undefined {
   if ('file' in c && typeof c.file === 'string') return c.file;
@@ -521,6 +451,9 @@ async function evalCheckInner(
   ws: GateWorkspaceReader,
   deps?: GateEvalDeps,
 ): Promise<InnerOutcome> {
+  // The kinds every host evaluates run through the shared module; only the
+  // desktop-only kinds are dispatched below.
+  if (isSharedGateCheck(c)) return evaluateDeclarativeCheck(c, ws);
   // Checks flagged `artifact: true` resolve `file` against the project's
   // artifacts drawer instead of the workspace. Build a `WorkspaceLike` view
   // whose `read`/`list` hit the artifact store, then run the EXACT same check
@@ -540,77 +473,6 @@ async function evalCheckInner(
   };
   const reader: WorkspaceLike = usesArtifact ? artifactReader : ws;
   switch (c.kind) {
-    case 'minBytes': {
-      const r = await fileMinBytes(reader, c.file, c.bytes);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'totalMinBytes': {
-      const r = await totalMinBytes(reader, c.files, c.bytes);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'fileCount': {
-      const r = await fileCountByExt(reader, c.ext, c.min, c.dir, {
-        ...(c.verifyImageBytes ? { verifyImageBytes: true } : {}),
-      });
-      const matched = (r as { matched?: string[] }).matched;
-      return {
-        ok: r.ok,
-        detail: r.detail,
-        ...(matched ? { evidence: { matched: capList(matched) } } : {}),
-      };
-    }
-    case 'cssMinBytes': {
-      const r = await cssMinBytes(reader, c.bytes, c.file);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'sniff': {
-      const content = await reader.read(c.file);
-      if (content === null) {
-        return {
-          ok: false,
-          detail: `${c.file} not found (needed for the ${c.sniff} check)`,
-          evidence: { sniff: c.sniff },
-        };
-      }
-      if (runStepSniff(c.sniff, content)) {
-        return {
-          ok: true,
-          detail: `${c.file} passes the ${c.sniff} check`,
-          evidence: { sniff: c.sniff },
-        };
-      }
-      // Name the actual gap, not the rule — explainSniff composes the
-      // diagnosis from the same primitives the sniff itself uses.
-      return {
-        ok: false,
-        detail: `${c.file} failed the ${c.sniff} check: ${explainSniff(c.sniff, content)}`,
-        evidence: { sniff: c.sniff },
-      };
-    }
-    case 'jsonPathEquals': {
-      const r = await jsonPathEquals(reader, c.file, c.path, c.value, c.label);
-      const actual = (r as { actual?: unknown }).actual;
-      return {
-        ok: r.ok,
-        detail: r.detail,
-        ...(actual !== undefined ? { evidence: { actual } } : {}),
-      };
-    }
-    case 'csvShape': {
-      const content = await reader.read(c.file);
-      const r = csvShape(content, {
-        ...(c.requiredColumns ? { requiredColumns: c.requiredColumns } : {}),
-        ...(c.exactColumns ? { exactColumns: c.exactColumns } : {}),
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-        ...(c.consistentColumns !== undefined ? { consistentColumns: c.consistentColumns } : {}),
-        ...(c.allowedValues ? { allowedValues: c.allowedValues } : {}),
-      });
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        evidence: shapeEvidence(r),
-      };
-    }
     case 'contains': {
       const r = await containsPattern(reader, c.file, c.pattern, c.flags, c.label);
       return { ok: r.ok, detail: r.detail };
@@ -715,37 +577,6 @@ async function evalCheckInner(
         ok: false,
         detail: `${c.file} does not parse: ${message}${at} — the file will not load until this is fixed (commonly a truncated file or an unbalanced brace).`,
         evidence: { diagnostic: `${message}${at}` },
-      };
-    }
-    case 'tableShape': {
-      const content = await reader.read(c.file);
-      if (content === null) {
-        return { ok: false, detail: `${c.file} not found (needed for the table-shape check)` };
-      }
-      const r = tableShape(content, {
-        ...(c.requiredColumns ? { requiredColumns: c.requiredColumns } : {}),
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-      });
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        evidence: shapeEvidence(r),
-      };
-    }
-    case 'recordSchema': {
-      const content = await reader.read(c.file);
-      const r = recordSchema(content, {
-        fields: c.fields,
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-        ...(c.uniqueBy ? { uniqueBy: c.uniqueBy } : {}),
-        ...(c.format ? { format: c.format } : {}),
-        ...(c.allowExtraFields !== undefined ? { allowExtraFields: c.allowExtraFields } : {}),
-      });
-      const rowCount = (r as { rowCount?: number }).rowCount;
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        ...(rowCount !== undefined ? { evidence: { rowCount } } : {}),
       };
     }
     case 'nodeRuns': {
@@ -1819,15 +1650,4 @@ async function evalCheckInner(
       };
     }
   }
-}
-
-function shapeEvidence(r: {
-  ok: boolean;
-  headers?: string[];
-  rowCount?: number;
-}): Record<string, unknown> | undefined {
-  const out: Record<string, unknown> = {};
-  if (r.headers) out.headers = capList(r.headers);
-  if (r.rowCount !== undefined) out.rowCount = r.rowCount;
-  return Object.keys(out).length > 0 ? out : undefined;
 }

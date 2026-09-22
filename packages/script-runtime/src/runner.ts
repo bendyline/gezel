@@ -18,11 +18,12 @@ import {
   getEngagementMode,
   isEngagementAllowed,
   narrowScriptSecurityCapabilities,
+  redactScriptRun,
   validateScriptInput,
   validateScriptOutput,
 } from '@bendyline/gezel';
 import type { PortableScriptTaskContext } from '@bendyline/gezel/runtime';
-import type { ScriptExecutor } from './index.js';
+import type { ScriptExecutionResult, ScriptExecutor } from './index.js';
 
 export interface PortableScriptDefinition {
   /** JavaScript compiled and metadata extracted by the trusted build, never by the guest. */
@@ -33,6 +34,11 @@ export interface PortableScriptDefinition {
   originalSource?: string;
   hash?: string;
   sourceCraftbook?: ScriptRun['sourceCraftbook'];
+  /**
+   * Host-verified first-party bytes: a catalog byte-match or a CLI-authorised
+   * hash. Ignored for `standard` scope, which is always trusted.
+   */
+  provenanceTrusted?: boolean;
 }
 
 export interface PortableScriptContext extends PortableScriptTaskContext {
@@ -41,6 +47,27 @@ export interface PortableScriptContext extends PortableScriptTaskContext {
   scriptName: string;
   signal: AbortSignal;
   trigger: ScriptRunTrigger;
+  /** The live admission ceiling, for request-scoped checks such as `credential:<name>`. */
+  capabilities: {
+    readonly allowed: ReadonlySet<ScriptCapability>;
+    readonly stripped: ReadonlyMap<ScriptCapability, string>;
+  };
+  /**
+   * Secret values seen during this run. Handlers that resolve credentials
+   * add them; every persisted snapshot and the returned record are scrubbed.
+   */
+  secrets: Set<string>;
+}
+
+export interface PortableScriptRunnerLimits {
+  /** Default 4. */
+  maxNestedDepth?: number;
+  /** Default 5 minutes. */
+  defaultTimeoutMs?: number;
+  /** Default 30 minutes. */
+  maxTimeoutMs?: number;
+  /** Default 1,000. */
+  maxHostCalls?: number;
 }
 
 export interface PortableScriptRunnerOptions {
@@ -48,7 +75,7 @@ export interface PortableScriptRunnerOptions {
   resolve(
     name: string,
     scope: ScriptScope,
-    context: { projectId: string; trigger: ScriptRunTrigger },
+    context: { projectId: string; trigger: ScriptRunTrigger; inlineSource?: string },
   ): Promise<PortableScriptDefinition>;
   readConfig(): Promise<GezelConfig>;
   workspaceWriteAllowed(projectId: string): Promise<{ ok: boolean; reason?: string }>;
@@ -56,6 +83,9 @@ export interface PortableScriptRunnerOptions {
   dispatch(context: PortableScriptContext, method: string, params: unknown): Promise<unknown>;
   /** Must atomically save the ordinary ScriptRun record; failure prevents the next effect. */
   persistRun(run: ScriptRun): Promise<void>;
+  /** The error line for a non-zero or timed-out execution. Default: stderr, else the exit code. */
+  describeFailure?(result: ScriptExecutionResult): string;
+  limits?: PortableScriptRunnerLimits;
   now?(): number;
   createId?(): string;
 }
@@ -69,6 +99,8 @@ export interface RunPortableScriptOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   depth?: number;
+  /** A caller-supplied source, for a craftbook snapshot. Never at standard scope. */
+  inlineSource?: string;
 }
 
 const MAX_LOG_CHARS = 64_000;
@@ -102,7 +134,12 @@ export class PortableScriptRunner {
   ): Promise<ScriptRun> {
     const { host } = this;
     const now = host.now ?? Date.now;
+    const limits = host.limits ?? {};
     const scope = options.scope ?? 'project';
+    if (options.inlineSource !== undefined && scope === 'standard')
+      throw new Error(
+        'inline script sources cannot run at standard scope — the trusted stdlib only loads from the app tree',
+      );
     const parent =
       hostParent?.entry ??
       (options.trigger.kind === 'nested'
@@ -119,11 +156,13 @@ export class PortableScriptRunner {
         throw new Error('Nested scripts must use their parent project and project scope');
       await parent.checkPolicy();
     }
+    const maxDepth = limits.maxNestedDepth ?? 4;
     const depth = parent ? parent.depth + 1 : (options.depth ?? 0);
-    if (!Number.isSafeInteger(depth) || depth < 0 || depth > 4)
-      throw new Error('nested script depth exceeded (max 4)');
-    let timeoutMs = options.timeoutMs ?? 300_000;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 1_800_000)
+    if (!Number.isSafeInteger(depth) || depth < 0 || depth > maxDepth)
+      throw new Error(`nested script depth exceeded (max ${maxDepth})`);
+    let timeoutMs = options.timeoutMs ?? limits.defaultTimeoutMs ?? 300_000;
+    const maxTimeoutMs = limits.maxTimeoutMs ?? 1_800_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > maxTimeoutMs)
       throw new Error('Invalid script timeout');
     if (parent) {
       timeoutMs = Math.min(timeoutMs, parent.budget.remainingMs());
@@ -195,8 +234,12 @@ export class PortableScriptRunner {
       scriptName: run.scriptName,
       signal: controller.signal,
       trigger: hostParent ? options.trigger : (parent?.trigger ?? options.trigger),
+      capabilities: { allowed, stripped },
+      secrets: new Set<string>(),
     };
     let accepting = true;
+    // Set once every effect has settled: nothing may change the audit after this.
+    let finalized = false;
     let outputSeen = false;
     let output: unknown;
     let persistFailure: unknown;
@@ -210,6 +253,9 @@ export class PortableScriptRunner {
       abridgeRun(run);
       const serialized = JSON.stringify(run);
       const snapshot = ScriptRunSchema.parse(JSON.parse(serialized));
+      // A secret seen by a handler must not reach disk in any snapshot, and
+      // snapshots are written after every call, so this cannot wait for the end.
+      redactScriptRun(snapshot, context.secrets);
       persistence = persistence.then(() => host.persistRun(snapshot));
       persistence.catch((error: unknown) => {
         persistFailure = error;
@@ -319,12 +365,13 @@ export class PortableScriptRunner {
           engagementFlags: { llmAllowed: isEngagementAllowed(config) },
         },
         signal: controller.signal,
-        provenanceTrusted: scope === 'standard',
+        provenanceTrusted: scope === 'standard' || definition.provenanceTrusted === true,
         trustedReadOnlyStandard:
           scope === 'standard' && [...allowed].every((cap) => cap.endsWith('.read')),
         onRequest: async (method, params) => {
           checkActive();
-          if (run.calls.length >= 1_000) throw new Error('Script host call limit exceeded');
+          if (run.calls.length >= (limits.maxHostCalls ?? 1_000))
+            throw new Error('Script host call limit exceeded');
           const start = now();
           const call: ScriptRunCall = {
             at: new Date(start).toISOString(),
@@ -356,17 +403,20 @@ export class PortableScriptRunner {
             } finally {
               effects.delete(effect);
             }
-            if (accepting) {
+            // An outcome that lands after the guest ended but before the run
+            // is finalized is still this run's: the effects are drained before
+            // finalization, so the audit records what actually happened.
+            if (!finalized) {
               delete call.error;
               call.outputSummary = summarize(value);
             }
             return value;
           } catch (error) {
-            if (accepting) call.error = errorMessage(error);
+            if (!finalized) call.error = errorMessage(error);
             throw error;
           } finally {
             pending.delete(call);
-            if (accepting) {
+            if (!finalized) {
               call.durationMs = Math.max(0, now() - start);
               await persist();
             }
@@ -384,16 +434,24 @@ export class PortableScriptRunner {
             log(`${args.map((arg) => summarize(arg, 2_000)).join(' ')}\n`);
           } else throw new Error('Invalid script notification');
         },
-        onStdout: (line) => log(`[stdout] ${line}\n`),
-        onStderr: (line) => log(`[stderr] ${line}\n`),
+        // A line arriving after the run ended must not change a settled audit.
+        onStdout: (line) => accepting && log(`[stdout] ${line}\n`),
+        onStderr: (line) => accepting && log(`[stderr] ${line}\n`),
       });
       if (persistFailure) throw persistFailure;
       if (controller.signal.aborted) throw new Error('Script execution cancelled');
       if (budget.expired())
         throw new Error(`script timed out after ${timeoutMs}ms${budget.describeSuspension()}`);
+      if (result.sandboxFallback)
+        log(
+          '[sandbox] the OS sandbox failed to start; the script ran under the runtime permission model only\n',
+        );
       if (result.timedOut) throw new Error(`script timed out after ${timeoutMs}ms`);
       if (result.exitCode !== 0)
-        throw new Error(result.stderr || `script exited with code ${result.exitCode}`);
+        throw new Error(
+          host.describeFailure?.(result) ??
+            (result.stderr || `script exited with code ${result.exitCode}`),
+        );
       if (meta.outputs && !outputSeen)
         throw new Error('Script finished without declaring its output');
       if (outputSeen) run.output = validateScriptOutput(meta, output);
@@ -414,10 +472,12 @@ export class PortableScriptRunner {
         call.error =
           'Script execution ended while this host operation was pending; it may still complete. Check its outcome before retrying.';
       }
+      finalized = true;
       run.finishedAt = new Date(now()).toISOString();
     }
     // Persistence failures are surfaced; never claim completion with only an in-memory audit.
     if (persistFailure) throw persistFailure;
+    redactScriptRun(run, context.secrets);
     await persist();
     return run;
   }
@@ -457,7 +517,9 @@ function errorMessage(error: unknown): string {
 function summarize(value: unknown, max = 256): string {
   if (value === undefined) return '';
   try {
-    return JSON.stringify(value).slice(0, max);
+    // JSON escapes every backslash; collapse them so a Windows path reads as
+    // typed. A run of 2k backslashes always encodes k, so this is lossless.
+    return JSON.stringify(value).replace(/\\\\/g, '\\').slice(0, max);
   } catch {
     return String(value).slice(0, max);
   }

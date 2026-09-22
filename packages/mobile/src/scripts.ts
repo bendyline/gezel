@@ -1,5 +1,6 @@
 import { scripts } from 'virtual:gezel-portable-scripts';
 import { sdkTypes } from 'virtual:gezel-portable-sdk-types';
+import { ScriptNotFoundError } from '@bendyline/gezel';
 import {
   type PortableScriptDefinition,
   PortableScriptRunner,
@@ -32,8 +33,7 @@ export async function resolveMobileScript(
 ): Promise<PortableScriptDefinition> {
   if (scope !== 'standard')
     throw new Error('This device currently runs bundled standard scripts only');
-  if (!Object.hasOwn(scripts, name))
-    throw new Error(`Script "${name}" is not bundled on this device`);
+  if (!Object.hasOwn(scripts, name)) throw new ScriptNotFoundError(name, 'standard');
   return structuredClone(scripts[name]!);
 }
 
@@ -46,6 +46,9 @@ export function createMobileScripts(store: PortableStore): PortableScripts {
   const runner = new PortableScriptRunner({
     executor: new MobileQuickJSExecutor(),
     resolve: async (name, scope, context) => {
+      // A craftbook step's source is read from the task snapshot here, never supplied by the caller.
+      if (context.inlineSource !== undefined)
+        throw new Error('This device resolves craftbook scripts from the task snapshot');
       if (scope === 'standard') return resolveMobileScript(name, scope);
       let record: Awaited<ReturnType<typeof store.readScriptSource>> = null;
       let sourceCraftbook: PortableScriptDefinition['sourceCraftbook'];
@@ -75,7 +78,7 @@ export function createMobileScripts(store: PortableStore): PortableScripts {
         scope === 'user' ? { scope } : { scope: 'project', projectId: context.projectId },
         name,
       );
-      if (!record) throw new Error(`Script "${name}" was not found in ${scope} scope`);
+      if (!record) throw new ScriptNotFoundError(name, scope);
       const compiled = await compileMobileScript(record.source, name);
       if (!compiled.javascript || !compiled.meta)
         throw new Error(

@@ -9,12 +9,37 @@ import type { ScriptScope } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import { type CreateTaskRequest, CreateTaskRequestSchema } from '../schemas/task.js';
 import { roleHasTeamScope, roleToolNames } from '../tools/access.js';
+import { TOOL_DESCRIPTIONS } from '../tools/descriptions.js';
 import {
+  AddGezelToProjectInputSchema,
+  AdvanceTaskStepInputSchema,
+  AppendToFileInputSchema,
+  AskUserQuestionInputSchema,
+  CreateTaskInputSchema,
+  EmptyInputSchema,
   EnsureGezelInputSchema,
+  GetScriptRunInputSchema,
+  GetTaskInputSchema,
+  ListArtifactsInputSchema,
   ListDirectoryInputSchema,
+  ListDocumentsInputSchema,
+  ListProjectGezelsInputSchema,
+  ListScriptsInputSchema,
+  ListTasksInputSchema,
+  MessageGezelInputSchema,
   ReadDocumentInputSchema,
+  ReadFileInputSchema,
   ReadTaskNotesInputSchema,
+  ReplaceInFileInputSchema,
+  ReplaceLinesInputSchema,
+  RunInstalledScriptInputSchema,
+  SaveMemoryInputSchema,
+  SearchInputSchema,
+  SearchMemoryInputSchema,
+  StartProjectInputSchema,
+  UpdateProjectInputSchema,
   WriteDocumentInputSchema,
+  WriteFileInputSchema,
   WriteTaskNoteInputSchema,
 } from '../tools/inputs.js';
 import { unionStepKit } from '../tools/step-kit.js';
@@ -25,203 +50,88 @@ import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
 import { taskActiveAssignee } from './tasks.js';
 
-const path = z.string().min(1).max(2000);
-const text = z.string().max(128_000);
-const empty = z.object({}).strict();
-const project = z.string().optional();
 const definitions = {
   ask_user_question: {
-    description:
-      'Ask the user a question and end your turn. Their answer arrives in this conversation. Include choices for bounded decisions.',
-    input: AskQuestionRequestSchema.omit({
-      projectId: true,
-      gezelId: true,
-      sessionId: true,
-      prompt: true,
-    })
-      .extend({ question: z.string().min(1).max(128_000) })
-      .strict(),
+    description: TOOL_DESCRIPTIONS.ask_user_question,
+    input: AskUserQuestionInputSchema,
   },
-  list_gilde: { description: 'List bundled crew templates.', input: empty },
-  create_task: {
-    description: 'Create a task with explicit steps in this project.',
-    input: z
-      .object({
-        title: z.string(),
-        description: z.string().min(40),
-        steps: z
-          .array(
-            z.object({ name: z.string(), prompt: z.string(), terminal: z.boolean().optional() }),
-          )
-          .min(1)
-          .max(12),
-        assignee: z.object({ kind: z.literal('gezel'), gezelId: z.string() }).optional(),
-      })
-      .strict(),
-  },
+  list_gilde: { description: TOOL_DESCRIPTIONS.list_gilde, input: EmptyInputSchema },
+  create_task: { description: TOOL_DESCRIPTIONS.create_task, input: CreateTaskInputSchema },
   advance_task_step: {
-    description: 'Check the completion gate and advance the active task step.',
-    input: z
-      .object({ ref: z.string(), stepId: z.string().optional(), next: z.string().optional() })
-      .strict(),
+    description: TOOL_DESCRIPTIONS.advance_task_step,
+    input: AdvanceTaskStepInputSchema,
   },
-  list_gezels: { description: 'List the named crew.', input: empty },
-  ensure_gezel: {
-    description: 'Reuse or recruit a gezel for a job.',
-    input: EnsureGezelInputSchema,
-  },
-  list_projects: { description: 'List projects and their ids.', input: empty },
+  list_gezels: { description: TOOL_DESCRIPTIONS.list_gezels, input: EmptyInputSchema },
+  ensure_gezel: { description: TOOL_DESCRIPTIONS.ensure_gezel, input: EnsureGezelInputSchema },
+  list_projects: { description: TOOL_DESCRIPTIONS.list_projects, input: EmptyInputSchema },
   update_project: {
-    description: 'Update project brief, objectives or lead.',
-    input: UpdateProjectRequestSchema.pick({
-      name: true,
-      description: true,
-      about: true,
-      missionObjectives: true,
-      voormanGezelId: true,
-    })
-      .extend({ id: z.string() })
-      .strict(),
+    description: TOOL_DESCRIPTIONS.update_project,
+    input: UpdateProjectInputSchema,
   },
-  start_project: {
-    description: 'Create a project, lead and kickoff task, then hand off the brief.',
-    input: z
-      .object({
-        name: z.string().min(1).max(200),
-        about: text.optional(),
-        missionObjectives: text.optional(),
-        taskDescription: text.optional(),
-        taskTitle: z.string().optional(),
-        kickoffMessage: text.optional(),
-      })
-      .strict(),
-  },
+  start_project: { description: TOOL_DESCRIPTIONS.start_project, input: StartProjectInputSchema },
   list_project_gezels: {
-    description: 'List this project crew.',
-    input: z.object({ project }).strict(),
+    description: TOOL_DESCRIPTIONS.list_project_gezels,
+    input: ListProjectGezelsInputSchema,
   },
   add_gezel_to_project: {
-    description: 'Add an existing gezel to a project.',
-    input: z.object({ project: z.string(), gezel: z.string() }).strict(),
+    description: TOOL_DESCRIPTIONS.add_gezel_to_project,
+    input: AddGezelToProjectInputSchema,
   },
-  message_gezel: {
-    description:
-      'Hand work to a crew member; the reply appears in their conversation. End your turn after sending.',
-    input: z.object({ gezel: z.string(), project, message: text.min(1) }).strict(),
-  },
-  list_dir: { description: 'List workspace files.', input: ListDirectoryInputSchema },
-  read_file: {
-    description: 'Read a workspace text file.',
-    input: z
-      .object({
-        path,
-        offset: z.number().int().min(1).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-      })
-      .strict(),
-  },
-  write_file: {
-    description: 'Write a workspace text file.',
-    input: z.object({ path, content: text }).strict(),
-  },
-  append_to_file: {
-    description:
-      'Append only the missing tail to an existing workspace file. Set create:true explicitly to create a missing file.',
-    input: z.object({ path, content: text, create: z.boolean().optional() }).strict(),
-  },
+  message_gezel: { description: TOOL_DESCRIPTIONS.message_gezel, input: MessageGezelInputSchema },
+  list_dir: { description: TOOL_DESCRIPTIONS.list_dir, input: ListDirectoryInputSchema },
+  read_file: { description: TOOL_DESCRIPTIONS.read_file, input: ReadFileInputSchema },
+  write_file: { description: TOOL_DESCRIPTIONS.write_file, input: WriteFileInputSchema },
+  append_to_file: { description: TOOL_DESCRIPTIONS.append_to_file, input: AppendToFileInputSchema },
   replace_in_file: {
-    description:
-      'Edit an existing workspace file with a literal find/replace. By default exactly one match is required; occurrence selects a 1-based match or all. Returns the saved path and size.',
-    input: z
-      .object({
-        path,
-        find: text.min(1),
-        replace: text,
-        occurrence: z.union([z.number().int().positive(), z.literal('all')]).optional(),
-      })
-      .strict(),
+    description: TOOL_DESCRIPTIONS.replace_in_file,
+    input: ReplaceInFileInputSchema,
   },
-  replace_lines: {
-    description:
-      'Replace an inclusive 1-based line range in an existing workspace file. Empty content deletes the range. Read current line numbers after each edit.',
-    input: z
-      .object({
-        path,
-        startLine: z.number().int().positive(),
-        endLine: z.number().int().positive(),
-        content: text,
-      })
-      .strict(),
+  replace_lines: { description: TOOL_DESCRIPTIONS.replace_lines, input: ReplaceLinesInputSchema },
+  list_artifacts: {
+    description: TOOL_DESCRIPTIONS.list_artifacts,
+    input: ListArtifactsInputSchema,
   },
-  list_artifacts: { description: 'List project artifacts.', input: ListDirectoryInputSchema },
-  read_artifact: { description: 'Read a project artifact.', input: ReadDocumentInputSchema },
+  read_artifact: { description: TOOL_DESCRIPTIONS.read_artifact, input: ReadDocumentInputSchema },
   write_artifact: {
-    description: 'Save supporting notes or a report to the project artifacts.',
+    description: TOOL_DESCRIPTIONS.write_artifact,
     input: WriteDocumentInputSchema,
   },
   list_documents: {
-    description: 'List the shared document library.',
-    input: ListDirectoryInputSchema,
+    description: TOOL_DESCRIPTIONS.list_documents,
+    input: ListDocumentsInputSchema,
   },
-  read_document: { description: 'Read a shared text document.', input: ReadDocumentInputSchema },
+  read_document: { description: TOOL_DESCRIPTIONS.read_document, input: ReadDocumentInputSchema },
   write_document: {
-    description: 'Save shared guidelines or reference text.',
+    description: TOOL_DESCRIPTIONS.write_document,
     input: WriteDocumentInputSchema,
   },
-  search: {
-    description: 'Search text in this project.',
-    input: z
-      .object({ query: z.string().min(1), maxResults: z.number().int().min(1).max(20).optional() })
-      .strict(),
-  },
-  search_memory: {
-    description: 'Search your own or this project memories.',
-    input: z
-      .object({ query: z.string().min(1), scope: z.enum(['gezel', 'project']).optional() })
-      .strict(),
-  },
-  save_memory: {
-    description: 'Save a durable note for yourself or this project.',
-    input: z.object({ text: text.min(1), scope: z.enum(['gezel', 'project']).optional() }).strict(),
-  },
+  search: { description: TOOL_DESCRIPTIONS.search, input: SearchInputSchema },
+  search_memory: { description: TOOL_DESCRIPTIONS.search_memory, input: SearchMemoryInputSchema },
+  save_memory: { description: TOOL_DESCRIPTIONS.save_memory, input: SaveMemoryInputSchema },
   read_task_notes: {
-    description: 'Read dated task notes, newest first. Omit stepId for the complete feed.',
+    description: TOOL_DESCRIPTIONS.read_task_notes,
     input: ReadTaskNotesInputSchema,
   },
   write_task_note: {
-    description: 'Append a focused dated note to the current task, attributed to you.',
+    description: TOOL_DESCRIPTIONS.write_task_note,
     input: WriteTaskNoteInputSchema,
   },
-  list_tasks: { description: 'List tasks in this project.', input: empty },
-  get_task: {
-    description: 'Read a task and its steps.',
-    input: z.object({ ref: z.string() }).strict(),
-  },
-  list_scripts: {
-    description:
-      'List installed project, user and standard scripts with input fields and required capabilities.',
-    input: z.object({ project }).strict(),
-  },
+  list_tasks: { description: TOOL_DESCRIPTIONS.list_tasks, input: ListTasksInputSchema },
+  get_task: { description: TOOL_DESCRIPTIONS.get_task, input: GetTaskInputSchema },
+  list_scripts: { description: TOOL_DESCRIPTIONS.list_scripts, input: ListScriptsInputSchema },
   run_installed_script: {
-    description:
-      'Run an installed script by name from list_scripts. Default scope is project. Input is validated; declared capabilities and project policy are enforced.',
-    input: z
-      .object({
-        name: z.string(),
-        project,
-        scope: z.enum(['project', 'user', 'standard']).optional(),
-        input: z.record(z.string(), z.unknown()).optional(),
-      })
-      .strict(),
+    description: TOOL_DESCRIPTIONS.run_installed_script,
+    input: RunInstalledScriptInputSchema,
   },
-  get_script_run: {
-    description: 'Read a persisted script run, output, logs and call audit.',
-    input: z.object({ project, runId: z.string() }).strict(),
-  },
+  get_script_run: { description: TOOL_DESCRIPTIONS.get_script_run, input: GetScriptRunInputSchema },
 } as const;
 export type PortableToolName = keyof typeof definitions;
 export function portableToolNames(): ReadonlySet<string> {
   return new Set(Object.keys(definitions));
+}
+/** The input schema a tool is registered with here, for cross-host contract tests. */
+export function portableToolInputSchema(name: string): z.ZodTypeAny | undefined {
+  return Object.hasOwn(definitions, name) ? definitions[name as PortableToolName].input : undefined;
 }
 
 export interface PortableToolActions {
@@ -230,7 +140,7 @@ export interface PortableToolActions {
   ): Promise<{ questionId: string; deduped?: boolean }>;
   recruit(role: string): Promise<{ id: string; name: string; role?: string }>;
   templates(): unknown;
-  createTask(input: CreateTaskRequest): Promise<unknown>;
+  createTask(input: CreateTaskRequest, projectId: string): Promise<unknown>;
   completeTask(ref: string, next?: string): Promise<unknown>;
   scripts?: {
     list(projectId: string): unknown;
@@ -352,9 +262,14 @@ export async function executePortableTool(
   }
   if (name === 'ask_user_question') {
     if (!actions.askQuestion) throw new Error('Questions are unavailable on this host');
-    const { question, ...rest } = args;
-    return actions.askQuestion({ ...rest, prompt: String(question) });
+    const { question, prompt, description, ...rest } = args;
+    const text = [question, prompt, description].find(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    );
+    if (!text) throw new Error('Provide the question text');
+    return actions.askQuestion({ ...rest, prompt: text });
   }
+  assertPortableTextBudget(args);
   if (name === 'append_to_file' || name === 'replace_in_file' || name === 'replace_lines') {
     const file = String(args.path);
     return store.editWorkspaceFile(session.projectId, file, (before) => {
@@ -392,7 +307,19 @@ export async function executePortableTool(
     return { gezelId: member.id, name: member.name, role: member.role };
   }
   if (name === 'list_gilde') return actions.templates();
-  if (name === 'create_task') return actions.createTask(CreateTaskRequestSchema.parse(args));
+  if (name === 'create_task') {
+    // No craftbook catalogue on this host: a task needs its steps spelled out.
+    if (!Array.isArray(args.steps) || args.steps.length === 0)
+      throw new Error('This host needs the task steps spelled out');
+    if (args.steps.length > PORTABLE_MAX_TASK_STEPS)
+      throw new Error(`This host runs tasks of at most ${PORTABLE_MAX_TASK_STEPS} steps`);
+    const destination = await store.getProject(target);
+    if (!destination) throw new Error('Project not found');
+    if (destination.status === 'readonly' || destination.status === 'inactive')
+      throw new Error('The destination project does not accept changes');
+    const { project: _project, ...request } = args;
+    return actions.createTask(CreateTaskRequestSchema.parse(request), destination.id);
+  }
   if (name === 'advance_task_step') {
     const task = await store.getTask(String(args.ref));
     if (!task || task.projectId !== session.projectId)
@@ -421,9 +348,11 @@ export async function executePortableTool(
   }
   if (name === 'message_gezel') {
     const gezels = await store.listGezels();
+    const wanted = typeof args.gezel === 'string' ? args.gezel : args.gezelId;
+    if (typeof wanted !== 'string' || !wanted.trim()) throw new Error('Name the gezel to message');
     const member =
-      gezels.find((g) => g.id === args.gezel) ??
-      gezels.find((g) => g.name.toLowerCase() === String(args.gezel).toLowerCase());
+      gezels.find((g) => g.id === wanted) ??
+      gezels.find((g) => g.name.toLowerCase() === wanted.toLowerCase());
     if (!member || member.id === session.gezelId) throw new Error('Choose another available gezel');
     // Check before the roster write, not after: a refusal must leave nothing behind.
     actions.assertHandoffAllowed(member.id);
@@ -452,8 +381,15 @@ export async function executePortableTool(
     const note = await store.appendTaskNote(task.ref, body, stepId, session.gezelId);
     return { operation: 'write_note', ref: task.ref, ...(stepId ? { stepId } : {}), note };
   }
-  if (name === 'list_tasks')
-    return { tasks: await store.listTasks({ projectId: session.projectId }) };
+  if (name === 'list_tasks') {
+    const tasks = (await store.listTasks({ projectId: target })).filter(
+      (task) =>
+        (!args.status || task.status === args.status) &&
+        (!args.assignee ||
+          (task.assignee.kind === 'gezel' && task.assignee.gezelId === args.assignee)),
+    );
+    return { tasks };
+  }
   if (name === 'get_task') {
     const task = await store.getTask(String(args.ref));
     if (!task || (task.projectId !== session.projectId && !team))
@@ -480,18 +416,20 @@ export async function executePortableTool(
   if (name === 'search')
     return store.searchProject(session.projectId, {
       query: String(args.query),
-      maxResults: args.maxResults as number | undefined,
+      // The contract allows up to 100; this host can afford 20.
+      maxResults: Math.min(20, (args.maxResults as number | undefined) ?? 20),
     });
   if (name === 'save_memory' || name === 'search_memory') {
     const scope = args.scope === 'project' ? 'project' : 'gezel';
     const id = scope === 'project' ? session.projectId : session.gezelId;
-    return name === 'save_memory'
-      ? store.saveMemory({ scope, id, text: String(args.text) })
-      : store.searchMemories({
-          gezelId: session.gezelId,
-          projectId: session.projectId,
-          query: String(args.query),
-        });
+    if (name === 'save_memory') return store.saveMemory({ scope, id, text: String(args.text) });
+    const found = await store.searchMemories({
+      gezelId: session.gezelId,
+      projectId: session.projectId,
+      query: String(args.query),
+    });
+    const topK = typeof args.topK === 'number' ? args.topK : 10;
+    return Array.isArray(found) ? found.slice(0, topK) : found;
   }
   const area =
     name.endsWith('document') || name === 'list_documents'
@@ -501,23 +439,49 @@ export async function executePortableTool(
         : 'workspace';
   const projectId = area === 'documents' ? undefined : session.projectId;
   if (name.startsWith('list_'))
-    return store.listFiles(area, projectId, args.path === '.' ? '' : String(args.path ?? ''));
+    return store.listFiles(
+      area,
+      projectId,
+      args.path === '.' ? '' : String(args.path ?? ''),
+      // The artifacts drawer walks its subtree by default; the others list one level.
+      typeof args.recursive === 'boolean' ? args.recursive : name === 'list_artifacts',
+    );
   if (name.startsWith('read_')) {
     const content = await store.readFile(area, projectId, String(args.path));
     if (content === null) throw new Error('File not found');
     const lines = content.split('\n');
-    const offset = Number(args.offset ?? 1);
-    const end = offset - 1 + Number(args.limit ?? 120);
+    // The same range contract as the desktop: 1-based, inclusive, whole file by default.
+    const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
+    const endLine = typeof args.endLine === 'number' ? args.endLine : lines.length;
     return {
       path: args.path,
-      content: lines.slice(offset - 1, end).join('\n'),
+      content: lines.slice(startLine - 1, endLine).join('\n'),
       totalLines: lines.length,
-      truncated: end < lines.length,
+      truncated: endLine < lines.length,
     };
   }
   if (name.startsWith('write_')) {
-    await store.writeFile(area, projectId, String(args.path), String(args.content));
+    const content = artifactText(args);
+    await store.writeFile(area, projectId, String(args.path), content);
     return { path: args.path, written: true };
   }
   throw new Error(`Tool ${name} is not implemented`);
+}
+
+/** Host budgets: the shared contracts carry no size caps, this device does. */
+export const PORTABLE_MAX_TEXT_CHARS = 128_000;
+export const PORTABLE_MAX_TASK_STEPS = 12;
+
+function assertPortableTextBudget(args: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(args))
+    if (typeof value === 'string' && value.length > PORTABLE_MAX_TEXT_CHARS)
+      throw new Error(`${key} exceeds this host's ${PORTABLE_MAX_TEXT_CHARS}-character limit`);
+}
+
+/** `write_artifact` takes text, a structured value, or `jsonContent`; the rest take text. */
+function artifactText(args: Record<string, unknown>): string {
+  const value = args.jsonContent ?? args.content;
+  if (typeof value === 'string') return value;
+  if (value !== undefined && value !== null) return `${JSON.stringify(value, null, 2)}\n`;
+  throw new Error('Provide content or jsonContent');
 }

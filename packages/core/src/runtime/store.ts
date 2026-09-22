@@ -21,6 +21,7 @@ import type { ChatSession } from '../schemas/session.js';
 import type { RestoreConfirm } from '../schemas/storage.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import * as backup from './backup.js';
+import { promptDraftFiles, promptDraftHost } from './drafts-portable.js';
 import * as drafts from './drafts.js';
 import * as gezels from './gezels.js';
 import { ensureLayout } from './layout.js';
@@ -348,31 +349,65 @@ export class PortableStore {
   ) {
     return this.run((repo) => files.renameFile(repo, area, projectId, from, to));
   }
-  listPromptDrafts(projectId: string, options: Parameters<typeof drafts.listPromptDrafts>[2] = {}) {
-    return this.run((repo) => drafts.listPromptDrafts(repo, projectId, options));
+  private draftPort(repo: PortableRepository, projectId: string) {
+    return { files: promptDraftFiles(repo, projectId), host: promptDraftHost(repo) };
+  }
+  listPromptDrafts(projectId: string, options: drafts.PromptDraftListFilter = {}) {
+    return this.run(async (repo) => {
+      await projects.requireProject(repo, projectId);
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.listPromptDrafts(files, host, projectId, options);
+    });
   }
   getPromptDraft(projectId: string, id: string) {
-    return this.run((repo) => drafts.getPromptDraft(repo, projectId, id));
+    return this.run(async (repo) => {
+      await projects.requireProject(repo, projectId);
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.getPromptDraft(files, host, projectId, id);
+    });
   }
   createPromptDraft(projectId: string, input: CreatePromptDraftRequest) {
-    return this.run((repo) => drafts.createPromptDraft(repo, projectId, input));
+    return this.run((repo) => {
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.createPromptDraft(files, host, projectId, input);
+    });
   }
   writePromptDraftContent(projectId: string, id: string, content: string) {
-    return this.run((repo) => drafts.writePromptDraftContent(repo, projectId, id, content));
+    return this.run(async (repo) => {
+      const { files, host } = this.draftPort(repo, projectId);
+      const { meta: _meta, ...result } = await drafts.writePromptDraftContent(
+        files,
+        host,
+        projectId,
+        id,
+        content,
+      );
+      return result;
+    });
   }
   patchPromptDraft(projectId: string, id: string, patch: PatchPromptDraftRequest) {
-    return this.run((repo) => drafts.patchPromptDraft(repo, projectId, id, patch));
+    return this.run((repo) => {
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.patchPromptDraft(files, host, projectId, id, patch);
+    });
   }
   deletePromptDraft(projectId: string, id: string) {
-    return this.run((repo) => drafts.deletePromptDraft(repo, projectId, id));
+    return this.run(async (repo) => {
+      const { files } = this.draftPort(repo, projectId);
+      return (await drafts.deletePromptDraft(files, projectId, id)).deleted;
+    });
   }
   duplicatePromptDraft(projectId: string, id: string, options: DuplicatePromptDraftRequest = {}) {
-    return this.run((repo) => drafts.duplicatePromptDraft(repo, projectId, id, options));
+    return this.run((repo) => {
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.duplicatePromptDraft(files, host, projectId, id, options);
+    });
   }
   markPromptDraftSent(projectId: string, id: string, sessionId: string, messageAt?: string) {
-    return this.run((repo) =>
-      drafts.markPromptDraftSent(repo, projectId, id, sessionId, messageAt),
-    );
+    return this.run((repo) => {
+      const { files, host } = this.draftPort(repo, projectId);
+      return drafts.markPromptDraftSent(files, host, projectId, id, { sessionId, messageAt });
+    });
   }
   writeScriptRun(run: ScriptRun) {
     return this.run((repo) => scriptRuns.writeScriptRun(repo, run));

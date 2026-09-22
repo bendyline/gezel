@@ -1,54 +1,48 @@
-import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CreatePromptDraftRequest,
   type DuplicatePromptDraftRequest,
   KeyedLock,
-  PROMPT_DRAFT_FILES_DIR_NAME,
-  PROMPT_DRAFT_MESSAGE_FILE,
-  PROMPT_DRAFT_META_FILE,
   type PatchPromptDraftRequest,
   type PromptDraft,
   type PromptDraftMeta,
-  PromptDraftMetaSchema,
   type PromptDraftStatus,
   type PromptDraftSummary,
   createLogger,
-  derivePromptDraftTitle,
-  formatPromptDraftId,
-  isPromptDraftId,
   nowIso,
-  parsePromptDraftId,
 } from '@bendyline/gezel';
 import { PROJECT_PROMPTS_DIR_NAME } from '@bendyline/gezel/paths';
+import {
+  PromptDraftInvalidIdError,
+  PromptDraftNotFoundError,
+  createPromptDraft,
+  deletePromptDraft,
+  duplicatePromptDraft,
+  getPromptDraft,
+  listPromptDrafts,
+  markPromptDraftSent,
+  patchPromptDraft,
+  planSessionCleanup,
+  stampPromptDraftSentMessageAt,
+  sweepableSentDrafts,
+  writePromptDraftContent,
+} from '@bendyline/gezel/runtime';
 import type { ChatEventBus } from '../chat/events.js';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { isSyncJunkName } from '../fs/sync-junk.js';
+import { nodePromptDraftFiles } from './node-files.js';
 
 /**
- * Owner of `artifacts/prompts/` — the messages a user is still writing.
+ * Owner of `artifacts/prompts/` on the desktop.
  *
- * A deliberate carve-out from `Store`: a draft folder is a small document
- * tree (`message.md` + `message_files/` + `draft.json`) whose files the
- * squisq editor writes directly through the ordinary artifact routes, so
- * routing the metadata through Store's schema-per-entity layer would buy
- * nothing and split ownership in two.
- *
- * Three habits are load-bearing:
- *
- * - **`touchProject` is never called.** Autosave writes here about once a
- *   second while someone types, and `project.updatedAt` is read elsewhere as
- *   "this project saw activity" by the nudge scheduler. A draft is private
- *   scratch; it is not the project doing anything.
- * - **Allocation and every metadata mutation run under a per-project lock.**
- *   The id is `max(existing sequence) + 1` read off the directory listing —
- *   no counter file to corrupt or migrate — which is only safe if two
- *   concurrent creates cannot both read the same max.
- * - **The folder name is the record.** A draft whose folder was renamed by
- *   hand to something that is not an id stops being listed; the files are
- *   still there and nothing is lost, but this manager will not adopt it.
+ * The draft logic itself is the shared module in core, the same one the
+ * portable host runs; this class supplies what the desktop adds: a
+ * per-project lock around allocation and every metadata change, and a
+ * project-stream event after each one. `touchProject` is never called here,
+ * by construction — the shared module cannot reach the project record.
  */
+
+export { PromptDraftInvalidIdError, PromptDraftNotFoundError };
 
 const log = createLogger('prompt-drafts');
 
@@ -65,32 +59,28 @@ export interface PromptDraftListFilter {
   status?: PromptDraftStatus;
 }
 
-export class PromptDraftNotFoundError extends Error {
-  readonly code = 'prompt-draft-not-found' as const;
-  constructor(draftId: string) {
-    super(`prompt draft not found: ${draftId}`);
-    this.name = 'PromptDraftNotFoundError';
-  }
-}
-
-export class PromptDraftInvalidIdError extends Error {
-  readonly code = 'prompt-draft-invalid-id' as const;
-  constructor(draftId: string) {
-    super(`not a prompt draft id: ${draftId}`);
-    this.name = 'PromptDraftInvalidIdError';
-  }
-}
-
 export class PromptDraftManager {
   private readonly store: Store;
   private readonly events: Pick<ChatEventBus, 'publishProjectEvent'> | undefined;
   private readonly now: () => Date;
   private readonly locks = new KeyedLock();
+  private readonly host: {
+    now: () => string;
+    allocatedAt: () => string;
+    isJunkName: (name: string) => boolean;
+  };
 
   constructor(opts: PromptDraftManagerOptions) {
     this.store = opts.store;
     this.events = opts.events;
     this.now = opts.now ?? (() => new Date());
+    // Timestamps read the real clock; only the id's date follows an injected
+    // `now`, which is what lets a test mint drafts across days.
+    this.host = {
+      now: () => nowIso(),
+      allocatedAt: () => this.now().toISOString(),
+      isJunkName: isSyncJunkName,
+    };
   }
 
   rootDir(projectId: string): string {
@@ -98,92 +88,45 @@ export class PromptDraftManager {
   }
 
   draftDir(projectId: string, draftId: string): string {
-    if (!isPromptDraftId(draftId)) throw new PromptDraftInvalidIdError(draftId);
+    if (!/^\d{4}-\d{2}-\d{2}-\d{4,}$/.test(draftId)) throw new PromptDraftInvalidIdError(draftId);
     return join(this.rootDir(projectId), draftId);
   }
 
+  private files(projectId: string) {
+    return nodePromptDraftFiles(this.rootDir(projectId));
+  }
+
   async list(projectId: string, filter: PromptDraftListFilter = {}): Promise<PromptDraftSummary[]> {
-    const ids = await this.listDraftIds(projectId);
-    const out: PromptDraftSummary[] = [];
-    for (const id of ids) {
-      const summary = await this.readSummary(projectId, id);
-      if (!summary) continue;
-      if (filter.gezelId && summary.gezelId !== filter.gezelId) continue;
-      if (filter.sessionId !== undefined && summary.sessionId !== filter.sessionId) continue;
-      if (filter.status && summary.status !== filter.status) continue;
-      out.push(summary);
-    }
-    // Most recently touched first, with the sequence as the tie-break so two
-    // drafts saved in the same millisecond still have a stable order.
-    out.sort((a, b) => {
-      if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
-      return (parsePromptDraftId(b.id)?.seq ?? 0) - (parsePromptDraftId(a.id)?.seq ?? 0);
-    });
-    return out;
+    return listPromptDrafts(this.files(projectId), this.host, projectId, filter);
   }
 
   async get(projectId: string, draftId: string): Promise<PromptDraft | null> {
-    const meta = await this.readMeta(projectId, draftId);
-    if (!meta) return null;
-    const content = await this.readContent(projectId, draftId);
-    const fileCount = await this.countFiles(projectId, draftId);
-    return { ...meta, ...this.derived(content, fileCount), content };
+    return getPromptDraft(this.files(projectId), this.host, projectId, draftId);
   }
 
   async create(projectId: string, input: CreatePromptDraftRequest): Promise<PromptDraft> {
-    const content = input.content ?? '';
     return this.locks.run(projectId, async () => {
-      const id = await this.allocateId(projectId);
-      const at = nowIso();
-      const meta: PromptDraftMeta = {
-        id,
-        projectId,
-        gezelId: input.gezelId,
-        sessionId: input.sessionId ?? null,
-        ...(input.taskRef ? { taskRef: input.taskRef } : {}),
-        ...(input.craftbookRef ? { craftbookRef: input.craftbookRef } : {}),
-        ...(input.scope ? { scope: input.scope } : {}),
-        createdAt: at,
-        updatedAt: at,
-        status: 'draft',
-      };
-      const dir = this.draftDir(projectId, id);
-      await mkdir(join(dir, PROMPT_DRAFT_FILES_DIR_NAME), { recursive: true });
-      await writeFileAtomic(join(dir, PROMPT_DRAFT_MESSAGE_FILE), content);
-      await this.writeMeta(projectId, meta);
-      this.publish(meta);
-      return { ...meta, ...this.derived(content, 0), content };
+      const draft = await createPromptDraft(this.files(projectId), this.host, projectId, input);
+      this.publish(draft);
+      return draft;
     });
   }
 
-  /**
-   * Save the draft's text. A draft with nothing in it and nothing attached is
-   * deleted rather than kept: the composer clears itself on send and on
-   * discard, and a husk left behind would show up as a blank row in the
-   * picker forever.
-   */
   async writeContent(
     projectId: string,
     draftId: string,
     content: string,
   ): Promise<{ draft: PromptDraftSummary | null; deleted: boolean }> {
     return this.locks.run(projectId, async () => {
-      const meta = await this.readMeta(projectId, draftId);
-      if (!meta) throw new PromptDraftNotFoundError(draftId);
-      const fileCount = await this.countFiles(projectId, draftId);
-      if (!content.trim() && fileCount === 0) {
-        await this.removeDir(projectId, draftId);
-        this.publish({ ...meta, updatedAt: nowIso() }, true);
-        return { draft: null, deleted: true };
-      }
-      await writeFileAtomic(
-        join(this.draftDir(projectId, draftId), PROMPT_DRAFT_MESSAGE_FILE),
+      const { meta, ...result } = await writePromptDraftContent(
+        this.files(projectId),
+        this.host,
+        projectId,
+        draftId,
         content,
       );
-      const next: PromptDraftMeta = { ...meta, updatedAt: nowIso() };
-      await this.writeMeta(projectId, next);
-      this.publish(next);
-      return { draft: { ...next, ...this.derived(content, fileCount) }, deleted: false };
+      this.publish(meta, result.deleted);
+      return result;
     });
   }
 
@@ -194,28 +137,22 @@ export class PromptDraftManager {
     patch: PatchPromptDraftRequest,
   ): Promise<PromptDraftSummary> {
     return this.locks.run(projectId, async () => {
-      const meta = await this.readMeta(projectId, draftId);
-      if (!meta) throw new PromptDraftNotFoundError(draftId);
-      const next: PromptDraftMeta = { ...meta, updatedAt: nowIso() };
-      if (patch.gezelId !== undefined) next.gezelId = patch.gezelId;
-      if (patch.sessionId !== undefined) next.sessionId = patch.sessionId;
-      for (const key of ['taskRef', 'craftbookRef', 'scope'] as const) {
-        const value = patch[key];
-        if (value === undefined) continue;
-        if (value === null) delete next[key];
-        else next[key] = value;
-      }
-      await this.writeMeta(projectId, next);
-      this.publish(next);
-      return this.summarize(projectId, next);
+      const { content: _content, ...summary } = await patchPromptDraft(
+        this.files(projectId),
+        this.host,
+        projectId,
+        draftId,
+        patch,
+      );
+      this.publish(summary);
+      return summary;
     });
   }
 
   /**
    * Record that this draft was sent. `content` is the ORIGINAL
    * document-relative markdown, not the rewritten form the transcript
-   * carries: the draft stays an editable document, and rewriting its own
-   * refs would break the editor's Files panel and any later reuse.
+   * carries: the draft stays an editable document.
    */
   async markSent(
     projectId: string,
@@ -223,40 +160,23 @@ export class PromptDraftManager {
     info: { sessionId: string; content?: string },
   ): Promise<PromptDraftSummary> {
     return this.locks.run(projectId, async () => {
-      const meta = await this.readMeta(projectId, draftId);
-      if (!meta) throw new PromptDraftNotFoundError(draftId);
-      if (info.content !== undefined) {
-        await writeFileAtomic(
-          join(this.draftDir(projectId, draftId), PROMPT_DRAFT_MESSAGE_FILE),
-          info.content,
-        );
-      }
-      const at = nowIso();
-      const next: PromptDraftMeta = {
-        ...meta,
-        sessionId: meta.sessionId ?? info.sessionId,
-        status: 'sent',
-        sentAt: at,
-        sentSessionId: info.sessionId,
-        updatedAt: at,
-      };
-      await this.writeMeta(projectId, next);
-      this.publish(next);
-      return this.summarize(projectId, next);
+      const { content: _content, ...summary } = await markPromptDraftSent(
+        this.files(projectId),
+        this.host,
+        projectId,
+        draftId,
+        info,
+      );
+      this.publish(summary);
+      return summary;
     });
   }
 
-  /**
-   * Stamp the `at` of the persisted user message. Best-effort and quiet: the
-   * send route accepts before the turn writes its message, so this lands a
-   * beat later and nothing gates on it.
-   */
+  /** Stamp the `at` of the persisted user message. Quiet when the draft is gone. */
   async noteSentMessageAt(projectId: string, draftId: string, at: string): Promise<void> {
-    await this.locks.run(projectId, async () => {
-      const meta = await this.readMeta(projectId, draftId);
-      if (!meta) return;
-      await this.writeMeta(projectId, { ...meta, sentMessageAt: at });
-    });
+    await this.locks.run(projectId, () =>
+      stampPromptDraftSentMessageAt(this.files(projectId), projectId, draftId, at),
+    );
   }
 
   /** "Use again" — copy a draft's text and files into a fresh open draft. */
@@ -265,60 +185,51 @@ export class PromptDraftManager {
     draftId: string,
     input: DuplicatePromptDraftRequest = {},
   ): Promise<PromptDraft> {
-    const source = await this.get(projectId, draftId);
-    if (!source) throw new PromptDraftNotFoundError(draftId);
-    const created = await this.create(projectId, {
-      gezelId: source.gezelId,
-      sessionId: input.sessionId !== undefined ? input.sessionId : source.sessionId,
-      content: source.content,
-      ...(source.taskRef ? { taskRef: source.taskRef } : {}),
-      ...(source.craftbookRef ? { craftbookRef: source.craftbookRef } : {}),
-      ...(source.scope ? { scope: source.scope } : {}),
-    });
-    if (source.hasFiles) {
-      const { cp } = await import('node:fs/promises');
-      await cp(
-        join(this.draftDir(projectId, draftId), PROMPT_DRAFT_FILES_DIR_NAME),
-        join(this.draftDir(projectId, created.id), PROMPT_DRAFT_FILES_DIR_NAME),
-        { recursive: true },
+    return this.locks.run(projectId, async () => {
+      const draft = await duplicatePromptDraft(
+        this.files(projectId),
+        this.host,
+        projectId,
+        draftId,
+        input,
       );
-    }
-    return (await this.get(projectId, created.id)) ?? created;
+      this.publish(draft);
+      return draft;
+    });
   }
 
   async delete(projectId: string, draftId: string): Promise<boolean> {
     return this.locks.run(projectId, async () => {
-      const meta = await this.readMeta(projectId, draftId);
-      if (!meta) return false;
-      await this.removeDir(projectId, draftId);
-      this.publish({ ...meta, updatedAt: nowIso() }, true);
-      return true;
+      const { deleted, meta } = await deletePromptDraft(this.files(projectId), projectId, draftId);
+      if (meta) this.publish({ ...meta, updatedAt: this.host.now() }, true);
+      return deleted;
     });
   }
 
   /**
-   * A thread was deleted. Its sent drafts go with it — they record a
-   * conversation that no longer exists — while unsent ones are detached
-   * rather than destroyed: those words are still the user's, they just have
-   * nowhere to go yet.
+   * A thread was deleted. Its sent drafts go with it; its unsent ones are
+   * detached rather than destroyed.
    */
   async onSessionDeleted(
     projectId: string,
     sessionId: string,
   ): Promise<{ deleted: number; detached: number }> {
-    const drafts = await this.list(projectId, { sessionId });
+    const plan = planSessionCleanup(await this.list(projectId, { sessionId }), sessionId);
     let deleted = 0;
     let detached = 0;
-    for (const draft of drafts) {
+    for (const id of plan.delete) {
       try {
-        if (draft.status === 'sent') {
-          if (await this.delete(projectId, draft.id)) deleted += 1;
-        } else {
-          await this.patchMeta(projectId, draft.id, { sessionId: null });
-          detached += 1;
-        }
+        if (await this.delete(projectId, id)) deleted += 1;
       } catch (err) {
-        log.warn(`session cleanup failed for ${projectId}/${draft.id}: ${describe(err)}`);
+        log.warn(`session cleanup failed for ${projectId}/${id}: ${describe(err)}`);
+      }
+    }
+    for (const id of plan.detach) {
+      try {
+        await this.patchMeta(projectId, id, { sessionId: null });
+        detached += 1;
+      } catch (err) {
+        log.warn(`session cleanup failed for ${projectId}/${id}: ${describe(err)}`);
       }
     }
     return { deleted, detached };
@@ -326,126 +237,18 @@ export class PromptDraftManager {
 
   /** Remove sent drafts last sent before `cutoffIso`. Unsent are never swept. */
   async sweepSent(projectId: string, cutoffIso: string): Promise<number> {
-    const drafts = await this.list(projectId, { status: 'sent' });
     let removed = 0;
-    for (const draft of drafts) {
-      const sentAt = draft.sentAt ?? draft.updatedAt;
-      if (sentAt >= cutoffIso) continue;
+    for (const id of sweepableSentDrafts(
+      await this.list(projectId, { status: 'sent' }),
+      cutoffIso,
+    )) {
       try {
-        if (await this.delete(projectId, draft.id)) removed += 1;
+        if (await this.delete(projectId, id)) removed += 1;
       } catch (err) {
-        log.warn(`sweep failed for ${projectId}/${draft.id}: ${describe(err)}`);
+        log.warn(`sweep failed for ${projectId}/${id}: ${describe(err)}`);
       }
     }
     return removed;
-  }
-
-  // ---------- internals ----------
-
-  private async allocateId(projectId: string): Promise<string> {
-    const ids = await this.listDraftIds(projectId);
-    let maxSeq = 0;
-    for (const id of ids) {
-      const seq = parsePromptDraftId(id)?.seq ?? 0;
-      if (seq > maxSeq) maxSeq = seq;
-    }
-    return formatPromptDraftId(this.now(), maxSeq + 1);
-  }
-
-  private async listDraftIds(projectId: string): Promise<string[]> {
-    let entries: string[];
-    try {
-      entries = await readdir(this.rootDir(projectId));
-    } catch {
-      return [];
-    }
-    return entries.filter((name) => isPromptDraftId(name));
-  }
-
-  private async readMeta(projectId: string, draftId: string): Promise<PromptDraftMeta | null> {
-    let raw: string;
-    try {
-      raw = await readFile(join(this.draftDir(projectId, draftId), PROMPT_DRAFT_META_FILE), 'utf8');
-    } catch {
-      return null;
-    }
-    try {
-      return PromptDraftMetaSchema.parse(JSON.parse(raw));
-    } catch (err) {
-      log.warn(`unreadable draft metadata at ${projectId}/${draftId}: ${describe(err)}`);
-      return null;
-    }
-  }
-
-  private async writeMeta(projectId: string, meta: PromptDraftMeta): Promise<void> {
-    await writeFileAtomic(
-      join(this.draftDir(projectId, meta.id), PROMPT_DRAFT_META_FILE),
-      `${JSON.stringify(meta, null, 2)}\n`,
-    );
-  }
-
-  private async readContent(projectId: string, draftId: string): Promise<string> {
-    try {
-      return await readFile(
-        join(this.draftDir(projectId, draftId), PROMPT_DRAFT_MESSAGE_FILE),
-        'utf8',
-      );
-    } catch {
-      return '';
-    }
-  }
-
-  private async countFiles(projectId: string, draftId: string): Promise<number> {
-    const dir = join(this.draftDir(projectId, draftId), PROMPT_DRAFT_FILES_DIR_NAME);
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return 0;
-    }
-    let count = 0;
-    for (const name of entries) {
-      // A stray .DS_Store must not keep an empty draft alive.
-      if (isSyncJunkName(name)) continue;
-      try {
-        if ((await stat(join(dir, name))).isFile()) count += 1;
-      } catch {
-        /* vanished between listing and stat */
-      }
-    }
-    return count;
-  }
-
-  private async removeDir(projectId: string, draftId: string): Promise<void> {
-    // Retries because an editor on Windows may still hold a just-written file.
-    await rm(this.draftDir(projectId, draftId), {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 50,
-    });
-  }
-
-  private derived(
-    content: string,
-    fileCount: number,
-  ): Pick<PromptDraftSummary, 'title' | 'hasFiles' | 'fileCount'> {
-    return { title: derivePromptDraftTitle(content), hasFiles: fileCount > 0, fileCount };
-  }
-
-  private async readSummary(
-    projectId: string,
-    draftId: string,
-  ): Promise<PromptDraftSummary | null> {
-    const meta = await this.readMeta(projectId, draftId);
-    if (!meta) return null;
-    return this.summarize(projectId, meta);
-  }
-
-  private async summarize(projectId: string, meta: PromptDraftMeta): Promise<PromptDraftSummary> {
-    const content = await this.readContent(projectId, meta.id);
-    const fileCount = await this.countFiles(projectId, meta.id);
-    return { ...meta, ...this.derived(content, fileCount) };
   }
 
   private publish(meta: PromptDraftMeta, deleted?: boolean): void {

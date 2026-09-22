@@ -1,5 +1,6 @@
 import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
+import { BACKUP_MANIFEST_KIND, BACKUP_SCHEMA_VERSION } from '../schemas/storage.js';
 import { readBackupZip, writeBackupZip } from './backup-zip.js';
 import { handlePortableDataRequest } from './data-routes.js';
 import { decodeText, encodeText } from './files.js';
@@ -342,6 +343,51 @@ describe('portable backup validation and transactional restore', () => {
     view.setUint32(centralOffset + 24, 1, true);
     await expect(readBackupZip(archive)).rejects.toThrow(/declared size/);
   });
+  it('accepts a desktop-shaped archive that carries a history file', async () => {
+    // Desktop backups list `settings/history.jsonl`; a phone never restores
+    // it, but refusing the archive over it locked users out of every restore.
+    const { store } = portableFixture();
+    await store.ensureLayout();
+    const manifest = {
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      kind: BACKUP_MANIFEST_KIND,
+      createdAt: '2026-09-22T00:00:00.000Z',
+      gezelVersion: '1.2.3',
+      platform: 'darwin',
+      externalFolders: null,
+      secretsExcluded: true,
+      items: [
+        {
+          kind: 'settings-file',
+          id: 'config.json',
+          label: 'Settings',
+          entryPrefix: 'settings/config.json',
+          bytes: 2,
+          fileCount: 1,
+        },
+        {
+          kind: 'settings-file',
+          id: 'history.jsonl',
+          label: 'History',
+          entryPrefix: 'settings/history.jsonl',
+          bytes: 17,
+          fileCount: 1,
+        },
+      ],
+    };
+    const archive = writeBackupZip(
+      new Map([
+        ['manifest.json', encodeText(JSON.stringify(manifest))],
+        ['settings/config.json', encodeText('{}')],
+        ['settings/history.jsonl', encodeText('{"event":"boot"}\n')],
+      ]),
+    );
+    const review = await store.scanRestore(archive);
+    expect(review.items.map((item) => item.id).sort()).toEqual(['config.json', 'history.jsonl']);
+    await store.confirmRestore(review.restoreId, { items: [], settings: true });
+    expect(await store.readConfig()).toBeTruthy();
+  });
+
   it('serves real search and backup routes and checks the restore activity guard before publishing', async () => {
     const { store } = portableFixture();
     await store.ensureLayout();

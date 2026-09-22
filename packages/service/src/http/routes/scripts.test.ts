@@ -61,7 +61,7 @@ describe('script source endpoints', () => {
       description: 'Says hello to whoever runs it.',
       template: 'blank',
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const created = (await res.json()) as { name: string; source: string; hash: string };
     expect(created.source).toContain('defineScript');
     expect(created.source).toContain("name: 'hello-script'");

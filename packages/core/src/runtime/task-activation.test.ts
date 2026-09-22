@@ -134,7 +134,10 @@ describe('portable task activation authority', () => {
       const generate = vi
         .fn()
         .mockResolvedValueOnce({
-          text: JSON.stringify({ name: 'advance_task_step', arguments: { ref: f.task.ref } }),
+          text: JSON.stringify({
+            name: 'advance_task_step',
+            arguments: { ref: f.task.ref, stepId: f.task.activeStepId },
+          }),
           stopReason: 'stop',
         })
         .mockResolvedValue({ text: 'Old activation continued', stopReason: 'stop' });
@@ -275,7 +278,10 @@ describe('portable task activation authority', () => {
     f.inference.generate = vi.fn(async () => {
       events.push('model');
       return {
-        text: JSON.stringify({ name: 'advance_task_step', arguments: { ref: task.ref } }),
+        text: JSON.stringify({
+          name: 'advance_task_step',
+          arguments: { ref: task.ref, stepId: task.activeStepId },
+        }),
         stopReason: 'stop' as const,
       };
     });

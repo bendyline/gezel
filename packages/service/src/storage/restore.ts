@@ -10,6 +10,7 @@ import {
   type RestoreReview,
   type RestoreReviewItem,
   type StorageJob,
+  backupEntryPrefix,
   createLogger,
 } from '@bendyline/gezel';
 import {
@@ -172,7 +173,7 @@ export async function runRestore(
       jobs.setPhase(job.id, 'publish', item.label);
       const target = targetPathFor(deps, item.kind, item.id);
       if (!target) continue;
-      const staged = join(stage, prefixFor(item.kind, item.id));
+      const staged = join(stage, ...backupEntryPrefix(item).split('/'));
       await publish(staged, target);
       restored += 1;
       jobs.update(job.id, { itemsDone: restored, bytesDone: item.bytes });
@@ -194,13 +195,6 @@ export async function runRestore(
     jobs.finish(job.id, { error: reason });
     throw err;
   }
-}
-
-function prefixFor(kind: RestoreReviewItem['kind'], id: string): string {
-  if (kind === 'gezel') return join('gezels', id);
-  if (kind === 'project') return join('projects', id);
-  if (kind === 'document-root') return 'documents';
-  return join('settings', id);
 }
 
 /**
@@ -373,7 +367,7 @@ async function extractSelected(
   items: RestoreReviewItem[],
   includeSettings: boolean,
 ): Promise<void> {
-  const prefixes = items.map((item) => `${prefixFor(item.kind, item.id).split('\\').join('/')}/`);
+  const prefixes = items.map((item) => `${backupEntryPrefix(item)}/`);
   if (includeSettings) prefixes.push('settings/');
   await mkdir(stage, { recursive: true });
 

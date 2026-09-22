@@ -4,6 +4,10 @@ The engineering contract for `@bendyline/gezel-app-sdk`. The handboek page
 [building connected apps](handboek/technical/building-connected-apps-with-gezel-app-sdk.md)
 teaches the SDK; this page says what is promised.
 
+The [desktop/mobile packaging plan](app-sdk-mobile-packaging-plan.md) proposes
+portable intelligence APIs and prebuilt native dependencies. Those proposed
+surfaces are not part of the current contract below.
+
 Consumers pin this package by exact version and, in at least one case, behind a
 release-age cooldown. An export that appears or disappears unnoticed is a
 contract change nobody reviewed, so `packages/app-sdk/src/surface.test.ts` pins

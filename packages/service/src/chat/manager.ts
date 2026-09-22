@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { taskTranscriptCompatible } from '@bendyline/gezel';
+import {
+  buildToolReceipt,
+  findAskCycleOrDepth,
+  inferTargetProject,
+  taskTranscriptCompatible,
+} from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
@@ -223,12 +228,6 @@ import {
   resolveMcpDefinition,
 } from '../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
-import {
-  humanizeToolCall,
-  renderFullToolArgs,
-  summarizeToolArgs,
-  summarizeToolResult,
-} from './args-summary.js';
 import {
   type BeginExternalConversationInput,
   ExternalConversationRecorder,
@@ -4675,13 +4674,8 @@ export class ChatManager extends LocalEngineRuntime {
     // don't guess; the model has to be explicit.
     if (!args.projectId && projectId === DEFAULT_PROJECT_ID) {
       const targetSessions = await this.store.listSessions({ gezelId: target.id });
-      const distinctNonDefault = new Set(
-        targetSessions
-          .filter((s) => !s.archived && s.projectId && s.projectId !== DEFAULT_PROJECT_ID)
-          .map((s) => s.projectId),
-      );
-      if (distinctNonDefault.size === 1) {
-        const chosen = [...distinctNonDefault][0]!;
+      const chosen = inferTargetProject(targetSessions, undefined, projectId, DEFAULT_PROJECT_ID);
+      if (chosen !== projectId) {
         log.info(
           `[chat] messageGezel auto-routing target=${target.id} to project=${chosen} (caller did not pass project; target has a single active non-default session there)`,
         );
@@ -5308,41 +5302,22 @@ export class ChatManager extends LocalEngineRuntime {
     // A single gezel may have multiple in-flight asks at once (e.g.
     // two consultation sessions both currently re-asking someone),
     // so we collect all out-edges per asker gezel.
-    const outEdges = new Map<string, Set<string>>();
-    for (const edge of this.inflightAsks.values()) {
-      let bucket = outEdges.get(edge.askerGezelId);
-      if (!bucket) {
-        bucket = new Set();
-        outEdges.set(edge.askerGezelId, bucket);
-      }
-      bucket.add(edge.targetGezelId);
-    }
-
-    // BFS from targetGezelId. Visiting askerGezelId at any depth = cycle.
-    const queue: Array<{ gezel: string; depth: number }> = [{ gezel: targetGezelId, depth: 1 }];
-    const visited = new Set<string>();
-    while (queue.length > 0) {
-      const { gezel, depth } = queue.shift()!;
-      if (gezel === askerGezelId) {
-        return {
-          kind: 'cycle',
-          message: 'This question would create a cycle in the gezel-to-gezel ask graph.',
-        };
-      }
-      if (depth > maxDepth) {
-        return {
-          kind: 'depth',
-          message: `Ask chain would exceed the max depth of ${maxDepth}. Try a shallower call pattern.`,
-        };
-      }
-      if (visited.has(gezel)) continue;
-      visited.add(gezel);
-      const out = outEdges.get(gezel);
-      if (!out) continue;
-      for (const next of out) {
-        queue.push({ gezel: next, depth: depth + 1 });
-      }
-    }
+    const verdict = findAskCycleOrDepth(
+      this.inflightAsks.values(),
+      askerGezelId,
+      targetGezelId,
+      maxDepth,
+    );
+    if (verdict.kind === 'cycle')
+      return {
+        kind: 'cycle',
+        message: 'This question would create a cycle in the gezel-to-gezel ask graph.',
+      };
+    if (verdict.kind === 'depth')
+      return {
+        kind: 'depth',
+        message: `Ask chain would exceed the max depth of ${maxDepth}. Try a shallower call pattern.`,
+      };
     return { kind: 'ok' };
   }
 
@@ -15049,8 +15024,6 @@ export class ChatManager extends LocalEngineRuntime {
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
       // the UI's expand + copy so a handoff's real content is verifiable.
-      const argsSummary = humanizeToolCall(info.name, info.args) ?? summarizeToolArgs(info.args);
-      const argsFull = renderFullToolArgs(info.args);
       // Read-heavy task steps intentionally carry their evidence into a
       // successor step or across a restart. The ordinary 4 KB UI/history cap
       // would keep only the beginning and end of a batched patch read, so a
@@ -15062,10 +15035,9 @@ export class ChatManager extends LocalEngineRuntime {
       const taskArtifactRead =
         Boolean(record.taskRef) &&
         (info.name === 'read_artifact' || info.name === 'read_artifacts');
-      const result = summarizeToolResult(
-        info.resultText,
-        taskArtifactRead ? toolEvidenceBudgetChars(record.contextWindow) : undefined,
-      );
+      const resultCap = taskArtifactRead
+        ? toolEvidenceBudgetChars(record.contextWindow)
+        : undefined;
       // Layer 4 surgical-edit tools surface `{diff, addedLines,
       // removedLines}` via MCP structuredContent. Pull the known fields
       // onto the persisted ChatMessageToolCall so the inline diff
@@ -15121,19 +15093,21 @@ export class ChatManager extends LocalEngineRuntime {
       // even a producer that never stamps startedAtMs yields a correct
       // `at` — which is why this line, not the producer stamps, carries
       // the replay-timeline guarantee.
-      const at = new Date(info.startedAtMs ?? Date.now() - info.durationMs).toISOString();
+      const startedAtMs = info.startedAtMs ?? Date.now() - info.durationMs;
+      const at = new Date(startedAtMs).toISOString();
       const call: ChatMessageToolCall = {
-        name: info.name,
-        at,
-        durationMs: info.durationMs,
-        success: info.success,
-        ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
+        ...buildToolReceipt({
+          name: info.name,
+          args: info.args,
+          startedAtMs,
+          durationMs: info.durationMs,
+          success: info.success,
+          errorMessage: info.errorMessage,
+          resultText: info.resultText,
+          resultCap,
+        }),
         ...(path ? { path } : {}),
         ...(paths.length > 0 ? { paths } : {}),
-        ...(argsSummary ? { argsSummary } : {}),
-        ...(argsFull ? { argsFull } : {}),
-        ...(result ? { resultText: result.text } : {}),
-        ...(result?.truncated ? { resultTruncated: true } : {}),
         ...(info.images && info.images.length > 0 ? { images: info.images } : {}),
         ...(info.audios && info.audios.length > 0 ? { audios: info.audios } : {}),
         ...(videos ? { videos } : {}),
@@ -15143,6 +15117,12 @@ export class ChatManager extends LocalEngineRuntime {
         ...(card ? { card } : {}),
         ...(reasoningOffset !== undefined ? { afterReasoningChars: reasoningOffset } : {}),
       };
+      const argsSummary = call.argsSummary;
+      const argsFull = call.argsFull;
+      const result =
+        call.resultText !== undefined
+          ? { text: call.resultText, truncated: call.resultTruncated === true }
+          : undefined;
       // Accumulate for persistence on the final assistant message. `send()`
       // clears this array at turn start and drains it at turn end.
       const bucket = currentTurnTools.get(record.id);

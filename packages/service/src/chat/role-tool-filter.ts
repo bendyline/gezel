@@ -24,7 +24,7 @@ import { classifyLocalModelTier, classifyModelTier } from './local-model-tier.js
 export type WebSearchBackendName = 'brave' | 'wikipedia' | 'tavily' | 'mock';
 
 export { expandToolsetGroups } from '@bendyline/gezel';
-import { expandToolsetGroups, roleHasTeamScope } from '@bendyline/gezel';
+import { expandToolsetGroups, roleHasTeamScope, roleToolNames } from '@bendyline/gezel';
 export { roleHasTeamScope } from '@bendyline/gezel';
 
 /**
@@ -49,9 +49,9 @@ export function roleToolsetGroups(role: string | undefined): readonly string[] {
   return toolsetGroupsForRole(role);
 }
 
-/** Tool-name allowlist for a role (its default groups, expanded). */
+/** Tool-name allowlist for a role: the core kit, before any solo-mode narrowing. */
 export function roleToolAllowlist(role: string | undefined): Set<string> {
-  return expandToolsetGroups(roleToolsetGroups(role));
+  return roleToolNames(role);
 }
 
 /**

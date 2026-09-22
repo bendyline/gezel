@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { assertSafeEntityId } from '../entity-id.js';
-import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
+import { formatAnswerSeed } from '../question-format.js';
+import {
+  answeredQuestion as applyAnswer,
+  findQuestion,
+  pendingQuestions,
+  resolveAsk,
+  sortQuestionsNewestFirst,
+} from '../question-policy.js';
 import {
   type AnswerQuestionRequest,
   AnswerQuestionRequestSchema,
@@ -36,13 +43,11 @@ export async function listQuestions(repo: PortableRepository, filter: PortableQu
   const ids = filter.projectId ? [filter.projectId] : (await listProjects(repo)).map((p) => p.id);
   const questions: Question[] = [];
   for (const id of ids) questions.push(...(await projectQuestions(repo, id)));
-  return questions
-    .filter((q) => !filter.pending || !q.answer)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return sortQuestionsNewestFirst(filter.pending ? pendingQuestions(questions) : questions);
 }
 export async function getQuestion(repo: PortableRepository, id: string): Promise<Question | null> {
   assertSafeEntityId(id, 'question id');
-  return (await listQuestions(repo)).find((q) => q.id === id) ?? null;
+  return findQuestion(await listQuestions(repo), id) ?? null;
 }
 export async function askQuestion(repo: PortableRepository, raw: AskQuestionRequest) {
   const input = AskQuestionRequestSchema.parse(raw);
@@ -55,15 +60,13 @@ export async function askQuestion(repo: PortableRepository, raw: AskQuestionRequ
     throw new Error('Question context must match its conversation');
   if (input.taskRef && (await getTask(repo, input.taskRef))?.projectId !== input.projectId)
     throw new Error('The attached task must belong to this project');
-  if (input.allowWriteIn === false && !input.choices?.length)
-    throw new Error('Provide choices when written answers are disabled');
   if (input.documentPath) validatePortablePath(input.documentPath);
   const questions = await projectQuestions(repo, input.projectId);
-  const existing = outstandingSessionQuestion(questions, input.sessionId);
-  if (existing) return { question: existing, deduped: true };
-  const question = QuestionSchema.parse({ ...input, id: repo.createId(), createdAt: repo.now() });
-  if (questions.some((q) => q.id === question.id))
-    throw new Error('Question identifier already exists');
+  const { question, deduped } = resolveAsk(questions, input, {
+    id: repo.createId(),
+    at: repo.now(),
+  });
+  if (deduped) return { question, deduped };
   await repo.transactions.commit(
     new Map([[questionPath(input.projectId), repo.json([...questions, question])]]),
   );
@@ -74,22 +77,11 @@ export function answeredQuestion(
   raw: AnswerQuestionRequest,
   at: string,
 ): Question {
+  // Two answer shapes belong to desktop-only flows and cannot be honoured here.
   if (question.intent) throw new Error('This approval requires a desktop host');
-  const answer = AnswerQuestionRequestSchema.parse(raw);
-  if (answer.npmInstallDecisions) throw new Error('Package approvals are unavailable on this host');
-  const choices = answer.selectedChoices ?? [];
-  if (
-    new Set(choices).size !== choices.length ||
-    choices.some((i) => i >= (question.choices?.length ?? 0))
-  )
-    throw new Error('Choose an option from this question');
-  if (!question.multiSelect && choices.length > 1) throw new Error('Choose only one option');
-  if (question.allowWriteIn === false && answer.writeIn?.trim())
-    throw new Error('This question does not accept written answers');
-  if (answer.writeIn && answer.writeIn.length > 128_000) throw new Error('This answer is too long');
-  if (!answer.silentSkip && !answer.declined && !choices.length && !answer.writeIn?.trim())
-    throw new Error('Select an option or write an answer');
-  return QuestionSchema.parse({ ...question, answer: { ...answer, at } });
+  if (AnswerQuestionRequestSchema.parse(raw).npmInstallDecisions)
+    throw new Error('Package approvals are unavailable on this host');
+  return applyAnswer(question, raw, at, { validate: true });
 }
 /** The answer and its continuation message commit together. A crash cannot
  * acknowledge an answer while losing the user's reply, or replay it on retry. */

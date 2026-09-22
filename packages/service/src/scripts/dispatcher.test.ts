@@ -1,6 +1,5 @@
 import type { ScriptCapability } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -24,7 +23,6 @@ function ctx(caps: ScriptCapability[], projectId = 'p1'): DispatcherContext {
     projectId,
     runId: 'run-1',
     scriptName: 'test-script',
-    engagementFlags: { llmAllowed: true },
     allowedCapabilities: new Set(caps),
     knownSecretValues: new Set(),
   };
@@ -33,7 +31,6 @@ function ctx(caps: ScriptCapability[], projectId = 'p1'): DispatcherContext {
 function makeDispatcher(deps: Partial<DispatcherDeps>) {
   return buildDispatcher({
     store: {} as Store,
-    chat: {} as ChatManager,
     ...deps,
   });
 }

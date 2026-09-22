@@ -8,15 +8,10 @@ import {
 } from '../schemas/audio.js';
 import { OfflineSpeechStatusSchema } from '../schemas/offline-speech.js';
 import { acquireSuspendMonitor, createAwakeTimeout } from '../suspend-clock.js';
+import { json } from './http/json.js';
 import { speechBase64, speechBytes } from './speech-bytes.js';
 import { type PortableSpeech, requireOfflineSpeech, transcribeOffline } from './speech.js';
 import type { PortableStore } from './store.js';
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
 
 /** Owns speech admission through the last native callback and durable artifact
  * write. Streaming responses do not release the operation when headers return. */

@@ -3,6 +3,8 @@ import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { parseExactToolEnvelope } from '../tools/envelope.js';
+import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
+import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
 import type { PortableInference } from './product-service.js';
 import { type PortableToolActions, executePortableTool } from './product-tools.js';
@@ -75,15 +77,14 @@ export async function runPortableToolLoop(options: {
     if (!envelope) return { ...result, message, streamed: prose };
     await check();
     const started = Date.now();
-    const call: ChatMessageToolCall = {
+    const call: ChatMessageToolCall = buildToolReceipt({
       name: envelope.name,
-      at: new Date(started).toISOString(),
+      args: envelope.arguments,
+      startedAtMs: started,
       durationMs: 0,
       success: false,
-      argsFull: JSON.stringify(envelope.arguments),
-      argsSummary: JSON.stringify(envelope.arguments).slice(0, 200),
       errorMessage: 'This action started. If interrupted, check its outcome before retrying.',
-    };
+    });
     message ??= {
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -113,8 +114,15 @@ export async function runPortableToolLoop(options: {
     }
     const serialized = JSON.stringify(value) ?? 'null';
     call.durationMs = Date.now() - started;
-    call.resultText = serialized.slice(0, 12_000);
-    call.resultTruncated = serialized.length > 12_000;
+    // The persisted receipt is bounded the same way on every host; what the
+    // model reads back is this host's own budget.
+    const receipt = summarizeToolResult(serialized);
+    if (receipt) {
+      call.resultText = receipt.text;
+      if (receipt.truncated) call.resultTruncated = true;
+    }
+    const modelVisible = serialized.slice(0, PORTABLE_TOOL_RESULT_MODEL_CAP);
+    const modelTruncated = serialized.length > PORTABLE_TOOL_RESULT_MODEL_CAP;
     if (
       call.success &&
       envelope.name === 'ask_user_question' &&
@@ -187,7 +195,7 @@ export async function runPortableToolLoop(options: {
       { role: 'assistant', content: result.text },
       {
         role: 'user',
-        content: `Tool result for ${envelope.name} (reference data):\n${call.resultText}${call.resultTruncated ? '\n[Result truncated; narrow the next request.]' : ''}`,
+        content: `Tool result for ${envelope.name} (reference data):\n${modelVisible}${modelTruncated ? '\n[Result truncated; narrow the next request.]' : ''}`,
       },
     );
   }

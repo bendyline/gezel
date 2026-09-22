@@ -11,6 +11,7 @@ import {
   type UnifiedSearchResult,
 } from '../schemas/api.js';
 import type { Project } from '../schemas/project.js';
+import { lexicalRelevance, pageSearchResults, scoreResult } from '../search-ranking.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import { validatePortablePath } from './files.js';
 import { listGezels } from './gezels.js';
@@ -77,8 +78,9 @@ async function searchFiles(
     const score = Math.max(nameScore, contentScore);
     if (!score) continue;
     const shared = area === 'documents' || isSharedLibraryProject(project);
+    const kind = shared ? 'document' : excerpt ? 'content' : 'file';
     state.results.push({
-      kind: shared ? 'document' : excerpt ? 'content' : 'file',
+      kind,
       id: `${shared ? 'documents' : `${project.id}/${area}`}/${entry.path}`,
       title: entry.name,
       subtitle: `${project.name} · ${entry.path}`,
@@ -95,9 +97,7 @@ async function searchFiles(
       // The existing wire contract calls literal text hits `fts`; engine below
       // explicitly reports lexical source scans, never an SQLite/vector index.
       ...(excerpt ? { arm: 'fts' as const } : {}),
-      score: score * 100 + (nameScore ? 10 : 0),
-      relevance: score,
-      tier: score === 1 ? 'strong' : 'weak',
+      ...scoreResult(kind, lexicalRelevance(score)),
     });
   }
 }
@@ -109,10 +109,10 @@ const newScan = (): Scan => ({
   incomplete: false,
 });
 function finish(state: Scan, limit: number, offset = 0): UnifiedSearchResponse {
-  state.results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  const page = pageSearchResults(state.results, { offset, limit });
   return {
-    results: state.results.slice(offset, offset + limit),
-    truncated: state.truncated || state.results.length > offset + limit,
+    results: page.results,
+    truncated: state.truncated || page.hasMore,
     ...(state.incomplete ? { sourcesIncomplete: true } : {}),
   };
 }
@@ -133,7 +133,7 @@ export async function search(
         id: project.id,
         title: project.name,
         projectId: project.id,
-        score: 200 * score,
+        ...scoreResult('project', lexicalRelevance(score)),
       });
   }
   for (const gezel of await listGezels(repo)) {
@@ -145,7 +145,7 @@ export async function search(
         title: gezel.name,
         gezelId: gezel.id,
         subtitle: gezel.role,
-        score: 180 * score,
+        ...scoreResult('gezel', lexicalRelevance(score)),
       });
   }
   for (const summary of await listSessions(repo)) {
@@ -186,9 +186,7 @@ export async function search(
         snippet,
         line,
         arm: 'fts',
-        score: score * 100,
-        relevance: score,
-        tier: score === 1 ? 'strong' : 'weak',
+        ...scoreResult('session', lexicalRelevance(score)),
       });
   }
   for (const project of projects) {
@@ -247,7 +245,7 @@ export async function searchProject(
           gezelId: scope === 'gezel' ? id : undefined,
           retrievalSource: source,
           arm: 'fts',
-          score: memory.score * 100,
+          ...scoreResult('memory', lexicalRelevance(memory.score)),
         });
     }
   if (input.sources?.includes('knowledge')) state.incomplete = true;

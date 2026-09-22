@@ -9,6 +9,7 @@ import {
 import { assertSafeEntityId } from '../entity-id.js';
 import { CreateProjectRequestSchema } from '../schemas/api.js';
 import { type Craftbook, CraftbookSchema, resolveSteps } from '../schemas/craftbook.js';
+import { GATE_DEFAULT_MAX_ATTEMPTS } from '../schemas/gate.js';
 import { type GateScriptResult, normalizeStepGate } from '../schemas/gate.js';
 import { ProjectSchema } from '../schemas/project.js';
 import { QuestionSchema } from '../schemas/question.js';
@@ -35,6 +36,10 @@ import {
 } from '../schemas/task.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import { pinCraftbookOwner } from '../task-execution.js';
+import { applyGateRejection } from '../tasks/gate-accounting.js';
+import { gateHandoffNoteText, stampGateHandoff } from '../tasks/gate-handoff.js';
+import { bumpStepActivation } from '../tasks/step-activation.js';
+import { resolveNextStep } from '../tasks/step-routing.js';
 import { slugifyEntityName } from './entities.js';
 import { encodeText } from './files.js';
 import { requireGezel } from './gezels.js';
@@ -443,21 +448,31 @@ export async function completeTaskStep(
     throw new Error('The step requires its completion check');
   if (options.gate && !options.gate.approved) {
     const infrastructureError = options.gate.infrastructureError === true;
-    if (!infrastructureError) step.gateAttempts = (step.gateAttempts ?? 0) + 1;
-    const paused = infrastructureError || (step.gateAttempts ?? 0) >= (gate?.maxAttempts ?? 3);
+    const plan = applyGateRejection({
+      step,
+      gate: {
+        maxAttempts: gate?.maxAttempts ?? GATE_DEFAULT_MAX_ATTEMPTS,
+        ...(gate?.onReject !== undefined ? { onReject: gate.onReject } : {}),
+      },
+      verdict: {
+        infrastructureError,
+        ...(options.gate.next !== undefined ? { goto: options.gate.next } : {}),
+      },
+      steps: task.craftbook.steps,
+    });
+    if (plan.unknownRoute !== undefined)
+      throw new Error('This task does not declare that gate rejection step');
+    if (!infrastructureError) step.gateAttempts = plan.attempt;
+    if (plan.progressAttempts > 0) step.gateProgressAttempts = plan.progressAttempts;
+    const paused = plan.paused;
     let extra = new Map<string, Uint8Array>();
     if (paused) task.status = 'paused';
-    else {
-      const targetId = options.gate.next ?? gate?.onReject;
-      if (targetId) {
-        const target = task.craftbook.steps.find((candidate) => candidate.id === targetId);
-        if (!target) throw new Error('This task does not declare that gate rejection step');
-        task.activeStepId = target.id;
-        delete target.completedAt;
-        // A fresh activation is not a fresh rejection budget for self-loops.
-        if (target.id !== step.id) target.gateAttempts = 0;
-        extra = await resetTaskLifecycle(repo, ref, target.id);
-      }
+    else if (plan.routeTo !== undefined) {
+      task.craftbook.steps = bumpStepActivation(task.craftbook.steps, plan.routeTo, repo.now(), {
+        preserveGateBudget: plan.preserveGateBudget,
+      });
+      task.activeStepId = plan.routeTo;
+      extra = await resetTaskLifecycle(repo, ref, plan.routeTo);
     }
     task.updatedAt = repo.now();
     if (infrastructureError) {
@@ -483,8 +498,8 @@ export async function completeTaskStep(
       gate: {
         decision: 'reject',
         message: options.gate.message ?? 'The step needs more work',
-        attempt: step.gateAttempts ?? 0,
-        maxAttempts: gate?.maxAttempts ?? 3,
+        attempt: plan.attempt,
+        maxAttempts: plan.maxAttempts,
         paused,
         ...(infrastructureError ? { infrastructureError: true } : {}),
         ...(options.gate.scriptRuns ? { scriptRuns: options.gate.scriptRuns } : {}),
@@ -493,23 +508,20 @@ export async function completeTaskStep(
   }
   // Match desktop: an explicit jump may name any existing step. A model
   // cannot invent one, and every gate above must still pass before the jump.
-  const next =
-    options.next && options.next !== 'next'
-      ? options.next
-      : (options.gate?.next ??
-        gate?.onApprove ??
-        step.advanceWhen?.goto ??
-        (step.terminal
-          ? undefined
-          : (step.next ?? task.craftbook.steps[task.craftbook.steps.indexOf(step) + 1]?.id)));
-  if (next && !task.craftbook.steps.some((candidate) => candidate.id === next))
-    throw new Error('This task does not declare that next step');
+  const route = resolveNextStep({
+    steps: task.craftbook.steps,
+    currentId: step.id,
+    ...(options.next !== undefined ? { override: options.next } : {}),
+    ...(options.gate?.next !== undefined ? { gateGoto: options.gate.next } : {}),
+    ...(gate?.onApprove !== undefined ? { gateOnApprove: gate.onApprove } : {}),
+    ...(step.advanceWhen?.goto !== undefined ? { advanceWhenGoto: step.advanceWhen.goto } : {}),
+  });
+  if (route.kind === 'invalid') throw new Error('This task does not declare that next step');
+  const next = route.kind === 'advance' ? route.to : undefined;
   step.completedAt = repo.now();
   if (next) {
     task.activeStepId = next;
-    const following = task.craftbook.steps.find((value) => value.id === next)!;
-    delete following.completedAt;
-    delete following.gateAttempts;
+    task.craftbook.steps = bumpStepActivation(task.craftbook.steps, next, repo.now());
   } else {
     task.status = 'complete';
     delete task.activeStepId;
@@ -518,29 +530,14 @@ export async function completeTaskStep(
   let extra = await resetTaskLifecycle(repo, ref, task.activeStepId);
   const handoff = options.gate?.handoff;
   if (handoff) {
-    task.lastGateHandoff = {
-      fromStepId: step.id,
-      toStepId: task.activeStepId,
-      ...handoff,
-      at: repo.now(),
-    };
-    if (task.activeStepId) {
-      const params = Object.entries(handoff.params ?? {})
-        .map(
-          ([key, value]) =>
-            `- ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`,
-        )
-        .join('\n');
+    task.lastGateHandoff = stampGateHandoff(step.id, task.activeStepId, handoff, repo.now());
+    if (task.activeStepId)
       extra = await taskNoteWrites(
         repo,
         ref,
-        {
-          text: `# Handoff from gate on "${step.name}"\n\n${handoff.message}${params ? `\n\n${params}` : ''}`,
-          stepId: task.activeStepId,
-        },
+        { text: gateHandoffNoteText(step.name, handoff), stepId: task.activeStepId },
         extra,
       );
-    }
   }
   await write(repo, task, extra);
   return { task };
@@ -572,8 +569,17 @@ export async function beginTaskRun(repo: PortableRepository, ref: string) {
   const prior = await repo.record(`${root}/execution.json`, RunSchema);
   if (prior?.state === 'running') throw new Error('This task step is already running');
   const step = task.craftbook.steps.find((item) => item.id === task.activeStepId)!;
-  step.attemptCount = (step.attemptCount ?? 0) + 1;
-  step.lastActivatedAt = repo.now();
+  // `attemptCount` counts activations, as on the desktop: a step's first
+  // pass, a transition that re-activates it, and a retry after a pause. A
+  // transition already counted itself; a run counts only when this step's
+  // current activation has run before (a retry) or was never stamped.
+  const ranThisActivation =
+    prior?.stepId === step.id &&
+    (step.lastActivatedAt === undefined || prior.startedAt >= step.lastActivatedAt);
+  if (step.lastActivatedAt === undefined || ranThisActivation) {
+    step.attemptCount = (step.attemptCount ?? 0) + 1;
+    step.lastActivatedAt = repo.now();
+  }
   task.updatedAt = repo.now();
   const run = RunSchema.parse({
     runId: repo.createId(),

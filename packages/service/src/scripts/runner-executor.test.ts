@@ -168,15 +168,23 @@ describe('ScriptRunner executor boundary', () => {
     const runner = runnerWith(async (options) => {
       callbacks = options;
       hostCall = options.onRequest('artifact.write', { path: 'slow.txt', content: 'pending' });
+      hostCall.catch(() => {});
       await writing;
+      // The run ends with the write still in flight, marks it pending, and
+      // waits for it to settle before returning; release it only then.
+      setTimeout(finishWrite, 25);
       return { ...success, exitCode: 1, timedOut: true };
     });
     const run = await runner.run({ ...invocation, inlineSource: source(['artifacts.write']) });
-    expect(run.calls[0]?.error).toContain('may still complete');
+    // The write settled during the drain, so its outcome is on the record;
+    // the run itself still failed on the guest's timeout.
+    expect(run.status).toBe('error');
+    expect(run.calls[0]?.error).toBeUndefined();
     const finished = JSON.stringify(run);
-    finishWrite();
-    await hostCall;
-    callbacks.onNotification('script.output', { value: { late: true } });
+    await hostCall.catch(() => {});
+    expect(() => callbacks.onNotification('script.output', { value: { late: true } })).toThrow(
+      /ended/,
+    );
     callbacks.onStderr('late error');
     await expect(callbacks.onRequest('artifact.write', {})).rejects.toThrow('execution has ended');
     expect(JSON.stringify(run)).toBe(finished);

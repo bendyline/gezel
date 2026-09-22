@@ -1,4 +1,13 @@
 import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
+import {
+  MERGE_WEIGHTS,
+  dedupeSearchResults,
+  ftsRankRelevance,
+  pageSearchResults,
+  scoreResult,
+} from '@bendyline/gezel';
+
+export { MERGE_WEIGHTS, ftsRankRelevance, scoreResult };
 import type {
   RetrievalSource,
   UnifiedSearchResult,
@@ -86,56 +95,8 @@ export const CATALOG_RELEVANT_HISTORY_KINDS: ReadonlySet<string> = new Set([
   'document.deleted',
 ]);
 
-// Per-kind merge weights — corpus PRIORITY, kept strictly separate from
-// within-corpus relevance. Bias name/quick-open matches above content so a
-// typed project name out-ranks a fuzzy file hit, while a strong content match
-// can still surface. Multiplied by a calibrated 0..1 relevance in
-// `scoreResult` to produce the merged ordering key. Typed against the full
-// kind enum so a future kind (e.g. `knowledge`, planned weight ~380 — below
-// project content, above memory) is a compile error here until weighted.
-export const MERGE_WEIGHTS: Record<UnifiedSearchResultKind, number> = {
-  project: 1000,
-  gezel: 950,
-  file: 700,
-  document: 680,
-  // A named task beats fuzzy content — the user typed something close to its
-  // title — but never a project/gezel/file name match.
-  task: 640,
-  // A subject-line match on the user's own mail is personal content — above
-  // catalogs and symbols, below tasks (a typed task title is more deliberate
-  // than a remembered subject fragment).
-  mail: 620,
-  symbol: 520,
-  craftbook: 500,
-  content: 420,
-  session: 400,
-  // Manual articles orient, they don't answer about the user's own work —
-  // below every user-content corpus, above nothing.
-  handboek: 380,
-  // Knowledge catalogs are generic reference material: below every corpus
-  // about the user's own work AND below the handboek (which at least is
-  // about this product), above only memory's ambient recall. The audit's
-  // "~380" slot collided with handboek — 370 keeps a strict ordering.
-  knowledge: 370,
-  memory: 360,
-};
-
-/**
- * Relevance estimate for an FTS-only corpus that reports rank order but no
- * usable score. RRF-shaped (k=10) and anchored so rank 0 = 0.6 — the fixed
- * pseudo-relevance these corpora carried historically — so the top hit's
- * merged score is bit-identical to the pre-calibration behavior and later
- * ranks decay instead of tying.
- */
-export function ftsRankRelevance(rank: number): number {
-  return 0.6 * (11 / (11 + rank));
-}
-
 /** Documented explicit pseudo-relevance for a symbol the query didn't fuzzy-match. */
 const SYMBOL_FALLBACK_RELEVANCE = 0.4;
-
-/** Relevance at or above which a hit renders as high-confidence. */
-const STRONG_TIER_MIN_RELEVANCE = 0.6;
 
 /**
  * One retrieval arm's observed timing — non-content telemetry. Rides the
@@ -152,23 +113,6 @@ export interface RetrievalArmTiming {
   hits: number;
   timedOut: boolean;
   failed: boolean;
-}
-
-/**
- * The single scoring seam: every result construction site routes through
- * this, so relevance stays a calibrated 0–1, tiers derive from one constant,
- * and `score` remains purely relevance × corpus priority.
- */
-export function scoreResult(
-  kind: UnifiedSearchResultKind,
-  relevance: number,
-): { relevance: number; tier: 'strong' | 'weak'; score: number } {
-  const clamped = clamp01(relevance);
-  return {
-    relevance: clamped,
-    tier: clamped >= STRONG_TIER_MIN_RELEVANCE ? 'strong' : 'weak',
-    score: clamped * MERGE_WEIGHTS[kind],
-  };
 }
 
 /**
@@ -555,8 +499,7 @@ export class SearchService {
         ...scoreResult(e.kind, rel),
       });
     }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, maxResults);
+    return pageSearchResults(scored, { limit: maxResults }).results;
   }
 
   // ── content fan-out ──────────────────────────────────────────────────────
@@ -975,29 +918,7 @@ export class SearchService {
   // ── merge ────────────────────────────────────────────────────────────────
 
   private merge(all: UnifiedSearchResult[], maxResults: number): UnifiedSearchResult[] {
-    const byId = new Map<string, UnifiedSearchResult>();
-    for (const r of all) {
-      const existing = byId.get(r.id);
-      if (!existing || r.score > existing.score) byId.set(r.id, r);
-    }
-    // A memory's id carries its scope and day, so the same remembered
-    // sentence recorded for two gezels — or on two days — survives the id
-    // pass and lists two, three, four times over. The text is what the reader
-    // sees, so that is what has to be unique; the best-scoring copy wins and
-    // keeps its own id, which is what navigation resolves against.
-    const bestByText = new Map<string, UnifiedSearchResult>();
-    const out: UnifiedSearchResult[] = [];
-    for (const r of byId.values()) {
-      if (r.kind !== 'memory') {
-        out.push(r);
-        continue;
-      }
-      const key = memoryTextKey(r.snippet ?? r.title);
-      const existing = bestByText.get(key);
-      if (!existing || r.score > existing.score) bestByText.set(key, r);
-    }
-    out.push(...bestByText.values());
-    return out.sort((a, b) => b.score - a.score).slice(0, maxResults);
+    return pageSearchResults(dedupeSearchResults(all), { limit: maxResults }).results;
   }
 }
 
@@ -1013,20 +934,6 @@ function normalizePathPrefix(prefix: string | undefined): string | null {
   if (!prefix) return null;
   const p = prefix.replaceAll('\\', '/').replace(/^\.\//, '');
   return p.length > 0 ? p : null;
-}
-
-function clamp01(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return n < 0 ? 0 : n > 1 ? 1 : n;
-}
-
-/**
- * Identity of a remembered sentence for de-duplication: case- and
- * whitespace-insensitive, so the same fact written on two days collapses to
- * one row rather than reading as two separate recollections.
- */
-function memoryTextKey(text: string): string {
-  return text.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /**

@@ -30,7 +30,10 @@ The stadium prompt and attributed image live in Molen's
 The September 22 campaign retries Flash Next Q2/DS4 and Gemma 31B/MLX on the
 original two-asset scenario after both approval fixes, then runs each standalone
 scenario with those models, Qwen 27B/MLX and Muse Glimmer/llama.cpp. All ten local
-trials have a 20-minute budget and run sequentially. Muse's 512-token reasoning
+trials have a 20-minute starting budget and run sequentially. The runtime repair
+policy can extend recent deliverable progress in 15-minute increments, up to a
+40-minute ceiling for these trials; retain the actual elapsed time and extension
+log when comparing results. Muse's 512-token reasoning
 cap is a per-run experiment, not a catalog tuning change. The live campaign
 manifest, exact commands, fixed reports and autonomous outputs are under Molen's
 `.artifacts/structure-workshop/model-comparison/september22/`; incomplete trials
@@ -39,6 +42,15 @@ remain incomplete, and any later operator compilation must be stored separately.
 Validation for the new cases: four scenario input/output-gate regressions, eval
 typecheck, four real compiler/import/material/review tests, and successful offline
 preparation of the stadium reference (including its SHA-256 receipt).
+
+The facts extractor reconciles per-session tool counts from completed transcripts
+and project history, retaining native CLI tools and interrupted continuations
+without adding duplicate observations. Older histories without session IDs supply
+a conservative per-tool lower bound. This recovers the earlier Muse follow-up's
+41 tools and 17 image reads; its separately recomputed fixed score is 2.8 instead
+of 3.3 because the efficiency axis now sees every call. Original reports remain
+preserved. The scoring rules and visual judgment are unchanged. The combined
+facts, postmortem and standalone-scenario regression suite passes 33 tests.
 
 The fixed-rubric score is not an independent art score. Inspect rendered output and
 report visual judgment separately. Earlier trials completed files without delivering

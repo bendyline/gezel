@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  backupEntryPrefix,
+  backupSettingsTarget,
+  isBackupDerivedPath,
+  isBackupItemRequested,
+  isBackupSettingsFileId,
+} from '../backup-policy.js';
 import { assertSafeEntityId } from '../entity-id.js';
 import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
 import { PoppetjeSchema } from '../poppetje/schema.js';
@@ -49,14 +56,6 @@ function portableConfig(config: GezelConfig): GezelConfig {
     ),
   );
 }
-function excluded(path: string): boolean {
-  return (
-    /^gezels\/[^/]+\/(?:memories\/index|toolsets)(?:\/|$)/.test(path) ||
-    /^projects\/[^/]+\/(?:_?index|memories\/index|artifacts\/(?:shadow|\.tabular)|toolsets|terminals|\.gezel\/(?:index|terminals))(?:\/|$)/.test(
-      path,
-    )
-  );
-}
 async function collect(
   repo: PortableRepository,
   options: PortableBackupOptions,
@@ -75,7 +74,7 @@ async function collect(
     let fileCount = 0;
     for (const path of await repo.tree(root)) {
       if (
-        excluded(path) ||
+        isBackupDerivedPath(path) ||
         (options.excludeWorkspaces && kind === 'project' && path.startsWith(`${root}/workspace/`))
       )
         continue;
@@ -95,18 +94,17 @@ async function collect(
     }
     items.push({ kind, id, label, entryPrefix, bytes, fileCount });
   }
+  const requested = (kind: BackupManifest['items'][number]['kind'], id: string) =>
+    isBackupItemRequested({ kind, id }, options.include);
   for (const gezel of await listGezels(repo))
-    if (!options.include?.gezels || options.include.gezels.includes(gezel.id))
+    if (requested('gezel', gezel.id))
       await item('gezel', gezel.id, gezel.name, `gezels/${gezel.id}`);
   for (const project of await listProjects(repo))
-    if (
-      !isSharedLibraryProject(project) &&
-      (!options.include?.projects || options.include.projects.includes(project.id))
-    )
+    if (!isSharedLibraryProject(project) && requested('project', project.id))
       await item('project', project.id, project.name, `projects/${project.id}`);
-  if (options.include?.documents !== false)
+  if (requested('document-root', 'documents'))
     await item('document-root', 'documents', 'Shared documents', 'documents');
-  if (options.include?.settings !== false) {
+  if (requested('settings-file', 'config.json')) {
     const content = boundedText(JSON.stringify(portableConfig(await readConfig(repo))));
     entries.set('settings/config.json', content);
     items.push({
@@ -156,22 +154,17 @@ export async function exportBackup(
   entries.set('manifest.json', boundedText(JSON.stringify(manifest)));
   return { bytes: writeBackupZip(entries), manifest };
 }
-function prefixFor(item: BackupManifest['items'][number]): string {
-  if (item.kind === 'project' || item.kind === 'gezel') {
-    assertSafeEntityId(item.id);
-    return `${item.kind === 'project' ? 'projects' : 'gezels'}/${item.id}`;
-  }
-  if (item.kind === 'document-root' && item.id === 'documents') return 'documents';
-  if (item.kind === 'settings-file' && item.id === 'config.json') return 'settings/config.json';
-  throw new Error('This backup item is not supported on this device');
-}
 function parseRecord(bytes: Uint8Array): unknown {
   return JSON.parse(decodeText(bytes, PORTABLE_BACKUP_LIMITS.fileBytes));
 }
 function validateFile(path: string, bytes: Uint8Array): void {
   const segments = path.split('/');
   if (segments[0] === 'settings') {
-    GezelConfigSchema.parse(parseRecord(bytes));
+    // Only the config is parsed; other known settings files (the desktop's
+    // `history.jsonl`) ride along as opaque text and are never restored here.
+    if (segments[1] === 'config.json') GezelConfigSchema.parse(parseRecord(bytes));
+    else if (!isBackupSettingsFileId(segments[1] ?? ''))
+      throw new Error('Unsupported settings file in backup');
     return;
   }
   if (segments[0] === 'documents') return;
@@ -243,7 +236,7 @@ async function inspect(
   const claimed = new Set(['manifest.json']);
   const identities = new Set<string>();
   for (const item of manifest.items) {
-    const prefix = prefixFor(item);
+    const prefix = backupEntryPrefix(item);
     const identity = `${item.kind}/${item.id}`;
     if (identities.has(identity) || item.entryPrefix !== prefix)
       throw new Error('Invalid or duplicate backup item');
@@ -252,7 +245,7 @@ async function inspect(
     let count = 0;
     for (const [path, content] of entries)
       if (path === prefix || path.startsWith(`${prefix}/`)) {
-        if (claimed.has(path) || excluded(path))
+        if (claimed.has(path) || isBackupDerivedPath(path))
           throw new Error('Backup contains overlapping items or private runtime data');
         validateFile(path, content);
         claimed.add(path);
@@ -289,7 +282,11 @@ async function targetExists(
   repo: PortableRepository,
   item: BackupManifest['items'][number],
 ): Promise<boolean> {
-  return repo.exists(item.kind === 'settings-file' ? 'config.json' : prefixFor(item));
+  return repo.exists(
+    item.kind === 'settings-file' && isBackupSettingsFileId(item.id)
+      ? backupSettingsTarget(item.id)
+      : backupEntryPrefix(item),
+  );
 }
 export async function scanRestore(
   repo: PortableRepository,
@@ -323,7 +320,7 @@ export async function scanRestore(
         ...item,
         conflict: (await targetExists(repo, {
           ...item,
-          entryPrefix: prefixFor({ ...item, entryPrefix: '' }),
+          entryPrefix: backupEntryPrefix(item),
         }))
           ? ('exists' as const)
           : ('none' as const),
@@ -384,7 +381,7 @@ export async function confirmRestore(
     );
     if (!item) throw new Error('Restore selection is not present in the reviewed backup');
     if (item.kind === 'settings-file') continue;
-    const target = prefixFor(item);
+    const target = backupEntryPrefix(item);
     if ((await targetExists(repo, item)) && requested.action !== 'replace')
       throw new Error(`Choose replace to restore ${item.label}`);
     if (item.kind === 'project') {

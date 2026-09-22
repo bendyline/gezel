@@ -5,7 +5,12 @@ import {
   type WorkspaceReadFileRequest,
   type WorkspaceReadFileSuccess,
 } from '@bendyline/gezel';
-import { binaryDocumentExtension, isBinaryDocumentPath } from '@bendyline/gezel';
+import {
+  ReadArtifactInputSchema,
+  ReadFileInputSchema,
+  binaryDocumentExtension,
+  isBinaryDocumentPath,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -242,15 +247,7 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
   server.tool(
     'read_file',
     'Read one project-workspace file, optionally only an inclusive line range. This tool never reads the separate artifacts drawer; use read_artifact for artifact inputs. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
-    {
-      path: z.string().min(1).max(4096).describe('File path relative to the project root.'),
-      startLine: z
-        .number()
-        .int()
-        .min(1)
-        .max(10_000_000)
-        .optional()
-        .describe('1-based first line to return (inclusive). Defaults to 1.'),
+    ReadFileInputSchema.extend({
       endLine: z
         .number()
         .int()
@@ -260,11 +257,7 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
         .describe(
           `1-based last line to return (inclusive). Maximum ${WORKSPACE_READ_MAX_RANGE_LINES} lines per ranged read; omit to read the next bounded chunk.`,
         ),
-      raw: z
-        .boolean()
-        .optional()
-        .describe('Return the file content without `N→` line-number gutters. Default false.'),
-    },
+    }).shape,
     async ({ path, startLine, endLine, raw }) => {
       try {
         // Before any range maths: a binary document has no lines to slice.
@@ -607,19 +600,7 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
   server.tool(
     'read_artifact',
     'Read one artifact, using a path returned by `list_artifacts`. Paths are relative to the artifact root: use "reports/summary.md", never add "artifacts/" (a legacy redundant prefix is still accepted). Use the same inclusive `startLine`/`endLine` range shape as `read_file`; the older `lines`/`head`/`tail` shapes remain accepted for compatibility. If the exact path is actually a workspace file and `read_file` is authorized, this read is safely rerouted and reports its resolved surface. Use `read_artifacts` for several known artifact paths.',
-    {
-      path: z
-        .string()
-        .describe(
-          'File path or basename. A redundant "artifacts/" prefix is stripped automatically.',
-        ),
-      startLine: z
-        .number()
-        .int()
-        .min(1)
-        .max(10_000_000)
-        .optional()
-        .describe('Canonical 1-based first line to return (inclusive). Defaults to 1.'),
+    ReadArtifactInputSchema.extend({
       endLine: z
         .number()
         .int()
@@ -638,7 +619,7 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
         .describe('Legacy range shape; prefer `startLine` / `endLine`.'),
       head: z.number().int().min(0).optional().describe('Legacy: read just the first N lines.'),
       tail: z.number().int().min(0).optional().describe('Legacy: read just the last N lines.'),
-    },
+    }).shape,
     async ({ path, startLine, endLine, lines, head, tail }) => {
       const sliceArgs = { startLine, endLine, lines, head, tail };
       const sliceError = artifactSliceArgsError(sliceArgs);

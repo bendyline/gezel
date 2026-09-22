@@ -15,6 +15,85 @@ afterEach(async () => {
 });
 
 describe('score-trial project history fallback', () => {
+  it('includes interrupted turns, preserves native tools and reconciles each session separately', async () => {
+    await mkdir(join(tempRoot, 'sessions'));
+    await mkdir(join(tempRoot, 'project-history'));
+    await writeFile(
+      join(tempRoot, 'result.json'),
+      JSON.stringify({
+        trialId: 'interrupted-turn',
+        scenarioId: 'data-wrangle',
+        modelId: 'test-model',
+        startedAt: '2026-06-04T00:00:00.000Z',
+        finishedAt: '2026-06-04T00:00:30.000Z',
+        durationMs: 30_000,
+        success: false,
+        reason: 'timeout',
+      }),
+    );
+    for (const [id, names] of [
+      ['a', ['read_file', 'write_file', 'shell']],
+      ['b', ['read_file', 'read_file', 'read_file']],
+    ] as const) {
+      await writeFile(
+        join(tempRoot, 'sessions', `builder--${id}.json`),
+        JSON.stringify({
+          id,
+          messages: [
+            {
+              role: 'assistant',
+              content: '',
+              at: '2026-06-04T00:00:10.000Z',
+              toolCalls: names.map((name) => ({ name, success: true })),
+            },
+          ],
+        }),
+      );
+    }
+    // a: one persisted read + two in the interrupted continuation; b: a
+    // partial history dump has only one of its three persisted reads.
+    const events = [
+      ...['read_file', 'read_file', 'read_file', 'write_file', 'write_file'].map((name) => ({
+        at: '2026-06-04T00:00:20.000Z',
+        kind: 'tool.called',
+        details: { name, sessionId: 'a', success: true },
+      })),
+      {
+        at: '2026-06-04T00:00:09.000Z',
+        kind: 'tool.called',
+        details: { name: 'read_file', sessionId: 'b', success: true },
+      },
+      ...['05', '20'].map((seconds) => ({
+        at: `2026-06-04T00:00:${seconds}.000Z`,
+        kind: 'workspace.write',
+        gezelId: 'builder',
+        details: { path: 'report.md' },
+      })),
+    ];
+    await writeFile(
+      join(tempRoot, 'project-history', 'demo.jsonl'),
+      events.map((event) => JSON.stringify(event)).join('\n'),
+    );
+
+    const facts = score(tempRoot);
+    expect(facts.toolUse.byTool).toEqual({ read_file: 6, write_file: 2, shell: 1 });
+    expect(facts.toolUse.totalToolCalls).toBe(9);
+    expect(facts.timing.timeToFirstArtifactMs).toBe(5_000);
+    expect(facts.timing.timeToLastArtifactWriteMs).toBe(20_000);
+
+    // Old unscoped history cannot be added to transcripts: that would count
+    // overlapping calls twice. Keep its observable per-tool lower bound.
+    const legacyEvents = events.map((event) => ({
+      ...event,
+      details: { ...event.details, sessionId: undefined },
+    }));
+    await writeFile(
+      join(tempRoot, 'project-history', 'demo.jsonl'),
+      legacyEvents.map((event) => JSON.stringify(event)).join('\n'),
+    );
+    expect(score(tempRoot).toolUse.byTool).toEqual({ read_file: 4, write_file: 2, shell: 1 });
+  });
+
   it('counts project-history tool calls when session dumps undercount them', async () => {
     await mkdir(join(tempRoot, 'sessions'), { recursive: true });
     await mkdir(join(tempRoot, 'project-history'), { recursive: true });

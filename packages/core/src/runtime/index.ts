@@ -30,9 +30,14 @@ export * from './task-gates.js';
 export { assertPortableCraftbookSupported, taskActiveAssignee } from './tasks.js';
 export type { PortableContent, PortableCatalogModel } from './content.js';
 
-export { portableToolNames } from './product-tools.js';
+export { portableToolInputSchema, portableToolNames } from './product-tools.js';
 
 export * from './transform.js';
 export * from './speech.js';
 export * from './speech-bytes.js';
 export * from './speech-pcm.js';
+
+export * from './http/json.js';
+export * from './http/errors.js';
+export * from './script-responses.js';
+export * from './drafts.js';

@@ -1,42 +1,21 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import {
-  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
-  type ScriptCapability,
-  type ScriptMeta,
-  type ScriptRun,
-  type ScriptRunCall,
-  type ScriptRunStatus,
-  type ScriptRunTrigger,
-  type ScriptScope,
-  assertScriptExecutionAllowed,
-  createLogger,
-  getEngagementMode,
-  isEngagementAllowed,
-  narrowScriptSecurityCapabilities,
-  validateScriptOutput,
-} from '@bendyline/gezel';
+import { type ScriptRun, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { ScriptExecutionResult, ScriptExecutor } from '@bendyline/gezel-script-runtime';
 import {
-  projectScriptFile,
-  projectScriptRunFile,
-  projectScriptRunsDir,
-  userScriptFile,
-} from '@bendyline/gezel/paths';
+  PortableScriptRunner,
+  type RunPortableScriptOptions,
+  type ScriptExecutor,
+} from '@bendyline/gezel-script-runtime';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
-import { redactObject, redactString } from '../providers/mcp-bridge.js';
 import { type CredentialRegistry, DefaultCredentialRegistry } from '../secrets/registry.js';
 import type { SecretStore } from '../secrets/types.js';
 import type { TaskManager } from '../tasks/manager.js';
-import { type DispatcherContext, type DispatcherDeps, buildDispatcher } from './dispatcher.js';
-import { validateScriptInput } from './input-validator.js';
-import { parseScriptMeta } from './meta.js';
+import { type DispatcherDeps, buildDispatcher } from './dispatcher.js';
 import { NodeScriptExecutor } from './node-executor.js';
-import { stdlibScriptFile } from './stdlib-source.js';
+import { NodeScriptHost, extractScriptFailureFromStderr } from './node-host.js';
+
+export { extractScriptFailureFromStderr };
 
 const log = createLogger('scripts');
 
@@ -44,7 +23,8 @@ export interface ScriptRunnerOptions {
   /** Host-selected execution engine. Scripts cannot select or replace it. */
   executor?: ScriptExecutor;
   store: Store;
-  chat: ChatManager;
+  /** Backs `llm.oneShot`; a runner without one refuses that call. */
+  chat?: Pick<ChatManager, 'oneShotCompletion'>;
   /** Backs the `gezel.memory.*` script API. Injected by service.ts. */
   memory?: MemoryManager;
   /** Backs the mutating `gezel.task.*` script API. Injected by service.ts. */
@@ -55,53 +35,16 @@ export interface ScriptRunnerOptions {
   defaultTimeoutMs?: number;
   /** Custom MCP call forwarder. Injected by service.ts when the bridge is ready. */
   mcpCall?: DispatcherDeps['mcpCall'];
-  /**
-   * Optional. When provided, scripts can resolve named credentials via
-   * `credential:<name>` capabilities. If omitted, the runner still
-   * operates; scripts that declare credential capabilities simply
-   * can't resolve them (any attempt via the `http.authed` dispatcher
-   * entry will error).
-   */
+  /** Resolves `credential:<name>` capabilities for `http.authed`. */
   credentials?: CredentialRegistry;
-  /**
-   * When `credentials` is omitted and a `secrets` store is provided,
-   * construct a `DefaultCredentialRegistry` from `(store, secrets)`.
-   * Service.ts uses this path at boot.
-   */
+  /** Builds the default credential registry when `credentials` is not given. */
   secrets?: SecretStore;
-  /**
-   * Optional. Backs provenance verification for the trusted-lane sandbox
-   * fallback: a project script whose bytes exactly match the catalog-
-   * shipped project-type script may run on platforms with no OS network
-   * boundary (Windows; Linux with the RPC channel). Without a catalog,
-   * no project script is ever provenance-trusted and such platforms keep
-   * failing closed.
-   */
+  /** Catalog for provenance trust of installed project-type and test-shim scripts. */
   catalog?: CatalogService;
 }
 
-export interface RunScriptOptions {
-  projectId: string;
-  scriptName: string;
-  /**
-   * Where the script resolves from. Explicit scope only — no fallback
-   * chain. Absent = `'project'`. `'craftbook'` refs resolve from the
-   * craftbook's embedded scripts map when the caller passes
-   * `inlineSource`, else from the project-installed copy (install.ts).
-   */
-  scope?: ScriptScope;
-  /**
-   * The script's TypeScript source, supplied directly instead of resolved
-   * from disk — how a craftbook's embedded `scripts` map executes. Never
-   * valid with `scope: 'standard'` (inline sources are project/local
-   * trust; the trusted stdlib only ever loads from the app's own tree).
-   */
-  inlineSource?: string;
-  inputs?: Record<string, unknown>;
-  trigger: ScriptRunTrigger;
-  depth?: number;
-  timeoutMs?: number;
-}
+/** The desktop accepts every option the shared runner does, `inlineSource` included. */
+export type RunScriptOptions = RunPortableScriptOptions;
 
 export interface ScriptRunResult {
   run: ScriptRun;
@@ -112,563 +55,84 @@ const MAX_TIMEOUT_MS = 30 * 60_000;
 const MAX_CASCADE_DEPTH = 4;
 
 /**
- * Owns the script execution pipeline: meta read → input validation →
- * host-selected executor → permission dispatcher → run
- * persistence. One instance per service; callers drive it through
- * `run()` (for chat/manual triggers) or the phase-hook wiring in
- * TaskManager.
+ * The desktop script runner: the shared `PortableScriptRunner` over a Node
+ * host. Admission, capability narrowing, live policy rechecks, per-call
+ * audit persistence, nesting, timeouts, redaction and effect draining are
+ * the shared runner's; this class owns what the desktop adds, which is the
+ * dispatcher with its desktop-only methods and its late-bound services.
  */
 export class ScriptRunner {
   private readonly store: Store;
-  private readonly executor: ScriptExecutor;
-  private readonly chat: ChatManager;
+  private readonly chat: Pick<ChatManager, 'oneShotCompletion'> | undefined;
   private readonly memory?: MemoryManager;
   private readonly tasks?: TaskManager;
-  private readonly maxNestedDepth: number;
-  private readonly defaultTimeoutMs: number;
   private readonly credentials?: CredentialRegistry;
-  private readonly catalog?: CatalogService;
-  private dispatcher: ReturnType<typeof buildDispatcher>;
   private mcpCall: DispatcherDeps['mcpCall'];
   private indexAccess: DispatcherDeps['index'];
-  private readonly activePolicies = new Map<string, { check(): Promise<void>; depth: number }>();
+  private readonly host: NodeScriptHost;
+  private readonly portable: PortableScriptRunner;
 
   constructor(opts: ScriptRunnerOptions) {
     this.store = opts.store;
-    this.executor = opts.executor ?? new NodeScriptExecutor();
     this.chat = opts.chat;
     this.memory = opts.memory;
     this.tasks = opts.tasks;
-    this.maxNestedDepth = opts.maxNestedDepth ?? MAX_CASCADE_DEPTH;
-    this.defaultTimeoutMs = Math.min(opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
-    this.catalog = opts.catalog;
     this.mcpCall = opts.mcpCall;
     this.credentials =
       opts.credentials ??
       (opts.secrets
         ? new DefaultCredentialRegistry(this.store, opts.secrets, this.store.historyManager)
         : undefined);
-
-    this.dispatcher = this.buildDispatcherWithDeps();
+    this.host = new NodeScriptHost({
+      store: this.store,
+      catalog: opts.catalog,
+      dispatcher: this.buildDispatcherWithDeps(),
+    });
+    const host = this.host;
+    this.portable = new PortableScriptRunner({
+      executor: opts.executor ?? new NodeScriptExecutor(),
+      resolve: (name, scope, context) => host.resolve(name, scope, context),
+      readConfig: () => host.readConfig(),
+      workspaceWriteAllowed: (projectId) => host.workspaceWriteAllowed(projectId),
+      dispatch: (context, method, params) => host.dispatch(context, method, params),
+      persistRun: (run) => host.persistRun(run),
+      describeFailure: (result) => host.describeFailure(result),
+      limits: {
+        maxNestedDepth: opts.maxNestedDepth ?? MAX_CASCADE_DEPTH,
+        defaultTimeoutMs: Math.min(opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS),
+        maxTimeoutMs: MAX_TIMEOUT_MS,
+      },
+    });
   }
 
   private buildDispatcherWithDeps(): ReturnType<typeof buildDispatcher> {
     return buildDispatcher({
       store: this.store,
-      chat: this.chat,
+      ...(typeof this.chat?.oneShotCompletion === 'function'
+        ? { oneShot: (...args) => this.chat!.oneShotCompletion(...args) }
+        : {}),
       memory: this.memory,
       tasks: this.tasks,
       mcpCall: this.mcpCall,
       credentials: this.credentials,
       index: this.indexAccess,
-      runNested: (parentCtx, name, input) => this.runNested(parentCtx, name, input),
     });
   }
 
-  /**
-   * Allow `service.ts` to wire in the MCP bridge forwarder after both
-   * the bridge and the runner have been constructed. This avoids a
-   * circular dep during service boot.
-   */
+  /** Wire the MCP bridge forwarder once the bridge exists, after boot ordering. */
   setMcpCall(fn: DispatcherDeps['mcpCall']): void {
     this.mcpCall = fn;
-    this.dispatcher = this.buildDispatcherWithDeps();
+    this.host.setDispatcher(this.buildDispatcherWithDeps());
   }
 
-  /**
-   * Wire the `index.*` methods after the workspace-index and enrichment
-   * managers exist — they are constructed later in service boot than the
-   * runner. Same late-binding shape as {@link setMcpCall}.
-   */
+  /** Wire the `index.*` methods once the index managers exist. */
   setIndexAccess(access: DispatcherDeps['index']): void {
     this.indexAccess = access;
-    this.dispatcher = this.buildDispatcherWithDeps();
+    this.host.setDispatcher(this.buildDispatcherWithDeps());
   }
 
   async run(opts: RunScriptOptions): Promise<ScriptRun> {
-    const depth = opts.depth ?? 0;
-    if (depth > this.maxNestedDepth) {
-      throw new Error(`nested script depth exceeded (max ${this.maxNestedDepth})`);
-    }
-    const parent =
-      opts.trigger.kind === 'nested'
-        ? this.activePolicies.get(opts.trigger.parentRunId)
-        : undefined;
-    if (opts.trigger.kind === 'nested' && !parent)
-      throw new Error('Parent script execution has ended');
-    await parent?.check();
-
-    const scope = opts.scope ?? 'project';
-    if (opts.inlineSource !== undefined && scope === 'standard') {
-      throw new Error(
-        'inline script sources cannot run at standard scope — the trusted stdlib only loads from the app tree',
-      );
-    }
-    const source =
-      opts.inlineSource ??
-      (await readFile(
-        await this.resolveScriptPath(opts.projectId, opts.scriptName, scope),
-        'utf8',
-      ));
-    const meta = parseScriptMeta(
-      source,
-      opts.inlineSource !== undefined
-        ? `<craftbook>/${opts.scriptName}.ts`
-        : `${scope}/${opts.scriptName}.ts`,
-    );
-
-    // Step-trigger convenience: a script that DECLARES `taskRef`/`stepId`
-    // inputs gets them filled from the triggering step when the caller
-    // didn't supply values — that's how e.g. checkTaskNoteContains knows
-    // which task it is gating without per-task craftbook edits. Only
-    // declared inputs are filled (validateScriptInput rejects unknowns).
-    let rawInputs = opts.inputs;
-    if (opts.trigger.kind === 'step') {
-      const auto: Record<string, unknown> = {};
-      if (meta.inputs?.taskRef && rawInputs?.taskRef === undefined) {
-        auto.taskRef = opts.trigger.taskRef;
-      }
-      if (meta.inputs?.stepId && rawInputs?.stepId === undefined) {
-        auto.stepId = opts.trigger.stepId;
-      }
-      if (Object.keys(auto).length > 0) rawInputs = { ...auto, ...(rawInputs ?? {}) };
-    }
-
-    // Validate input against meta, applying defaults and required checks.
-    const validatedInput = validateScriptInput(meta, rawInputs);
-
-    // Initial guest flags describe admission; host dispatch rechecks live policy.
-    const config = await this.store.readConfig();
-    const llmAllowed = isEngagementAllowed(config);
-    const engagementMode = getEngagementMode(config);
-
-    // Centralized security ceiling on model/automation-initiated script
-    // execution. `chat` (a gezel ran a script mid-turn) and `step` (a
-    // craftbook step) are the agentic paths gated by `allowScriptExecution`.
-    // `manual` is user-initiated and `nested` inherits its already-
-    // authorized parent — both stay exempt (the agency axis). The app's own
-    // npm/node/CLI/MCP execution is a different code path and is unaffected.
-    // STANDARD-scope scripts are exempt too: they are packed into the app,
-    // read-only, and resolution only ever reads from the app's own stdlib
-    // directory — running them is running the product, not user code.
-    assertScriptExecutionAllowed(config, scope, opts.trigger);
-
-    const runId = randomUUID();
-    const startedAt = new Date().toISOString();
-
-    const run: ScriptRun = {
-      id: runId,
-      projectId: opts.projectId,
-      scriptName: opts.scriptName,
-      scope,
-      sourceHash: createHash('sha256').update(source).digest('hex'),
-      startedAt,
-      status: 'running',
-      trigger: opts.trigger,
-      inputs: validatedInput,
-      calls: [],
-      logs: '',
-    };
-
-    const allowedCapabilities = new Set<ScriptCapability>(meta.requires ?? []);
-    // Declared-but-gated capabilities, with the reason — flows into
-    // CapabilityDeniedError so the failure names the actual gate instead
-    // of the misleading "did not declare it in meta.requires".
-    const strippedCapabilities = new Map<ScriptCapability, string>();
-    const stripCapability = (cap: ScriptCapability, reason: string) => {
-      if (allowedCapabilities.delete(cap)) strippedCapabilities.set(cap, reason);
-    };
-    narrowScriptSecurityCapabilities(config, allowedCapabilities, strippedCapabilities);
-    // Per-project write gate: `workspace.write` follows the same
-    // contract as every other workspace-write surface (internal
-    // workspaces writable, external dirs opt-in, explicit per-project
-    // "edits off" respected) — scripts count as gezel-initiated work.
-    // The global policy deliberately does not factor in, so a fresh
-    // internal project (a checkers board) keeps working under
-    // super-lockdown. `documents.write` targets the shared cross-project
-    // library, so it stays on the global file-edits posture. Artifacts
-    // stay writable — the locked-down "write to the sandbox, not the
-    // source" escape hatch.
-    const narrowWorkspaceCapability = async () => {
-      if (allowedCapabilities.has('workspace.write')) {
-        const writeGate = await this.store.assertWorkspaceWritable(opts.projectId, {
-          initiatedByGezel: true,
-        });
-        if (!writeGate.ok) {
-          stripCapability(
-            'workspace.write',
-            writeGate.reason === 'external-consent-required'
-              ? `gezel writes to this project's external working directory require "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings`
-              : 'gezel workspace writes are turned off for this project (Project → Settings)',
-          );
-        }
-      }
-    };
-    await narrowWorkspaceCapability();
-    const knownSecretValues = new Set<string>();
-    const ctx: DispatcherContext = {
-      projectId: opts.projectId,
-      runId,
-      scriptName: opts.scriptName,
-      engagementFlags: { llmAllowed },
-      allowedCapabilities,
-      strippedCapabilities,
-      knownSecretValues,
-    };
-
-    const timeoutMs = Math.min(opts.timeoutMs ?? this.defaultTimeoutMs, MAX_TIMEOUT_MS);
-    let outputStamped: unknown;
-    let outputSeen = false;
-
-    const provenanceTrusted = await this.isProvenanceTrusted(
-      scope,
-      source,
-      opts.scriptName,
-      opts.inlineSource !== undefined,
-    );
-    const cliTrusted = await this.isCliTrustedSource(opts, source);
-    if (cliTrusted && !provenanceTrusted) {
-      log.info(
-        `[scripts] CLI-authorized custom script ${opts.scriptName}: using best-effort network isolation`,
-      );
-    }
-    const trustedReadOnlyStandard =
-      scope === 'standard' &&
-      provenanceTrusted &&
-      [...allowedCapabilities].every((capability) => capability.endsWith('.read'));
-
-    let acceptingCallbacks = true;
-    const pendingCalls = new Set<ScriptRunCall>();
-    const checkPolicy = async () => {
-      if (!acceptingCallbacks) throw new Error('Script execution has ended');
-      await parent?.check();
-      const current = await this.store.readConfig();
-      assertScriptExecutionAllowed(current, scope, opts.trigger);
-      narrowScriptSecurityCapabilities(current, allowedCapabilities, strippedCapabilities);
-      await narrowWorkspaceCapability();
-      ctx.engagementFlags.llmAllowed = isEngagementAllowed(current);
-      if (!acceptingCallbacks) throw new Error('Script execution has ended');
-    };
-    this.activePolicies.set(runId, { check: checkPolicy, depth });
-    try {
-      const result = await this.executor.execute({
-        source,
-        scriptName: opts.scriptName,
-        provenanceTrusted: provenanceTrusted || cliTrusted,
-        trustedReadOnlyStandard,
-        init: {
-          input: validatedInput,
-          runId,
-          projectId: opts.projectId,
-          engagementMode,
-          engagementFlags: { llmAllowed },
-        },
-        timeoutMs,
-        onRequest: async (method, params) => {
-          if (!acceptingCallbacks) throw new Error('Script execution has ended');
-          const start = Date.now();
-          const call: ScriptRunCall = {
-            at: new Date(start).toISOString(),
-            kind: method,
-            argsSummary: summarize(params).slice(0, 256),
-            durationMs: 0,
-          };
-          run.calls.push(call);
-          pendingCalls.add(call);
-          try {
-            await checkPolicy();
-            const result = await this.dispatcher.dispatch(ctx, method, params);
-            if (acceptingCallbacks) call.outputSummary = summarize(result).slice(0, 256);
-            return result;
-          } catch (err) {
-            if (acceptingCallbacks) call.error = err instanceof Error ? err.message : String(err);
-            throw err;
-          } finally {
-            if (acceptingCallbacks) call.durationMs = Date.now() - start;
-            pendingCalls.delete(call);
-          }
-        },
-        onNotification: (method, params) => {
-          if (!acceptingCallbacks) return;
-          if (method === 'script.output') {
-            if (outputSeen) {
-              return; // already recorded; silently drop
-            }
-            outputSeen = true;
-            outputStamped = (params as { value?: unknown } | undefined)?.value;
-          } else if (method === 'script.log') {
-            const args = (params as { args?: unknown[] } | undefined)?.args ?? [];
-            run.logs += `${args.map(summarize).join(' ')}\n`;
-          }
-        },
-        onStdout: (line) => {
-          if (!acceptingCallbacks) return;
-          run.logs += `[stdout] ${line}\n`;
-        },
-        onStderr: (line) => {
-          if (!acceptingCallbacks) return;
-          run.logs += `[stderr] ${line}\n`;
-        },
-      });
-
-      if (result.sandboxFallback) {
-        run.logs +=
-          '[sandbox] macOS Seatbelt failed to start; retried byte-verified read-only standard script under the Node permission and network-neutralizer layers.\n';
-      }
-      run.finishedAt = new Date().toISOString();
-      if (result.timedOut) {
-        run.status = 'error';
-        run.error = `script timed out after ${timeoutMs}ms`;
-      } else if (result.exitCode !== 0) {
-        run.status = 'error';
-        // Keep the script's thrown Error line. Script-backed tools use this
-        // field as their repair signal, so collapsing an illegal-move error
-        // (including its authoritative legal-move list) to "exited with
-        // code 1" leaves the model guessing from stale transcript state.
-        run.error =
-          run.error ??
-          extractScriptFailureFromStderr(result.stderr) ??
-          formatScriptExitFailure(result);
-      } else {
-        run.status = 'ok';
-        if (outputSeen) {
-          try {
-            run.output = validateScriptOutput(meta, outputStamped);
-          } catch (err) {
-            run.status = 'error';
-            run.error = err instanceof Error ? err.message : String(err);
-          }
-        }
-      }
-    } catch (err) {
-      run.finishedAt = new Date().toISOString();
-      run.status = 'error';
-      run.error = err instanceof Error ? err.message : String(err);
-    } finally {
-      acceptingCallbacks = false;
-      this.activePolicies.delete(runId);
-      for (const call of pendingCalls) {
-        call.durationMs = Date.now() - Date.parse(call.at);
-        call.error =
-          'Script execution ended while this host operation was pending; it may still complete';
-      }
-      pendingCalls.clear();
-    }
-
-    redactRunInPlace(run, knownSecretValues);
-    await this.persistRun(run);
-    if (run.status === 'error') {
-      log.error(
-        `[script-run] runId=${run.id} project=${run.projectId} script=${run.scriptName} ` +
-          `trigger=${run.trigger.kind} error=${run.error ?? 'unknown error'} ` +
-          `logsTail=${JSON.stringify(tailText(run.logs, 1_500))}`,
-      );
-    }
-    return run;
+    log.debug?.(`[scripts] run ${opts.scope ?? 'project'}/${opts.scriptName} in ${opts.projectId}`);
+    return this.portable.run(opts);
   }
-
-  async runNested(
-    parentCtx: DispatcherContext,
-    name: string,
-    input?: Record<string, unknown>,
-  ): Promise<{ runId: string; status: 'ok' | 'error'; output?: unknown; error?: string }> {
-    const parent = this.activePolicies.get(parentCtx.runId);
-    if (!parent) throw new Error('Parent script execution has ended');
-    const nested = await this.run({
-      projectId: parentCtx.projectId,
-      scriptName: name,
-      inputs: input,
-      trigger: { kind: 'nested', parentRunId: parentCtx.runId },
-      depth: parent.depth + 1,
-    });
-    return {
-      runId: nested.id,
-      status: nested.status === 'ok' ? 'ok' : 'error',
-      output: nested.output,
-      error: nested.error,
-    };
-  }
-
-  /**
-   * Resolve a script name + scope to its on-disk source. Explicit scope
-   * only — a project script can never shadow a standard one by accident.
-   */
-  private async resolveScriptPath(
-    projectId: string,
-    scriptName: string,
-    scope: ScriptScope,
-  ): Promise<string> {
-    switch (scope) {
-      case 'standard':
-        return stdlibScriptFile(scriptName);
-      case 'user':
-        return userScriptFile(this.store.homePath, scriptName);
-      case 'craftbook':
-        // Craftbook-bundled scripts are installed into the project at
-        // task creation (scripts/install.ts) — resolve the installed copy.
-        return projectScriptFile(this.store.homePath, projectId, scriptName);
-      case 'project':
-        return projectScriptFile(this.store.homePath, projectId, scriptName);
-    }
-  }
-
-  /**
-   * A script is provenance-trusted when its bytes are provably first-party:
-   * the shipped stdlib (standard scope resolves only from the app tree), a
-   * project script whose full content equals the provenance header plus
-   * the catalog-shipped project-type script body, or a project script
-   * matching a catalog-shipped craftbook `test.json` cli-shim body — byte
-   * for byte, at the exact version the header names. Trusted scripts may
-   * run where `denyNet` has no OS boundary (Windows; Linux with the RPC
-   * channel) under the remaining sandbox layers — their IO already flows
-   * through the fd-3 dispatcher, never raw sockets. Any edit to the
-   * installed file (even whitespace) drops it back to the fail-closed
-   * path, as does a version the catalog no longer serves.
-   */
-  private async isProvenanceTrusted(
-    scope: ScriptScope,
-    source: string,
-    scriptName: string,
-    isInline: boolean,
-  ): Promise<boolean> {
-    if (isInline) return false;
-    if (scope === 'standard') return true;
-    if (scope !== 'project' || !this.catalog) return false;
-    const newline = source.indexOf('\n');
-    if (newline < 0) return false;
-    const header = source.slice(0, newline);
-    const projectType = /^\/\/ @gezel-project-type: ([a-z0-9][a-z0-9-]*)@([0-9A-Za-z.+-]+)$/.exec(
-      header,
-    );
-    if (projectType) {
-      const detail = await this.catalog
-        .get('project-type', projectType[1]!, undefined, projectType[2]!)
-        .catch(() => null);
-      if (!detail || detail.manifest.kind !== 'project-type') return false;
-      const body = (detail.manifest.scripts as Record<string, string> | undefined)?.[scriptName];
-      return typeof body === 'string' && source === `${header}\n${body}`;
-    }
-    // Eval-harness lane: a craftbook's `test.json` may ship cli-shim
-    // scripts (`mocks[].shim`). Those bytes are catalog-shipped exactly
-    // like project-type scripts, so an installed copy that byte-matches
-    // the shim at the named book@version is first-party too. Used by the
-    // eval mock-service rail; a model-edited copy stops matching and
-    // falls back to fail-closed.
-    const testShim = /^\/\/ @gezel-craftbook-test: ([a-z0-9][a-z0-9-]*)@([0-9A-Za-z.+-]+)$/.exec(
-      header,
-    );
-    if (testShim && typeof this.catalog.getCraftbookTestSpec === 'function') {
-      const found = await this.catalog
-        .getCraftbookTestSpec(testShim[1]!, testShim[2]!)
-        .catch(() => null);
-      if (!found) return false;
-      for (const mock of found.spec.mocks) {
-        if (mock.kind !== 'cli') continue;
-        if (source === `${header}\n${mock.shim.content}`) return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  /** A model cannot grant trust by editing a script or supplying an invocation argument. */
-  private async isCliTrustedSource(opts: RunScriptOptions, source: string): Promise<boolean> {
-    if (
-      opts.scope !== 'craftbook' ||
-      opts.trigger.kind !== 'step' ||
-      opts.inlineSource === undefined
-    )
-      return false;
-    const [projectId, num] = opts.trigger.taskRef.split('/');
-    if (projectId !== opts.projectId || !num || !/^\d+$/.test(num)) return false;
-    const task = await this.store.readTask(projectId, Number(num));
-    return (
-      task?.cliTrustedScriptHashes?.includes(createHash('sha256').update(source).digest('hex')) ===
-      true
-    );
-  }
-
-  private async persistRun(run: ScriptRun): Promise<void> {
-    const date = run.startedAt.slice(0, 10);
-    const runsDir = projectScriptRunsDir(this.store.homePath, run.projectId);
-    const dayDir = join(runsDir, date);
-    await mkdir(dayDir, { recursive: true });
-    const file = projectScriptRunFile(this.store.homePath, run.projectId, date, run.id);
-    await writeFile(file, JSON.stringify(run, null, 2), 'utf8');
-  }
-}
-
-/**
- * Pull the actionable exception from a child script's stderr without
- * surfacing its stack trace. Sandbox/capability refusals keep priority;
- * ordinary user-script exceptions (Error, TypeError, RangeError, …) are
- * the fallback. The first exception line is the thrown message Node prints.
- */
-export function extractScriptFailureFromStderr(stderr: string): string | undefined {
-  const lines = stderr
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const refusal = lines.find(
-    (line) =>
-      line.startsWith('[sandbox error]') ||
-      line.startsWith('Error: script attempted to call') ||
-      line.startsWith('Error: script called'),
-  );
-  if (refusal) return refusal;
-  return lines.find((line) => /^(?:Error|[A-Za-z][A-Za-z0-9]*Error):\s+\S/.test(line));
-}
-
-function formatScriptExitFailure(result: ScriptExecutionResult): string {
-  const exit = result.signal
-    ? `script closed by signal ${result.signal}`
-    : `script exited with code ${result.exitCode}`;
-  const stderrTail = tailText(result.stderr, 600);
-  return stderrTail.length > 0 ? `${exit}: ${stderrTail}` : `${exit} without stderr output`;
-}
-
-function tailText(value: string, maxChars: number): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= maxChars) return trimmed;
-  return `…${trimmed.slice(trimmed.length - maxChars)}`;
-}
-
-function summarize(value: unknown): string {
-  if (value === undefined) return '';
-  // Collapse JSON's escaped backslashes so Windows paths read with single
-  // separators (c:\gh\foo, not c:\\gh\\foo) — a 2k-backslash run always
-  // encodes k real ones, so halving is lossless. See args-summary.ts.
-  if (typeof value === 'string') return JSON.stringify(value).replace(/\\\\/g, '\\');
-  try {
-    return JSON.stringify(value).replace(/\\\\/g, '\\');
-  } catch {
-    return String(value);
-  }
-}
-
-/**
- * Scrub every known secret value from fields of a `ScriptRun` that a
- * chat-side consumer (the model or a chat-rendered trace) can see.
- * `run.inputs` and `run.trigger` are out of scope — those were
- * supplied by the caller; they never hold credential values (the
- * dispatcher never echoes a secret back as an input value).
- */
-function redactRunInPlace(run: ScriptRun, secrets: Set<string>): void {
-  if (secrets.size === 0) return;
-  run.logs = redactString(run.logs, secrets);
-  if (run.error) run.error = redactString(run.error, secrets);
-  if (run.output !== undefined) run.output = redactObject(run.output, secrets);
-  run.calls = run.calls.map((call) => {
-    const out: ScriptRunCall = {
-      ...call,
-      argsSummary: redactString(call.argsSummary, secrets),
-    };
-    if (call.outputSummary !== undefined) {
-      out.outputSummary = redactString(call.outputSummary, secrets);
-    }
-    if (call.error !== undefined) {
-      out.error = redactString(call.error, secrets);
-    }
-    return out;
-  });
 }

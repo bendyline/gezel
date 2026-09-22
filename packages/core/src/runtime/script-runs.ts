@@ -1,5 +1,6 @@
 import { assertSafeEntityId } from '../entity-id.js';
 import { type ScriptRun, ScriptRunSchema } from '../schemas/script.js';
+import { markScriptRunInterrupted } from '../scripts/runs.js';
 import { listProjects, projectRoot, requireProject } from './projects.js';
 import type { PortableRepository } from './repository.js';
 
@@ -45,11 +46,7 @@ export async function recoverScriptRuns(repo: PortableRepository): Promise<void>
       for (const entry of await repo.list(`${root(project.id)}/${day.name}`)) {
         if (entry.isDirectory || !entry.name.endsWith('.json')) continue;
         const run = await getScriptRun(repo, project.id, entry.name.slice(0, -5));
-        if (run?.status !== 'running') continue;
-        run.status = 'error';
-        run.finishedAt = repo.now();
-        run.error =
-          'Script interrupted when Gezel closed. Inspect its calls and saved files before running it again; actions were not replayed.';
+        if (!run || !markScriptRunInterrupted(run, repo.now())) continue;
         await writeScriptRun(repo, run);
       }
     }
