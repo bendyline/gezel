@@ -114,8 +114,10 @@ jobs:
           node --input-type=module <<'JS'
           import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
           import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
           await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
-            const result = spawnSync('sdkmanager', ['platforms;android-36', 'build-tools;36.0.0', 'cmake;3.31.6', 'ndk;28.2.13676358'], {
+            const sdkmanager = path.join(process.env.ANDROID_HOME, 'cmdline-tools/latest/bin/sdkmanager');
+            const result = spawnSync(sdkmanager, ['platforms;android-36', 'build-tools;36.0.0', 'cmake;3.31.6', 'ndk;28.2.13676358'], {
               env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 }, stdio: 'inherit',
             });
             if (result.error) throw result.error;
@@ -221,7 +223,7 @@ jobs:
   ios-simulator:
     name: iOS simulator product and native bridge tests
     needs: bridge
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
