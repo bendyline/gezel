@@ -92,3 +92,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * Compact layout swaps between the roster and one gezel. Both panes stay
+ * mounted so a rename in progress, the open tab and the scroll position all
+ * survive a resize; these rules are what actually hide the inactive one,
+ * because a grid child's `display` wins over the `hidden` attribute.
+ */
+.gezellen-view > aside[hidden],
+.gezellen-view > section[hidden] {
+  display: none;
+}

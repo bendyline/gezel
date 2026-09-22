@@ -7,7 +7,12 @@ import {
 } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import type { ScriptExecutionOptions } from './index.js';
-import { PortableScriptRunner, type PortableScriptRunnerOptions } from './runner.js';
+import {
+  MAX_RUN_CHARS,
+  PortableScriptRunner,
+  type PortableScriptRunnerOptions,
+  abridgeRun,
+} from './runner.js';
 
 const meta: ScriptMeta = {
   name: 'example',
@@ -226,5 +231,37 @@ describe('portable script runner', () => {
     expect(executed).toBe(false);
     expect(run.status).toBe('error');
     expect(saved.at(-1)?.status).toBe('error');
+  });
+});
+
+describe('an oversized audit still gets written', () => {
+  const fits = (run: { calls: unknown[]; logs: string }) =>
+    JSON.stringify(run).length <= MAX_RUN_CHARS;
+
+  it('leaves a record that already fits alone', () => {
+    const run = { calls: [{ method: 'fs.read' }], logs: 'hello' };
+    abridgeRun(run);
+    expect(run.calls).toHaveLength(1);
+    expect(run.logs).toBe('hello');
+  });
+
+  it('drops the oldest calls and says how many, keeping the newest', () => {
+    const run = {
+      calls: Array.from({ length: 4_000 }, (_, index) => ({ index, blob: 'x'.repeat(600) })),
+      logs: '',
+    };
+    abridgeRun(run);
+    expect(fits(run)).toBe(true);
+    expect(run.calls.length).toBeGreaterThan(0);
+    // A run is read for how it ended, so the last call must survive.
+    expect((run.calls.at(-1) as { index: number }).index).toBe(3_999);
+    expect(run.logs).toMatch(/earlier host call\(s\) omitted/);
+  });
+
+  it('truncates a runaway log', () => {
+    const run = { calls: [], logs: 'y'.repeat(MAX_RUN_CHARS + 10_000) };
+    abridgeRun(run);
+    expect(fits(run)).toBe(true);
+    expect(run.logs).toMatch(/output log truncated/);
   });
 });

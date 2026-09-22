@@ -28,6 +28,7 @@ import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
@@ -259,6 +260,11 @@ function FullApp() {
   const [questionsOpen, setQuestionsOpen] = useState(false);
 
   const commitSelection = useCallback((next: RecentTab | null) => {
+    // Any navigation closes the first-run window. The estimate is re-run on
+    // every config save, and a provider switched before its key is pasted
+    // reads as "not set up" — without this, saving in Settings would throw the
+    // user back to Home and clear their stored selection.
+    setupOpened.current = true;
     setSelection(next);
     setNavigationOpen(false);
     try {
@@ -271,11 +277,23 @@ function FullApp() {
 
   useEffect(() => {
     if (!firstRun || setupOpened.current) return;
-    setupOpened.current = true;
     // Setup must be visible even when compact navigation or a restored project
-    // would otherwise hide Home. Later navigation remains the user's choice.
+    // would otherwise hide Home. This is a startup affordance only: navigating
+    // or saving settings closes the window below, so a later estimate cannot
+    // reopen it underneath someone mid-task.
     commitSelection(null);
   }, [firstRun, commitSelection]);
+
+  useEffect(() => {
+    // Saving settings re-runs the first-run estimate, and a provider switched
+    // before its key is pasted reads as "not set up". A save is by definition
+    // not app startup, so it must never pull the user back to Home.
+    const close = () => {
+      setupOpened.current = true;
+    };
+    window.addEventListener('gezel:config-updated', close);
+    return () => window.removeEventListener('gezel:config-updated', close);
+  }, []);
 
   const openArea = useCallback(
     (area: RecentTabArea) => commitSelection(toRecentTab({ kind: 'area', area })),
@@ -860,43 +878,45 @@ function FullApp() {
           )}
         </div>
       )}
-      <ResponsiveAppShell
-        compact={compact}
-        navigationOpen={navigationOpen}
-        navigation={
-          <Sidebar
-            compact={compact}
-            selection={selection}
-            onSelect={commitSelection}
-            onOpenArea={openArea}
-            onPreload={preloadSelection}
-            activeProjectIds={activeProjectIds}
-            activeGezelIds={activeGezelIds}
-            pendingByProject={pendingByProject}
-            poisonedProjects={poisonedProjects}
-          />
-        }
-      >
-        <Suspense fallback={<div className="placeholder">Loading view…</div>}>
-          {selection === null ? (
-            <HomeView
-              platform={window.__GEZEL__?.platform}
-              onNavigate={(v) => {
-                if (v === 'home') commitSelection(null);
-                else openArea(v);
-              }}
+      <FirstRunProvider value={firstRun}>
+        <ResponsiveAppShell
+          compact={compact}
+          navigationOpen={navigationOpen}
+          navigation={
+            <Sidebar
+              compact={compact}
+              selection={selection}
+              onSelect={commitSelection}
+              onOpenArea={openArea}
+              onPreload={preloadSelection}
+              activeProjectIds={activeProjectIds}
+              activeGezelIds={activeGezelIds}
+              pendingByProject={pendingByProject}
+              poisonedProjects={poisonedProjects}
             />
-          ) : (
-            <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-              <TabContent
-                tab={selection}
-                activeProjectsByGezel={activeProjectsByGezel}
-                activeTurnsReady={activeTurnsReady}
+          }
+        >
+          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+            {selection === null ? (
+              <HomeView
+                platform={window.__GEZEL__?.platform}
+                onNavigate={(v) => {
+                  if (v === 'home') commitSelection(null);
+                  else openArea(v);
+                }}
               />
-            </TabErrorBoundary>
-          )}
-        </Suspense>
-      </ResponsiveAppShell>
+            ) : (
+              <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+                <TabContent
+                  tab={selection}
+                  activeProjectsByGezel={activeProjectsByGezel}
+                  activeTurnsReady={activeTurnsReady}
+                />
+              </TabErrorBoundary>
+            )}
+          </Suspense>
+        </ResponsiveAppShell>
+      </FirstRunProvider>
     </div>
   );
 }

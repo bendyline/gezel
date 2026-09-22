@@ -194,4 +194,14 @@ describe('QuickJS worker through ScriptRunner', () => {
     expect((await loop).stderr).toContain('cancelled');
     expect(guestStarted).toBe(true);
   });
+
+  it('reports a script that will not compile as a failed run, not a thrown host error', async () => {
+    // The in-worker executor and the Node sandbox both surface this as exit 1.
+    // Throwing instead made the runner log the same failure a different way.
+    const executor = new QuickJSWorkerExecutor();
+    const result = await executor.execute(directOptions('const broken: = 1;'));
+    expect(result.exitCode).toBe(1);
+    expect(result.timedOut).toBe(false);
+    expect(result.stderr).toMatch(/Error:/);
+  });
 });

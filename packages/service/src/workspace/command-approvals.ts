@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { CommandApprovalInputFile, CommandApprovalScope } from '@bendyline/gezel';
+import {
+  type CommandApprovalInputFile,
+  type CommandApprovalScope,
+  KeyedLock,
+} from '@bendyline/gezel';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
 
@@ -16,7 +20,9 @@ import { writeFileAtomic } from '../fs/atomic.js';
  *   { scripts: { build: 'approved' | 'declined', ... },
  *     npx:     { vitest: 'approved', ... },
  *     scriptHashes: { build: '<sha256 of the approved invocation + input files>' },
- *     npxHashes:    { ... } }
+ *     npxHashes:    { ... },
+ *     scriptInvocationHashes: { build: ['<approved invocation>', ...] },
+ *     npxInvocationHashes: { ... } }
  *
  * An `approved` decision is honored ONLY while the command body/path,
  * ordered argument vector, and identifiable input-file contents match what
@@ -34,7 +40,13 @@ export interface CommandApprovalsFile {
   npx: Record<string, CommandApprovalDecision>;
   scriptHashes?: Record<string, string>;
   npxHashes?: Record<string, string>;
+  /** Retain independently approved invocations when fanout tasks share a command. */
+  scriptInvocationHashes?: Record<string, string[]>;
+  npxInvocationHashes?: Record<string, string[]>;
 }
+
+const approvalLocks = new KeyedLock();
+const MAX_INVOCATIONS_PER_COMMAND = 64;
 
 /** sha256 of the exact body/path + ordered args + input snapshot the user approved. */
 export function hashCommandInvocation(
@@ -69,6 +81,8 @@ export async function readCommandApprovals(
       npx: normalizeBucket(parsed.npx),
       scriptHashes: normalizeHashes(parsed.scriptHashes),
       npxHashes: normalizeHashes(parsed.npxHashes),
+      scriptInvocationHashes: normalizeInvocationHashes(parsed.scriptInvocationHashes),
+      npxInvocationHashes: normalizeInvocationHashes(parsed.npxInvocationHashes),
     };
   } catch {
     return { scripts: {}, npx: {} };
@@ -99,7 +113,10 @@ export function lookupApproval(
   // Missing legacy hashes and body-only hashes both force a re-prompt.
   if (invocationHash === undefined) return undefined;
   const hashes = scope === 'script' ? file.scriptHashes : file.npxHashes;
-  return hashes?.[name] === invocationHash ? 'approved' : undefined;
+  const invocations = scope === 'script' ? file.scriptInvocationHashes : file.npxInvocationHashes;
+  return hashes?.[name] === invocationHash || invocations?.[name]?.includes(invocationHash)
+    ? 'approved'
+    : undefined;
 }
 
 export async function recordApproval(
@@ -110,22 +127,43 @@ export async function recordApproval(
   decision: CommandApprovalDecision,
   invocationHash?: string,
 ): Promise<void> {
-  const existing = await readCommandApprovals(home, projectId);
-  const scriptHashes = { ...existing.scriptHashes };
-  const npxHashes = { ...existing.npxHashes };
-  const next: CommandApprovalsFile = {
-    scripts: { ...existing.scripts },
-    npx: { ...existing.npx },
-    scriptHashes,
-    npxHashes,
-  };
-  const bucket = scope === 'script' ? next.scripts : next.npx;
-  const hashes = scope === 'script' ? scriptHashes : npxHashes;
-  bucket[name] = decision;
-  // Only an approval pins an exact invocation hash; a decline clears any stale one.
-  if (decision === 'approved' && invocationHash) hashes[name] = invocationHash;
-  else delete hashes[name];
-  await writeCommandApprovals(home, projectId, next);
+  await approvalLocks.run(approvalsPath(home, projectId), async () => {
+    const existing = await readCommandApprovals(home, projectId);
+    const scriptHashes = { ...existing.scriptHashes };
+    const npxHashes = { ...existing.npxHashes };
+    const scriptInvocationHashes = { ...existing.scriptInvocationHashes };
+    const npxInvocationHashes = { ...existing.npxInvocationHashes };
+    const next: CommandApprovalsFile = {
+      scripts: { ...existing.scripts },
+      npx: { ...existing.npx },
+      scriptHashes,
+      npxHashes,
+      scriptInvocationHashes,
+      npxInvocationHashes,
+    };
+    const bucket = scope === 'script' ? next.scripts : next.npx;
+    const hashes = scope === 'script' ? scriptHashes : npxHashes;
+    const invocations = scope === 'script' ? scriptInvocationHashes : npxInvocationHashes;
+    const priorDecision = bucket[name];
+    bucket[name] = decision;
+    // Older readers still see only the latest exact hash. New readers retain a
+    // bounded set, never a command-wide wildcard. Declines revoke the entire set.
+    if (decision === 'approved' && invocationHash) {
+      const prior =
+        priorDecision === 'approved'
+          ? [...(invocations[name] ?? []), ...(hashes[name] ? [hashes[name]!] : [])]
+          : [];
+      invocations[name] = [
+        ...new Set(prior.filter((hash) => hash !== invocationHash)),
+        invocationHash,
+      ].slice(-MAX_INVOCATIONS_PER_COMMAND);
+      hashes[name] = invocationHash;
+    } else {
+      delete hashes[name];
+      delete invocations[name];
+    }
+    await writeCommandApprovals(home, projectId, next);
+  });
 }
 
 function normalizeBucket(
@@ -144,6 +182,23 @@ function normalizeHashes(raw: Record<string, string> | undefined): Record<string
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw)) {
     if (typeof v === 'string' && v.length > 0) out[k] = v;
+  }
+  return out;
+}
+
+function normalizeInvocationHashes(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [name, values] of Object.entries(raw)) {
+    if (Array.isArray(values)) {
+      out[name] = [
+        ...new Set(
+          values.filter(
+            (value): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
+          ),
+        ),
+      ].slice(-MAX_INVOCATIONS_PER_COMMAND);
+    }
   }
   return out;
 }

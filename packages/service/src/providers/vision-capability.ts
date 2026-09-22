@@ -71,11 +71,10 @@ const VISION_NATIVE: Record<ProviderName, 'always' | 'never' | 'per-model'> = {
 };
 
 /**
- * MLX has no vision path today — `gezel_mlx_server.py` declares vision tokens
- * explicitly out of scope, and the TS side sets an `images` field the Python
- * server ignores. One constant to flip when that lands.
+ * MLX vision uses the complete installed vision tower and a separate uncached
+ * serial path. The bound session, rather than a catalog tag, must confirm it.
  */
-export const MLX_VISION_SUPPORTED = false;
+export const MLX_VISION_SUPPORTED = true;
 
 export interface VisionCapabilityInput {
   provider: ProviderName;
@@ -94,6 +93,7 @@ export interface VisionCapabilityInput {
   visionEncoderPath?: string;
   /** Whether the user opted this model into native vision. */
   nativeVisionEnabled?: boolean;
+  mlxVisionAvailable?: boolean;
 }
 
 /**
@@ -142,8 +142,10 @@ export function resolveVisionCapability(input: VisionCapabilityInput): {
   if (mode === 'always') return { native: true, reason: `${input.provider} accepts images` };
   if (mode === 'never') return { native: false, reason: `${input.provider} cannot accept images` };
 
-  if (input.provider === 'mlx' && !MLX_VISION_SUPPORTED) {
-    return { native: false, reason: 'the mlx engine has no vision path yet' };
+  if (input.provider === 'mlx') {
+    return input.mlxVisionAvailable && input.nativeVisionEnabled
+      ? { native: true, reason: 'the bound MLX engine runs with its vision tower' }
+      : { native: false, reason: 'the bound MLX engine has no enabled vision tower' };
   }
   const visionSidecarPath = input.provider === 'ds4' ? input.visionEncoderPath : input.mmprojPath;
   if (!visionSidecarPath) {

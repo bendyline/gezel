@@ -87,7 +87,7 @@ export async function listGezels(repo: PortableRepository): Promise<GezelSummary
   const gezels: GezelSummary[] = [];
   for (const entry of await repo.list('gezels')) {
     if (!entry.isDirectory || !isSafeEntityId(entry.name)) continue;
-    const gezel = await getGezel(repo, entry.name);
+    const gezel = await repo.listed(`gezel ${entry.name}`, () => getGezel(repo, entry.name));
     if (gezel) gezels.push(GezelSummarySchema.parse(gezel));
   }
   return gezels.sort((a, b) => a.name.localeCompare(b.name));

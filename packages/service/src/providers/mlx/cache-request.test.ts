@@ -63,33 +63,163 @@ function toolCallResponse(name: string, args: Record<string, unknown>): Response
 }
 
 describe('MlxProvider cache request wiring', () => {
-  it('continues from a seeded tool result without appending an empty user turn', async () => {
-    let body: Record<string, unknown> | undefined;
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
-      body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-      return completionResponse('Built it.');
-    }) as typeof fetch;
-    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
-    const session = await provider.createSession({
-      systemMessage: 'system',
-      priorMessages: [
-        { role: 'user', content: 'Build index.html.' },
-        {
-          role: 'assistant',
-          content: '',
-          toolCalls: [{ id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' }],
-        },
-        { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
-      ],
+  it('rejects image attachments before sending a text-only sidecar request', async () => {
+    let requested = false;
+    const provider = new MlxProvider({
+      baseUrl: 'http://mlx.test',
+      fetchImpl: (async () => {
+        requested = true;
+        return completionResponse();
+      }) as typeof fetch,
     });
-
-    await session.sendAndWait('', { timeoutMs: 5_000, continueFromToolResult: true });
-
-    const messages = body?.messages as Array<{ role: string; content?: string }>;
-    expect(messages.at(-1)).toMatchObject({ role: 'tool', content: 'Appended note.' });
-    expect(messages).not.toContainEqual({ role: 'user', content: '' });
+    const session = await provider.createSession({ systemMessage: 'system' });
+    await expect(
+      session.sendAndWait('Inspect this image.', {
+        timeoutMs: 5_000,
+        attachments: [{ base64: 'eA==', mimeType: 'image/png', filename: 'model.png' }],
+      }),
+    ).rejects.toThrow('supports text only');
+    expect(requested).toBe(false);
     await session.disconnect();
   });
+
+  it('does not emit a successful image-read receipt when pixels cannot reach the model', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const provider = new MlxProvider({
+      baseUrl: 'http://mlx.test',
+      fetchImpl: (async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return bodies.length === 1
+          ? toolCallResponse('read_image_as_base64', { path: 'model.png' })
+          : completionResponse('Image inspection requires another provider.');
+      }) as typeof fetch,
+    });
+    const session = await provider.createSession({ systemMessage: 'system' });
+    let invoked = false;
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        {
+          name: 'read_image_as_base64',
+          description: 'Read image.',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+            required: ['path'],
+          },
+        },
+      ],
+      hasTool: () => true,
+      callTool: async () => {
+        invoked = true;
+        return 'Image read';
+      },
+      stop: async () => {},
+    };
+    await session.sendAndWait('Inspect the model.', { timeoutMs: 5_000 });
+    expect(invoked).toBe(false);
+    const messages = bodies[1]?.messages as Array<{ role: string; content?: string }>;
+    expect(messages.find((m) => m.role === 'tool')?.content).toContain('No image was delivered');
+    await session.disconnect();
+  });
+
+  it('delivers tool pixels after the paired tool result on a vision-enabled engine', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const provider = new MlxProvider({
+      baseUrl: 'http://mlx.test',
+      visionEnabled: true,
+      fetchImpl: (async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return bodies.length === 1
+          ? toolCallResponse('read_image_as_base64', { path: 'reference.png' })
+          : completionResponse('I see the image.');
+      }) as typeof fetch,
+    });
+    const session = await provider.createSession({ systemMessage: 'system' });
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        {
+          name: 'read_image_as_base64',
+          description: 'Read image.',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+            required: ['path'],
+          },
+        },
+      ],
+      hasTool: () => true,
+      callTool: async (
+        _name: string,
+        _args: unknown,
+        opts: { onImages: (images: unknown[]) => void },
+      ) => {
+        opts.onImages([{ base64: 'cGl4ZWxz', mimeType: 'image/png' }]);
+        return 'Reference image';
+      },
+      stop: async () => {},
+    };
+    await session.sendAndWait('Inspect the reference.', { timeoutMs: 5_000 });
+    const messages = bodies[1]?.messages as Array<{
+      role: string;
+      content?: string;
+      images?: string[];
+    }>;
+    expect(messages.at(-2)).toMatchObject({
+      role: 'tool',
+      content: 'Reference image',
+      tool_call_id: 'call-1',
+    });
+    expect(messages.at(-1)).toMatchObject({ role: 'user', images: ['cGl4ZWxz'] });
+    expect(JSON.stringify(messages.map((m) => m.content))).not.toContain('cGl4ZWxz');
+    expect(session.supportsImageInput).toBe(true);
+    await session.disconnect();
+  });
+
+  it.each([false, true])(
+    'continues from a seeded tool result without an empty user turn (image=%s)',
+    async (withImage) => {
+      let body: Record<string, unknown> | undefined;
+      const fetchImpl = (async (_url: string, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        return completionResponse('Built it.');
+      }) as typeof fetch;
+      const provider = new MlxProvider({
+        baseUrl: 'http://mlx.test',
+        fetchImpl,
+        visionEnabled: withImage,
+      });
+      const session = await provider.createSession({
+        systemMessage: 'system',
+        priorMessages: [
+          { role: 'user', content: 'Build index.html.' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              { id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' },
+            ],
+          },
+          { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
+          ...(withImage
+            ? [{ role: 'user' as const, content: 'Tool image', images: ['eA=='] }]
+            : []),
+        ],
+      });
+
+      await session.sendAndWait('', { timeoutMs: 5_000, continueFromToolResult: true });
+
+      const messages = body?.messages as Array<{ role: string; content?: string }>;
+      expect(messages.at(-1)).toMatchObject(
+        withImage
+          ? { role: 'user', images: ['eA=='] }
+          : { role: 'tool', content: 'Appended note.' },
+      );
+      expect(messages).not.toContainEqual({ role: 'user', content: '' });
+      await session.disconnect();
+    },
+  );
 
   it('uses one stable fallback cache id when queue session metadata is absent', async () => {
     const bodies: Array<Record<string, unknown>> = [];

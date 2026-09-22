@@ -34,11 +34,20 @@ export function useResponsiveLayout() {
   }, []);
 
   useEffect(() => {
-    if (compact) {
-      document.documentElement.dataset.layout = 'mobile';
-      void import('../components/ResponsiveAppShell.mobile.css');
-    } else delete document.documentElement.dataset.layout;
+    if (!compact) {
+      delete document.documentElement.dataset.layout;
+      return;
+    }
+    // Desktop only pays for the compact stylesheet when it narrows, but the
+    // attribute must not land first: styling the tree as mobile before its
+    // rules arrive shows a frame of unstyled compact layout. The native host
+    // imports the sheet eagerly, so there it resolves immediately.
+    let cancelled = false;
+    void import('../components/ResponsiveAppShell.mobile.css').then(() => {
+      if (!cancelled) document.documentElement.dataset.layout = 'mobile';
+    });
     return () => {
+      cancelled = true;
       delete document.documentElement.dataset.layout;
     };
   }, [compact]);

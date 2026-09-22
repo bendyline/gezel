@@ -71,9 +71,10 @@ NDK version to the native build manifest so JNI and the staged C++ runtime match
 The speech build's `--fetch` flag downloads checksum-pinned dependencies and the
 offline model pack; use it only after authorizing those downloads. Omit it for
 subsequent builds from the verified cache. Speech build commands acquire the
-repository dependency lease. The initial pack is about 260 MiB before compression
+repository dependency lease. The initial pack is about 240 MiB before compression
 and includes Whisper tiny plus Kokoro voices, so speech can work on first launch
-without a connection. See [offline speech](../../docs/mobile-speech.md) for provider
+without a connection. The pack's 17 MiB `espeak-ng-data` directory is excluded:
+it is GPL-3, and only the retired eSpeak frontend ever read it. See [offline speech](../../docs/mobile-speech.md) for provider
 selection, supported voices, tests, and remaining device validation.
 
 When iOS assets already exist, launch them directly by opening

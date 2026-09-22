@@ -136,14 +136,42 @@ describe('QuickJS script execution', () => {
     expect(result.stderr).toContain('unavailable in portable scripts');
   });
 
-  it.each([
-    'while (true) {}',
-    'await new Promise(() => {});',
-    'while (true) { await Promise.resolve(); }',
-  ])('times out guest execution: %s', async (source) => {
-    const result = await executor().execute(runOptions(source, { timeoutMs: 40 }));
-    expect(result).toMatchObject({ exitCode: 1, timedOut: true });
-    expect(result.stderr).toContain('timed out');
+  it.each(['while (true) {}', 'while (true) { await Promise.resolve(); }'])(
+    'times out guest execution: %s',
+    async (source) => {
+      const result = await executor().execute(runOptions(source, { timeoutMs: 40 }));
+      expect(result).toMatchObject({ exitCode: 1, timedOut: true });
+      expect(result.stderr).toContain('timed out');
+    },
+  );
+
+  it('refuses the internal SDK module to anything but the bootstrap', async () => {
+    // The compiler rejects this import, but eval() never reaches the compiler,
+    // so the loader has to be the one that says no.
+    const result = await executor().execute(
+      runOptions('await eval("import(\'@gezel-internal/portable-sdk\')");'),
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('unavailable in portable scripts');
+  });
+
+  it('still lets the bootstrap reach it, so ordinary scripts work', async () => {
+    const result = await executor().execute(
+      runOptions("import { gezel } from '@bendyline/gezel-sdk';\ngezel.output({ ok: true });"),
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('fails a guest nothing can resume instead of burning the whole budget', async () => {
+    const started = Date.now();
+    // No host call outstanding, no queued job, and the guest has no timers.
+    const result = await executor().execute(
+      runOptions('await new Promise(() => {});', { timeoutMs: 20_000 }),
+    );
+    expect(result).toMatchObject({ exitCode: 1, timedOut: false });
+    expect(result.stderr).toMatch(/nothing can resume it/);
+    // The point of the fix: it stops immediately rather than at the deadline.
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it('caps guest allocations before exhausting host memory', async () => {
@@ -152,6 +180,16 @@ describe('QuickJS script execution', () => {
       const arrays = [];
       while (true) arrays.push(new Array(10000).fill('payload'));
     `),
+    );
+    expect(result).toMatchObject({ exitCode: 1, timedOut: false });
+    expect(result.stderr).toMatch(/memory/i);
+  });
+
+  it('stops ordinary allocation growth through the guest allocator', async () => {
+    // Object churn stays inside QuickJS's own accounting, so its limit fires
+    // first and the run ends well before any deadline.
+    const result = await executor({ memoryLimitBytes: 2 * 1024 * 1024 }).execute(
+      runOptions("const a = []; while (true) a.push({ x: 1, y: 2, z: 'abc' });"),
     );
     expect(result).toMatchObject({ exitCode: 1, timedOut: false });
     expect(result.stderr).toMatch(/memory/i);

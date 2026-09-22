@@ -424,6 +424,8 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WikimediaImageSearchRequest,
+  WikimediaImageSearchResponse,
   WikipediaReadRequest,
   WikipediaReadResponse,
   WikipediaSearchRequest,
@@ -6518,6 +6520,17 @@ export class GezelClient {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(id)}/tools/wikipedia-search`,
+      body,
+    );
+  }
+
+  toolWikimediaImageSearch(
+    id: string,
+    body: WikimediaImageSearchRequest,
+  ): Promise<WikimediaImageSearchResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/wikimedia-image-search`,
       body,
     );
   }

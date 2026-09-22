@@ -5,6 +5,7 @@ import {
   QUICKJS_MAX_MESSAGE_CHARS,
   QUICKJS_MAX_PENDING_CALLS,
   QUICKJS_MAX_TOTAL_MESSAGE_CHARS,
+  QUICKJS_START_TIMEOUT_MS,
   type QuickJSHostReply,
   type QuickJSWorkerData,
   type QuickJSWorkerMessage,
@@ -41,6 +42,7 @@ export class WebWorkerScriptExecutor implements ScriptExecutor {
           timeout.dispose();
           timeout.signal.removeEventListener('abort', onTimeout);
           options.signal?.removeEventListener('abort', onAbort);
+          started();
           worker.onmessage = null;
           worker.onerror = null;
           worker.onmessageerror = null;
@@ -55,6 +57,16 @@ export class WebWorkerScriptExecutor implements ScriptExecutor {
           }
         };
         const onAbort = () => stop('Error: script execution cancelled');
+        // A worker killed before it runs reports nothing at all.
+        let startup: ReturnType<typeof setTimeout> | undefined = setTimeout(
+          () => stop('Error: the script worker did not start'),
+          QUICKJS_START_TIMEOUT_MS,
+        );
+        const started = () => {
+          if (startup === undefined) return;
+          clearTimeout(startup);
+          startup = undefined;
+        };
         const timeout = createAwakeTimeout(options.timeoutMs);
         const onTimeout = () =>
           stop(`Error: script execution timed out${timeout.budget.describeSuspension()}`, true);
@@ -102,7 +114,10 @@ export class WebWorkerScriptExecutor implements ScriptExecutor {
             account(event.data);
             const frame = JSON.parse(event.data) as QuickJSWorkerMessage;
             if (frame.runId !== options.init.runId) throw new Error('Invalid script run identity');
+            started();
             switch (frame.kind) {
+              case 'started':
+                break;
               case 'request':
                 if (
                   ++calls > QUICKJS_MAX_CALLS ||

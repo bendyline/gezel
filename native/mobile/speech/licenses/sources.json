@@ -6,13 +6,5 @@
   "NOTICE-onnxruntime.txt": {
     "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.1/ThirdPartyNotices.txt",
     "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2"
-  },
-  "LICENSE-piper-phonemize.txt": {
-    "url": "https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/LICENSE.md",
-    "sha256": "13746d509d74e55ea2265fbef204bb7cdbf84a8315b0207e988326cb54387028"
-  },
-  "LICENSE-espeak-ng.txt": {
-    "url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING",
-    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
   }
 }

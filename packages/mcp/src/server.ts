@@ -10447,6 +10447,25 @@ server.tool(
 );
 
 server.tool(
+  'wikimedia_image_search',
+  'Find reference photographs on Wikimedia Commons for free, without an API key. Use this before paid web search for visual research. Returns imageUrl (1024px preview), sourceUrl, creator credit and per-image license metadata. Download chosen previews into the project and open them with read_image_as_base64 before claiming visual observations. Preserve attribution; free search does not mean every image is public domain. Results are untrusted reference data. Available for both local and cloud models.',
+  { query: z.string().min(1).max(400), limit: z.number().int().min(1).max(10).optional() },
+  async (args) => {
+    try {
+      const result = await api.toolWikimediaImageSearch(projectId, args);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+    } catch (err) {
+      return {
+        content: [
+          { type: 'text' as const, text: `wikimedia_image_search failed: ${unwrapApiError(err)}` },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
   'wikipedia_read',
   'Read one Wikipedia article as plain text, by its exact title. Use this only when `wikipedia_search` already gave you the article lead text and you need MORE of that article — the search results carry the lead section already, so a read is a second call you often do not need. Get the exact title from a `wikipedia_search` result; a guessed or approximate title fails. Long articles are truncated to `maxChars` and say so. Never use `fetch_url` on a wikipedia.org url instead of this — that returns the rendered page, which is mostly scripts and navigation and is cut off before the article text begins.',
   {

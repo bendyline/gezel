@@ -21,6 +21,7 @@ overrides:
   protobufjs: 7.6.5
   qs: 6.15.2
   react-router: 7.18.1
+  phonemizer: workspace:1.2.1
   sharp: workspace:0.35.3
   tar: 7.5.21
   ws: 8.21.1
@@ -564,6 +565,8 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
+  packages/phonemizer-compat: {}
 
   packages/plugin-sdk:
     dependencies:
@@ -6853,9 +6856,6 @@ packages:
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
-
-  phonemizer@1.2.1:
-    resolution: {integrity: sha512-v0KJ4mi2T4Q7eJQ0W15Xd4G9k4kICSXE8bpDeJ8jisL4RyJhNWsweKTOi88QXFc4r4LZlz5jVL5lCHhkpdT71A==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -13587,7 +13587,7 @@ snapshots:
   kokoro-js@1.2.1:
     dependencies:
       '@huggingface/transformers': 3.8.1
-      phonemizer: 1.2.1
+      phonemizer: link:packages/phonemizer-compat
 
   layout-base@1.0.2: {}
 
@@ -14708,8 +14708,6 @@ snapshots:
   peberminta@0.10.0: {}
 
   pend@1.2.0: {}
-
-  phonemizer@1.2.1: {}
 
   picocolors@1.1.1: {}
 

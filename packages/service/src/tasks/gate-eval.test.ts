@@ -1312,6 +1312,60 @@ describe('evaluateGate — hardened kinds', () => {
     expect(localSourceStillRequired.failures.join('\n')).toContain('source/brief.md');
   });
 
+  it('imageEvidence requires every current manifest image and fails closed on missing telemetry', async () => {
+    const check = {
+      kind: 'imageEvidence' as const,
+      file: 'asset/build.json',
+      imagesKey: 'images',
+      baseDir: 'asset',
+    };
+    const ws = reader({
+      'asset/build.json': JSON.stringify({
+        images: [{ path: 'revisions/2/front.png' }, { path: 'revisions/2/back.png' }],
+      }),
+    });
+    expect((await evaluateGate([check], ws)).pass).toBe(false);
+    const stale = await evaluateGate([check], ws, {
+      imageEvidence: async () => ({
+        observable: true,
+        paths: [
+          'asset/revisions/1/front.png',
+          'asset/revisions/2/front.png',
+          'asset/revisions/2/front.png',
+        ],
+      }),
+    });
+    expect(stale.pass).toBe(false);
+    expect(stale.failures.join('\n')).toContain('asset/revisions/2/back.png');
+    expect(
+      (
+        await evaluateGate([check], ws, {
+          imageEvidence: async () => ({
+            observable: false,
+            paths: ['asset/revisions/2/front.png', 'asset/revisions/2/back.png'],
+          }),
+        })
+      ).pass,
+    ).toBe(false);
+    expect(
+      (
+        await evaluateGate([check], ws, {
+          imageEvidence: async () => ({
+            observable: true,
+            paths: ['./asset/revisions/2/front.png', 'asset\\revisions\\2\\back.png'],
+          }),
+        })
+      ).pass,
+    ).toBe(true);
+    expect(
+      (
+        await evaluateGate([check], reader({ 'asset/build.json': '{"images":[]}' }), {
+          imageEvidence: async () => ({ observable: true, paths: [] }),
+        })
+      ).pass,
+    ).toBe(false);
+  });
+
   it('markdownHeadingsMatch rejects a deck that drops a locked outline slide', async () => {
     const result = await evaluateGate(
       [

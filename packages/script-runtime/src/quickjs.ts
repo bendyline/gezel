@@ -73,6 +73,7 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
     limit(options.timeoutMs, 300_000);
     const started = config.now();
     let timedOut = false;
+    let exceededMemory = false;
     let active = true;
     let calls = 0;
     let totalChars = 0;
@@ -80,7 +81,7 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
     const pending = new Set<QuickJSDeferredPromise>();
     const stopped = (): boolean => {
       if (config.now() - started >= options.timeoutMs) timedOut = true;
-      return timedOut || options.signal?.aborted === true;
+      return timedOut || exceededMemory || options.signal?.aborted === true;
     };
     const checkSize = (json: string): void => {
       totalChars += json.length;
@@ -94,12 +95,24 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
     try {
       runtime.setMemoryLimit(memoryLimit);
       runtime.setMaxStackSize(stackLimit);
-      runtime.setInterruptHandler(stopped);
       vm = runtime.newContext();
     } catch (error) {
       runtime.dispose();
       throw error;
     }
+    // QuickJS's own allocator limit catches ordinary allocation, but one large
+    // typed allocation can grow the WebAssembly heap far past it inside a
+    // single builtin, without the interpreter ever yielding to the interrupt.
+    // Left alone that runs to the 32-bit address ceiling — two gigabytes — and
+    // the heap never shrinks again, so measure growth and stop the guest.
+    // Overshoot is bounded by one allocation step, not by the budget; the host
+    // discards the whole worker after a run, which is what reclaims the heap.
+    const heap = QuickJS.getWasmMemory();
+    const heapBaseline = heap.buffer.byteLength;
+    runtime.setInterruptHandler(() => {
+      if (heap.buffer.byteLength - heapBaseline > memoryLimit) exceededMemory = true;
+      return stopped();
+    });
     let entry: QuickJSHandle | undefined;
     const decode = (method: QuickJSHandle, payload: QuickJSHandle) => {
       if (!active || stopped()) throw new Error('Script execution has ended');
@@ -163,12 +176,25 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
       checkSize(options.source);
       const source = config.compile(options.source, options.scriptName);
       checkSize(source);
-      runtime.setModuleLoader((name) => {
-        if (name === SDK) return BOOTSTRAP;
-        if (name === PORTABLE) return config.sdkModuleSource;
-        if (Object.hasOwn(config.modules ?? {}, name)) return config.modules![name]!;
-        throw new Error(`Module "${name}" is unavailable in portable scripts`);
-      });
+      const unavailable = (name: string) =>
+        new Error(`Module "${name}" is unavailable in portable scripts`);
+      runtime.setModuleLoader(
+        (name) => {
+          if (name === SDK) return BOOTSTRAP;
+          if (name === PORTABLE) return config.sdkModuleSource;
+          if (Object.hasOwn(config.modules ?? {}, name)) return config.modules![name]!;
+          throw unavailable(name);
+        },
+        (base, requested) => {
+          // The internal SDK module exists only so the bootstrap can wrap it in
+          // the capability-checked `gezel` object. Guest code must not reach the
+          // unwrapped module: the compiler rejects that import, but `eval` and a
+          // dynamic `import()` never pass through the compiler, so the loader is
+          // the only place that can refuse for certain.
+          if (requested === PORTABLE && base !== SDK) throw unavailable(requested);
+          return requested;
+        },
+      );
       const init = JSON.stringify(options.init);
       checkSize(init);
       const initHandle = vm.newString(init);
@@ -216,6 +242,10 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
         evaluated.error.dispose();
       } else {
         entry = evaluated.value;
+        // Consecutive turns where nothing could possibly advance the guest.
+        // Counted rather than acted on at once so a single tick between a host
+        // reply and the job it queues is never mistaken for a stall.
+        let idle = 0;
         while (!failure && !stopped()) {
           const jobs = runtime.executePendingJobs(128);
           if (jobs.error) {
@@ -238,13 +268,25 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
             }
             if (!runtime.hasPendingJob()) break;
           }
+          // A guest with no host call outstanding, no queued job and no timers
+          // has nothing left that can resolve it: `await new Promise(() => {})`
+          // or a dropped resolver. Waiting for the deadline would spin a phone's
+          // CPU for minutes and hold the one script slot for the whole budget.
+          if (state.type === 'pending' && pending.size === 0 && !runtime.hasPendingJob()) {
+            if (++idle > 1) {
+              failure = 'Error: portable script stopped without finishing; nothing can resume it';
+              break;
+            }
+          } else idle = 0;
           await new Promise<void>((resolve) => setTimeout(resolve, pending.size ? 2 : 0));
         }
       }
       if (stopped()) {
-        failure = timedOut
-          ? 'Error: script execution timed out'
-          : 'Error: script execution cancelled';
+        failure = exceededMemory
+          ? 'Error: script exceeded its memory budget'
+          : timedOut
+            ? 'Error: script execution timed out'
+            : 'Error: script execution cancelled';
       }
     } catch (error) {
       failure = report(error);

@@ -12,7 +12,7 @@ from verify_web_payload import verify_web_payload
 from verify_speech_payload import verify_speech_payload
 
 
-def verify_archive(archive, readelf, web_dir=None):
+def verify_archive(archive, readelf, web_dir=None, speech_dir=None):
     repo = Path(__file__).resolve().parents[3]
     spec = importlib.util.spec_from_file_location("mobile_build", repo / "native/mobile/build-llama.py")
     build = importlib.util.module_from_spec(spec)
@@ -29,9 +29,8 @@ def verify_archive(archive, readelf, web_dir=None):
         for required in ("index.html", "preview-isolation.js", "licenses/LICENSE-gezel.txt",
                          "licenses/npm/manifest.json", "licenses/native/LICENSE-llama-cpp.txt",
                          "licenses/native/LICENSE-ggml.txt", "licenses/native/LICENSE-whisper.txt",
-                         "licenses/native/LICENSE-sherpa-onnx.txt", "licenses/native/LICENSE-kokoro.txt",
-                         "licenses/native/LICENSE-onnxruntime.txt", "licenses/native/NOTICE-onnxruntime.txt",
-                         "licenses/native/LICENSE-piper-phonemize.txt", "licenses/native/LICENSE-espeak-ng.txt"):
+                         "licenses/native/LICENSE-kokoro.txt",
+                         "licenses/native/LICENSE-onnxruntime.txt", "licenses/native/NOTICE-onnxruntime.txt"):
             if assets + required not in names:
                 raise ValueError(f"Missing release asset: {required}")
         libraries = [name for name in names if name.startswith(root + "lib/") and name.endswith(".so")]
@@ -43,7 +42,7 @@ def verify_archive(archive, readelf, web_dir=None):
         packaged = [PurePosixPath(name).name for name in libraries]
         if "libgezel_mobile.so" not in packaged or "libgezel-llama.so" not in packaged:
             raise ValueError("Missing Gezel JNI or inference library")
-        if not all(name in packaged for name in ['libGezelSpeech.so', 'libsherpa-onnx-c-api.so', 'libonnxruntime.so']):
+        if not all(name in packaged for name in ['libGezelSpeech.so', 'libonnxruntime.so']):
             raise ValueError('Missing native speech libraries')
         for name in libraries:
             if payload.getinfo(name).file_size > 256 * 1024 * 1024:
@@ -60,7 +59,8 @@ def verify_archive(archive, readelf, web_dir=None):
             build.verify_elf_dependencies(dynamic, packaged)
         result = {"archive": str(archive), "abis": sorted(abis), "elfLibraries": len(libraries),
                 "elfPageAlignment": 16384, "productionAssets": "passed"}
-        result['speechPayload'] = verify_speech_payload(repo / 'packages/mobile/android/app/src/main/assets/speech', lambda name: payload.open(root + 'assets/speech/' + name))
+        staged_speech = speech_dir or repo / 'packages/mobile/android/app/src/main/assets/speech'
+        result['speechPayload'] = verify_speech_payload(staged_speech, lambda name: payload.open(root + 'assets/speech/' + name))
         if web_dir is not None:
             result["webPayload"] = verify_web_payload(web_dir, lambda relative: payload.open(assets + relative))
         return result

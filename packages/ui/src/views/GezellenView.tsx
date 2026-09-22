@@ -231,126 +231,122 @@ export function GezellenView({
           window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail: gezel }));
         }}
       />
-      {(!compact || !showCompactDetail) && (
-        <aside className="side gezels-side">
-          <div className="area-toolbar">
-            <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
-              + New Gezel
-            </button>
-          </div>
-          <ul className="gezel-list">
-            {agents.map((a) => {
-              const isGenerating = generatingIcons.has(a.id);
-              const isActive = a.id === selectedGezelId;
-              const isWorking = (activeProjectsByGezel?.get(a.id)?.size ?? 0) > 0;
-              return (
-                <li key={a.id} className={`gezel-row-shell${isActive ? ' active' : ''}`}>
-                  <button
-                    type="button"
-                    className={`gezel-row${isActive ? ' active' : ''}`}
-                    onClick={() => openGezel(a.id)}
-                  >
-                    <GezelIcon
-                      svg={a.icon ?? null}
-                      poppetje={a.poppetje}
-                      iconOverride={a.iconOverride}
-                      name={a.name}
-                      size={36}
-                      pulsing={isGenerating && !a.icon && !a.poppetje}
-                    />
-                    <span className="gezel-row-text">
-                      <span className="gezel-row-name">
-                        {a.name}
-                        {a.growth && (
-                          <LevelBadge level={a.growth.level} pending={!!a.growth.pending} />
-                        )}
-                        {a.storageScope === 'machine-shared' && (
-                          <span
-                            className="machine-shared-badge"
-                            title="Shared with accounts on this machine; chats and memories stay private"
-                          >
-                            Shared
-                          </span>
-                        )}
-                        {a.id === meesterId && (
-                          <span
-                            className="meester-badge"
-                            title="Current Meester — change in Settings"
-                            aria-label="Current Meester"
-                          >
-                            ⭐
-                          </span>
-                        )}
-                        {a.fixedFunction && (
-                          <span
-                            className="ff-row-badge"
-                            title={`Fixed-function gezel — forwards messages to ${a.fixedFunction.tool} (no LLM)`}
-                            aria-label="Fixed-function gezel"
-                          >
-                            ⚡
-                          </span>
-                        )}
-                      </span>
-                      {(a.id === meesterId || a.role) && (
-                        <span className="gezel-row-role">
-                          {a.id === meesterId
-                            ? // The designation beats the job title: with the star
-                              // one hover away, the subtitle is what actually tells
-                              // a scanning eye who the meester IS — otherwise a
-                              // roster can show a role-titled "Meester" on someone
-                              // who no longer holds the designation.
-                              a.role && a.role !== 'Meester'
-                              ? `Meester · ${a.role}`
-                              : 'Meester'
-                            : a.role}
+      <aside className="side gezels-side" hidden={compact && showCompactDetail}>
+        <div className="area-toolbar">
+          <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
+            + New Gezel
+          </button>
+        </div>
+        <ul className="gezel-list">
+          {agents.map((a) => {
+            const isGenerating = generatingIcons.has(a.id);
+            const isActive = a.id === selectedGezelId;
+            const isWorking = (activeProjectsByGezel?.get(a.id)?.size ?? 0) > 0;
+            return (
+              <li key={a.id} className={`gezel-row-shell${isActive ? ' active' : ''}`}>
+                <button
+                  type="button"
+                  className={`gezel-row${isActive ? ' active' : ''}`}
+                  onClick={() => openGezel(a.id)}
+                >
+                  <GezelIcon
+                    svg={a.icon ?? null}
+                    poppetje={a.poppetje}
+                    iconOverride={a.iconOverride}
+                    name={a.name}
+                    size={36}
+                    pulsing={isGenerating && !a.icon && !a.poppetje}
+                  />
+                  <span className="gezel-row-text">
+                    <span className="gezel-row-name">
+                      {a.name}
+                      {a.growth && (
+                        <LevelBadge level={a.growth.level} pending={!!a.growth.pending} />
+                      )}
+                      {a.storageScope === 'machine-shared' && (
+                        <span
+                          className="machine-shared-badge"
+                          title="Shared with accounts on this machine; chats and memories stay private"
+                        >
+                          Shared
+                        </span>
+                      )}
+                      {a.id === meesterId && (
+                        <span
+                          className="meester-badge"
+                          title="Current Meester — change in Settings"
+                          aria-label="Current Meester"
+                        >
+                          ⭐
+                        </span>
+                      )}
+                      {a.fixedFunction && (
+                        <span
+                          className="ff-row-badge"
+                          title={`Fixed-function gezel — forwards messages to ${a.fixedFunction.tool} (no LLM)`}
+                          aria-label="Fixed-function gezel"
+                        >
+                          ⚡
                         </span>
                       )}
                     </span>
+                    {(a.id === meesterId || a.role) && (
+                      <span className="gezel-row-role">
+                        {a.id === meesterId
+                          ? // The designation beats the job title: with the star
+                            // one hover away, the subtitle is what actually tells
+                            // a scanning eye who the meester IS — otherwise a
+                            // roster can show a role-titled "Meester" on someone
+                            // who no longer holds the designation.
+                            a.role && a.role !== 'Meester'
+                            ? `Meester · ${a.role}`
+                            : 'Meester'
+                          : a.role}
+                      </span>
+                    )}
+                  </span>
+                </button>
+                {isWorking && (
+                  <button
+                    type="button"
+                    className="project-row-thinking gezel-row-thinking"
+                    onClick={() => openGezel(a.id)}
+                    title={`${a.name} is working — open`}
+                    aria-label={`${a.name} is working. Open gezel.`}
+                  >
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
                   </button>
-                  {isWorking && (
-                    <button
-                      type="button"
-                      className="project-row-thinking gezel-row-thinking"
-                      onClick={() => openGezel(a.id)}
-                      title={`${a.name} is working — open`}
-                      aria-label={`${a.name} is working. Open gezel.`}
-                    >
-                      <span className="project-row-thinking-dot" aria-hidden="true" />
-                      <span className="project-row-thinking-dot" aria-hidden="true" />
-                      <span className="project-row-thinking-dot" aria-hidden="true" />
-                    </button>
-                  )}
-                  <GezelActionsMenu gezel={a} compact boringMode={boringMode} />
-                </li>
-              );
-            })}
-          </ul>
-          {error && <p className="error">{error}</p>}
-        </aside>
-      )}
-      {(!compact || showCompactDetail) && (
-        <section>
-          {compact && (
-            <button
-              type="button"
-              className="gezellen-back"
-              onClick={() => setShowCompactDetail(false)}
-            >
-              Back to gezellen
-            </button>
-          )}
-          {selectedGezelId ? (
-            <GezelDetailView
-              key={selectedGezelId}
-              gezelId={selectedGezelId}
-              workingProjectIds={activeProjectsByGezel?.get(selectedGezelId)}
-              activeTurnsReady={activeTurnsReady}
-            />
-          ) : (
-            <p className="placeholder">No gezellen yet — create one to get started.</p>
-          )}
-        </section>
-      )}
+                )}
+                <GezelActionsMenu gezel={a} compact boringMode={boringMode} />
+              </li>
+            );
+          })}
+        </ul>
+        {error && <p className="error">{error}</p>}
+      </aside>
+      <section hidden={compact && !showCompactDetail}>
+        {compact && (
+          <button
+            type="button"
+            className="gezellen-back"
+            onClick={() => setShowCompactDetail(false)}
+          >
+            Back to gezellen
+          </button>
+        )}
+        {selectedGezelId ? (
+          <GezelDetailView
+            key={selectedGezelId}
+            gezelId={selectedGezelId}
+            workingProjectIds={activeProjectsByGezel?.get(selectedGezelId)}
+            activeTurnsReady={activeTurnsReady}
+          />
+        ) : (
+          <p className="placeholder">No gezellen yet — create one to get started.</p>
+        )}
+      </section>
     </div>
   );
 }

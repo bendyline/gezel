@@ -9,6 +9,7 @@ export default defineConfig({
     'src/schemas/index.ts',
     'src/schemas/mobile-provider.ts',
     'src/runtime/index.ts',
+    'src/kokoro/index.ts',
     'src/poppetje/index.ts',
     'src/markdown/index.ts',
     // `./native` ships the llama-cpp backend probe + bundled-engine

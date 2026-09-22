@@ -47,7 +47,7 @@ export async function getProject(
   id: string,
 ): Promise<ProjectDetail | null> {
   const root = projectRoot(id);
-  const project = await repo.record(`${root}/project.json`, ProjectSchema);
+  const project = await repo.tolerantRecord(`${root}/project.json`, ProjectSchema, `project ${id}`);
   if (!project) return null;
   if (project.id !== id) throw new Error('Project identity does not match its directory');
   const about = await repo.text(`${root}/documents/about.md`);

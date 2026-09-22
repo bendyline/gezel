@@ -36,7 +36,11 @@ export async function getSession(
   gezelId: string,
   id: string,
 ): Promise<ChatSession | null> {
-  const session = await repo.record(sessionPath(gezelId, id), ChatSessionSchema);
+  const session = await repo.tolerantRecord(
+    sessionPath(gezelId, id),
+    ChatSessionSchema,
+    `session ${gezelId}/${id}`,
+  );
   if (session && (session.id !== id || session.gezelId !== gezelId))
     throw new Error('Session identity does not match its file');
   return session;
@@ -141,7 +145,9 @@ export async function listSessions(
       if (entry.isDirectory || !entry.name.endsWith('.json')) continue;
       const id = entry.name.slice(0, -5);
       if (!isSafeEntityId(id)) continue;
-      const session = await getSession(repo, gezelId, id);
+      const session = await repo.listed(`session ${gezelId}/${id}`, () =>
+        getSession(repo, gezelId, id),
+      );
       if (session && (!options.projectId || session.projectId === options.projectId))
         sessions.push(sessionSummary(session));
     }

@@ -121,3 +121,39 @@ describe('Web Worker script boundary', () => {
     expect(worker.postMessage).toHaveBeenCalledOnce();
   });
 });
+
+describe('a worker that never starts', () => {
+  afterEach(() => {
+    resetSuspendClockForTests();
+    vi.useRealTimers();
+  });
+
+  it('fails on its own instead of waiting out the script deadline', async () => {
+    // A worker the platform kills at spawn fires no error event anywhere: it
+    // simply never speaks. Without the startup frame the host sat through the
+    // whole budget for a run that never began.
+    vi.useFakeTimers();
+    const { executor, options, worker } = fixture();
+    const running = executor.execute({ ...options, timeoutMs: 600_000 });
+    await vi.advanceTimersByTimeAsync(11_000);
+    const result = await running;
+    expect(result).toMatchObject({ exitCode: 1, timedOut: false });
+    expect(result.stderr).toMatch(/did not start/);
+    expect(worker.terminate).toHaveBeenCalled();
+  });
+
+  it('stays quiet once the worker has spoken', async () => {
+    vi.useFakeTimers();
+    const { executor, options, send } = fixture();
+    const running = executor.execute({ ...options, timeoutMs: 600_000 });
+    await vi.advanceTimersByTimeAsync(10);
+    send({ runId: 'run', kind: 'started' });
+    await vi.advanceTimersByTimeAsync(11_000);
+    send({
+      runId: 'run',
+      kind: 'result',
+      result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+    });
+    await expect(running).resolves.toMatchObject({ exitCode: 0 });
+  });
+});

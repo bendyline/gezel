@@ -64,7 +64,15 @@ export class QuickJSWorkerExecutor implements ScriptExecutor {
       const error = compiled.diagnostics?.find(
         (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
       );
-      if (error) throw new Error(ts.flattenDiagnosticMessageText(error.messageText, '\n'));
+      if (error) {
+        // A script that will not compile is a failed run, not a broken host.
+        // The other two executors already report it that way, and a runner
+        // that has to catch a throw here logs it differently from every other
+        // script failure.
+        const message = `Error: ${ts.flattenDiagnosticMessageText(error.messageText, '\n')}`;
+        options.onStderr(message);
+        return failed(message);
+      }
       if (cancelled()) return failed('Error: script execution cancelled');
       if (deadline.budget.expired()) return failed('Error: script execution timed out', true);
       const data: QuickJSWorkerData = {
@@ -156,6 +164,8 @@ export class QuickJSWorkerExecutor implements ScriptExecutor {
             if (message.runId !== options.init.runId)
               throw new Error('Invalid script run identity');
             switch (message.kind) {
+              case 'started':
+                break;
               case 'request':
                 if (
                   ++calls > QUICKJS_MAX_CALLS ||

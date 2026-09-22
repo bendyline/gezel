@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
+import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
 import { ScriptRunner } from '../scripts/runner.js';
@@ -87,6 +88,124 @@ function gatedSteps(gate: unknown) {
 }
 
 describe('completion gates — checks floor', () => {
+  it('accepts current generalist image evidence across a stale bridge step tag, but excludes earlier activations', async () => {
+    const history = new HistoryManager(home);
+    const imageTasks = new TaskManager(store, history);
+    await writeWorkspaceFile(
+      'asset/build.json',
+      JSON.stringify({ images: [{ path: 'front.png' }] }),
+    );
+    const task = await imageTasks.create('default', {
+      title: 'Generalist rework',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      executionMode: 'generalist',
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          {
+            kind: 'imageEvidence',
+            file: 'asset/build.json',
+            imagesKey: 'images',
+            baseDir: 'asset',
+          },
+        ],
+      }),
+    });
+    const stepId = task.activeStepId!;
+    expect(task.executionMode).toBe('generalist');
+    expect(task.craftbook.steps.find((s) => s.id === stepId)?.lastActivatedAt).toBeTruthy();
+    const details = {
+      name: 'read_image_as_base64',
+      path: 'asset/front.png',
+      success: true,
+      imageArtifact: false,
+      taskRef: task.ref,
+      stepId: 'previous-review-step',
+    };
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      at: '2000-01-01T00:00:00Z',
+      summary: 'Previous activation',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe('held');
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Image delivered in current activation',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe(
+      'advanced',
+    );
+  });
+
+  it('counts only successful workspace image reads from this task and step activation', async () => {
+    const history = new HistoryManager(home);
+    const imageTasks = new TaskManager(store, history);
+    await writeWorkspaceFile(
+      'asset/build.json',
+      JSON.stringify({ images: [{ path: 'front.png' }] }),
+    );
+    const task = await imageTasks.create('default', {
+      title: 'Inspect render',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          {
+            kind: 'imageEvidence',
+            file: 'asset/build.json',
+            imagesKey: 'images',
+            baseDir: 'asset',
+          },
+        ],
+      }),
+    });
+    const stepId = task.activeStepId!;
+    const details = {
+      name: 'read_image_as_base64',
+      path: 'asset/front.png',
+      success: true,
+      imageArtifact: false,
+      taskRef: task.ref,
+      stepId,
+    };
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      at: '2000-01-01T00:00:00Z',
+      summary: 'Old activation',
+      details,
+    });
+    for (const override of [
+      { taskRef: 'default/999' },
+      { stepId: 'other' },
+      { success: false },
+      { imageArtifact: true },
+      { name: 'run_package_script' },
+      { path: 'asset/old.png' },
+    ]) {
+      await history.log({
+        kind: 'tool.called',
+        projectId: 'default',
+        summary: 'Unrelated image evidence',
+        details: { ...details, ...override },
+      });
+    }
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe('held');
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Delivered the current render',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe(
+      'advanced',
+    );
+  });
+
   it('holds the step (not completed, gateAttempts bumped, note appended) on reject', async () => {
     const task = await tasks.create('default', {
       title: 'Gated build',

@@ -46,8 +46,6 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
         CAPPluginMethod(name: "mkdirProductDirectory", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "removeProductPath", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "renameProductPath", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "readState", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "writeState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "resolveModelSource", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelModelSourceResolution", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listModelDownloads", returnType: CAPPluginReturnPromise),
@@ -62,6 +60,7 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "providers", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "prepareProvider", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelProviderPreparation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "releaseModel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "removeModel", returnType: CAPPluginReturnPromise)
     ]
@@ -226,17 +225,6 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
         withStore(call) { store in try store.productFiles.rename(from, to: to); return [:] }
     }
 
-    @objc public func readState(_ call: CAPPluginCall) {
-        withStore(call) { store in
-            let data = try store.readState()
-            return ["data": data.map { $0 as Any } ?? NSNull()]
-        }
-    }
-
-    @objc public func writeState(_ call: CAPPluginCall) {
-        guard let data = call.getString("data") else { call.reject("State data is required"); return }
-        withStore(call) { try $0.writeState(data); return [:] }
-    }
 
     private func modelJSON(_ model: MobileModel) -> [String: Any] {
         var result: [String:Any] = ["id": model.id, "name": model.name, "sizeBytes": model.sizeBytes]
@@ -285,16 +273,30 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
     @objc public func startModelDownload(_ call: CAPPluginCall) {
         guard reserveDownloadAdmission() else { call.reject("Finish the current operation before downloading a model", "BUSY"); return }
         withStore(call, completion: { self.releaseModelMutation() }) { _ in
-            self.operationLock.lock(); defer { self.operationLock.unlock() }
-            guard !self.backgrounded, let name = call.getString("name") else { throw ModelDownloadError("Open Gezel and choose a model to download") }
+            // The lifecycle observers take operationLock on the main thread.
+            // Holding it across this call would stall them: starting or
+            // resuming waits on the downloads queue, and that queue may be
+            // part way through hashing a multi-gigabyte file. Read the flag
+            // under the lock and let go before the slow part.
+            self.operationLock.lock()
+            let backgrounded = self.backgrounded
+            self.operationLock.unlock()
+            guard !backgrounded, let name = call.getString("name") else { throw ModelDownloadError("Open Gezel and choose a model to download") }
             return ["download": try self.downloads!.start(source: self.downloadSource(call), name: name).json()]
         }
     }
     @objc public func resumeModelDownload(_ call: CAPPluginCall) {
         guard reserveDownloadAdmission() else { call.reject("Finish the current operation before resuming a model", "BUSY"); return }
         withStore(call, completion: { self.releaseModelMutation() }) { _ in
-            self.operationLock.lock(); defer { self.operationLock.unlock() }
-            guard !self.backgrounded, let id = call.getString("id") else { throw ModelDownloadError("Open Gezel and choose a download to resume") }
+            // The lifecycle observers take operationLock on the main thread.
+            // Holding it across this call would stall them: starting or
+            // resuming waits on the downloads queue, and that queue may be
+            // part way through hashing a multi-gigabyte file. Read the flag
+            // under the lock and let go before the slow part.
+            self.operationLock.lock()
+            let backgrounded = self.backgrounded
+            self.operationLock.unlock()
+            guard !backgrounded, let id = call.getString("id") else { throw ModelDownloadError("Open Gezel and choose a download to resume") }
             return ["download": try self.downloads!.resume(id: id).json()]
         }
     }
@@ -620,6 +622,15 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
         }
     }
 
+    /// Nothing on iOS prepares a provider — `prepareProvider` always refuses,
+    /// because the OS owns Apple's model downloads — so there is never a
+    /// preparation in flight to stop. The method exists because the shared
+    /// host contract declares it, and a host call that simply fails on one
+    /// platform is worse than one that truthfully does nothing.
+    @objc public func cancelProviderPreparation(_ call: CAPPluginCall) {
+        call.resolve()
+    }
+
     /// Called only on inferenceQueue, with generation admission already held.
     private func unloadLlama() throws {
         if let engine {
@@ -783,6 +794,11 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
             var options = gezel_llama_default_generation_options()
             options.request_id = operation
             options.max_tokens = UInt32(maxTokens)
+            // The library's default deadline is a flat minute covering prompt
+            // processing as well as decoding, which a long reply on a phone
+            // passes routinely. Scale it with the reply actually asked for, and
+            // keep a ceiling so a wedged decode still ends.
+            options.timeout_ms = UInt32(min(600_000, 30_000 + maxTokens * 250))
             let strings = turns.flatMap { [strdup($0.role), strdup($0.content)] }
             defer { strings.forEach { free($0) } }
             let nativeTurns = turns.indices.map { index in
@@ -797,7 +813,12 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
             guard status == 0 || stopped else {
                 throw NSError(domain: "GezelLlama", code: Int(status), userInfo: [NSLocalizedDescriptionKey: errorText(&nativeError)])
             }
-            let reason = stopped ? "cancelled" : (result.finish_reason == 2 ? "length" : "stop")
+            // 2 is the token ceiling and 4 the deadline: both mean the reply was
+            // cut short rather than finished, which is what "length" tells the
+            // product. Treating a timeout as "stop" would present a truncated
+            // answer as a complete one.
+            let truncated = result.finish_reason == 2 || result.finish_reason == 4
+            let reason = stopped ? "cancelled" : (truncated ? "length" : "stop")
             return ["text": stream.text, "stopReason": reason]
         }
         do { terminal = .success(try perform()) }

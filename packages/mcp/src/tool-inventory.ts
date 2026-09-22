@@ -167,6 +167,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'fetch_url',
   'web_search',
   'wikipedia_search',
+  'wikimedia_image_search',
   'wikipedia_read',
 
   // Search / files

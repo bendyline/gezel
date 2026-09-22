@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import { type LoadTransformersEnv, pinTransformersCacheDir } from '../../transformers-cache.js';
+import { KokoroFrontend } from './kokoro-frontend.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -58,6 +59,13 @@ export interface KokoroProviderOptions {
    * don't want every gezel boot to pay that cost.
    */
   loadKokoroJs?: () => Promise<KokoroJsModule>;
+  /** Directory holding the staged pronunciation dictionaries. */
+  lexiconDir?: string;
+  /**
+   * Lazy loader for the tensor constructor. Deferred for the same reason as
+   * kokoro-js: importing Transformers.js costs tens of megabytes of heap.
+   */
+  loadTransformers?: () => Promise<{ Tensor: KokoroTensorConstructor }>;
   /**
    * Lazy accessor for the transformers `env` singleton whose `cacheDir`
    * we pin. Injected for tests; the default imports the same
@@ -166,8 +174,30 @@ export interface KokoroTextSplitterStream {
   close(): void;
 }
 
+/**
+ * `@huggingface/transformers`'s Tensor, narrowed to the one shape we build.
+ * Declared structurally so tests can supply a stub without the real package.
+ */
+export interface KokoroTensorConstructor {
+  new (type: 'int64', data: BigInt64Array, dims: readonly number[]): KokoroInputIds;
+}
+
+/** Opaque to us; kokoro-js only reads `dims` before handing it to ONNX. */
+export interface KokoroInputIds {
+  readonly dims: readonly number[];
+}
+
 export interface KokoroTTSInstance {
   generate(text: string, opts?: { voice?: string; speed?: number }): Promise<KokoroAudioOutput>;
+  /**
+   * Synthesize from phoneme ids. This is the entry point Gezel uses: it skips
+   * kokoro-js's own text handling, which reaches for eSpeak NG through
+   * `phonemizer`. See kokoro-frontend.ts.
+   */
+  generate_from_ids(
+    inputIds: KokoroInputIds,
+    opts?: { voice?: string; speed?: number },
+  ): Promise<KokoroAudioOutput>;
   /**
    * Sentence-level streaming variant. Each yielded `audio` is a small
    * RawAudio chunk (~1-2s of speech) instead of one mega-inference for
@@ -303,6 +333,9 @@ export class KokoroProvider implements TextToSpeechProvider {
   private readonly defaultDtype: 'q4' | 'q8' | 'fp16' | 'fp32';
   private readonly inferenceTimeoutMs: number;
   private readonly loadTimeoutMs: number;
+  private readonly frontend: KokoroFrontend;
+  private readonly loadTransformers: () => Promise<{ Tensor: KokoroTensorConstructor }>;
+  private cachedTensor: Promise<KokoroTensorConstructor> | null = null;
   private cachedTts: KokoroTTSInstance | null = null;
   private cachedModule: KokoroJsModule | null = null;
   private loadingPromise: Promise<KokoroTTSInstance> | null = null;
@@ -316,6 +349,15 @@ export class KokoroProvider implements TextToSpeechProvider {
     // Undefined → pinTransformersCacheDir uses its own default env loader.
     this.loadTransformersEnv = opts.loadTransformersEnv;
     this.defaultDtype = opts.defaultDtype ?? 'q8';
+    this.frontend = new KokoroFrontend(
+      opts.lexiconDir === undefined ? {} : { lexiconDir: opts.lexiconDir },
+    );
+    this.loadTransformers =
+      opts.loadTransformers ??
+      (async () =>
+        (await import('@huggingface/transformers')) as unknown as {
+          Tensor: KokoroTensorConstructor;
+        });
     this.inferenceTimeoutMs = opts.inferenceTimeoutMs ?? DEFAULT_INFERENCE_TIMEOUT_MS;
     this.loadTimeoutMs = opts.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
   }
@@ -342,104 +384,56 @@ export class KokoroProvider implements TextToSpeechProvider {
     const tts = await this.ensureLoaded();
     input.signal?.throwIfAborted();
     await report('synthesizing');
-    const splitterCtor = (await this.module()).TextSplitterStream;
     const voice = input.voice ?? DEFAULT_VOICE_ID;
     const speed = clamp(input.speed ?? 1, 0.5, 2);
 
-    // Prefer the sentence-level streaming API when available — each
-    // iteration runs ONNX inference on a single sentence, and the
-    // `await new Promise(setImmediate)` between chunks lets the host
-    // event loop drain so other timers / IO / IPC don't pile up.
-    // Critical in Electron's embedded mode where this code runs on the
-    // main process thread: a 30-sentence reply via `generate()` would
-    // freeze the window for the full inference duration.
+    // Kokoro reads phoneme ids. `kokoro-js` will derive them itself, but only
+    // through `phonemizer`, which embeds eSpeak NG — GPL-3 code that cannot
+    // ship inside an MIT app on the app stores. So the text is phonemized by
+    // the shared frontend (the same one the mobile host runs, against the same
+    // dictionary) and fed to `generate_from_ids` one sentence at a time.
     //
-    // We must build and CLOSE the splitter ourselves. Handing `stream()`
-    // a bare string makes kokoro-js (through at least 1.2.1) construct an
-    // internal TextSplitterStream it never closes: the splitter holds the
-    // trailing sentence back waiting for more input, and the iterator then
-    // awaits a resolver nothing will ever fire. A one-sentence preview
-    // yields zero chunks and hangs forever; an N-sentence reply yields
-    // N-1 and hangs. No timeout anywhere turned that into a permanently
-    // stuck "Synthesizing…" button and a dead narration path.
-    let chunks: Float32Array[];
+    // Driving the loop ourselves also retires the `TextSplitterStream`
+    // deadlock the old streaming path had to work around: handing `stream()` a
+    // bare string made kokoro-js build an internal splitter it never closed,
+    // so the trailing sentence hung forever. There is no splitter now.
+    const utterances = await this.frontend.plan(input.text, voice);
+    const Tensor = await this.tensorConstructor();
+    const chunks: Float32Array[] = [];
     let sampleRate: number | undefined;
-    if (typeof tts.stream === 'function' && splitterCtor) {
-      const splitter = new splitterCtor();
-      splitter.push(input.text);
-      splitter.close();
-      chunks = [];
-      // Driven by hand rather than `for await` so each chunk gets its own
-      // watchdog. A stalled iterator is the exact shape of the deadlock
-      // above, and it must not be able to pin a request open forever.
-      const iterator = tts.stream(splitter, { voice, speed })[Symbol.asyncIterator]();
-      let stalled = false;
-      try {
-        for (;;) {
-          input.signal?.throwIfAborted();
-          const step = await withTimeout(
-            iterator.next(),
-            this.inferenceTimeoutMs,
-            `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s after ${chunks.length} chunk(s) — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
-          );
-          input.signal?.throwIfAborted();
-          if (step.done) break;
-          chunks.push(step.value.audio.audio);
-          sampleRate ??= step.value.audio.sampling_rate;
-          completedCharacters = Math.min(
-            totalCharacters,
-            completedCharacters + step.value.text.length,
-          );
-          completedChunks += 1;
-          await report('synthesizing');
-          await input.onChunk?.({
-            index: completedChunks - 1,
-            wav: encodeWavPcm16(step.value.audio.audio, step.value.audio.sampling_rate),
-            sampleRate: step.value.audio.sampling_rate,
-            durationSeconds: step.value.audio.audio.length / step.value.audio.sampling_rate,
-          });
-          // Yield to the event loop before the next sentence's
-          // inference starts. setImmediate sits after IO/timers in the
-          // Node event loop, which is what we want — UI ticks and
-          // pending HTTP work catch up before we re-saturate the CPU.
-          await new Promise<void>((r) => setImmediate(r));
-        }
-      } catch (err) {
-        stalled = err instanceof KokoroTimeoutError;
-        throw err;
-      } finally {
-        // Never *await* the close: `return()` on a generator suspended at
-        // an await queues behind that same never-settling promise, so
-        // awaiting here would reintroduce the hang we're guarding against.
-        if (stalled) {
-          void Promise.resolve(iterator.return?.(undefined)).catch(() => {});
-        } else {
-          await iterator.return?.(undefined).catch(() => {});
-        }
-      }
-    } else {
-      // Older kokoro-js without the stream API (or without the exported
-      // splitter we need to drive it safely) — fall back to the one-shot
-      // path. The freeze it causes is the known issue this streaming
-      // branch fixes; keep the fallback so a downgraded upstream still
-      // works (degraded UX) rather than not speaking at all.
-      const result = await withTimeout(
-        tts.generate(input.text, { voice, speed }),
+    for (const utterance of utterances) {
+      input.signal?.throwIfAborted();
+      // The model wants int64 ids shaped [batch, tokens].
+      const inputIds = new Tensor(
+        'int64',
+        BigInt64Array.from(utterance.tokens, (id) => BigInt(id)),
+        [1, utterance.tokens.length],
+      );
+      // Each sentence keeps its own watchdog so one stall cannot pin the
+      // request open forever.
+      const audio = await withTimeout(
+        tts.generate_from_ids(inputIds, { voice, speed }),
         this.inferenceTimeoutMs,
-        `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
+        `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s after ${chunks.length} chunk(s) — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
       );
       input.signal?.throwIfAborted();
-      chunks = [result.audio];
-      sampleRate = result.sampling_rate;
-      completedCharacters = totalCharacters;
-      completedChunks = 1;
+      chunks.push(audio.audio);
+      sampleRate ??= audio.sampling_rate;
+      completedCharacters = Math.min(totalCharacters, completedCharacters + utterance.text.length);
+      completedChunks += 1;
       await report('synthesizing');
       await input.onChunk?.({
-        index: 0,
-        wav: encodeWavPcm16(result.audio, result.sampling_rate),
-        sampleRate: result.sampling_rate,
-        durationSeconds: result.audio.length / result.sampling_rate,
+        index: completedChunks - 1,
+        wav: encodeWavPcm16(audio.audio, audio.sampling_rate),
+        sampleRate: audio.sampling_rate,
+        durationSeconds: audio.audio.length / audio.sampling_rate,
       });
+      // Yield to the event loop before the next sentence's inference starts.
+      // setImmediate sits after IO/timers in the Node event loop, which is what
+      // we want — UI ticks and pending HTTP work catch up before we re-saturate
+      // the CPU. Critical in Electron's embedded mode, where this runs on the
+      // main process thread.
+      await new Promise<void>((r) => setImmediate(r));
     }
 
     if (chunks.length === 0 || sampleRate === undefined) {
@@ -606,6 +600,19 @@ export class KokoroProvider implements TextToSpeechProvider {
   async shutdown(): Promise<void> {
     this.cachedTts = null;
     this.loadingPromise = null;
+  }
+
+  /** Resolve the tensor constructor once; the import is heavy. */
+  private tensorConstructor(): Promise<KokoroTensorConstructor> {
+    if (!this.cachedTensor) {
+      const pending = this.loadTransformers().then((mod) => mod.Tensor);
+      // A failed import must not be cached as a permanent failure.
+      void pending.catch(() => {
+        this.cachedTensor = null;
+      });
+      this.cachedTensor = pending;
+    }
+    return this.cachedTensor;
   }
 
   private async ensureLoaded(): Promise<KokoroTTSInstance> {

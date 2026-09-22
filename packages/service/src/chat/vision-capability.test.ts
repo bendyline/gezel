@@ -89,6 +89,23 @@ describe('resolveVisionCapability', () => {
       }).native,
     ).toBe(false);
   });
+
+  it('uses the bound MLX vision tower and respects its opt-out', () => {
+    expect(
+      resolveVisionCapability({
+        provider: 'mlx',
+        mlxVisionAvailable: true,
+        nativeVisionEnabled: true,
+      }).native,
+    ).toBe(true);
+    expect(
+      resolveVisionCapability({
+        provider: 'mlx',
+        mlxVisionAvailable: true,
+        nativeVisionEnabled: false,
+      }).native,
+    ).toBe(false);
+  });
 });
 
 describe('applyRecognitionPolicy', () => {

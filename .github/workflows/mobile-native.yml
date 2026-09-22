@@ -141,6 +141,9 @@ jobs:
           await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'android', '--abi', 'arm64-v8a', '--jobs', '2'],
+              // mobile:sync:android stages the offline speech pack and fails
+              // without it; --models pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--models'],
               ['pnpm', 'mobile:sync:android'],
               ['node', 'packages/mobile/scripts/stage-android-test-fixture.mjs', 'native/mobile/.build/ios-fixture.gguf'],
             ]) {
@@ -265,6 +268,9 @@ jobs:
           await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'ios', '--output', 'native/mobile/.build/ios-bridge', '--simulator-arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', '--jobs', '3'],
+              // mobile:sync:ios stages the offline speech pack and fails
+              // without it; --models pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--models'],
               ['pnpm', 'mobile:sync:ios'],
               ['swift', 'test', '--package-path', 'packages/mobile/native/ios', '--scratch-path', path.join(process.env.RUNNER_TEMP, 'mobile-storage-tests')],
             ]) {

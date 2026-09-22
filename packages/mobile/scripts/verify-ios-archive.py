@@ -19,7 +19,7 @@ def file_hash(file):
     return digest.hexdigest()
 
 
-def verify_archive(archive, version, build_number, web_dir=None):
+def verify_archive(archive, version, build_number, web_dir=None, speech_dir=None):
     app = archive / "Products/Applications/App.app"
     info = plistlib.loads((app / "Info.plist").read_bytes())
     if (info["CFBundleIdentifier"] != "com.bendyline.gezel.mobile"
@@ -31,9 +31,8 @@ def verify_archive(archive, version, build_number, web_dir=None):
                      "public/licenses/LICENSE-gezel.txt", "public/licenses/npm/manifest.json",
                      "public/licenses/native/LICENSE-llama-cpp.txt",
                      "public/licenses/native/LICENSE-ggml.txt", "public/licenses/native/LICENSE-whisper.txt",
-                     "public/licenses/native/LICENSE-sherpa-onnx.txt", "public/licenses/native/LICENSE-kokoro.txt",
-                     "public/licenses/native/LICENSE-onnxruntime.txt", "public/licenses/native/NOTICE-onnxruntime.txt",
-                     "public/licenses/native/LICENSE-piper-phonemize.txt", "public/licenses/native/LICENSE-espeak-ng.txt"):
+                     "public/licenses/native/LICENSE-kokoro.txt",
+                     "public/licenses/native/LICENSE-onnxruntime.txt", "public/licenses/native/NOTICE-onnxruntime.txt"):
         if not (app / relative).is_file():
             raise ValueError(f"Missing release asset: {relative}")
     payload = []
@@ -78,7 +77,8 @@ def verify_archive(archive, version, build_number, web_dir=None):
                                                           ensure_ascii=True).encode()).hexdigest()}
     if web_dir is not None:
         result["webPayload"] = verify_web_payload(web_dir, lambda relative: (app / "public" / relative).open("rb"))
-    result['speechPayload'] = verify_speech_payload(Path(__file__).resolve().parents[1] / '.build/speech/assets/speech', lambda name: (app / 'speech' / name).open('rb'))
+    staged_speech = speech_dir or Path(__file__).resolve().parents[1] / '.build/speech/assets/speech'
+    result['speechPayload'] = verify_speech_payload(staged_speech, lambda name: (app / 'speech' / name).open('rb'))
     return result
 
 

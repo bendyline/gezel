@@ -192,6 +192,37 @@ describe('Responsive navigation in the desktop app', () => {
       }
     },
   );
+
+  it('keeps the user in place when a later config save re-reads as first run', async () => {
+    const getConfig = vi.mocked(api.getConfig).getMockImplementation();
+    // A configured install with work already open: setup must not appear.
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'copilot' } as never);
+    window.localStorage.setItem(
+      'gezel:nav:selection',
+      JSON.stringify({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 }),
+    );
+    try {
+      render(<App />);
+      // Compact layout mounts the restored project behind the navigation pane.
+      expect(await screen.findByText('project:mobile-project')).toBeInTheDocument();
+
+      // Switching provider before pasting its key reads as "not set up", and
+      // every Settings save re-runs that estimate.
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'openai' } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: false, modelCount: 0 } as never);
+      await act(async () => window.dispatchEvent(new CustomEvent('gezel:config-updated')));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // The stored selection survives. Being thrown to Home clears it, which
+      // is the part that loses the user's place across a restart too.
+      expect(window.localStorage.getItem('gezel:nav:selection')).toContain('mobile-project');
+      expect(screen.queryByText('project:mobile-project')).toBeInTheDocument();
+    } finally {
+      vi.mocked(api.getConfig).mockImplementation(getConfig!);
+    }
+  });
 });
 
 describe('Output pane titlebar restore', () => {

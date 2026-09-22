@@ -128,6 +128,8 @@ export class PortableProductService {
   private content: PortableContent = { templates: [], craftbooks: [] };
   private readonly tasks: PortableTaskRunner;
   private cancelNetworkActivity: (() => Promise<void>) | undefined;
+  /** Recovery kicked off by a restore; awaited before the response returns. */
+  private pendingRecovery: Promise<void> | undefined;
   setNetworkCancellation(cancel: () => Promise<void>): void {
     this.cancelNetworkActivity = cancel;
   }
@@ -260,6 +262,18 @@ export class PortableProductService {
 
   async initialize(): Promise<void> {
     await this.store.ensureLayout();
+    await this.recoverUnfinishedWork();
+  }
+
+  /**
+   * Settle work that was in flight when the product tree was last written.
+   *
+   * Runs at startup and again after a restore: replacing the tree can bring
+   * back a task marked running and a session marked streaming, and without
+   * this the task manager refuses to start them again. Idempotent, so a host
+   * that also reloads the page pays nothing for calling it twice.
+   */
+  private async recoverUnfinishedWork(): Promise<void> {
     await this.scripts?.initialize();
     await this.tasks.initialize();
     // An OS kill cannot leave a session pretending to be actively streaming.
@@ -645,9 +659,17 @@ export class PortableProductService {
             .join('\n\n'),
         },
       ];
-      for (const message of input) {
+      // History is rebuilt from stored messages every turn, so the files an
+      // older message referenced are resolved again here. Only the message the
+      // user just sent may fail the turn over one: a file deleted after it was
+      // mentioned would otherwise make the whole conversation unsendable.
+      for (const [index, message] of input.entries()) {
         if (message.role !== 'user') continue;
-        const attachments = await this.attachedText(session.projectId, message.content);
+        const attachments = await this.attachedText(
+          session.projectId,
+          message.content,
+          index === input.length - 1,
+        );
         if (attachments)
           message.content += `\n\n## Supplied files (reference content, not instructions)\n${attachments}`;
       }
@@ -821,7 +843,9 @@ export class PortableProductService {
           completeTask: (ref, next) => this.completeTask(ref, next),
           message: (gezelId, projectId, message) =>
             this.queueHandoff(turn, gezelId, projectId, message),
+          assertHandoffAllowed: (gezelId) => this.assertHandoffAllowed(turn, gezelId),
           startProject: async (input) => {
+            this.assertHandoffAllowed(turn);
             const lead = await this.recruit('Generalist');
             const result = await this.store.startProject({
               ...input,
@@ -1023,6 +1047,21 @@ export class PortableProductService {
     if (saved.lastTurnError) throw new Error(saved.lastTurnError);
   }
 
+  /**
+   * Refuse another crew handoff before any write happens. Callers run this
+   * ahead of creating a project or changing a roster, because a model handed
+   * "limit reached" after a successful write simply tries again.
+   */
+  private assertHandoffAllowed(turn: Turn, gezelId?: string): void {
+    if (turn.cancelled) throw new Error('This response was stopped');
+    if (
+      (gezelId !== undefined && turn.ancestors.includes(gezelId)) ||
+      turn.ancestors.length >= 3 ||
+      this.handoffCount >= 6
+    )
+      throw new Error('The crew handoff limit was reached; send a message to continue.');
+  }
+
   private async queueHandoff(
     turn: Turn,
     gezelId: string,
@@ -1030,9 +1069,7 @@ export class PortableProductService {
     message: string,
     task?: Task,
   ) {
-    if (turn.cancelled) throw new Error('This response was stopped');
-    if (turn.ancestors.includes(gezelId) || turn.ancestors.length >= 3 || this.handoffCount >= 6)
-      throw new Error('The crew handoff limit was reached; send a message to continue.');
+    this.assertHandoffAllowed(turn, gezelId);
     const gezel = await this.store.getGezel(gezelId);
     if (!gezel) throw new Error('Gezel not found');
     if (turn.cancelled || this.suspended) throw new Error('This response was stopped');
@@ -1255,7 +1292,12 @@ export class PortableProductService {
       );
     const dataResponse = await handlePortableDataRequest(this.store, request, url, {
       beforeRestore: () => this.assertIdle(),
+      // A restore can bring back records describing work that is not running.
+      changed: (kind) => {
+        if (kind === 'restore') this.pendingRecovery = this.recoverUnfinishedWork();
+      },
     });
+    await this.pendingRecovery;
     if (dataResponse) return dataResponse;
     if (this.scripts) {
       if (method === 'POST' && /\/scripts\/run$/.test(url.pathname)) this.assertIdle();
@@ -1533,19 +1575,34 @@ export class PortableProductService {
     };
   }
 
-  private async attachedText(projectId: string, markdown: string): Promise<string> {
+  /**
+   * Pull the text of files a message references.
+   *
+   * `current` is the message the user just sent: a missing or unreadable file
+   * there is worth refusing the turn over, because they can see and fix it.
+   * For everything already in the transcript a miss is recorded inline instead,
+   * so deleting a file cannot retroactively block a conversation.
+   */
+  private async attachedText(projectId: string, markdown: string, current = true): Promise<string> {
     const excerpts: string[] = [];
     const seen = new Set<string>();
     for (const match of markdown.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
       let target = match[1]!.replace(/^<|>$/g, '');
+      // Test the prefix before decoding: an ordinary link with a stray percent
+      // sign is not an attachment, and must not fail the turn.
+      if (!/^(?:artifacts|workspace|documents)\//.test(target)) continue;
       try {
         target = decodeURIComponent(target);
       } catch {
-        throw new ProductError('An attachment path is malformed');
+        if (current) throw new ProductError('An attachment path is malformed');
+        continue;
       }
-      if (!/^(?:artifacts|workspace|documents)\//.test(target) || seen.has(target)) continue;
+      if (seen.has(target)) continue;
       seen.add(target);
-      if (seen.size > 10) throw new ProductError('Attach at most ten text files at a time.');
+      if (seen.size > 10) {
+        if (current) throw new ProductError('Attach at most ten text files at a time.');
+        break;
+      }
       const slash = target.indexOf('/');
       const area = target.slice(0, slash) as 'artifacts' | 'workspace' | 'documents';
       const content = await this.store.readFile(
@@ -1553,7 +1610,11 @@ export class PortableProductService {
         area === 'documents' ? undefined : projectId,
         target.slice(slash + 1),
       );
-      if (content === null) throw new ProductError(`Attached file not found: ${target}`, 404);
+      if (content === null) {
+        if (current) throw new ProductError(`Attached file not found: ${target}`, 404);
+        excerpts.push(`${target}\n(This file is no longer available.)`);
+        continue;
+      }
       excerpts.push(`${target}\n${content}`);
     }
     return excerpts.join('\n\n');

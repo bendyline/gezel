@@ -52,10 +52,18 @@ async function estimateFirstRun(): Promise<boolean> {
   }
 }
 
-export function useIsFirstRun(): boolean {
+/**
+ * Whether this install still needs first-run setup.
+ *
+ * Each call costs a config read and a provider probe, repeated on every
+ * settings save, so a tree with more than one consumer should share a single
+ * result through {@link FirstRunContext} and pass `enabled: false` here.
+ */
+export function useIsFirstRun(enabled = true): boolean {
   const [firstRun, setFirstRun] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let revision = 0;
     const recheck = () => {
@@ -80,7 +88,7 @@ export function useIsFirstRun(): boolean {
       window.removeEventListener('gezel:first-run', onFirstRun);
       window.removeEventListener('gezel:config-updated', recheck);
     };
-  }, []);
+  }, [enabled]);
 
   return firstRun;
 }

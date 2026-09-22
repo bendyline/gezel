@@ -133,15 +133,6 @@ public final class GezelMobilePlugin extends Plugin {
     @PluginMethod public void removeProductPath(PluginCall call) { storage(call, () -> { store.productFiles.remove(call.getString("path")); return new JSObject(); }); }
     @PluginMethod public void renameProductPath(PluginCall call) { storage(call, () -> { store.productFiles.rename(call.getString("from"), call.getString("to")); return new JSObject(); }); }
 
-    @PluginMethod public void readState(PluginCall call) { storage(call, () -> {
-        String data = store.readState();
-        return new JSObject().put("data", data == null ? JSONObject.NULL : data);
-    }); }
-    @PluginMethod public void writeState(PluginCall call) {
-        String data = call.getString("data");
-        if (data == null) { call.reject("State data is required"); return; }
-        storage(call, () -> { store.writeState(data); return new JSObject(); });
-    }
     @PluginMethod public void listModels(PluginCall call) { storage(call, () -> store.listModels()); }
 
     private synchronized boolean reserveDownloadAdmission() {

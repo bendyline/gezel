@@ -42,8 +42,6 @@ function fixture() {
     mkdirProductDirectory: vi.fn(async () => {}),
     removeProductPath: vi.fn(async () => {}),
     renameProductPath: vi.fn(async () => {}),
-    readState: vi.fn(async () => ({ data: null })),
-    writeState: vi.fn(async () => {}),
     listModels: vi.fn(async () => ({ models: [] })),
     importModel: vi.fn(async () => ({ model: null })),
     selectModel: vi.fn(async () => ({ model: { id: 'one', name: 'model', sizeBytes: 16 } })),

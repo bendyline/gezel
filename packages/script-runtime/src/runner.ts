@@ -72,7 +72,8 @@ export interface RunPortableScriptOptions {
 }
 
 const MAX_LOG_CHARS = 64_000;
-const MAX_RUN_CHARS = 2_000_000;
+/** Largest audit record a host will store. Exported for its own tests. */
+export const MAX_RUN_CHARS = 2_000_000;
 interface ActiveScript {
   projectId: string;
   depth: number;
@@ -202,8 +203,12 @@ export class PortableScriptRunner {
     // A snapshot is captured before queuing; later mutations cannot change what was audited.
     let persistence = Promise.resolve();
     const persist = () => {
+      // An audit that cannot be written is worse than an abridged one. persist()
+      // runs after every host call, so throwing here left the durable record
+      // stuck at `running` and made every later write fail as well. The verdict
+      // — status, output, error — matters more than the full history.
+      abridgeRun(run);
       const serialized = JSON.stringify(run);
-      if (serialized.length > MAX_RUN_CHARS) throw new Error('Script run record is too large');
       const snapshot = ScriptRunSchema.parse(JSON.parse(serialized));
       persistence = persistence.then(() => host.persistRun(snapshot));
       persistence.catch((error: unknown) => {
@@ -416,6 +421,34 @@ export class PortableScriptRunner {
     await persist();
     return run;
   }
+}
+
+/** Shrink the growable parts of a run record until it fits its size limit. */
+export function abridgeRun(run: { calls: unknown[]; logs: string }): void {
+  const size = () => JSON.stringify(run).length;
+  if (size() <= MAX_RUN_CHARS) return;
+  const dropped = { calls: 0, logs: false };
+  if (run.logs.length > 4_000) {
+    run.logs = run.logs.slice(0, 4_000);
+    dropped.logs = true;
+  }
+  // Oldest calls go first: a run is usually read for how it ended.
+  while (run.calls.length > 1 && size() > MAX_RUN_CHARS) {
+    const cut = Math.max(1, Math.floor(run.calls.length / 2));
+    run.calls.splice(0, cut);
+    dropped.calls += cut;
+  }
+  if (size() > MAX_RUN_CHARS) {
+    dropped.calls += run.calls.length;
+    run.calls.length = 0;
+    run.logs = '';
+    dropped.logs = true;
+  }
+  const notes = [
+    dropped.calls > 0 && `${dropped.calls} earlier host call(s) omitted`,
+    dropped.logs && 'output log truncated',
+  ].filter(Boolean);
+  run.logs += `\n[gezel] This audit exceeded its size limit: ${notes.join('; ')}.\n`;
 }
 
 function errorMessage(error: unknown): string {

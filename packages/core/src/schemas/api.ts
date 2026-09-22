@@ -4650,6 +4650,31 @@ export const WikipediaSearchRequestSchema = z.object({
 });
 export type WikipediaSearchRequest = z.infer<typeof WikipediaSearchRequestSchema>;
 
+/** Free reference-image discovery; licenses belong to individual Commons files. */
+export const WikimediaImageSearchRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+export type WikimediaImageSearchRequest = z.infer<typeof WikimediaImageSearchRequestSchema>;
+export const WikimediaImageResultSchema = z.object({
+  title: z.string(),
+  sourceUrl: z.string(),
+  imageUrl: z.string(),
+  width: z.number(),
+  height: z.number(),
+  description: z.string(),
+  credit: z.string(),
+  license: z.string(),
+  licenseUrl: z.string(),
+  usageTerms: z.string(),
+});
+export type WikimediaImageResult = z.infer<typeof WikimediaImageResultSchema>;
+export const WikimediaImageSearchResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(WikimediaImageResultSchema),
+});
+export type WikimediaImageSearchResponse = z.infer<typeof WikimediaImageSearchResponseSchema>;
+
 export const WebSearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
   /** Identifier of the provider that actually answered. */

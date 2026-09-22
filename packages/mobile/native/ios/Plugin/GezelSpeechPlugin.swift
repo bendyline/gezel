@@ -169,6 +169,16 @@ public final class GezelSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         let voice = call.getString("voice") ?? "af_heart"
         let index = voices.first { $0["id"] as? String == voice }?["index"] as? Int
         if synthesis && index == nil { call.reject("The selected Kokoro voice is unavailable", "invalid-input"); return }
+        // Phoneme ids, produced by the shared @bendyline/gezel/kokoro frontend
+        // in the WebView. Nothing native turns text into sound any more, which
+        // is how eSpeak NG left the app.
+        var tokens: [Int32] = []
+        if synthesis {
+            let supplied = (call.getArray("tokens") as? [Int]) ?? []
+            guard supplied.count >= 3, supplied.count <= 511, supplied.allSatisfy({ $0 >= 0 && $0 <= 177 })
+            else { call.reject("Speech phonemes are missing or too long", "invalid-input"); return }
+            tokens = supplied.map(Int32.init)
+        }
         guard let engine = gezel_speech_create() else { call.reject("Not enough memory for speech", "resource-limit"); return }
         active = call; nativeEngine = engine; nativeCancelled = false
         let root = speechRoot
@@ -180,7 +190,10 @@ public final class GezelSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
                 var wav: UnsafeMutablePointer<UInt8>?
                 var count = 0
                 let speed = Float(min(2, max(0.5, call.getDouble("speed") ?? 1)))
-                let code = gezel_speech_synthesize(engine, root.appendingPathComponent("kokoro").path, call.getString("text") ?? "", Int32(index!), speed, &wav, &count)
+                let code = tokens.withUnsafeBufferPointer { ids in
+                    gezel_speech_synthesize(engine, root.appendingPathComponent("kokoro").path,
+                                            ids.baseAddress, ids.count, Int32(index!), speed, &wav, &count)
+                }
                 if code == 0, let wav {
                     let data = Data(bytes: wav, count: count)
                     result = ["wav": data.base64EncodedString(), "meta": ["voice": voice, "model": model, "sampleRate": 24000, "durationSeconds": Double(count - 44) / 48000, "durationMs": Int((ProcessInfo.processInfo.systemUptime - start) * 1000)]]

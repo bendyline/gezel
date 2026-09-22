@@ -237,7 +237,7 @@ async function wrapForPlatform(
     // Build tools read far more widely than a task script (icu data,
     // dyld caches, node_modules sources). Writes stay scoped to the
     // workspace — that's the real fence.
-    return runUnderMacSandbox(command, args, ctx, { relaxReads: true });
+    return runUnderMacSandbox(command, args, ctx, { relaxReads: true, allowBrowserIpc: true });
   }
   // Approved repository scripts and installed package binaries are a
   // deliberately trusted execution class. On Windows/Linux, or on a

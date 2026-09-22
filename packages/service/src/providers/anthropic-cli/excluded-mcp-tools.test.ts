@@ -9,6 +9,10 @@ import { CLAUDE_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
 const RECEIPT_BEARING_RUNNERS = ['run_package_script', 'run_npx', 'list_package_scripts'];
 
 describe('CLI provider MCP exclusions', () => {
+  it('Codex keeps scoped image content available for visual craftbook review', () => {
+    expect(CODEX_CLI_EXCLUDED_MCP_TOOLS).not.toContain('read_image_as_base64');
+  });
+
   it.each([
     ['claude', CLAUDE_CLI_EXCLUDED_MCP_TOOLS],
     ['codex', CODEX_CLI_EXCLUDED_MCP_TOOLS],

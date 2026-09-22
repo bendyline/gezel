@@ -63,14 +63,24 @@ public final class GezelSpeechPlugin extends Plugin {
                 if (synthesis) {
                     String model = call.getString("model", "kokoro-82m-v1.0");
                     if (!model.equals("kokoro-82m-v1.0")) throw new IllegalArgumentException("The selected Kokoro model is unavailable");
-                    String text = call.getString("text", ""), voice = call.getString("voice", "af_heart");
-                    if (text.isEmpty() || text.length() > 12000) throw new IllegalArgumentException("Use up to 12,000 characters of speech");
+                    String voice = call.getString("voice", "af_heart");
+                    // Phoneme ids, produced by the shared @bendyline/gezel/kokoro
+                    // frontend in the WebView. Nothing native turns text into
+                    // sound any more, which is how eSpeak NG left the app.
+                    JSONArray encoded = call.getArray("tokens");
+                    if (encoded == null || encoded.length() < 3 || encoded.length() > 511)
+                        throw new IllegalArgumentException("Speech phonemes are missing or too long");
+                    int[] tokens = new int[encoded.length()];
+                    for (int i = 0; i < tokens.length; i++) {
+                        tokens[i] = encoded.getInt(i);
+                        if (tokens[i] < 0 || tokens[i] > 177) throw new IllegalArgumentException("Invalid speech phoneme");
+                    }
                     int index = -1; JSONArray voices = assets.voices();
                     for (int i = 0; i < voices.length(); i++) if (voices.getJSONObject(i).getString("id").equals(voice)) index = voices.getJSONObject(i).getInt("index");
                     if (index < 0) throw new IllegalArgumentException("The selected Kokoro voice is unavailable");
                     File root = assets.ensure(); checkResources(); check();
                     long nativeEngine = allocate();
-                    byte[] wav = SpeechRuntime.synthesize(nativeEngine, new File(root, "kokoro").getPath(), text, index, (float) Math.min(2, Math.max(.5, call.getDouble("speed", 1.0))));
+                    byte[] wav = SpeechRuntime.synthesize(nativeEngine, new File(root, "kokoro").getPath(), tokens, index, (float) Math.min(2, Math.max(.5, call.getDouble("speed", 1.0))));
                     check();
                     result = new JSObject().put("wav", Base64.encodeToString(wav, Base64.NO_WRAP)).put("meta", new JSObject()
                         .put("voice", voice).put("model", model).put("sampleRate", 24000).put("durationSeconds", (wav.length - 44) / 48000.0).put("durationMs", SystemClock.uptimeMillis() - start));

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { markBackDismiss } from '../back-dismiss.js';
 
 /** The native Back gesture follows the same overlay dismissal and navigation
  * state as the visible controls. Hidden panes remain mounted with their drafts. */
@@ -20,14 +21,16 @@ export function useBackNavigation(
       );
       if (overlay) {
         event.preventDefault();
-        (document.activeElement ?? document).dispatchEvent(
-          new KeyboardEvent('keydown', {
-            key: 'Escape',
-            code: 'Escape',
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+        const dismiss = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          code: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        });
+        // Marked so listeners that treat Escape as a destructive shortcut can
+        // tell this apart from the user pressing the key.
+        markBackDismiss(dismiss);
+        (document.activeElement ?? document).dispatchEvent(dismiss);
       } else if (compact && !navigationOpen) {
         event.preventDefault();
         openNavigation();

@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { assertSafeEntityId } from '../entity-id.js';
 import { KeyedLock } from '../keyed-lock.js';
+import { createLogger } from '../log.js';
 import {
   PORTABLE_MAX_RECORD_BYTES,
   type PortableFileEntry,
@@ -17,6 +18,8 @@ export interface PortableStoreOptions {
   now?: () => string;
   createId?: () => string;
 }
+
+const log = createLogger('portable-store');
 
 export class PortableRepository {
   readonly files: PortableFileSystem;
@@ -48,6 +51,49 @@ export class PortableRepository {
     const raw = await readText(this.files, path, PORTABLE_MAX_RECORD_BYTES);
     return raw === null ? null : schema.parse(JSON.parse(raw));
   }
+  /**
+   * Read a product record without letting one damaged file take the app down.
+   *
+   * A single unparseable session or task used to reject every listing that
+   * walked past it, including the ones `initialize()` runs, so the product
+   * would not open at all. This follows the desktop store's convention:
+   * invalid JSON is damage and gets set aside with its bytes intact, while
+   * valid JSON that misses the schema is treated as version skew and merely
+   * skipped, because a future build may still want it.
+   */
+  async tolerantRecord<T>(path: string, schema: z.ZodType<T>, label = path): Promise<T | null> {
+    const raw = await readText(this.files, path, PORTABLE_MAX_RECORD_BYTES);
+    if (raw === null) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      log.warn(`${label} is not valid JSON; quarantining`, error);
+      // Leave the file in place if it cannot be moved: another warning next
+      // boot is better than destroying the only copy of someone's work.
+      await this.files.rename(path, `${path}.corrupt-${Date.now()}`).catch(() => {});
+      return null;
+    }
+    const result = schema.safeParse(parsed);
+    if (result.success) return result.data;
+    log.warn(`${label} does not match its schema; skipping`, result.error.message);
+    return null;
+  }
+
+  /**
+   * Load one entity for a listing. A damaged entity is skipped rather than
+   * failing the whole list, which is what keeps a product with one bad record
+   * usable instead of unopenable.
+   */
+  async listed<T>(label: string, load: () => Promise<T | null>): Promise<T | null> {
+    try {
+      return await load();
+    } catch (error) {
+      log.warn(`${label} could not be read; skipping`, error);
+      return null;
+    }
+  }
+
   json(value: unknown): Uint8Array {
     const bytes = encodeText(`${JSON.stringify(value, null, 2)}\n`);
     if (bytes.byteLength > PORTABLE_MAX_RECORD_BYTES)

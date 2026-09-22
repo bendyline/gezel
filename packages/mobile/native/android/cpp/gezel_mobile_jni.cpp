@@ -4,6 +4,7 @@
 #include <cstring>
 #include <exception>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -115,6 +116,12 @@ Java_com_bendyline_gezel_mobile_LlamaRuntime_generate(JNIEnv * env, jclass, jlon
     auto options = gezel_llama_default_generation_options();
     options.request_id = static_cast<uint64_t>(request);
     options.max_tokens = static_cast<uint32_t>(maxTokens);
+    // The library's default deadline is a flat minute covering prompt
+    // processing as well as decoding, which a long reply on a phone passes
+    // routinely. Scale it with the reply actually asked for, and keep a
+    // ceiling so a wedged decode still ends.
+    options.timeout_ms = static_cast<uint32_t>(
+        std::min<int64_t>(600000, 30000 + static_cast<int64_t>(maxTokens) * 250));
     gezel_llama_result result{};
     gezel_llama_error error{};
     int32_t status = gezel_llama_generate(engine(handle), messages.data(), messages.size(), &options, chunk, &stream, &result, &error);
@@ -160,13 +167,20 @@ Java_com_bendyline_gezel_mobile_SpeechRuntime_transcribe(JNIEnv *env, jclass, jl
 } catch (...) { fail(env, "Speech ran out of resources"); return nullptr; }
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_bendyline_gezel_mobile_SpeechRuntime_synthesize(JNIEnv *env, jclass, jlong handle,
-    jstring directory, jstring text, jint voice, jfloat speed) try {
-    if (!handle) { fail(env, "Speech engine is unavailable"); return nullptr; }
+    jstring directory, jintArray tokens, jint voice, jfloat speed) try {
+    if (!handle || !tokens) { fail(env, "Speech engine is unavailable"); return nullptr; }
     auto state = reinterpret_cast<gezel_speech *>(handle);
-    auto root = utf8(env, directory), input = utf8(env, text);
+    auto root = utf8(env, directory);
+    if (env->ExceptionCheck()) return nullptr;
+    // Phoneme ids, already padded by the shared frontend. Two pad frames plus
+    // at most 509 phonemes; anything else is a caller bug, not a long phrase.
+    const jsize count = env->GetArrayLength(tokens);
+    if (count < 3 || count > 511) { fail(env, "Use a shorter phrase"); return nullptr; }
+    std::vector<int32_t> ids(static_cast<size_t>(count));
+    env->GetIntArrayRegion(tokens, 0, count, reinterpret_cast<jint *>(ids.data()));
     if (env->ExceptionCheck()) return nullptr;
     uint8_t *wav = nullptr; size_t size = 0;
-    if (gezel_speech_synthesize(state, root.c_str(), input.c_str(), voice, speed, &wav, &size)) {
+    if (gezel_speech_synthesize(state, root.c_str(), ids.data(), ids.size(), voice, speed, &wav, &size)) {
         fail(env, gezel_speech_error(state)); return nullptr;
     }
     auto output = env->NewByteArray(static_cast<jsize>(size));

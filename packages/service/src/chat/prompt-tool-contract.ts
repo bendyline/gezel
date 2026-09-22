@@ -83,6 +83,7 @@ const CONDITIONAL_CONTEXT =
 const OPTIONAL_EXTERNAL_RESEARCH_TOOLS = new Set([
   'web_search',
   'wikipedia_search',
+  'wikimedia_image_search',
   'wikipedia_read',
   'fetch_url',
   'run_playwright_script',

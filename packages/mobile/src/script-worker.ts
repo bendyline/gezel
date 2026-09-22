@@ -41,6 +41,9 @@ port.onmessage = (event) => {
     'sdkModuleSource' | 'checksModuleSource'
   >;
   runId = data.init.runId;
+  // Proof of life before QuickJS boots: a worker the platform kills at spawn
+  // fires no error event, and the host would otherwise wait out the deadline.
+  send({ runId, kind: 'started' });
   void run(data);
 };
 

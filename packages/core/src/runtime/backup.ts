@@ -295,12 +295,24 @@ export async function scanRestore(
   repo: PortableRepository,
   bytes: Uint8Array,
 ): Promise<RestoreReview> {
+  // At most three pending reviews prevent abandoned uploads filling the device.
+  // A review is two writes, so a kill between them leaves a directory holding
+  // an archive nobody can name. Those are swept here rather than counted:
+  // otherwise three interrupted uploads lock the user out of importing at all.
+  const pending: string[] = [];
+  for (const entry of await repo.list('.restore')) {
+    if (!entry.isDirectory) continue;
+    if (await repo.exists(`.restore/${entry.name}/review.json`)) {
+      pending.push(entry.name);
+      continue;
+    }
+    await repo.files.remove(`.restore/${entry.name}`).catch(() => {});
+  }
+  if (pending.length >= 3)
+    throw new Error('Cancel a pending restore review before importing another backup');
   const { manifest } = await inspect(bytes);
   const id = repo.createId();
   const root = restoreRoot(id);
-  // At most three pending reviews prevent abandoned uploads filling the device.
-  if ((await repo.list('.restore')).filter((entry) => entry.isDirectory).length >= 3)
-    throw new Error('Cancel a pending restore review before importing another backup');
   const review: RestoreReview = {
     restoreId: id,
     createdAt: repo.now(),

@@ -6,6 +6,9 @@ import { createBrowserHost } from './browser-host.js';
 import { createOfflineHtmlPreview } from './html-preview.js';
 import { createNativeHost, isNativeHost } from './native.js';
 import { createMobileScripts } from './scripts.js';
+// The native host is always compact, so its stylesheet belongs in the first
+// paint rather than arriving a moment later over the desktop layout.
+import '../../ui/src/components/ResponsiveAppShell.mobile.css';
 import './product-host.css';
 
 async function boot() {

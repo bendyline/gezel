@@ -74,6 +74,19 @@ bool load_progress(float, void * data) { return !abort_decode(data); }
 bool valid_request(uint64_t id) { return id != 0 && (id & cancelled_bit) == 0; }
 bool valid_timeout(uint32_t value) { return value > 0 && value <= 300000; }
 
+/**
+ * Map a stop signal to a finish reason once generation has begun.
+ *
+ * Before the first token there is nothing to keep, so a stop is an error. After
+ * it, discarding the text the model already produced — and that the host has
+ * already streamed to the screen — throws away real work. The caller is told
+ * how it ended and decides what to do with it.
+ */
+int32_t finish_for_stop(int32_t status) {
+    return status == GEZEL_LLAMA_CANCELLED ? GEZEL_LLAMA_FINISH_CANCELLED
+                                           : GEZEL_LLAMA_FINISH_TIMEOUT;
+}
+
 int32_t stop_error(gezel_llama_engine & engine, gezel_llama_error * error) {
     const auto status = engine.stopped();
     return fail(error, status, status == GEZEL_LLAMA_CANCELLED ? "Request cancelled" : "Request timed out");
@@ -224,13 +237,24 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
             return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Generated output exceeds its byte limit");
         result.output_bytes += text.size();
         if (callback(text.data(), text.size(), user_data) != 0) gezel_llama_cancel(&engine, options.request_id);
-        return engine.stopped() ? stop_error(engine, error) : GEZEL_LLAMA_OK;
+        // The caller asked to stop after receiving this chunk; the loop above
+        // notices and ends the reply gracefully with what has been produced.
+        return GEZEL_LLAMA_OK;
     };
     result.finish_reason = GEZEL_LLAMA_FINISH_LENGTH;
     while (result.generated_tokens < options.max_tokens) {
-        if (engine.stopped()) return stop_error(engine, error);
+        // Past the first token a stop ends the reply rather than failing it.
+        if (const auto stop = engine.stopped()) {
+            if (result.generated_tokens == 0) return stop_error(engine, error);
+            result.finish_reason = finish_for_stop(stop);
+            break;
+        }
         auto token = llama_sampler_sample(sampler.get(), engine.context, -1);
-        if (engine.stopped()) return stop_error(engine, error);
+        if (const auto stop = engine.stopped()) {
+            if (result.generated_tokens == 0) return stop_error(engine, error);
+            result.finish_reason = finish_for_stop(stop);
+            break;
+        }
         if (llama_vocab_is_eog(vocab, token)) { result.finish_reason = GEZEL_LLAMA_FINISH_STOP; break; }
         ++result.generated_tokens;
         char small[256];

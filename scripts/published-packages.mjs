@@ -73,6 +73,7 @@ export const RELEASE_IGNORED_PACKAGE_PATHS = [
   'packages/mobile',
   'packages/eval-viewer',
   'packages/sharp-compat',
+  'packages/phonemizer-compat',
   'packages/ml-runtime',
   'evals',
 ];

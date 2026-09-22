@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 from pathlib import Path
 import plistlib
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,9 +20,33 @@ def load(name):
 
 android = load("verify-android-package")
 ios = load("verify-ios-archive")
+# Every asset both release verifiers require. The speech stack was added to
+# the verifiers when offline speech landed; these fixtures have to carry the
+# same set or the bridge job fails before it checks anything real.
 ASSETS = ["index.html", "preview-isolation.js", "licenses/LICENSE-gezel.txt",
           "licenses/npm/manifest.json", "licenses/native/LICENSE-llama-cpp.txt",
-          "licenses/native/LICENSE-ggml.txt"]
+          "licenses/native/LICENSE-ggml.txt", "licenses/native/LICENSE-whisper.txt",
+          "licenses/native/LICENSE-kokoro.txt", "licenses/native/LICENSE-onnxruntime.txt",
+          "licenses/native/NOTICE-onnxruntime.txt"]
+
+
+SPEECH_FILES = {"whisper-tiny.bin": b"whisper weights", "kokoro/model.int8.onnx": b"kokoro weights",
+                "voices.json": b"[]", "pack.json": b"{}"}
+
+
+def staged_speech(root):
+    """Write a staged offline speech pack and return it with its manifest bytes."""
+    directory = root / "staged-speech"
+    manifest = {}
+    for name, content in SPEECH_FILES.items():
+        file = directory / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(content)
+        manifest[name] = hashlib.sha256(content).hexdigest()
+    body = json.dumps(manifest).encode()
+    (directory / "manifest.json").write_bytes(body)
+    packaged = {"manifest.json": body, **SPEECH_FILES}
+    return directory, packaged
 
 
 def compiled_web(root, index):
@@ -40,17 +65,23 @@ class AndroidReleaseTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.speech, self.packaged_speech = staged_speech(self.root)
 
     def archive(self, suffix=".apk", omit=None, extra=(), contents=None):
         archive = self.root / ("app" + suffix)
         prefix = "base/" if suffix == ".aab" else ""
         names = [prefix + "assets/public/" + name for name in ASSETS]
-        names += [prefix + "lib/arm64-v8a/" + name for name in ["libgezel_mobile.so", "libgezel-llama.so"]]
+        speech = {prefix + "assets/speech/" + name: body
+                  for name, body in self.packaged_speech.items()}
+        names += list(speech)
+        names += [prefix + "lib/arm64-v8a/" + name for name in
+                  ["libgezel_mobile.so", "libgezel-llama.so", "libGezelSpeech.so",
+                   "libonnxruntime.so"]]
         with warnings.catch_warnings(), zipfile.ZipFile(archive, "w") as output:
             warnings.simplefilter("ignore", UserWarning)
             for name in names + list(extra):
                 if name != omit:
-                    output.writestr(name, (contents or {}).get(name, b"fixture"))
+                    output.writestr(name, (contents or {}).get(name, speech.get(name, b"fixture")))
         return archive
 
     def verify(self, archive, machine="AArch64", alignment="0x4000", dependency="libc.so", web_dir=None):
@@ -59,7 +90,7 @@ class AndroidReleaseTests(unittest.TestCase):
                     "-lW": f" LOAD 0 0 0 0 0 R E {alignment}\n",
                     "-dW": f" (NEEDED) Shared library: [{dependency}]\n"}[args[1]]
         with patch.object(android.subprocess, "check_output", side_effect=command):
-            return android.verify_archive(archive, Path("readelf"), web_dir)
+            return android.verify_archive(archive, Path("readelf"), web_dir, self.speech)
 
     def test_compiled_web_matches_apk_and_bundle_and_allows_native_extras(self):
         web_dir = self.root / "dist"
@@ -98,7 +129,7 @@ class AndroidReleaseTests(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 result = self.verify(self.archive(suffix))
                 self.assertEqual(result["abis"], ["arm64-v8a"])
-                self.assertEqual(result["elfLibraries"], 2)
+                self.assertEqual(result["elfLibraries"], 4)
 
     def test_rejects_missing_license_or_jni(self):
         for missing in ["assets/public/licenses/native/LICENSE-ggml.txt", "lib/arm64-v8a/libgezel_mobile.so"]:
@@ -140,6 +171,12 @@ class IOSReleaseTests(unittest.TestCase):
         self.put("PrivacyInfo.xcprivacy", b"privacy fixture")
         self.put("Frameworks/Capacitor.framework/Info.plist", plistlib.dumps({"CFBundleExecutable": "Capacitor"}))
         self.put("Frameworks/Capacitor.framework/Capacitor", b"framework fixture")
+        # Offline speech ships as its own framework, and the verifier requires it.
+        self.put("Frameworks/GezelSpeech.framework/Info.plist", plistlib.dumps({"CFBundleExecutable": "GezelSpeech"}))
+        self.put("Frameworks/GezelSpeech.framework/GezelSpeech", b"speech fixture")
+        self.speech, packaged_speech = staged_speech(Path(self.temporary.name))
+        for name, body in packaged_speech.items():
+            self.put("speech/" + name, body)
         for name in ASSETS:
             self.put("public/" + name, b"asset fixture")
 
@@ -153,7 +190,7 @@ class IOSReleaseTests(unittest.TestCase):
             return {"lipo": arch + "\n", "vtool": f" platform {platform}\n minos {minos}\n",
                     "otool": f"binary:\n {dependency} (compatibility version 1.0.0)\n"}[args[1]]
         with patch.object(ios.subprocess, "check_output", side_effect=command):
-            return ios.verify_archive(self.archive, "1.2.3", "12", web_dir)
+            return ios.verify_archive(self.archive, "1.2.3", "12", web_dir, self.speech)
 
     def test_compiled_web_matches_every_file_and_allows_native_extras(self):
         web_dir = self.archive.parent / "dist"
@@ -192,7 +229,7 @@ class IOSReleaseTests(unittest.TestCase):
         for minos in ["16.4", "16.4.0"]:
             with self.subTest(minos=minos):
                 result = self.verify(minos=minos)
-                self.assertEqual(len(result["binaries"]), 2)
+                self.assertEqual(len(result["binaries"]), 3)
                 self.assertEqual(len(result["appPayloadSHA256"]), 64)
 
     def test_rejects_release_identity_drift(self):

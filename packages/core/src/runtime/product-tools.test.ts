@@ -14,6 +14,7 @@ const actions: PortableToolActions = {
   templates: () => [],
   createTask: async () => {},
   completeTask: async () => {},
+  assertHandoffAllowed: () => {},
   message: async () => {},
   startProject: async () => {},
 };

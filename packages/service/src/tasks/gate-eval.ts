@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { GateCheck } from '@bendyline/gezel';
 import { validateFile } from '@bendyline/gezel-mcp';
 import {
@@ -242,6 +243,8 @@ export interface GateCheckResult {
  * fail-closes with an explanatory rejection rather than silently passing.
  */
 export interface GateEvalDeps {
+  /** Successful scoped image reads in this task, step and activation. */
+  imageEvidence?: () => Promise<{ observable: boolean; paths: string[] }>;
   sandboxExec?: (
     file: string,
     timeoutMs: number,
@@ -456,6 +459,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `citationsResolve ${c.file}`;
     case 'researchEvidence':
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
+    case 'imageEvidence':
+      return `imageEvidence ${c.file} ${c.imagesKey}`;
     case 'commandEvidence':
       return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
     case 'corpusCoverage':
@@ -829,6 +834,44 @@ async function evalCheckInner(
           urls: capList(r.urls),
           ...(r.forgiven && r.forgiven.length > 0 ? { forgiven: capList(r.forgiven) } : {}),
         },
+      };
+    }
+    case 'imageEvidence': {
+      if (!deps?.imageEvidence)
+        return { ok: false, detail: 'Image delivery evidence is unavailable (fail-closed).' };
+      const raw = await reader.read(c.file);
+      if (!raw) return { ok: false, detail: `Image manifest not found: ${c.file}` };
+      let items: unknown;
+      try {
+        items = JSON.parse(raw)[c.imagesKey];
+      } catch {
+        return { ok: false, detail: `Invalid image manifest JSON: ${c.file}` };
+      }
+      if (
+        !Array.isArray(items) ||
+        items.length === 0 ||
+        items.length > 100 ||
+        !items.every((i) => i && typeof i.path === 'string' && i.path.trim().length > 0)
+      )
+        return {
+          ok: false,
+          detail: `${c.file}.${c.imagesKey} must list 1–100 image objects with paths.`,
+        };
+      const normalize = (path: string) =>
+        posix.normalize(path.replaceAll('\\', '/').replace(/^workspace\//, ''));
+      const expected = [...new Set(items.map((i) => normalize(posix.join(c.baseDir, i.path))))];
+      const observed = await deps.imageEvidence();
+      if (!observed.observable)
+        return { ok: false, detail: 'Image delivery telemetry is unavailable (fail-closed).' };
+      const seen = new Set(observed.paths.map(normalize));
+      const missing = expected.filter((path) => !seen.has(path));
+      return {
+        ok: missing.length === 0,
+        detail:
+          missing.length === 0
+            ? `All ${expected.length} manifest images were delivered to this step.`
+            : `Open each missing image with read_image_as_base64 before advancing: ${missing.join(', ')}. Text, hashes and base64 printed in a shell are not image inspection.`,
+        evidence: { expected, missing },
       };
     }
     case 'researchEvidence': {

@@ -39,6 +39,7 @@ async function fixture() {
     templates: () => [],
     createTask: async () => {},
     completeTask: () => restart(),
+    assertHandoffAllowed: () => {},
     message: async () => {},
     startProject: async () => {},
   };

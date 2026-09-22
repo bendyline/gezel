@@ -19,6 +19,8 @@ import { z } from 'zod';
 
 /** Incremented on any breaking change to the request or frame schemas. */
 export const PROTOCOL_VERSION = 1;
+/** Infer-only extension. Old brokers reject it instead of dropping image history. */
+export const IMAGE_HISTORY_PROTOCOL_VERSION = 2;
 
 /** One tool definition advertised to the remote model (OpenAI `function` shape). */
 export const ExternalToolSpecWireSchema = z.object({
@@ -51,7 +53,13 @@ export const PriorMessageWireSchema = z.union([
     reasoning: z.string().optional(),
   }),
   z.object({ role: z.literal('tool'), content: z.string(), toolCallId: z.string() }),
-  z.object({ role: z.enum(['user', 'assistant']), content: z.string() }),
+  z
+    .object({
+      role: z.enum(['user', 'assistant']),
+      content: z.string(),
+      images: z.array(z.string()).max(32).optional(),
+    })
+    .refine((m) => !m.images?.length || m.role === 'user', 'Images belong to user messages'),
 ]);
 export type PriorMessageWire = z.infer<typeof PriorMessageWireSchema>;
 

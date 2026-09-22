@@ -17,7 +17,14 @@ export async function handlePortableScriptRoute(
   url: URL,
 ): Promise<Response | null> {
   const path = url.pathname;
-  const json = (body: unknown, status = 200) => Response.json(body, { status });
+  // `Response.json()` is a static the WebView on this project's iOS floor (16.4)
+  // does not have; Safari gained it in 17. Build the response by hand so every
+  // supported device can read a route's reply.
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
   if (path === '/api/sdk/types' && request.method === 'GET')
     return scripts.authoring
       ? json(scripts.authoring.sdkTypes())

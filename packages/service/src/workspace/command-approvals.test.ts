@@ -143,4 +143,57 @@ describe('command-approvals', () => {
     ).toBeUndefined();
     expect(lookupApproval(data, 'script', 'build')).toBeUndefined();
   });
+
+  it('retains concurrent exact approvals without authorizing other arguments or content', async () => {
+    const body = 'node build.mjs';
+    const inputs = [{ path: 'build.mjs', sha256: 'a'.repeat(64) }];
+    const school = hashCommandInvocation(body, ['school'], inputs);
+    const tower = hashCommandInvocation(body, ['tower'], inputs);
+    const npx = hashCommandInvocation('/bin/validator', ['asset.glb']);
+    await Promise.all([
+      recordApproval(home, projectId, 'script', 'build', 'approved', school),
+      recordApproval(home, projectId, 'script', 'build', 'approved', tower),
+      recordApproval(home, projectId, 'npx', 'validator', 'approved', npx),
+    ]);
+    const data = await readCommandApprovals(home, projectId);
+    for (const hash of [school, tower])
+      expect(lookupApproval(data, 'script', 'build', hash)).toBe('approved');
+    expect(lookupApproval(data, 'npx', 'validator', npx)).toBe('approved');
+    for (const hash of [
+      hashCommandInvocation(body, ['other'], inputs),
+      hashCommandInvocation('node different.mjs', ['school'], inputs),
+      hashCommandInvocation(body, ['school'], [{ path: 'build.mjs', sha256: 'b'.repeat(64) }]),
+    ])
+      expect(lookupApproval(data, 'script', 'build', hash)).toBeUndefined();
+  });
+
+  it('revokes all invocations on decline and does not restore them on reapproval', async () => {
+    const first = hashCommandInvocation('build', ['first']);
+    const second = hashCommandInvocation('build', ['second']);
+    await recordApproval(home, projectId, 'script', 'build', 'approved', first);
+    await recordApproval(home, projectId, 'script', 'build', 'approved', second);
+    await recordApproval(home, projectId, 'script', 'build', 'declined');
+    let data = await readCommandApprovals(home, projectId);
+    expect(data.scriptInvocationHashes?.build).toBeUndefined();
+    expect(data.scriptHashes?.build).toBeUndefined();
+    expect(lookupApproval(data, 'script', 'build', first)).toBe('declined');
+    await recordApproval(home, projectId, 'script', 'build', 'approved', second);
+    data = await readCommandApprovals(home, projectId);
+    expect(lookupApproval(data, 'script', 'build', first)).toBeUndefined();
+    expect(lookupApproval(data, 'script', 'build', second)).toBe('approved');
+  });
+
+  it('preserves an existing exact approval when migrating to multiple invocations', async () => {
+    const first = hashCommandInvocation('build', ['first']);
+    const second = hashCommandInvocation('build', ['second']);
+    await (await import('node:fs/promises')).writeFile(
+      join(home, 'projects', projectId, 'command-approvals.json'),
+      JSON.stringify({ scripts: { build: 'approved' }, npx: {}, scriptHashes: { build: first } }),
+    );
+    await recordApproval(home, projectId, 'script', 'build', 'approved', second);
+    const data = await readCommandApprovals(home, projectId);
+    expect(lookupApproval(data, 'script', 'build', first)).toBe('approved');
+    expect(lookupApproval(data, 'script', 'build', second)).toBe('approved');
+    expect(data.scriptHashes?.build).toBe(second);
+  });
 });

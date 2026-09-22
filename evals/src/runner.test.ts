@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
@@ -12,6 +12,7 @@ import {
   buildPoisonedSessionRecoveryMessage,
   buildReEngageNudge,
   canDispatchPoisonedSessionRecovery,
+  captureFinalState,
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
   describeSendFailure,
@@ -55,6 +56,7 @@ import {
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  trialMaxDurationMs,
   workspacePathSignature,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
@@ -66,6 +68,33 @@ function terminalHandoffTestClient(): GezelClient {
     listSessionTelemetry: vi.fn().mockResolvedValue({ sessions: [] }),
   } as unknown as GezelClient;
 }
+
+it('captures generated files from an external eval workspace, including hidden asset folders', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gezel-eval-external-capture-'));
+  try {
+    const external = join(root, 'external');
+    await mkdir(join(external, '.artifacts'), { recursive: true });
+    await writeFile(join(external, '.artifacts', 'model.glb'), Buffer.from([1, 2, 3, 4]));
+    const client = {
+      ...terminalHandoffTestClient(),
+      listProjects: async () => ({ projects: [{ id: 'asset-project', workingDir: external }] }),
+      listGezels: async () => ({ gezels: [] }),
+      listTasks: async () => ({ tasks: [] }),
+      getConfig: async () => ({}),
+    } as unknown as GezelClient;
+    await captureFinalState({
+      client,
+      trialHome: join(root, 'home'),
+      runDir: join(root, 'run'),
+      log: () => {},
+    });
+    expect(
+      await readFile(join(root, 'run', 'workspace', 'asset-project', '.artifacts', 'model.glb')),
+    ).toEqual(Buffer.from([1, 2, 3, 4]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 describe('eval run directory resolution', () => {
   it('anchors relative paths to the repository instead of the eval package cwd', () => {
@@ -1681,6 +1710,32 @@ describe('defaultSoftProgressTimeoutMsForModel', () => {
     expect(defaultSoftProgressTimeoutMsForModel('claude-sonnet-4-6', 'anthropic')).toBe(
       5 * 60 * 1000,
     );
+  });
+});
+
+describe('trialMaxDurationMs', () => {
+  it('honors an explicit bounded comparison budget on a large-model engine', () => {
+    expect(
+      trialMaxDurationMs({
+        authoredMaxDurationMs: 40 * 60_000,
+        timeoutMs: 20 * 60_000,
+        minTrialTimeoutMs: 120 * 60_000,
+        decodeRateTokensPerSec: 5,
+      }),
+    ).toBe(20 * 60_000);
+  });
+
+  it('retains the engine floor and throughput scaling without an operator override', () => {
+    expect(
+      trialMaxDurationMs({ authoredMaxDurationMs: 40 * 60_000, minTrialTimeoutMs: 120 * 60_000 }),
+    ).toBe(120 * 60_000);
+    expect(
+      trialMaxDurationMs({
+        authoredMaxDurationMs: 40 * 60_000,
+        minTrialTimeoutMs: 120 * 60_000,
+        decodeRateTokensPerSec: 5,
+      }),
+    ).toBe(160 * 60_000);
   });
 });
 

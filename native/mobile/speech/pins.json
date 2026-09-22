@@ -4,20 +4,10 @@
     "sha256": "279af4ce60dbf397362868f3bacc75b56a4332ac2541cae155070093f6aaf0e3",
     "file": "whisper.tar.gz"
   },
-  "sherpa-source": {
-    "url": "https://codeload.github.com/k2-fsa/sherpa-onnx/tar.gz/refs/tags/v1.13.8",
-    "sha256": "b0374cc56dbc186d442ae73d5de743bb092470b640c4c50ce7b029044c0c4fa8",
-    "file": "sherpa-source.tar.gz"
-  },
-  "sherpa-android": {
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-android.tar.bz2",
-    "sha256": "2ff63469a71cb6009aa2e3ed5f4a670f8abdcbe4bb9ffd23776afc792a6b4f44",
-    "file": "sherpa-android.tar.bz2"
-  },
-  "sherpa-ios": {
-    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/xcframework/sherpa-onnx-v1.13.8-ios-static.xcframework.zip",
-    "sha256": "6b8e769cb153343270fdccbe92e3b3db0d1c421d67fa0989ab01fdf5b2fcf2de",
-    "file": "sherpa-ios.zip"
+  "onnx-android": {
+    "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.1/onnxruntime-android-1.28.1.zip",
+    "sha256": "1d2660a12107fb998e1a2e3b8600de4319d012c1c306aaf4965fb96291277d0a",
+    "file": "onnx-android.zip"
   },
   "onnx-ios": {
     "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.1/onnxruntime-ios-static-xcframework-1.28.1.xcframework.zip",

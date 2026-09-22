@@ -49,6 +49,7 @@ import {
   waitForRemoteCapacity,
 } from './backpressure.js';
 import {
+  IMAGE_HISTORY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   type PriorMessageWire,
   type RemoteCacheWarmRequest,
@@ -169,6 +170,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
    * from disk: system bands, transcript, tuning, and A's local tool schemas.
    */
   async prewarm(sessionId: string): Promise<void> {
+    if (this.transcript.some((m) => m.role === 'user' && m.images?.length)) return;
     const connection = this.deps.resolveConnection?.() ?? this.deps;
     const tools = this.advertisedTools();
     const body: RemoteCacheWarmRequest = {
@@ -203,6 +205,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       this.systemMessage.length + (this.deps.volatileContext?.length ?? 0) + prompt.length;
     for (const message of priorMessages) {
       total += message.content.length;
+      if (message.role === 'user') total += (message.images?.length ?? 0) * 8192;
       if ('toolCalls' in message) total += JSON.stringify(message.toolCalls).length;
       if ('toolCallId' in message) total += message.toolCallId.length;
       if ('reasoning' in message && message.reasoning) total += message.reasoning.length;
@@ -275,7 +278,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         // The first forward pass carries the user message in `prompt`; every
         // continuation must move it into priorMessages because B is stateless.
         if (!userMessageAdded) {
-          priorMessages.push({ role: 'user', content: prompt });
+          priorMessages.push({
+            role: 'user',
+            content: prompt,
+            ...(opts?.attachments?.length ? { images: opts.attachments.map((a) => a.base64) } : {}),
+          });
           userMessageAdded = true;
         }
         this.pendingPrompt = '';
@@ -316,6 +323,8 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         // The adaptive cap uses the broker-admitted numCtx, exactly like the
         // in-process llama.cpp/MLX/Ollama sessions.
         let terminalActionClosing: string | null = null;
+        let approvalPending = false;
+        const toolImages: string[] = [];
         for (const call of toolCalls) {
           if (terminalActionClosing) {
             priorMessages.push({
@@ -346,6 +355,10 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
               });
               output = rich.text;
               outputIsError = rich.isError;
+              if (!rich.isError) {
+                toolImages.push(...rich.images.map((image) => image.base64));
+                approvalPending ||= rich.approvalPending === true;
+              }
             } catch (err) {
               output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
               outputIsError = true;
@@ -415,6 +428,19 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           priorMessages.push({ role: 'assistant', content: closing });
           this.transcript = [...priorMessages];
           return fullText ? `${fullText}\n${closing}` : closing;
+        }
+        if (toolImages.length)
+          priorMessages.push({
+            role: 'user',
+            content:
+              'Images returned by the preceding tools. Inspect the pixels before judging them.',
+            images: toolImages,
+          });
+        if (approvalPending) {
+          // The user daemon owns approval and queues its answer as a new turn.
+          // Preserve complete tool pairs, then free the turn for that answer.
+          this.transcript = [...priorMessages];
+          return fullText;
         }
         currentTurnStartIdx = await this.maybeCompactMidLoop(priorMessages, currentTurnStartIdx);
         nextPrompt = ''; // tool results drive the next forward-pass
@@ -534,7 +560,9 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
     const body: RemoteInferRequest = {
       ...(prompt.length > 0 && opts?.fileTurnIntent ? { fileTurnIntent: opts.fileTurnIntent } : {}),
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion: priorMessages.some((m) => m.role === 'user' && m.images?.length)
+        ? IMAGE_HISTORY_PROTOCOL_VERSION
+        : PROTOCOL_VERSION,
       model: this.deps.model,
       systemMessage: this.systemMessage,
       ...(this.deps.systemPromptLayers ? { systemPromptLayers: this.deps.systemPromptLayers } : {}),

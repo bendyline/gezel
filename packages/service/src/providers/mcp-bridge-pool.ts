@@ -250,7 +250,12 @@ export class McpBridgePool {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: {
+      budgetChars?: number;
+      numCtxTokens?: number;
+      onImages?: (images: Array<{ base64: string; mimeType: string }>) => void;
+      onApprovalPending?: () => void;
+    },
   ): Promise<string> {
     const resolved = this.resolveBridgeTool(name);
     if (resolved && !this.isCallableByModel(resolved.name)) {
@@ -268,6 +273,7 @@ export class McpBridgePool {
     text: string;
     images: Array<{ base64: string; mimeType: string }>;
     isError: boolean;
+    approvalPending?: boolean;
   }> {
     const resolved = this.resolveBridgeTool(name);
     if (resolved && !this.isCallableByModel(resolved.name)) {

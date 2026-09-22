@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, normalizePath } from 'vite';
 import { harperWasmPlugin } from '../ui/scripts/vite-harper-wasm.js';
 import { browserTypeScriptPlugin } from './scripts/browser-typescript.js';
+import { kokoroLexiconPlugin } from './scripts/kokoro-lexicon.js';
 import { portableContentPlugin } from './scripts/portable-content.js';
 import { portableScriptsPlugin } from './scripts/portable-scripts.js';
 
@@ -42,6 +43,7 @@ export default defineConfig({
       },
     },
     browserTypeScriptPlugin(),
+    kokoroLexiconPlugin(),
     portableScriptsPlugin(),
     portableContentPlugin(),
     react(),

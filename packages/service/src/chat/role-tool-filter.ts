@@ -1222,6 +1222,7 @@ function applyGitToolGates(
 export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'web_search',
   'wikipedia_search',
+  'wikimedia_image_search',
   'wikipedia_read',
   'fetch_url',
   // Email send/draft are external-service agency: a no-services posture

@@ -48,8 +48,14 @@ public final class PreviewBoundary {
             }
             @Override public boolean shouldOverrideUrlLoading(WebView webView, WebResourceRequest request) {
                 if (PreviewSnapshots.reserved(request.getUrl())) return request.isForMainFrame() || !snapshots.available;
+                // A preview frame never navigates anything but itself.
                 if (!request.isForMainFrame()) return true;
-                return !PreviewSnapshots.packaged(request.getUrl()) || super.shouldOverrideUrlLoading(webView, request);
+                // Ask Capacitor rather than deciding here. Its policy keeps the
+                // packaged origin inside the WebView and hands everything else
+                // to the browser. Short-circuiting on "not packaged" skipped
+                // that entirely, so an external link did nothing at all — while
+                // the same link on iOS opened Safari.
+                return super.shouldOverrideUrlLoading(webView, request);
             }
         });
     }

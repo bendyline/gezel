@@ -57,6 +57,10 @@
       "types": "./dist/schemas/mobile-provider.d.ts",
       "import": "./dist/schemas/mobile-provider.js"
     },
+    "./kokoro": {
+      "types": "./dist/kokoro/index.d.ts",
+      "import": "./dist/kokoro/index.js"
+    },
     "./markdown": {
       "types": "./dist/markdown/index.d.ts",
       "import": "./dist/markdown/index.js"

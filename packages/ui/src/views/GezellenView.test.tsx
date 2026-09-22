@@ -84,13 +84,34 @@ describe('GezellenView', () => {
 
   it('uses the same roster and detail one at a time in narrow windows', async () => {
     layout.compact = true;
-    render(<GezellenView />);
+    const { container } = render(<GezellenView />);
+    const roster = () => container.querySelector('aside.gezels-side');
+    const detail = () => container.querySelector('.gezellen-view > section');
+
     fireEvent.click(await screen.findByRole('button', { name: /Maya.*Researcher/ }));
     expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
-    expect(screen.queryByText('Bob')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to gezellen' }));
+    // Only one pane shows at a time, but both stay mounted: unmounting the
+    // detail on a resize threw away an in-progress rename and the open tab.
+    expect(roster()).toHaveAttribute('hidden');
+    expect(detail()).not.toHaveAttribute('hidden');
     expect(screen.getByText('Bob')).toBeInTheDocument();
-    expect(screen.queryByTestId('gezel-detail')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to gezellen' }));
+    expect(roster()).not.toHaveAttribute('hidden');
+    expect(detail()).toHaveAttribute('hidden');
+    expect(screen.getByTestId('gezel-detail')).toBeInTheDocument();
+  });
+
+  it('keeps both panes mounted so a resize cannot discard the open gezel', async () => {
+    layout.compact = false;
+    const { container, rerender } = render(<GezellenView />);
+    fireEvent.click(await screen.findByRole('button', { name: /Maya.*Researcher/ }));
+    expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
+
+    // Narrowing the window used to unmount the detail entirely.
+    layout.compact = true;
+    rerender(<GezellenView />);
+    expect(container.querySelector('[data-testid="gezel-detail"]')).toBeInTheDocument();
   });
 
   it('shows which gezel is working in the full roster', async () => {

@@ -3676,6 +3676,52 @@ describe('ChatManager — sendWithMentions (@-mention fan-out)', () => {
       );
     });
 
+    it.each(['pending', 'answered', 'old', 'other-session'] as const)(
+      "yields recovery only for this turn's command approval: %s",
+      async (kind) => {
+        const session = await manager.createSession({ gezelId: 'ada' });
+        mock.scriptSendDelay(200);
+        mock.script('', 'The command returned successfully.', 'NONE', 'NONE');
+        const sending = manager.send(session.id, 'Run the project build.');
+        await vi.waitFor(
+          () => expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1),
+          { timeout: 5000, interval: 10 },
+        );
+        const internals = manager as unknown as {
+          currentTurnTools: Map<
+            string,
+            Array<{ name: string; durationMs: number; success: boolean }>
+          >;
+        };
+        internals.currentTurnTools.set(session.id, [
+          { name: 'run_package_script', durationMs: 1, success: true },
+        ]);
+        await store.writeQuestion({
+          id: 'build-approval',
+          projectId: 'default',
+          gezelId: 'ada',
+          sessionId: kind === 'other-session' ? 'another-session' : session.id,
+          prompt: 'Approve the build?',
+          choices: ['Approve', 'Decline'],
+          multiSelect: false,
+          createdAt: kind === 'old' ? '2020-01-01T00:00:00.000Z' : new Date().toISOString(),
+          intent: {
+            kind: 'command-approval',
+            scope: 'script',
+            name: 'build',
+            body: 'node build.mjs',
+          },
+          ...(kind === 'answered'
+            ? { answer: { selectedChoices: [0], at: new Date().toISOString() } }
+            : {}),
+        });
+        await sending;
+        expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(
+          kind === 'pending' || kind === 'answered' ? 1 : 2,
+        );
+      },
+    );
+
     it('drops session affinity on continuation re-acquires so queued siblings win FIFO', async () => {
       // Fix C: when the stall detector fires a continuation nudge,
       // the re-acquire should set `affinity: false` on the queue
@@ -5723,7 +5769,14 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const sys = create!.opts!.systemMessage!;
       expect(sys).toContain('`read_file`');
       expect(sys).toContain('`read_artifact`');
-      expect(sys).toContain('never invent refs from the project name');
+      // This used to assert the "never invent refs from the project name"
+      // clause. The prompt rework removed the sentence that carried it,
+      // deliberately: telling every session to call `read_task_notes({ ref })`
+      // sent medium models into a re-read loop hunting for a procedure that
+      // was never in the notes. The real ref is now stated directly in the
+      // prompt ("### Current task: <ref>"), so there is nothing to invent.
+      // What must still hold is that the curated task tool is named.
+      expect(sys).toContain('`read_task_notes`');
 
       // The uncurated tail IS trimmed now (161 → curated list) and under
       // `debugMode` the trim surfaces as a warning — the transparency half

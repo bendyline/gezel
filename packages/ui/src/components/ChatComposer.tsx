@@ -15,6 +15,7 @@ import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
+import { isBackDismiss } from '../back-dismiss.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
@@ -807,6 +808,8 @@ export function ChatComposer({
   // gap where the Stop button is already visible but Escape does nothing.
   const turnActiveRef = useRef(turnActive);
   turnActiveRef.current = turnActive;
+  const openCommandQueryRef = useRef(openCommandQuery);
+  openCommandQueryRef.current = openCommandQuery;
 
   /**
    * Mention provider — backs both the WYSIWYG `@` popover and the Raw
@@ -1324,11 +1327,21 @@ export function ChatComposer({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // The `/open` menu is not a Radix layer, so nothing else dismisses it.
+      // Close it first and mark the event handled: Escape closes what is on
+      // top, and must not fall through to abandoning the reply underneath.
+      if (openCommandQueryRef.current !== null) {
+        event.preventDefault();
+        setOpenCommandQuery(null);
+        return;
+      }
       if (
         !turnActiveRef.current ||
         draftSubmissionPendingRef.current ||
-        event.key !== 'Escape' ||
-        event.defaultPrevented
+        // Back dismisses the overlay on top; it never abandons the reply
+        // running underneath it.
+        isBackDismiss(event)
       ) {
         return;
       }

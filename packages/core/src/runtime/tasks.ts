@@ -113,7 +113,7 @@ async function write(repo: PortableRepository, task: Task, extra?: Map<string, U
 }
 export async function getTask(repo: PortableRepository, ref: string): Promise<Task | null> {
   const { root, projectId, num } = taskLocation(ref);
-  const task = await repo.record(`${root}/task.json`, TaskSchema);
+  const task = await repo.tolerantRecord(`${root}/task.json`, TaskSchema, `task ${root}`);
   if (!task) return null;
   if (task.projectId !== projectId || task.num !== num || task.ref !== ref)
     throw new Error('Task identity does not match its file');

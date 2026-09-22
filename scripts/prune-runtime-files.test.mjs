@@ -85,7 +85,7 @@ describe('pruneRuntimeFiles', () => {
 
   it('prunes only disposable files and removes newly empty directories', async () => {
     const result = await pruneRuntimeFiles(root);
-    assert.deepEqual(result.byReason, { 'source-map': 2, 'type-declaration': 3 });
+    assert.deepEqual(result.byReason, { 'source-map': 2, 'type-declaration': 3, 'bundler-only': 0 });
     assert.equal(result.removed.length, 5);
 
     for (const path of [
@@ -156,5 +156,27 @@ describe('release bundle wiring', () => {
     assert.match(serviceBuilder, /await createBundleArchive\(\{ sourceDir: src, archivePath \}\)/);
     assert.doesNotMatch(electronBuilder, /^\s+- dist\/(?:main|extract-service-bundle)\.js\.map$/m);
     assert.match(electronBuilder, /^\s+- '!dist\/ui\/\*\*\/\*\.map'$/m);
+  });
+});
+
+describe('undistributable bundler builds', () => {
+  it('drops kokoro-js\'s web bundle, which inlines GPL-3 eSpeak NG', () => {
+    assert.equal(
+      runtimePruneReason('node_modules/kokoro-js/dist/kokoro.web.js'),
+      'bundler-only',
+    );
+    assert.equal(
+      runtimePruneReason('app/node_modules/kokoro-js/dist/kokoro.web.js'),
+      'bundler-only',
+    );
+  });
+
+  it('keeps the Node entries the product actually loads', () => {
+    assert.equal(runtimePruneReason('node_modules/kokoro-js/dist/kokoro.js'), null);
+    assert.equal(runtimePruneReason('node_modules/kokoro-js/dist/kokoro.cjs'), null);
+  });
+
+  it('does not match a similarly named file from another package', () => {
+    assert.equal(runtimePruneReason('node_modules/other/dist/kokoro.web.js'), null);
   });
 });

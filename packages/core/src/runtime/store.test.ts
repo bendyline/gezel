@@ -403,3 +403,108 @@ describe('desktop creation helper parity', () => {
     expect(pickRoleBasedName(undefined, new Set(['gezel-1']))).toBe('gezel-2');
   });
 });
+
+describe('damaged records do not take the product down', () => {
+  it('quarantines unreadable JSON, skips schema drift, and still opens', async () => {
+    const { files, store, options } = fixture();
+    await store.ensureLayout();
+    const gezel = await store.createGezel({ name: 'Reader', role: 'Writer' });
+    const project = await store.createProject({ name: 'Work' });
+    const good = await store.createSession({ gezelId: gezel.id, projectId: project.id });
+
+    // One session file is truncated mid-write; another survives an older
+    // schema. Neither is a reason to refuse to open the app.
+    const torn = `gezels/${gezel.id}/sessions/torn.json`;
+    const stale = `gezels/${gezel.id}/sessions/stale.json`;
+    files.entries.set(torn, encodeText('{"id":"torn","messages":[{'));
+    files.entries.set(stale, encodeText('{"id":"stale","fromAFutureBuild":true}'));
+
+    const reopened = new PortableStore(options);
+    await reopened.ensureLayout();
+    const sessions = await reopened.listSessions({ gezelId: gezel.id });
+    expect(sessions.map((session) => session.id)).toEqual([good.id]);
+
+    // Invalid JSON is damage: set aside with its bytes intact for recovery.
+    const quarantined = [...files.entries.keys()].filter((path) =>
+      path.startsWith(`${torn}.corrupt-`),
+    );
+    expect(quarantined).toHaveLength(1);
+    expect(decodeText(files.entries.get(quarantined[0]!)!)).toBe('{"id":"torn","messages":[{');
+    expect(files.entries.has(torn)).toBe(false);
+
+    // Valid JSON that misses the schema may be version skew: keep the file.
+    expect(files.entries.has(stale)).toBe(true);
+  });
+
+  it('skips a gezel it cannot read rather than failing the roster', async () => {
+    const { files, store, options } = fixture();
+    await store.ensureLayout();
+    const keep = await store.createGezel({ name: 'Keeper', role: 'Writer' });
+    // A gezel directory whose record cannot be read at all: here the path is
+    // itself a directory, which is how a half-finished sync can leave things.
+    files.entries.set('gezels/broken', null);
+    files.entries.set('gezels/broken/gezel.md', null);
+
+    const reopened = new PortableStore(options);
+    const roster = await reopened.listGezels();
+    expect(roster.map((entry) => entry.id)).toContain(keep.id);
+    expect(roster.map((entry) => entry.id)).not.toContain('broken');
+  });
+});
+
+describe('a damaged transaction journal does not brick the product', () => {
+  it('sets aside a committed journal whose staged bytes are gone, and keeps working', async () => {
+    const { files, store, options } = fixture();
+    await store.ensureLayout();
+    await store.createProject({ name: 'Before' });
+
+    // A journal that reached its commit point while the staged bytes did not
+    // survive. Recovery runs before every store call, so throwing here used to
+    // make the product permanently unopenable.
+    files.entries.set('.transactions', null);
+    files.entries.set(
+      '.transactions/pending.json',
+      encodeText(
+        JSON.stringify({
+          id: 'lost',
+          writes: [{ path: 'projects/ghost/project.json', staged: '.transactions/lost/0' }],
+          removes: [],
+          directories: [],
+          clears: [],
+        }),
+      ),
+    );
+
+    const reopened = new PortableStore(options);
+    const projects = await reopened.listProjects();
+    expect(projects.some((project) => project.name === 'Before')).toBe(true);
+    // The journal is kept under a new name as evidence, not applied in part.
+    expect(files.entries.has('.transactions/pending.json')).toBe(false);
+    const setAside = [...files.entries.keys()].filter((path) =>
+      path.startsWith('.transactions/unrecoverable-'),
+    );
+    expect(setAside).toHaveLength(1);
+    expect(await reopened.listProjects()).toHaveLength(projects.length);
+  });
+
+  it('still refuses to import when three reviews are genuinely pending', async () => {
+    const { files, store } = fixture();
+    await store.ensureLayout();
+    // Three complete reviews and one interrupted upload. The complete ones
+    // reach the cap on their own; the interrupted directory must be swept
+    // rather than counted, or interrupted uploads alone could lock the user out.
+    files.entries.set('.restore', null);
+    for (const id of ['one', 'two', 'three']) {
+      files.entries.set(`.restore/${id}`, null);
+      files.entries.set(`.restore/${id}/review.json`, encodeText('{}'));
+    }
+    files.entries.set('.restore/torn', null);
+    files.entries.set('.restore/torn/archive.zip', encodeText('partial'));
+
+    await expect(store.scanRestore(new Uint8Array([1, 2, 3]))).rejects.toThrow(
+      /Cancel a pending restore review/,
+    );
+    // The interrupted upload is swept rather than counted.
+    expect(files.entries.has('.restore/torn')).toBe(false);
+  });
+});

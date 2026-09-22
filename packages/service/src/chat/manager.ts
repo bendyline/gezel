@@ -8407,25 +8407,26 @@ export class ChatManager extends LocalEngineRuntime {
         // skipped — they already stamped the prior assistant on
         // creation and re-stamping the new bubble would duplicate
         // the card across two timeline rows.
-        if (!assistantMessage.pendingQuestionId) {
-          try {
-            const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
-            const candidate = projectQuestions
-              .filter(
-                (q) =>
-                  q.sessionId === sessionId &&
-                  !q.answer &&
-                  q.intent !== undefined &&
-                  q.createdAt >= iterStartedAt,
-              )
+        let commandApprovalRaisedThisTurn = false;
+        try {
+          const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
+          const raisedQuestions = projectQuestions.filter(
+            (q) =>
+              q.sessionId === sessionId && q.intent !== undefined && q.createdAt >= iterStartedAt,
+          );
+          // An immediate answer may already be queued. It still owns the next
+          // turn: a stall-recovery nudge must not run ahead of that answer.
+          commandApprovalRaisedThisTurn = raisedQuestions.some(
+            (q) => q.intent?.kind === 'command-approval',
+          );
+          if (!assistantMessage.pendingQuestionId) {
+            const candidate = raisedQuestions
+              .filter((q) => !q.answer)
               .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
             if (candidate) assistantMessage.pendingQuestionId = candidate.id;
-          } catch (err) {
-            log.warn(
-              'mid-turn question stamping failed:',
-              err instanceof Error ? err.message : err,
-            );
           }
+        } catch (err) {
+          log.warn('mid-turn question stamping failed:', err instanceof Error ? err.message : err);
         }
         state.record.lastActivityAt = nowIso();
         // Capture provider-state (sessionId / previous_response_id) for resume.
@@ -8759,8 +8760,13 @@ export class ChatManager extends LocalEngineRuntime {
         // automatic continuation must stop here — including recovery for an
         // earlier failed tool in the same turn and inspector escalation after
         // an exhausted continuation budget.
-        if (drained.some((call) => call.name === 'ask_user_question' && call.success)) {
-          log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
+        if (
+          commandApprovalRaisedThisTurn ||
+          drained.some((call) => call.name === 'ask_user_question' && call.success)
+        ) {
+          log.info(
+            `session ${sessionId}: question or command approval posted — yielding to its answer`,
+          );
           break;
         }
         // Completing a task step transfers ownership to the successor session.
@@ -12531,6 +12537,7 @@ export class ChatManager extends LocalEngineRuntime {
     mmprojPath?: string;
     visionEncoderPath?: string;
     nativeVisionEnabled?: boolean;
+    mlxVisionAvailable?: boolean;
   }> {
     // Ask about the model that is actually SERVING this turn.
     //
@@ -12547,6 +12554,12 @@ export class ChatManager extends LocalEngineRuntime {
       ? parseEngineKey(state.record.engineKey)?.modelId
       : undefined;
     const modelId = boundModelId ?? state.record.model ?? undefined;
+    if (state.record.providerName === 'mlx')
+      return {
+        ...(modelId ? { modelId } : {}),
+        mlxVisionAvailable: state.session?.supportsImageInput === true,
+        nativeVisionEnabled: state.session?.supportsImageInput === true,
+      };
     const modelStore = state.record.providerName === 'ds4' ? this.ds4Models : this.llamaCppModels;
     if (!modelId || !modelStore) return modelId ? { modelId } : {};
     try {
@@ -15177,6 +15190,9 @@ export class ChatManager extends LocalEngineRuntime {
             success: info.success,
             ...(info.deliveredResultTruncated === true ? { deliveredResultTruncated: true } : {}),
             ...(path ? { path } : {}),
+            ...(info.name === 'read_image_as_base64'
+              ? { imageArtifact: info.args?.artifact === true || info.args?.artifact === 'true' }
+              : {}),
             ...(paths.length > 0 ? { paths } : {}),
             ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
             ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),

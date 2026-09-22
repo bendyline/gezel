@@ -2673,6 +2673,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let total = 0;
     for (const m of this.messages) {
       if (typeof m.content === 'string') total += m.content.length;
+      total += (m.attachments?.length ?? 0) * 8192;
       if (m.tool_calls) {
         for (const tc of m.tool_calls)
           total += tc.function.arguments.length + tc.function.name.length;
@@ -5965,6 +5966,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         });
         let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let terminalActionClosing: string | null = null;
+        const toolImages: ImageAttachment[] = [];
         const immediateFileWritePaths: string[] = [];
         const immediatePartialWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
@@ -6076,6 +6078,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   numCtxTokens: this.deps.numCtx,
                 })
                 .catch((err) => `ERROR: ${err instanceof Error ? err.message : String(err)}`));
+          } else if (call.function.name === 'read_image_as_base64' && !this.deps.visionEnabled) {
+            // Do not record a successful image read when pixels cannot reach the model.
+            output =
+              'ERROR: Image inspection requires a loaded vision projector. No image was delivered; do not claim visual observations.';
           } else if (this.deps.bridges.hasTool(call.function.name)) {
             try {
               // Adaptive cap: compute how many chars of tool output
@@ -6094,6 +6100,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               output = await this.deps.bridges.callTool(call.function.name, args, {
                 budgetChars,
                 numCtxTokens: this.deps.numCtx,
+                onApprovalPending: () => {
+                  askedQuestionThisTurn = true;
+                },
+                onImages: (images) => {
+                  if (this.deps.visionEnabled)
+                    toolImages.push(
+                      ...images.map((image, index) => ({
+                        ...image,
+                        filename: `${call.id}-${index}`,
+                      })),
+                    );
+                },
               });
             } catch (err) {
               output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
@@ -6476,7 +6494,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             });
           }
         }
-        // Terminal: the model asked the user a question. The card is now in
+        if (toolImages.length)
+          this.messages.push({
+            role: 'user',
+            content:
+              'Images returned by the preceding tools. Inspect the pixels before judging them.',
+            attachments: toolImages,
+          });
+        // Terminal: a tool posted a question or command approval. Its card is in
         // front of the user, the question is registered, and its answer
         // arrives as the NEXT user message (the questions-route contract).
         // End the turn HERE rather than issue another generation request —
@@ -6488,7 +6513,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // mutation-landed early-returns below.
         if (askedQuestionThisTurn) {
           log.info(
-            '[llama-cpp] ask_user_question posted; ending turn (answer arrives as the next message)',
+            '[llama-cpp] question or command approval posted; ending turn (answer arrives as the next message)',
           );
           if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
             const durationMs = Date.now() - start;

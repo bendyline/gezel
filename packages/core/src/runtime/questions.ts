@@ -22,7 +22,12 @@ export interface PortableQuestionFilter {
 const questionPath = (id: string) => `${projectRoot(id)}/questions.json`;
 async function projectQuestions(repo: PortableRepository, projectId: string): Promise<Question[]> {
   await requireProject(repo, projectId);
-  const questions = (await repo.record(questionPath(projectId), z.array(QuestionSchema))) ?? [];
+  const questions =
+    (await repo.tolerantRecord(
+      questionPath(projectId),
+      z.array(QuestionSchema),
+      `questions for ${projectId}`,
+    )) ?? [];
   if (questions.some((question) => question.projectId !== projectId))
     throw new Error('Question does not belong to its project');
   return questions;

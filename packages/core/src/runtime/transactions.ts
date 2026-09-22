@@ -1,3 +1,4 @@
+import { createLogger } from '../log.js';
 import { PortableTransactionSchema } from '../schemas/portable-store.js';
 import {
   type PortableFileSystem,
@@ -8,6 +9,7 @@ import {
 } from './files.js';
 
 const PENDING = '.transactions/pending.json';
+const log = createLogger('portable-store');
 function destination(path: string): void {
   validatePortablePath(path);
   if (path === '.transactions' || path.startsWith('.transactions/'))
@@ -21,22 +23,51 @@ export class PortableTransactions {
     private readonly createId: () => string,
   ) {}
 
+  /**
+   * Set aside a journal that cannot be completed.
+   *
+   * Recovery runs before every store operation, so a journal that always
+   * throws makes the product permanently unopenable — the one outcome worse
+   * than losing the writes it described. Those writes were never durable
+   * anyway: the commit point was reached but the staged bytes are not on the
+   * device. The journal is kept under a new name as evidence rather than
+   * applied in part, because partial application is exactly what it exists to
+   * prevent.
+   */
+  private async quarantine(reason: unknown): Promise<void> {
+    log.warn('a pending transaction cannot be recovered; setting it aside', reason);
+    await this.files
+      .rename(PENDING, `.transactions/unrecoverable-${Date.now()}.json`)
+      .catch(async () => {
+        // If it cannot be renamed it must still stop blocking every read.
+        await this.files.remove(PENDING).catch(() => {});
+      });
+  }
+
   async recover(): Promise<void> {
     const raw = await readText(this.files, PENDING);
     if (raw === null) return;
-    const journal = PortableTransactionSchema.parse(JSON.parse(raw));
-    const staging = `.transactions/${journal.id}`;
-    for (const path of [
-      ...journal.removes,
-      ...journal.clears,
-      ...journal.directories,
-      ...journal.writes.map((item) => item.path),
-    ])
-      destination(path);
-    for (const [index, item] of journal.writes.entries()) {
-      if (item.staged !== `${staging}/${index}`) throw new Error('Invalid staged transaction path');
-      if ((await this.files.read(item.staged)) === null)
-        throw new Error('A committed transaction is missing staged data');
+    let journal: ReturnType<typeof PortableTransactionSchema.parse>;
+    let staging: string;
+    try {
+      journal = PortableTransactionSchema.parse(JSON.parse(raw));
+      staging = `.transactions/${journal.id}`;
+      for (const path of [
+        ...journal.removes,
+        ...journal.clears,
+        ...journal.directories,
+        ...journal.writes.map((item) => item.path),
+      ])
+        destination(path);
+      for (const [index, item] of journal.writes.entries()) {
+        if (item.staged !== `${staging}/${index}`)
+          throw new Error('Invalid staged transaction path');
+        if ((await this.files.read(item.staged)) === null)
+          throw new Error('A committed transaction is missing staged data');
+      }
+    } catch (error) {
+      await this.quarantine(error);
+      return;
     }
     for (const path of journal.clears) await this.files.remove(path);
     for (const path of journal.directories) await this.files.mkdir(path);

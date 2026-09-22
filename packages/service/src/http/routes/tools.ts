@@ -64,6 +64,7 @@ import {
   UpdateBoekwachterIssueRequestSchema,
   WebSearchRequestSchema,
   type WebSearchResponse,
+  WikimediaImageSearchRequestSchema,
   WikipediaReadRequestSchema,
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
@@ -90,6 +91,7 @@ import { SqlRejectedError } from '../../observations/statement-guard.js';
 import { createSearchProvider } from '../../providers/search/factory.js';
 import { MockSearchProvider, mockWikipediaArticle } from '../../providers/search/mock.js';
 import type { SearchProvider } from '../../providers/search/types.js';
+import { searchWikimediaImages } from '../../providers/search/wikimedia-images.js';
 import {
   WikipediaSearchProvider,
   fetchWikipediaArticle,
@@ -380,6 +382,39 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return c.json({ error: msg }, 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  app.post('/:id/tools/wikimedia-image-search', async (c) => {
+    const body = WikimediaImageSearchRequestSchema.parse(await c.req.json());
+    const config = await ctx.store.readConfig();
+    const denial = checkQueryPolicy(body.query, config.webSearch);
+    if (denial) return c.json({ error: denial }, 403);
+    const secrets = await collectProviderSecretValues(ctx.secrets);
+    if (stringsContainingAnySecret([body.query], secrets)) {
+      return c.json(
+        {
+          error: 'request denied: outbound payload contains a value matching a stored credential.',
+        },
+        403,
+      );
+    }
+    const mocked = process.env.GEZEL_MOCK_PROVIDER === '1';
+    if (!mocked && !resolveSecurityPolicy(config).allowExternalServices) {
+      return c.json(
+        { error: 'request denied: external services are disabled by the current security level.' },
+        403,
+      );
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_WEB_SEARCH_TIMEOUT_MS);
+    try {
+      const results = mocked ? [] : await searchWikimediaImages(body, controller.signal);
+      return c.json({ query: body.query, results });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
     } finally {
       clearTimeout(timeout);
     }

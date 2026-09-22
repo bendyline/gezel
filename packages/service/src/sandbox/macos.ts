@@ -31,6 +31,8 @@ export interface RunUnderMacSandboxOptions {
    * Default: false (workspace build/test commands may need the network).
    */
   denyNet?: boolean;
+  /** Approved build/test commands may launch Chromium subprocesses. */
+  allowBrowserIpc?: boolean;
 }
 
 export function runUnderMacSandbox(
@@ -78,6 +80,7 @@ function buildMacPolicy(
 (allow signal (target self))
 (allow sysctl-read)
 (allow mach-lookup)
+${opts.allowBrowserIpc ? '(allow mach-register (global-name-regex #"^org[.]chromium[.].*[.]MachPortRendezvousServer[.][0-9]+$"))' : ''}
 (allow ipc-posix-shm)
 (allow iokit-open)
 ${readBlock}

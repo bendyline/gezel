@@ -39,6 +39,7 @@ port.on('message', (json: string) => {
   }
 });
 
+send({ runId, kind: 'started' });
 startSuspendMonitor();
 try {
   const executor = new QuickJSScriptExecutor({

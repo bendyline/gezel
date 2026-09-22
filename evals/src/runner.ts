@@ -385,13 +385,12 @@ export async function runTrial(
   // that value was calibrated against a ~20 tok/s reference machine and
   // otherwise makes the verdict a property of the hardware.
   const authoredMaxDurationMs = scenario.timeoutMs ?? DEFAULT_MAX_DURATION_MS;
-  const requestedMaxDurationMs =
-    opts.timeoutMs ??
-    throughputScaledMaxDurationMs({
-      authoredMaxDurationMs,
-      decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
-    });
-  const maxDurationMs = Math.max(requestedMaxDurationMs, llamaEvalLaunch?.minTrialTimeoutMs ?? 0);
+  const maxDurationMs = trialMaxDurationMs({
+    authoredMaxDurationMs,
+    timeoutMs: opts.timeoutMs,
+    decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    minTrialTimeoutMs: llamaEvalLaunch?.minTrialTimeoutMs,
+  });
   // `scenario.progressTimeoutMs`, when set, acts as the HARD timeout
   // override (real-progress watchdog).
   //
@@ -727,6 +726,12 @@ export async function runTrial(
   }
 
   // Phase 3: spawn trial daemon.
+  const requestedMaxDurationMs =
+    opts.timeoutMs ??
+    throughputScaledMaxDurationMs({
+      authoredMaxDurationMs,
+      decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    });
   if (requestedMaxDurationMs !== authoredMaxDurationMs && opts.timeoutMs === undefined) {
     log(
       `[trial] throughput-scaled ceiling: ${Math.round(authoredMaxDurationMs / 60_000)}m → ${Math.round(requestedMaxDurationMs / 60_000)}m at ${opts.decodeRateTokensPerSec} tok/s (reference ${CEILING_REFERENCE_TOKENS_PER_SEC} tok/s)`,
@@ -738,6 +743,8 @@ export async function runTrial(
       log(
         `[trial] large-model minimum timeout raised maxDuration ${requestedMaxDurationMs}ms → ${maxDurationMs}ms`,
       );
+    } else if (opts.timeoutMs !== undefined) {
+      log(`[trial] explicit timeout retained: ${maxDurationMs}ms`);
     }
   }
   // Per-run behavior overrides (A/B toggle) — injected into the daemon
@@ -1572,6 +1579,18 @@ export function throughputScaledMaxDurationMs(args: {
     MAX_CEILING_THROUGHPUT_SCALE,
   );
   return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
+}
+
+/** Explicit operator budgets also take precedence over engine startup presets. */
+export function trialMaxDurationMs(args: {
+  authoredMaxDurationMs: number;
+  timeoutMs?: number;
+  decodeRateTokensPerSec?: number | null;
+  minTrialTimeoutMs?: number;
+}): number {
+  return (
+    args.timeoutMs ?? Math.max(throughputScaledMaxDurationMs(args), args.minTrialTimeoutMs ?? 0)
+  );
 }
 
 export function defaultSoftProgressTimeoutMsForModel(
@@ -3202,7 +3221,9 @@ export async function captureFinalState(args: {
         await cp(artifactsSrc, join(runDir, 'artifacts', project.id), { recursive: true });
       }
 
-      const workspaceSrc = join(projectDir, 'workspace');
+      // Scenarios may create disposable external workspaces. Capturing only
+      // the internal fallback silently loses their generated assets.
+      const workspaceSrc = project.workingDir ?? join(projectDir, 'workspace');
       if (existsSync(workspaceSrc)) {
         await cp(workspaceSrc, join(runDir, 'workspace', project.id), { recursive: true });
       }

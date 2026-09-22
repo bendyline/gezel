@@ -308,6 +308,13 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minSuccessful: z.number().int().positive().optional(),
     externalOptional: z.boolean().optional(),
   }),
+  /** Require actual image delivery for each {path} in a workspace JSON manifest. */
+  z.object({
+    kind: z.literal('imageEvidence'),
+    file: z.string().min(1),
+    imagesKey: z.string().min(1).default('images'),
+    baseDir: z.string().min(1),
+  }),
   /**
    * Require a real command run during this activation, verified against the
    * service-written run receipts (`workspace.script.run` / `workspace.npx.run`
@@ -322,8 +329,8 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
    * against the unmodified tree, so `onDraft: 'defer'` (the default)
    * approves with an explicit "execution deferred until Apply" note instead
    * of demanding a receipt that would be a lie; `'require'` hard-blocks
-   * instead. Books standardize on the argless canonical invocation because
-   * command approvals pin one invocation hash per script name.
+   * instead. Prefer a canonical invocation so the expected receipt and the
+   * exact command invocation the user approves remain easy to understand.
    */
   z.object({
     kind: z.literal('commandEvidence'),

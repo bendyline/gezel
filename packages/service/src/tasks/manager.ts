@@ -3029,6 +3029,31 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
+        imageEvidence: async () => {
+          if (!this.history) return { observable: false, paths: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: ['tool.called'],
+            ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+          });
+          const paths = events.flatMap((event) => {
+            const d = event.details;
+            return d?.success === true &&
+              d.name === 'read_image_as_base64' &&
+              d.imageArtifact === false &&
+              d.taskRef === task.ref &&
+              // Generalist sessions survive graph transitions; their bridge's
+              // step tag can name the previous step after a repair back-edge.
+              // The current activation's timestamp is the authority in that
+              // mode. Stepwise workers still require the exact step tag.
+              (d.stepId === step.id ||
+                (task.executionMode === 'generalist' && Boolean(step.lastActivatedAt))) &&
+              typeof d.path === 'string'
+              ? [d.path]
+              : [];
+          });
+          return { observable: true, paths };
+        },
         researchEvidence: async ({ sourcePath, tools }) => {
           if (!this.history) return { observable: false, matches: [] };
           const events = await this.history.listEvents({

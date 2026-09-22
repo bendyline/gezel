@@ -241,6 +241,12 @@ export interface PortableToolActions {
       scope: ScriptScope,
     ): Promise<unknown>;
   };
+  /**
+   * Refuse a handoff before anything is written. The limit used to be checked
+   * inside the handoff itself, after the project or roster change had already
+   * committed, so a model that retried on the refusal created the work twice.
+   */
+  assertHandoffAllowed(gezelId?: string): void;
   message(gezelId: string, projectId: string, message: string): Promise<unknown>;
   startProject(input: {
     name: string;
@@ -407,14 +413,20 @@ export async function executePortableTool(
     if (!team && id !== session.projectId) throw new Error('Project is out of scope');
     return store.updateProject(String(id), UpdateProjectRequestSchema.parse(patch));
   }
-  if (name === 'start_project')
+  if (name === 'start_project') {
+    // The lead is recruited inside startProject, so this checks the depth and
+    // count limits only; the handoff re-checks once the identity exists.
+    actions.assertHandoffAllowed();
     return actions.startProject(args as Parameters<PortableToolActions['startProject']>[0]);
+  }
   if (name === 'message_gezel') {
     const gezels = await store.listGezels();
     const member =
       gezels.find((g) => g.id === args.gezel) ??
       gezels.find((g) => g.name.toLowerCase() === String(args.gezel).toLowerCase());
     if (!member || member.id === session.gezelId) throw new Error('Choose another available gezel');
+    // Check before the roster write, not after: a refusal must leave nothing behind.
+    actions.assertHandoffAllowed(member.id);
     await store.addGezelToProject(target, member.id);
     return actions.message(member.id, target, String(args.message));
   }

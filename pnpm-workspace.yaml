@@ -105,6 +105,10 @@ overrides:
   "protobufjs": "7.6.5"
   "qs": "6.15.2"
   "react-router": "7.18.1"
+  # kokoro-js pulls in phonemizer, which embeds GPL-3 eSpeak NG. Gezel
+  # phonemizes with @bendyline/gezel/kokoro and calls generate_from_ids, so the
+  # engine is never used and must not ship; see packages/phonemizer-compat.
+  "phonemizer": "workspace:1.2.1"
   # Transformers.js imports Sharp eagerly even for text/audio-only consumers.
   # Gezel deliberately supplies a private no-image workspace implementation;
   # see packages/sharp-compat/README.md.

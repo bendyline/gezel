@@ -186,7 +186,7 @@ export interface SessionOpts {
    * stateful sessions.
    */
   priorMessages?: Array<
-    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
     | {
         role: 'assistant';
         content: string;
@@ -755,6 +755,8 @@ export interface SendAndWaitOpts {
 }
 
 export interface LLMSession {
+  /** Bound engine capability; absent is unknown, never proof of native vision. */
+  readonly supportsImageInput?: boolean;
   /** The owning engine was retired; rebuild from saved history before the next turn. */
   readonly isDisposed?: boolean;
   /**
@@ -1071,6 +1073,7 @@ export interface BatchCapability {
 }
 
 export interface LLMProvider {
+  readonly supportsImageInput?: boolean;
   readonly name: ProviderName;
   /** Boot the underlying client / authenticate. Called lazily. */
   initialize(signal?: AbortSignal): Promise<void>;

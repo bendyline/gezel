@@ -128,6 +128,18 @@ export default defineConfig({
     // as the MLX python copy above.
     cpSync('src/providers/video/python', 'dist/providers/video/python', { recursive: true });
 
+    // Kokoro's pronunciation dictionaries. The daemon phonemizes text itself
+    // rather than calling eSpeak NG (GPL-3, unshippable), so these files are a
+    // hard requirement for speech: without them synthesis has no dictionary.
+    // Staged by scripts/build-kokoro-lexicon.mjs from the pinned voice pack.
+    const kokoroSrc = resolve(__dirname, 'assets', 'kokoro');
+    if (!existsSync(kokoroSrc)) {
+      throw new Error(
+        `Kokoro lexicon assets missing at ${kokoroSrc} — run node scripts/build-kokoro-lexicon.mjs`,
+      );
+    }
+    cpSync(kokoroSrc, 'dist/kokoro-lexicon', { recursive: true });
+
     // Stage the workspace UI bundle into `dist/ui/` so an installed
     // service (e.g. the Node-only CLI distribution) can serve the browser
     // UI: `findBundledUi()` in src/bin/gezeld.ts probes `<bin>/../ui` first,

@@ -45,8 +45,9 @@ export const CODEX_CLI_EXCLUDED_MCP_TOOLS = [
   'run_nodejs_script',
   'run_playwright_script',
   'list_packages',
-  // Image / archive helpers also covered by built-ins.
-  'read_image_as_base64',
+  // Keep the scoped image reader: craftbooks name it explicitly and its MCP
+  // image content + receipt cannot be replaced by printing base64 in a shell.
+  // Archive helpers are covered by built-ins.
   'list_archive',
   'extract_archive',
 ];

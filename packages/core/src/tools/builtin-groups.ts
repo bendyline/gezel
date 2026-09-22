@@ -312,6 +312,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: [
       'web_search',
       'wikipedia_search',
+      'wikimedia_image_search',
       'wikipedia_read',
       'fetch_url',
       'browser_find_page_element',

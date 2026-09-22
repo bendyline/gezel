@@ -44,6 +44,7 @@ export const RESEARCH_STEP_TOOLS: readonly string[] = [
   'read_document',
   'web_search',
   'wikipedia_search',
+  'wikimedia_image_search',
   'wikipedia_read',
   'fetch_url',
   'browser_find_page_element',
@@ -145,6 +146,9 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | n
         break;
       case 'researchEvidence':
         for (const tool of RESEARCH_STEP_TOOLS) out.add(tool);
+        break;
+      case 'imageEvidence':
+        out.add('read_image_as_base64');
         break;
       case 'corpusCoverage':
         out.add('search');

@@ -118,7 +118,6 @@ import type {
   BatchCapability,
   ExternalToolCall,
   ExternalToolSpec,
-  ImageAttachment,
   LLMProvider,
   LLMSession,
   ModelInfo,
@@ -303,6 +302,7 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 
 export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
+  readonly supportsImageInput: boolean;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
   readonly supportsPriorMessages = true;
@@ -419,6 +419,8 @@ export class MlxProvider implements LLMProvider {
   private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
+    /** True only when the supervised sidecar loads its complete vision tower. */
+    visionEnabled?: boolean;
     supervisor?: NativeEngineSupervisor;
     baseUrl?: string;
     defaultModel?: string;
@@ -459,6 +461,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.supervisor) this.supervisor = opts.supervisor;
     if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.defaultModel = opts.defaultModel ?? 'mlx';
+    this.supportsImageInput = opts.visionEnabled === true;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
     this.plannedReservation = opts.plannedReservationBytes;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -849,7 +852,7 @@ interface MlxSessionDeps {
   /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
   volatileContext?: string;
   priorMessages: Array<
-    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
     | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
@@ -898,6 +901,9 @@ interface MlxSessionDeps {
 }
 
 class MlxSession extends StreamingSessionBase implements LLMSession {
+  get supportsImageInput(): boolean {
+    return this.deps.provider.supportsImageInput;
+  }
   private readonly messages: ChatMessage[];
   /**
    * Direct provider callers and ephemeral one-shot work do not always have a
@@ -1007,7 +1013,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         });
         continue;
       }
-      this.messages.push({ role: m.role, content: m.content });
+      if (m.role === 'user' && m.images?.length && !this.supportsImageInput) {
+        throw new Error(
+          '[Mac AI] This MLX engine cannot accept image history. Enable its vision tower.',
+        );
+      }
+      this.messages.push({
+        role: m.role,
+        content: m.content,
+        ...(m.role === 'user' && m.images?.length ? { images: m.images } : {}),
+      });
     }
   }
 
@@ -1023,6 +1038,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     let total = 0;
     for (const m of this.messages) {
       if (typeof m.content === 'string') total += m.content.length;
+      // The sidecar bounds images to 1024px. Reserve patch tokens without
+      // counting base64 bytes as language tokens or treating pixels as free.
+      total += (m.images?.length ?? 0) * 8192;
       if (m.tool_calls) {
         for (const tc of m.tool_calls)
           total += tc.function.arguments.length + tc.function.name.length;
@@ -1042,6 +1060,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
    * after a user daemon prepares `/v1/remote/cache/warm`.
    */
   async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
+    // Vision KV is not eligible for text-prefix warming or persistence.
+    if (this.messages.some((message) => message.images?.length)) return;
     // Focusing a chat must not cold-start MLX. The real turn owns normal lazy
     // startup; warming only accelerates an already-resident server.
     const baseUrl = this.deps.provider.currentBaseUrl();
@@ -1278,13 +1298,18 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           '[Mac AI] a tool-result continuation cannot include a new prompt or attachments',
         );
       }
-      if (this.messages.at(-1)?.role !== 'tool') {
+      const last = this.messages.at(-1);
+      if (last?.role !== 'tool' && !(last?.role === 'user' && last.images?.length)) {
         throw new Error('[Mac AI] a tool-result continuation requires a trailing tool result');
       }
     }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (opts?.attachments && opts.attachments.length > 0) {
-      userMsg.images = opts.attachments.map((a: ImageAttachment) => a.base64);
+      if (!this.supportsImageInput)
+        throw new Error(
+          '[Mac AI] This MLX runtime supports text only. Enable native vision for an installed vision checkpoint; no image was delivered to the model.',
+        );
+      userMsg.images = opts.attachments.map((a) => a.base64);
     }
     // Mark this turn's start so mid-loop compaction can split prior
     // history (compactable) from in-flight tool loop (preserve verbatim).
@@ -3547,6 +3572,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let asyncHandoffCount = 0;
         let terminalActionClosing: string | null = null;
+        const toolImages: string[] = [];
         const immediateFileWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
         // EOS-flushed (truncated mid-content) — drives the bail-vs-loop
@@ -3589,6 +3615,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
             args = {};
             output = `ERROR: ${call.function.name} was not executed because its arguments are not a valid JSON object. Retry with the declared fields.`;
+          } else if (
+            !this.supportsImageInput &&
+            call.function.name.replaceAll('-', '_') === 'read_image_as_base64'
+          ) {
+            // Do not execute the bridge: that would emit a successful image-read
+            // receipt even though callTool() drops images and this sidecar has
+            // no vision path. A craftbook must not approve fabricated inspection.
+            output =
+              'ERROR: Image inspection is unavailable in this text-only MLX runtime. No image was delivered. Use a provider with image input support; do not claim visual observations or approve a visual review.';
           } else if (
             opts?.fileTurnIntent &&
             FILE_REPAIR_MUTATION_TOOLS.has(call.function.name) &&
@@ -3665,6 +3700,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 output = await this.deps.bridges.callTool(call.function.name, args, {
                   budgetChars,
                   numCtxTokens: this.deps.numCtx,
+                  onApprovalPending: () => {
+                    askedQuestionThisTurn = true;
+                  },
+                  onImages: (images) => {
+                    if (!this.supportsImageInput)
+                      throw new Error(
+                        'This MLX model cannot receive tool images. No visual inspection occurred.',
+                      );
+                    toolImages.push(...images.map((image) => image.base64));
+                  },
                 });
               } catch (err) {
                 output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
@@ -3804,6 +3849,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             });
           }
         }
+        // Keep tool-call/result pairs adjacent, then deliver the actual pixels
+        // as one vision message. Base64 must never be tokenized as tool text.
+        if (toolImages.length)
+          this.messages.push({
+            role: 'user',
+            content:
+              'Images returned by the preceding tools. Inspect the pixels before judging them.',
+            images: toolImages,
+          });
         if (abortDueToFailureLoop) {
           const { tool: failedTool, count: failCount } = abortDueToFailureLoop;
           log.error(

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
+import { isBackDismiss } from '../back-dismiss.js';
 import * as Dialog from '../primitives/Dialog.js';
 import { useBackNavigation } from './useBackNavigation.js';
 
@@ -59,5 +60,34 @@ describe('native Back with the shared responsive app', () => {
     expect(back()).toBe(false);
     view.unmount();
     expect(back()).toBe(false);
+  });
+});
+
+describe('Back never abandons work underneath an overlay', () => {
+  it('marks its dismissal so an Escape shortcut can tell it from a key press', () => {
+    const seen = { real: 0, fromBack: 0 };
+    const listener = (event: Event) => {
+      if (isBackDismiss(event)) seen.fromBack += 1;
+      else seen.real += 1;
+    };
+    window.addEventListener('keydown', listener);
+    // An overlay nothing else dismisses: exactly the shape that let Back reach
+    // the composer's cancel shortcut and stop a running reply.
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.append(menu);
+    try {
+      render(<Example />);
+      back();
+      expect(seen.fromBack).toBe(1);
+      expect(seen.real).toBe(0);
+
+      // A real key press stays unmarked, so the shortcut still works.
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(seen.real).toBe(1);
+    } finally {
+      menu.remove();
+      window.removeEventListener('keydown', listener);
+    }
   });
 });

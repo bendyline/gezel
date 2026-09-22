@@ -34,8 +34,6 @@ export interface GezelMobilePlugin extends ProductFilePlugin, ExportFilePlugin {
   previewAvailability?(): Promise<{ available: boolean }>;
   publishHtmlPreview?(options: { html: string }): Promise<{ id: string; url: string }>;
   removeHtmlPreview?(options: { id: string }): Promise<void>;
-  readState(): Promise<{ data: string | null }>;
-  writeState(options: { data: string }): Promise<void>;
   listModels(): Promise<ModelInventory>;
   resolveModelSource(options: { source: MobileModelSourceIdentity }): Promise<{
     source: MobileModelSource;

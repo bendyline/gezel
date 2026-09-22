@@ -22,7 +22,7 @@ import { WorkspaceWriteDeniedError } from './errors.js';
  * the allowlist and approval-gate logic so both tools share identical
  * consent semantics.
  *
- * `run_package_script`: invoked as `pnpm run <name> -- [args]`. Name
+ * `run_package_script`: invoked as `pnpm run <name> [args]`. Name
  * must exist as a key in the workspace's `package.json#scripts`.
  *
  * `run_npx`: invoked as `<workspace>/node_modules/.bin/<name> [args]`.
@@ -104,11 +104,9 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
   });
   if (gateOutcome) return gateOutcome;
 
-  const invocation = resolvePnpmCommand([
-    'run',
-    opts.script,
-    ...(opts.args && opts.args.length > 0 ? ['--', ...opts.args] : []),
-  ]);
+  // pnpm already forwards every argument after the script name. Unlike npm,
+  // an inserted separator reaches the program as a literal first argument.
+  const invocation = resolvePnpmCommand(['run', opts.script, ...(opts.args ?? [])]);
   const res = await runWorkspaceCommand({
     bin: invocation.command,
     args: invocation.args,

@@ -50,11 +50,11 @@ import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { fileManagerLabel } from './file-manager-label.js';
+import { useFirstRun } from './first-run-context.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
-import { useIsFirstRun } from './useIsFirstRun.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -261,7 +261,7 @@ export function Sidebar({
   const showAdvancedFeatures = useShowAdvancedFeatures();
   const hasKnowledgeCatalogs = useHasKnowledgeCatalogs();
   // Until setup is done, the home tab reads "Get started" instead of "Home".
-  const firstRun = useIsFirstRun();
+  const firstRun = useFirstRun();
   const meester = gezels.find((gezel) => gezel.id === meesterGezelId);
   const meesterName = meester ? displayName(meester, roleBasedNameOnly) : '';
   // "Home" carries the weight; the meester's name rides along muted. The

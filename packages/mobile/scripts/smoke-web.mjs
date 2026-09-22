@@ -142,9 +142,15 @@ try {
   async function navigation() {
     await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
-    const back = page.getByRole('button', { name: 'Navigation', exact: true });
-    if (await back.isVisible()) await back.click();
     const nav = page.getByRole('navigation', { name: 'Primary navigation', exact: true });
+    const open = page.getByRole('button', { name: 'Navigation', exact: true });
+    // The rail is either already open or sits behind the header button, and
+    // which one shows depends on where the app last was. Wait for whichever
+    // arrives rather than sampling once: immediately after a load neither is
+    // mounted, and committing to one path waits out the whole timeout on a
+    // page that was always going to show the other.
+    await nav.or(open).first().waitFor();
+    if (await open.isVisible()) await open.click();
     await nav.waitFor();
     return nav;
   }
@@ -152,6 +158,15 @@ try {
     const nav = await navigation();
     await nav.getByRole('button', { name: 'Offline field notes', exact: true }).click();
     await page.getByRole('tablist', { name: 'Project sections', exact: true }).waitFor();
+  }
+  async function globalSearch() {
+    const input = page.getByRole('textbox', { name: 'Search', exact: true });
+    if (await input.isVisible()) return input;
+    // Compact layout collapses global search behind a header button carrying
+    // the same accessible name; it becomes the input once activated.
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    await input.waitFor();
+    return input;
   }
   async function createFile(name, text) {
     await page.getByRole('button', { name: 'New file', exact: true }).click();
@@ -297,15 +312,15 @@ try {
     .getByText('Keep careful notes about local wildlife.', { exact: false })
     .waitFor();
   await checkpoint('phone-document-search');
-  await page.getByRole('textbox', { name: 'Search', exact: true }).fill('herons');
+  await (await globalSearch()).fill('herons');
   await page
     .getByTestId('search-palette')
     .getByRole('option')
     .filter({ hasText: 'report.md' })
     .waitFor();
   await checkpoint('phone-global-search');
-  await page.getByRole('textbox', { name: 'Search', exact: true }).fill('');
-  await page.getByRole('textbox', { name: 'Search', exact: true }).press('Escape');
+  await (await globalSearch()).fill('');
+  await (await globalSearch()).press('Escape');
 
   await openProject();
   await page.getByRole('tab', { name: 'Tasks', exact: true }).click();

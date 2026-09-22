@@ -834,6 +834,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [showWorkspaceHidden, showArtifactsHidden],
   );
 
+  // Saving a reply to the artifacts drawer happens in the chat timeline, which
+  // has no way to reach this view's listing. It announces the write instead,
+  // and until something listened the new file simply did not appear until the
+  // project was reopened.
+  useEffect(() => {
+    const onArtifactUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (!selected || (detail?.projectId && detail.projectId !== selected.id)) return;
+      void refreshFiles(selected.id);
+    };
+    window.addEventListener('gezel:artifact-updated', onArtifactUpdated);
+    return () => window.removeEventListener('gezel:artifact-updated', onArtifactUpdated);
+  }, [selected, refreshFiles]);
+
   // Output discovery has deliberately tighter traversal rules than the full
   // Workspace file tree: no node_modules/dot-folders, and at most four
   // containing folders from the workspace root.

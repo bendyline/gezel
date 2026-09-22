@@ -8,13 +8,35 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+/** A real 24 kHz PCM16 WAV, so joining exercises the same path the device does. */
+function wavFixture(samples: number): string {
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, bytes.length - 8, true);
+  ascii(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 24_000, true);
+  view.setUint32(28, 48_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, samples * 2, true);
+  return Buffer.from(bytes).toString('base64');
+}
+
 function bridge(): NativeSpeechPlugin {
   return {
     status: vi.fn(),
     transcribe: vi.fn(),
     cancel: vi.fn(async () => {}),
     synthesize: vi.fn(async () => ({
-      wav: 'UklGRg==',
+      wav: wavFixture(160),
       meta: {
         voice: 'af_heart',
         model: 'kokoro-82m-v1.0',
@@ -77,6 +99,33 @@ describe('native speech adapter', () => {
     ).rejects.toThrow();
     expect(native.transcribe).not.toHaveBeenCalled();
   });
+  it('sends phonemes, never text, and one call per sentence', async () => {
+    const native = bridge();
+    await createNativeSpeech(native).synthesize(
+      { text: 'Hello world. Hello cat.' },
+      new AbortController().signal,
+    );
+    // One inference per sentence, since nothing native splits sentences now.
+    expect(native.synthesize).toHaveBeenCalledTimes(2);
+    for (const [call] of vi.mocked(native.synthesize).mock.calls) {
+      // Text must not cross the bridge: the eSpeak-free frontend runs here.
+      expect(call).not.toHaveProperty('text');
+      expect(call.tokens.length).toBeGreaterThan(2);
+      // Kokoro frames every utterance with its pad token.
+      expect(call.tokens.at(0)).toBe(0);
+      expect(call.tokens.at(-1)).toBe(0);
+    }
+  });
+
+  it('reads a British voice from the British dictionary', async () => {
+    const native = bridge();
+    const speech = createNativeSpeech(native);
+    await speech.synthesize({ text: 'hello', voice: 'af_heart' }, new AbortController().signal);
+    await speech.synthesize({ text: 'hello', voice: 'bm_george' }, new AbortController().signal);
+    const [american, british] = vi.mocked(native.synthesize).mock.calls.map(([c]) => c.tokens);
+    expect(british).not.toEqual(american);
+  });
+
   it('validates native status and never invokes inference during a readiness check', async () => {
     const native = bridge();
     const speech = createNativeSpeech(native);

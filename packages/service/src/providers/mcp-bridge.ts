@@ -895,9 +895,16 @@ export class McpBridge {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: {
+      budgetChars?: number;
+      numCtxTokens?: number;
+      onImages?: (images: Array<{ base64: string; mimeType: string }>) => void;
+      onApprovalPending?: () => void;
+    },
   ): Promise<string> {
     const rich = await this.callToolRich(name, args, opts);
+    if (!rich.isError && rich.images.length) opts?.onImages?.(rich.images);
+    if (!rich.isError && rich.approvalPending) opts?.onApprovalPending?.();
     return rich.text;
   }
 
@@ -1023,6 +1030,7 @@ export class McpBridge {
     text: string;
     images: Array<{ base64: string; mimeType: string }>;
     isError: boolean;
+    approvalPending?: boolean;
   }> {
     if (!this.client) throw new Error('[mcp-bridge] not started');
     // Resolve renamed/miscased spellings to the advertised name BEFORE
@@ -1348,7 +1356,18 @@ export class McpBridge {
         `call_tool ${toolName} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
       );
     }
-    return { text: capped, images, isError: false };
+    const approvalPending =
+      (toolName === 'run_package_script' || toolName === 'run_npx') &&
+      structuredContent?.state === 'approval_pending' &&
+      structuredContent.approvalPending === true &&
+      typeof structuredContent.questionId === 'string' &&
+      structuredContent.questionId.length > 0;
+    return {
+      text: capped,
+      images,
+      isError: false,
+      ...(approvalPending ? { approvalPending } : {}),
+    };
   }
 
   async stop(): Promise<void> {
