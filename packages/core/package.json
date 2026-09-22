@@ -53,6 +53,10 @@
       "types": "./dist/schemas/index.d.ts",
       "import": "./dist/schemas/index.js"
     },
+    "./mobile-inference": {
+      "types": "./dist/mobile/inference.d.ts",
+      "import": "./dist/mobile/inference.js"
+    },
     "./mobile-providers": {
       "types": "./dist/schemas/mobile-provider.d.ts",
       "import": "./dist/schemas/mobile-provider.js"

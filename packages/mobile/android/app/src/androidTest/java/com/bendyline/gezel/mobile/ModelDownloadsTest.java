@@ -1,4 +1,4 @@
-package com.bendyline.gezel.mobile;
+package com.bendyline.gezel.runtime;
 
 import static org.junit.Assert.*;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -18,7 +18,7 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public final class ModelDownloadsTest {
     private File root;
-    private MobileStore store;
+    private MobileModelStore store;
     private ModelDownloads manager;
     private final byte[] bytes="GGUFverified model fixture".getBytes(StandardCharsets.UTF_8);
     private interface Reply { ModelDownloads.Connection open(String method,Map<String,String> fields) throws Exception; }
@@ -30,7 +30,7 @@ public final class ModelDownloadsTest {
     };
     @Before public void setup()throws Exception{
         root=Files.createTempDirectory(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir().toPath(),"downloads-").toFile();
-        store=new MobileStore(root);manager=new ModelDownloads(store,transport);
+        store=new MobileModelStore(root);manager=new ModelDownloads(store,transport);
     }
     @After public void cleanup()throws Exception{
         manager.close();
@@ -71,7 +71,7 @@ public final class ModelDownloadsTest {
         reply=(method,fields)->response(bytes,200,Map.of(),false);
         String id=manager.start(source(),"Fixture").getJSONObject("download").getString("id");
         assertEquals(id,waitFor(id,"complete").getString("modelId"));
-        JSObject inventory=new MobileStore(root).listModels();
+        NativeObject inventory=new MobileModelStore(root).listModels();
         assertFalse(inventory.has("selectedModelId"));
         assertEquals(source().getString("sha256"),inventory.getJSONArray("models").getJSONObject(0).getJSONObject("source").getString("sha256"));
         manager.remove(id);

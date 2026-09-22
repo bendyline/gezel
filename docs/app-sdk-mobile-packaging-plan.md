@@ -2,19 +2,89 @@
 
 Assessment and proposed implementation plan, 2026-09-22. Based on the current
 checkout, the owner's runtime-reunification notes (all five tranches completed
-in the working tree), and the sibling DocBlocks and Qualla checkouts. Package names and API examples below are
-proposals, not existing exports. This document does not change the
+in the working tree), and the sibling DocBlocks and Qualla checkouts. The status
+below distinguishes implemented exports from remaining proposals. This document does not change the
 [App SDK stability contract](app-sdk-surface.md).
+
+## Implementation progress
+
+The first implementation slice is in place; see
+[local mobile runtime packages](../native/mobile/SDK.md) for staging and consumer
+commands. This is groundwork for phases 1–2, not completion of those phases:
+
+- Extracted the browser-safe native inference adapter into core's narrow
+  `./mobile-inference` entry. Gezel mobile uses it, while the existing
+  `PortableInference` runtime export remains compatible. Multiple callers of
+  the same plugin now share admission and cancellation release state.
+- Extracted the Android llama JNI/Java binding from the app's combined speech
+  shim. The app and standalone packager use the same binding sources.
+- Added verified, immutable local staging for a Swift binary package and a
+  Maven AAR containing JNI plus all native dependencies, notices, R8 rules and
+  provenance. Swift exposes only Gezel's versioned C ABI. Consumers do not
+  compile llama.cpp.
+- Added isolated Swift and Android consumer fixtures. Fresh simulator linking
+  and an offline, minified Android release build passed from staged packages
+  outside the checkout. Portable runtime tests (230), mobile tests (58), App SDK
+  tests (113), mobile typechecking and the web production build passed.
+
+The second slice now implements the native provider/model/lifecycle hosts in
+[`native/runtime`](../native/runtime/README.md), the
+[`@bendyline/gezel-capacitor`](../packages/capacitor/README.md) package, and an
+in-process Fetch adapter returning the existing `GezelApp`. Gezel mobile routes
+its inference/model calls through that same plugin. The app retains its product
+files, export/preview UI, and separate speech implementation.
+
+`GezelApp<'portable'>` opts into optional usage and native finish reasons while
+preserving the default desktop response types. Model listings expose availability
+and capabilities. Unsupported operations reject before inference; model preparation
+is explicit. Abort, early stream exit and client close wait for native cancellation,
+and an idle client cannot cancel another client's request. No public `/intelligence`
+entry or competing inference client was added.
+
+Both native hosts are staged over the prebuilt engine, and the Capacitor tarball
+carries a self-contained Swift package and local Maven repository. Local folder
+and tarball consumption needs no publication. Qualla/DocBlocks adoption and
+physical-device provider qualification remain follow-on work. Existing SDK methods
+stay available; the new package currently supports the text inference subset.
+
+Validation for the second slice:
+
+- 19 transport tests, 113 existing App SDK tests, 58 mobile tests, relevant
+  typechecks, the mobile web production build, and 24 staging/script tests passed.
+- 22 selected native model/storage tests passed. The extracted Capacitor tarball
+  passed six independent iOS simulator tests, including import, real generation
+  and streaming with the synthetic GGUF fixture, release, and removal.
+- An independent minified Android consumer built from the tarball; all seven
+  engine libraries passed dependency and 16 KB ELF/ZIP alignment checks. Gezel's
+  own Android Java integration also compiled.
+- A fresh consumer installed the matching local tarballs offline, exercised the
+  SDK, and bundled for browsers without Node/service imports. No registry
+  publication or consumer engine rebuild was involved.
+
+Broader checkout checks are not all green: the full Gezel iOS build and Android
+instrumentation compilation encounter the existing speech source/artifact API
+mismatches; four macOS product-filesystem assertions reported `EPERM` on the
+latest full storage run; and the two pre-existing service module-size violations
+remain. These do not occur in the isolated text SDK consumers. Physical-device
+Apple/ML Kit inference and Qualla/DocBlocks adoption remain unqualified.
 
 ## Recommendation
 
-Extend the **Gezel App SDK** into one family with two independently usable layers:
+Extend the existing **Gezel App SDK** to more hosts. Keep its current two levels
+of use, with one shared implementation of each supported operation:
 
 1. **Intelligence:** prepare a model, generate and stream text, cancel, inspect
    capabilities, and manage resources. An app supplies its own documents, UI,
    prompts, and conversation history. No Gezel project or crew is required.
 2. **Product runtime:** opt into Gezel projects, sessions, tools, memories,
    scripts, and tasks through the existing shared client/domain boundaries.
+
+These are dependency boundaries, not two competing SDKs or construction APIs.
+`GezelApp` already provides direct inference, and `Gezel.openai` exposes it from
+the richer `Gezel` object. Do not introduce the previously proposed public
+`/intelligence` entry or `createIntelligence` factory. Preserve existing imports
+and methods; extend their implementation through host adapters. Desktop clients
+use the same shared client code as mobile without having to migrate their imports.
 
 Publish the mobile intelligence implementation as ordinary native dependencies:
 a Swift package backed by prebuilt XCFrameworks, Android Maven artifacts containing
@@ -36,30 +106,22 @@ same model, quality, features, or process arrangement on every device.
 
 | Area | Evidence in this checkout | Packaging implication |
 | --- | --- | --- |
-| Public desktop integration | [App SDK](../packages/app-sdk/package.json): Node discovery/consent, OpenAI-shaped `GezelApp`, browser entry, and optional `connectOrHost` | Preserve the 1.x API; add a portable intelligence entry rather than redefining the existing hosting API. |
+| Public desktop integration | [App SDK](../packages/app-sdk/package.json): Node discovery/consent, OpenAI-shaped `GezelApp`, browser entry, and optional `connectOrHost` | Preserve the 1.x API and reuse its browser-safe client; add mobile host integration underneath it. |
 | Portable product host | [`PortableProductService` and `PortableInference`](../packages/core/src/runtime/product-service.ts), [`PortableStore`](../packages/core/src/runtime/store.ts), injected Fetch in [mobile boot](../packages/mobile/src/main.tsx) | Mobile already runs without a REST listener. Reuse the product boundary when an app wants product features. |
 | Shared execution after the refactor | Desktop [`ScriptRunner`](../packages/service/src/scripts/runner.ts) delegates to [`PortableScriptRunner`](../packages/script-runtime/src/runner.ts) through [`NodeScriptHost`](../packages/service/src/scripts/node-host.ts) | Do not plan another script runner extraction. Package the existing implementation behind a deliberately smaller public surface. |
 | Shared product behavior after the refactor | Core task/gate/tool helpers, draft storage, path/question/backup policies, and [shared response/error helpers](../packages/core/src/runtime/http/errors.ts) | Shared policy and host-specific effects are already the architectural direction. Preserve the desktop authority checks. |
 | Cross-host contract coverage | [HTTP parity](../packages/service/src/http/portable-parity.test.ts), [backup interoperability](../packages/service/src/storage/backup-portable-interop.test.ts), [tool parity](../packages/mcp/src/portable-tool-parity.test.ts) | Extend this testing pattern to the SDK contract and packed consumer dependencies. These files are evidence of coverage being authored, not a claim that this assessment ran the refactor's tests. |
 | Native text engine | [C ABI v1](../native/mobile/gezel_llama.h), [pinned builder](../native/mobile/build-llama.py), XCFramework and Android `.so` outputs | The binary foundation exists. It needs a supported distribution and compatibility contract. |
-| Platform AI | [Apple adapter](../packages/mobile/native/ios/Plugin/AppleFoundationProvider.swift), [ML Kit adapter](../packages/mobile/native/android/java/com/bendyline/gezel/mobile/MlKitPrompt.java) | Extract these into native libraries independent of Capacitor and Gezel product storage. |
+| Platform AI | [Apple adapter](../native/runtime/ios/Sources/GezelRuntime/AppleFoundationProvider.swift), [ML Kit adapter](../native/runtime/android/src/main/java/com/bendyline/gezel/runtime/MlKitPrompt.java) | Now extracted into native libraries independent of Capacitor and Gezel product storage. |
 | Model lifecycle | Native download managers, verified provenance, resumable staging, cancellation barriers, foreground/resource admission | Reuse these mechanisms; expose model ownership and preparation independently of the Gezel settings UI. |
 | Speech | [Mobile speech bridge](../packages/mobile/src/speech.ts) and [native speech work](mobile-speech.md) | A valuable follow-on module, particularly for Qualla; not a mandatory text dependency. |
 
-The refactor reduces the amount of domain logic that needs moving. It does not
-yet make the mobile runtime an external SDK:
-
-- [`@bendyline/gezel-mobile`](../packages/mobile/package.json) remains a private
-  application package containing React UI and product boot code.
-- [`GezelMobilePlugin`](../packages/mobile/src/native.ts) combines inference with
-  product files, import/export, previews, and model management.
-- The [Android app build](../packages/mobile/android/app/build.gradle) includes
-  native source directories and invokes a [JNI CMake project](../packages/mobile/native/android/cpp/CMakeLists.txt)
-  that knows the Gezel repository layout and links speech alongside llama.cpp.
-- iOS links a locally built XCFramework. The current native `Package.swift`
-  publishes a storage library, not a reusable inference SDK.
-- Native CI verifies Gezel app builds. It does not establish that a fresh
-  third-party app can resolve public native packages without this checkout.
+The original refactor reduced the domain logic requiring extraction. The two
+implementation slices now separate the private mobile product from its reusable
+provider/model host. iOS resolves it through the Capacitor Swift package; Android
+uses its prebuilt runtime AAR. Gezel's remaining CMake project builds only the
+app-owned speech shim. Native package consumer fixtures complement the existing
+app build checks; published registry resolution is still a release gate.
 
 Also distinguish **hosting the Node service in-process** from **linking the
 inference library in-process**. The existing desktop host mode concerns where
@@ -99,7 +161,7 @@ optional product release. None blocks packaging native text inference.
 
 ```mermaid
 flowchart TD
-  Apps[DocBlocks / Qualla / third-party app] --> API[App SDK intelligence API]
+  Apps[DocBlocks / Qualla / third-party app] --> API[Existing App SDK: GezelApp / Gezel.openai]
   API --> Desktop[Desktop adapter: existing consent and hosting]
   API --> Cap[Capacitor adapter]
   NativeApps[Swift / Kotlin apps] --> Native[Native intelligence libraries]
@@ -114,18 +176,19 @@ flowchart TD
 ```
 
 The diagram describes the target dependency direction, not a requirement to
-reroute all existing desktop provider internals in the first release. Initially,
-the desktop intelligence adapter wraps the existing App SDK, and the portable
-product host gets an adapter from its `PortableInference` port to the new runtime.
+reroute all existing desktop provider internals in the first release. Keep the
+existing desktop SDK implementation as the first host path. Add mobile transport
+and operation adapters beneath the same client API; the portable product host
+gets an adapter from its `PortableInference` port to that native runtime.
 
 | Proposed surface | Responsibility | Consumer setup |
 | --- | --- | --- |
-| `@bendyline/gezel-app-sdk/intelligence` | Platform-neutral client, capabilities, request/result/event types, model preparation, errors | Common TypeScript import; no Node, Capacitor, React, or service runtime imports |
-| Existing App SDK Node and `./host` entries | Discovery, scoped consent, existing daemon or app-owned hosting, adapter to intelligence | Existing desktop integration plus a small adapter/factory |
-| `@bendyline/gezel-capacitor` | Native registration, event bridge, lifecycle integration, native dependency declarations | Install with the App SDK, then normal Capacitor sync/build |
+| Existing `GezelApp`, exported from the root and `./browser` | Shared client, request/result/event types, model preparation, errors; additive capability/status APIs | Preserve imports; the browser-safe client implementation has no Node, Capacitor, React, or service runtime imports |
+| Existing App SDK Node and `./host` entries | Discovery, scoped consent, existing daemon or app-owned hosting, `Gezel` projects and model orchestration | Existing desktop integration remains valid |
+| `@bendyline/gezel-capacitor` | Mobile initialization returning the shared client API, native registration, event bridge, lifecycle integration, native dependency declarations | Install with the App SDK, then normal Capacitor sync/build |
 | Swift package `GezelIntelligence` | Native Swift API and platform provider/lifecycle/model management | Add an exact Swift package version; select the required products |
 | Maven `com.bendyline.gezel:intelligence` and engine/provider modules | Native Android API, model management and provider composition | Add a dependency; ordinary Gradle resolution |
-| Optional product facade, initially experimental | Stable access to the supported portable product operations | Explicit opt-in to product/runtime dependencies |
+| Mobile support for the existing richer `Gezel` API, initially experimental | Reuse `ensureProject`, project chats and tools where the portable runtime implements their contracts | Explicit opt-in to product/runtime dependencies; retain desktop-only connection facts on desktop |
 | Optional speech module | Speech APIs and their native payloads | Separate dependency and preparation; text-only apps omit it |
 
 Use a small number of developer-facing dependencies. Native modules can separate
@@ -147,39 +210,54 @@ bindings later. Those bindings are not part of the first implementation.
 
 ## Public API and routing contract
 
-Retain the familiar `chat`, `models`, and cancellation vocabulary. Add a portable
-facade rather than widening every current desktop model/provider union. In
-particular, the existing `EnsureModelEngine` union has daemon-specific semantics;
-mobile system providers must not be added to it without matching daemon support.
+### What moves, and what does not
 
-The first contract should cover:
+No existing public operation moves to a new intelligence namespace. The first
+refactor is internal:
 
-| Operation | Required semantics |
+| Existing API/code | Proposed treatment |
 | --- | --- |
-| `capabilities()` / status subscription | Current provider/model availability, reason, modality support, limits, locality, preparation actions, foreground requirement |
-| `plan(...)` | Select an eligible candidate without downloading or loading; return selected destination, model identity, required preparation, bytes when known, and why |
-| `prepare(plan, options)` | Explicit model preparation/download/load with progress and cancellation; return the prepared model handle; revalidate stale plans |
-| `chat(request, { signal })` | Text completion or stream; use the prepared model identity; reject unsupported options before starting |
-| `models()` / model management | Installed and available models, explicit removal, storage usage, provenance; distinguish app-owned and system-owned assets |
-| `close()` | Cancel/drain this client's work and release owned resources; never stop a borrowed daemon |
+| `GezelApp.chat`, `models`, `embeddings`, `ensureModel`, `streamEnsureEvents`, `close` | Remain on `GezelApp`, at the existing imports and through `gezel.openai`; share their client semantics across hosts |
+| `types.ts`, `errors.ts`, request cancellation and stream contracts | Keep one browser-safe implementation; export through the existing entries |
+| HTTP requests and SSE in `client.ts` / `sse.ts` | Keep the desktop transport; use the existing injected Fetch seam for an initial native adapter, with no localhost listener. If measured bridge overhead warrants a direct operation port later, keep that internal. |
+| `connect`, `connectLocal`, discovery, consent, TLS and `connectOrHost` | Remain desktop/Node initialization and lifetime management; do not import these into mobile bundles |
+| `Gezel.ensureModel` and its provisioning helpers | Retain the high-level operation; separate model intent/progress from desktop filesystem, engine provisioning and daemon-default mutations before exposing it on mobile |
+| `Gezel.ensureProject`, `openProject`, project chats and app tools | Preserve the existing product API; add mobile implementations only for supported operations, through existing domain/host ports |
 
-Illustrative proposed usage:
+The checkout's public constructors are `connect`/`connectLocal` (returning
+`GezelApp`) and `connectOrHost` (returning `Gezel`). There is no exported
+`createGezel` at assessment time. A future common factory name is an independent
+ergonomics decision; introducing `createIntelligence` is not needed for portability.
+
+The existing `./browser` entry already supplies the portable client class. The
+Capacitor package can supply mobile initialization over that class. There is no
+need for a new public subpath simply to separate internal transport files.
+
+Retain the existing operation vocabulary:
+
+| Operation | Mobile extension and compatibility obligation |
+| --- | --- |
+| `capabilities()` / status subscription, additive | Provider/model availability, reason, modalities, limits, locality, preparation actions, foreground requirement; useful to desktop clients too |
+| `models()` | Enumerate models and expose readiness/capabilities without loading or downloading; keep existing model identities stable |
+| `ensureModel()` / `streamEnsureEvents()` | Reuse explicit preparation/progress/cancellation; map system-managed preparation honestly and keep app-owned weights distinct. Do not replace these with a new mandatory `plan`/`prepare` API. |
+| `chat(request, { signal })` | Preserve text completion/stream vocabulary; reject unsupported options before starting |
+| `embeddings()` | Keep the operation; report unsupported until a mobile provider implements it |
+| `close()` | Own-resource cleanup and cancellation/draining where supported; never stop a borrowed daemon or silently change desktop lifetime semantics |
+
+Illustrative proposed mobile initialization, followed by existing client usage:
 
 ```ts
-// Mobile composition root. These are proposed APIs.
-import { createIntelligence } from '@bendyline/gezel-app-sdk/intelligence';
-import { createMobileRuntime } from '@bendyline/gezel-capacitor';
+// Only this initializer is new/proposed. It returns the shared GezelApp client.
+import { connect } from '@bendyline/gezel-capacitor';
 
-const ai = createIntelligence({
-  runtime: createMobileRuntime(),
+const app = await connect({
+  appId: 'qualla',
   policy: { locality: 'on-device', fallback: 'none' },
 });
 
-const plan = await ai.plan({ capability: 'text', model: 'auto' });
-// The app presents any setup/download action described by plan.
-const model = await ai.prepare(plan, { allowDownload: true, onProgress });
-const stream = await ai.chat({
-  model: model.id,
+// modelId is an available/prepared model chosen through models/ensureModel.
+const stream = await app.chat({
+  model: modelId,
   messages: [{ role: 'user', content: 'Summarize this passage: ...' }],
   stream: true,
 }, { signal });
@@ -187,21 +265,32 @@ const stream = await ai.chat({
 for await (const chunk of stream) {
   appendText(chunk.choices[0]?.delta?.content ?? '');
 }
-// Keep ai alive for the feature's lifetime; close it when its owner ends.
+// Keep app alive for the feature's lifetime; close it when its owner ends.
 ```
 
-Desktop supplies an adapter over an authorized `GezelApp` or an existing hosted
-connection. The feature code after initialization stays the same. For Electron,
+On desktop, `app` is the existing `connect` result or `gezel.openai` from
+`connectOrHost`; no new intelligence wrapper is required. The feature code after
+initialization stays the same. For Electron,
 discovery, credentials, and hosting stay in main; use a narrow preload bridge for
 renderer calls. A plain website receives no native inference implementation by
 installing this npm package; it reports unsupported or uses an explicitly
 configured connection.
 
-Use OpenAI-shaped messages and chunks where they fit, with a documented supported
-subset. Do not imply full OpenAI API compatibility on mobile. Preserve existing
-SDK responses unchanged; the new facade may expose optional usage and an unknown
-finish reason when a platform cannot report them. Never invent token counts or
-quietly ignore tools, images, sampling controls, or output-schema requirements.
+Before claiming the same return types on mobile, audit two real compatibility
+gaps: `ChatCompletionResponse` currently requires usage and its finish-reason union
+is narrower than some native outcomes; high-level `EnsureModelEngine` and related
+results are explicitly daemon-specific. Streaming already allows omitted usage,
+so that is a practical first path. Do not fabricate counts or mislabel a system
+provider as llama.cpp. Design an explicit opt-in overload/versioned result contract
+where needed, or defer that operation/provider until its contract is representable;
+do not silently weaken existing desktop return types. Keep supported options
+documented and reject unsupported tools, images, sampling and output schemas.
+
+The richer `Gezel` class also exposes `daemon` facts and a legacy product client.
+Extract shared operations behind an internal host port while retaining those
+desktop contracts on desktop. Do not fabricate a port/token/pid for a native
+runtime or claim that the entire daemon-bearing object is immediately portable.
+The initial mobile inference integration needs only the existing `GezelApp` seam.
 
 The current [mobile provider schema](../packages/core/src/schemas/mobile-provider.ts)
 explicitly reports tools, structured output, and images as unsupported. The C ABI
@@ -322,6 +411,33 @@ and a new app release; publish release notes and deprecations accordingly.
 Provide an explicit source-build escape hatch for unsupported targets, outside
 the supported zero-engine-build path.
 
+### Bootstrap locally before public publishing
+
+DocBlocks and Qualla can consume packages built on the same development machine.
+Public npm, GitHub Releases, and Maven Central are not prerequisites for the
+first integrations. Build each native target once in Gezel, then stage a local
+SDK distribution containing:
+
+- npm tarballs for the App SDK and Capacitor plugin, with workspace dependencies
+  resolved into consumable packages. Local directory links are useful during
+  iteration; packed artifacts are the packaging acceptance test.
+- A local Swift package whose binary target points at the prebuilt XCFramework.
+  Xcode supports local package dependencies.
+  [Apple local packages](https://developer.apple.com/documentation/xcode/creating-a-standalone-swift-package-with-xcode).
+- A folder-based Maven repository containing versioned AARs, native binaries,
+  and dependency metadata. Consumer Gradle configuration points to that folder;
+  prefer an explicit SDK staging directory over an ambient `mavenLocal()` cache.
+  [Android local publication](https://developer.android.com/build/publish-library/upload-library).
+
+Keep consumer overrides local and use unique development versions so stale
+artifacts are visible. Existing platform/provider dependencies still need their
+normal initial resolution; no Gezel public release is required. The apps compile
+their wrappers and app code, but do not rebuild llama.cpp. This shares build
+artifacts on the development machine, not a runtime or private model directory
+between installed phone apps. CI can later build/stage the same distribution or
+download it as a build artifact. Public release changes artifact resolution, not
+the application-facing API.
+
 ## Model ownership, lifecycle, and product scope
 
 **Reusing a build does not imply sharing one installed GGUF across mobile apps.**
@@ -366,8 +482,8 @@ Limit the Capacitor plugin to its packaged trusted app context; embedded authore
 HTML and remote pages must not gain inference, download, or file authority.
 Reuse the existing preview/bridge boundary tests when splitting the plugin.
 
-The optional product layer should wrap the existing host runtimes and their shared
-domain code, not export every internal class as a stable SDK. Keep filesystem authority, tool permissions,
+Mobile support for the existing product API should wrap the host runtimes and their
+shared domain code, not export every internal class as a stable SDK. Keep filesystem authority, tool permissions,
 durability, and script executor choice in host ports. Full desktop MCP, terminals,
 cloud credentials, and background jobs remain separately advertised capabilities.
 For pure Swift/Kotlin apps, the first release provides inference only; do not imply
@@ -425,11 +541,11 @@ desktop engine rewrite should block a reusable mobile text release.
 | --- | --- | --- |
 | 0. Freeze the first contract | Inventory post-refactor imports; specify inference states, locality enforcement, cancellation and model identity; choose support matrix and artifact names | Reviewed API fixtures plus dependency diagram; separate existing behavior from new exports |
 | 1. Extract native libraries | Move inference/provider/model code out of the app plugin; separate product storage, previews, and speech; make Gezel mobile consume the extracted modules | Gezel's existing native/bridge regression scenarios still work with no duplicate engine/provider implementation |
-| 2. Publish a consumable preview | Build precompiled XCFramework and AAR/JNI artifacts; add Swift/Maven wrappers and Capacitor package; publish coordinated preview versions | Fresh Swift, Android, and Capacitor apps build and run without the Gezel checkout, llama source, or a C++ engine build |
-| 3. Unify desktop and mobile API | Add portable App SDK facade and desktop adapter; retain existing 1.x API; connect the portable product inference port to the same adapter | Shared completion/stream/cancel/error/locality fixtures pass across desktop and native bridges; existing SDK surface tests remain intact |
-| 4. Adopt in real apps | Qualla mobile/desktop place summary and DocBlocks desktop text transformation; record setup friction and package size | Both apps use released artifacts, no copied Gezel source/build scripts; feature code stays provider-neutral |
-| 5. Support a stable public release | Physical-device qualification, package/security/lifecycle tests, reference apps, docs and upgrade policy | Supported matrix and known limitations published; release candidates pass isolated consumer gates |
-| Later, independently | Speech package, embedding/retrieval adapters, optional product facade, paired-device inference, additional bindings/targets | Each has its own capabilities and consumer acceptance tests |
+| 2. Stage a local consumable preview | Build precompiled XCFramework and AAR/JNI artifacts; add Swift/Maven wrappers and Capacitor package; stage local tarballs, Swift package, and Maven repository | Fresh Swift, Android, and Capacitor apps build and run from staged packages without Gezel source imports, llama source, or a C++ engine build |
+| 3. Extend the existing SDK across hosts | Reuse `GezelApp` and the browser-safe client, add the mobile adapter and capability/status APIs; audit native result compatibility; connect the portable product inference port to the same runtime | Shared supported completion/stream/cancel/error/locality fixtures pass across desktop and native bridges; existing SDK imports and surface remain valid |
+| 4. Adopt in real apps | Qualla mobile/desktop place summary and DocBlocks desktop text transformation using local packages; record setup friction and package size | Both apps consume staged packages, no copied Gezel source/build scripts; feature code stays provider-neutral |
+| 5. Publish and support public releases | Publish coordinated previews to GitHub/SPM, Maven Central, and npm; physical-device qualification, package/security/lifecycle tests, reference apps, docs and upgrade policy | Registry/release artifacts pass isolated consumer gates; supported matrix and known limitations published before stable release |
+| Later, independently | Speech package, embedding/retrieval adapters, mobile support for the richer Gezel product API, paired-device inference, additional bindings/targets | Each has its own capabilities and consumer acceptance tests |
 
 Phases 1 and 2 are the first investment: they directly eliminate per-app engine
 builds. Phase 3 can develop against those preview artifacts. Carry forward the
@@ -439,8 +555,8 @@ this plan does not require completing all desktop/mobile parity work.
 When implementation changes core or script-runtime, rebuild their existing dist
 outputs before service/MCP checks: those packages resolve built outputs. The
 owner's notes identify existing Gilde schema-freshness and module-size failures;
-track their disposition separately from packaging regressions. This planning-only
-assessment has not rerun or certified those gates.
+track their disposition separately from packaging regressions. The first implementation slice's verification is recorded above; it does not
+certify every gate from the original reunification.
 
 Required qualification should include:
 

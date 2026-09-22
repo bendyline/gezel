@@ -36,3 +36,12 @@ export type {
   RequestOptions,
   SdkError,
 } from './types.js';
+
+export type {
+  ChatResponseFormat,
+  PortableFinishReason,
+  PortableChatCompletionResponse,
+  PortableChatCompletionChunk,
+  ChatResponseFor,
+  ChatStreamFor,
+} from './types.js';

@@ -2,6 +2,7 @@ import XCTest
 import Capacitor
 import WebKit
 @testable import App
+@testable import GezelRuntime
 
 /// Actual shared React UI, portable service, and native inference on a dedicated simulator.
 final class MobileBridgeTests: XCTestCase {
@@ -43,6 +44,7 @@ final class MobileBridgeTests: XCTestCase {
         // Invoke the real plugin before loading a provider, independently of
         // other smoke tests that deliberately unload the product WebView.
         let plugin = GezelMobilePlugin()
+        plugin.load()
         for modelId in ["model-from-another-provider", ""] {
             var failure: String?
             var failureMessage: String?

@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'packages/mobile/**'
+      - 'packages/capacitor/**'
+      - 'packages/app-sdk/**'
       - 'packages/core/**'
       - 'packages/gezk/**'
       - 'packages/client/**'

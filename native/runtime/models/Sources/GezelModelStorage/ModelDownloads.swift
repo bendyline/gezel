@@ -19,7 +19,7 @@ public struct MobileModelDownload: Codable, Sendable {
 
 /// Foreground streaming acquisition, independent of inference and product files.
 public final class ModelDownloads: @unchecked Sendable {
-    private let store: MobileStore
+    private let store: MobileModelStore
     private let root: URL
     private let configuration: URLSessionConfiguration
     private let queue = DispatchQueue(label: "com.bendyline.gezel.model-download")
@@ -40,7 +40,7 @@ public final class ModelDownloads: @unchecked Sendable {
     private var cancelCallbacks: [@Sendable () -> Void] = []
     private let fm = FileManager.default
 
-    public init(store: MobileStore, configuration: URLSessionConfiguration = .ephemeral) throws {
+    public init(store: MobileModelStore, configuration: URLSessionConfiguration = .ephemeral) throws {
         self.store = store; self.root = try store.downloadsDirectory(); self.configuration = configuration
         for var record in try records() where ["queued","downloading","verifying"].contains(record.state) {
             record.state = "paused"; record.error = "Download paused when the app closed. Resume when ready."

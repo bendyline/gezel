@@ -6,10 +6,11 @@ struct MobileChatTurn: Sendable {
     let content: String
 }
 
-struct MobileInferenceError: LocalizedError {
-    let code: String
-    let message: String
-    var errorDescription: String? { message }
+public struct MobileInferenceError: LocalizedError {
+    public let code: String
+    public let message: String
+    public init(code: String, message: String) { self.code = code; self.message = message }
+    public var errorDescription: String? { message }
 }
 
 enum AppleFoundationProvider {

@@ -40,7 +40,7 @@ def verify_archive(archive, readelf, web_dir=None, speech_dir=None):
         if abis != {"arm64-v8a"}:
             raise ValueError(f"Unexpected Android ABIs: {sorted(abis)}")
         packaged = [PurePosixPath(name).name for name in libraries]
-        if "libgezel_mobile.so" not in packaged or "libgezel-llama.so" not in packaged:
+        if not {"libgezel_mobile.so", "libgezel-llama.so", "libgezel_llama_jni.so"}.issubset(packaged):
             raise ValueError("Missing Gezel JNI or inference library")
         if not all(name in packaged for name in ['libGezelSpeech.so', 'libonnxruntime.so']):
             raise ValueError('Missing native speech libraries')

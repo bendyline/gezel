@@ -1,4 +1,4 @@
-package com.bendyline.gezel.mobile;
+package com.bendyline.gezel.runtime;
 
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.genai.common.DownloadCallback;

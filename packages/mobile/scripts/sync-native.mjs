@@ -7,19 +7,17 @@ import { normalizeSwiftPackage } from './swift-package.mjs';
 import { verifyNativeBuild } from './verify-native-build.mjs';
 
 // Run after `cap sync <platform>`. Native binaries are build outputs, never
-// committed assets. The iOS project links its XCFramework directly; Android
-// requires all linked .so dependencies copied into its package's jniLibs.
+// committed assets. Inference comes from the reusable Capacitor package;
+// speech remains app-owned and is staged here.
 const mobile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(mobile, '../..');
 const platform = process.argv[2];
 if (platform !== 'ios' && platform !== 'android') {
   throw new Error('Usage: node scripts/sync-native.mjs ios|android');
 }
-const build = path.join(
-  repo,
-  'native/mobile/.build',
-  platform === 'ios' ? 'ios-bridge' : 'android',
-);
+const build =
+  process.env.GEZEL_MOBILE_NATIVE_BUILD ||
+  path.join(repo, 'native/mobile/.build', platform === 'ios' ? 'ios-bridge' : 'android');
 const publicAssets = path.join(
   mobile,
   platform === 'ios' ? 'ios/App/App/public' : 'android/app/src/main/assets/public',
@@ -52,13 +50,6 @@ if (platform === 'ios') {
   replacements.push({
     target: path.join(mobile, 'android/app/src/main/jniLibs'),
     files: [
-      ...Object.entries(native.files)
-        .filter(([relative]) => relative.startsWith('jniLibs/'))
-        .map(([relative, sha256]) => ({
-          relative: relative.slice('jniLibs/'.length),
-          source: path.join(build, relative),
-          sha256,
-        })),
       ...Object.entries(speech.manifest.files)
         .filter(([name]) => name.endsWith('.so'))
         .map(([name, sha256]) => ({

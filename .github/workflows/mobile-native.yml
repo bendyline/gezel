@@ -4,9 +4,12 @@ on:
   pull_request:
     paths:
       - 'native/mobile/**'
+      - 'native/runtime/**'
       - 'native/engines/llama-cpp/VERSION'
       - 'native/scripts/fetch-upstream.sh'
       - 'packages/mobile/**'
+      - 'packages/capacitor/**'
+      - 'packages/app-sdk/**'
       - 'packages/core/**'
       - 'packages/client/**'
       - 'packages/gezk/**'
@@ -63,7 +66,7 @@ jobs:
           import { spawnSync } from 'node:child_process';
           await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
-              ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs'],
+              ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs', 'packages/capacitor/scripts/stage-native.test.mjs'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'native/mobile', '-p', 'test_*.py'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'packages/mobile/scripts', '-p', 'test_*.py'],
               ['python3', 'native/mobile/build-llama.py', 'host', '--jobs', '2'],
@@ -136,14 +139,17 @@ jobs:
       - name: Build the pinned arm64 engine and shared product
         run: |
           node --input-type=module <<'JS'
-          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
           import { spawnSync } from 'node:child_process';
-          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'android', '--abi', 'arm64-v8a', '--jobs', '2'],
               // mobile:sync:android stages the offline speech pack and fails
               // without it; --models pulls the checksum-pinned voice pack.
               ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--models'],
+              ['python3', 'native/mobile/stage-sdk.py', 'android', '--build', 'native/mobile/.build/android', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`, '--ndk', process.env.ANDROID_NDK_HOME, '--javac', `${process.env.JAVA_HOME}/bin/javac`],
+              ['python3', 'native/runtime/stage-sdk.py', 'android', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'android', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['pnpm', 'mobile:sync:android'],
               ['node', 'packages/mobile/scripts/stage-android-test-fixture.mjs', 'native/mobile/.build/ios-fixture.gguf'],
             ]) {
@@ -262,15 +268,18 @@ jobs:
           fi
           if test -n "${DEVELOPER_DIR:-}"; then echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"; fi
           node --input-type=module <<'JS'
-          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
           import { spawnSync } from 'node:child_process';
           import path from 'node:path';
-          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'ios', '--output', 'native/mobile/.build/ios-bridge', '--simulator-arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', '--jobs', '3'],
               // mobile:sync:ios stages the offline speech pack and fails
               // without it; --models pulls the checksum-pinned voice pack.
               ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--models'],
+              ['python3', 'native/mobile/stage-sdk.py', 'ios', '--build', 'native/mobile/.build/ios-bridge', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`],
+              ['python3', 'native/runtime/stage-sdk.py', 'ios', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'ios', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['pnpm', 'mobile:sync:ios'],
               ['swift', 'test', '--package-path', 'packages/mobile/native/ios', '--scratch-path', path.join(process.env.RUNNER_TEMP, 'mobile-storage-tests')],
             ]) {

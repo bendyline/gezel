@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import GezelMobileStorage
+@testable import GezelModelStorage
 
 final class ProductFilesTests: XCTestCase {
     var root: URL!

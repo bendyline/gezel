@@ -1,8 +1,19 @@
 import Foundation
 import XCTest
 @testable import GezelMobileStorage
+@testable import GezelModelStorage
 
 final class MobileStoreTests: XCTestCase {
+    func testProductAdapterDoesNotRecoverAnotherHostsActiveImport() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try MobileStore(root: root)
+        let partial = root.appendingPathComponent("models/active.partial")
+        try Data("GGUF".utf8).write(to: partial)
+        _ = try MobileStore(root: root, recoverModels: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: partial.path))
+    }
+
     var root: URL!
 
     override func setUpWithError() throws {

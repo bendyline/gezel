@@ -1,0 +1,5 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+rootProject.name = 'GezelRuntimeConsumer'
+include ':capacitor-android', ':bendyline-gezel-capacitor'
+project(':capacitor-android').projectDir = file(providers.gradleProperty('capacitorAndroid').get())
+project(':bendyline-gezel-capacitor').projectDir = file(providers.gradleProperty('gezelCapacitor').get() + '/android')

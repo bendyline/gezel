@@ -1,0 +1,24 @@
+apply plugin: 'com.android.library'
+
+def gezelNative = file('../native/android')
+if (!new File(gezelNative, 'sdk-manifest.json').isFile()) {
+    throw new GradleException('Stage the Gezel Capacitor native package before syncing Android. See @bendyline/gezel-capacitor/README.md.')
+}
+def gezelVersion = new groovy.json.JsonSlurper().parse(new File(gezelNative, 'sdk-manifest.json')).packageVersion
+// Transitive Maven artifacts must also be visible to the consuming app project.
+rootProject.allprojects { repositories {
+    google()
+    mavenCentral()
+    maven { url = uri(new File(gezelNative, 'maven')) }
+} }
+android {
+    namespace 'com.bendyline.gezel.capacitor'
+    compileSdk rootProject.ext.has('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
+    defaultConfig { minSdk 28 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies {
+    implementation project(':capacitor-android')
+    implementation 'androidx.activity:activity:1.11.0'
+    api "com.bendyline.gezel:gezel-runtime:${gezelVersion}"
+}

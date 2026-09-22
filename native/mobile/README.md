@@ -7,6 +7,10 @@ versioned [`gezel_llama.h`](gezel_llama.h) C ABI for bounded text conversations.
 Native Swift/JNI plugins can call it without depending on llama.cpp's changing
 struct layouts. It does not build a server or promise server/tool-call parity.
 
+For local Swift-package and Maven/AAR consumption of these prebuilt libraries,
+see [Local mobile runtime packages](SDK.md). The SDK packager builds only the
+small Android JNI binding; downstream apps do not rebuild llama.cpp.
+
 ## Build
 
 Requires Python 3.9+, Git, CMake, and Make. Start with the existing upstream

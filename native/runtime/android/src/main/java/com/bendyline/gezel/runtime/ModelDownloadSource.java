@@ -1,4 +1,4 @@
-package com.bendyline.gezel.mobile;
+package com.bendyline.gezel.runtime;
 
 import java.io.IOException;
 import java.net.URI;
@@ -31,7 +31,7 @@ final class ModelDownloadSource {
             Object raw = input.get("sizeBytes");
             if (!(raw instanceof Number)) throw new IOException("An exact model length is required");
             double value = ((Number) raw).doubleValue();
-            if (!Double.isFinite(value) || value < 4 || value > MobileStore.MAX_MODEL || value != Math.rint(value)) throw new IOException("Model must be between 4 bytes and 4 GiB");
+            if (!Double.isFinite(value) || value < 4 || value > MobileModelStore.MAX_MODEL || value != Math.rint(value)) throw new IOException("Model must be between 4 bytes and 4 GiB");
             result.put("sizeBytes", (long) value);
         }
         return result;

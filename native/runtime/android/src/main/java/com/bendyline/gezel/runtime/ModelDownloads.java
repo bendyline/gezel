@@ -1,7 +1,6 @@
-package com.bendyline.gezel.mobile;
+package com.bendyline.gezel.runtime;
 
 import android.util.AtomicFile;
-import com.getcapacitor.JSObject;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -63,7 +62,7 @@ final class ModelDownloads {
             throw new IOException("Model source redirected too many times");
         }
     }
-    private final MobileStore store;
+    private final MobileModelStore store;
     private final File root;
     private final Transport transport;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -76,8 +75,8 @@ final class ModelDownloads {
     private volatile Connection connection;
     private Future<?> active;
 
-    ModelDownloads(MobileStore store) throws Exception { this(store, new HttpTransport()); }
-    ModelDownloads(MobileStore store, Transport transport) throws Exception {
+    ModelDownloads(MobileModelStore store) throws Exception { this(store, new HttpTransport()); }
+    ModelDownloads(MobileModelStore store, Transport transport) throws Exception {
         this.store = store; this.root = store.downloadsRoot(); this.transport = transport;
         for (JSONObject record : records()) {
             String state = record.getString("state");
@@ -139,17 +138,17 @@ final class ModelDownloads {
         try { output = file.startWrite(); output.write(record.toString().getBytes(StandardCharsets.UTF_8)); file.finishWrite(output); }
         catch (Exception error) { file.failWrite(output); throw error; }
     }
-    private JSObject publicRecord(JSONObject record) throws Exception {
-        JSObject result = new JSObject().put("id",record.getString("id")).put("name",record.getString("name"))
+    private NativeObject publicRecord(JSONObject record) throws Exception {
+        NativeObject result = new NativeObject().put("id",record.getString("id")).put("name",record.getString("name"))
             .put("source",record.getJSONObject("source")).put("state",record.getString("state")).put("downloadedBytes",record.getLong("downloadedBytes"));
         if (record.has("error")) result.put("error",record.getString("error"));
         if (record.has("modelId")) result.put("modelId",record.getString("modelId"));
         return result;
     }
-    synchronized JSObject list() throws Exception {
+    synchronized NativeObject list() throws Exception {
         JSONArray downloads = new JSONArray();
         for (JSONObject record : records()) downloads.put(publicRecord(record));
-        return new JSObject().put("downloads",downloads);
+        return new NativeObject().put("downloads",downloads);
     }
     synchronized void resolveSource(JSONObject raw, SourceResult completion) throws Exception {
         if(sourcePending)throw new IOException("A model source is already being checked");
@@ -162,7 +161,7 @@ final class ModelDownloads {
                 try(Connection response=transport.open(ModelDownloadSource.url(source),"HEAD",Map.of(),()->sourceCancelled)) {
                     if(response.status()!=200)throw new IOException("Model source cannot be inspected (HTTP "+response.status()+"). Gated models must be imported from Files.");
                     long size=parseLength(response.header("Content-Length"));
-                    if(size<4||size>MobileStore.MAX_MODEL)throw new IOException("This model exceeds the 4 GiB mobile download limit");
+                    if(size<4||size>MobileModelStore.MAX_MODEL)throw new IOException("This model exceeds the 4 GiB mobile download limit");
                     result=source.put("sizeBytes",size);
                 }
             }catch(Exception error){failure=error;}
@@ -174,7 +173,7 @@ final class ModelDownloads {
         });
     }
     void cancelSourceResolution() { sourceCancelled=true;transport.cancel(sourceThread); }
-    synchronized JSObject start(JSONObject raw, String name) throws Exception {
+    synchronized NativeObject start(JSONObject raw, String name) throws Exception {
         if (activeId != null) throw new IOException("A model download is already running");
         JSONObject source=ModelDownloadSource.validate(raw,true);
         if (name==null || name.isEmpty() || name.length()>200 || name.indexOf(0)>=0) throw new IOException("Invalid model name");
@@ -182,16 +181,16 @@ final class ModelDownloads {
         if (root.getUsableSpace()<source.getLong("sizeBytes")+64L*1024*1024) throw new IOException("Not enough storage for this model");
         JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("name",name).put("source",source).put("state","queued").put("downloadedBytes",0);
         save(record); launch(record.getString("id"));
-        return new JSObject().put("download",publicRecord(record));
+        return new NativeObject().put("download",publicRecord(record));
     }
-    synchronized JSObject resume(String value) throws Exception {
+    synchronized NativeObject resume(String value) throws Exception {
         if (activeId != null) throw new IOException("A model download is already running");
         JSONObject record=read(value);
-        if (record.getString("state").equals("complete")) return new JSObject().put("download",publicRecord(record));
+        if (record.getString("state").equals("complete")) return new NativeObject().put("download",publicRecord(record));
         long remaining=record.getJSONObject("source").getLong("sizeBytes")-(candidate(record).isFile()?candidate(record).length():0);
         if (root.getUsableSpace()<remaining+64L*1024*1024) throw new IOException("Not enough storage to resume this download");
         record.put("state","queued"); record.remove("error"); save(record); launch(value);
-        return new JSObject().put("download",publicRecord(record));
+        return new NativeObject().put("download",publicRecord(record));
     }
     private void launch(String value) {
         activeId=value; cancelled=false;

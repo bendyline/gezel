@@ -1,5 +1,9 @@
+import { GezelRuntime, type GezelRuntimePlugin } from '@bendyline/gezel-capacitor';
 import {
-  MobileInferenceBudgetSchema,
+  type NativeInferencePlugin,
+  createNativeInference,
+} from '@bendyline/gezel/mobile-inference';
+import {
   type MobileModel,
   type MobileModelDownload,
   MobileModelDownloadSchema,
@@ -11,9 +15,7 @@ import {
   type MobileModelSourceIdentity,
   MobileModelSourceIdentitySchema,
   MobileModelSourceSchema,
-  type MobileProvider,
   type MobileProviderId,
-  MobileProviderListSchema,
 } from '@bendyline/gezel/mobile-providers';
 import type {
   PortableFileSystem,
@@ -21,7 +23,6 @@ import type {
   PortableSpeech,
 } from '@bendyline/gezel/runtime';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import type { PluginListenerHandle } from '@capacitor/core';
 import { type ExportFilePlugin, type ExportedFile, saveNativeExport } from './export-file.js';
 import type { PublishHtmlPreview } from './html-preview.js';
 import { type ProductFilePlugin, createNativeProductFiles } from './product-files.js';
@@ -30,7 +31,10 @@ import { createNativeSpeech } from './speech.js';
 export type { MobileModel } from '@bendyline/gezel/schemas';
 export type ModelInventory = MobileModelInventory;
 
-export interface GezelMobilePlugin extends ProductFilePlugin, ExportFilePlugin {
+export interface GezelMobilePlugin
+  extends NativeInferencePlugin,
+    ProductFilePlugin,
+    ExportFilePlugin {
   previewAvailability?(): Promise<{ available: boolean }>;
   publishHtmlPreview?(options: { html: string }): Promise<{ id: string; url: string }>;
   removeHtmlPreview?(options: { id: string }): Promise<void>;
@@ -49,22 +53,8 @@ export interface GezelMobilePlugin extends ProductFilePlugin, ExportFilePlugin {
   importModel(): Promise<{ model: MobileModel | null }>;
   selectModel(options: { id: string }): Promise<{ model: MobileModel }>;
   removeModel(options: { id: string }): Promise<void>;
-  providers(): Promise<{ providers: MobileProvider[] }>;
   prepareProvider(options: { providerId: MobileProviderId }): Promise<void>;
   cancelProviderPreparation(options: { providerId: MobileProviderId }): Promise<void>;
-  generate(options: {
-    requestId: string;
-    providerId: MobileProviderId;
-    modelId?: string;
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-    maxTokens?: number;
-    contextSize?: number;
-  }): Promise<{ text: string; stopReason: 'stop' | 'length' | 'cancelled' }>;
-  cancel(options: { requestId: string }): Promise<void>;
-  addListener(
-    event: 'chatDelta',
-    callback: (event: { requestId: string; delta: string }) => void,
-  ): Promise<PluginListenerHandle>;
 }
 
 export interface MobileHost {
@@ -93,7 +83,8 @@ export interface MobileHost {
 const plugin = registerPlugin<GezelMobilePlugin>('GezelMobile');
 
 export function createNativeHost(nativePlugin: GezelMobilePlugin = plugin): MobileHost {
-  const runs = new Map<string, { cancelled: boolean; started: boolean; released: Promise<void> }>();
+  const runtime: GezelRuntimePlugin | GezelMobilePlugin =
+    nativePlugin === plugin ? GezelRuntime : nativePlugin;
   return {
     native: true,
     speech: createNativeSpeech(),
@@ -121,100 +112,51 @@ export function createNativeHost(nativePlugin: GezelMobilePlugin = plugin): Mobi
     resolveModelSource: async (source) =>
       MobileModelSourceSchema.parse(
         (
-          await nativePlugin.resolveModelSource({
+          await runtime.resolveModelSource({
             source: MobileModelSourceIdentitySchema.parse(source),
           })
         ).source,
       ),
     cancelModelSourceResolution: async () => {
-      await nativePlugin.cancelModelSourceResolution();
+      await runtime.cancelModelSourceResolution();
     },
     listModelDownloads: async () =>
-      MobileModelDownloadsSchema.parse(await nativePlugin.listModelDownloads()).downloads,
+      MobileModelDownloadsSchema.parse(await runtime.listModelDownloads()).downloads,
     startModelDownload: async (source, name) =>
       MobileModelDownloadSchema.parse(
         (
-          await nativePlugin.startModelDownload({
+          await runtime.startModelDownload({
             source: MobileModelSourceSchema.parse(source),
             name,
           })
         ).download,
       ),
     resumeModelDownload: async (id) =>
-      MobileModelDownloadSchema.parse((await nativePlugin.resumeModelDownload({ id })).download),
+      MobileModelDownloadSchema.parse((await runtime.resumeModelDownload({ id })).download),
     cancelModelDownload: async (id) => {
-      await nativePlugin.cancelModelDownload({ id });
+      await runtime.cancelModelDownload({ id });
     },
     removeModelDownload: async (id) => {
-      await nativePlugin.removeModelDownload({ id });
+      await runtime.removeModelDownload({ id });
     },
     saveExportedFile: (file) => saveNativeExport(nativePlugin, file),
-    inference: {
-      models: async () => MobileModelInventorySchema.parse(await nativePlugin.listModels()),
-      async providers() {
-        const result = await nativePlugin.providers();
-        return MobileProviderListSchema.parse(result.providers);
-      },
-      async generate(request, onDelta) {
-        if (runs.size) throw new Error('A response is already running');
-        let release!: () => void;
-        const released = new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        const run = { cancelled: false, started: false, released };
-        runs.set(request.requestId, run);
-        let listener: PluginListenerHandle | undefined;
-        try {
-          listener = await nativePlugin.addListener('chatDelta', (event) => {
-            if (!run.cancelled && event.requestId === request.requestId) onDelta(event);
-          });
-          if (run.cancelled) return { text: '', stopReason: 'cancelled' };
-          run.started = true;
-          const budget = MobileInferenceBudgetSchema.parse({
-            contextSize: request.contextSize ?? 4096,
-            maxTokens: request.maxTokens ?? 1024,
-          });
-          if (request.providerId === 'llama-cpp') MobileModelSchema.shape.id.parse(request.modelId);
-          else if (request.modelId !== undefined && request.modelId !== request.providerId)
-            throw new Error('The requested model is not available from this on-device provider');
-          return await nativePlugin.generate({ ...request, ...budget });
-        } finally {
-          run.cancelled = true;
-          try {
-            await listener?.remove();
-          } catch {
-            // Teardown cannot replace the model's authoritative result (or error).
-            // The sealed run also ignores callbacks if the native listener survived.
-          } finally {
-            runs.delete(request.requestId);
-            release();
-          }
-        }
-      },
-      cancel: async (requestId) => {
-        const run = runs.get(requestId);
-        if (!run) return;
-        run.cancelled = true;
-        if (run.started) await nativePlugin.cancel({ requestId });
-        await run.released;
-      },
-    },
-    listModels: async () => MobileModelInventorySchema.parse(await nativePlugin.listModels()),
+    inference: createNativeInference(runtime),
+    listModels: async () => MobileModelInventorySchema.parse(await runtime.listModels()),
     importModel: async () => {
-      const { model } = await nativePlugin.importModel();
+      const { model } = await runtime.importModel();
       return { model: model === null ? null : MobileModelSchema.parse(model) };
     },
     selectModel: async (id) => ({
-      model: MobileModelSchema.parse((await nativePlugin.selectModel({ id })).model),
+      model: MobileModelSchema.parse((await runtime.selectModel({ id })).model),
     }),
     removeModel: async (id) => {
-      await nativePlugin.removeModel({ id });
+      await runtime.removeModel({ id });
     },
     prepareProvider: async (providerId) => {
-      await nativePlugin.prepareProvider({ providerId });
+      await runtime.prepareProvider({ providerId });
     },
     cancelProviderPreparation: async (providerId) => {
-      await nativePlugin.cancelProviderPreparation({ providerId });
+      await runtime.cancelProviderPreparation({ providerId });
     },
   };
 }

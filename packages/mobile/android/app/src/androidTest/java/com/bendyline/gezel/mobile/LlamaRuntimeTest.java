@@ -1,5 +1,7 @@
 package com.bendyline.gezel.mobile;
 
+import com.bendyline.gezel.llama.LlamaRuntime;
+
 import static org.junit.Assert.*;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;

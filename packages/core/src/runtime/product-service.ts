@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
 import { checkHandoffChain } from '../handoff-limits.js';
+import type { PortableInference } from '../mobile/inference.js';
 import { pickRandomNameWithGender } from '../names.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
@@ -20,8 +21,6 @@ import {
 } from '../schemas/api.js';
 import type { ChatEvent, ChatMessage } from '../schemas/gezel.js';
 import {
-  type MobileModelInventory,
-  type MobileProvider,
   type MobileProviderId,
   MobileProviderIdSchema,
   resolveMobileInferenceBudget,
@@ -81,22 +80,7 @@ import { runPortableToolLoop, toolProtocol } from './tool-loop.js';
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
 import type { PortableTransformTarget } from './transform.js';
 
-export interface PortableInference {
-  providers(): Promise<MobileProvider[]>;
-  models?(): Promise<MobileModelInventory>;
-  generate(
-    request: {
-      requestId: string;
-      providerId: MobileProviderId;
-      modelId?: string;
-      contextSize?: number;
-      maxTokens?: number;
-      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-    },
-    onDelta: (event: { requestId: string; delta: string }) => void,
-  ): Promise<{ text: string; stopReason: 'stop' | 'length' | 'cancelled' }>;
-  cancel(requestId: string): Promise<void>;
-}
+export type { PortableInference } from '../mobile/inference.js';
 const requiredString = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || !value.trim()) throw new ProductError(`${name} is required`);
   return value;

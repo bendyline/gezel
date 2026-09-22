@@ -21,7 +21,7 @@ public struct MobileModelSource: Codable, Equatable, Sendable {
             throw ModelDownloadError("A catalog model must pin a repository, immutable revision, GGUF filename and SHA-256")
         }
         if exact {
-            guard let sizeBytes, (4...MobileStore.maximumModelBytes).contains(sizeBytes) else { throw ModelDownloadError("An exact model length between 4 bytes and 4 GiB is required") }
+            guard let sizeBytes, (4...MobileModelStore.maximumModelBytes).contains(sizeBytes) else { throw ModelDownloadError("An exact model length between 4 bytes and 4 GiB is required") }
         }
     }
     public func url() throws -> URL {

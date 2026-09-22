@@ -345,12 +345,48 @@ export interface ChatCompletionChunk {
   usage?: ChatCompletionResponse['usage'];
 }
 
+/** Opt-in cross-host replies: native providers may not report token usage. */
+export type ChatResponseFormat = 'openai' | 'portable';
+export type PortableFinishReason = 'stop' | 'tool_calls' | 'length' | 'cancelled';
+export type PortableChatCompletionResponse = Omit<ChatCompletionResponse, 'usage' | 'choices'> & {
+  choices: Array<
+    Omit<ChatCompletionResponse['choices'][number], 'finish_reason'> & {
+      finish_reason: PortableFinishReason;
+    }
+  >;
+  usage?: ChatCompletionResponse['usage'];
+};
+export type PortableChatCompletionChunk = Omit<ChatCompletionChunk, 'choices'> & {
+  choices: Array<
+    Omit<ChatCompletionChunk['choices'][number], 'finish_reason'> & {
+      finish_reason: PortableFinishReason | null;
+    }
+  >;
+};
+export type ChatResponseFor<F extends ChatResponseFormat> = F extends 'portable'
+  ? PortableChatCompletionResponse
+  : ChatCompletionResponse;
+export type ChatStreamFor<F extends ChatResponseFormat> = AsyncIterable<
+  F extends 'portable' ? PortableChatCompletionChunk : ChatCompletionChunk
+>;
+
 export interface ModelListEntry {
   id: string;
   object: 'model';
   created: number;
   owned_by: string;
   context_window?: number;
+  /** Present when the host can explicitly report native readiness and support. */
+  availability?: 'available' | 'unavailable' | 'download-required' | 'downloading';
+  unavailable_reason?: string;
+  locality?: 'on-device';
+  capabilities?: {
+    text: boolean;
+    tools: boolean;
+    structuredOutput: boolean;
+    images: boolean;
+    foregroundOnly: boolean;
+  };
   supports_reasoning?: boolean;
   /** Present when this model entry addresses one of the user's gezels. */
   gezel_id?: string;

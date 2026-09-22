@@ -75,7 +75,7 @@ class AndroidReleaseTests(unittest.TestCase):
                   for name, body in self.packaged_speech.items()}
         names += list(speech)
         names += [prefix + "lib/arm64-v8a/" + name for name in
-                  ["libgezel_mobile.so", "libgezel-llama.so", "libGezelSpeech.so",
+                  ["libgezel_mobile.so", "libgezel_llama_jni.so", "libgezel-llama.so", "libGezelSpeech.so",
                    "libonnxruntime.so"]]
         with warnings.catch_warnings(), zipfile.ZipFile(archive, "w") as output:
             warnings.simplefilter("ignore", UserWarning)
@@ -129,10 +129,10 @@ class AndroidReleaseTests(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 result = self.verify(self.archive(suffix))
                 self.assertEqual(result["abis"], ["arm64-v8a"])
-                self.assertEqual(result["elfLibraries"], 4)
+                self.assertEqual(result["elfLibraries"], 5)
 
     def test_rejects_missing_license_or_jni(self):
-        for missing in ["assets/public/licenses/native/LICENSE-ggml.txt", "lib/arm64-v8a/libgezel_mobile.so"]:
+        for missing in ["assets/public/licenses/native/LICENSE-ggml.txt", "lib/arm64-v8a/libgezel_mobile.so", "lib/arm64-v8a/libgezel_llama_jni.so"]:
             with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, "Missing"):
                 self.verify(self.archive(omit=missing))
 

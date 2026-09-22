@@ -8,6 +8,7 @@ export default defineConfig({
     'src/paths.ts',
     'src/schemas/index.ts',
     'src/schemas/mobile-provider.ts',
+    'src/mobile/inference.ts',
     'src/runtime/index.ts',
     'src/kokoro/index.ts',
     'src/poppetje/index.ts',

@@ -16,6 +16,7 @@
     "sync:android": "node scripts/verify-native-build.mjs android && cap sync android && node scripts/sync-native.mjs android"
   },
   "dependencies": {
+    "@bendyline/gezel-capacitor": "workspace:*",
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-script-runtime": "workspace:*",
     "@capacitor/android": "8.5.2",

@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import XCTest
 @testable import GezelMobileStorage
+@testable import GezelModelStorage
 
 private final class DownloadProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((DownloadProtocol) -> Void)?
