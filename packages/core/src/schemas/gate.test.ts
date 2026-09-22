@@ -27,6 +27,18 @@ describe('GateCheckSchema — connector coverage', () => {
     );
   });
 
+  it('preserves the task-bound JSON path list for observable artifact reads', () => {
+    expect(
+      GateCheckSchema.parse({ kind: 'artifactReadEvidence', paths: '{{sourcePaths}}' }),
+    ).toEqual({ kind: 'artifactReadEvidence', paths: '{{sourcePaths}}' });
+    expect(GateCheckSchema.safeParse({ kind: 'artifactReadEvidence', paths: '' }).success).toBe(
+      false,
+    );
+    expect(
+      GateCheckSchema.safeParse({ kind: 'artifactReadEvidence', paths: ['a.json'] }).success,
+    ).toBe(false);
+  });
+
   it('parses a workspace ledger against an artifact corpus', () => {
     expect(
       GateCheckSchema.parse({

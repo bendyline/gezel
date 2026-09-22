@@ -86,7 +86,7 @@ import {
   stripXmlTagToolCallsFromText,
 } from '../local-tool-call-salvage.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
-import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
+import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type {
   NativeEngineExitSnapshot,
   NativeEngineLaunch,
@@ -98,6 +98,7 @@ import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { condensePresentedToolOutput } from './condense-presented-output.js';
 import { applyLlamaCppReasoningBudgetOverride } from './reasoning-launch.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
@@ -2520,6 +2521,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * outside an active turn.
    */
   private currentTurnStartIdx = 0;
+  /** Tool results may be condensed only after a successful model request
+   * has carried them. Several calls in one response must not erase an
+   * earlier result before the model has received it even once. */
+  private submittedToolResults = new WeakSet<ChatMessage>();
   /**
    * Per-turn guard: at most one mid-loop compaction per `sendAndWait`.
    * Prevents a runaway double-compaction loop if the synthesis itself
@@ -2864,13 +2869,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * Returns the number of chars reclaimed (0 when there was nothing to
    * shrink, which is the honest "this layer can't help" signal).
    */
-  private condenseInTurnToolResults(): number {
+  private condenseInTurnToolResults(toolHeadroomChars?: number): number {
     const KEEP_INTACT = 2;
     const MIN_SHRINKABLE = 400;
     const FLOOR_CHARS = 200;
     const targetChars = Math.floor(this.deps.numCtx * MID_LOOP_COMPACT_RATIO * 4);
     let estimated = this.estimatePromptChars();
-    if (estimated <= targetChars) return 0;
+    const hasRoom = () =>
+      toolHeadroomChars === undefined
+        ? estimated <= targetChars
+        : computeToolBudgetChars(this.deps.numCtx, estimated) >= toolHeadroomChars;
+    if (hasRoom()) return 0;
 
     const shrinkable: number[] = [];
     for (let i = this.currentTurnStartIdx; i < this.messages.length; i++) {
@@ -2880,18 +2889,20 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       shrinkable.push(i);
     }
     // Newest results are load-bearing; drop them from the candidate set.
-    const candidates = shrinkable.slice(0, Math.max(0, shrinkable.length - KEEP_INTACT));
+    const candidates = shrinkable
+      .slice(0, Math.max(0, shrinkable.length - KEEP_INTACT))
+      .filter((idx) => this.submittedToolResults.has(this.messages[idx]!));
     if (candidates.length === 0) return 0;
 
     let reclaimed = 0;
     for (const idx of candidates) {
-      if (estimated <= targetChars) break;
+      if (hasRoom()) break;
       const m = this.messages[idx]!;
       const before = (m.content as string).length;
-      // capToolOutput keeps head+tail and stamps a visible truncation
-      // footer, so the model can tell "this was long" from "this was
-      // empty" — the same contract the bridge applies on the way in.
-      const condensed = capToolOutput(m.content as string, FLOOR_CHARS);
+      // This response was already presented. A delivery-cutoff footer would
+      // tell the model to reread it, creating a read/condense/reread loop.
+      // Keep context shortening distinct from an initially incomplete read.
+      const condensed = condensePresentedToolOutput(m.content as string, FLOOR_CHARS);
       if (condensed.length >= before) continue;
       m.content = condensed;
       const saved = before - condensed.length;
@@ -2907,6 +2918,24 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       );
     }
     return reclaimed;
+  }
+
+  /** The adaptive tool cap can run out well before the engine overflows.
+   * Waiting for an HTTP overflow leaves every subsequent read at the 500-char
+   * floor. Reclaim older observations before the next request, preserving the
+   * newest two and all user/assistant messages as in overflow recovery. */
+  private async makeRoomForToolResults(resultChars?: number): Promise<void> {
+    const minimum =
+      resultChars ?? Math.min(8_000, Math.max(500, Math.floor(this.deps.numCtx * 0.1 * 2.8)));
+    if (computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()) >= minimum) return;
+    await this.maybeCompactMidLoop({ force: true });
+    if (computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()) >= minimum) return;
+    this.condenseInTurnToolResults(resultChars === undefined ? minimum * 2 : minimum);
+  }
+
+  private async prepareToolOutputBudget(resultChars: number): Promise<number> {
+    await this.makeRoomForToolResults(resultChars);
+    return computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars());
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
@@ -3135,6 +3164,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // the session's exact post-clamp roster is more accurate here than
         // the manager's earlier boundary estimate.
         await this.maybeCompactMidLoop();
+        if (tools?.length) await this.makeRoomForToolResults();
 
         const engineRequestLabel = `${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)}#${turn}`;
         if (budget.expired()) throw turnTimeoutError();
@@ -4590,6 +4620,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           throw new Error(
             `[llama-cpp] /v1/chat/completions returned ${res.status} ${res.statusText}: ${txt.slice(0, 200)}`,
           );
+        }
+
+        for (const message of this.messages) {
+          if (message.role === 'tool') this.submittedToolResults.add(message);
         }
 
         // Engine is up — the /v1/chat/completions response is open, so
@@ -6067,6 +6101,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 .callTool(call.function.name, args, {
                   budgetChars: computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()),
                   numCtxTokens: this.deps.numCtx,
+                  prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
                 })
                 .catch((err) => `ERROR: ${err instanceof Error ? err.message : String(err)}`));
           } else if (constrainedRunNodeScriptTarget) {
@@ -6076,6 +6111,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 .callTool(call.function.name, args, {
                   budgetChars: computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()),
                   numCtxTokens: this.deps.numCtx,
+                  prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
                 })
                 .catch((err) => `ERROR: ${err instanceof Error ? err.message : String(err)}`));
           } else if (call.function.name === 'read_image_as_base64' && !this.deps.visionEnabled) {
@@ -6100,6 +6136,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               output = await this.deps.bridges.callTool(call.function.name, args, {
                 budgetChars,
                 numCtxTokens: this.deps.numCtx,
+                prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
                 onApprovalPending: () => {
                   askedQuestionThisTurn = true;
                 },

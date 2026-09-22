@@ -124,7 +124,6 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-  TurnUsage,
 } from '../types.js';
 import {
   asyncHandoffClosing,
@@ -132,6 +131,11 @@ import {
   isSuccessfulAsyncHandoff,
 } from './async-file-handoff.js';
 export { isSuccessfulAsyncHandoff };
+import {
+  type ChatCompletionChunk,
+  type ChatMessage,
+  setChatTemplateKwarg,
+} from './chat-protocol.js';
 import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
@@ -154,7 +158,6 @@ import {
   APPEND_TO_FILE_CONTINUATION_TOOL,
   type ChatCompletionTool,
   MlxToolCallAccumulator,
-  type ToolCallDelta,
   chatCompletionToolName,
   hermesRequiredArgGrammarRequested,
   missingTopLevelRequiredToolArgs,
@@ -162,6 +165,7 @@ import {
   validatorReportedMissingRequiredArgs,
 } from './tool-call-protocol.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
+import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
 
 export {
   buildMidStreamDropMessage,
@@ -249,56 +253,6 @@ const log = createLogger('mlx');
  * quants, certain Gemma variants) doesn't burn the whole turn budget.
  */
 const MAX_MALFORMED_RETRIES = LOCAL_TURN_LIMITS.malformed;
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-  images?: string[];
-}
-
-interface ChatCompletionChunk {
-  choices?: Array<{
-    index: number;
-    delta: { role?: string; content?: string | null; tool_calls?: ToolCallDelta[] };
-    finish_reason?: string | null;
-  }>;
-  /**
-   * mlx_vlm.server emits Responses-API field names (`input_tokens` /
-   * `output_tokens`) while older OpenAI-compatible servers (including
-   * llama.cpp's, ollama's, and the Chat Completions reference shape)
-   * use `prompt_tokens` / `completion_tokens`. We accept both so this
-   * type can flex across engines if we ever point the provider at
-   * a different OpenAI-compatible host. mlx_vlm also ships
-   * `prompt_tps` (prefill speed, set on first chunk) and
-   * `generation_tps` (running decode speed, updated per chunk).
-   */
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-    prompt_tps?: number;
-    generation_tps?: number;
-    /** Prompt tokens actually served from the MLX KV cache. */
-    cached_tokens?: number;
-  };
-}
-
-function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
-  const existing = body.chat_template_kwargs;
-  if (existing && typeof existing === 'object' && existing !== null) {
-    (existing as Record<string, unknown>)[key] = value;
-    return;
-  }
-  body.chat_template_kwargs = { [key]: value };
-}
 
 export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
@@ -1479,13 +1433,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     let projectMacroInterceptCount = 0;
     let forceProjectMacroBail: { closingText: string } | null = null;
     let fullText = '';
-    let lastUsage: {
-      prompt_tokens: number;
-      completion_tokens: number;
-      prompt_tps?: number;
-      generation_tps?: number;
-      cached_tokens?: number;
-    } | null = null;
+    let lastUsage: MlxTurnUsageSnapshot | null = null;
     let firstTokenAt: number | null = null;
     let lastIterationStartedAt = start;
     let lastIterationFirstTokenAt: number | null = null;
@@ -1498,49 +1446,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // and one-shot sessions without duplicating subtly different accounting
     // at each return site.
     const emitTerminalTelemetry = (): void => {
-      if (!lastUsage || (lastUsage.prompt_tokens <= 0 && lastUsage.completion_tokens <= 0)) return;
-
-      const finishedAt = Date.now();
-      const durationMs = finishedAt - start;
-      const generationStartedAt = lastIterationFirstTokenAt ?? lastIterationStartedAt;
-      const generationFinishedAt = lastIterationFinishedAt ?? finishedAt;
-      const generationMs = Math.max(1, generationFinishedAt - generationStartedAt);
-      const wallTps =
-        lastUsage.completion_tokens > 0
-          ? lastUsage.completion_tokens / (generationMs / 1000)
-          : undefined;
-      const tokensPerSec =
-        lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-          ? lastUsage.generation_tps
-          : wallTps;
-      const at = new Date(finishedAt).toISOString();
-      const usage: TurnUsage = {
+      const telemetry = buildMlxTerminalTelemetry({
+        lastUsage,
         model: this.deps.model,
-        inputTokens: lastUsage.prompt_tokens,
-        outputTokens: lastUsage.completion_tokens,
-        ...(lastUsage.cached_tokens !== undefined
-          ? { cachedInputTokens: lastUsage.cached_tokens }
-          : {}),
-        ...(tokensPerSec !== undefined ? { outputTokensPerSec: tokensPerSec } : {}),
-        durationMs,
-        at,
-      };
-      this.emitUsage(usage);
-      this.emitTurnStats({
-        provider: 'mlx',
-        promptTokens: lastUsage.prompt_tokens,
-        completionTokens: lastUsage.completion_tokens,
-        durationMs,
-        ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-        ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-          ? { promptTokensPerSec: lastUsage.prompt_tps }
-          : {}),
-        ...(lastUsage.cached_tokens !== undefined
-          ? { cachedPromptTokens: lastUsage.cached_tokens }
-          : {}),
-        ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
+        start,
+        lastIterationStartedAt,
+        lastIterationFirstTokenAt,
+        lastIterationFinishedAt,
+        firstTokenAt,
       });
+      if (!telemetry) return;
+      this.emitUsage(telemetry.usage);
+      this.emitTurnStats(telemetry.stats);
     };
+
     this.deps.provider._registerActiveSession(this);
 
     // Status heartbeat. The pre-first-token window — cache warm (prepareForSend)

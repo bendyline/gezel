@@ -577,6 +577,9 @@ export const ChatMessageToolCallSchema = z.object({
   resultText: z.string().optional(),
   /** True when `resultText` is a bounded summary rather than the complete response. */
   resultTruncated: z.boolean().optional(),
+  /** Provider context cap clipped this result; independent of the UI summary above.
+   * Absent on older records or providers that do not report delivery metadata. */
+  deliveredResultTruncated: z.boolean().optional(),
   /** Image artifacts the tool returned (e.g. browser_snapshot screenshots). */
   images: z.array(ToolCallImageSchema).optional(),
   /** Audio artifacts the tool returned (e.g. synthesize_speech WAV). */
@@ -1076,6 +1079,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     resultText: z.string().optional(),
     /** True when `resultText` is a bounded summary rather than the complete response. */
     resultTruncated: z.boolean().optional(),
+    deliveredResultTruncated: z.boolean().optional(),
     /**
      * Image artifacts the tool returned (most commonly browser screenshots).
      * Paths are relative to the project's artifacts/ root and resolved

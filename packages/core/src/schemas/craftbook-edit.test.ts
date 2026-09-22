@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CraftbookStep } from './craftbook.js';
 import {
+  CraftbookSchema,
   CraftbookStepSchema,
   applyStepPatch,
   assertCraftbookGraph,
@@ -202,5 +203,73 @@ describe('assertCraftbookGraph', () => {
     expect(() => assertCraftbookGraph({ steps: steps(), entryStepId: 'ghost' })).toThrow(
       /invalid craftbook/,
     );
+  });
+});
+
+function terminalCheckpointBook() {
+  return {
+    id: 'final-report',
+    name: 'Final report',
+    version: '1.0.0',
+    entryStepId: 'work',
+    createdAt: '2026-09-22T00:00:00Z',
+    updatedAt: '2026-09-22T00:00:00Z',
+    steps: [
+      {
+        id: 'work',
+        name: 'Write and validate',
+        terminal: true,
+        toolPolicy: { outputMedium: 'artifact', allowTools: ['read_artifact', 'write_artifact'] },
+        advanceWhen: {
+          file: 'report.json',
+          artifact: true,
+          sniff: 'json-valid',
+          requireChange: true,
+        },
+        gate: {
+          at: 'completion',
+          checks: [{ kind: 'sniff', file: 'report.json', artifact: true, sniff: 'json-valid' }],
+          maxAttempts: 3,
+        },
+      },
+    ],
+  };
+}
+
+describe('terminal checkpoint authoring', () => {
+  it('accepts an observed terminal artifact while preserving all completion gate checks', () => {
+    const value = terminalCheckpointBook();
+    const result = CraftbookSchema.safeParse(value);
+    expect(result.success).toBe(true);
+    if (!result.success) throw result.error;
+    expect(result.data.steps[0]?.gate).toEqual(value.steps[0]?.gate);
+    expect(result.data.steps[0]?.advanceWhen).toEqual(value.steps[0]?.advanceWhen);
+    expect(validateCraftbookGraph(result.data)).toEqual([]);
+  });
+
+  it('still rejects onward terminal routes, including an existing target', () => {
+    const value = terminalCheckpointBook();
+    value.steps.push({ ...value.steps[0]!, id: 'other' });
+    for (const route of [
+      { next: 'other' },
+      { branches: [{ when: { op: 'ok' }, goto: 'other' }] },
+      { advanceWhen: { ...value.steps[0]!.advanceWhen, goto: 'other' } },
+    ]) {
+      const candidate = structuredClone(value);
+      Object.assign(candidate.steps[0]!, route);
+      const result = CraftbookSchema.safeParse(candidate);
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.message).toContain('terminal');
+    }
+  });
+
+  it('keeps terminal activation gates invalid and does not add observables to legacy final steps', () => {
+    const value = terminalCheckpointBook();
+    value.steps[0]!.gate.at = 'activation';
+    expect(CraftbookSchema.safeParse(value).success).toBe(false);
+    const legacy = terminalCheckpointBook();
+    delete (legacy.steps[0] as { advanceWhen?: unknown }).advanceWhen;
+    const parsed = CraftbookSchema.parse(legacy);
+    expect(parsed.steps[0]?.advanceWhen).toBeUndefined();
   });
 });

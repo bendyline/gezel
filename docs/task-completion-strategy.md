@@ -327,3 +327,44 @@ measured nothing for three weeks because the pin was silently dead.
 model-tier per hour — not chat turns, not pass-rate alone. Structure
 investments are justified exactly when they move that number for the
 small/medium tiers without taxing the frontier tier.
+
+
+### Completing a final artifact step on save
+
+A terminal step may explicitly declare an `advanceWhen` observable without a
+`goto`. Saving the named deliverable lets ChatManager request completion through
+the same completion gate used by `advance_task_step`. Terminal steps still cannot
+route to another step; `advanceWhen.goto`, `next`, and branches remain invalid.
+
+For a report saved in the artifact drawer:
+
+```json
+{
+  "terminal": true,
+  "advanceWhen": {
+    "file": "{{output}}",
+    "artifact": true,
+    "requireChange": true,
+    "sniff": "json-valid",
+    "minBytes": 2
+  }
+}
+```
+
+Keep the report's required reads, output validators, and attempt limit in its
+completion gate. A successful save triggers validation; it is not an approval.
+Gate rejection feeds back through ordinary bounded repair. Exhausted or
+infrastructure-held gates stay held. This policy grants no additional retries,
+deadline extensions, or authority to revive timed-out tasks.
+
+For artifact observables, `requireChange` requires a successful `write_artifact`
+call for the exact normalized drawer path in the current turn, including its
+artifact-write acknowledgement. A workspace write, a redirected source-file
+write, another task's same-named artifact, or an existing file alone is not
+sufficient. The acknowledgement check fails closed if tool output is missing or
+changes; the real MCP integration tests cover that contract.
+
+Tell the model to finish its reads, save the complete output once, and stop.
+Intermediate saves can consume gate attempts. Steps without this observable
+retain their existing completion behavior; enabling it in a project workflow
+should use a fresh, pinned craftbook version or identity.

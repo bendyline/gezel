@@ -29,7 +29,7 @@
  *
  * llama-server supports per-slot save/restore via `POST
  * /slots/{id}?action=save&filename=…` (and `…?action=restore`) when
- * launched with `--slot-save-path <dir>`. The endpoint writes a small
+ * launched with `--slot-save-path <dir>`. The endpoint writes a potentially large
  * binary file containing the slot's KV state; restore mmap-loads it
  * back into the slot in milliseconds. We wire this in:
  *
@@ -53,8 +53,14 @@
  */
 
 import { createHash } from 'node:crypto';
-import { copyFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { copyFile, stat, statfs, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  DEFAULT_LLAMA_DISK_CACHE_MB,
+  pruneLlamaDiskCache,
+  withLlamaDiskCache,
+} from './disk-cache.js';
 
 import { createLogger } from '@bendyline/gezel';
 
@@ -150,6 +156,10 @@ export interface LlamaCppCacheAdapterOptions {
    * adapter behaves like Phase 1.
    */
   slotSavePath?: string;
+  /** Shared slots root, including every model fingerprint and replica. */
+  diskCacheRoot?: string;
+  /** Whole-root retention bound. Zero explicitly disables pruning. */
+  diskCacheBudgetMb?: number;
   /** Replaceable fetch for tests. */
   fetchImpl?: typeof fetch;
 }
@@ -177,6 +187,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   private readonly fetchImpl: typeof fetch;
   /** Directory used by llama-server's --slot-save-path. */
   private readonly slotSavePath?: string;
+  private readonly diskCacheRoot?: string;
+  private readonly diskCacheBudgetBytes: number;
+  private diskCacheInitialized = false;
   /** Per-session prefix mapping for cross-session cache sharing. */
   private readonly sessionPrefix = new Map<string, string>();
   /**
@@ -214,6 +227,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     this.slotCount = Math.max(1, opts.slotCount ?? 1);
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.slotSavePath) this.slotSavePath = opts.slotSavePath;
+    if (opts.slotSavePath) this.diskCacheRoot = opts.diskCacheRoot ?? opts.slotSavePath;
+    const budget = opts.diskCacheBudgetMb ?? DEFAULT_LLAMA_DISK_CACHE_MB;
+    if (!Number.isSafeInteger(budget) || budget < 0 || !Number.isSafeInteger(budget * 1024 * 1024))
+      throw new Error('Invalid llama disk cache budget');
+    this.diskCacheBudgetBytes = budget * 1024 * 1024;
   }
 
   /** The provider survives engine restarts, but its resident slot contents do not. */
@@ -259,6 +277,10 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     systemPrompt?: string,
     layers?: SystemPromptLayers,
   ): Promise<void> {
+    if (this.diskCacheRoot && !this.diskCacheInitialized) {
+      await withLlamaDiskCache(this.diskCacheRoot, () => this.pruneDiskCache());
+      this.diskCacheInitialized = true;
+    }
     if (layers) {
       const { gp, gezel } = llamaLayerPrefixIds(layers);
       // Most-specific first: a restore tries gp (full stable system) then
@@ -525,10 +547,58 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    * prefix can then restore that file on allocate. Returns true on
    * success.
    */
+  private async pruneDiskCache(): Promise<void> {
+    if (!this.diskCacheRoot) return;
+    try {
+      const result = await pruneLlamaDiskCache(this.diskCacheRoot, this.diskCacheBudgetBytes);
+      if (result.removedFiles)
+        log.info(
+          `Pruned ${result.removedFiles} llama snapshots (${result.removedBytes} bytes); retained ${result.bytes} bytes`,
+        );
+      if (this.diskCacheBudgetBytes && result.bytes > this.diskCacheBudgetBytes)
+        log.warn('Llama disk cache remains over budget; some files could not be removed');
+    } catch (error) {
+      log.warn(`Could not enforce llama disk cache budget: ${String(error)}`);
+    }
+  }
+
   private async saveSlotForSession(slot: number, sessionId: string): Promise<boolean> {
+    if (!this.slotSavePath || !this.diskCacheRoot) return false;
+    const slotSavePath = this.slotSavePath;
+    const generation = this.engineGeneration;
+    return withLlamaDiskCache(this.diskCacheRoot, async () => {
+      await this.pruneDiskCache();
+      // Cache persistence is optional. Leave headroom for a large snapshot
+      // plus durable product state; prefix copies receive their own check.
+      // This is a conservative preflight, not a filesystem reservation.
+      try {
+        const disk = await statfs(slotSavePath);
+        const reserve = DEFAULT_LLAMA_DISK_CACHE_MB * 1024 * 1024 + 1024 ** 3;
+        if (disk.bavail * disk.bsize < reserve) {
+          log.warn('Skipping optional llama snapshot: insufficient free disk space');
+          return false;
+        }
+      } catch {
+        log.warn('Skipping optional llama snapshot: could not inspect free disk space');
+        return false;
+      }
+      try {
+        return await this.saveSlotForSessionUnlocked(slot, sessionId, generation);
+      } finally {
+        // Includes prefix copies and removes even a single oversized snapshot.
+        await this.pruneDiskCache();
+      }
+    });
+  }
+
+  private async saveSlotForSessionUnlocked(
+    slot: number,
+    sessionId: string,
+    generation: number,
+  ): Promise<boolean> {
     if (!this.slotSavePath) return false;
     if (this.slotActionsUnsupported) return false;
-    const generation = this.engineGeneration;
+    if (generation !== this.engineGeneration) return false;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
     if (!baseUrl || generation !== this.engineGeneration) return false;
     const filename = sessFilename(sessionId);
@@ -550,7 +620,12 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
         // prior process — we don't need to overwrite a sibling save.
         const existing = await stat(prefixPath).catch(() => null);
         if (!existing) {
-          await copyFile(sessPath, prefixPath);
+          const snapshot = await stat(sessPath);
+          // Do not double an oversized snapshot only to immediately prune it.
+          if (this.diskCacheBudgetBytes && snapshot.size > this.diskCacheBudgetBytes) return true;
+          const disk = await statfs(this.slotSavePath);
+          if (disk.bavail * disk.bsize < snapshot.size + 1024 ** 3) return true;
+          await copyFile(sessPath, prefixPath, constants.COPYFILE_EXCL);
         }
         this.seededPrefixes.add(prefixId);
       } catch {
@@ -564,9 +639,21 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   /** Try restore-by-session, then restore-by-prefix. Returns true if
    *  any restore succeeded. */
   private async tryRestoreForSession(slot: number, sessionId: string): Promise<boolean> {
+    if (!this.slotSavePath || !this.diskCacheRoot) return false;
+    const generation = this.engineGeneration;
+    return withLlamaDiskCache(this.diskCacheRoot, () =>
+      this.tryRestoreForSessionUnlocked(slot, sessionId, generation),
+    );
+  }
+
+  private async tryRestoreForSessionUnlocked(
+    slot: number,
+    sessionId: string,
+    generation: number,
+  ): Promise<boolean> {
     if (!this.slotSavePath) return false;
     if (this.slotActionsUnsupported) return false;
-    const generation = this.engineGeneration;
+    if (generation !== this.engineGeneration) return false;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
     if (!baseUrl || generation !== this.engineGeneration) return false;
 
@@ -579,7 +666,10 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
         sessFilename(sessionId),
         generation,
       );
-      if (ok) return true;
+      if (ok) {
+        await utimes(sessPath, new Date(), new Date()).catch(() => {});
+        return true;
+      }
     }
     if (generation !== this.engineGeneration) return false;
     // Layered cascade (flag ON): try most-specific (gp) then gezel. Once a
@@ -590,8 +680,12 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       for (const pid of layered) {
         const path = join(this.slotSavePath, prefixFilename(pid));
         if (!(await stat(path).catch(() => null))) continue;
-        if (await this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(pid), generation))
+        if (
+          await this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(pid), generation)
+        ) {
+          await utimes(path, new Date(), new Date()).catch(() => {});
           return true;
+        }
         if (generation !== this.engineGeneration) return false;
       }
       return false;
@@ -600,7 +694,15 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     if (!prefixId) return false;
     const prefixPath = join(this.slotSavePath, prefixFilename(prefixId));
     if (!(await stat(prefixPath).catch(() => null))) return false;
-    return this.invokeSlotAction(baseUrl, slot, 'restore', prefixFilename(prefixId), generation);
+    const restored = await this.invokeSlotAction(
+      baseUrl,
+      slot,
+      'restore',
+      prefixFilename(prefixId),
+      generation,
+    );
+    if (restored) await utimes(prefixPath, new Date(), new Date()).catch(() => {});
+    return restored;
   }
 
   /**

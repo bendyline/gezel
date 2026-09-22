@@ -376,6 +376,16 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     expectPaths: z.string().min(1).optional(),
   }),
   /**
+   * Require complete artifact reads observed by the service in this task step.
+   * JSON keeps a runtime-sized list interpolatable without reading a manifest
+   * the model could rewrite. Bind exact paths in task params at creation time.
+   * This proves delivery, not comprehension or unchanged file contents.
+   */
+  z.object({
+    kind: z.literal('artifactReadEvidence'),
+    paths: z.string().min(1),
+  }),
+  /**
    * A review-batch child may claim paths in a JSON shard only after the
    * service has returned every line of that batch's exact artifact records
    * to its model. Read evidence is service-written tool history, not a model

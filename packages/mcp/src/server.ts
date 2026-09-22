@@ -289,9 +289,13 @@ const linkedApi = new GezelClient({ baseUrl, token, fetch: linkedFetchImpl });
 // A successful advance transfers ownership before another provider generation.
 // This fence also protects SDK/CLI loops and resumed stale sessions.
 let sessionStepCompleted = false;
+// Advisory only: refresh it through the existing mutation fence for each write.
+// A failed lookup must not reuse an earlier completion hint.
+let sessionStepCompletion: 'automatic' | 'manual' | 'unknown' = 'unknown';
 
 async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
+  sessionStepCompletion = 'unknown';
 
   let activeStepId: string | undefined;
   let activeStepOwnedBySession = false;
@@ -301,6 +305,9 @@ async function staleStepMutationResult() {
       const task = await api.getTask(parsed.projectId, parsed.num);
       activeStepId = task.activeStepId;
       const activeStep = task.craftbook.steps.find((s) => s.id === activeStepId);
+      if (activeStep && activeStepId === sessionStepId) {
+        sessionStepCompletion = activeStep.advanceWhen ? 'automatic' : 'manual';
+      }
       const owner =
         activeStep?.assignee?.kind === 'gezel'
           ? activeStep.assignee.gezelId
@@ -4222,10 +4229,19 @@ server.tool(
       ...(gezelId ? { gezelId } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
-    const completionHint =
-      sessionTaskRef && sessionStepId
-        ? '\nSaving an artifact does not complete the task step. When its required deliverable is ready, call advance_task_step to run the completion checks. Repair specific failures if returned; do not repeatedly rewrite a finished report without submitting it.'
-        : '';
+    let completionHint = '';
+    if (sessionTaskRef && sessionStepId) {
+      if (sessionStepCompletion === 'automatic') {
+        completionHint =
+          '\nThis step uses automatic completion checks. Finish its required deliverable and stop; the runtime will run its completion gate. Saving does not approve the work. If the gate rejects it, repair the named problems and save the complete deliverable again.';
+      } else if (sessionStepCompletion === 'manual') {
+        completionHint =
+          '\nSaving an artifact does not complete the task step. When its required deliverable is ready, call advance_task_step to run the completion checks. Repair specific failures if returned; do not repeatedly rewrite a finished report without submitting it.';
+      } else {
+        completionHint =
+          '\nFollow the active craftbook completion rule. If it uses automatic completion, finish the required deliverable and stop; otherwise call advance_task_step when ready. Saving alone is not approval. Repair any specific validation failures returned.';
+      }
+    }
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
   },
 );

@@ -182,6 +182,27 @@ export class ConnectorSetupRequiredError extends Error {
 }
 
 /**
+ * Completion must wait until the task and its ancestors are active.
+ *
+ * Keep the task metadata used by the HTTP response while sharing the
+ * step-completion error contract used by every refused state transition.
+ */
+export class TaskNotActiveError extends StepCompletionBlockedError {
+  readonly responseCode = 'TASK_NOT_ACTIVE' as const;
+
+  constructor(
+    readonly taskRef: string,
+    readonly stepId: string,
+    readonly effectiveStatus: TaskStatus,
+  ) {
+    super(
+      `task ${taskRef}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
+      'task_not_active',
+    );
+  }
+}
+
+/**
  * The data a connector pulled down for one task launch: params to merge
  * into `craftbookParams` (so `{{corpusScope}}` and friends interpolate
  * into step prompts and gate paths) and a note for the audit trail.
@@ -2337,10 +2358,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
     const effectiveStatus = await this.effectiveStatusFor(task);
     if (effectiveStatus !== 'active') {
-      throw new StepCompletionBlockedError(
-        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
-        'task_not_active',
-      );
+      throw new TaskNotActiveError(task.ref, stepId, effectiveStatus);
     }
 
     // ── Completion gate guard ─────────────────────────────────────────
@@ -3771,6 +3789,10 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const workspaceChecks = new Map<string, string | undefined>();
     for (const c of gate.checks) {
+      // Read receipts are satisfied by reading existing artifacts, not by
+      // changing the workspace. corpusReadEvidence may read its batch manifest
+      // from the workspace, but that does not make a missing read a write.
+      if (c.kind === 'artifactReadEvidence' || c.kind === 'corpusReadEvidence') continue;
       if ((c as { artifact?: boolean }).artifact === true) continue;
       workspaceChecks.set(gateCheckLabel(c), (c as { file?: string }).file);
     }

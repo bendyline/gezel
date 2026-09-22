@@ -439,6 +439,29 @@ There is intentionally **no model-universal layer** — that would require front
   (load rejects a mismatch); llama models that 501 on slot-save (mmproj/multimodal) get no disk
   persistence.
 
+The llama.cpp retention limit is enforced by the service across the entire
+`slots/` tree, including every model fingerprint and replica. It defaults to
+8192 MiB; `llamaCppDiskCacheBudgetMb: 0` explicitly disables pruning. The adapter
+prunes before its first send and before/after each disk save, including shared
+prefix copies. Successful restores refresh recency. Save, restore and pruning
+share a process-local lock so one replica cannot delete another's in-flight
+snapshot. Only recognized snapshot filenames and directory layouts are eligible;
+model weights and product state are outside this policy, and directory links are
+not traversed.
+
+Persistence also checks free space: below 9 GiB it skips the optional native
+save, and a prefix copy gets a separate size-based check leaving 1 GiB free.
+This is a conservative preflight, not a reservation against other processes or
+a hard bound on a native snapshot's transient size. Failed/locked deletions are
+reported and retried on later saves. A missing snapshot falls back to prefill;
+the persisted conversation remains the source of truth.
+
+This enforcement fixes the September 18 Qualla trial incident: the config
+field existed but the llama adapter never consumed it, allowing approximately
+503 GB of regenerable snapshots to fill the system disk. Regression coverage
+checks aggregate retention, LRU, oversized snapshots, opt-out, unknown files,
+junctions, serialization, and low-space saves/copies.
+
 **Measured result.** A cross-session A/B (same gezel+project, *different* task, shared cache root,
 `--parallel 1`) on `gemma4-e4b-q8`: session B's prefill dropped **16,467 → 499 tokens (97%)** under
 the flag (baseline cold-re-prefills because its whole-prompt hash differs on the inline task; the

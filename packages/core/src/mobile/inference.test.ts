@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type NativeInferencePlugin, createNativeInference } from './inference.js';
 
+type GenerationResult = Awaited<ReturnType<NativeInferencePlugin['generate']>>;
+
 describe('shared native inference adapter', () => {
   it('shares admission and waits for native release across clients of the same plugin', async () => {
-    let finish!: (result: { text: string; stopReason: 'cancelled' }) => void;
+    let finish!: (result: GenerationResult) => void;
     let emit!: (event: { requestId: string; delta: string }) => void;
     const remove = vi.fn(async () => {});
     const plugin: NativeInferencePlugin = {
@@ -11,7 +13,7 @@ describe('shared native inference adapter', () => {
       listModels: async () => ({ models: [] }),
       generate: vi.fn(
         () =>
-          new Promise((resolve) => {
+          new Promise<GenerationResult>((resolve) => {
             finish = resolve;
           }),
       ),

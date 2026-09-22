@@ -464,9 +464,11 @@ export function validateCraftbookGraph(cb: {
       }
     }
     if (s.advanceWhen) {
-      // A terminal step has nowhere to auto-advance to; and an explicit
-      // `goto` must resolve (it's an edge, same as `next`).
-      if (s.terminal) problems.push(`step "${s.id}" is terminal but also has advanceWhen`);
+      // Observing a terminal deliverable can complete the task through its
+      // ordinary completion gate. Only an onward route contradicts terminal.
+      if (s.terminal && s.advanceWhen.goto) {
+        problems.push(`step "${s.id}" is terminal but also has advanceWhen.goto`);
+      }
       if (s.advanceWhen.goto && !ids.has(s.advanceWhen.goto)) {
         problems.push(`step "${s.id}" advanceWhen.goto "${s.advanceWhen.goto}" missing from steps`);
       }

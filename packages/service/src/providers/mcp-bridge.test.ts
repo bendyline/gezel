@@ -172,11 +172,64 @@ describe('McpBridge', () => {
         { budgetChars: 1_000 },
       );
       expect(ranged.text).not.toContain('tool output truncated');
-      expect(events.at(-1)?.deliveredResultTruncated).toBeUndefined();
+      expect(events.at(-1)?.deliveredResultTruncated).toBe(false);
     } finally {
       bridge.onToolCall = previous;
     }
   });
+  it('prepares headroom for the actual result before recording delivery evidence', async () => {
+    const path = 'tests/result-headroom.md';
+    await svc.context.store.writeProjectArtifact('default', path, 'complete source\n'.repeat(600));
+    const order: string[] = [];
+    const previous = bridge.onToolCall;
+    bridge.onToolCall = (info) => {
+      order.push('receipt');
+      expect(info.deliveredResultTruncated).toBe(false);
+    };
+    try {
+      const result = await bridge.callToolRich(
+        'read_artifact',
+        { path },
+        {
+          budgetChars: 1_000,
+          numCtxTokens: 32_768,
+          prepareOutputBudget: async (chars) => {
+            order.push('prepare');
+            expect(chars).toBeGreaterThan(8_000);
+            return chars;
+          },
+        },
+      );
+      expect(result.text).not.toContain('tool output truncated');
+      expect(result.text).toBe('complete source\n'.repeat(600).trimEnd());
+      expect(order).toEqual(['prepare', 'receipt']);
+    } finally {
+      bridge.onToolCall = previous;
+    }
+  });
+
+  it.each(['throw', 'NaN', 'negative'])(
+    'retains the original cap if headroom preparation returns %s',
+    async (mode) => {
+      const path = `tests/headroom-fallback-${mode}.md`;
+      await svc.context.store.writeProjectArtifact('default', path, 'source\n'.repeat(600));
+      const prepare = vi.fn(async () => {
+        if (mode === 'throw') throw new Error('recovery unavailable');
+        return mode === 'NaN' ? Number.NaN : -1;
+      });
+      const result = await bridge.callToolRich(
+        'read_artifact',
+        { path },
+        {
+          budgetChars: 1_000,
+          prepareOutputBudget: prepare,
+        },
+      );
+      expect(result.text).toContain('tool output truncated');
+      expect(prepare).toHaveBeenCalledOnce();
+    },
+  );
+
   it('lists the expected gezel-mcp tools', () => {
     const tools = bridge.getOpenAITools();
     const names = tools.map((t) => t.name);

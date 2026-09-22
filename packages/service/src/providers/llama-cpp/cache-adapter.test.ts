@@ -1,8 +1,21 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LlamaCppCacheAdapter, llamaLayerPrefixIds, llamaPrefixId } from './cache-adapter.js';
+import { withLlamaDiskCache } from './disk-cache.js';
+
+const disk = vi.hoisted(() => ({ available: 100 * 1024 ** 3 }));
+vi.mock('node:fs/promises', async (original) => ({
+  ...(await original<typeof import('node:fs/promises')>()),
+  statfs: async () => {
+    if (disk.available < 0) throw new Error('unavailable filesystem');
+    return { bavail: disk.available, bsize: 1 };
+  },
+}));
+beforeEach(() => {
+  disk.available = 100 * 1024 ** 3;
+});
 
 describe('llamaLayerPrefixIds — layered prefix keys', () => {
   it('produces distinct gp/gezel namespaces with stable 16-hex hashes', () => {
@@ -216,6 +229,99 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     }) as unknown as typeof fetch;
     return { calls, fetchImpl };
   }
+
+  it('does not save an obsolete slot when the engine exits while waiting for another replica', async () => {
+    const { calls, fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await a.prepareForSend('old');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const otherReplica = withLlamaDiskCache(tmp, async () => gate);
+    const saving = a.flushAll();
+    a.resetEngineState();
+    release();
+    await otherReplica;
+    expect(await saving).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it('prunes stale caches from other models before inference and enforces the quota after saving', async () => {
+    const other = join(tmp, 'b'.repeat(24), 'replica-1');
+    const own = join(tmp, 'a'.repeat(24));
+    await mkdir(other, { recursive: true });
+    await mkdir(own);
+    await writeFile(join(other, 'sess-obsolete.bin'), Buffer.alloc(2 * 1024 ** 2));
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotSavePath: own,
+      diskCacheRoot: tmp,
+      diskCacheBudgetMb: 1,
+      fetchImpl: (async (_url, init) => {
+        const { filename } = JSON.parse(String(init?.body));
+        await writeFile(join(own, filename), Buffer.alloc(700 * 1024));
+        return new Response('{}');
+      }) as typeof fetch,
+    });
+    await a.prepareForSend('new', 'system prompt');
+    expect(await readdir(other)).toEqual([]);
+    expect(await a.flushAll()).toBe(1);
+    const files = await readdir(own);
+    expect(files.length).toBe(1); // session + seeded prefix cannot both fit
+    expect((await stat(join(own, files[0]!))).size).toBe(700 * 1024);
+  });
+
+  it.each([0, -1])(
+    'skips optional saves when free space is insufficient or unknown (%s)',
+    async (available) => {
+      const { calls, fetchImpl } = makeFetchSpy();
+      const a = new LlamaCppCacheAdapter({
+        resolveBaseUrl: async () => 'http://127.0.0.1:0',
+        slotSavePath: tmp,
+        fetchImpl,
+      });
+      await a.prepareForSend('safe');
+      disk.available = available;
+      expect(await a.flushAll()).toBe(0);
+      expect(calls).toEqual([]);
+      expect(a.buildRequestExtras('safe').id_slot).toBe(0);
+    },
+  );
+
+  it('rechecks free space after the native save before making a prefix copy', async () => {
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotSavePath: tmp,
+      fetchImpl: (async (_url, init) => {
+        await writeFile(join(tmp, JSON.parse(String(init?.body)).filename), 'saved');
+        disk.available = 100;
+        return new Response('{}');
+      }) as typeof fetch,
+    });
+    await a.prepareForSend('safe', 'prefix');
+    expect(await a.flushAll()).toBe(1);
+    expect(await readdir(tmp)).toEqual(['sess-safe.bin']);
+  });
+
+  it('refreshes restored snapshots so disk retention uses last successful use', async () => {
+    const path = join(tmp, 'sess-resume.bin');
+    await writeFile(path, 'cache');
+    await utimes(path, 1, 1);
+    const { fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    const before = Date.now();
+    await a.prepareForSend('resume');
+    expect((await stat(path)).mtimeMs).toBeGreaterThanOrEqual(before - 1000);
+  });
 
   it('skips disk persistence when slotSavePath is unset', async () => {
     const { calls, fetchImpl } = makeFetchSpy();

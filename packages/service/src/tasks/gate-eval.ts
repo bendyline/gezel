@@ -408,12 +408,6 @@ function globPathRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-/**
- * Stable identity of the configured check — kind + file + the config
- * discriminator (pattern/path/sniff name). Never includes observed
- * values, so it is hash-stable across attempts.
- */
-
 function checkFile(c: GateCheck): string | undefined {
   if ('file' in c && typeof c.file === 'string') return c.file;
   if (c.kind === 'cssMinBytes' || c.kind === 'jsParses') return c.file ?? 'index.html';
@@ -444,6 +438,57 @@ interface InnerOutcome {
   evidence?: Record<string, unknown>;
   /** See {@link GateCheckOutcome.remaining}. */
   remaining?: number;
+}
+
+async function completeArtifactReads(
+  paths: string[],
+  label: string,
+  deps?: GateEvalDeps,
+): Promise<InnerOutcome> {
+  if (!deps?.corpusReadEvidence) {
+    return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
+  }
+  const observed = await deps.corpusReadEvidence();
+  if (!observed.observable) {
+    return { ok: false, detail: 'Artifact read history is not observable (fail-closed).' };
+  }
+  const missing = paths.filter((path) => {
+    const slices = observed.slices.filter((slice) => slice.path === path);
+    if (slices.length === 0) return true;
+    const total = slices[0]!.totalLines;
+    if (
+      !Number.isSafeInteger(total) ||
+      total < 1 ||
+      slices.some((slice) => slice.totalLines !== total)
+    )
+      return true;
+    const ranges = slices
+      .filter(
+        (slice) =>
+          Number.isSafeInteger(slice.startLine) &&
+          Number.isSafeInteger(slice.endLine) &&
+          slice.startLine >= 1 &&
+          slice.endLine <= total &&
+          slice.endLine >= slice.startLine,
+      )
+      .sort((a, b) => a.startLine - b.startLine);
+    let next = 1;
+    for (const range of ranges) {
+      if (range.startLine > next) break;
+      next = Math.max(next, range.endLine + 1);
+      if (next > total) return false;
+    }
+    return true;
+  });
+  return {
+    ok: missing.length === 0,
+    detail:
+      missing.length === 0
+        ? `${label}: full artifact reads verified for all ${paths.length} records.`
+        : `${label}: ${missing.length}/${paths.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
+    evidence: { expectedRecords: paths.length, missingRecords: missing.slice(0, 10) },
+    remaining: missing.length,
+  };
 }
 
 async function evalCheckInner(
@@ -1035,6 +1080,30 @@ async function evalCheckInner(
         detail: `Fanout batches complete: ${actual.length} batch(es), ${seen.size} path(s), matching artifacts/${manifestPath}`,
       };
     }
+    case 'artifactReadEvidence': {
+      let paths: unknown;
+      try {
+        paths = JSON.parse(c.paths);
+      } catch {
+        return { ok: false, detail: 'Artifact read paths must be a JSON array (fail-closed).' };
+      }
+      if (
+        !Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.some(
+          (path) =>
+            typeof path !== 'string' || path.trim().length === 0 || /\{\{.*?\}\}/.test(path),
+        ) ||
+        new Set(paths).size !== paths.length
+      ) {
+        return {
+          ok: false,
+          detail:
+            'Artifact read paths must be distinct, nonempty, resolved path strings (fail-closed).',
+        };
+      }
+      return completeArtifactReads(paths as string[], 'Required artifacts', deps);
+    }
     case 'corpusReadEvidence': {
       const raw = await reader.read(c.batchesFile);
       if (raw === null) return { ok: false, detail: `${c.batchesFile} not found (fail-closed).` };
@@ -1069,50 +1138,7 @@ async function evalCheckInner(
           detail: `${c.batchesFile}: batch ${number} has no exact record paths (fail-closed).`,
         };
       }
-      if (!deps?.corpusReadEvidence) {
-        return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
-      }
-      const observed = await deps.corpusReadEvidence();
-      if (!observed.observable) {
-        return { ok: false, detail: 'Artifact read history is not observable (fail-closed).' };
-      }
-      const missing = (records as string[]).filter((path) => {
-        const slices = observed.slices.filter((slice) => slice.path === path);
-        if (slices.length === 0) return true;
-        const total = slices[0]!.totalLines;
-        if (
-          !Number.isSafeInteger(total) ||
-          total < 1 ||
-          slices.some((slice) => slice.totalLines !== total)
-        )
-          return true;
-        const ranges = slices
-          .filter(
-            (slice) =>
-              Number.isSafeInteger(slice.startLine) &&
-              Number.isSafeInteger(slice.endLine) &&
-              slice.startLine >= 1 &&
-              slice.endLine <= total &&
-              slice.endLine >= slice.startLine,
-          )
-          .sort((a, b) => a.startLine - b.startLine);
-        let next = 1;
-        for (const range of ranges) {
-          if (range.startLine > next) break;
-          next = Math.max(next, range.endLine + 1);
-          if (next > total) return false;
-        }
-        return true;
-      });
-      return {
-        ok: missing.length === 0,
-        detail:
-          missing.length === 0
-            ? `Batch ${number}: full artifact reads verified for all ${records.length} records.`
-            : `Batch ${number}: ${missing.length}/${records.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
-        evidence: { expectedRecords: records.length, missingRecords: missing.slice(0, 10) },
-        remaining: missing.length,
-      };
+      return completeArtifactReads(records as string[], `Batch ${number}`, deps);
     }
     case 'corpusBatchObservations': {
       const [batchesRaw, observations] = await Promise.all([

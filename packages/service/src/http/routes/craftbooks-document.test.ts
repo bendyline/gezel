@@ -99,6 +99,54 @@ const DOC: CraftbookDoc = {
 };
 
 describe('craftbook document routes — end to end', () => {
+  it('reports paused completion as a conflict without spending a gate attempt, then permits resume', async () => {
+    const create = await api('POST', '/api/projects/default/tasks', {
+      title: 'Paused completion',
+      description: 'A state conflict must not become a generic server failure.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          id: 'build',
+          name: 'Build',
+          assignee: { kind: 'user' },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'paused-marker.txt', bytes: 1 }],
+          },
+        },
+        { id: 'done', name: 'Done', assignee: { kind: 'user' } },
+      ],
+    });
+    expect(create.status).toBe(201);
+    const task = (await create.json()) as { num: number; ref: string; activeStepId: string };
+    const taskPath = `/api/projects/default/tasks/${task.num}`;
+    const stepPath = `${taskPath}/steps/${task.activeStepId}/complete`;
+    expect((await api('POST', `${taskPath}/status`, { status: 'paused' })).status).toBe(200);
+
+    for (const body of [{}, { force: true }]) {
+      const completion = await api('POST', stepPath, body);
+      expect(completion.status).toBe(409);
+      expect(await completion.json()).toMatchObject({
+        error: expect.stringContaining('effective status is paused'),
+        code: 'TASK_NOT_ACTIVE',
+        taskRef: task.ref,
+        stepId: task.activeStepId,
+        effectiveStatus: 'paused',
+      });
+    }
+    const paused = await svc.context.tasks.get('default', task.num);
+    const step = paused!.craftbook.steps.find((entry) => entry.id === task.activeStepId)!;
+    expect(step.gateAttempts ?? 0).toBe(0);
+    expect(step.completedAt).toBeUndefined();
+
+    const ws = await svc.context.store.projectWorkspaceDir('default');
+    await writeFile(join(ws, 'paused-marker.txt'), 'present', 'utf8');
+    expect((await api('POST', `${taskPath}/status`, { status: 'active' })).status).toBe(200);
+    const completed = await api('POST', stepPath);
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({ task: { activeStepId: 'done' } });
+  });
+
   it('reports invalid project documents as 422 with a repair, while absent books remain 404', async () => {
     const ws = await svc.context.store.projectWorkspaceDir('default');
     const dir = join(ws, '.gezel', 'craftbooks', 'bad-input');

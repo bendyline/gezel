@@ -394,6 +394,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(assistantMsg!.toolCalls![0]!.success).toBe(true);
     expect(assistantMsg!.toolCalls![0]!.resultText).toBeTruthy();
     expect(assistantMsg!.toolCalls![0]!.resultTruncated).not.toBe(true);
+    expect(assistantMsg!.toolCalls![0]!.deliveredResultTruncated).toBe(false);
   }, 30_000);
 
   it('stamps each tool call with its offset into the turn reasoning trace', async () => {
@@ -515,6 +516,39 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(callAt).toBeDefined();
     expect(Date.parse(callAt!)).not.toBeNaN();
     expect(Date.parse(callAt!)).toBeLessThanOrEqual(Date.parse(assistantMsg!.at));
+  }, 30_000);
+
+  it('persists provider clipping separately from the public result summary', async () => {
+    await store.writeProjectArtifact(
+      'default',
+      'large.json',
+      JSON.stringify({ text: 'x'.repeat(90_000) }),
+    );
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptToolCalls([{ name: 'read_artifact', arguments: { path: 'large.json' } }]);
+    mock.script('Read the available result.');
+    await manager.send(session.id, 'Read the artifact.');
+    const disk = await store.getSession('ada', session.id);
+    const call = disk?.messages.find((m) => m.content === 'Read the available result.')
+      ?.toolCalls?.[0];
+    expect(call).toMatchObject({
+      name: 'read_artifact',
+      success: true,
+      deliveredResultTruncated: true,
+    });
+    expect(mock.toolCallOutputs[0]?.output).toContain('tool output truncated');
+    const history = await svc.context.history.listEvents({
+      projectId: 'default',
+      kinds: ['tool.called'],
+    });
+    expect(history.find((event) => event.details?.sessionId === session.id)?.details).toMatchObject(
+      {
+        deliveredResultTruncated: true,
+      },
+    );
+    expect(
+      history.find((event) => event.details?.sessionId === session.id)?.details?.artifactReadSlices,
+    ).toBeUndefined();
   }, 30_000);
 
   it('persists every resolved path returned by read_artifacts', async () => {
@@ -1018,100 +1052,278 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
   }, 30_000);
 
-  it('auto-advances an evidence-only step after its exact artifact read', async () => {
-    const project = await store.createProject({ name: 'Read evidence' });
-    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
-      {
-        toolsetId: 'builtin-artifacts',
-        sourceId: 'test',
-        version: '1.0.0',
-        installedAt: new Date().toISOString(),
-        runtime: { kind: 'builtin', toolsetGroupId: 'artifacts' },
-      },
-      {
-        toolsetId: 'custom-unrelated',
-        sourceId: 'test',
-        version: '1.0.0',
-        installedAt: new Date().toISOString(),
-        runtime: {
-          kind: 'custom-mcp',
-          serverName: 'unrelated',
-          source: { kind: 'imported' },
-          transport: 'stdio',
-          command: process.execPath,
-          args: [],
-          envKeys: [],
-          headerKeys: [],
-        },
-      },
-    ]);
-    await store.writeProjectArtifact(project.id, 'data/record.md', 'line one\nline two\n');
-    await store.writeProjectArtifact(
-      project.id,
-      'tasks/1/batches.json',
-      JSON.stringify([
+  it.each(['corpusReadEvidence', 'artifactReadEvidence'] as const)(
+    'auto-advances a %s-only step after its exact artifact read',
+    async (kind) => {
+      const project = await store.createProject({ name: 'Read evidence' });
+      await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
         {
-          batchNumber: 1,
-          start: 1,
-          end: 1,
-          paths: ['src/a.ts'],
-          records: ['data/record.md'],
+          toolsetId: 'builtin-artifacts',
+          sourceId: 'test',
+          version: '1.0.0',
+          installedAt: new Date().toISOString(),
+          runtime: { kind: 'builtin', toolsetGroupId: 'artifacts' },
         },
-      ]),
-    );
-    // Same assignee, same project, and an already-satisfied observable. A
-    // child task's read must not advance this host merely because list order
-    // presents it first.
-    const unrelatedHost = await svc.context.tasks.create(project.id, {
-      title: 'Unrelated fanout host',
-      assignee: { kind: 'gezel', gezelId: 'ada' },
-      steps: [
         {
-          id: 'collect',
-          name: 'Collect',
-          prompt: 'Wait for children.',
-          advanceWhen: { file: 'data/record.md', artifact: true, minBytes: 1 },
-          next: 'host-done',
+          toolsetId: 'custom-unrelated',
+          sourceId: 'test',
+          version: '1.0.0',
+          installedAt: new Date().toISOString(),
+          runtime: {
+            kind: 'custom-mcp',
+            serverName: 'unrelated',
+            source: { kind: 'imported' },
+            transport: 'stdio',
+            command: process.execPath,
+            args: [],
+            envKeys: [],
+            headerKeys: [],
+          },
         },
-        { id: 'host-done', name: 'Host done', assignee: { kind: 'user' } },
-      ],
-      entryStepId: 'collect',
-    });
+      ]);
+      await store.writeProjectArtifact(project.id, 'data/record.md', 'line one\nline two\n');
+      await store.writeProjectArtifact(
+        project.id,
+        'tasks/1/batches.json',
+        JSON.stringify([
+          {
+            batchNumber: 1,
+            start: 1,
+            end: 1,
+            paths: ['src/a.ts'],
+            records: ['data/record.md'],
+          },
+        ]),
+      );
+      // Same assignee, same project, and an already-satisfied observable. A
+      // child task's read must not advance this host merely because list order
+      // presents it first.
+      const unrelatedHost = await svc.context.tasks.create(project.id, {
+        title: 'Unrelated fanout host',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        steps: [
+          {
+            id: 'collect',
+            name: 'Collect',
+            prompt: 'Wait for children.',
+            advanceWhen: { file: 'data/record.md', artifact: true, minBytes: 1 },
+            next: 'host-done',
+          },
+          { id: 'host-done', name: 'Host done', assignee: { kind: 'user' } },
+        ],
+        entryStepId: 'collect',
+      });
+      const task = await svc.context.tasks.create(project.id, {
+        title: 'Open exact review record',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        steps: [
+          {
+            id: 'open',
+            name: 'Open record',
+            prompt: 'Call read_artifact for data/record.md.',
+            toolPolicy: {
+              outputMedium: 'none',
+              allowTools: ['read_artifact', 'read_artifacts'],
+            },
+            gate: {
+              at: 'completion',
+              checks: [
+                kind === 'artifactReadEvidence'
+                  ? { kind, paths: '["data/record.md"]' }
+                  : {
+                      kind: 'corpusReadEvidence',
+                      batchesFile: 'tasks/1/batches.json',
+                      batchNumber: '1',
+                      artifact: true,
+                    },
+              ],
+              onReject: 'open',
+              maxAttempts: 4,
+            },
+            next: 'done',
+          },
+          { id: 'done', name: 'Done', assignee: { kind: 'user' } },
+        ],
+        entryStepId: 'open',
+      });
+      manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
+        const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
+          cause: 'auto',
+        });
+        return outcome.status === 'advanced'
+          ? { status: 'advanced' as const }
+          : {
+              status: 'held' as const,
+              message: outcome.gate.message,
+              messageFingerprint: outcome.gate.messageFingerprint,
+              attempt: outcome.gate.attempt,
+            };
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: project.id,
+        taskRef: task.ref,
+        stepId: 'open',
+      });
+      mock.scriptToolCalls([{ name: 'read_artifact', arguments: { path: 'data/record.md' } }]);
+      mock.script('', 'The exact record was opened.');
+
+      await manager.send(session.id, 'Open the assigned record.');
+
+      const updated = await store.readTask(project.id, task.num);
+      expect(updated?.activeStepId).toBe('done');
+      expect((await store.readTask(project.id, unrelatedHost.num))?.activeStepId).toBe('collect');
+      const createOpts = mock.calls.find((call) => call.kind === 'create')?.opts;
+      const calls = createOpts?.toolAllowlist;
+      expect(createOpts?.toolNamePolicy?.allow).toEqual(
+        new Set(['read_artifact', 'read_artifacts']),
+      );
+      expect(createOpts?.extraMcpServers ?? []).toEqual([]);
+      expect(calls?.has('read_artifact')).toBe(true);
+      expect(calls?.has('advance_task_step')).toBe(false);
+      expect(createOpts?.terminalToolPolicy).toEqual({
+        toolNames: ['read_artifact', 'read_artifacts'],
+        fallbackText: 'Assigned records opened.',
+        maxClosingChars: 120,
+      });
+      expect(createOpts?.tuning?.toolChoice).toBe('required');
+      expect(createOpts?.tuning?.reasoning.enableThinking).toBe(false);
+      expect(createOpts?.tuning?.reasoning.thinkingBudget).toBeUndefined();
+      expect(createOpts?.tuning?.sampling.maxTokens).toBeLessThanOrEqual(512);
+      // The successful read is both the action and the durable proof. Once it
+      // advances the task, the predecessor must not receive the generic
+      // read-only recovery prompt.
+      expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+    },
+    30_000,
+  );
+
+  it.each(['missing-read', 'invalid-report'] as const)(
+    'keeps a terminal artifact checkpoint held when its %s gate rejects',
+    async (defect) => {
+      const project = await store.createProject({ name: `Held terminal checkpoint ${defect}` });
+      await store.writeProjectArtifact(project.id, 'source.json', '{"fact":"Required source"}');
+      const task = await svc.context.tasks.create(project.id, {
+        title: 'Validate final checkpoint',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        steps: [
+          {
+            id: 'work',
+            name: 'Submit report',
+            terminal: true,
+            prompt: 'Write the completed report.',
+            toolPolicy: {
+              outputMedium: 'artifact',
+              allowTools: ['read_artifact', 'write_artifact'],
+            },
+            advanceWhen: {
+              file: 'report.json',
+              artifact: true,
+              sniff: 'json-valid',
+              requireChange: true,
+            },
+            gate: {
+              at: 'completion',
+              maxAttempts: 1,
+              checks:
+                defect === 'missing-read'
+                  ? [{ kind: 'artifactReadEvidence', paths: '["source.json"]' }]
+                  : [
+                      {
+                        kind: 'jsonPathEquals',
+                        file: 'report.json',
+                        artifact: true,
+                        path: 'complete',
+                        value: true,
+                      },
+                    ],
+            },
+          },
+        ],
+        entryStepId: 'work',
+      });
+      manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
+        const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
+          cause: 'auto',
+        });
+        return outcome.status === 'advanced'
+          ? { status: 'advanced' as const }
+          : {
+              status: 'held' as const,
+              message: outcome.gate.message,
+              messageFingerprint: outcome.gate.messageFingerprint,
+              attempt: outcome.gate.attempt,
+              paused: outcome.gate.paused,
+            };
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: project.id,
+        taskRef: task.ref,
+        stepId: 'work',
+      });
+      mock.scriptToolCalls([
+        {
+          name: 'write_artifact',
+          arguments: {
+            path: 'report.json',
+            jsonContent: { complete: defect !== 'invalid-report' },
+          },
+        },
+      ]);
+      mock.script('', 'Checkpoint written.');
+      await manager.send(session.id, 'Submit the report.');
+      const updated = await store.readTask(project.id, task.num);
+      expect(updated?.status).toBe('paused');
+      expect(updated?.activeStepId).toBe('work');
+      expect(updated?.craftbook.steps[0]?.gateAttempts).toBe(1);
+      expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+      expect(await store.readProjectArtifact(project.id, 'report.json')).toContain('complete');
+    },
+    30_000,
+  );
+
+  it('repairs a rejected terminal artifact checkpoint within the original gate budget', async () => {
+    const project = await store.createProject({ name: 'Repair terminal checkpoint' });
     const task = await svc.context.tasks.create(project.id, {
-      title: 'Open exact review record',
+      title: 'Submit valid report',
       assignee: { kind: 'gezel', gezelId: 'ada' },
       steps: [
         {
-          id: 'open',
-          name: 'Open record',
-          prompt: 'Call read_artifact for data/record.md.',
-          toolPolicy: {
-            outputMedium: 'none',
-            allowTools: ['read_artifact', 'read_artifacts'],
+          id: 'work',
+          name: 'Submit report',
+          terminal: true,
+          prompt: 'Save the complete report.',
+          toolPolicy: { outputMedium: 'artifact', allowTools: ['write_artifact'] },
+          advanceWhen: {
+            file: 'report.json',
+            artifact: true,
+            sniff: 'json-valid',
+            requireChange: true,
           },
           gate: {
             at: 'completion',
+            maxAttempts: 3,
             checks: [
               {
-                kind: 'corpusReadEvidence',
-                batchesFile: 'tasks/1/batches.json',
-                batchNumber: '1',
+                kind: 'jsonPathEquals',
+                file: 'report.json',
                 artifact: true,
+                path: 'complete',
+                value: true,
               },
             ],
-            onReject: 'open',
-            maxAttempts: 4,
           },
-          next: 'done',
         },
-        { id: 'done', name: 'Done', assignee: { kind: 'user' } },
       ],
-      entryStepId: 'open',
+      entryStepId: 'work',
     });
+    const outcomes: string[] = [];
     manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
       const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
         cause: 'auto',
       });
+      outcomes.push(outcome.status);
       return outcome.status === 'advanced'
         ? { status: 'advanced' as const }
         : {
@@ -1119,41 +1331,39 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
             message: outcome.gate.message,
             messageFingerprint: outcome.gate.messageFingerprint,
             attempt: outcome.gate.attempt,
+            paused: outcome.gate.paused,
           };
     });
     const session = await manager.createSession({
       gezelId: 'ada',
       projectId: project.id,
       taskRef: task.ref,
-      stepId: 'open',
+      stepId: 'work',
     });
-    mock.scriptToolCalls([{ name: 'read_artifact', arguments: { path: 'data/record.md' } }]);
-    mock.script('', 'The exact record was opened.');
-
-    await manager.send(session.id, 'Open the assigned record.');
-
+    mock.scriptToolCalls([
+      {
+        name: 'write_artifact',
+        arguments: { path: 'report.json', jsonContent: { complete: false } },
+      },
+    ]);
+    mock.scriptToolCalls([
+      {
+        name: 'write_artifact',
+        arguments: { path: 'report.json', jsonContent: { complete: true } },
+      },
+    ]);
+    mock.script('', 'Checkpoint written.');
+    mock.script('', 'Corrected checkpoint written.');
+    await manager.send(session.id, 'Submit the report.');
     const updated = await store.readTask(project.id, task.num);
-    expect(updated?.activeStepId).toBe('done');
-    expect((await store.readTask(project.id, unrelatedHost.num))?.activeStepId).toBe('collect');
-    const createOpts = mock.calls.find((call) => call.kind === 'create')?.opts;
-    const calls = createOpts?.toolAllowlist;
-    expect(createOpts?.toolNamePolicy?.allow).toEqual(new Set(['read_artifact', 'read_artifacts']));
-    expect(createOpts?.extraMcpServers ?? []).toEqual([]);
-    expect(calls?.has('read_artifact')).toBe(true);
-    expect(calls?.has('advance_task_step')).toBe(false);
-    expect(createOpts?.terminalToolPolicy).toEqual({
-      toolNames: ['read_artifact', 'read_artifacts'],
-      fallbackText: 'Assigned records opened.',
-      maxClosingChars: 120,
-    });
-    expect(createOpts?.tuning?.toolChoice).toBe('required');
-    expect(createOpts?.tuning?.reasoning.enableThinking).toBe(false);
-    expect(createOpts?.tuning?.reasoning.thinkingBudget).toBeUndefined();
-    expect(createOpts?.tuning?.sampling.maxTokens).toBeLessThanOrEqual(512);
-    // The successful read is both the action and the durable proof. Once it
-    // advances the task, the predecessor must not receive the generic
-    // read-only recovery prompt.
-    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+    expect(outcomes).toEqual(['held', 'advanced']);
+    expect(updated?.status).toBe('complete');
+    expect(updated?.craftbook.steps[0]?.gate?.maxAttempts).toBe(3);
+    expect(updated?.craftbook.steps[0]?.gateAttemptHistory).toHaveLength(1);
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(2);
+    expect(
+      JSON.parse((await store.readProjectArtifact(project.id, 'report.json')) ?? 'null'),
+    ).toEqual({ complete: true });
   }, 30_000);
 
   it('completes a terminal artifact step after its checkpoint write passes the gate', async () => {
@@ -1175,6 +1385,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
             file: 'tasks/review/observations.md',
             artifact: true,
             minBytes: 20,
+            requireChange: true,
           },
           gate: {
             at: 'completion',

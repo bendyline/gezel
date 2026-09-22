@@ -26,6 +26,78 @@ const verificationChannel = `
 `;
 
 describe('evaluateGate', () => {
+  it('holds a valid report until every task-bound artifact has observed read coverage', async () => {
+    const paths = ['brief.json', 'sources-1.json', 'sources-2.json'];
+    const checks = [
+      { kind: 'sniff' as const, file: 'report.json', artifact: true, sniff: 'json-valid' as const },
+      { kind: 'artifactReadEvidence' as const, paths: JSON.stringify(paths) },
+    ];
+    const files = splitReader({}, { 'report.json': '{"approved":true}', 'manifest.json': '[]' });
+    const slices = paths
+      .slice(0, 2)
+      .map((path) => ({ path, startLine: 1, endLine: 5, totalLines: 5 }));
+    const deps = { corpusReadEvidence: async () => ({ observable: true, slices }) };
+    const held = await evaluateGate(checks, files, deps);
+    expect(held.pass).toBe(false);
+    expect(held.checks[0]?.ok).toBe(true);
+    expect(held.checks[1]?.remaining).toBe(1);
+    expect(held.checks[1]?.evidence).toEqual({
+      expectedRecords: 3,
+      missingRecords: ['sources-2.json'],
+    });
+    // The model's report and an empty manifest cannot substitute for a read.
+    slices.push({ path: 'sources-2.json', startLine: 1, endLine: 5, totalLines: 5 });
+    expect((await evaluateGate(checks, files, deps)).pass).toBe(true);
+  });
+
+  it('accepts overlapping out-of-order slices only when their union covers the exact artifact', async () => {
+    const check = { kind: 'artifactReadEvidence' as const, paths: '["source.json"]' };
+    const slices = [
+      { path: 'source.json', startLine: 6, endLine: 10, totalLines: 10 },
+      { path: 'source.json', startLine: 1, endLine: 4, totalLines: 10 },
+      { path: 'other/source.json', startLine: 1, endLine: 10, totalLines: 10 },
+    ];
+    const deps = { corpusReadEvidence: async () => ({ observable: true, slices }) };
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(false);
+    slices.push({ path: 'source.json', startLine: 4, endLine: 7, totalLines: 10 });
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(true);
+    slices.push({ path: 'source.json', startLine: 1, endLine: 11, totalLines: 11 });
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(false);
+  });
+
+  it.each([
+    '{{paths}}',
+    'null',
+    '[]',
+    '{}',
+    '[3]',
+    '[""]',
+    '["  "]',
+    '["a","a"]',
+    '["{{unresolved}}"]',
+  ])('fails closed on malformed artifact read paths %s', async (paths) => {
+    const result = await evaluateGate([{ kind: 'artifactReadEvidence', paths }], reader({}), {
+      corpusReadEvidence: async () => ({ observable: true, slices: [] }),
+    });
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toContain('fail-closed');
+  });
+
+  it('fails closed when artifact read history is unavailable or unobservable', async () => {
+    const check = { kind: 'artifactReadEvidence' as const, paths: '["a.json"]' };
+    expect((await evaluateGate([check], reader({}))).pass).toBe(false);
+    expect(
+      (
+        await evaluateGate([check], reader({}), {
+          corpusReadEvidence: async () => ({
+            observable: false,
+            slices: [{ path: 'a.json', startLine: 1, endLine: 1, totalLines: 1 }],
+          }),
+        })
+      ).pass,
+    ).toBe(false);
+  });
+
   it('corpusBatchObservations accepts equivalent heading levels and requires every assigned path', async () => {
     const batchesFile = 'pr-review/batches.json';
     const file = 'pr-review/observations-1.md';

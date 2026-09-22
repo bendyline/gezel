@@ -748,10 +748,27 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
       }
       const header = result.fuzzy ? `(matched ${result.path} by basename)\n` : '';
       const sliceStart = artifactSliceStart(sliceArgs, result.totalLines, result.linesReturned);
-      const sliceTail =
-        result.hasMore || result.linesReturned !== result.totalLines
-          ? `\n\n…[lines ${result.linesReturned} of ${result.totalLines}; ${result.hasMore ? 'more available' : 'this is the last slice'}. Re-call with \`startLine\` / \`endLine\` to read more.]`
-          : '';
+      const sliceEnd = sliceStart + Math.max(0, result.linesReturned - 1);
+      const emptyRequested = head === 0 || tail === 0 || lines?.count === 0;
+      const beyondEnd =
+        !emptyRequested && result.linesReturned === 0 && sliceStart > result.totalLines;
+      let sliceTail = '';
+      if (beyondEnd) {
+        // The service's legacy hasMore also counts omitted *earlier* lines.
+        // Treating that as forward pagination sent a local reviewer into a
+        // loop requesting lines 1201–1600 of a 172-line artifact until timeout.
+        sliceTail = `\n\n[End of file: ${result.totalLines} total lines. No lines exist at or after requested startLine ${sliceStart}; do not page further.]`;
+      } else if (emptyRequested) {
+        sliceTail = `\n\n[No lines requested; file has ${result.totalLines} total lines.]`;
+      } else if (result.linesReturned !== result.totalLines) {
+        const earlier = sliceStart > 1 ? ' Earlier lines are not included in this slice.' : '';
+        const nextStart = sliceEnd + 1;
+        const continuation =
+          nextStart <= result.totalLines
+            ? ` Next: ${renderExactToolCall('read_artifact', { path: result.path, startLine: nextStart, endLine: Math.min(result.totalLines, nextStart + WORKSPACE_READ_MAX_RANGE_LINES - 1) })}`
+            : ' End of file; no later lines.';
+        sliceTail = `\n\n[lines ${sliceStart}-${sliceEnd} of ${result.totalLines}.${earlier}${continuation}]`;
+      }
       return {
         content: [{ type: 'text' as const, text: header + result.content + sliceTail }],
         structuredContent: {
@@ -760,10 +777,12 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
           fuzzy: result.fuzzy,
           content: result.content,
           startLine: sliceStart,
-          endLine: sliceStart + Math.max(0, result.linesReturned - 1),
+          endLine: sliceEnd,
           linesReturned: result.linesReturned,
           totalLines: result.totalLines,
-          hasMore: result.hasMore,
+          hasMore: emptyRequested
+            ? result.totalLines > 0
+            : !beyondEnd && sliceEnd < result.totalLines,
         },
       };
     },

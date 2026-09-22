@@ -94,6 +94,17 @@ export { isHttpSpec, isInMemorySpec, isStdioSpec } from './mcp-spec.js';
  */
 export const MAX_TOOL_OUTPUT_CHARS = 80_000;
 
+export interface ToolOutputBudgetOptions {
+  budgetChars?: number;
+  numCtxTokens?: number;
+  /** Reclaim context for this result before capping it. Receives only its
+   * character count, bounded by the ordinary output ceiling. The returned
+   * budget is still subject to all normal caps. */
+  prepareOutputBudget?: (resultChars: number) => Promise<number>;
+  onImages?: (images: Array<{ base64: string; mimeType: string }>) => void;
+  onApprovalPending?: () => void;
+}
+
 /**
  * Maximum UTF-8 JSON size copied from an MCP result's `structuredContent`
  * into a durable tool-call event. This intentionally sits above the 100 KB
@@ -898,12 +909,7 @@ export class McpBridge {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts?: {
-      budgetChars?: number;
-      numCtxTokens?: number;
-      onImages?: (images: Array<{ base64: string; mimeType: string }>) => void;
-      onApprovalPending?: () => void;
-    },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<string> {
     const rich = await this.callToolRich(name, args, opts);
     if (!rich.isError && rich.images.length) opts?.onImages?.(rich.images);
@@ -1028,7 +1034,7 @@ export class McpBridge {
   async callToolRich(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<{
     text: string;
     images: Array<{ base64: string; mimeType: string }>;
@@ -1282,12 +1288,24 @@ export class McpBridge {
       if (!isError) {
         redactedText = redactString(combined || '(empty)', this.knownSecretValues);
         cap = opts?.budgetChars ?? MAX_TOOL_OUTPUT_CHARS;
+        if (opts?.prepareOutputBudget) {
+          try {
+            const prepared = await opts.prepareOutputBudget(
+              Math.min(redactedText.length, MAX_TOOL_OUTPUT_CHARS),
+            );
+            if (Number.isFinite(prepared) && prepared >= 0) cap = prepared;
+          } catch {
+            // The tool already ran. Deliver its result using the original
+            // conservative budget; never retry a mutation because recovery failed.
+            log.warn('Could not prepare tool-output headroom; retaining the original cap');
+          }
+        }
         capped = capToolOutput(
           redactedText,
           cap,
           opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : undefined,
         );
-        deliveredResultTruncated = capped.length !== redactedText.length;
+        deliveredResultTruncated = capped !== redactedText;
       }
       if (this.onToolCall) {
         try {
@@ -1313,7 +1331,7 @@ export class McpBridge {
             startedAtMs: start,
             durationMs: Date.now() - start,
             success: !isError,
-            ...(deliveredResultTruncated ? { deliveredResultTruncated: true } : {}),
+            ...(!isError ? { deliveredResultTruncated } : {}),
             ...(redactedError ? { errorMessage: redactedError } : {}),
             ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),

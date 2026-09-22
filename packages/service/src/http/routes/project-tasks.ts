@@ -35,9 +35,11 @@ import { ConnectorPrepError } from '../../connectors/task-prep.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
 import {
+  type CompleteStepOutcome,
   ConnectorSetupRequiredError,
   CraftbookSetupRequiredError,
   StepCompletionBlockedError,
+  TaskNotActiveError,
 } from '../../tasks/manager.js';
 import { retryPausedTask } from '../../tasks/retry.js';
 import type { ServiceContext } from '../context.js';
@@ -332,7 +334,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
-    let outcome: Awaited<ReturnType<typeof ctx.tasks.completeStepChecked>>;
+    let outcome: CompleteStepOutcome;
     try {
       outcome = await ctx.tasks.completeStepChecked(
         projectId,
@@ -342,6 +344,18 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         body.force ? { force: true, cause: 'user' } : { cause: 'model' },
       );
     } catch (err) {
+      if (err instanceof TaskNotActiveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.responseCode,
+            taskRef: err.taskRef,
+            stepId: err.stepId,
+            effectiveStatus: err.effectiveStatus,
+          },
+          409,
+        );
+      }
       // A completion the task's state refuses is a 409 the caller renders,
       // never a 500 — the catch-all scrubs the body, and the message IS
       // the instruction.

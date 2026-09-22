@@ -248,6 +248,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
     case 'corpusCoverage':
       return `corpusCoverage ${c.file} ${c.corpusDir}`;
+    case 'artifactReadEvidence':
+      return `artifactReadEvidence ${c.paths}`;
     case 'corpusReadEvidence':
       return `corpusReadEvidence ${c.batchesFile} batch=${c.batchNumber}`;
     case 'corpusBatchObservations':
