@@ -3741,6 +3741,28 @@ async function lastAbortTeachingWarning(
   return undefined;
 }
 
+const MISSING_TARGET_WORDING =
+  /\b(?:not present|not found|missing|does not exist|doesn't exist|absent|never created)\b/i;
+
+/**
+ * Does the scenario check itself report that `filePath` is not on disk?
+ *
+ * Only a named path counts. A bare "missing=[tests-present, …]" signal list
+ * names gates, not files, and inferring a path from a gate id would guess —
+ * the cost of guessing wrong here is routing an existing file into a
+ * full-rewrite, which throws away work the patch branch would have kept.
+ */
+export function sniffReportsMissingTarget(
+  filePath: string | null | undefined,
+  failReason: string | undefined,
+): boolean {
+  if (!filePath || !failReason) return false;
+  if (!MISSING_TARGET_WORDING.test(failReason)) return false;
+  if (failReason.includes(filePath)) return true;
+  const base = filePath.split('/').pop() ?? '';
+  return base.length > 3 && failReason.includes(base);
+}
+
 export function buildPoisonedSessionRecoveryMessage(args: {
   lastTurnError?: string;
   /** The aborting guard's teaching text — preferred over the toast. */
@@ -3776,7 +3798,19 @@ export function buildPoisonedSessionRecoveryMessage(args: {
     /(?:\b(?:replace_lines|replace_in_file|apply_patch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic|(?:same|exact|identical)\s+arguments|repeat(?:ed|ing)?)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replace_lines|replace_in_file|apply_patch)\b)/i.test(
       errorForStrategy,
     );
-  const existingCheckedFile = !!filePath && !!sniff && sniff.bytes > 0;
+  // `sniff.bytes` is the SCENARIO's scored byte count, not this file's. A run
+  // that has written three of four deliverables reports healthy bytes while
+  // the one file we are about to send the model to patch does not exist, and
+  // the patch branch then says "read it once, then patch, do not replace the
+  // complete file" in the same message whose own failure line says it is not
+  // present. Wild-caught on schema-migration: `tests/migrate.test.ts` was
+  // missing at bytes=3088, and every repair turn was spent on a file that
+  // could not be read or patched into existence.
+  const existingCheckedFile =
+    !!filePath &&
+    !!sniff &&
+    sniff.bytes > 0 &&
+    !sniffReportsMissingTarget(filePath, sniff.failReason);
   const editLine =
     taskGraphLine ??
     (filePath

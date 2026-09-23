@@ -3,6 +3,7 @@ import { salvageImmediateFileWriteArgs } from './immediate-write-salvage.js';
 import {
   LocalTurnPolicy,
   compactLocalTurn,
+  isMissingRepairTargetOutput,
   planFileTurn,
   turnCheckpoint,
 } from './local-turn-policy.js';
@@ -148,5 +149,44 @@ describe('shared compaction', () => {
     );
     await expect(compactLocalTurn(cancelled, a)).rejects.toThrow(/cancelled|stopped/i);
     expect(a.replace).not.toHaveBeenCalled();
+  });
+});
+
+describe('missing repair target detection', () => {
+  // A read reports absence in whatever wording its transport produced, so the
+  // read arm has to be as broad as cross-drawer-read-tools' own sniff.
+  it.each([
+    'read_file "tests/migrate.test.ts": file not found in workspace: tests/migrate.test.ts',
+    'read_file "tests/migrate.test.ts": not found',
+    'read_file "tests/migrate.test.ts": ENOENT: no such file or directory',
+    'read_file "tests/migrate.test.ts": 404',
+  ])('treats a read that answers absence as a missing target: %s', (output) => {
+    expect(isMissingRepairTargetOutput('read_file', output)).toBe(true);
+  });
+
+  it('recognizes the surgical-edit wording', () => {
+    expect(
+      isMissingRepairTargetOutput(
+        'replace_in_file',
+        'Cannot edit tests/migrate.test.ts: file does not exist (ENOENT: no such file or directory). Use `write_file` to create it first.',
+      ),
+    ).toBe(true);
+  });
+
+  // The load-bearing negative: the file IS there and only the anchor is
+  // missing. Reading this as absence would rewrite a whole file that just
+  // needed a better `find` string.
+  it('does not treat a missing find-anchor as a missing file', () => {
+    expect(
+      isMissingRepairTargetOutput(
+        'replace_in_file',
+        '`find` string was not found in tests/migrate.test.ts',
+      ),
+    ).toBe(false);
+  });
+
+  it('does not fire on ordinary tool failures', () => {
+    expect(isMissingRepairTargetOutput('validate', 'tsc: 3 errors')).toBe(false);
+    expect(isMissingRepairTargetOutput('read_file', 'ok: 42 lines')).toBe(false);
   });
 });

@@ -3,6 +3,7 @@
 # stable-diffusion.cpp upstream.
 #
 # Emits: native/build/<platform>/gezel-sd-server
+#        (or native/build/<platform>-<backend>/ when SD_BACKEND_TAG=1)
 #
 # Detects the platform and enables the appropriate accelerator:
 #   - darwin-arm64: Metal (-DSD_METAL=ON)
@@ -160,7 +161,19 @@ if [[ "$os" == "Linux" ]]; then
 fi
 
 # ── 6. Copy into the canonical output tree ─────────────────────────
-out_dir="$repo_root/native/build/$platform"
+# SD_BACKEND_TAG=1 emits to `native/build/<platform>-<backend>/` instead of
+# the bare platform dir, mirroring llama-cpp's LLAMA_BACKEND_TAG. sd-cpp ships
+# ONE portable binary per platform in the bare key plus, on Linux, a CUDA
+# build in the `-cuda` key it shares with llama-server and ds4 — so a host
+# with an NVIDIA GPU gets an accelerated sd-server while every other host
+# still resolves a binary that runs. Without this the CUDA leg would overwrite
+# the portable one at the same path and ship a binary that dies at exec on any
+# machine without the CUDA runtime.
+if [[ "${SD_BACKEND_TAG:-0}" == "1" ]]; then
+  out_dir="$repo_root/native/build/$platform-$backend"
+else
+  out_dir="$repo_root/native/build/$platform"
+fi
 mkdir -p "$out_dir"
 # Ship under a gezel- prefix (gezel-sd-server) for process attribution while
 # preserving the stable-diffusion.cpp lineage. Only the installed file is
@@ -243,6 +256,33 @@ if [[ "$os" == "Linux" && "$backend" == "vulkan" ]]; then
       echo "[build]        expected it under $bundle_dir — the binary would depend on a host path" >&2
       exit 1
     fi
+  fi
+fi
+
+# ── 7b. Linux CUDA: rpath only — llama's CUDA leg owns the redistributables ──
+# Same arrangement ds4 uses, for the same reason. A CUDA sd-server dynamically
+# links libcudart / libcublas, and it emits into the `-cuda` key where
+# llama-server's CUDA leg has already staged them from the same toolkit. Do NOT
+# stage our own copies: two writers into one directory would let merge order
+# decide which build survives, and staging from a different path than llama's
+# leg has already produced two different libcudart builds of the same version
+# (see native/engines/ds4/build.sh §5b). One writer, everyone else sets rpath.
+#
+# The rpath itself is load-bearing: sd-cpp links everything else statically and
+# so carries NO rpath by default, which is why the Vulkan branch above had to
+# add one. Without this the shipped binary cannot see the sibling CUDA
+# libraries and dies at exec on the user's machine — never in CI, where the
+# toolkit is installed system-wide.
+if [[ "$os" == "Linux" && "$backend" == "cuda" ]]; then
+  if ! command -v patchelf >/dev/null 2>&1; then
+    echo "[build] installing patchelf for rpath fixup"
+    sudo apt-get install -y --no-install-recommends patchelf || true
+  fi
+  patchelf --set-rpath '$ORIGIN' "$out_dir/$server_name"
+  echo "[build] patchelf set rpath \$ORIGIN on $server_name"
+  if command -v ldd >/dev/null 2>&1; then
+    echo "[build] cuda linkage:"
+    env -u LD_LIBRARY_PATH ldd "$out_dir/$server_name" 2>/dev/null | sed 's/^/[build]   /' || true
   fi
 fi
 

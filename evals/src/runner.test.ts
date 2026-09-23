@@ -51,6 +51,7 @@ import {
   slugifyForDirName,
   sniffArtifactHasScored,
   sniffKeyToWorkspaceFilePath,
+  sniffReportsMissingTarget,
   summarizeInflightTurnsForLog,
   summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
@@ -838,6 +839,37 @@ describe('poisoned-session recovery', () => {
     );
     expect(message).toContain('Do not replace the complete file');
     expect(message).not.toContain('`write_file`');
+  });
+
+  it('uses a complete write when the named target is missing despite healthy scenario bytes', () => {
+    // `bytes` is the SCENARIO's total, not this file's. schema-migration had
+    // bytes=3088 from deliverables it HAD written while `tests/migrate.test.ts`
+    // did not exist; the patch branch then sent every repair turn at a file
+    // that could not be read or patched into being.
+    const message = buildPoisonedSessionRecoveryMessage({
+      lastTurnError: '`read_file` failed 5 times in a row',
+      filePath: 'tests/migrate.test.ts',
+      sniff: {
+        key: 'source-repair',
+        score: 4,
+        bytes: 3088,
+        failReason: 'tests/migrate.test.ts not present yet',
+      },
+    });
+
+    expect(message).toContain('use `write_file` to write a complete corrected version');
+    expect(message).not.toContain('smallest targeted repair');
+    expect(message).not.toContain('Do not replace the complete file');
+  });
+
+  it('still prefers a targeted patch when the failure is about content, not absence', () => {
+    expect(sniffReportsMissingTarget('src/machine.ts', "expected 'draft' to be 'pending'")).toBe(
+      false,
+    );
+    // A gate-id list names gates, not files — inferring a path would guess.
+    expect(
+      sniffReportsMissingTarget('src/machine.ts', 'missing=[tests-present, tsc-clean]'),
+    ).toBe(false);
   });
 
   it('uses a complete write when the checked file is missing', () => {

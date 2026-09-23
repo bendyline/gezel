@@ -171,6 +171,7 @@ import {
   LOCAL_TURN_LIMITS,
   LocalTurnPolicy,
   compactLocalTurn,
+  isMissingRepairTargetOutput,
   mutationOnlyRepairTools as mutationOnlyScenarioRepairTools,
   patchOnlyRepairTools as patchOnlyExistingSourceEditTools,
   planFileTurn,
@@ -3110,6 +3111,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         : extractPrerequisiteRepairReadPaths(prompt);
     let prerequisiteRepairNoProgressNudges = 0;
     let scenarioRepairFailedMutationCalls = 0;
+    let scenarioRepairMissingTargetCalls = 0;
     let scenarioRepairDiagnosticReadRetryPending = false;
     const scenarioRepairReadFilePaths: string[] = [];
     let existingSourceEditNoMutationNudges = 0;
@@ -3374,10 +3376,16 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             : hasExplicitFullFileRewriteWording(prompt));
         const fullRewriteScenarioRepairTurn =
           sourceFileScenarioRepairTurn && explicitFullRewriteScenarioRepairTurn;
+        // A confirmed-missing target flips to the rewrite surface on the FIRST
+        // sighting, not the second: the patch surface cannot create a file, so
+        // a second read of a path that is not there teaches nothing the first
+        // did not. See `isMissingRepairTargetOutput`.
         const sourceRewriteFallback =
           sourceFileScenarioRepairTurn &&
           !fullRewriteScenarioRepairTurn &&
-          (scenarioRepairNoMutationNudges >= 2 || scenarioRepairFailedMutationCalls >= 2);
+          (scenarioRepairNoMutationNudges >= 2 ||
+            scenarioRepairFailedMutationCalls >= 2 ||
+            scenarioRepairMissingTargetCalls >= 1);
         const existingSourceRewriteFallback =
           existingSourceEditTurn &&
           (existingSourceEditNoMutationNudges >= 2 || existingSourceEditFailedMutationCalls >= 2);
@@ -3398,8 +3406,13 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 scenarioRepairReadFilePaths.at(-1) ??
                 null)
               : null;
+        // Never demand a refresh read of a target we already know is absent:
+        // this branch pins a read_file-ONLY surface and orders the model to
+        // emit exactly that call, so on a missing path it re-enters the same
+        // dead end with fewer tools than before.
         const sourceRewriteRefreshReadPending =
           sourceRewriteFallback &&
+          scenarioRepairMissingTargetCalls === 0 &&
           scenarioRepairWriteTarget !== null &&
           !scenarioRepairReadFilePaths.some(
             (path) =>
@@ -6300,6 +6313,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             log.warn(
               `[llama-cpp] direct-file-work helper execution failed; forcing helper rewrite path=${DIRECT_FILE_WORK_SCRIPT_HELPER_PATH}`,
             );
+          }
+          if (
+            scenarioFileRepairTurn &&
+            isMissingRepairTargetOutput(call.function.name, output)
+          ) {
+            scenarioRepairMissingTargetCalls += 1;
           }
           if (
             scenarioFileRepairTurn &&
