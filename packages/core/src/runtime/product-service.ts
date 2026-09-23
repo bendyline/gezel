@@ -76,7 +76,11 @@ import { assertPortableTaskSessionActive } from './task-authority.js';
 import { evaluatePortableTaskGate } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
-import { runPortableToolLoop, toolProtocol } from './tool-loop.js';
+import {
+  type PortableToolListing,
+  type PortableToolSpec,
+  runPortableToolLoop,
+} from './tool-loop.js';
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
 import type { PortableTransformTarget } from './transform.js';
 
@@ -144,6 +148,9 @@ export class PortableProductService {
   private pendingSaveDraftId: string | undefined;
   private changingModel = false;
   private suspended = false;
+  /** The tool listing each conversation last fitted, so later turns skip the
+   * refusals that found it. Stored history only grows, so it never widens again. */
+  private readonly toolListings = new Map<string, PortableToolListing>();
   private status = { busy: false, pendingSave: false, changingModel: false };
   private statusListeners = new Set<() => void>();
   private readonly eventBus = new ChatEventBus();
@@ -613,7 +620,6 @@ export class PortableProductService {
         context.project.about && `### About this project\n${context.project.about}`,
         context.project.missionObjectives &&
           `### Mission objectives\n${context.project.missionObjectives}`,
-        toolProtocol(inventoryTools),
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -716,7 +722,7 @@ export class PortableProductService {
       this.turn = turn;
       this.publishStatus();
       this.emit(session, { type: 'user_message', message: user });
-      turn.finished = this.runTurn(turn, providerId, input, { modelId, ...limits });
+      turn.finished = this.runTurn(turn, providerId, input, { modelId, ...limits }, inventoryTools);
       return { accepted: true, sessionId: id };
     } finally {
       if (!ownsTurn && admission.cancelled && savedSession?.turnStartedAt) {
@@ -759,10 +765,18 @@ export class PortableProductService {
     providerId: MobileProviderId,
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     limits: { modelId: string; contextSize: number; maxTokens: number },
+    inventory: readonly PortableToolSpec[],
   ): Promise<void> {
     const { session } = turn;
     let response: ChatMessage | undefined;
     let failure: string | undefined;
+    const listingKey = [
+      session.id,
+      providerId,
+      limits.modelId,
+      limits.contextSize,
+      limits.maxTokens,
+    ].join(':');
     try {
       const result = await runPortableToolLoop({
         store: this.store,
@@ -772,6 +786,17 @@ export class PortableProductService {
         providerId,
         ...limits,
         messages,
+        tools: {
+          inventory,
+          listing: this.toolListings.get(listingKey),
+          narrowed: (listing) => {
+            this.toolListings.delete(listingKey);
+            this.toolListings.set(listingKey, listing);
+            // Insertion order is recency: forget the longest-idle conversation.
+            if (this.toolListings.size > 64)
+              this.toolListings.delete(this.toolListings.keys().next().value!);
+          },
+        },
         cancelled: () => turn.cancelled,
         checkpoint: async (message) => {
           const index = session.messages.findIndex((item) => item.id === message.id);

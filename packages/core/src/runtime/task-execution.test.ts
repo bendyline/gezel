@@ -192,6 +192,14 @@ describe('shared task transcript continuity', () => {
         'Prompt plus requested output exceeds the context; shorten the transcript or output',
     },
     {
+      lastTurnError:
+        "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.",
+    },
+    {
+      lastTurnError:
+        "This conversation is too long for Android's on-device AI. Start a new conversation.",
+    },
+    {
       messages: [
         {
           id: 'halt',

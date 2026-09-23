@@ -488,6 +488,47 @@ describe('ordinary client against offline product runtime', () => {
     expect(saved.lastTurnError).toContain('native tokenizer');
     expect(saved.messages.some((item) => item.role === 'assistant')).toBe(false);
   });
+
+  it('fits the tool listing to a small native context and remembers the fit', async () => {
+    // The iOS bridge fixture: one token per byte, 8192 context, 256-token replies.
+    const systems: string[] = [];
+    const { service, client } = await setup({
+      models: async () => ({
+        models: [{ id: 'fixture', name: 'Fixture', sizeBytes: 100 }],
+        selectedModelId: 'fixture',
+      }),
+      generate: async (request, onDelta) => {
+        systems.push(request.messages[0]!.content);
+        let tokens = request.maxTokens!;
+        for (const message of request.messages)
+          tokens += new TextEncoder().encode(message.content).byteLength;
+        if (tokens > request.contextSize!)
+          throw new Error(
+            'Prompt plus requested output exceeds the context; shorten the transcript or output',
+          );
+        onDelta({ requestId: request.requestId, delta: 'Hello.' });
+        return { text: 'Hello.', stopReason: 'stop' };
+      },
+    });
+    const gezel = await client.createGezel({ name: 'Native tester', role: 'Helper' });
+    await client.updateConfig({
+      modelContextOverrides: { 'llama-cpp:fixture': 8192 },
+      modelTuning: { fixture: { sampling: { maxTokens: 256 } } },
+    });
+    const session = await client.createChatSession({ gezelId: gezel.id });
+    await client.sendToChatSession(session.id, { message: 'Say hello.' });
+    await settled(service);
+    const saved = await client.getChatSession(session.id);
+    expect(saved.lastTurnError).toBeUndefined();
+    expect(saved.messages.map((item) => item.content)).toEqual(['Say hello.', 'Hello.']);
+    expect(systems[0]).toContain('"parameters"');
+    expect(systems.at(-1)).toContain('- read_file(path: string');
+
+    const attempts = systems.length;
+    await client.sendToChatSession(session.id, { message: 'Once more.' });
+    await settled(service);
+    expect(systems).toHaveLength(attempts + 1);
+  });
   it('retains a completed response on failed final save and blocks mutations until retry succeeds', async () => {
     const files = new MemoryFiles();
     const { service, client } = await setup(
