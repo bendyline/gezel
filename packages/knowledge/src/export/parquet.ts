@@ -7,6 +7,13 @@
  * stores them (provably identical, one third of float32's size), with the
  * dequantisation rule recorded in the file metadata (gezk spec §6).
  *
+ * The bit rule in that metadata follows the catalog's profile: a `sign`
+ * profile stores sign(x), a `centered-sign` profile sign(x − c) with the
+ * profile's center c — which the metadata then carries too, so the Parquet
+ * files alone are enough to binarise a query the way the archive did. (Export
+ * version 2 wrote the plain-sign rule for every profile, which misdescribed
+ * centered-sign catalogs; version 3 fixed that.)
+ *
  * Determinism: rows are read in primary-key order and written single-
  * threaded with insertion order preserved, a fixed codec and level, a fixed
  * row-group size, and no wall-clock metadata — so two exports of one archive
@@ -21,7 +28,7 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { brotliDecompressSync } from 'node:zlib';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
-import { KnowledgeCatalogManifestSchema } from '@bendyline/gezk';
+import { KnowledgeCatalogManifestSchema, embeddingProfileCenter } from '@bendyline/gezk';
 import { extractGezkVerified } from '../archive/read.js';
 import {
   MANIFEST_PATH,
@@ -32,7 +39,8 @@ import { type CatalogDb, openCatalogDatabase } from '../reader/open.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 import { type DuckdbCli, assertDuckdbCli, runDuckdbScript } from './duckdb.js';
 
-export const PARQUET_EXPORT_VERSION = 2;
+/** 3: the bit-rule metadata follows the profile's binary method (was always plain sign). */
+export const PARQUET_EXPORT_VERSION = 3;
 const DEFAULT_ROW_GROUP_SIZE = 32_768;
 /** `read_ndjson` refuses objects above this; a document body can approach MAX_KNOWLEDGE_DOCUMENT_BYTES. */
 const NDJSON_MAX_OBJECT_BYTES = Math.max(64 * 1024 * 1024, MAX_KNOWLEDGE_DOCUMENT_BYTES * 2);
@@ -102,7 +110,7 @@ export async function exportCatalogParquet(
     const staging = join(work, 'ndjson');
     await mkdir(staging, { recursive: true });
     const files: ParquetExportFile[] = [];
-    const metadata = kvMetadata(manifest);
+    const metadata = parquetKvMetadata(manifest);
     const rowGroupSize = opts.rowGroupSize ?? DEFAULT_ROW_GROUP_SIZE;
 
     const router = openCatalogDatabase(join(rootDir, ROUTER_DB_PATH));
@@ -405,7 +413,19 @@ function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function kvMetadata(manifest: KnowledgeCatalogManifest): Record<string, string> {
+/**
+ * The key/value metadata every exported file carries. The bit rule is read
+ * from the profile — never assumed — because a `centered-sign` profile's bits
+ * are meaningless to a reader who binarises a query with plain sign(x). `x`
+ * is the float unit vector the bits were taken from, before int8 rounding, so
+ * recomputing them from `q / 127` can flip the few dimensions within rounding
+ * error of the threshold. Insertion order is the file's key order, so it is
+ * part of the deterministic bytes.
+ */
+export function parquetKvMetadata(manifest: KnowledgeCatalogManifest): Record<string, string> {
+  const binary = manifest.embedding.quantization.binary;
+  // Validates the method/center pairing (throws on a malformed profile).
+  const centered = embeddingProfileCenter(manifest.embedding) !== null;
   return {
     gezk_catalog_id: manifest.id,
     gezk_catalog_version: manifest.version,
@@ -415,7 +435,11 @@ function kvMetadata(manifest: KnowledgeCatalogManifest): Record<string, string> 
     gezk_embedding_model: manifest.embedding.model.repo,
     gezk_embedding_dimensions: String(manifest.embedding.dimensions),
     gezk_embedding_int8: 'symmetric-linear scale 127: x = q / 127',
-    gezk_embedding_bit: 'sign bits, LSB-first, ceil(dimensions/8) bytes: bit = x > 0',
+    gezk_embedding_bit: centered
+      ? 'centered-sign bits, LSB-first, ceil(dimensions/8) bytes: bit = (x - c) > 0, x the float unit vector, c = gezk_embedding_bit_center'
+      : 'sign bits, LSB-first, ceil(dimensions/8) bytes: bit = x > 0, x the float unit vector',
+    gezk_embedding_bit_method: binary.method,
+    ...(centered ? { gezk_embedding_bit_center: JSON.stringify(binary.center) } : {}),
     gezk_parquet_export_version: String(PARQUET_EXPORT_VERSION),
     gezk_license: manifest.license.name,
   };

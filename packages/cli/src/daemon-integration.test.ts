@@ -380,12 +380,23 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       expect(hardStopped.stderr).toBe('');
       expect(hardStopped.stdout).toContain('Hard stop complete:');
       expect(hardStopped.stdout).toContain('Local engines unloaded; Gezel is Reactive.');
+      expect(hardStopped.stdout).toContain(
+        `gezeld is still running (pid ${runtime?.pid}); run \`gezel stop --daemon\``,
+      );
       expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
 
       const stopped = await runCliAtHome(headlessHome, 'stop', '--daemon');
       expect(stopped.stderr).toBe('');
       expect(stopped.stdout).toContain('stopped gezeld pid=');
       expect(runtime ? isProcessAlive(runtime.pid) : true).toBe(false);
+
+      // With the daemon gone, status reports it AND fails, so scripts can gate on it.
+      const down = await runCliAtHome(headlessHome, 'status').then(
+        () => null,
+        (err: { code?: number; stdout?: string }) => err,
+      );
+      expect(down?.code).toBe(1);
+      expect(down?.stdout).toMatch(/gezeld is not running|alive=false/);
     } finally {
       const runtime = await readRuntime(headlessHome).catch(() => null);
       if (runtime && isProcessAlive(runtime.pid)) {

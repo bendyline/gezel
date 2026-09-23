@@ -28,8 +28,10 @@ The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-pac
 gezel start                 ensure the service is running
 gezel start --port 8080 --foreground
                             run it attached, on a fixed port
-gezel status                is it up, and where
-gezel stop                  stop it
+gezel status                is it up, and where (exits 1 if not running or unhealthy)
+gezel stop                  emergency stop: cancel AI work, unload engines,
+                            switch to Reactive — the service keeps running
+gezel stop --daemon         shut the service down
 gezel run "..."             one-shot: send a prompt, print the reply
 ```
 
