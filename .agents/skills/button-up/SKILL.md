@@ -100,11 +100,28 @@ job's log directly instead. It is available as soon as that job finishes:
 gh api repos/bendyline/gezel/actions/jobs/<jobId>/logs > "<scratchpad>\ci-<job>.log"
 ```
 
-Each line starts with a 29-character timestamp. Grep for `##[error]`,
+Each line starts with a 29-character timestamp, and vitest output keeps its
+ANSI colour codes, so grep with `-a` (the logs contain NUL bytes and grep
+otherwise just says "Binary file matches") and strip colours with
+`sed 's/\x1b\[[0-9;]*m//g'` before matching. Grep for `##[error]`,
 `ELIFECYCLE`, ` FAIL `, `error TS`, `Formatter would`, `Error:`, and
 `What went wrong` (Gradle), then read the context around the first real
 error. The step that failed, and the exact command it ran, are in the job's
 workflow under `.github/workflows/` (search for the job's display name).
+
+**New or long-standing?** Before debugging a failing job, check its history
+on this branch:
+
+```bash
+gh run list --workflow <file>.yml --branch <branch> --limit 8 \
+  --json databaseId,headSha,conclusion --jq '.[] | [.databaseId, .headSha[0:8], .conclusion] | @tsv'
+```
+
+A job that fails on every commit may be failing for a *different* reason
+each time. Compare the actual error across runs: fixing an early failure
+often unmasks a deeper one further along the same test, and that is
+progress, not a regression. (Run `--jq` from Bash: PowerShell mangles the
+quotes.)
 
 **Triage every failing check** into one of these:
 
@@ -203,9 +220,13 @@ captured to the scratchpad, and wait for the completion notification:
 pnpm all *> "<scratchpad>\button-up-all-<n>.log"; "EXIT=$LASTEXITCODE"
 ```
 
-The echoed exit code is the verdict, since the log is too long to skim.
-Grep the log for `ELIFECYCLE`, `FAIL`, and `Error:` to find where it
-stopped.
+The echoed exit code is the verdict, since the log is too long to skim. The
+log is also full of deliberate `failed` / `FAILED` / `Error:` warnings from
+tests that exercise failure paths (download retries, refused handoffs, MCP
+connects). To find where it really stopped, match vitest's ` FAIL ` lines
+and `Test Files … failed` summaries, `error TS`, and `[ELIFECYCLE]`, not
+the bare word. If you watch the log live with Monitor, use the same narrow
+pattern, or negative-path tests will flood you with notifications.
 
 It is serial and fail-fast: the first failing sub-script ends the run. When
 it fails:
@@ -215,7 +236,9 @@ it fails:
 2. **Iterate on that piece alone**, not the whole chain:
    - one package's tests: `pnpm --filter <pkg> run test` or a single file
      via the root `node_modules\.bin\vitest.CMD run <file>` with the
-     package as cwd
+     package as cwd. The PowerShell tool keeps the working directory
+     between calls, so wrap it in `Push-Location <pkg>; …; Pop-Location`,
+     or every later pnpm command runs in the wrong place
    - typecheck: `pnpm typecheck` (or `pnpm --filter <pkg> exec tsc --noEmit`)
    - e2e: `pnpm test:e2e:run` / `pnpm test:e2e:web:run` with a spec filter
    - published/package checks: `pnpm test:published`, `pnpm check:packages`
@@ -238,6 +261,19 @@ it fails:
   `git diff` to judge whether a failure touches the branch's changes. Both
   kinds must be fixed for the branch to be clean, but say which is which in
   the report.
+- **New failures between runs.** A test that passed last run and now fails,
+  in code you did not touch, usually means someone else changed the tree
+  mid-run. Check `git rev-parse --short HEAD` and `git status --porcelain`
+  against the snapshot before debugging. If the other change is clearly
+  deliberate (a redesign, a removed feature), update the test to match it,
+  minimally, and flag it in the report. If it looks half-finished, leave it
+  alone and report it: the author is probably still working on it.
+- **Pin bumps.** A recent gilde, squisq, or engine pin bump often breaks a
+  test that asserted the old pinned *content* (a count, an empty list, a
+  specific id). CI may not have shown it yet if an earlier job step failed
+  first. Make the test independent of the content, asserting the behaviour
+  it exists to check, rather than updating it to the new numbers, which
+  would break again at the next bump.
 
 ## The loop
 
@@ -252,6 +288,11 @@ PR → A → B → C
 - Any other edit → restart at B.
 - Done when **B and C pass consecutively with no edits between them**, and
   every failing PR check has been triaged.
+- The loop only converges on a tree nobody else is editing. If a *second*
+  concurrent change lands during your run (new modified files, or files
+  whose mtime keeps moving), stop and ask whether another session is still
+  working. Report what you have instead of restarting a 40-minute
+  `pnpm all` against a moving target.
 - If five full cycles pass without converging, or a fix needs a decision
   that belongs to the user (dependency change, deleting a test, changing a
   guard's budget, an environmental failure you cannot clear), stop and

@@ -806,6 +806,10 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'list_tasks',
   'get_task',
   'read_task_notes',
+  // Oversight of the craftbook runs it launches — Default has no voorman.
+  'manage_task',
+  'assign_task',
+  'write_task_note',
   'search',
   'search_memory',
   'save_memory',

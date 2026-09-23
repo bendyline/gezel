@@ -18,6 +18,7 @@ import { type KnowledgeEmbeddingProfile, createLogger } from '@bendyline/gezel';
 import {
   EmbedderUnavailableError,
   KNOWLEDGE_EMBEDDING_PROFILES,
+  type ModelDownloadProgress,
   type ProfileEmbedder,
   createProfileEmbedder,
   resolveTransformersModelOptions,
@@ -330,6 +331,8 @@ const PROFILE_IDLE_MS = 10 * 60 * 1000;
 
 interface ProfileEntry {
   promise: Promise<ProfileEmbedder>;
+  /** Everyone waiting on this load who wants its download progress — including callers that joined late. */
+  progressListeners: Set<(progress: ModelDownloadProgress) => void>;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -347,11 +350,18 @@ function armIdleDisposal(id: string, entry: ProfileEntry): void {
 /** Load (and cache) a catalog profile's embedder; typed load failures like the default pipeline's. */
 export async function loadProfileEmbedder(
   profile: KnowledgeEmbeddingProfile,
+  onDownloadProgress?: (progress: ModelDownloadProgress) => void,
 ): Promise<ProfileEmbedder> {
   let entry = profileEmbedders.get(profile.id);
   if (!entry) {
     const cacheDir = process.env[HF_CACHE_DIR_ENV];
-    const promise = createProfileEmbedder(profile, cacheDir ? { cacheDir } : {}).catch((err) => {
+    const progressListeners = new Set<(progress: ModelDownloadProgress) => void>();
+    const promise = createProfileEmbedder(profile, {
+      ...(cacheDir ? { cacheDir } : {}),
+      onDownloadProgress: (progress) => {
+        for (const listener of progressListeners) listener(progress);
+      },
+    }).catch((err) => {
       profileEmbedders.delete(profile.id);
       if (err instanceof PipelineLoadError) throw err;
       const missing =
@@ -362,21 +372,29 @@ export async function loadProfileEmbedder(
         !missing && isRetryablePipelineLoadFailure(err),
       );
     });
-    entry = { promise };
+    entry = { promise, progressListeners };
     profileEmbedders.set(profile.id, entry);
     log.info(`[embed] loading knowledge profile ${profile.id} (${profile.model.repo})`);
   }
   armIdleDisposal(profile.id, entry);
-  return entry.promise;
+  if (!onDownloadProgress) return entry.promise;
+  const { progressListeners } = entry;
+  progressListeners.add(onDownloadProgress);
+  try {
+    return await entry.promise;
+  } finally {
+    progressListeners.delete(onDownloadProgress);
+  }
 }
 
 /** Embed SEARCH QUERIES with a catalog's own profile (its query instruction applied). */
 export async function runProfileQueryEmbed(
   texts: string[],
   profile: KnowledgeEmbeddingProfile,
+  onDownloadProgress?: (progress: ModelDownloadProgress) => void,
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
-  const embedder = await loadProfileEmbedder(profile);
+  const embedder = await loadProfileEmbedder(profile, onDownloadProgress);
   const out: number[][] = [];
   for (const text of texts) out.push(Array.from(await embedder.embedQuery(capText(text))));
   return out;

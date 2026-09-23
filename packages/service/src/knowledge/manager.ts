@@ -38,7 +38,11 @@ import {
   sameVectorSpace,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { compareCatalogVersions, knowledgeEmbeddingProfile } from '@bendyline/gezel-knowledge';
+import {
+  type ModelDownloadProgress,
+  compareCatalogVersions,
+  knowledgeEmbeddingProfile,
+} from '@bendyline/gezel-knowledge';
 import {
   knowledgeCatalogVersionDir,
   knowledgeCatalogsDir,
@@ -78,6 +82,8 @@ const log = createLogger('knowledge');
 /** Explicit-search shard budget (S) across every active catalog (§3.4). */
 const ROUTE_BUDGET_EXPLICIT = 6;
 const FINAL_K = 24;
+/** Same cadence as the catalog download's own progress (download-with-retry). */
+const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
 /** Finished jobs stay pollable for a minute: the CLI and older cards poll `/jobs/:id`. */
 const JOB_TTL_MS = 60_000;
 const AUTO_UPDATE_STARTUP_DELAY_MS = 10 * 60_000;
@@ -192,7 +198,11 @@ export interface KnowledgeManagerOptions {
   /** Project policy lookup (Store.getProject wrapper); null = no policy. */
   projectPolicy?: (projectId: string) => Promise<ProjectKnowledgeCatalogs | null>;
   /** Test seam: embed a query in a catalog profile's space (default: the embed worker). */
-  embedQueryForProfile?: (text: string, profile: KnowledgeEmbeddingProfile) => Promise<number[]>;
+  embedQueryForProfile?: (
+    text: string,
+    profile: KnowledgeEmbeddingProfile,
+    opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
+  ) => Promise<number[]>;
 }
 
 export class KnowledgeManager {
@@ -751,7 +761,7 @@ export class KnowledgeManager {
     const mounted = this.mountedByKey.get(key);
     if (mounted?.semanticSearch === 'profile') {
       yield { type: 'progress', phase: 'embedder', bytesDone: 0, bytesTotal: 0 };
-      warning = await this.prewarmProfile(mounted.embedding);
+      warning = yield* this.prewarmProfile(mounted.embedding);
     }
     yield { ...event, ...(warning ? { warning } : {}) };
   }
@@ -759,20 +769,66 @@ export class KnowledgeManager {
   /**
    * Pull the catalog's query model now, while the user is watching the
    * install, instead of on the first search. Never an install failure: the
-   * catalog is on disk and keyword search works without the model.
+   * catalog is on disk and keyword search works without the model. The model
+   * can outweigh the catalog — multilingual-e5-small's full-precision graph
+   * is ~470 MB against a 160 MB Wikipedia catalog — so its download reports
+   * bytes the way the catalog's own does.
    */
-  private async prewarmProfile(profile: KnowledgeEmbeddingProfile): Promise<string | undefined> {
+  private async *prewarmProfile(
+    profile: KnowledgeEmbeddingProfile,
+  ): AsyncGenerator<KnowledgeInstallEvent, string | undefined> {
     if (!(await this.networkAllowed())) {
       return `semantic search starts once the embedding model ${profile.model.repo} can be downloaded (app network access is off)`;
     }
-    try {
-      await (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(
-        'knowledge catalog warm-up',
-        profile,
-      );
-      return undefined;
-    } catch (err) {
-      return `semantic search starts once the embedding model ${profile.model.repo} is available: ${errorMessage(err)}`;
+    const progress: {
+      latest: ModelDownloadProgress | null;
+      reported: ModelDownloadProgress | null;
+    } = { latest: null, reported: null };
+    let lastReportAt = 0;
+    let outcome: { warning: string | undefined } | null = null;
+    let wake: (() => void) | null = null;
+    const notify = () => {
+      wake?.();
+      wake = null;
+    };
+    void (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(
+      'knowledge catalog warm-up',
+      profile,
+      {
+        onDownloadProgress: (next) => {
+          progress.latest = next;
+          if (Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS) notify();
+        },
+      },
+    ).then(
+      () => {
+        outcome = { warning: undefined };
+        notify();
+      },
+      (err) => {
+        outcome = {
+          warning: `semantic search starts once the embedding model ${profile.model.repo} is available: ${errorMessage(err)}`,
+        };
+        notify();
+      },
+    );
+    while (true) {
+      const settled = outcome as { warning: string | undefined } | null;
+      const latest = progress.latest;
+      if (
+        latest &&
+        latest !== progress.reported &&
+        (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
+      ) {
+        progress.reported = latest;
+        lastReportAt = Date.now();
+        yield { type: 'progress', phase: 'embedder', ...latest };
+        continue;
+      }
+      if (settled) return settled.warning;
+      await new Promise<void>((resolveWake) => {
+        wake = resolveWake;
+      });
     }
   }
 

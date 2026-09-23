@@ -1304,6 +1304,14 @@ export interface AdaptiveCtxGrowthInput {
   /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
   vramBytes: number;
   /**
+   * Graphics memory free right now on a discrete card, as device admission
+   * measures it (`measureAvailableGpuBytes`). Growth never plans past it:
+   * `vramBytes` is a fraction of the card's TOTAL memory, and admission
+   * refuses a grown launch that other applications' VRAM no longer leaves
+   * room for. Ignored off discrete cards; omit for a policy-only preview.
+   */
+  measuredFreeVramBytes?: number;
+  /**
    * Live free RAM — consulted only on shared-pool hosts. Omit for a
    * policy-only preview; see {@link CtxMemoryClampInput.freeSystemRamBytes}.
    */
@@ -1353,7 +1361,9 @@ export interface AdaptiveCtxGrowthResult {
  *
  * Confinement: on a discrete GPU the clamp sees only the fast budget and
  * usable VRAM (`freeSystemRamBytes` zeroed) so grown KV never pages through
- * system RAM; on unified / system-ram hosts fast memory IS the budget, so
+ * system RAM, and — when the launch supplies `measuredFreeVramBytes` — only
+ * the VRAM other applications actually leave free, so a grown launch is one
+ * device admission will grant; on unified / system-ram hosts fast memory IS the budget, so
  * the inputs match the base clamp. Inherits `VRAM_USABLE_FRACTION` and
  * {@link LOCAL_ENGINE_COMPUTE_HEADROOM} through the shared clamp.
  *
@@ -1377,6 +1387,12 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
   const discrete = input.budgetKind === 'discrete-gpu';
   if (input.isMoE && discrete) return noGrowth;
   const kvFixedPerSlot = Math.max(0, input.kvFixedPerSlotBytes ?? 0);
+  const measuredFreeVram =
+    discrete && input.measuredFreeVramBytes !== undefined
+      ? Math.max(0, input.measuredFreeVramBytes)
+      : undefined;
+  const cardBytes =
+    measuredFreeVram !== undefined ? Math.min(input.vramBytes, measuredFreeVram) : input.vramBytes;
   const safeAt = (slots: number): number => {
     const safe = clampCtxTokensForMemory({
       requestedPerTurnCtxTokens: target,
@@ -1395,7 +1411,7 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
         : input.freeSystemRamBytes !== undefined
           ? { freeSystemRamBytes: input.freeSystemRamBytes }
           : {}),
-      vramBytes: discrete ? input.vramBytes : 0,
+      vramBytes: discrete ? cardBytes : 0,
       minPerTurnCtxTokens: 1,
     });
     return Math.min(target, safe.perTurnCtxTokens);
@@ -1426,6 +1442,11 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
   const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
   const slotNote =
     chosenSlots < startSlots ? `, consolidating ${startSlots} → ${chosenSlots} engine lanes` : '';
+  const fastLeft = Math.max(0, input.fastBudgetBytes - (input.committedOtherBytes ?? 0));
+  const measuredNote =
+    measuredFreeVram !== undefined && measuredFreeVram < Math.min(fastLeft, input.vramBytes)
+      ? ` (capped at the ~${gb(measuredFreeVram)} of graphics memory other applications leave free)`
+      : '';
   return {
     perTurnCtxTokens: grownTo,
     slots: chosenSlots,
@@ -1434,7 +1455,7 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
       `growing context ${base} → ${grownTo} tokens/turn at ${chosenSlots} slot${chosenSlots === 1 ? '' : 's'}${slotNote} ` +
       `(target ${target}): weights ~${gb(input.weightsResidentBytes)} + grown KV ` +
       `~${gb(chosenSlots * (kvFixedPerSlot + grownTo * input.kvBytesPerToken))} fits fast memory ` +
-      `~${gb(Math.max(0, input.fastBudgetBytes - (input.committedOtherBytes ?? 0)))}`,
+      `~${gb(fastLeft)}${measuredNote}`,
   };
 }
 

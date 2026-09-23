@@ -140,6 +140,26 @@ describe('PromptMeesterBuildPrelude', () => {
     expect(out).toContain('start_project');
   });
 
+  // "team" is a build noun, so the audience read as the deliverable and a
+  // craftbook-sized deck was sent off to a brand-new project.
+  it.each([
+    'Can you make me some slides for our team?',
+    'Please put together a report for the marketing team',
+    'Create a one-pager for my app',
+  ])('leaves document deliverables to the current project: %s', (userText) => {
+    expect(
+      PromptMeesterBuildPrelude.userPromptPrelude!(turnCtx({ userText }), undefined),
+    ).toBeNull();
+  });
+
+  it('still honors an explicit separate-project ask for a document', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({ userText: 'Create a new project and make slides for our team there' }),
+      undefined,
+    );
+    expect(out).toContain('start_project');
+  });
+
   it('does not emit a start_project prelude when that tool is absent', () => {
     const out = PromptMeesterBuildPrelude.userPromptPrelude!(
       turnCtx({

@@ -1441,6 +1441,77 @@ describe('adaptive context growth', () => {
       });
       expect(shared.perTurnCtxTokens).toBeLessThan(alone.perTurnCtxTokens);
     });
+
+    describe('measured free graphics memory', () => {
+      // 2026-09-23: gemma4-31b on a 32 GB card, two slots, ~4.5 GB of VRAM
+      // held by the desktop and browsers. Sized against 95% of the card it
+      // grew past what admission then measured as free, and was refused.
+      const GEMMA_31B_ON_32GB = {
+        basePerTurnCtxTokens: 65_536,
+        targetPerTurnCtxTokens: 262_144,
+        slots: 2,
+        kvBytesPerToken: 48 * 1024,
+        kvFixedPerSlotBytes: 0.25 * GB,
+        weightsResidentBytes: 18 * GB,
+        fastBudgetBytes: 30.3 * GB,
+        committedOtherBytes: 0,
+        budgetKind: 'discrete-gpu' as const,
+        vramBytes: 30.3 * GB,
+        freeSystemRamBytes: 64 * GB,
+      };
+      const reservation = (r: { perTurnCtxTokens: number; slots: number }) =>
+        GEMMA_31B_ON_32GB.weightsResidentBytes +
+        r.slots *
+          (GEMMA_31B_ON_32GB.kvFixedPerSlotBytes +
+            r.perTurnCtxTokens * GEMMA_31B_ON_32GB.kvBytesPerToken);
+
+      it('card-sized growth overruns what other applications leave free', () => {
+        const unmeasured = planAdaptiveContextGrowth(GEMMA_31B_ON_32GB);
+        expect(reservation(unmeasured)).toBeGreaterThan(27.2 * GB);
+      });
+
+      it('grows only as far as a launch admission will grant', () => {
+        const measured = planAdaptiveContextGrowth({
+          ...GEMMA_31B_ON_32GB,
+          measuredFreeVramBytes: 27.2 * GB,
+        });
+        expect(measured.grown).toBe(true);
+        expect(measured.perTurnCtxTokens).toBeGreaterThan(65_536);
+        expect(measured.perTurnCtxTokens).toBeLessThan(
+          planAdaptiveContextGrowth(GEMMA_31B_ON_32GB).perTurnCtxTokens,
+        );
+        expect(reservation(measured)).toBeLessThanOrEqual(27.2 * GB);
+        expect(measured.reason).toMatch(
+          /27\.2 GB of graphics memory other applications leave free/,
+        );
+      });
+
+      it('never takes the window below the base grant', () => {
+        const starved = planAdaptiveContextGrowth({
+          ...GEMMA_31B_ON_32GB,
+          measuredFreeVramBytes: 20 * GB,
+        });
+        expect(starved).toMatchObject({ grown: false, perTurnCtxTokens: 65_536, slots: 2 });
+      });
+
+      it('changes nothing when the card is emptier than the usable fraction', () => {
+        expect(
+          planAdaptiveContextGrowth({ ...GEMMA_31B_ON_32GB, measuredFreeVramBytes: 31.5 * GB }),
+        ).toEqual(planAdaptiveContextGrowth(GEMMA_31B_ON_32GB));
+      });
+
+      it('is ignored on shared-pool hosts', () => {
+        const unified = {
+          ...GEMMA_31B_ON_32GB,
+          budgetKind: 'unified' as const,
+          vramBytes: 0,
+          fastBudgetBytes: 44.8 * GB,
+        };
+        expect(planAdaptiveContextGrowth({ ...unified, measuredFreeVramBytes: 1 * GB })).toEqual(
+          planAdaptiveContextGrowth(unified),
+        );
+      });
+    });
   });
 
   describe('planAdaptiveContextGrowth — slot trade', () => {

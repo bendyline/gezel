@@ -20,6 +20,7 @@
 
 import { Worker } from 'node:worker_threads';
 import { type KnowledgeEmbeddingProfile, createLogger, sameVectorSpace } from '@bendyline/gezel';
+import type { ModelDownloadProgress } from '@bendyline/gezel-knowledge';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
   PipelineLoadError,
@@ -110,10 +111,12 @@ interface Pending {
   reject: (err: unknown) => void;
   /** Set for knowledge-profile requests: their failures stay per profile. */
   profileId?: string;
+  onDownloadProgress?: (progress: ModelDownloadProgress) => void;
 }
 
 interface WorkerReply {
   id: number;
+  progress?: ModelDownloadProgress;
   vectors?: number[][];
   error?: string;
   fatal?: boolean;
@@ -168,6 +171,10 @@ function ensureWorker(): Worker | null {
 function onMessage(msg: WorkerReply): void {
   const p = pending.get(msg.id);
   if (!p) return;
+  if (msg.progress) {
+    p.onDownloadProgress?.(msg.progress);
+    return;
+  }
   pending.delete(msg.id);
   if (msg.error) {
     if (p.profileId) {
@@ -216,11 +223,21 @@ function sendToWorker(
   w: Worker,
   texts: string[],
   profile?: KnowledgeEmbeddingProfile,
+  onDownloadProgress?: (progress: ModelDownloadProgress) => void,
 ): Promise<number[][]> {
   const id = nextId++;
   return new Promise<number[][]>((resolve, reject) => {
-    pending.set(id, { resolve, reject, ...(profile ? { profileId: profile.id } : {}) });
-    w.postMessage(profile ? { id, texts, profile } : { id, texts });
+    pending.set(id, {
+      resolve,
+      reject,
+      ...(profile ? { profileId: profile.id } : {}),
+      ...(onDownloadProgress ? { onDownloadProgress } : {}),
+    });
+    w.postMessage(
+      profile
+        ? { id, texts, profile, ...(onDownloadProgress ? { reportProgress: true } : {}) }
+        : { id, texts },
+    );
   });
 }
 
@@ -362,7 +379,9 @@ export function sharesDaemonEmbedder(profile: KnowledgeEmbeddingProfile): boolea
 export async function embedKnowledgeQuery(
   text: string,
   profile: KnowledgeEmbeddingProfile,
+  opts: { onDownloadProgress?: (progress: ModelDownloadProgress) => void } = {},
 ): Promise<number[]> {
+  const { onDownloadProgress } = opts;
   if (sharesDaemonEmbedder(profile)) {
     const vector = await embedQuery(text);
     if (await daemonEmbedderVerified()) return vector;
@@ -375,7 +394,7 @@ export async function embedKnowledgeQuery(
   const w = ensureWorker();
   if (w) {
     try {
-      const [vector] = await sendToWorker(w, [text], profile);
+      const [vector] = await sendToWorker(w, [text], profile, onDownloadProgress);
       return vector ?? [];
     } catch (err) {
       if (err instanceof EmbeddingsUnavailableError) throw err;
@@ -383,7 +402,7 @@ export async function embedKnowledgeQuery(
     }
   }
   try {
-    const [vector] = await runProfileQueryEmbed([text], profile);
+    const [vector] = await runProfileQueryEmbed([text], profile, onDownloadProgress);
     return vector ?? [];
   } catch (err) {
     if (err instanceof PipelineLoadError) {

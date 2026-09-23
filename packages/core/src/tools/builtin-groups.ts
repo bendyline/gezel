@@ -212,6 +212,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['list_tasks', 'get_task', 'list_craftbooks', 'suggest_craftbook', 'read_task_notes'],
   },
   {
+    id: 'task-oversight',
+    name: 'Task Oversight',
+    description:
+      'Coordinator controls for running work: pause, resume or cancel a task, reassign it, and leave it a note. Deliberately excludes authoring, advancing and completing — those stay with the assignee and its step gates.',
+    tools: ['manage_task', 'assign_task', 'write_task_note'],
+  },
+  {
     id: 'craftbook-launch',
     name: 'Craftbook Launcher',
     description:

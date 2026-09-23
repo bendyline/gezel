@@ -79,6 +79,15 @@ export function humanizeToolCall(
       );
     case 'set_task_status':
       return `Marked ${str('ref') ?? 'task'} ${str('status') ?? ''}`.trim();
+    case 'manage_task': {
+      const verbs: Record<string, string> = {
+        pause: 'Paused',
+        resume: 'Resumed',
+        retry: 'Resumed',
+        cancel: 'Canceled',
+      };
+      return `${verbs[str('action') ?? ''] ?? 'Updated'} ${str('ref') ?? 'the task'}`;
+    }
     case 'advance_task_step':
       return `Advanced ${str('ref') ?? 'the task'}`;
     case 'invoke_craftbook':

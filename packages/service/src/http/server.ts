@@ -282,6 +282,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   const scopedSessionRoutes = sessionRouteGuard({
     log: (m) => sessionRouteLog.warn(m),
     isProjectLinked,
+    isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);

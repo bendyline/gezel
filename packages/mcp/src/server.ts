@@ -14,6 +14,7 @@ import {
   ListProjectGezelsInputSchema,
   ListScriptsInputSchema,
   ListTasksInputSchema,
+  ManageTaskInputSchema,
   MessageGezelInputSchema,
   ReadDocumentInputSchema,
   ReadTaskNotesInputSchema,
@@ -4995,7 +4996,10 @@ async function launchCraftbookTask(args: {
   params?: Record<string, string>;
   /** Durable continuation dedupe key for the explicit invoke_craftbook tool. */
   craftbookInvocationKey?: string;
-  /** Ad-hoc binary handoffs join the active capability workflow. */
+  /**
+   * Ad-hoc binary handoffs join a live task of the same craftbook that is
+   * already responsible for the same `params.outputPath`.
+   */
   dedupeActiveCraftbook?: boolean;
 }): Promise<CraftbookLaunchResult> {
   let projectCraftbooks = await api.listProjectCraftbooks(args.project);
@@ -5026,10 +5030,15 @@ async function launchCraftbookTask(args: {
   if (missing.length > 0) return { kind: 'setup-required', missing, installed };
 
   if (args.dedupeActiveCraftbook) {
+    // Same book is not the same deliverable. Matching on the book alone made
+    // every PowerPoint handoff in Default "join" whichever deck was already
+    // open there, paused ones included; a conflict needs the same file.
+    const outputPath = args.params?.outputPath;
     const active = (await api.listProjectTasks(args.project)).tasks.find(
       (task) =>
         task.craftbook.id === args.craftbookId &&
-        (task.status === 'draft' || task.status === 'active' || task.status === 'paused'),
+        (task.status === 'draft' || task.status === 'active' || task.status === 'paused') &&
+        (outputPath === undefined || task.craftbookParams?.outputPath === outputPath),
     );
     if (active) return { kind: 'existing', task: active, installed };
   }
@@ -6076,21 +6085,18 @@ server.tool(
     // rules buried in the system prompt. Embed the id verbatim so the
     // model can copy-paste it into the next call.
     //
-    // The hint includes `project` only when the caller's current project
-    // isn't Default — the Meester (in Default talking about other
-    // projects) typically still needs to specify it, but we can't know
-    // their intent from here, so we punt and tell them to set it
-    // explicitly when delegating for a non-Default project. Voorman /
-    // other gezels who already live in the project they're delegating
-    // for don't need to repeat their own project id, so the bare form
-    // stays right for them.
-    const projectArgFragment =
-      projectId === 'default' ? ', project: "<projectId>"' : `, project: "${projectId}"`;
+    // The hint always carries the caller's real project id. The Meester
+    // lives in Default and may be delegating for another project, so it
+    // also gets a line saying to swap in that id — but never a placeholder:
+    // a model that copied `"<projectId>"` verbatim hit a non-retryable
+    // "project does not exist" that told it to `start_project`, pushing
+    // Default work out of Default.
+    const projectArgFragment = `, project: "${projectId}"`;
     const projectArgGuidance =
       projectId === 'default'
-        ? ' If this work belongs to a project you spun up (not Default), pass `project: "<projectId>"` in BOTH calls — without it the gezel lands in `Default` and gets the wrong workspace + memory scope.'
+        ? " If this work belongs to another project, pass that project's id as `project` in BOTH calls instead — otherwise the gezel works in Default, with its workspace and memory."
         : '';
-    const nextHint = `\n\nNEXT: \`message_gezel({ gezel: "${res.gezelId}", message: "<one-line brief>"${projectArgFragment} })\` to start them, or \`update_task({ ref, assignee: "${res.gezelId}" })\` to formally assign.${projectArgGuidance} Do NOT call \`ensure_gezel\` again with a similar \`jobTitle\` — it is idempotent and will keep returning the same gezel.`;
+    const nextHint = `\n\nNEXT: \`message_gezel({ gezel: "${res.gezelId}", message: "<one-line brief>"${projectArgFragment} })\` to start them, or \`assign_task({ ref, assignee: "${res.gezelId}" })\` to formally assign.${projectArgGuidance} Do NOT call \`ensure_gezel\` again with a similar \`jobTitle\` — it is idempotent and will keep returning the same gezel.`;
     return {
       content: [
         {
@@ -9350,6 +9356,92 @@ server.tool(
         note: appended,
       },
       { text: summary },
+    );
+  },
+);
+
+server.tool(
+  'manage_task',
+  'Pause, resume, or cancel a task when the user asks — "pause the deck", "try the PowerPoint again", "cancel that". `resume` also restarts a task that paused for help, with fresh budgets, and works only when the user asked for it this turn. Finishing a task is not an action here: its assignee does that through the step gates.',
+  ManageTaskInputSchema.shape,
+  async ({ ref, action, reason }) => {
+    // The coordinator's own chat is not task-scoped, so a bare number means
+    // a task in its own project rather than the session task it lacks.
+    const bare = ref.trim().replace(/^#/, '');
+    const parsed = await parseRef(
+      /^\d+$/.test(bare) && !sessionTaskRef ? `${projectId}/${bare}` : ref,
+    );
+    const current = await api.getTask(parsed.projectId, parsed.num);
+    const taskRef = current.ref;
+    const why = reason?.trim();
+    const leaveNote = async (heading: string) => {
+      if (!why) return;
+      await api
+        .appendTaskNote(
+          parsed.projectId,
+          parsed.num,
+          { text: normalizeMarkdown(`### ${heading}\n\n${why}`) },
+          gezelId ? { actorGezelId: gezelId } : {},
+        )
+        .catch(() => {});
+    };
+    const done = (summary: string, task = current) =>
+      okResult(
+        TaskToolOutputSchema,
+        { summary, operation: `manage_${action}`, ref: taskRef, status: task.status, task },
+        { text: summary },
+      );
+    const settled = current.status === 'complete' || current.status === 'canceled';
+
+    if (action === 'pause') {
+      if (current.status !== 'active') {
+        return done(`${taskRef} is ${current.status}, not running — nothing to pause.`);
+      }
+      const updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'paused');
+      await leaveNote('Paused');
+      return done(`Paused ${taskRef}.`, updated);
+    }
+
+    if (action === 'cancel') {
+      if (settled) return done(`${taskRef} is already ${current.status}.`);
+      const updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'canceled');
+      await leaveNote('Canceled');
+      return done(`Canceled ${taskRef}.`, updated);
+    }
+
+    // resume / retry
+    if (current.status === 'active') return done(`${taskRef} is already running.`);
+    if (current.status === 'draft') {
+      return errorResult(
+        `${taskRef} is a draft plan that has not started. The user starts it from the plan's card.`,
+        { retryable: false },
+      );
+    }
+    if (settled) {
+      return errorResult(
+        `${taskRef} is ${current.status} and cannot be resumed. If the user wants another run, start a fresh one (for a craftbook, invoke_craftbook).`,
+        { retryable: false },
+      );
+    }
+    let result: Awaited<ReturnType<typeof api.retryTask>>;
+    try {
+      result = await api.retryTask(parsed.projectId, parsed.num);
+    } catch (err) {
+      if (/\b403\b/.test(err instanceof Error ? err.message : String(err))) {
+        return errorResult(
+          `Only the user can restart ${taskRef}. Ask them — "want me to try it again?" — and resume it when they say so, or they can click Try again on its card. Do not call this again until they answer.`,
+          { code: 'needs_user', retryable: false },
+        );
+      }
+      throw err;
+    }
+    await leaveNote('Resumed');
+    const who = result.assigneeName ?? result.gezelId;
+    return done(
+      result.dispatched
+        ? `Restarted ${taskRef} with fresh budgets; ${who ?? 'its gezel'} is back on it.`
+        : `Set ${taskRef} active again, but no one was re-driven (${result.reason ?? 'no active step'}).`,
+      result.task,
     );
   },
 );

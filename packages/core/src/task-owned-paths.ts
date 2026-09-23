@@ -64,21 +64,31 @@ export function normalizeFolder(value: string | undefined): string {
 const LIVE_STATUSES = new Set(['active', 'paused']);
 
 export function taskOwnedPrefixes(tasks: readonly TaskPathSource[]): TaskOwnedPrefix[] {
-  const out: TaskOwnedPrefix[] = [];
-  for (const task of tasks) {
-    if (!LIVE_STATUSES.has(task.status)) continue;
-    const params = task.craftbookParams ?? {};
-    // The artifact folder is a convention with a default, so it holds even
-    // when the book never named `workPath`.
-    const artifactPrefix = normalizeFolder(params.workPath) || `tasks/${task.num}`;
-    out.push({ taskRef: task.ref, surface: 'artifacts', prefix: artifactPrefix });
-    // The workspace folder only exists when the book declared one. Inferring
-    // it from the deliverable's parent would claim shared directories — a book
-    // writing `README.md` at the root would own the entire workspace.
-    const workspacePrefix = normalizeFolder(params.outputDir);
-    if (workspacePrefix) {
-      out.push({ taskRef: task.ref, surface: 'workspace', prefix: workspacePrefix });
-    }
+  return tasks.filter((task) => LIVE_STATUSES.has(task.status)).flatMap(taskDeclaredFolders);
+}
+
+/**
+ * The folders a task declared, whatever its status. Ownership (above) lapses
+ * when a task settles, but the files stay that task's subject matter —
+ * retrieval inside another task's step uses this to keep them out.
+ */
+export function taskDeclaredFolders(task: TaskPathSource): TaskOwnedPrefix[] {
+  const params = task.craftbookParams ?? {};
+  // The artifact folder is a convention with a default, so it holds even
+  // when the book never named `workPath`.
+  const out: TaskOwnedPrefix[] = [
+    {
+      taskRef: task.ref,
+      surface: 'artifacts',
+      prefix: normalizeFolder(params.workPath) || `tasks/${task.num}`,
+    },
+  ];
+  // The workspace folder only exists when the book declared one. Inferring
+  // it from the deliverable's parent would claim shared directories — a book
+  // writing `README.md` at the root would own the entire workspace.
+  const workspacePrefix = normalizeFolder(params.outputDir);
+  if (workspacePrefix) {
+    out.push({ taskRef: task.ref, surface: 'workspace', prefix: workspacePrefix });
   }
   return out;
 }

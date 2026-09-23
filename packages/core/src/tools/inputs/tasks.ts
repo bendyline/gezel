@@ -93,3 +93,27 @@ export const ListTasksInputSchema = z
 export const GetTaskInputSchema = z
   .object({ ref: z.string().describe('Task ref, e.g. "marketing/7"') })
   .strict();
+
+/**
+ * The coordinator's lifecycle controls. Deliberately no `complete`: finishing
+ * is the assignee's move, through the step gates, and a coordinator that could
+ * close tasks would be the one path around them.
+ */
+export const ManageTaskInputSchema = z
+  .object({
+    ref: z
+      .string()
+      .describe('Task ref, e.g. "default/11". A bare number means a task in your own project.'),
+    action: z
+      .enum(['pause', 'resume', 'retry', 'cancel'])
+      .describe(
+        '`pause` holds the task where it is. `resume` (same as `retry`) restarts a paused task — ' +
+          'including one that paused for help — with fresh budgets, and only works when the user ' +
+          'asked for it this turn. `cancel` stops it for good.',
+      ),
+    reason: z
+      .string()
+      .optional()
+      .describe('Why, in a sentence. Saved on the task so its gezel sees it.'),
+  })
+  .strict();

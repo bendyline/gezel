@@ -546,8 +546,10 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       tier: 'medium',
     });
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('write_task_note')).toBe(false);
+    // `write_task_note` is part of the Meester's own oversight kit now, so
+    // the step grant is observed through the progression tools it adds.
     expect(allowlist!.has('advance_task_step')).toBe(false);
+    expect(allowlist!.has('set_task_status')).toBe(false);
   });
 
   it.each([

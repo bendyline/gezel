@@ -7458,6 +7458,11 @@ export class GezelClient {
        * wants the bytes it can round-trip, so this is opt-in.
        */
       as?: 'markdown';
+      /**
+       * Project context for a bare path: after the shared library misses,
+       * the server tries this project's `documents/` then `artifacts/`.
+       */
+      project?: string;
     },
   ): Promise<{
     path: string;
@@ -7482,7 +7487,11 @@ export class GezelClient {
     size?: number;
   }> {
     const as = opts?.as ? `&as=${opts.as}` : '';
-    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);
+    const project = opts?.project ? `&project=${encodeURIComponent(opts.project)}` : '';
+    return this.request(
+      'GET',
+      `/api/documents/read?path=${encodeURIComponent(filePath)}${as}${project}`,
+    );
   }
 
   writeDocument(

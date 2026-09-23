@@ -92,7 +92,12 @@ async function linkedWorkspaceAccessAllowed(
  * remain unavailable.
  */
 export function sessionRouteGuard(
-  opts: { log?: (msg: string) => void; isProjectLinked?: LinkedProjectAccessCheck } = {},
+  opts: {
+    log?: (msg: string) => void;
+    isProjectLinked?: LinkedProjectAccessCheck;
+    /** Whether the session's in-flight turn was started by the user. */
+    isUserDirectedTurn?: (sessionId: string) => boolean;
+  } = {},
 ): MiddlewareHandler {
   return async (c, next) => {
     const raw = c.get('auth');
@@ -107,7 +112,12 @@ export function sessionRouteGuard(
       gezelId: raw.gezelId,
       ...(raw.team !== undefined ? { team: raw.team } : {}),
     };
-    const allowed = await isSessionRouteAllowed(c, auth, opts.isProjectLinked);
+    const allowed = await isSessionRouteAllowed(
+      c,
+      auth,
+      opts.isProjectLinked,
+      opts.isUserDirectedTurn,
+    );
     if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason);
     return next();
   };
@@ -148,6 +158,7 @@ async function isSessionRouteAllowed(
   c: Context,
   auth: SessionAuth,
   isProjectLinked?: LinkedProjectAccessCheck,
+  isUserDirectedTurn?: (sessionId: string) => boolean,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -192,9 +203,16 @@ async function isSessionRouteAllowed(
     // Pausing for help is the circuit breaker on a task that cannot make
     // progress. Retry resets the very budgets that tripped it, so it stays
     // a human move — a worker able to un-pause and re-drive itself would
-    // spin exactly as long as the pause was meant to prevent.
+    // spin exactly as long as the pause was meant to prevent. A coordinator
+    // (the Meester) may carry it out, but only inside a turn the user
+    // started: "retry the deck" typed to the Meester is the user's move.
     if (/^\/tasks\/[^/]+\/retry\/?$/.test(rest)) {
-      return sessionDeny('restarting a paused task requires a first-party client');
+      if (auth.team && isUserDirectedTurn?.(sessionId(auth))) return SESSION_ALLOW;
+      return sessionDeny(
+        auth.team
+          ? 'restarting a paused task needs the user to ask for it in this turn'
+          : 'restarting a paused task requires a first-party client',
+      );
     }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
@@ -350,11 +368,13 @@ async function isSessionRouteAllowed(
 
   // The shared documents library is an intentional cross-project MCP
   // capability. Do not, however, let its fuzzy `projects/<id>/...` read
-  // fallback become a side door into project documents/artifacts.
+  // fallback — spelled as a `projects/` path or as `?project=` — become a
+  // side door into project documents/artifacts.
   if (path === '/api/documents' || path.startsWith('/api/documents/')) {
     if (
       path === '/api/documents/read' &&
-      (c.req.query('path') ?? '').replaceAll('\\', '/').startsWith('projects/')
+      ((c.req.query('path') ?? '').replaceAll('\\', '/').startsWith('projects/') ||
+        c.req.query('project') !== undefined)
     ) {
       return sessionDeny('project documents must use the scoped project API');
     }

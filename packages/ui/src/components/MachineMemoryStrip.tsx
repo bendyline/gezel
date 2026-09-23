@@ -77,7 +77,9 @@ function gpuProcessDisplayName(name: string | undefined): string | null {
 function gpuProcessRowLabel(process: GpuProcess): string {
   const name = gpuProcessDisplayName(process.name);
   if (name === 'Windows Desktop') return name;
-  return name ? `${gpuOwnerLabel(process.owner)} · ${name}` : gpuOwnerLabel(process.owner);
+  if (!name) return gpuOwnerLabel(process.owner);
+  if (process.owner === 'external') return `App: ${name}`;
+  return `${gpuOwnerLabel(process.owner)} · ${name}`;
 }
 
 /**

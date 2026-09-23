@@ -159,10 +159,11 @@ export async function pickRosterVoorman(store: Store, projectId: string): Promis
  * project (today's behavior), and a user with a 3-project Mira can't
  * tell which session they're actually pinging.
  *
- * `default` is excluded as a project context — pinging the Meester's
- * own pseudo-project would be a no-op routing back to the same chat.
- * A bare candidate (no `?project=` suffix) is still added for gezels
- * with no real project presence so the dropdown is never empty.
+ * `default` is offered as a project context only for live task work
+ * there (a Meester-run craftbook) — as a voorman or fallback entry it
+ * would route straight back into this same chat. A bare candidate (no
+ * `?project=` suffix) is still added for gezels with no real project
+ * presence so the dropdown is never empty.
  */
 async function deriveMeesterRoster(
   store: Store,
@@ -171,8 +172,10 @@ async function deriveMeesterRoster(
   const out: MentionCandidate[] = [];
   for (const g of gezels) {
     const ranked = await rankProjectsForGezel(store, g.id).catch(() => []);
-    const realProjects = ranked.filter(
-      (p) => p.projectId !== DEFAULT_PROJECT_ID && p.precedence !== 'fallback',
+    const realProjects = ranked.filter((p) =>
+      p.projectId === DEFAULT_PROJECT_ID
+        ? p.precedence === 'assignment'
+        : p.precedence !== 'fallback',
     );
     if (realProjects.length === 0) {
       // Gezel hasn't been pulled into any non-default project yet —
@@ -248,8 +251,11 @@ function toProjectScopedCandidate(
  *      (`complete` and `canceled` tasks excluded — wrapped work shouldn't
  *      pull a gezel back)
  *   3. `session` — they have a non-archived session in the project, even
- *      without a formal assignment
- *   4. `fallback` — `default` always appears last so the dropdown is never
+ *      without a formal assignment. Default sessions don't count: every
+ *      Meester consultation lands there, so they say little about where the
+ *      gezel works. Default tasks do count above — Meester-run craftbooks
+ *      live there.
+ *   4. `fallback` — `default` always appears so the dropdown is never
  *      empty for a fresh install
  *
  * Within each precedence band, projects are ordered by the gezel's most
@@ -265,7 +271,6 @@ export async function rankProjectsForGezel(
   const ranked = new Map<string, ProjectForGezel>();
 
   for (const p of projects) {
-    if (p.id === DEFAULT_PROJECT_ID) continue;
     const detail = await store.getProject(p.id).catch(() => null);
     if (detail?.voormanGezelId === gezelId) {
       ranked.set(p.id, {
@@ -285,7 +290,9 @@ export async function rankProjectsForGezel(
       }
       if (
         t.craftbook.steps.some(
-          (s) => s.assignee?.kind === 'gezel' && s.assignee.gezelId === gezelId,
+          (s) =>
+            (s.assignee?.kind === 'gezel' && s.assignee.gezelId === gezelId) ||
+            (s.id === t.activeStepId && s.suggestedGezelId === gezelId),
         )
       ) {
         assignmentHit = true;

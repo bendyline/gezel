@@ -109,11 +109,18 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     //    404 that blocks the user from reviewing real content, try the
     //    per-project documents dir and the per-project artifacts dir
     //    before giving up. The response `kind` tells the UI what it
-    //    actually resolved to so the chip label matches reality.
+    //    actually resolved to so the chip label matches reality. A bare
+    //    path with `?project=` gets the same fallback, so a library hit
+    //    still wins and no project (Default included) is special-cased.
     const m = filePath.match(/^projects\/([^\/]+)\/(.+)$/);
-    if (m) {
-      const projectId = m[1]!;
-      const rest = m[2]!;
+    const contextProject = c.req.query('project');
+    const scoped = m
+      ? { projectId: m[1]!, rest: m[2]! }
+      : contextProject
+        ? { projectId: contextProject, rest: filePath }
+        : null;
+    if (scoped) {
+      const { projectId, rest } = scoped;
       const docRel = rest.replace(/^documents\//, '');
       const projectDoc = await ctx.store.readProjectDoc(projectId, docRel);
       if (projectDoc !== null) {

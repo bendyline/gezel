@@ -1558,22 +1558,15 @@ function DocumentContext({
   >(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Project-relative paths get the project prefix; bare paths are
-  // treated as global library (matches readDocument's contract).
-  const fullPath = useMemo(
-    () =>
-      projectId && projectId !== 'default' && !documentPath.startsWith('projects/')
-        ? `projects/${projectId}/${documentPath}`
-        : documentPath,
-    [projectId, documentPath],
-  );
   useEffect(() => {
     let cancelled = false;
     setContent(null);
     setResolvedKind(null);
     setError(null);
+    // The server resolves library → project docs → artifacts, which is
+    // the order the ask_user_question contract promises the model.
     api
-      .readDocument(fullPath)
+      .readDocument(documentPath, projectId ? { project: projectId } : undefined)
       .then((res) => {
         if (cancelled) return;
         setContent(res.content);
@@ -1595,7 +1588,7 @@ function DocumentContext({
     return () => {
       cancelled = true;
     };
-  }, [fullPath, documentPath]);
+  }, [projectId, documentPath]);
 
   const previewLines = useMemo(() => {
     if (!content) return '';
@@ -1614,6 +1607,12 @@ function DocumentContext({
       : resolvedKind === 'project-document'
         ? 'Project doc'
         : 'Document';
+  // The document tab reads without project context, so a project hit opens
+  // by its qualified path and a library hit by its own.
+  const openPath =
+    resolvedKind && resolvedKind !== 'document' && !documentPath.startsWith('projects/')
+      ? `projects/${projectId}/${documentPath}`
+      : documentPath;
 
   return (
     <div className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}`}>
@@ -1623,7 +1622,7 @@ function DocumentContext({
         <button
           type="button"
           className="pending-question-context-link"
-          onClick={() => navigateToTab({ kind: 'document', path: fullPath })}
+          onClick={() => navigateToTab({ kind: 'document', path: openPath })}
         >
           Open {kindLabel.toLowerCase()}
         </button>

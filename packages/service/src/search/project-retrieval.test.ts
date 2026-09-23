@@ -426,6 +426,57 @@ describe('knowledge injection ceilings', () => {
     expect(result?.hits.every((h) => h.source === 'knowledge')).toBe(true);
     expect(result?.policy.inheritedFrom).toBe('craftbook-step');
   });
+
+  // Wild-caught in Default (2026-09-23): the Pasta deck's research turn was
+  // handed an earlier AI-startup deck's `powerpoint/task-8/` files as
+  // evidence, though its own procedure rules other task folders out.
+  it("keeps another task's declared folders out of a task step's injection", async () => {
+    const hit = (path: string, source: 'workspace' | 'artifacts'): UnifiedSearchResult => ({
+      ...workspaceHit(1),
+      id: `content:p1:${path}:1`,
+      title: path,
+      path,
+      source,
+      retrievalSource: source,
+      snippet: 'pasta evidence',
+    });
+    const search = {
+      searchProject: async () => ({
+        results: [
+          hit('powerpoint/task-8/source-evidence.md', 'workspace'),
+          hit('tasks/8/sources.md', 'artifacts'),
+          hit('powerpoint/task-11/deck.md', 'workspace'),
+          hit('notes/pasta.md', 'workspace'),
+        ],
+        truncated: false,
+      }),
+    } as unknown as SearchService;
+    const taskFor = (num: number) => ({
+      ref: `p1/${num}`,
+      num,
+      status: num === 8 ? 'complete' : 'active',
+      craftbookParams: { workPath: `tasks/${num}`, outputDir: `powerpoint/task-${num}` },
+      craftbook: { steps: [{ id: 'research' }] },
+    });
+    const result = await retrieveProjectContext({
+      store: {
+        ...STORE,
+        readProjectArtifact: async () => 'pasta evidence line one',
+        readTask: async (_projectId: string, num: number) => taskFor(num),
+        listProjectTasks: async () => [taskFor(8), taskFor(11)],
+      } as unknown as Store,
+      search,
+      record: { ...RECORD, taskRef: 'p1/11', stepId: 'research' } as unknown as ChatSession,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'research pasta evidence',
+      messageOrigin: 'direct-user',
+    });
+    const paths = result?.hits.map((h) => h.path);
+    expect(paths).toEqual(expect.arrayContaining(['powerpoint/task-11/deck.md', 'notes/pasta.md']));
+    expect(paths).not.toContain('powerpoint/task-8/source-evidence.md');
+    expect(paths).not.toContain('tasks/8/sources.md');
+  });
 });
 
 describe('weights invariant', () => {

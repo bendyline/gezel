@@ -106,6 +106,19 @@ export function looksLikeNewBuildRequest(text: string): boolean {
 }
 
 /**
+ * A document-shaped deliverable is craftbook work, which runs in the current
+ * project — Default included. The noun list above matches the audience as
+ * readily as the output, so "make me some slides for our team" read as a
+ * team build and was told to start a project and "NOT reuse Default".
+ */
+const DOCUMENT_DELIVERABLE_RE =
+  /\b(?:slides?|slide\s*show|deck|presentation|power\s*point|pptx?|report|document|docx|memo|letter|spreadsheet|pdf|one-pager|poster|flyer|essay|article|outline)\b/i;
+
+export function namesDocumentDeliverable(text: string): boolean {
+  return DOCUMENT_DELIVERABLE_RE.test(text);
+}
+
+/**
  * In an already-scoped project, a generic build request means "work here".
  * Starting another project requires explicit project/workspace language;
  * `new game` is deliberately insufficient because `new` describes the
@@ -137,6 +150,12 @@ export const PromptMeesterBuildPrelude: Behavior = {
     if (ctx.messageOrigin !== 'direct-user') return null;
     if (/^\s*\[Answer to:/i.test(ctx.userText)) return null;
     if (!looksLikeNewBuildRequest(ctx.userText)) return null;
+    if (
+      namesDocumentDeliverable(ctx.userText) &&
+      !explicitlyRequestsSeparateProject(ctx.userText)
+    ) {
+      return null;
+    }
     if (ctx.projectId !== 'default' && !explicitlyRequestsSeparateProject(ctx.userText)) {
       return null;
     }

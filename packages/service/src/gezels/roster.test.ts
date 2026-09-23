@@ -324,4 +324,42 @@ describe('rankProjectsForGezel', () => {
     const voormen = ranked.filter((p) => p.precedence === 'voorman');
     expect(voormen.map((p) => p.projectId)).toEqual([b.id, a.id]); // b more recent
   });
+
+  // A Meester-run craftbook lives in Default, so "@Ada" from the Meester
+  // chat must reach the step she owns there, not an older project chat.
+  it('ranks live task work in default above a plain session elsewhere', async () => {
+    await store.createGezel({ name: 'Ada', role: 'Researcher' });
+    const chatted = await store.createProject({
+      name: 'Just Chatted',
+      about: 'x'.repeat(80),
+      missionObjectives: 'y'.repeat(60),
+    });
+    const { randomUUID } = await import('node:crypto');
+    await store.writeSession({
+      version: 1,
+      id: randomUUID(),
+      gezelId: 'ada',
+      projectId: chatted.id,
+      providerName: 'copilot',
+      title: 'hi',
+      createdAt: nowIso(),
+      lastActivityAt: nowIso(),
+      messages: [],
+      providerState: {},
+    });
+    const task = makeTask({
+      projectId: 'default',
+      num: seq++,
+      title: 'Pasta deck',
+      assigneeGezelId: 'leo',
+    });
+    task.craftbook.steps[0]!.suggestedGezelId = 'ada';
+    await store.writeTask(task);
+
+    const ranked = await rankProjectsForGezel(store, 'ada');
+    expect(ranked[0]).toMatchObject({ projectId: 'default', precedence: 'assignment' });
+
+    const roster = await deriveGezelRoster(store, 'default');
+    expect(roster.map((c) => c.id)).toContain('ada?project=default');
+  });
 });

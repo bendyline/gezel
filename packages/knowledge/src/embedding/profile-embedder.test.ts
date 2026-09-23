@@ -212,6 +212,36 @@ describe('createProfileEmbedder', () => {
     }
   });
 
+  it('reports download progress summed across the model and tokenizer files', async () => {
+    const runtime = fakeTransformers();
+    const loadPipeline = runtime.module.pipeline;
+    runtime.module.pipeline = async (task, model, options) => {
+      const report = options?.progress_callback as (info: Record<string, unknown>) => void;
+      report({ status: 'initiate', name: model, file: 'onnx/model.onnx' });
+      report({ status: 'progress', name: model, file: 'onnx/model.onnx', loaded: 40, total: 100 });
+      report({ status: 'progress', name: model, file: 'onnx/model.onnx', loaded: 100, total: 100 });
+      return loadPipeline(task, model, options);
+    };
+    const loadTokenizer = runtime.module.AutoTokenizer.from_pretrained;
+    runtime.module.AutoTokenizer.from_pretrained = async (model, options) => {
+      const report = options?.progress_callback as (info: Record<string, unknown>) => void;
+      // No Content-Length: the total grows with what has been read.
+      report({ status: 'progress', name: model, file: 'tokenizer.json', loaded: 10, total: 0 });
+      return loadTokenizer(model, options);
+    };
+    const seen: Array<{ bytesDone: number; bytesTotal: number }> = [];
+    await createProfileEmbedder(profileWith({}), {
+      cacheDir,
+      transformers: runtime.module,
+      onDownloadProgress: (p) => seen.push(p),
+    });
+    expect(seen).toEqual([
+      { bytesDone: 40, bytesTotal: 100 },
+      { bytesDone: 100, bytesTotal: 100 },
+      { bytesDone: 110, bytesTotal: 110 },
+    ]);
+  });
+
   it('marks a profile without digests as unpinned rather than failing', async () => {
     const runtime = fakeTransformers();
     const embedder = await createProfileEmbedder(profileWith({}), {

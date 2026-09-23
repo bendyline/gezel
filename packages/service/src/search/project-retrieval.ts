@@ -6,10 +6,13 @@ import {
   type RetrievalMode,
   type RetrievalPolicy,
   type RetrievalSource,
+  type TaskOwnedPrefix,
   type UnifiedSearchResult,
   contextBudgetCeiling,
   estimateTokens,
+  isInsideFolder,
   parseTaskRef,
+  taskDeclaredFolders,
 } from '@bendyline/gezel';
 import { looksBinaryText } from '../fs/binary-text.js';
 import type { Store } from '../fs/store.js';
@@ -264,7 +267,13 @@ export async function retrieveProjectContext(args: {
     ...(found.arms ? { arms: found.arms } : {}),
   });
 
-  const diverse = diversify(found.results).filter(clearsInjectionFloor);
+  const foreign =
+    taskContext && args.record.taskRef
+      ? await otherTasksFolders(args.store, args.record.projectId, args.record.taskRef)
+      : [];
+  const diverse = diversify(found.results)
+    .filter(clearsInjectionFloor)
+    .filter((result) => !insideOtherTask(result, foreign, args.record.projectId));
   if (diverse.length === 0) return null;
   const terms = queryTerms(query);
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
@@ -323,6 +332,44 @@ export async function retrieveProjectContext(args: {
     hits: rendered.hits,
     truncated: found.truncated || rendered.hits.length < hits.length,
   };
+}
+
+/**
+ * Folders the project's OTHER tasks declared. A step's procedure scopes its
+ * inputs to its own task, but ambient retrieval ignored that: the Pasta
+ * research turn in Default was handed an earlier AI-startup deck's
+ * `powerpoint/task-8/` files as evidence. Explicit reads are unaffected.
+ */
+async function otherTasksFolders(
+  store: Store,
+  projectId: string,
+  taskRef: string,
+): Promise<TaskOwnedPrefix[]> {
+  try {
+    const tasks = await store.listProjectTasks(projectId);
+    return tasks.filter((task) => task.ref !== taskRef).flatMap(taskDeclaredFolders);
+  } catch {
+    return [];
+  }
+}
+
+function insideOtherTask(
+  result: UnifiedSearchResult,
+  foreign: readonly TaskOwnedPrefix[],
+  projectId: string | undefined,
+): boolean {
+  if (foreign.length === 0 || !result.path) return false;
+  const surface =
+    result.retrievalSource === 'workspace'
+      ? 'workspace'
+      : result.retrievalSource === 'artifacts'
+        ? 'artifacts'
+        : null;
+  if (!surface) return false;
+  if (result.projectId && result.projectId !== projectId) return false;
+  return foreign.some(
+    (folder) => folder.surface === surface && isInsideFolder(result.path!, folder.prefix),
+  );
 }
 
 async function resolveTaskContext(store: Store, record: ChatSession) {

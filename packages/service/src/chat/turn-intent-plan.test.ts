@@ -35,6 +35,29 @@ describe('turn intent planning', () => {
     expect(detectExactArtifactRoute('Does PowerPoint support video?')).toBeNull();
   });
 
+  // The route leaves `invoke_craftbook` as the only tool, so each of these
+  // used to start a second deck instead of reaching the one already running
+  // — the common follow-up once the Meester runs craftbooks in Default.
+  it.each([
+    'Can you cancel the PowerPoint task?',
+    'Please retry the PowerPoint',
+    'I want to know how the PowerPoint is going',
+    'Can you update the PowerPoint to add a slide about sauces?',
+    'Please give me the status of my deck',
+    'Could you pause that presentation for now?',
+  ])('does not route follow-ups about existing work: %s', (text) => {
+    expect(detectExactArtifactRoute(text)).toBeNull();
+  });
+
+  it.each([
+    'Can you build a PowerPoint about pasta?',
+    'Turn this report into a PowerPoint',
+    'Please make a PowerPoint about how the stock market works',
+    'Please edit my notes into a slide deck',
+  ])('still routes new-deck requests: %s', (text) => {
+    expect(detectExactArtifactRoute(text)?.craftbookId).toBe('powerpoint-deck');
+  });
+
   it('suggests a developer only for action plus implementation subject', () => {
     expect(looksLikeImplementationRequest('Please fix the API integration tests')).toBe(true);
     expect(looksLikeImplementationRequest('What is an API?')).toBe(false);

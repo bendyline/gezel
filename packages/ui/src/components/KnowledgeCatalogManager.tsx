@@ -19,7 +19,7 @@ import {
 } from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
-import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
+import { huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { InstallProgressRow } from './InstallProgressRow.js';
 import { LicenseButton } from './LicenseButton.js';
@@ -108,12 +108,15 @@ function progressLabel(inst: ActiveInstall): string {
     case 'extract':
       return 'Unpacking and verifying the catalog…';
     case 'embedder':
-      return 'Fetching the search model for this catalog…';
+      return inst.bytesTotal > 0
+        ? `Downloading the search model: ${formatBytes(inst.bytesDone)} of ${formatBytes(inst.bytesTotal)}`
+        : 'Fetching the search model for this catalog…';
   }
 }
 
 function progressPercent(inst: ActiveInstall): number | null {
-  if (inst.error || inst.retrying || inst.phase !== 'download' || inst.bytesTotal <= 0) return null;
+  if (inst.error || inst.retrying || inst.bytesTotal <= 0) return null;
+  if (inst.phase !== 'download' && inst.phase !== 'embedder') return null;
   return (inst.bytesDone / inst.bytesTotal) * 100;
 }
 
@@ -744,7 +747,9 @@ export function KnowledgeCatalogManager() {
                   ? `Downloading… ${Math.round(pct)}%`
                   : 'Downloading…'
                 : inflight.phase === 'embedder'
-                  ? 'Fetching search model…'
+                  ? pct !== null
+                    ? `Search model… ${Math.round(pct)}%`
+                    : 'Fetching search model…'
                   : 'Installing…'
               : installed
                 ? updateAvailable
@@ -757,39 +762,26 @@ export function KnowledgeCatalogManager() {
                     : 'Download';
             const released = formatReleased(m.releasedAt);
             return (
-              <div className="catalog-ollama-action">
-                <div className="catalog-ollama-meta">
-                  <div className="catalog-ollama-specs muted small">
-                    <HuggingFaceRepoLink repo={m.huggingface.repo} repoType="dataset" />
-                    <span>·</span>
-                    <span>{formatBytes(m.archiveBytes)}</span>
-                    <span>·</span>
-                    <span>{m.documents.toLocaleString()} documents</span>
-                    <span>·</span>
-                    <span>{m.language}</span>
-                    {released && (
-                      <>
-                        <span>·</span>
-                        <span>{released}</span>
-                      </>
-                    )}
-                  </div>
+              <div className="catalog-knowledge-action">
+                <div className="catalog-ollama-specs muted small">
+                  <span>{formatBytes(m.archiveBytes)}</span>
+                  <span>·</span>
+                  <span>{m.documents.toLocaleString()} documents</span>
+                  <span>·</span>
+                  <span>{m.language}</span>
+                  {released && (
+                    <>
+                      <span>·</span>
+                      <span>{released}</span>
+                    </>
+                  )}
+                </div>
+                <div className="catalog-ollama-action">
                   <div className="catalog-ollama-pills">
                     <LicenseButton
                       manifest={m}
                       fallbackHref={huggingFaceRepoUrl(m.huggingface.repo, 'dataset')}
                     />
-                    {m.parquet && (
-                      <a
-                        className="hf-repo-link"
-                        href={`${huggingFaceRepoUrl(m.parquet.repo, 'dataset')}/tree/${encodeURIComponent(m.parquet.revision)}/${m.parquet.dir.split('/').map(encodeURIComponent).join('/')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="The same documents, chunks and embeddings as Parquet tables, for data tools"
-                      >
-                        Parquet
-                      </a>
-                    )}
                     {state?.sharedOnDevice && !installed && (
                       <span
                         className="gz-status-pill gz-status-pill--ok"
@@ -799,21 +791,21 @@ export function KnowledgeCatalogManager() {
                       </span>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    title={
+                      installed && !updateAvailable
+                        ? `Installed (v${installed.version})`
+                        : state?.incompleteDownload
+                          ? 'A partial download is on disk; installing picks up where it stopped.'
+                          : undefined
+                    }
+                    onClick={() => startCatalogInstall(m.id)}
+                  >
+                    {label}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  title={
-                    installed && !updateAvailable
-                      ? `Installed (v${installed.version})`
-                      : state?.incompleteDownload
-                        ? 'A partial download is on disk; installing picks up where it stopped.'
-                        : undefined
-                  }
-                  onClick={() => startCatalogInstall(m.id)}
-                >
-                  {label}
-                </button>
               </div>
             );
           }}

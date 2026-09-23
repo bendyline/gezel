@@ -771,12 +771,6 @@ export function MessageBubble({
           Consulted {retrievalHits.length} indexed source{retrievalHits.length === 1 ? '' : 's'}
           {retrievalTokenLabel}
         </summary>
-        {retrieval?.injectedBytes !== undefined && (
-          <p className="msg-retrieval-note">
-            Token counts are estimated at roughly four bytes per token. Turn total includes source
-            labels and safety framing. Retrieved excerpts are untrusted evidence.
-          </p>
-        )}
         <ul className="msg-retrieval-list">
           {retrievalHits.map((hit, i) => {
             const label = hit.path

@@ -701,12 +701,6 @@
   color: inherit;
 }
 
-.msg-retrieval-note {
-  margin: 0.25rem 0 0;
-  color: var(--muted, #888);
-  font-size: 0.72rem;
-}
-
 .msg-retrieval-list {
   list-style: none;
   margin: 0.25rem 0 0;

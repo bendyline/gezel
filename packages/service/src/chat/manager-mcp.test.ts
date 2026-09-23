@@ -1366,91 +1366,102 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     ).toEqual({ complete: true });
   }, 30_000);
 
-  it('completes a terminal artifact step after its checkpoint write passes the gate', async () => {
-    const project = await store.createProject({ name: 'Terminal artifact checkpoint' });
-    const task = await svc.context.tasks.create(project.id, {
-      title: 'Write the final checkpoint',
-      assignee: { kind: 'gezel', gezelId: 'ada' },
-      steps: [
-        {
-          id: 'review',
-          name: 'Review batch',
-          prompt: 'Write the review checkpoint.',
-          terminal: true,
-          toolPolicy: {
-            outputMedium: 'artifact',
-            allowTools: ['write_artifact'],
+  // Default is where the Meester files craftbooks. The observable-progress
+  // hook once skipped it outright, and because the checkpoint write ends the
+  // turn, nothing could advance the step: default/11 paused after three
+  // identical, valid sources.md writes (2026-09-23).
+  it.each(['a named', 'the Default'] as const)(
+    'completes a terminal artifact step after its checkpoint write passes the gate in %s project',
+    async (which) => {
+      const project =
+        which === 'the Default'
+          ? { id: 'default' }
+          : await store.createProject({ name: 'Terminal artifact checkpoint' });
+      const task = await svc.context.tasks.create(project.id, {
+        title: 'Write the final checkpoint',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        steps: [
+          {
+            id: 'review',
+            name: 'Review batch',
+            prompt: 'Write the review checkpoint.',
+            terminal: true,
+            toolPolicy: {
+              outputMedium: 'artifact',
+              allowTools: ['write_artifact'],
+            },
+            advanceWhen: {
+              file: 'tasks/review/observations.md',
+              artifact: true,
+              minBytes: 20,
+              requireChange: true,
+            },
+            gate: {
+              at: 'completion',
+              checks: [
+                {
+                  kind: 'minBytes',
+                  file: 'tasks/review/observations.md',
+                  artifact: true,
+                  bytes: 20,
+                },
+              ],
+              onReject: 'review',
+              maxAttempts: 3,
+            },
           },
-          advanceWhen: {
-            file: 'tasks/review/observations.md',
-            artifact: true,
-            minBytes: 20,
-            requireChange: true,
-          },
-          gate: {
-            at: 'completion',
-            checks: [
-              {
-                kind: 'minBytes',
-                file: 'tasks/review/observations.md',
-                artifact: true,
-                bytes: 20,
-              },
-            ],
-            onReject: 'review',
-            maxAttempts: 3,
-          },
-        },
-      ],
-      entryStepId: 'review',
-    });
-    manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
-      const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
-        cause: 'auto',
+        ],
+        entryStepId: 'review',
       });
-      return outcome.status === 'advanced'
-        ? { status: 'advanced' as const }
-        : {
-            status: 'held' as const,
-            message: outcome.gate.message,
-            messageFingerprint: outcome.gate.messageFingerprint,
-            attempt: outcome.gate.attempt,
-          };
-    });
-    const session = await manager.createSession({
-      gezelId: 'ada',
-      projectId: project.id,
-      taskRef: task.ref,
-      stepId: 'review',
-    });
-    mock.scriptToolCalls([
-      {
-        name: 'write_artifact',
-        arguments: {
-          path: 'tasks/review/observations.md',
-          content: '# Review\n\nNo actionable findings in this batch.\n',
+      manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
+        const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
+          cause: 'auto',
+        });
+        return outcome.status === 'advanced'
+          ? { status: 'advanced' as const }
+          : {
+              status: 'held' as const,
+              message: outcome.gate.message,
+              messageFingerprint: outcome.gate.messageFingerprint,
+              attempt: outcome.gate.attempt,
+            };
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: project.id,
+        taskRef: task.ref,
+        stepId: 'review',
+      });
+      mock.scriptToolCalls([
+        {
+          name: 'write_artifact',
+          arguments: {
+            path: 'tasks/review/observations.md',
+            content: '# Review\n\nNo actionable findings in this batch.\n',
+          },
         },
-      },
-    ]);
-    mock.script('', 'Checkpoint written.');
+      ]);
+      mock.script('', 'Checkpoint written.');
 
-    await manager.send(session.id, 'Review the batch.');
+      await manager.send(session.id, 'Review the batch.');
 
-    const updated = await store.readTask(project.id, task.num);
-    expect(updated?.status).toBe('complete');
-    expect(updated?.activeStepId).toBeUndefined();
-    const createOpts = mock.calls.find((call) => call.kind === 'create')?.opts;
-    expect(createOpts?.terminalToolPolicy).toEqual({
-      toolNames: ['write_artifact'],
-      fallbackText: 'Checkpoint written for validation.',
-      maxClosingChars: 120,
-      // Only the checkpoint file's write ends the turn; a procedure that
-      // writes another deliverable first keeps going (invoice-run, 2026-09-19).
-      onlyWhenArgEquals: { arg: 'path', value: 'tasks/review/observations.md' },
-    });
-    expect(createOpts?.tuning?.toolChoice).toBe('required');
-    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
-  }, 30_000);
+      const updated = await store.readTask(project.id, task.num);
+      expect(updated?.status).toBe('complete');
+      expect(updated?.activeStepId).toBeUndefined();
+      const createOpts = mock.calls.find((call) => call.kind === 'create')?.opts;
+      expect(createOpts?.terminalToolPolicy).toEqual({
+        toolNames: ['write_artifact'],
+        fallbackText: 'Checkpoint written for validation.',
+        maxClosingChars: 120,
+        // Only the checkpoint file's write ends the turn; a procedure that
+        // writes another deliverable first keeps going (invoice-run, 2026-09-19).
+        onlyWhenArgEquals: { arg: 'path', value: 'tasks/review/observations.md' },
+      });
+      expect(createOpts?.tuning?.toolChoice).toBe('required');
+      expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+    },
+    30_000,
+  );
 
   it('skips CLOSING_SUMMARY after validation repair writes so checks can rerun', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });

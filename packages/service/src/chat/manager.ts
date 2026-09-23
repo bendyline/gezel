@@ -92,6 +92,10 @@ import {
   outputMediumForStep,
   toolsetIdsExplicitlyDisabledForStep,
 } from '../craftbook/step-toolsets.js';
+import {
+  DEFAULT_PROJECT_ABOUT_MD,
+  DEFAULT_PROJECT_MISSION_MD,
+} from '../fs/default-project-docs.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
@@ -401,6 +405,9 @@ import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 import { roleGetsWorkspaceOrientation } from './workspace-prompt-listing.js';
 
 const DEFAULT_PROJECT_ID = 'default';
+const SEEDED_DEFAULT_PROJECT_DOCS = new Set(
+  [DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD].map((doc) => doc.trim()),
+);
 
 /**
  * Upper bound on the streamed reply text buffered for abort salvage
@@ -869,6 +876,8 @@ const MAX_RESUMED_TURNS_PER_BOOT = 20;
 interface InflightTurn {
   userText: string;
   startedAt: number;
+  /** Who started the turn; gates user-only actions like a task retry. */
+  origin: TurnMessageOrigin;
   abort?: AbortController;
   /** True once a provider request has actually been issued for this turn. */
   providerStarted?: boolean;
@@ -2231,7 +2240,7 @@ export class ChatManager extends LocalEngineRuntime {
   }> {
     if (!this.taskAdvancer) return {};
     const projectId = state.record.projectId;
-    if (!projectId || projectId === DEFAULT_PROJECT_ID) return {};
+    if (!projectId) return {};
     const gezelId = state.record.gezelId;
     // The model's own advance wins — never double-advance in one turn.
     if (drained.some((d) => d.name === 'advance_task_step' && d.success)) return {};
@@ -2492,7 +2501,7 @@ export class ChatManager extends LocalEngineRuntime {
     const scripts = ed.scripts ?? [];
     if (checks.length === 0 && scripts.length === 0) return {};
     const projectId = state.record.projectId;
-    if (!projectId || projectId === DEFAULT_PROJECT_ID) return {};
+    if (!projectId) return {};
     const runner = this.scriptRunnerForHooks;
     // Scripts need the runner; if it isn't wired, don't half-evaluate.
     if (scripts.length > 0 && !runner) return {};
@@ -2627,6 +2636,18 @@ export class ChatManager extends LocalEngineRuntime {
    */
   isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0;
+  }
+
+  /**
+   * True while this session is running a turn the user started — a message
+   * they typed or an answer they gave. Nudges, handoffs, and other gezels'
+   * messages are not. Actions that exist to stop a model looping on its own
+   * (restarting a task that paused for help) require this, so a coordinator
+   * can do them for the user but never on its own initiative.
+   */
+  isUserDirectedTurn(sessionId: string): boolean {
+    const origin = this.inflight.get(sessionId)?.origin;
+    return origin === 'direct-user' || origin === 'question-answer';
   }
 
   /**
@@ -3797,6 +3818,44 @@ export class ChatManager extends LocalEngineRuntime {
         ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
         : {}),
     });
+  }
+
+  /**
+   * Post a runtime-authored nudge into one exact task step's session.
+   * `messageGezel` needs a distinct gezel to speak, and a step can be owned
+   * by the only one there is — the Meester on a Default craftbook, or a
+   * voorman on their own project — so the stuck-step sweep used to return
+   * silently there: no nudge, no re-drive count, so never an escalation.
+   */
+  async nudgeTaskStep(args: {
+    gezelId: string;
+    projectId: string;
+    taskRef: string;
+    stepId: string;
+    text: string;
+    lane?: Lane;
+    ambient?: boolean;
+  }): Promise<{ sessionId: string }> {
+    const session = await this.ensureOrCreateTaskSession({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+      taskRef: args.taskRef,
+      stepId: args.stepId,
+    });
+    this.trackBackground(
+      this.sendWithBusyRetry(session.id, args.text, {
+        messageOrigin: 'system',
+        ...(args.lane ? { lane: args.lane } : {}),
+        ...(args.ambient ? { ambient: true } : {}),
+      }).then(
+        () => undefined,
+        (err: unknown) =>
+          log.warn(
+            `[chat] task-step nudge for ${args.taskRef}/${args.stepId} failed: ${err instanceof Error ? err.message : err}`,
+          ),
+      ),
+    );
+    return { sessionId: session.id };
   }
 
   /** Late-bind the fitness manager (see the field's docblock). */
@@ -6277,9 +6336,8 @@ export class ChatManager extends LocalEngineRuntime {
    * project picker, so the two stay coherent: the project the dropdown
    * pre-selects is also the one a fan-out routes to.
    *
-   * `fallback` (i.e. `default`) lands at the bottom of the ranked list,
-   * so we only end up there when the gezel has no real project presence —
-   * matching today's behavior.
+   * `default` ranks like any project when the gezel owns live task work
+   * there (a Meester-run craftbook); otherwise it is the bottom `fallback`.
    */
   private async resolveMentionProject(gezelId: string): Promise<string> {
     const ranked = await rankProjectsForGezel(this.store, gezelId);
@@ -7038,7 +7096,11 @@ export class ChatManager extends LocalEngineRuntime {
       messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
-    const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
+    const inflightTurn: InflightTurn = {
+      userText,
+      startedAt: Date.now(),
+      origin: resolveTurnMessageOrigin(opts),
+    };
     this.inflight.set(sessionId, inflightTurn);
     // Claim a clean question slot synchronously with the in-flight lock.
     // `stampPendingQuestion` can be called as soon as the provider starts
@@ -10024,6 +10086,10 @@ export class ChatManager extends LocalEngineRuntime {
         const part = candidate?.trim();
         const key = part?.replace(/\s+/g, ' ').toLowerCase();
         if (!part || !key || seenPromptParts.has(key)) continue;
+        // Default's seeded docs describe the catch-all bucket, not the
+        // picture; ~800 chars of it ahead of the step description can crowd
+        // the actual subject out of a short-prompt image engine.
+        if (SEEDED_DEFAULT_PROJECT_DOCS.has(part)) continue;
         seenPromptParts.add(key);
         promptParts.push(part);
       }
@@ -10096,6 +10162,13 @@ export class ChatManager extends LocalEngineRuntime {
     const project = await this.store.getProject(record.projectId).catch(() => null);
     if (!project?.voormanGezelId) return null;
     if (project.voormanGezelId !== record.gezelId) return null;
+    // The Meester's front-door chat lives in Default. A casual reply there is
+    // not a lead stalling on Default's craftbook work, even when the user has
+    // made the Meester Default's voorman.
+    if (!record.taskRef && record.projectId === DEFAULT_PROJECT_ID) {
+      const config = await this.store.readConfig().catch(() => null);
+      if (config?.meesterGezelId === record.gezelId) return null;
+    }
     // A message_gezel/delegate_* callback parked behind this sender is
     // concrete pending work. Nudging the voorman before releasing the turn
     // deadlocks that handoff and encourages a duplicate dispatch.
@@ -10125,10 +10198,17 @@ export class ChatManager extends LocalEngineRuntime {
     // without doing it; the voorman-idle arm is reserved for active work.
     // Likewise, when every task is terminal there is no active step to
     // advance, so the voorman's prose is already a valid terminal response.
+    // Scheduled hosts (cron, Night Shift) stay active between runs, and the
+    // scheduler — not the voorman — starts each one, so they are not live
+    // work to resume.
     const tasks = withEffectiveTaskStatuses(
       await this.store.listProjectTasks(record.projectId).catch(() => [] as Task[]),
     );
-    if (tasks.length === 0 || !tasks.some((task) => taskEffectiveStatus(task) === 'active')) {
+    if (
+      !tasks.some(
+        (task) => taskEffectiveStatus(task) === 'active' && !task.cron && !task.nightShift?.enabled,
+      )
+    ) {
       return null;
     }
     // Live work remains. Distinguish whether anything has actually been
@@ -13834,16 +13914,18 @@ export class ChatManager extends LocalEngineRuntime {
     // currently owned by them) in the same project as the session, so
     // the gezel doesn't have to call `list_tasks` to discover what
     // they're supposed to work on. Skipped when this session is itself
-    // task-scoped (taskContext above already injects the relevant task)
-    // or for the default "untitled" project (no real work tracked
-    // there).
+    // task-scoped (taskContext above already injects the relevant task).
     let assignedTasks: Task[] = [];
-    if (!record.taskRef && record.projectId !== DEFAULT_PROJECT_ID) {
+    if (!record.taskRef) {
       try {
         const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(record.projectId));
         assignedTasks = all.filter((t) => {
           const status = taskEffectiveStatus(t);
           if (status !== 'active' && status !== 'paused') return false;
+          // The scheduler dispatches these on its own clock. Listing them
+          // invites a chat turn to start the run — and Default always holds
+          // the Meester's perpetual Night Shift oversight task.
+          if (t.cron || t.nightShift?.enabled) return false;
           if (t.assignee.kind === 'gezel' && t.assignee.gezelId === record.gezelId) return true;
           // Step-level assignment: the active step may name this gezel
           // even if the task's top-level assignee is someone else.

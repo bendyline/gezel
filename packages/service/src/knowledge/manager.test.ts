@@ -282,6 +282,54 @@ describe('KnowledgeManager — per-profile query embedding', () => {
   });
 });
 
+describe('KnowledgeManager — search model download progress', () => {
+  let progressDir: string;
+
+  beforeAll(async () => {
+    progressDir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-progress-'));
+  });
+
+  afterAll(async () => {
+    await rm(progressDir, { recursive: true, force: true });
+  });
+
+  it('streams the profile model download as embedder bytes before done', async () => {
+    const { MULTILINGUAL_E5_SMALL_1 } = await import('@bendyline/gezel-knowledge');
+    const archive = join(progressDir, 'e5-progress-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: archive,
+      workDir: join(progressDir, 'work'),
+      id: 'e5-progress',
+      embeddingProfile: MULTILINGUAL_E5_SMALL_1,
+    });
+    const progressManager = new KnowledgeManager({
+      home: join(progressDir, 'home'),
+      host: await createInProcessCatalogHost(),
+      embedQueryForProfile: async (text, _profile, opts) => {
+        opts?.onDownloadProgress?.({ bytesDone: 100, bytesTotal: 300 });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        opts?.onDownloadProgress?.({ bytesDone: 300, bytesTotal: 300 });
+        return testHashVector(text);
+      },
+    });
+    await progressManager.start();
+    try {
+      const events = await runInstall(progressManager, archive);
+      const embedder = events.flatMap((e) =>
+        e.type === 'progress' && e.phase === 'embedder' ? [[e.bytesDone, e.bytesTotal]] : [],
+      );
+      expect(embedder).toEqual([
+        [0, 0],
+        [100, 300],
+        [300, 300],
+      ]);
+      expect(events.at(-1)?.type).toBe('done');
+    } finally {
+      await progressManager.stop();
+    }
+  }, 60_000);
+});
+
 describe('KnowledgeManager with a registered profile id whose pins differ', () => {
   let pinDir: string;
   let pinManager: KnowledgeManager;

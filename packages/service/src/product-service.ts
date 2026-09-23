@@ -24,6 +24,7 @@ import {
   onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  projectLeadGezelId,
   resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
@@ -1617,11 +1618,13 @@ export async function startProductService(
       // A book whose entry step names no role — every SKILL.md conversion
       // that carried no persona — would otherwise launch owned by the user
       // and never dispatch: created, active, and inert, which reads to the
-      // user as "I ran it and nothing happened". The voorman is the
-      // project's standing answer to "who picks this up?", and can route it
-      // onward. Falls through to the user only when the project has none.
-      const voormanGezelId = (await store.getProject(projectId).catch(() => null))?.voormanGezelId;
-      if (voormanGezelId) assignee = { kind: 'gezel', gezelId: voormanGezelId };
+      // user as "I ran it and nothing happened". The project lead (voorman,
+      // or the Meester in Default) is the standing answer to "who picks
+      // this up?". Falls through to the user only when there is none.
+      const project = await store.getProject(projectId).catch(() => null);
+      const config = await store.readConfig().catch(() => null);
+      const leadGezelId = project ? projectLeadGezelId(project, config?.meesterGezelId) : undefined;
+      if (leadGezelId) assignee = { kind: 'gezel', gezelId: leadGezelId };
     }
 
     const task = await tasks.create(projectId, {

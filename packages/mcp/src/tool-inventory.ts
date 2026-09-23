@@ -136,6 +136,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'spawn_task_instances',
   'list_task_children',
   'set_task_status',
+  'manage_task',
   'activate_task',
   'assign_task',
   'add_task_step',

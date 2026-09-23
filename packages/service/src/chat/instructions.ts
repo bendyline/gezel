@@ -700,6 +700,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     'start_project',
     'update_project',
     'create_task',
+    'manage_task',
     'assign_task',
     'advance_task_step',
     'write_task_note',
@@ -719,13 +720,18 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
       ? 'For named output formats or multi-step production work, call `suggest_craftbook` once, then make `invoke_craftbook` your next tool call when it returns a match or fallback. Do not repeat the suggestion with a rephrased query or switch to a generic kickoff macro.'
       : '';
+  // Without this, "try the deck again" reads as production work and starts a
+  // second run beside the paused one.
+  const taskOversightRoute = availableToolNameSet.has('manage_task')
+    ? ' To pause, resume, retry, or cancel work that is already running, call `manage_task` on its task — never start a second run.'
+    : '';
   const projectPrimaryRoute = availableToolNameSet.has('start_project')
     ? '`start_project({ name, about, missionObjectives, taskDescription })`'
     : availableToolNameSet.has('message_gezel')
       ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
       : 'the available project/task tools listed below';
-  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
-  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
+  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
+  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail = !isDelegationRole
     ? ''
     : opts.generalistKickoff === 'on'

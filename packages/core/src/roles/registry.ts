@@ -103,8 +103,10 @@ function std(name: string, inputs?: Record<string, unknown>): GateScriptRef {
 
 export const ROLES: Record<RoleId, RoleDefinition> = {
   // Meester surface, post-trim: `tasks-readonly` plus the narrow
-  // `craftbook-launch` front door. The latter may create a procedure-backed
-  // task, but all subsequent mutation lives with the voorman/assignee.
+  // `craftbook-launch` front door, and `task-oversight` to pause, resume,
+  // cancel, reassign and annotate what it launched — Default has no voorman,
+  // so the Meester is the only one who can manage its craftbook runs. Step
+  // advancing and completion still live with the assignee.
   // No `web` group (research routes through ask_specialist({ role:
   // 'researcher' }) — one schema vs. five web tools, meaningful for
   // tier:medium locals).
@@ -115,6 +117,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     toolsetGroups: [
       'team-management',
       'tasks-readonly',
+      'task-oversight',
       'craftbook-launch',
       'craftbooks',
       'artifacts',

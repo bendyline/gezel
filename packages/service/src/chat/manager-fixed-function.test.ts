@@ -384,6 +384,42 @@ describe('ChatManager — fixed-function gezels', () => {
     ).resolves.toBeDefined();
   }, 30_000);
 
+  // Meester-run craftbooks land in Default, whose seeded about/mission say
+  // what the bucket is for — nothing a picture should be drawn from.
+  it("keeps Default's seeded project docs out of the image brief", async () => {
+    expect((await store.getProject('default'))?.about).toContain('catch-all');
+    const gezel = await store.createGezel({
+      name: 'Picasso',
+      role: 'Image generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const task = await new TaskManager(store).create('default', {
+      title: 'Render a bowl of pasta',
+      description: 'A steaming bowl of tagliatelle for the title slide.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [
+        {
+          name: 'Render image',
+          suggestedRole: 'image-generator',
+          deliverable: { path: 'pasta.png', kind: 'image-set', minBytes: 100 },
+        },
+      ],
+    });
+    const session = await manager.createSession({
+      gezelId: gezel.id,
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+
+    const reply = await manager.send(session.id, `You've been assigned task ${task.ref}.`);
+
+    const args = reply.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('steaming bowl of tagliatelle');
+    expect(args).not.toContain('catch-all');
+    expect(args).not.toContain('promoted into a project');
+  }, 30_000);
+
   it('does not write about.md for fixed-function gezels', async () => {
     const gezel = await store.createGezel(makeWriteDocFf());
 

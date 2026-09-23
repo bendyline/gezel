@@ -147,6 +147,33 @@ export function nativeCapacityDirectory(home: string): string {
   );
 }
 
+/**
+ * Free graphics memory as device admission counts it: every card's reported
+ * free memory, less a driver reserve. Undefined when no card reports usage.
+ *
+ * The llama.cpp context planner sizes adaptive growth against this same
+ * reading. It used to size against 95% of the card's TOTAL memory while
+ * admission compared against this, so on a 32 GB card with ~4.5 GB held by
+ * the desktop and browsers, gemma4-31b grew to a 96K window, planned a
+ * 28.3 GB launch, and was refused against 27.2 GB free — a launch that fit
+ * comfortably at the 64K it would otherwise have used (2026-09-23).
+ */
+export async function measureAvailableGpuBytes(): Promise<number | undefined> {
+  const { createSystemDeviceHealthProbe } = await import('@bendyline/gezel/native');
+  const probe = await createSystemDeviceHealthProbe({
+    helperPath: process.env.GEZEL_DEVICE_HEALTH_BIN,
+  }).sample();
+  const readings = probe.readings.filter(
+    (r) => r.memoryTotalMb !== undefined && r.memoryUsedMb !== undefined,
+  );
+  if (readings.length === 0) return undefined;
+  return Math.max(
+    0,
+    readings.reduce((sum, r) => sum + r.memoryTotalMb! - r.memoryUsedMb!, 0) * 1024 ** 2 -
+      256 * 1024 ** 2,
+  );
+}
+
 export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacitySample> {
   const budget = await measuredCapacityBudget();
   const ram = totalmem();
@@ -166,22 +193,8 @@ export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacit
   // the host could serve.
   const availableBytes =
     Math.max(0, availableSystemRamBytes() - liveRamOsReserveBytes(ram)) + budget.vramBytes;
-  let availableGpuBytes: number | undefined;
-  if (budget.kind === 'discrete-gpu') {
-    const { createSystemDeviceHealthProbe } = await import('@bendyline/gezel/native');
-    const probe = await createSystemDeviceHealthProbe({
-      helperPath: process.env.GEZEL_DEVICE_HEALTH_BIN,
-    }).sample();
-    const readings = probe.readings.filter(
-      (r) => r.memoryTotalMb !== undefined && r.memoryUsedMb !== undefined,
-    );
-    if (readings.length > 0)
-      availableGpuBytes = Math.max(
-        0,
-        readings.reduce((sum, r) => sum + r.memoryTotalMb! - r.memoryUsedMb!, 0) * 1024 ** 2 -
-          256 * 1024 ** 2,
-      );
-  }
+  const availableGpuBytes =
+    budget.kind === 'discrete-gpu' ? await measureAvailableGpuBytes() : undefined;
   return {
     budgetBytes,
     // Keep non-reclaimable accelerator commitments on the conservative curve;

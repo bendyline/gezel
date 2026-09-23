@@ -198,7 +198,10 @@ describe('ChatManager — clamped first-turn context', () => {
       expect(admissionCalls).toBeGreaterThan(0);
       expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
       expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
-      expect(recalled?.toolAllowlist?.size).toBeLessThan(60);
+      // The diet caps at the curated Meester list (60 once the task-oversight
+      // kit joined it), well under the ~71-tool surface the floor sheds.
+      expect(recalled?.toolAllowlist?.size).toBeLessThan(64);
+      expect(recalled?.toolAllowlist?.has('manage_task')).toBe(true);
 
       const persisted = await testStore.getSession('imara', session.id);
       expect(persisted?.messages.map((message) => [message.role, message.content])).toEqual([
@@ -813,6 +816,34 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.warnings?.[0]).not.toMatch(/caller/i);
   }, 20_000);
 
+  // The scope guard asks this before letting a coordinator restart a task
+  // that paused for help: the user may, a model on its own may not.
+  it.each([
+    ['a typed message', undefined, true],
+    ['an answer to a question', { messageOrigin: 'question-answer' as const }, true],
+    ['a background nudge', { lane: 'background' as const, ambient: true }, false],
+    ['a system handoff', { messageOrigin: 'system' as const }, false],
+  ])(
+    'reports whether the in-flight turn is user-directed: %s',
+    async (_label, opts, expected) => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      expect(manager.isUserDirectedTurn(session.id)).toBe(false);
+      mock.scriptStreamThenHang('working on it');
+      const pending = manager.send(session.id, 'go', opts).catch(() => {});
+      await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+        timeout: 5000,
+        interval: 10,
+      });
+
+      expect(manager.isUserDirectedTurn(session.id)).toBe(expected);
+
+      await manager.cancelInflight(session.id);
+      await pending;
+      expect(manager.isUserDirectedTurn(session.id)).toBe(false);
+    },
+    20_000,
+  );
+
   it('scrubs reasoning markup off the turn-aborted message instead of baking it into content', async () => {
     // The salvaged buffer is RAW — the turn died before the provider's
     // end-of-turn reasoning extraction ran. Persisting it verbatim put
@@ -1346,8 +1377,6 @@ describe('ChatManager — task context', () => {
     // Regression: a gezel chatting in a project where they have
     // open tasks should see those tasks in the system prompt
     // instead of having to call `list_tasks` to discover them.
-    // The default project is excluded (no real work tracked
-    // there), so use a real project.
     const proj = await store.createProject({ name: 'Shop' });
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);
@@ -1410,13 +1439,23 @@ describe('ChatManager — task context', () => {
     expect(sys).not.toContain('### Tasks assigned to you in this project');
   });
 
-  it('does not inject assigned tasks for the default project', async () => {
+  // Craftbook work run through the Meester lands in Default, so its tasks
+  // are as real as any project's.
+  it('injects assigned tasks for the default project too', async () => {
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);
-    await taskMgr.create('default', {
-      title: 'Default-project busywork',
+    const task = await taskMgr.create('default', {
+      title: 'Pasta deck',
       assignee: { kind: 'gezel', gezelId: 'ada' },
       steps: [{ name: 'p1' }],
+    });
+    // Scheduled runs (the Meester's perpetual Night Shift oversight task
+    // lives in Default) are the scheduler's to start, not chat's.
+    await taskMgr.create('default', {
+      title: 'Night review',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [{ name: 'review' }],
+      nightShift: { enabled: true, onceADay: true },
     });
 
     const session = await manager.createSession({ gezelId: 'ada' });
@@ -1425,7 +1464,9 @@ describe('ChatManager — task context', () => {
 
     const create = mock.calls.find((c) => c.kind === 'create');
     const sys = create!.opts!.systemMessage;
-    expect(sys).not.toContain('### Tasks assigned to you in this project');
+    expect(sys).toContain('### Tasks assigned to you in this project (1)');
+    expect(sys).toContain(task.ref);
+    expect(sys).not.toContain('Night review');
   });
 
   it('injects lessons.md into the stable prefix, after the about body and before project context', async () => {

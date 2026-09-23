@@ -18,6 +18,12 @@ const USER_REQUEST_RE =
   /\b(?:can\s+you|could\s+you|please|i\s+(?:need|want|would\s+like)|we\s+(?:need|want|would\s+like))\b/i;
 const INFORMATIONAL_OPEN_RE =
   /^\s*(?:(?:how|what|why|when|where|who)\b|(?:are|can|could|did|do|does|is|will|would)(?!\s+you\b)\b)/i;
+// Acting on, or asking after, a deliverable that already exists — "cancel the
+// PowerPoint task", "how the deck is going", "update my presentation". An
+// exact route leaves `invoke_craftbook` as the only tool, so each of these
+// used to start a second, unrelated run instead of reaching the first.
+const EXISTING_WORK_RE =
+  /\b(?:cancel|stop|pause|resume|retry|restart|abort|delete|remove|update|edit|revise|fix|change|tweak|shorten|extend|finish|check\s+on|status\s+of|progress\s+on|how(?:'s|\s+is|\s+are)?|where(?:'s|\s+is|\s+are)?)\s+(?:the|that|this|my|our|your)\s+(?:[\w-]+\s+){0,2}?(?:power\s*point|pptx?|deck|presentation|slides?|slide\s*show|docx?|document|report|pdf|task)\b/i;
 
 /**
  * Deterministic, high-precision artifact routing. This is intentionally much
@@ -29,6 +35,7 @@ export function detectExactArtifactRoute(text: string): ExactArtifactRoute | nul
   if (!normalized) return null;
   if (INFORMATIONAL_OPEN_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
   if (!PRODUCTION_ACTION_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
+  if (EXISTING_WORK_RE.test(normalized)) return null;
 
   if (/\b(?:power\s*point|pptx?|slide\s+deck|presentation\s+deck)\b/i.test(normalized)) {
     return {

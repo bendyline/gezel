@@ -1551,7 +1551,7 @@
   content: "▸";
   display: inline-block;
   transition: transform 0.15s ease;
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   opacity: 0.7;
 }
 .msg-tool-history[open] > summary::before {
@@ -1654,7 +1654,7 @@
   content: "▸";
   display: inline-block;
   transition: transform 0.15s ease;
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   opacity: 0.7;
 }
 .msg-reasoning[open] > summary::before {

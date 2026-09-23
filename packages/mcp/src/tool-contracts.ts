@@ -259,6 +259,7 @@ const TOOL_OUTPUT_SCHEMAS = {
   add_verification_step: TaskToolOutputSchema,
   spawn_task_instances: TaskToolOutputSchema,
   set_task_status: TaskToolOutputSchema,
+  manage_task: TaskToolOutputSchema,
   activate_task: TaskToolOutputSchema,
   assign_task: TaskToolOutputSchema,
   add_task_step: TaskToolOutputSchema,
