@@ -23,9 +23,16 @@ enum AppleFoundationProvider {
         // Explicitly choose the on-device model, including on SDKs that also
         // expose cloud models. Never substitute a different model/provider.
         let model = SystemLanguageModel.default
-        let context = min(4096, model.contextSize)
+        let reportedContext = min(4096, model.contextSize)
+        // An unavailable system model can report no context at all (including
+        // on the simulator). Keep its descriptor valid for the shared provider
+        // list; the availability reason still prevents inference.
+        let context = reportedContext > maximumOutputTokens ? reportedContext : 4096
         switch model.availability {
         case .available:
+            guard reportedContext > maximumOutputTokens else {
+                return ("Apple's on-device model did not report a usable context window.", context)
+            }
             return (nil, context)
         case .unavailable(.deviceNotEligible):
             return ("This device does not support Apple Intelligence.", context)

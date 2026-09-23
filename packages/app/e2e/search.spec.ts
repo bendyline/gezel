@@ -22,7 +22,7 @@ async function launch(gezelHome: string): Promise<ElectronApplication> {
 
 const SHORTCUT = process.platform === 'darwin' ? 'Meta+p' : 'Control+p';
 
-test.setTimeout(60_000);
+test.setTimeout(90_000);
 
 test('titlebar search: shortcut focuses the box and typing opens the palette', async () => {
   const gezelHome = await mkdtemp(join(tmpdir(), 'gezel-search-e2e-'));
@@ -30,7 +30,8 @@ test('titlebar search: shortcut focuses the box and typing opens the palette', a
   try {
     const page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 10_000 });
+    // The first document is the splash; cold embedded-service startup can take longer.
+    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 60_000 });
 
     const input = page.locator('[data-testid="titlebar-search-input"]');
     await expect(input).toBeVisible();

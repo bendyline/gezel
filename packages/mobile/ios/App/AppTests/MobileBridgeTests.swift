@@ -22,8 +22,12 @@ final class MobileBridgeTests: XCTestCase {
         let status = try await invoke("status", [:])
         XCTAssertEqual((status["kokoro"] as? PluginCallResultData)?["state"] as? String, "ready")
         XCTAssertGreaterThanOrEqual((status["voices"] as? [PluginCallResultData])?.count ?? 0, 30)
+        // Shared Kokoro frontend output for "The blue bicycle is beside the window."
+        // The native plugin accepts padded phoneme ids rather than text.
+        let usSentence = [0, 81, 51, 16, 44, 54, 156, 63, 16, 44, 156, 25, 61, 83, 53, 83, 54, 16, 102, 68, 16, 44, 83, 61, 156, 25, 46, 16, 81, 51, 16, 65, 156, 102, 56, 46, 31, 4, 0]
+        let gbSentence = [0, 81, 83, 16, 44, 54, 156, 63, 158, 16, 44, 156, 25, 61, 102, 53, 42, 54, 16, 102, 68, 16, 44, 102, 61, 156, 25, 46, 16, 81, 83, 16, 65, 156, 102, 56, 46, 33, 4, 0]
         for voice in ["af_heart", "bm_george"] {
-            let output = try await invoke("synthesize", ["requestId": UUID().uuidString, "voice": voice, "text": "The blue bicycle is beside the window."])
+            let output = try await invoke("synthesize", ["requestId": UUID().uuidString, "voice": voice, "tokens": voice.hasPrefix("b") ? gbSentence : usSentence])
             let wav = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(output["wav"] as? String)))
             XCTAssertEqual(String(data: wav.prefix(4), encoding: .ascii), "RIFF")
             XCTAssertEqual((output["meta"] as? PluginCallResultData)?["voice"] as? String, voice)
@@ -68,6 +72,11 @@ final class MobileBridgeTests: XCTestCase {
         try AppleFoundationProvider.requireContextBudget(promptTokens: 256, maxTokens: 512, contextSize: 1024, modelContext: 4096)
         XCTAssertThrowsError(try AppleFoundationProvider.requireContextBudget(promptTokens: 257, maxTokens: 512, contextSize: 1024, modelContext: 4096))
         XCTAssertThrowsError(try AppleFoundationProvider.requireContextBudget(promptTokens: -1, maxTokens: 100, contextSize: 1024, modelContext: 4096))
+    }
+
+    func testSystemModelDescriptorLeavesInputContext() {
+        let descriptor = AppleFoundationProvider.availability()
+        XCTAssertGreaterThan(descriptor.contextTokens, AppleFoundationProvider.maximumOutputTokens)
     }
 
     @MainActor
@@ -202,6 +211,8 @@ final class MobileBridgeTests: XCTestCase {
         let gezelId = try XCTUnwrap(seeded?["gezelId"] as? String)
         try await reload()
         _ = try await run(#"""
+            const probe = await api('/api/models/test?provider=llama-cpp');
+            check(probe.ok && probe.modelCount > 0, 'Selected native model is unavailable to the shared product: ' + JSON.stringify(probe));
             window.dispatchEvent(new CustomEvent('gezel:navigate',{detail:{view:'home'}}));
             await until(()=>visible(document.querySelector('[data-testid="home-workshop"] .chat-composer')),'Meester composer');
             return true;

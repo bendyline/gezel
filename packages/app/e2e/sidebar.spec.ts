@@ -24,7 +24,7 @@ async function launch(gezelHome: string): Promise<ElectronApplication> {
 
 // Electron launch + worker contention can push this past the default
 // 30s budget. Bump it.
-test.setTimeout(60_000);
+test.setTimeout(90_000);
 
 test('sidebar selection persists and document icons align with their group header', async () => {
   const gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sidebar-e2e-'));
@@ -37,7 +37,7 @@ test('sidebar selection persists and document icons align with their group heade
 
     // Wait for the App (and its `gezel:open-tab` listener) to mount. The
     // sidebar rendering is the proxy for "App.tsx finished first render".
-    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 60_000 });
 
     await test.step('document icons align with the Documents header', async () => {
       const documentsToggle = page.getByTestId('sidebar-group-toggle-documents');

@@ -235,6 +235,11 @@ export async function main() {
       `--coverage.reportsDirectory=${reportsDirectory}`,
       `--coverage.include=${target.include}`,
       ...exclusions.map((pattern) => `--coverage.exclude=${pattern}`),
+      // The CLI integration suite runs a real daemon and many CLI children.
+      // Parallel coverage workers contend with them on the CI runner, causing
+      // child deadlines and daemon connection resets. Keep all tests in the
+      // coverage pass, but run this package's files one at a time.
+      ...(target.id === 'cli' ? ['--maxWorkers=1'] : []),
     ];
     // The override is useful while the checkout's dependency mutation lease is
     // occupied: a separately installed Vitest can measure this tree without
