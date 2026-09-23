@@ -48,7 +48,7 @@ export function ProductModelSettings({
     (value: unknown) => setError(value instanceof Error ? value.message : String(value)),
     [],
   );
-  const refresh = useCallback(async () => {
+  const load = useCallback(async () => {
     const [nextProviders, nextInventory, config] = await Promise.all([
       host.inference.providers(),
       host.listModels(),
@@ -62,11 +62,18 @@ export function ProductModelSettings({
       config.provider === 'android-mlkit'
     )
       setProvider(config.provider);
-    window.dispatchEvent(new CustomEvent('gezel:config-updated'));
   }, [host, service]);
+  const refresh = useCallback(async () => {
+    await load();
+    window.dispatchEvent(new CustomEvent('gezel:config-updated'));
+  }, [load]);
+  // Mounting is not a settings change. The shell reads `gezel:config-updated`
+  // as "the user saved", which ends first-run's return to Home, so announcing
+  // on mount let a reload into Settings keep or lose setup depending on which
+  // of this read and the first-run estimate finished first.
   useEffect(() => {
-    void refresh().catch(onError);
-  }, [refresh, onError]);
+    void load().catch(onError);
+  }, [load, onError]);
   const selected = providers.find(({ id }) => id === provider);
   const modelId = provider === 'llama-cpp' ? inventory.selectedModelId : provider;
   const downloads = (

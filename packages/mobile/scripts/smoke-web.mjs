@@ -139,6 +139,9 @@ try {
     }
     console.log(`Passed ${name}`);
   }
+  // Cleared before every document load: the rail-close below is re-armed per
+  // page, not per install, so a reload or goto that skips it reintroduces the
+  // race on whichever step next reaches for the rail.
   let booted = false;
   async function navigation() {
     await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
@@ -146,10 +149,11 @@ try {
     const nav = page.getByRole('navigation', { name: 'Primary navigation', exact: true });
     const open = page.getByRole('button', { name: 'Navigation', exact: true });
     if (!booted) {
-      // A fresh install boots with the rail open and closes it once the
-      // first-run estimate lands, about 100ms after load. A rail opened before
-      // that settles is closed underneath the next step, and which side of
-      // the close a run lands on moves with bundle size, so wait it out.
+      // Every load boots with the rail open and closes it once the first-run
+      // estimate lands, about 100ms later, for as long as no model is ready —
+      // which is the whole run here. A rail opened before that settles is
+      // closed underneath the next step, and which side of the close a run
+      // lands on moves with bundle size, so wait it out.
       await open.waitFor();
       booted = true;
     }
@@ -287,6 +291,7 @@ try {
   );
   await checkpoint('phone-project-chat');
 
+  booted = false;
   await page.reload();
   await openProject();
   await page.getByRole('tab', { name: 'Chat', exact: true }).first().click();
@@ -434,6 +439,7 @@ try {
     .all())
     await checkbox.check();
   await checkpoint('phone-backup-review');
+  booted = false;
   await Promise.all([page.waitForEvent('load'), restoreButton.click()]);
   await openProject();
   await page.getByRole('tab', { name: 'Workspace', exact: true }).click();
@@ -458,6 +464,7 @@ try {
   await checkpoint('tablet-project');
   const previewUrl = new URL(url);
   previewUrl.searchParams.set('layout', 'mobile');
+  booted = false;
   await page.goto(previewUrl.href);
   await (await navigation()).getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Backup and restore', exact: true }).click();
@@ -474,6 +481,7 @@ try {
   );
   await checkpoint('desktop-mobile-preview-backup');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  booted = false;
   await page.goto(url);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 320, height: 640 });
