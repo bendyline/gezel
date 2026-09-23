@@ -6314,10 +6314,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               `[llama-cpp] direct-file-work helper execution failed; forcing helper rewrite path=${DIRECT_FILE_WORK_SCRIPT_HELPER_PATH}`,
             );
           }
-          if (
-            scenarioFileRepairTurn &&
-            isMissingRepairTargetOutput(call.function.name, output)
-          ) {
+          if (scenarioFileRepairTurn && isMissingRepairTargetOutput(call.function.name, output)) {
             scenarioRepairMissingTargetCalls += 1;
           }
           if (

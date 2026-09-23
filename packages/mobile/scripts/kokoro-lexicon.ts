@@ -38,7 +38,12 @@ export function kokoroLexiconPlugin(): Plugin {
             { cause },
           );
         }
-        const reference = this.emitFile({ type: 'asset', name: file, source: bytes });
+        // Android's asset packager treats a final .gz suffix specially: it
+        // strips the suffix (and can inflate the payload) inside APKs. Publish
+        // the same gzip bytes under a neutral name so the WebView URL and the
+        // packaged bytes remain identical on both mobile platforms.
+        const assetName = file.replace(/\.txt\.gz$/, '.bin');
+        const reference = this.emitFile({ type: 'asset', name: assetName, source: bytes });
         urls[language] = reference;
       }
     },

@@ -225,11 +225,12 @@ final class MobileBridgeTests: XCTestCase {
             await clickButton('Settings', document.querySelector('[data-testid="app-sidebar"]'));
             const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native providers inside shared Settings');
             await until(() => models.querySelector('select')?.options.length > 0, 'native provider inventory');
-            const navigation = document.querySelector('.app-compact-navigation');
-            if (visible(navigation)) {
-                const rect = navigation.getBoundingClientRect();
-                check(rect.top >= -1 && rect.bottom <= innerHeight + 1 && rect.height >= 40, 'Navigation must remain fully visible in Settings');
-            }
+            const navigation = await until(() => {
+                const control = document.querySelector('.app-header-navigation[aria-label="Navigation"]');
+                return visible(control) && control;
+            }, 'Navigation control in Settings');
+            const rect = navigation.getBoundingClientRect();
+            check(rect.top >= -1 && rect.bottom <= innerHeight + 1 && rect.height >= 40, 'Navigation must remain fully visible in Settings');
             const providers = (await plugin.providers()).providers;
             check(providers.find(item => item.id === 'llama-cpp')?.availability === 'available', 'Imported fixture must be available');
             check(providers.some(item => item.id === 'apple-foundation-models'), 'Apple descriptor must reach native settings');
@@ -422,7 +423,10 @@ final class MobileBridgeTests: XCTestCase {
         };
         const openNavigation = async () => {
             if (!visible(document.querySelector('[data-testid="app-sidebar"]'))) {
-                const navigation = await until(() => document.querySelector('.app-compact-navigation button'), 'Navigation control');
+                const navigation = await until(() => {
+                    const control = document.querySelector('.app-header-navigation[aria-label="Navigation"]');
+                    return visible(control) && control;
+                }, 'Navigation control');
                 navigation.click();
             }
             await until(() => visible(document.querySelector('[data-testid="app-sidebar"]')), 'shared primary navigation');

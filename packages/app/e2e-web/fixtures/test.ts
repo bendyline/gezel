@@ -105,9 +105,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         const baseURL = `http://127.0.0.1:${svc.port}`;
         await waitForHealth(baseURL);
 
+        // The seeded world represents an already configured install. Copilot's
+        // availability probe checks the host SDK even when chat uses the mock,
+        // which can send the browser into first-run setup mid-test. Use the
+        // mocked OpenAI provider with an inert credential instead.
+        const client = new GezelClient({ baseUrl: baseURL, token });
+        await client.updateConfig({ provider: 'openai', openaiApiKey: 'sk-e2e-openai' });
+
         let world: SeedWorld | null = null;
         if (process.env.GEZEL_SEED !== '0') {
-          world = await seed(new GezelClient({ baseUrl: baseURL, token }), svc.context.store);
+          world = await seed(client, svc.context.store);
         }
         if (unexpectedHttpErrors.length > 0) {
           throw new Error(formatUnexpectedHttpErrors('while seeding', unexpectedHttpErrors));

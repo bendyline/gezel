@@ -210,11 +210,7 @@ const SOURCE_REPAIR_TOOLS: ReadonlySet<string> = new Set([
  * is present and only the anchor is missing, and treating that as absence
  * would send a whole-file rewrite at a file that just needed a better anchor.
  */
-const MISSING_TARGET_READ_TOOLS: ReadonlySet<string> = new Set([
-  'read_file',
-  'read_files',
-  'stat',
-]);
+const MISSING_TARGET_READ_TOOLS: ReadonlySet<string> = new Set(['read_file', 'read_files', 'stat']);
 const MISSING_TARGET_READ = /\bnot found\b|\bno such file\b|\b404\b/i;
 const MISSING_TARGET_EDIT = /\bfile does not exist\b|\bfile not found in workspace\b/i;
 export function isMissingRepairTargetOutput(toolName: string, output: string): boolean {

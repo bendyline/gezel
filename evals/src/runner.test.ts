@@ -867,9 +867,9 @@ describe('poisoned-session recovery', () => {
       false,
     );
     // A gate-id list names gates, not files — inferring a path would guess.
-    expect(
-      sniffReportsMissingTarget('src/machine.ts', 'missing=[tests-present, tsc-clean]'),
-    ).toBe(false);
+    expect(sniffReportsMissingTarget('src/machine.ts', 'missing=[tests-present, tsc-clean]')).toBe(
+      false,
+    );
   });
 
   it('uses a complete write when the checked file is missing', () => {

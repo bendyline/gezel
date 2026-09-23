@@ -9,13 +9,11 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   daemon,
 }) => {
   test.skip(!world, 'requires the seeded world');
-  await new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token }).writeProjectWorkspaceFile(
-    world!.projectId,
-    {
-      path: 'Mobile notes.md',
-      content: '# Mobile notes\n\nPhone workspace verification.\n',
-    },
-  );
+  const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+  await client.writeProjectWorkspaceFile(world!.projectId, {
+    path: 'Mobile notes.md',
+    content: '# Mobile notes\n\nPhone workspace verification.\n',
+  });
   const screenshots = process.env.GEZEL_RESPONSIVE_SHOTS;
   if (screenshots) await mkdir(screenshots, { recursive: true });
   const capture = async (name: string) => {
@@ -74,7 +72,8 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   await expect(editor).toBeVisible();
   await editor.fill('Keep this draft while resizing the workshop.');
   await expect(page.getByText('Hello from the web e2e seed', { exact: true })).toBeVisible();
-  await expect(page.getByText('Hello from the web e2e seed', { exact: true })).toBeInViewport({
+  const latestReply = page.getByText('Mock reply: Hello from the web e2e seed', { exact: true });
+  await expect(latestReply).toBeInViewport({
     ratio: 1,
   });
   await noOverflow();
@@ -107,7 +106,7 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   await capture('desktop768');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(editor).toHaveText('Keep this draft while resizing the workshop.');
-  await expect(page.getByText('Hello from the web e2e seed', { exact: true })).toBeInViewport({
+  await expect(latestReply).toBeInViewport({
     ratio: 1,
   });
   await noOverflow();
@@ -122,4 +121,17 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   await expect(page.locator('.app-mobile-preview')).toHaveCount(0);
   await expect(page.getByTestId('project-tab-chat')).toBeVisible();
   await expect(sidebar).toBeVisible();
+
+  // This worker's daemon is reused by later specs. The draft was only needed
+  // to verify resizing, so clear it and wait for its autosave deletion.
+  await editor.fill('');
+  await expect
+    .poll(async () => {
+      const { drafts } = await client.listPromptDrafts(world!.projectId, {
+        gezelId: world!.gezelIds.ada,
+        status: 'draft',
+      });
+      return drafts.some((draft) => draft.title.startsWith('Keep this draft while resizing'));
+    })
+    .toBe(false);
 });

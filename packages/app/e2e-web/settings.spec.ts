@@ -43,11 +43,9 @@ const SECTIONS = [
 test.describe('settings', () => {
   test('section tour', async ({ page, daemon }) => {
     const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
-    // API-key providers stay hidden until configured. Seed inert credentials so
-    // this tour covers their settings panels without changing the active mock
-    // provider or making an external request.
+    // API-key providers stay hidden until configured. The web fixture already
+    // configures the mock OpenAI provider; add Anthropic for this tour.
     await client.updateConfig({
-      openaiApiKey: 'sk-e2e-openai',
       anthropicApiKey: 'sk-ant-e2e-anthropic',
     });
 
@@ -69,7 +67,6 @@ test.describe('settings', () => {
       }
     } finally {
       await client.updateConfig({
-        openaiApiKey: '',
         anthropicApiKey: '',
       });
     }
@@ -130,7 +127,7 @@ test.describe('settings', () => {
       });
     } finally {
       await client.deleteDs4Model(legacyId).catch(() => {});
-      await client.updateConfig({ provider: 'copilot' });
+      await client.updateConfig({ provider: 'openai' });
     }
   });
 });
