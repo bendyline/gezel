@@ -34,7 +34,8 @@ import {
   isPermanentHandoffError,
 } from './handoff.ts';
 import type { SniffResult } from './success-check.ts';
-import type { EvalContext, EvalTerminalFailure } from './types.ts';
+import { type TaskStepRoute, resolveTaskStepDelivery } from './task-step-routing.ts';
+import type { EvalContext, EvalRepairActionSnapshot, EvalTerminalFailure } from './types.ts';
 
 /**
  * Per-context cache of "we've already nudged about this exact sniff
@@ -98,8 +99,17 @@ function logFeedbackDeferral(ctx: EvalContext, key: string, message: string): vo
 interface SniffEscalationState {
   /** Distinct delivered-and-completed attempts on this frozen signature. */
   attempts: number;
-  /** Exact hash + content fingerprint of the last observed revision. */
-  lastRevisionKey: string;
+  /**
+   * Exact hash + content fingerprint of the last observed revision, PER FILE
+   * (see `ladderFileKey`). A single slot let two files that fail the same way
+   * read each other's content as a fresh revision: petshop's `index.html` in
+   * the scenario project and a stray copy in the shared library alternated
+   * on one ladder and bumped it 2 -> 3 -> 4 inside five seconds with no model
+   * turn in between (2026-09-23). The signature ladder only ever holds one
+   * file; the plateau ladder deliberately spans files, and a file it has not
+   * seen before still counts once as a moved failure.
+   */
+  lastRevisionByFile: Map<string, string>;
   /**
    * A nudge for this signature actually landed since the last attempt
    * bump. The anti-inflation guard: undelivered feedback (in-flight
@@ -123,10 +133,67 @@ interface SniffEscalationState {
    * poll never reads as movement.
    */
   lastProgressToken?: string;
+  /**
+   * Virtual targets only: the session the last nudge landed in, and how many
+   * committed assistant turns it must reach before "the watched state did not
+   * advance" may count as a failed attempt. Without it the ladder counted
+   * every five-second poll after a delivery — craftbook-code-review went
+   * 1 -> 4 and was terminated in 15 seconds while the nudge still sat
+   * unanswered in the queue (2026-09-23).
+   */
+  pendingTurn?: {
+    sessionId: string;
+    gezelId: string;
+    projectId?: string;
+    turnsAtLeast: number;
+  };
   /** Stage-3 suppression log emitted once. */
   suppressionLogged: boolean;
 }
 const escalationMemory = new WeakMap<EvalContext, Map<string, SniffEscalationState>>();
+
+/**
+ * Identity of one checked file for ladder keys: the same relative path in two
+ * projects, or in the workspace and the artifacts drawer of one project, is
+ * two files and must never share a revision ladder.
+ */
+function ladderFileKey(filePath: string, opts: SniffFeedbackOptions): string {
+  return `${opts.projectId ?? ''}::${opts.surface ?? ''}::${filePath}`;
+}
+
+/** Committed assistant turns in a snapshot; older snapshots only carry the mutation count. */
+function snapshotTurns(snapshot: EvalRepairActionSnapshot): number {
+  return snapshot.completedTurns ?? snapshot.completedMutationTurns;
+}
+
+/**
+ * Has the model finished a turn in the session the last virtual-target nudge
+ * landed in? Lightweight contexts without a snapshot hook keep the legacy
+ * poll-counting behavior; a real trial that cannot verify does not count.
+ */
+async function completedTurnSinceNudge(
+  ctx: EvalContext,
+  state: SniffEscalationState,
+): Promise<boolean> {
+  if (!ctx.snapshotRepairActions) return true;
+  const pending = state.pendingTurn;
+  if (!pending) return false;
+  try {
+    const snapshot = await ctx.snapshotRepairActions({
+      sessionId: pending.sessionId,
+      gezelId: pending.gezelId,
+      ...(pending.projectId ? { projectId: pending.projectId } : {}),
+    });
+    return (
+      snapshot !== null && !snapshot.inflight && snapshotTurns(snapshot) >= pending.turnsAtLeast
+    );
+  } catch (err) {
+    ctx.log(
+      `[sniff-feedback] completed-turn check failed for ${pending.gezelId}/${pending.sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
 
 /**
  * Last successfully DELIVERED sniff nudge per trial, with its stage. The
@@ -158,13 +225,14 @@ export function lastDeliveredSniffNudge(ctx: EvalContext): { at: number; stage: 
 function ensureEscalationState(
   escalation: Map<string, SniffEscalationState>,
   key: string,
+  fileKey: string,
   revisionKey: string,
 ): SniffEscalationState {
   let state = escalation.get(key);
   if (!state) {
     state = {
       attempts: 1,
-      lastRevisionKey: revisionKey,
+      lastRevisionByFile: new Map([[fileKey, revisionKey]]),
       sentSinceLastCount: false,
       suppressionLogged: false,
     };
@@ -183,6 +251,7 @@ function ensureEscalationState(
 async function advanceEscalationState(
   ctx: EvalContext,
   state: SniffEscalationState,
+  fileKey: string,
   revisionKey: string,
   filePath: string,
   ladder: 'signature' | 'plateau',
@@ -205,18 +274,22 @@ async function advanceEscalationState(
       state.attempts = 1;
       state.sentSinceLastCount = false;
       state.pendingRepairAction = undefined;
-      state.lastRevisionKey = revisionKey;
+      state.pendingTurn = undefined;
+      state.lastRevisionByFile.set(fileKey, revisionKey);
       return { reset: true };
     }
-    if (state.sentSinceLastCount) {
+    // An unanswered nudge is not a failed attempt: count only once the
+    // target has actually finished a turn after it.
+    if (state.sentSinceLastCount && (await completedTurnSinceNudge(ctx, state))) {
       state.attempts += 1;
       state.sentSinceLastCount = false;
       state.pendingRepairAction = undefined;
+      state.pendingTurn = undefined;
       ctx.log(
         `[sniff-feedback] ${ladder} attempt ${state.attempts} for ${filePath}: nudge delivered and the watched state did not advance`,
       );
     }
-    state.lastRevisionKey = revisionKey;
+    state.lastRevisionByFile.set(fileKey, revisionKey);
     return { reset: false };
   }
   let completedPostNudgeRepair = false;
@@ -238,11 +311,16 @@ async function advanceEscalationState(
       );
     }
   }
-  const revisionChanged = revisionKey !== state.lastRevisionKey;
+  // Compared against THIS file's last revision only. A file the ladder has
+  // not seen before is a moved failure (the progressive store.ts ->
+  // migrate.ts shape the plateau ladder exists for), which counts once;
+  // two files that merely coexist no longer alternate as fresh revisions.
+  const previousRevision = state.lastRevisionByFile.get(fileKey);
+  const revisionChanged = previousRevision !== revisionKey;
   if ((revisionChanged || completedPostNudgeRepair) && state.sentSinceLastCount) {
     state.attempts += 1;
     state.sentSinceLastCount = false;
-    state.lastRevisionKey = revisionKey;
+    state.lastRevisionByFile.set(fileKey, revisionKey);
     state.pendingRepairAction = undefined;
     if (completedPostNudgeRepair) {
       ctx.log(
@@ -250,7 +328,7 @@ async function advanceEscalationState(
       );
     }
   } else if (revisionChanged) {
-    state.lastRevisionKey = revisionKey;
+    state.lastRevisionByFile.set(fileKey, revisionKey);
   }
   return { reset: false };
 }
@@ -276,14 +354,14 @@ function normalizeFailReasonForSignature(failReason: string): string {
   return failReason.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 }
 
-function coarseSniffSignature(filePath: string, sniff: SniffResult): string {
+function coarseSniffSignature(fileKey: string, sniff: SniffResult): string {
   const missing = blindVolatileTempPaths(
     (sniff.missingRequiredSignals ?? []).slice().sort().join(','),
   );
   const failReason = normalizeFailReasonForSignature(
     blindVolatileTempPaths(sniff.failReason ?? ''),
   );
-  return `${filePath}::missing:${missing}::fail:${failReason}`;
+  return `${fileKey}::missing:${missing}::fail:${failReason}`;
 }
 
 /** Mirror of the product ladder's stageForPlateau: 2→targeted-edit, 3→full-rewrite, ≥4→suppress. */
@@ -341,11 +419,25 @@ export interface SniffFeedbackOptions {
   dedupeToken?: string;
   /**
    * Optional project id used for target selection and coordinator copies.
+   * Also part of the checked file's ladder identity.
    */
   projectId?: string;
   /**
+   * Drawer the checked file was read from. Part of the ladder identity, so a
+   * workspace file and a same-named artifact never share a revision ladder.
+   */
+  surface?: 'workspace' | 'artifacts';
+  /**
+   * The failure concerns a craftbook task: deliver INTO the active step's
+   * bound session (never as a free-standing `messageGezel`), and hold while
+   * no step session exists or the runner still holds the step's handoff.
+   * See [task-step-routing.ts](./task-step-routing.ts).
+   */
+  taskStep?: TaskStepRoute;
+  /**
    * Pin feedback to a known gezel, such as the author of a task-native
    * deliverable. When omitted, feedback uses the usual role/recency picker.
+   * Ignored when `taskStep` routes the nudge.
    */
   targetGezelId?: string;
   /**
@@ -494,7 +586,7 @@ function hashSniffFailure(
     ? `${opts.assetHandoff.jobTitle}:${opts.assetHandoff.filePath}:${opts.assetHandoff.message}`
     : '';
   const sourceRevision = '';
-  return `${filePath}::missing:${missing}::failReason:${failReason}::imageSrcs:${imageSrcs}::brokenImageSrcs:${brokenImageSrcs}::repair:${repairDirective}::dedupe:${dedupeToken}::expected:${expectedDeliverable}::postReadMutationTarget:${postReadMutationTarget}::target:${targetGezelId}::targeted:${targetedEditsOnly}::asset:${assetHandoff}::source:${sourceRevision}`;
+  return `${ladderFileKey(filePath, opts)}::missing:${missing}::failReason:${failReason}::imageSrcs:${imageSrcs}::brokenImageSrcs:${brokenImageSrcs}::repair:${repairDirective}::dedupe:${dedupeToken}::expected:${expectedDeliverable}::postReadMutationTarget:${postReadMutationTarget}::target:${targetGezelId}::targeted:${targetedEditsOnly}::asset:${assetHandoff}::source:${sourceRevision}`;
 }
 
 /**
@@ -554,16 +646,18 @@ export async function postSniffFeedback(
     escalation = new Map();
     escalationMemory.set(ctx, escalation);
   }
-  const coarseKey = coarseSniffSignature(filePath, sniff);
+  const fileKey = ladderFileKey(filePath, opts);
+  const coarseKey = coarseSniffSignature(fileKey, sniff);
   const revisionKey = `${exactKey}::rev:${contentRevisionToken(opts.sourceText ?? '')}`;
   const progressToken =
     opts.progressSourceText !== undefined
       ? contentRevisionToken(opts.progressSourceText)
       : undefined;
-  const state = ensureEscalationState(escalation, coarseKey, revisionKey);
+  const state = ensureEscalationState(escalation, coarseKey, fileKey, revisionKey);
   const signatureAdvance = await advanceEscalationState(
     ctx,
     state,
+    fileKey,
     revisionKey,
     filePath,
     'signature',
@@ -579,10 +673,11 @@ export async function postSniffFeedback(
     typeof sniff.score === 'number' && sniff.score > 0 ? `__plateau__::score:${sniff.score}` : null;
   let plateauState: SniffEscalationState | undefined;
   if (plateauKey) {
-    plateauState = ensureEscalationState(escalation, plateauKey, revisionKey);
+    plateauState = ensureEscalationState(escalation, plateauKey, fileKey, revisionKey);
     await advanceEscalationState(
       ctx,
       plateauState,
+      fileKey,
       revisionKey,
       filePath,
       'plateau',
@@ -642,15 +737,30 @@ export async function postSniffFeedback(
   if (stage < 3 && posted.has(key)) return { status: 'deduped' };
 
   let target: TargetGezel | null = null;
-  try {
-    target = await pickTargetGezel(ctx, filePath, {
-      projectId: opts.projectId,
-      targetGezelId: opts.targetGezelId,
-    });
-  } catch (err) {
-    ctx.log(
-      `[sniff-feedback] target lookup failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  if (opts.taskStep) {
+    // Held BEFORE the terminal rung too: a step that has not started, or a
+    // handoff the runner is still holding, is queued work, not a stuck model.
+    const decision = await resolveTaskStepDelivery(ctx.client, opts.taskStep);
+    if (decision.kind === 'hold') {
+      logTaskStepHold(ctx, filePath, opts.taskStep, decision.reason);
+      return { status: 'held' };
+    }
+    target = {
+      gezelId: decision.gezelId,
+      sessionId: decision.sessionId,
+      projectId: decision.projectId,
+    };
+  } else {
+    try {
+      target = await pickTargetGezel(ctx, filePath, {
+        projectId: opts.projectId,
+        targetGezelId: opts.targetGezelId,
+      });
+    } catch (err) {
+      ctx.log(
+        `[sniff-feedback] target lookup failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   const deliveryProjectId = opts.projectId ?? target?.projectId;
   const inflight = target ? await targetInflightTurn(ctx, target, deliveryProjectId) : null;
@@ -727,9 +837,10 @@ export async function postSniffFeedback(
     opts.expectedDeliverable === undefined
       ? { kind: 'file' as const, filePath }
       : opts.expectedDeliverable;
-  const deliverableFragment = expectedDeliverable
-    ? attachableDeliverable(expectedDeliverable.filePath, target.role, ctx.log)
-    : {};
+  const deliverableFragment =
+    expectedDeliverable && !opts.taskStep
+      ? attachableDeliverable(expectedDeliverable.filePath, target.role, ctx.log)
+      : {};
   let repairActionBaseline: Awaited<ReturnType<NonNullable<EvalContext['snapshotRepairActions']>>> =
     null;
   if (target.sessionId && ctx.snapshotRepairActions) {
@@ -745,19 +856,26 @@ export async function postSniffFeedback(
       );
     }
   }
+  const stepSessionId = opts.taskStep ? target.sessionId : undefined;
   try {
-    const delivered = await ctx.client.messageGezel(target.gezelId, {
-      fileTurnIntent: {
-        kind: 'repair-file',
-        path: filePath,
-        ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
-      },
-      fromGezelId: ctx.meesterId,
-      text,
-      suppressReply: true,
-      ...deliverableFragment,
-      ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
-    });
+    // A bound step session gets the text alone: no file-turn intent and no
+    // expected-deliverable contract. The step's own gate is the stricter
+    // contract there, and a `repair-file` intent on a virtual target
+    // (`task-graph.md`) orders the turn to write a file it must never write.
+    const delivered: { sessionId?: string } = stepSessionId
+      ? await ctx.client.sendToChatSession(stepSessionId, { message: text, nudge: true })
+      : await ctx.client.messageGezel(target.gezelId, {
+          fileTurnIntent: {
+            kind: 'repair-file',
+            path: filePath,
+            ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
+          },
+          fromGezelId: ctx.meesterId,
+          text,
+          suppressReply: true,
+          ...deliverableFragment,
+          ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
+        });
     if (opts.notifyMeester) {
       await ctx.client.sendChatMessage(ctx.meesterId, {
         message: [formatCoordinatorCopy(filePath, opts), '', text].join('\n'),
@@ -808,9 +926,31 @@ export async function postSniffFeedback(
           };
         }
       }
+      if (progressToken !== undefined && deliveredSessionId) {
+        const turnsAtLeast = await turnsAfterNudge(
+          ctx,
+          { sessionId: deliveredSessionId, gezelId: target.gezelId, projectId: deliveryProjectId },
+          deliveredSessionId === target.sessionId ? repairActionBaseline : null,
+        );
+        for (const s of armedStates) {
+          s.pendingTurn =
+            turnsAtLeast === null
+              ? undefined
+              : {
+                  sessionId: deliveredSessionId,
+                  gezelId: target.gezelId,
+                  ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
+                  turnsAtLeast,
+                };
+        }
+      }
     }
+    const into =
+      stepSessionId && opts.taskStep
+        ? ` into ${opts.taskStep.taskRef}/${opts.taskStep.stepId} session ${stepSessionId.slice(0, 8)}`
+        : '';
     ctx.log(
-      `[sniff-feedback] nudged ${target.gezelId} about ${filePath} sniff failure${stage > 0 ? ` (escalation stage ${stage}${plateauDriven ? ' via score plateau' : ''}, attempt ${stagedAttempts})` : ''}: ` +
+      `[sniff-feedback] nudged ${target.gezelId}${into} about ${filePath} sniff failure${stage > 0 ? ` (escalation stage ${stage}${plateauDriven ? ' via score plateau' : ''}, attempt ${stagedAttempts})` : ''}: ` +
         `missing=[${(sniff.missingRequiredSignals ?? []).join(', ')}]${sniff.failReason ? ` failReason="${sniff.failReason}"` : ''}`,
     );
     return { status: 'sent', stage: stage as 0 | 1 | 2, attempts: stagedAttempts };
@@ -822,9 +962,61 @@ export async function postSniffFeedback(
         `[sniff-feedback] suppressing identical repair sends to ${target.gezelId} after permanent client error`,
       );
     }
-    ctx.log(`[sniff-feedback] messageGezel failed for ${target.gezelId}: ${msg}`);
+    ctx.log(
+      `[sniff-feedback] ${stepSessionId ? 'sendToChatSession' : 'messageGezel'} failed for ${target.gezelId}: ${msg}`,
+    );
     return { status: 'send-failed' };
   }
+}
+
+/**
+ * The committed-turn count a nudge's own reply will reach. With a baseline
+ * of the same session taken just before delivery, that is one more turn —
+ * two when a turn was already running, since the nudge queues behind it.
+ * Otherwise measure after delivery. `null` = cannot tell, so the ladder
+ * will not count an attempt it cannot verify.
+ */
+async function turnsAfterNudge(
+  ctx: EvalContext,
+  scope: { sessionId: string; gezelId: string; projectId?: string },
+  sameSessionBaseline: EvalRepairActionSnapshot | null,
+): Promise<number | null> {
+  if (sameSessionBaseline) {
+    return snapshotTurns(sameSessionBaseline) + 1 + (sameSessionBaseline.inflight ? 1 : 0);
+  }
+  if (!ctx.snapshotRepairActions) return null;
+  try {
+    const after = await ctx.snapshotRepairActions({
+      sessionId: scope.sessionId,
+      gezelId: scope.gezelId,
+      ...(scope.projectId ? { projectId: scope.projectId } : {}),
+    });
+    return after === null ? null : snapshotTurns(after) + 1;
+  } catch {
+    return null;
+  }
+}
+
+const taskStepHoldLogMemory = new WeakMap<EvalContext, Map<string, string>>();
+
+/** One line per (task step, reason) — a held step polls every five seconds. */
+function logTaskStepHold(
+  ctx: EvalContext,
+  filePath: string,
+  route: TaskStepRoute,
+  reason: string,
+): void {
+  let perContext = taskStepHoldLogMemory.get(ctx);
+  if (!perContext) {
+    perContext = new Map();
+    taskStepHoldLogMemory.set(ctx, perContext);
+  }
+  const key = `${filePath}::${route.taskRef}::${route.stepId}`;
+  if (perContext.get(key) === reason) return;
+  perContext.set(key, reason);
+  ctx.log(
+    `[sniff-feedback] holding the ${filePath} nudge for ${route.taskRef}: ${reason}; it will be delivered into that step's own session once one exists`,
+  );
 }
 
 /**
@@ -1253,22 +1445,17 @@ function isTicTacToeThinScriptFailure(sniff: SniffResult): boolean {
  * Tracks how many consecutive polls have seen the deliverable file missing,
  * plus how many directive nudges we've already sent for it.
  */
-const missingDeliverableState = new WeakMap<
-  EvalContext,
-  Map<
-    string,
-    {
-      absentPolls: number;
-      nudgesSent: number;
-      lastNearMissKey?: string;
-      lastTargetGezelId?: string;
-      firstSeenTargetGezelId?: string;
-      firstSeenTargetAtPoll?: number;
-      coordinatorFallbackSentAtPoll?: number;
-      lastNudgeSentAtPoll?: number;
-    }
-  >
->();
+interface MissingDeliverableState {
+  absentPolls: number;
+  nudgesSent: number;
+  lastNearMissKey?: string;
+  lastTargetGezelId?: string;
+  firstSeenTargetGezelId?: string;
+  firstSeenTargetAtPoll?: number;
+  coordinatorFallbackSentAtPoll?: number;
+  lastNudgeSentAtPoll?: number;
+}
+const missingDeliverableState = new WeakMap<EvalContext, Map<string, MissingDeliverableState>>();
 
 export interface MissingDeliverableNearMiss {
   path: string;
@@ -1309,6 +1496,12 @@ export interface MissingDeliverableFeedbackOptions {
    * identical and only the drawer is wrong.
    */
   expectedSurface?: 'workspace' | 'artifact';
+  /**
+   * The deliverable belongs to a craftbook task: deliver into the active
+   * step's bound session, or hold. Never recruits, never messages a gezel
+   * outside the step. See [task-step-routing.ts](./task-step-routing.ts).
+   */
+  taskStep?: TaskStepRoute;
 }
 
 /**
@@ -1361,6 +1554,15 @@ export async function postMissingDeliverableFeedback(
   perCtx.set(filePath, state);
 
   if (state.absentPolls < minPolls) return;
+
+  if (opts.taskStep) {
+    await postMissingDeliverableIntoTaskStep(ctx, filePath, opts, opts.taskStep, state, {
+      repeatEvery,
+      maxNudges,
+      inflightGraceMs,
+    });
+    return;
+  }
 
   const minimumScore = opts.targetGezelId
     ? undefined
@@ -1518,6 +1720,73 @@ export async function postMissingDeliverableFeedback(
       );
     }
     ctx.log(`[sniff-feedback] missing-deliverable nudge failed for ${filePath}: ${msg}`);
+  }
+}
+
+/**
+ * Missing-deliverable nudge for a craftbook task's deliverable: the same
+ * directive text, delivered into the active step's bound session. There is
+ * no coordinator fallback and no recruiting here — the runtime already owns
+ * the step, and an ad-hoc Developer writing into a live task's folder is
+ * refused by the MCP server anyway.
+ */
+async function postMissingDeliverableIntoTaskStep(
+  ctx: EvalContext,
+  filePath: string,
+  opts: MissingDeliverableFeedbackOptions,
+  route: TaskStepRoute,
+  state: MissingDeliverableState,
+  limits: { repeatEvery: number; maxNudges: number; inflightGraceMs: number },
+): Promise<void> {
+  const nearMissKey = opts.nearMiss ? opts.nearMiss.location : undefined;
+  const newNearMiss = !!nearMissKey && state.lastNearMissKey !== nearMissKey;
+  if (state.nudgesSent >= limits.maxNudges && !newNearMiss) return;
+  if (
+    !newNearMiss &&
+    state.nudgesSent > 0 &&
+    state.lastNudgeSentAtPoll !== undefined &&
+    state.absentPolls - state.lastNudgeSentAtPoll < limits.repeatEvery
+  ) {
+    return;
+  }
+  const decision = await resolveTaskStepDelivery(ctx.client, route);
+  if (decision.kind === 'hold') {
+    logTaskStepHold(ctx, filePath, route, decision.reason);
+    return;
+  }
+  const target: TargetGezel = {
+    gezelId: decision.gezelId,
+    sessionId: decision.sessionId,
+    projectId: decision.projectId,
+  };
+  const inflight = await targetInflightTurn(ctx, target, decision.projectId);
+  if (inflight && inflight.elapsedMs < limits.inflightGraceMs) {
+    logFeedbackDeferral(
+      ctx,
+      `missing:${filePath}:${route.taskRef}:${route.stepId}:inflight`,
+      `[sniff-feedback] missing-deliverable nudge for ${filePath} deferred; ${route.taskRef}/${route.stepId} session ${decision.sessionId.slice(0, 8)} is still mid-turn for ${Math.round(inflight.elapsedMs / 1000)}s`,
+    );
+    return;
+  }
+  const text = formatMissingDeliverableNudge(filePath, opts.nearMiss, {
+    repairDirective: opts.repairDirective,
+    expectedSurface: opts.expectedSurface,
+  });
+  try {
+    await ctx.client.sendToChatSession(decision.sessionId, { message: text, nudge: true });
+    state.nudgesSent += 1;
+    state.lastNudgeSentAtPoll = state.absentPolls;
+    state.lastTargetGezelId = decision.gezelId;
+    if (nearMissKey) state.lastNearMissKey = nearMissKey;
+    noteHarnessInterventionDelivered(ctx);
+    ctx.log(
+      `[sniff-feedback] missing-deliverable nudge #${state.nudgesSent} → ${decision.gezelId} into ${route.taskRef}/${route.stepId} session ${decision.sessionId.slice(0, 8)} for ${filePath} (absent ${state.absentPolls} polls)`,
+    );
+  } catch (err) {
+    if (isPermanentHandoffError(err)) state.nudgesSent = limits.maxNudges;
+    ctx.log(
+      `[sniff-feedback] missing-deliverable nudge failed for ${filePath}: ${describeSendFailure(err)}`,
+    );
   }
 }
 

@@ -119,7 +119,31 @@ export interface PendingHandoff {
    * a mid-window quota reset releases it.
    */
   heldFor?: 'night-shift' | 'night-quota' | 'provider-busy';
+  /**
+   * Start of this handoff's current unbroken run of provider-capacity holds.
+   * Cleared on dispatch. Drives the starvation bound — see
+   * {@link DEFAULT_PROVIDER_BUSY_STARVATION_MS}.
+   */
+  providerBusySince?: number;
 }
+
+/**
+ * How long a handoff may wait for a free provider slot before it is admitted
+ * behind the work already there.
+ *
+ * Holding while the engine is busy is right for a moment: it keeps cancellable
+ * work off the provider and leaves the foreground slot to typed chat. It is
+ * wrong without a bound. On a one-slot local engine, a steady stream of chat
+ * turns — gezel-to-gezel handoffs, coordinator nudges — rarely leaves an idle
+ * instant for a tick to land on, and the pooled summary counts queued turns as
+ * occupancy too. Wild-caught on 2026-09-23 (gemma4-31b): four craftbooks sat
+ * with their next step queued here for 7 to 55 minutes, the scheduler reading
+ * "already queued or in flight" every 30 s, until the run was declared stuck
+ * with the deliverables otherwise done. An admitted handoff still waits its
+ * turn — the provider queue runs interactive work first — so the bound costs
+ * foreground chat nothing.
+ */
+const DEFAULT_PROVIDER_BUSY_STARVATION_MS = 60_000;
 
 /** One side of the pending split — see {@link TaskRunner.snapshot}. */
 export interface TaskHandoffBucket {
@@ -268,6 +292,8 @@ export interface TaskRunnerOptions {
   tickIntervalMs?: number;
   /** Injectable clock for tests. */
   now?: () => number;
+  /** Override for {@link DEFAULT_PROVIDER_BUSY_STARVATION_MS}. */
+  providerBusyStarvationMs?: number;
   /**
    * Synchronous read of Night Shift active state. While OFF, handoffs for
    * night-shift tasks are held on the queue rather than dispatched.
@@ -306,6 +332,7 @@ export class TaskRunner {
   private readonly pauseAfterFailedDispatch: TaskRunnerOptions['pauseAfterFailedDispatch'];
   private readonly tickIntervalMs: number;
   private readonly now: () => number;
+  private readonly providerBusyStarvationMs: number;
   private readonly isNightShiftActive: () => boolean;
   private readonly isNightShiftPending: (task: Task) => boolean;
   private readonly isIndexCatchUpActive: () => boolean;
@@ -347,6 +374,8 @@ export class TaskRunner {
     this.pauseAfterFailedDispatch = opts.pauseAfterFailedDispatch;
     this.tickIntervalMs = opts.tickIntervalMs ?? 5_000;
     this.now = opts.now ?? Date.now;
+    this.providerBusyStarvationMs =
+      opts.providerBusyStarvationMs ?? DEFAULT_PROVIDER_BUSY_STARVATION_MS;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
     this.isNightShiftPending = opts.isNightShiftPending ?? (() => true);
     this.isIndexCatchUpActive = opts.isIndexCatchUpActive ?? (() => false);
@@ -660,6 +689,45 @@ export class TaskRunner {
   }
 
   /**
+   * Whether a capacity-held handoff has waited past the starvation bound and
+   * goes out anyway. Only while the runner has no turn of its own in flight on
+   * that provider: the bound guarantees progress, it must not reopen the
+   * burst a fanout would otherwise send at a one-slot engine.
+   */
+  private starvedPastBound(
+    handoff: PendingHandoff,
+    providerName: ProviderName,
+    inFlight: number,
+  ): boolean {
+    if (handoff.providerBusySince === undefined) return false;
+    if (this.now() - handoff.providerBusySince < this.providerBusyStarvationMs) return false;
+    if (inFlight > 0) return false;
+    for (const dispatch of this.activeDispatches.values()) {
+      if (dispatch.providerName === providerName) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Record a capacity hold. Logged once per unbroken run of holds — the
+   * scheduler's "already queued or in flight" line was the only trace of a
+   * 55-minute hold, and it named neither the provider nor what filled it.
+   */
+  private holdProviderBusy(
+    handoff: PendingHandoff,
+    providerName: ProviderName,
+    occupancy: string,
+  ): void {
+    if (handoff.providerBusySince === undefined) {
+      handoff.providerBusySince = this.now();
+      log.info(
+        `[task-runner] ${handoff.taskRef}/${handoff.stepId} held: ${providerName} at capacity (${occupancy})`,
+      );
+    }
+    handoff.heldFor = 'provider-busy';
+  }
+
+  /**
    * One dispatch pass. Walks pending in FIFO order; dispatches any
    * whose target provider has a free slot; skips items for tasks
    * that are no longer active.
@@ -924,8 +992,16 @@ export class TaskRunner {
         // cancellation (paused/canceled tasks) drop work cleanly before a
         // session is ever created, and preserves any reserved foreground
         // capacity for typed chat.
-        if (!provider.queue.hasCapacity(lane, inFlight)) {
-          handoff.heldFor = 'provider-busy';
+        if (
+          !provider.queue.hasCapacity(lane, inFlight) &&
+          !this.starvedPastBound(handoff, providerName, inFlight)
+        ) {
+          const snap = provider.queue.snapshot();
+          this.holdProviderBusy(
+            handoff,
+            providerName,
+            `running=${snap.running} queued=${snap.queuedInteractive}i+${snap.queuedBackground}b`,
+          );
           keep.push(handoff);
           continue;
         }
@@ -941,6 +1017,7 @@ export class TaskRunner {
         );
         const inFlight = inTickDispatches.get(providerName) ?? 0;
         let atCapacity: boolean;
+        let occupancy = `runner=${activeForProvider.length}`;
         if (pooled && pooled.maxConcurrency > 0 && pooled.backgroundConcurrency > 0) {
           const reflectedSessionIds = new Set(
             [...pooled.active, ...pooled.pending]
@@ -960,14 +1037,28 @@ export class TaskRunner {
           atCapacity =
             totalOccupied + reservations >= pooled.maxConcurrency ||
             backgroundOccupied + reservations >= pooled.backgroundConcurrency;
+          occupancy =
+            `running=${pooled.running} queued=${pooled.queuedInteractive}i+${pooled.queuedBackground}b ` +
+            `max=${pooled.maxConcurrency} bg=${pooled.backgroundConcurrency} runner=${reservations}`;
         } else {
           atCapacity = activeForProvider.length + inFlight >= 1;
         }
-        if (atCapacity) {
-          handoff.heldFor = 'provider-busy';
+        if (atCapacity && !this.starvedPastBound(handoff, providerName, inFlight)) {
+          this.holdProviderBusy(handoff, providerName, occupancy);
           keep.push(handoff);
           continue;
         }
+      }
+      if (handoff.providerBusySince !== undefined) {
+        const heldMs = this.now() - handoff.providerBusySince;
+        const bound =
+          heldMs >= this.providerBusyStarvationMs
+            ? ' — starvation bound reached; it waits behind the provider queue instead'
+            : '';
+        log.info(
+          `[task-runner] ${handoff.taskRef}/${handoff.stepId} admitted after ${Math.round(heldMs / 1000)}s held for ${providerName}${bound}`,
+        );
+        handoff.providerBusySince = undefined;
       }
       handoff.heldFor = undefined;
 

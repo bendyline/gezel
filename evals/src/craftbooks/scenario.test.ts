@@ -1289,6 +1289,8 @@ describe('craftbook generic scenario adapter', () => {
             id: 'session-runner',
             gezelId: 'runner-1',
             projectId: 'project-1',
+            taskRef: 'T-1',
+            stepId: 'build',
             lastActivityAt: '2026-09-04T05:00:00Z',
           },
         ],
@@ -1297,6 +1299,7 @@ describe('craftbook generic scenario adapter', () => {
         gezels: [{ id: 'runner-1', role: 'Workflow Operator' }],
       }),
       messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: 'session-runner' }),
     };
     const scenario = craftbookScenarioFromSpec({
       ...directWorkerSpec(),
@@ -1315,7 +1318,7 @@ describe('craftbook generic scenario adapter', () => {
     // A workflow that has just started has not reached a terminal step by
     // definition: the virtual target holds its nudge through the start-up
     // grace and speaks only once the runtime has had its two minutes.
-    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
     for (let poll = 0; poll < RUNNING_WORKFLOW_GRACE_POLLS; poll++) {
       await scenario.successCheck({
         client,
@@ -1324,12 +1327,84 @@ describe('craftbook generic scenario adapter', () => {
         logChanged: vi.fn(),
       } as unknown as EvalContext);
     }
-    expect(client.messageGezel).toHaveBeenCalledTimes(1);
-    expect(client.messageGezel.mock.calls[0]![0]).toBe('runner-1');
-    const repair = client.messageGezel.mock.calls[0]![1].text as string;
+    // Delivered INTO the active step's bound session, never as a
+    // free-standing message that would open a task-less chat.
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).toHaveBeenCalledTimes(1);
+    const [sessionId, body] = client.sendToChatSession.mock.calls[0]!;
+    expect(sessionId).toBe('session-runner');
+    expect(body.nudge).toBe(true);
+    expect(body).not.toHaveProperty('fileTurnIntent');
+    const repair = body.message as string;
     expect(repair).toContain('Continue the real craftbook task `T-1`');
     expect(repair).toContain('advance_task_step');
     expect(repair).not.toContain('draft task');
+  });
+
+  // INCIDENT (2026-09-23 smoke): codemod-sweep's task-graph nudge went to the
+  // runner as a plain message, opened a task-less session, and every
+  // `write_artifact tasks/1/*.md` from it was refused `task_scoped_write_denied`.
+  it('holds the task-graph nudge while the active step has no session of its own', async () => {
+    const log = vi.fn();
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({
+        tasks: [
+          {
+            projectId: 'project-1',
+            num: 1,
+            ref: 'T-1',
+            title: 'Run workflow',
+            status: 'active',
+            assignee: { kind: 'gezel', gezelId: 'runner-1' },
+            activeStepId: 'build',
+            craftbook: {
+              id: 'sample-book',
+              steps: [
+                { id: 'build', name: 'Build' },
+                { id: 'finish', name: 'Finish', terminal: true },
+              ],
+            },
+            sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+          },
+        ],
+      }),
+      // Only an unbound chat exists — the shape the old route created.
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [
+          {
+            id: 'session-unbound',
+            gezelId: 'runner-1',
+            projectId: 'project-1',
+            lastActivityAt: '2026-09-04T05:00:00Z',
+          },
+        ],
+      }),
+      listGezels: vi.fn().mockResolvedValue({
+        gezels: [{ id: 'runner-1', role: 'Workflow Operator' }],
+      }),
+      listInflightTurns: vi.fn().mockResolvedValue({ inflight: [] }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: 'x' }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      mode: 'workflow',
+      success: { summary: 'The real workflow completes.' },
+    });
+    const ctx = { client, meesterId: 'meester', log, logChanged: vi.fn() };
+    for (let poll = 0; poll <= RUNNING_WORKFLOW_GRACE_POLLS + 5; poll++) {
+      await expect(scenario.successCheck(ctx as unknown as EvalContext)).resolves.toEqual({
+        done: false,
+      });
+    }
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toContain(
+      'no session has started for active step `build` yet',
+    );
   });
 
   function runningWorkflowFixture(inflight: Array<{ gezelId: string; elapsedMs: number }> = []) {

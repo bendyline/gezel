@@ -150,7 +150,7 @@ describe('completed repair-action snapshots', () => {
       false,
     );
 
-    expect(snapshot).toEqual({ completedMutationTurns: 2, inflight: false });
+    expect(snapshot).toEqual({ completedMutationTurns: 2, completedTurns: 4, inflight: false });
   });
 
   // INCIDENT: this counter is the SECOND arm of `advanceEscalationState` —
@@ -174,7 +174,7 @@ describe('completed repair-action snapshots', () => {
           { role: 'assistant', toolCalls: [{ name: 'mcp__gezel__read_file', success: true }] },
         ],
       }),
-    ).toEqual({ completedMutationTurns: 3, inflight: false });
+    ).toEqual({ completedMutationTurns: 3, completedTurns: 5, inflight: false });
   });
 
   it('carries the live in-flight bit separately from committed action count', () => {
@@ -185,7 +185,7 @@ describe('completed repair-action snapshots', () => {
         },
         true,
       ),
-    ).toEqual({ completedMutationTurns: 1, inflight: true });
+    ).toEqual({ completedMutationTurns: 1, completedTurns: 1, inflight: true });
   });
 });
 
@@ -739,6 +739,49 @@ describe('soft watchdog inflight handling', () => {
 });
 
 describe('poisoned-session recovery', () => {
+  it('skips a poisoned session pinned to a task step the task has left', () => {
+    const sessions = [
+      {
+        id: 'finished-sources',
+        gezelId: 'chinelo',
+        projectId: 'default',
+        taskRef: 'default/2',
+        stepId: 'sources',
+        lastTurnError: 'ramble abort',
+        lastActivityAt: '2026-09-24T15:40:00.000Z',
+      },
+      {
+        id: 'active-write',
+        gezelId: 'sunil',
+        projectId: 'default',
+        taskRef: 'default/2',
+        stepId: 'write',
+        lastTurnError: 'abort',
+        lastActivityAt: '2026-09-24T15:39:00.000Z',
+      },
+      {
+        id: 'unlisted-task',
+        gezelId: 'rex',
+        projectId: 'other',
+        taskRef: 'other/1',
+        stepId: 'scope',
+        lastTurnError: 'abort',
+        lastActivityAt: '2026-09-24T15:38:00.000Z',
+      },
+    ];
+    const picked = pickPoisonedSessionsForRecovery(
+      sessions,
+      'meester',
+      new Map([['default/2', 'write']]),
+    );
+    expect(picked.map((s) => s.sessionId)).toEqual(['active-write', 'unlisted-task']);
+    expect(
+      pickPoisonedSessionsForRecovery(sessions, 'meester', new Map([['default/2', null]])).map(
+        (s) => s.sessionId,
+      ),
+    ).toEqual(['unlisted-task']);
+  });
+
   it('picks recent non-meester sessions with a last turn error', () => {
     const picked = pickPoisonedSessionsForRecovery(
       [

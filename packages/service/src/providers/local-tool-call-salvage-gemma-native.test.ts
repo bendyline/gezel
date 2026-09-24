@@ -277,6 +277,61 @@ Done."}`;
     });
   });
 
+  describe('complete call, rumination, then a call cut off at the cap (gemma4-31b / schema-migration)', () => {
+    // The scenario-repair turn hit max_tokens=4096 after a complete, correct
+    // write_file: the model rambled on the thought channel ("**Wait**, I still
+    // need MIGRATION.md") and opened a second write_file that never closed.
+    // File bodies trimmed; the envelope structure is verbatim.
+    const Q = '<|"|>';
+    const testFile = [
+      "import { describe, it, expect } from 'vitest';",
+      "import { migrateUser } from '../src/migrate';",
+      "describe('migrateUser', () => {",
+      "  it('should handle a one-word name', () => {",
+      "    const legacy = { id: '2', name: 'Cher', email: 'cher@example.com' };",
+      "    expect(migrateUser(legacy)).toEqual({ id: '2', firstName: 'Cher', lastName: '', email: 'cher@example.com' });",
+      '  });',
+      '});',
+    ].join('\n');
+    const completeCall = `<|tool_call>call:write_file{content:${Q}${testFile}${Q},path:${Q}tests/migrate.test.ts${Q}}<tool_call|>`;
+    const wildShape = [
+      completeCall,
+      '<|channel>thought\n<channel|>I wrote `tests/migrate.test.ts` with three test cases ',
+      'covering normal, one-word, and multi-word names to verify the migration logic. Moving on to the final deliverable.\n',
+      '**Wait**, I still need `MIGRATION.md`.\n<|channel>thought\n<channel|>',
+      `<|tool_call>call:write_file{content:${Q}# User Schema Migration: Name Split\n## Overview\n`,
+      'The `User` record has been updated to replace the single `name` string field',
+    ].join('');
+
+    it('recovers the complete leading call and drops the truncated trailing one', () => {
+      const spans = findGemmaNativeToolCallSpans(wildShape, TOOLS);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]).toMatchObject({
+        name: 'write_file',
+        arguments: { path: 'tests/migrate.test.ts', content: testFile },
+        matchStart: 0,
+        matchEnd: completeCall.length,
+      });
+    });
+
+    it('recovers the same call when the tail is only rumination', () => {
+      const text = `${completeCall}<|channel>thought\n<channel|>I wrote it.\n---\n**Wait, I can just call the tool!** (Stop).\n---\n**Actually,`;
+      const spans = findGemmaNativeToolCallSpans(text, TOOLS);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.arguments).toEqual({ path: 'tests/migrate.test.ts', content: testFile });
+    });
+
+    it('still refuses a tool that is not on the roster', () => {
+      expect(findGemmaNativeToolCallSpans(wildShape, new Set(['read_file']))).toEqual([]);
+    });
+
+    it('does not promote the cut-off trailing call when the closed leading call is unknown', () => {
+      const text = wildShape.replace('call:write_file{content:', 'call:not_a_real_tool{content:');
+      expect(text.startsWith('<|tool_call>call:not_a_real_tool{')).toBe(true);
+      expect(findGemmaNativeToolCallSpans(text, TOOLS)).toEqual([]);
+    });
+  });
+
   describe('peg-parse dropped shapes (cbmx-20260720-195716)', () => {
     // llama-server's peg-gemma4 parser logs `W common_chat_peg_parse:
     // unparsed peg-gemma4 output: …` on these and streams nothing (the

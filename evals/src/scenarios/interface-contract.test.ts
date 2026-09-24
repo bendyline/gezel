@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { EvalContext } from '../types.ts';
 import {
   INTERFACE_CONTRACT_PROMPT,
   REQUIRED_PIPELINE_FILES,
@@ -286,4 +287,39 @@ describe('gate handles type-only imports (smoke regression)', () => {
       await rm(tmp, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+describe('interface-contract — project selection', () => {
+  it('never treats the shared documents library as the scenario project', async () => {
+    const listProjectWorkspace = vi.fn().mockResolvedValue({
+      files: [{ name: 'About this library.md', path: 'About this library.md', isDirectory: false }],
+    });
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'default' }, { id: 'shared', properties: { 'gezel.sharedLibrary': '1' } }],
+      }),
+      listProjectWorkspace,
+      listProjectArtifacts: vi.fn().mockResolvedValue({ files: [] }),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      messageGezel: vi.fn(),
+      sendChatMessage: vi.fn(),
+      ensureGezel: vi.fn(),
+    };
+    const lines: string[] = [];
+    const ctx = {
+      client,
+      meesterId: 'meester-1',
+      log: () => {},
+      logChanged: (_key: string, line: string) => lines.push(line),
+    } as unknown as EvalContext;
+
+    for (let poll = 0; poll < 30; poll++) {
+      await expect(interfaceContractScenario.successCheck(ctx)).resolves.toEqual({ done: false });
+    }
+    expect(listProjectWorkspace).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(lines).toContain('[scenario] no non-default project yet');
+  });
 });

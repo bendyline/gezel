@@ -203,4 +203,41 @@ describe('LlamaCppSession tool-result headroom', () => {
     expect(internal.messages).toEqual(before);
     expect(capToolOutput('x'.repeat(16_000), budget)).toContain('truncated');
   });
+  it('condenses a long read loop in a few large steps, not once per read', async () => {
+    // Each condensation rewrites an earlier message, which invalidates the
+    // engine's cached prefix from there on. Reclaiming only what the next read
+    // needed condensed on nearly every read of a long loop.
+    const numCtx = 65_536;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx });
+    const session = await provider.createSession({ systemMessage: 'sys' });
+    const internal = session as unknown as {
+      currentTurnStartIdx: number;
+      messages: Array<{ role: string; content: string; tool_call_id?: string }>;
+      makeRoomForToolResults: () => Promise<void>;
+      submittedToolResults: WeakSet<object>;
+    };
+    internal.currentTurnStartIdx = internal.messages.length;
+    internal.messages.push({ role: 'user', content: 'Review every batch.' });
+    let rewrites = 0;
+    for (let i = 0; i < 24; i++) {
+      const before = internal.messages.map((m) => m.content);
+      await internal.makeRoomForToolResults();
+      if (
+        internal.messages.some((m, idx) => before[idx] !== undefined && m.content !== before[idx])
+      ) {
+        rewrites++;
+      }
+      internal.messages.push({ role: 'assistant', content: `Read batch ${i}` });
+      const result = {
+        role: 'tool',
+        content: `${i}:${'x'.repeat(13_000)}`,
+        tool_call_id: `call-${i}`,
+      };
+      internal.messages.push(result);
+      internal.submittedToolResults.add(result);
+    }
+    expect(rewrites).toBeGreaterThan(0);
+    expect(rewrites).toBeLessThanOrEqual(4);
+    expect(internal.messages.at(-1)?.content).toBe(`23:${'x'.repeat(13_000)}`);
+  });
 });

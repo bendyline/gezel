@@ -71,6 +71,7 @@ export function completedRepairActionSnapshot(
           (call) => call.success && COMPLETED_REPAIR_MUTATION_TOOLS.has(bareToolName(call.name)),
         ),
     ).length,
+    completedTurns: session.messages.filter((message) => message.role === 'assistant').length,
     inflight,
   };
 }

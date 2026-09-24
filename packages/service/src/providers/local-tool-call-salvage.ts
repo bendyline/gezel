@@ -134,6 +134,8 @@ export interface GemmaNativeToolCallSpan extends ParsedGemmaToolCall {
 }
 
 const GEMMA_NATIVE_TOOL_CALL_ENVELOPE_RE = /<\|tool_call>\s*[\s\S]*?<tool_call\|>/gi;
+// Non-global twin for `.test()`: the `g` flag makes `.test` stateful.
+const CLOSED_GEMMA_NATIVE_ENVELOPE_RE = /<\|tool_call>[\s\S]*?<tool_call\|>/i;
 
 /**
  * Find Gemma 4's native `call:name{...}` tool-call format when the
@@ -171,8 +173,14 @@ export function findGemmaNativeToolCallSpans(
   // the rest of the buffer as the value. Still strict: the name must resolve
   // in knownToolNames, so this can't fabricate a call out of pure prose.
   // (Wild-caught on gemma4-e4b-q4 / plan-and-estimate.)
+  //
+  // Not after a closed envelope, though: a model that already emitted a
+  // complete `<|tool_call>…<tool_call|>` knows the closer, so a later opener
+  // without one was cut off at the output cap (gemma4-31b / schema-migration
+  // started a second write_file after rambling past its first call). Its
+  // unterminated `content` would land a truncated file as if it were whole.
   const markerIdx = text.lastIndexOf('<|tool_call>');
-  if (markerIdx !== -1) {
+  if (markerIdx !== -1 && !CLOSED_GEMMA_NATIVE_ENVELOPE_RE.test(text.slice(0, markerIdx))) {
     const parsedFromMarker = parseGemmaNativeToolCall(text.slice(markerIdx), knownToolNames);
     if (parsedFromMarker) {
       return [{ ...parsedFromMarker, matchStart: markerIdx, matchEnd: text.length }];

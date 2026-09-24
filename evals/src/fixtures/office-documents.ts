@@ -71,6 +71,27 @@ export function zipStored(files: Array<[string, string]>): Uint8Array {
   return out;
 }
 
+/** Read a {@link zipStored} archive's entries back out, in order — for assertions. */
+export function readStoredZip(bytes: Uint8Array): Map<string, string> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  const out = new Map<string, string>();
+  let cursor = 0;
+  while (cursor + 30 <= bytes.length && view.getUint32(cursor, true) === 0x04034b50) {
+    const size = view.getUint32(cursor + 18, true);
+    const nameLength = view.getUint16(cursor + 26, true);
+    const extraLength = view.getUint16(cursor + 28, true);
+    const nameStart = cursor + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    out.set(
+      decoder.decode(bytes.subarray(nameStart, nameStart + nameLength)),
+      decoder.decode(bytes.subarray(dataStart, dataStart + size)),
+    );
+    cursor = dataStart + size;
+  }
+  return out;
+}
+
 export function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;
   for (const byte of data) {
@@ -83,7 +104,7 @@ export function crc32(data: Uint8Array): number {
 }
 
 /** Escape the five XML metacharacters. Source briefs contain `&` and quotes. */
-function xmlEscape(text: string): string {
+export function xmlEscape(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

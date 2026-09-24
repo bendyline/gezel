@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
-import { listAllFiles, materializeProjectWorkspace, spawnAndAwait } from './helpers.ts';
+import {
+  isScenarioWorkProject,
+  listAllFiles,
+  materializeProjectWorkspace,
+  spawnAndAwait,
+} from './helpers.ts';
 
 /**
  * Interface-contract — two workers must agree on a shared interface.
@@ -347,10 +352,12 @@ export const interfaceContractScenario: EvalScenario = {
   successCheck: async (ctx): Promise<SuccessCheckResult> => {
     const { client, log, logChanged, recordSniff } = ctx;
     const { projects } = await client.listProjects();
-    // Newest non-default project first — the prompt asks the meester to
-    // create a fresh project for this work.
+    // Newest scenario project first — the prompt asks the meester to
+    // create a fresh project for this work. Never the shared documents
+    // library: with no scenario project yet it was the only candidate and
+    // took the missing-file nudges.
     const candidates = projects
-      .filter((p) => p.id !== 'default')
+      .filter(isScenarioWorkProject)
       .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
     if (candidates.length === 0) {
       logChanged('project', '[scenario] no non-default project yet');

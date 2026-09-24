@@ -21,6 +21,7 @@ interface MockedClient {
   listGezels: ReturnType<typeof vi.fn>;
   ensureGezel: ReturnType<typeof vi.fn>;
   listInflightTurns: ReturnType<typeof vi.fn>;
+  sendToChatSession: ReturnType<typeof vi.fn>;
 }
 
 function makeClient(
@@ -31,6 +32,8 @@ function makeClient(
       lastActivityAt: string;
       archived?: boolean;
       projectId?: string;
+      taskRef?: string;
+      stepId?: string;
     }>;
     gezels?: Array<{ id: string; role?: string | null; roleBasedName?: string | null }>;
     inflight?: Array<{
@@ -44,7 +47,15 @@ function makeClient(
     messageGezelImpl?: () => Promise<unknown>;
   } = {},
 ): MockedClient {
-  const sessions = opts.sessions ?? [];
+  const sessions: Array<{
+    id: string;
+    gezelId: string;
+    lastActivityAt: string;
+    archived?: boolean;
+    projectId?: string;
+    taskRef?: string;
+    stepId?: string;
+  }> = opts.sessions ?? [];
   const gezels = opts.gezels ?? [];
   const inflight = opts.inflight ?? [];
   return {
@@ -69,6 +80,9 @@ function makeClient(
       role: 'Developer',
       action: 'created-bespoke',
     }),
+    sendToChatSession: vi
+      .fn()
+      .mockImplementation((sessionId: string) => Promise.resolve({ accepted: true, sessionId })),
   };
 }
 
@@ -2281,13 +2295,18 @@ describe('sniff escalation ladder', () => {
         { id: 's', gezelId: 'runner-1', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
       ],
     });
+    let completedTurns = 0;
     const ctx = {
       ...makeCtx(client),
       log: (message: string) => logs.push(message),
       requestTerminalFailure,
       // Every poll reports a completed post-nudge mutation — the shape that
       // used to drive the counter. With a progress signal it must not.
-      snapshotRepairActions: async () => ({ completedMutationTurns: 99, inflight: false }),
+      snapshotRepairActions: async () => ({
+        completedMutationTurns: 99,
+        completedTurns,
+        inflight: false,
+      }),
     };
     const sniff = failingSniff({
       failReason: 'task sourced from craftbook x has not reached a terminal step',
@@ -2296,6 +2315,7 @@ describe('sniff escalation ladder', () => {
 
     // Six polls, each with the task on a further step. Never exhausts.
     for (const step of ['audit', 'fix', 'fix2', 'validate', 'evaluate', 'review']) {
+      completedTurns += 1;
       await postSniffFeedback(ctx, 'task-graph.md', sniff, {
         projectId: 'p1',
         expectedDeliverable: null,
@@ -2304,10 +2324,11 @@ describe('sniff escalation ladder', () => {
     }
     expect(requestTerminalFailure).not.toHaveBeenCalled();
 
-    // Now the task freezes on one step: the honest failed attempts accrue and
-    // the ladder still terminates.
+    // Now the task freezes on one step while the target answers every nudge:
+    // the honest failed attempts accrue and the ladder still terminates.
     const statuses: string[] = [];
     for (let i = 0; i < 6; i++) {
+      completedTurns += 1;
       const r = await postSniffFeedback(ctx, 'task-graph.md', sniff, {
         projectId: 'p1',
         expectedDeliverable: null,
@@ -2317,6 +2338,104 @@ describe('sniff escalation ladder', () => {
     }
     expect(statuses).toContain('exhausted');
     expect(logs.join('\n')).toContain('the watched state did not advance');
+  });
+
+  // INCIDENT (2026-09-23 smoke, craftbook-code-review): the virtual-target
+  // ladder counted every five-second poll after a delivery as a failed
+  // attempt, went 1 -> 4 in 15 seconds with the nudge still unanswered, and
+  // terminated the trial `repair-exhausted`.
+  it('counts a virtual-target attempt only after the target finished a turn', async () => {
+    const logs: string[] = [];
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'rex', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    let snapshot = { completedMutationTurns: 0, completedTurns: 3, inflight: false };
+    const ctx = {
+      ...makeCtx(client),
+      log: (message: string) => logs.push(message),
+      requestTerminalFailure,
+      snapshotRepairActions: vi.fn(async () => snapshot),
+    };
+    const sniff = failingSniff({
+      failReason: 'task sourced from craftbook code-review has not reached a terminal step',
+      missingRequiredSignals: [
+        'task sourced from craftbook code-review has not reached a terminal step',
+      ],
+    });
+    const opts = {
+      projectId: 'p1',
+      expectedDeliverable: null,
+      progressSourceText: 'p/1|paused|report',
+    };
+
+    expect(await postSniffFeedback(ctx, 'task-graph.md', sniff, opts)).toMatchObject({
+      status: 'sent',
+      attempts: 1,
+    });
+    // Four quick polls: the nudge is queued, then running — no turn has
+    // completed, so nothing counts and the trial is not terminated.
+    for (const next of [
+      { completedMutationTurns: 0, completedTurns: 3, inflight: false },
+      { completedMutationTurns: 0, completedTurns: 3, inflight: true },
+      { completedMutationTurns: 0, completedTurns: 3, inflight: true },
+      { completedMutationTurns: 0, completedTurns: 4, inflight: true },
+    ]) {
+      snapshot = next;
+      expect(await postSniffFeedback(ctx, 'task-graph.md', sniff, opts)).toEqual({
+        status: 'deduped',
+      });
+    }
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+    expect(logs.join('\n')).not.toContain('attempt 2');
+
+    // The reply turn commits: now it is an honest failed attempt.
+    snapshot = { completedMutationTurns: 0, completedTurns: 4, inflight: false };
+    expect(await postSniffFeedback(ctx, 'task-graph.md', sniff, opts)).toMatchObject({
+      status: 'sent',
+      stage: 1,
+      attempts: 2,
+    });
+    expect(client.messageGezel).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the queued reply when the virtual-target nudge landed mid-turn', async () => {
+    const client = makeClient({
+      sessions: [
+        { id: 's', gezelId: 'rex', projectId: 'p1', lastActivityAt: '2026-06-04T05:00:00Z' },
+      ],
+    });
+    // Mid-turn at delivery, but past the in-flight deferral window.
+    let snapshot = { completedMutationTurns: 0, completedTurns: 5, inflight: true };
+    const ctx = {
+      ...makeCtx(client),
+      snapshotRepairActions: vi.fn(async () => snapshot),
+    };
+    const sniff = failingSniff({
+      failReason: 'task sourced from craftbook x has not reached a terminal step',
+      missingRequiredSignals: ['task sourced from craftbook x has not reached a terminal step'],
+    });
+    const opts = {
+      projectId: 'p1',
+      expectedDeliverable: null,
+      progressSourceText: 'p/1|active|build',
+      inflightDeferMs: 0,
+    };
+    await postSniffFeedback(ctx, 'task-graph.md', sniff, opts);
+
+    // The turn that was already running commits; the nudge's own reply has
+    // not — still not an attempt.
+    snapshot = { completedMutationTurns: 0, completedTurns: 6, inflight: false };
+    expect(await postSniffFeedback(ctx, 'task-graph.md', sniff, opts)).toEqual({
+      status: 'deduped',
+    });
+    snapshot = { completedMutationTurns: 0, completedTurns: 7, inflight: false };
+    expect(await postSniffFeedback(ctx, 'task-graph.md', sniff, opts)).toMatchObject({
+      status: 'sent',
+      attempts: 2,
+    });
   });
 
   it('does not treat the first observation of a progress signal as movement', async () => {
@@ -2890,5 +3009,255 @@ describe('terminal rung requires the SCENARIO to be stuck, not one signature', (
   it('leaves sub-terminal stages untouched', () => {
     expect(resolveStage(2, 0)).toBe(1);
     expect(resolveStage(3, 0)).toBe(2);
+  });
+});
+
+describe('ladder identity is per file', () => {
+  const htmlSniff: SniffResult = {
+    ok: false,
+    signals: ['pet-vocab', 'store-vocab', 'structured-page'],
+    score: 3,
+    missingRequiredSignals: ['working-image', 'image-asset'],
+  };
+
+  // INCIDENT (2026-09-23 smoke, petshop): one `index.html` in the scenario
+  // project and a stray one in the shared library failed the same way and
+  // shared ONE ladder keyed by the bare path. Each poll read the other file's
+  // bytes as a fresh revision: attempts 2 -> 3 -> 4 inside five seconds with
+  // no model turn in between, then `repair-exhausted`.
+  it('never lets the same path in two projects alternate on one ladder', async () => {
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'dev-1', lastActivityAt: '2026-06-04T05:00:00Z' }],
+    });
+    const ctx = { ...makeCtx(client), requestTerminalFailure };
+    const statuses: string[] = [];
+    for (let poll = 0; poll < 5; poll++) {
+      for (const [projectId, sourceText] of [
+        ['pet-shop-website', '<html>5856 bytes of shop</html>'],
+        ['other-project', '<html>1806 bytes of draft</html>'],
+      ] as const) {
+        const result = await postSniffFeedback(ctx, 'index.html', htmlSniff, {
+          projectId,
+          surface: 'workspace',
+          sourceText,
+          expectedDeliverable: null,
+        });
+        statuses.push(result.status);
+      }
+    }
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+    expect(statuses).not.toContain('exhausted');
+    // One first-rung nudge per file; unchanged files after that only dedupe.
+    expect(client.messageGezel).toHaveBeenCalledTimes(2);
+    for (const call of client.messageGezel.mock.calls) {
+      expect(call[1].text).not.toContain('REPEAT MISS');
+      expect(call[1].text).not.toContain('SCORE PLATEAU');
+    }
+  });
+
+  it('keeps a workspace file and a same-named artifact on separate ladders', async () => {
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'dev-1', lastActivityAt: '2026-06-04T05:00:00Z' }],
+    });
+    const ctx = { ...makeCtx(client), requestTerminalFailure };
+    for (let poll = 0; poll < 5; poll++) {
+      for (const [surface, sourceText] of [
+        ['workspace', 'workspace copy'],
+        ['artifacts', 'artifact copy'],
+      ] as const) {
+        await postSniffFeedback(ctx, 'index.html', htmlSniff, {
+          projectId: 'p1',
+          surface,
+          sourceText,
+          expectedDeliverable: null,
+        });
+      }
+    }
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(2);
+  });
+
+  it('still escalates when one file is really rewritten without clearing the check', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'dev-1', lastActivityAt: '2026-06-04T05:00:00Z' }],
+    });
+    const ctx = makeCtx(client);
+    const results = [];
+    for (const sourceText of ['rev-1', 'rev-2', 'rev-3']) {
+      results.push(
+        await postSniffFeedback(ctx, 'index.html', htmlSniff, {
+          projectId: 'p1',
+          surface: 'workspace',
+          sourceText,
+          expectedDeliverable: null,
+        }),
+      );
+    }
+    expect(results.map((r) => ('attempts' in r ? r.attempts : r.status))).toEqual([1, 2, 3]);
+  });
+});
+
+describe('task-step routing', () => {
+  const graphSniff: SniffResult = {
+    ok: false,
+    signals: [],
+    score: 4,
+    failReason: 'task sourced from craftbook codemod-sweep has not reached a terminal step',
+    missingRequiredSignals: [
+      'task sourced from craftbook codemod-sweep has not reached a terminal step',
+    ],
+  };
+  const route = { projectId: 'profile-cards', taskRef: 'profile-cards/1', stepId: 'enumerate' };
+
+  it('delivers into the active step session instead of opening a task-less chat', async () => {
+    const logs: string[] = [];
+    const client = makeClient({
+      sessions: [
+        // The task owner's unbound chat is the most recent session: the old
+        // recency picker would have chosen it.
+        {
+          id: 'runner-unbound',
+          gezelId: 'craftbook-runner',
+          projectId: 'profile-cards',
+          lastActivityAt: '2026-09-23T21:14:48Z',
+        },
+        {
+          id: 'kwame-enumerate',
+          gezelId: 'kwame',
+          projectId: 'profile-cards',
+          taskRef: 'profile-cards/1',
+          stepId: 'enumerate',
+          lastActivityAt: '2026-09-23T21:12:45Z',
+        },
+      ],
+    });
+    const ctx = { ...makeCtx(client), log: (m: string) => logs.push(m) };
+
+    const result = await postSniffFeedback(ctx, 'task-graph.md', graphSniff, {
+      projectId: 'profile-cards',
+      taskStep: route,
+      targetGezelId: 'craftbook-runner',
+      expectedDeliverable: null,
+      progressSourceText: 'profile-cards/1|active|enumerate',
+    });
+
+    expect(result).toMatchObject({ status: 'sent' });
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).toHaveBeenCalledTimes(1);
+    const [sessionId, body] = client.sendToChatSession.mock.calls[0]!;
+    expect(sessionId).toBe('kwame-enumerate');
+    expect(body).toEqual({ message: expect.stringContaining('task-graph.md'), nudge: true });
+    expect(logs.join('\n')).toContain('into profile-cards/1/enumerate session kwame-en');
+  });
+
+  it('holds while the active step has not started a session', async () => {
+    const logs: string[] = [];
+    const requestTerminalFailure = vi.fn();
+    const client = makeClient({
+      sessions: [
+        {
+          id: 'runner-unbound',
+          gezelId: 'craftbook-runner',
+          projectId: 'profile-cards',
+          lastActivityAt: '2026-09-23T21:14:48Z',
+        },
+      ],
+    });
+    const ctx = { ...makeCtx(client), log: (m: string) => logs.push(m), requestTerminalFailure };
+    for (let poll = 0; poll < 6; poll++) {
+      expect(
+        await postSniffFeedback(ctx, 'task-graph.md', graphSniff, {
+          projectId: 'profile-cards',
+          taskStep: route,
+          expectedDeliverable: null,
+          progressSourceText: 'profile-cards/1|active|enumerate',
+        }),
+      ).toEqual({ status: 'held' });
+    }
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+    // Logged once, not once per poll.
+    expect(logs.filter((line) => line.includes('no session has started')).length).toBe(1);
+  });
+
+  // INCIDENT (2026-09-23 smoke, craftbook-powerpoint-deck): nudges to the
+  // previous step's gezels took the single engine slot while the runner held
+  // the `review` handoff as provider-busy.
+  it('holds while the runner still holds the step handoff', async () => {
+    const client = makeClient({
+      sessions: [
+        {
+          id: 'jungwoo-draft',
+          gezelId: 'jungwoo',
+          projectId: 'deck',
+          taskRef: 'deck/1',
+          stepId: 'review',
+          lastActivityAt: '2026-09-23T18:14:00Z',
+        },
+      ],
+    });
+    const ctx = makeCtx(client);
+    const result = await postSniffFeedback(ctx, 'task-graph.md', graphSniff, {
+      projectId: 'deck',
+      taskStep: {
+        projectId: 'deck',
+        taskRef: 'deck/1',
+        stepId: 'review',
+        runnerHold: 'provider-busy',
+      },
+      expectedDeliverable: null,
+    });
+    expect(result).toEqual({ status: 'held' });
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+  });
+
+  it('routes a missing craftbook deliverable into the step session without recruiting', async () => {
+    const logs: string[] = [];
+    const client = makeClient({
+      sessions: [
+        {
+          id: 'kwame-enumerate',
+          gezelId: 'kwame',
+          projectId: 'profile-cards',
+          taskRef: 'profile-cards/1',
+          stepId: 'enumerate',
+          lastActivityAt: '2026-09-23T21:12:45Z',
+        },
+      ],
+      gezels: [{ id: 'kwame', role: 'Codebase Analyst' }],
+    });
+    const ctx = { ...makeCtx(client), log: (m: string) => logs.push(m) };
+    await postMissingDeliverableFeedback(ctx, 'report.md', {
+      projectId: 'profile-cards',
+      taskStep: route,
+      minPolls: 1,
+    });
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).toHaveBeenCalledTimes(1);
+    const [sessionId, body] = client.sendToChatSession.mock.calls[0]!;
+    expect(sessionId).toBe('kwame-enumerate');
+    expect(body.nudge).toBe(true);
+    expect(body.message).toContain('There is still **no `report.md`**');
+  });
+
+  it('holds a missing craftbook deliverable nudge while no step session exists', async () => {
+    const client = makeClient({ sessions: [] });
+    const ctx = makeCtx(client);
+    for (let poll = 0; poll < 3; poll++) {
+      await postMissingDeliverableFeedback(ctx, 'report.md', {
+        projectId: 'profile-cards',
+        taskStep: route,
+        minPolls: 1,
+      });
+    }
+    expect(client.ensureGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
   });
 });

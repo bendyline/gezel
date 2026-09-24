@@ -3231,6 +3231,8 @@ interface WatchdogSessionSnapshot {
   lastActivityAt?: string;
   archived?: boolean;
   lastTurnError?: string;
+  taskRef?: string | null;
+  stepId?: string | null;
 }
 
 export interface PoisonedSessionSnapshot {
@@ -3258,18 +3260,47 @@ async function listPoisonedSessionsForWatchdog(
   meesterId: string,
 ): Promise<PoisonedSessionSnapshot[]> {
   const { sessions } = await client.listChatSessions();
-  return pickPoisonedSessionsForRecovery(sessions ?? [], meesterId);
+  const list = (sessions ?? []) as WatchdogSessionSnapshot[];
+  const projects = new Set(
+    list
+      .filter((session) => session.taskRef && session.stepId && session.lastTurnError)
+      .map((session) => session.projectId),
+  );
+  const activeSteps = new Map<string, string | null>();
+  for (const projectId of projects) {
+    const listed = await client.listProjectTasks(projectId).catch(() => null);
+    for (const task of listed?.tasks ?? []) {
+      const live = task.status === 'active' || task.status === 'paused';
+      activeSteps.set(task.ref, live ? (task.activeStepId ?? null) : null);
+    }
+  }
+  return pickPoisonedSessionsForRecovery(list, meesterId, activeSteps);
 }
 
+/**
+ * `activeSteps` maps a task ref to its live active step (null once the task
+ * is finished). A poisoned session pinned to a step the task has already left
+ * is history, not a stuck deliverable: the docx-meester-e2e re-run on
+ * 2026-09-24 sent a repair turn into the finished `sources` step's session,
+ * where it rambled for 12 minutes on the only engine slot while `write` waited,
+ * and then failed the trial for that stale session's recovery allowance.
+ * Tasks the listing did not return are left to the ordinary rules.
+ */
 export function pickPoisonedSessionsForRecovery(
   sessions: WatchdogSessionSnapshot[],
   meesterId: string,
+  activeSteps?: ReadonlyMap<string, string | null>,
 ): PoisonedSessionSnapshot[] {
   const tsOf = (session: WatchdogSessionSnapshot): number => {
     if (!session.lastActivityAt) return 0;
     const ts = Date.parse(session.lastActivityAt);
     return Number.isFinite(ts) ? ts : 0;
   };
+  const leftStep = (session: WatchdogSessionSnapshot): boolean =>
+    !!session.taskRef &&
+    !!session.stepId &&
+    !!activeSteps?.has(session.taskRef) &&
+    activeSteps.get(session.taskRef) !== session.stepId;
   return sessions
     .filter(
       (session) =>
@@ -3278,7 +3309,8 @@ export function pickPoisonedSessionsForRecovery(
         session.gezelId !== meesterId &&
         session.projectId &&
         typeof session.lastTurnError === 'string' &&
-        session.lastTurnError.trim().length > 0,
+        session.lastTurnError.trim().length > 0 &&
+        !leftStep(session),
     )
     .sort((a, b) => tsOf(b) - tsOf(a))
     .map((session) => ({

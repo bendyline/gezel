@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyBinaryDocumentBytes } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readStoredZip } from '../fixtures/office-documents.ts';
 import {
   evaluateMockExpectations,
   materializeMockToolFixture,
@@ -74,6 +75,96 @@ describe('mock MCP file fixtures', () => {
     // …and the fixtures are genuinely different containers.
     expect(Buffer.from(minimalDocxFixture())).not.toEqual(Buffer.from(minimalPptxFixture()));
     expect(verifyBinaryDocumentBytes('x.pdf', minimalPptxFixture()).ok).toBe(false);
+  });
+
+  it('builds PPTX and DOCX fixtures from the converted source instead of a placeholder', async () => {
+    // Regression: every save wrote the fixed one-slide "Deterministic DocBlocks
+    // eval deck", so powerpoint-deck's evaluate step — which reads the saved
+    // deck back with the real read_doc_as_markdown — correctly failed content
+    // fidelity and looped evaluate → publish until the retry-loop verdict.
+    home = await mkdtemp(join(tmpdir(), 'gezel-mock-mcp-'));
+    const source = {
+      markdown: '# Pilot Scope\n- 18 SKUs\n\n# Next Actions\n- Automated status emails\n',
+      origin: 'workspace/powerpoint/eval/deck.md',
+      slideBreak: 'h1' as const,
+    };
+    const pptx = await materializeMockToolFixture(
+      { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-pptx' },
+      { destination: { path: 'tasks/1/deck.pptx' } },
+      { trialHome: home, projectId: 'pptx-eval', source },
+    );
+    const docx = await materializeMockToolFixture(
+      { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-docx' },
+      { destination: { path: 'tasks/1/report.docx' } },
+      { trialHome: home, projectId: 'pptx-eval', source },
+    );
+    expect(pptx.materializedFrom).toBe('workspace/powerpoint/eval/deck.md');
+    expect(docx.materializedFrom).toBe('workspace/powerpoint/eval/deck.md');
+
+    const artifacts = join(home, 'projects', 'pptx-eval', 'artifacts', 'tasks', '1');
+    const deck = readStoredZip(new Uint8Array(await readFile(join(artifacts, 'deck.pptx'))));
+    expect(deck.get('ppt/slides/slide1.xml')).toContain('<a:t>Pilot Scope</a:t>');
+    expect(deck.get('ppt/slides/slide2.xml')).toContain('<a:t>Automated status emails</a:t>');
+    expect(deck.has('ppt/slides/slide3.xml')).toBe(false);
+    const report = readStoredZip(new Uint8Array(await readFile(join(artifacts, 'report.docx'))));
+    expect(report.get('word/document.xml')).toContain('Next Actions');
+    for (const [path, bytes] of [
+      ['deck.pptx', deck],
+      ['report.docx', report],
+    ] as const) {
+      expect([...bytes.values()].join(''), path).not.toContain('Deterministic DocBlocks eval');
+    }
+  });
+
+  it('keeps the fixed fixture when no source resolves, and for formats nothing reads back', async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-mock-mcp-'));
+    const noSource = await materializeMockToolFixture(
+      { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-pptx' },
+      { destination: { path: 'deck.pptx' } },
+      { trialHome: home, projectId: 'fallback-eval', source: null },
+    );
+    const pdf = await materializeMockToolFixture(
+      { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-pdf' },
+      { destination: { path: 'report.pdf' } },
+      {
+        trialHome: home,
+        projectId: 'fallback-eval',
+        source: { markdown: '# Report\n', origin: 'workspace/report.md' },
+      },
+    );
+    const emptySource = await materializeMockToolFixture(
+      { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-pptx' },
+      { destination: { path: 'empty.pptx' } },
+      {
+        trialHome: home,
+        projectId: 'fallback-eval',
+        source: { markdown: '\n', origin: 'workspace/empty.md' },
+      },
+    );
+    expect(noSource.materializedFrom).toBe('fixed minimal-pptx fixture');
+    expect(pdf.materializedFrom).toBe('fixed minimal-pdf fixture');
+    expect(emptySource.materializedFrom).toBe('fixed minimal-pptx fixture');
+    const artifacts = join(home, 'projects', 'fallback-eval', 'artifacts');
+    expect(await readFile(join(artifacts, 'deck.pptx'))).toEqual(Buffer.from(minimalPptxFixture()));
+    expect(await readFile(join(artifacts, 'report.pdf'))).toEqual(Buffer.from(minimalPdfFixture()));
+    expect(await readFile(join(artifacts, 'empty.pptx'))).toEqual(
+      Buffer.from(minimalPptxFixture()),
+    );
+  });
+
+  it('still refuses a destination outside the project when it has a source', async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-mock-mcp-'));
+    await expect(
+      materializeMockToolFixture(
+        { surface: 'artifact', pathArgument: 'destination.path', fixture: 'minimal-pptx' },
+        { destination: { path: '../../escape.pptx' } },
+        {
+          trialHome: home,
+          projectId: 'pptx-eval',
+          source: { markdown: '# Slide\n', origin: 'workspace/deck.md', slideBreak: 'h1' },
+        },
+      ),
+    ).rejects.toThrow(/inside the project/);
   });
 
   it('materializes a real PNG screenshot stub above the image-gate floor', async () => {
