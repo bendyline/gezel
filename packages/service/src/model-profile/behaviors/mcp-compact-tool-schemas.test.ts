@@ -129,6 +129,45 @@ describe('compact-tool-schemas checks-union slim', () => {
     expect(JSON.stringify(out)).not.toContain('intermediate edit');
   });
 
+  it('keeps properties whose NAMES collide with stripped schema keywords', () => {
+    const tool: OpenAIFunctionTool = {
+      type: 'function',
+      name: 'create_task',
+      description: 'Create a task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', title: 'Title', description: 'Short task title.' },
+          description: { type: 'string', description: 'What the task is for.' },
+          default: { type: 'boolean', default: false },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { title: { type: 'string' }, description: { type: 'string' } },
+              required: ['title'],
+            },
+          },
+        },
+        required: ['title', 'description'],
+      },
+    };
+    const params = decorate(tool).parameters;
+    const props = params.properties as Record<string, Record<string, unknown>>;
+    expect(Object.keys(props)).toEqual(['title', 'description', 'default', 'steps']);
+    expect(props.title).toEqual({ type: 'string' });
+    expect(props.description).toEqual({ type: 'string' });
+    expect(props.default).toEqual({ type: 'boolean' });
+    const stepProps = (props.steps!.items as Record<string, unknown>).properties as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(stepProps)).toEqual(['title', 'description']);
+    // Every required key must remain declared, or the model is told to
+    // supply a field it is never shown.
+    for (const key of params.required as string[]) expect(props).toHaveProperty(key);
+  });
+
   it('leaves small unions untouched', () => {
     const tool = delegateTool();
     const ed = (tool.parameters.properties as Record<string, unknown>)

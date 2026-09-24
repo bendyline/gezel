@@ -92,6 +92,21 @@ export function looksLikeImplementationRequest(text: string): boolean {
   return IMPLEMENTATION_ACTION_RE.test(text) && IMPLEMENTATION_NOUN_RE.test(text);
 }
 
+const DECK_SUBJECT_RE =
+  /\b(?:about|on|covering|regarding|explaining|introducing)\s+(.+?)\s*(?:,?\s*please)?\s*[.?!]*\s*$/i;
+
+/**
+ * The subject of a deck request — "pizza" from "Create a PowerPoint about
+ * pizza". The whole sentence used to become `topic`, which the research
+ * step then searched for verbatim and the copywriter could title slides
+ * with. Falls back to the full text when no subject clause is present;
+ * the invocation's `description` always keeps the user's own words.
+ */
+export function deckTopicFromRequest(text: string): string {
+  const subject = DECK_SUBJECT_RE.exec(text)?.[1]?.trim();
+  return subject && subject.length > 0 ? subject : text;
+}
+
 export interface ResolveTurnIntentPlanInput {
   text: string;
   isMeester: boolean;
@@ -127,7 +142,7 @@ export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIn
         name: artifact.craftbookName,
         invocation: {
           description: text,
-          ...(artifact.format === 'pptx' ? { params: { topic: text } } : {}),
+          ...(artifact.format === 'pptx' ? { params: { topic: deckTopicFromRequest(text) } } : {}),
         },
       },
       requiredTools: ['invoke_craftbook'],

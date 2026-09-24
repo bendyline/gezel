@@ -976,8 +976,8 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
   it('does not clamp a coordinator executing a step that declares a deliverable', async () => {
     const seed =
       'The previous step has been completed and handed step `oversight` of task default/1 to ' +
-      'you. Follow the step instructions already in your prompt — make the first tool call they ' +
-      'name this turn. Append focused notes with `write_task_note` as you go so the next gezel ' +
+      'you. Follow the step instructions already in your prompt — start with the first tool call ' +
+      'they name, then keep working through the procedure. Append focused notes with `write_task_note` as you go so the next gezel ' +
       'can pick up where you left off. When the step is done, call `advance_task_step` to hand ' +
       "off to whoever's next.";
     const clamps: string[] = [];

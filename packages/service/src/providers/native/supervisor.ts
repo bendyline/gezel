@@ -1468,6 +1468,13 @@ export class NativeEngineSupervisor {
       /* treat as failure below */
     }
     if (this.state.kind !== 'running') return;
+    // A busy engine can be too busy to answer: a 12-image vision prefill held
+    // the MLX server's event loop, three probes went unanswered, and the
+    // restart threw away a 20-minute powerpoint-deck evaluate turn
+    // (qwen3.8-27b, 2026-09-23). A turn in flight has its own awake-time
+    // deadlines that end a genuinely wedged engine, so only an idle engine's
+    // silence counts here.
+    if (this.engineBusy()) return;
     this.state.healthFails++;
     if (this.state.healthFails >= HEALTH_FAIL_THRESHOLD) {
       this.onLog(`${this.logPrefix} ${HEALTH_FAIL_THRESHOLD} health failures — restarting`);

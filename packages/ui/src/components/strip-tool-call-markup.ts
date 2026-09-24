@@ -61,11 +61,16 @@ const TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
   // least sees the fragment of intent the model was trying to express
   // — a string like "ada" or a description). Same shape, no close.
   /<parameter=[a-zA-Z_][a-zA-Z0-9_]*\s*>/gi,
-  // Stray `</parameter>` / `</function>` closes left over from
-  // partially-stripped or truncated emissions. Safe to drop blindly
-  // — these are never legitimate prose.
+  // Stray closes left over from partially-stripped or truncated
+  // emissions, or from a model that lost the thread and closes a call
+  // that was never open (qwen3.8 after a JSON-envelope call wrote
+  // `</parameter></invoke></function>` and then `</function>` forever).
+  // Safe to drop blindly — these are never legitimate prose.
   /<\/parameter\s*>/gi,
   /<\/function\s*>/gi,
+  /<\/invoke\s*>/gi,
+  /<\/tool_call\s*>/gi,
+  /<\/function_calls\s*>/gi,
   // gpt-oss channel markers — Gemma 3/4 picks this shape up after the
   // verbose-family `<think>` hint and emits both the canonical
   // `<|channel|>NAME<|message|>...<|end|>` and asymmetric variants —
@@ -145,7 +150,34 @@ const TRAILING_OPEN_PATTERNS: ReadonlyArray<RegExp> = [
   /<\|channel\|?>[\s\S]*$/i,
   /(?:^|\n)(?:thought|analysis|commentary|final)\|>[\s\S]*$/i,
   /(?:^|\n)(?:thought|analysis|commentary|final)\|\s*\n[\s\S]*$/i,
+  // An attribute-style opener still arriving: `<invoke name="rea`.
+  /<(?:invoke|parameter)\s[^<>]*$/i,
 ];
+
+/**
+ * Tag names whose half-streamed form (`<`, `</`, `</func`) must not
+ * reach the live bubble. Every full-tag strip above waits for the
+ * closing `>`, so without this the partial tag renders for a frame and
+ * vanishes when the tag completes — a model looping on `</function>`
+ * made the bubble flash `</` ten times a second.
+ */
+const PARTIAL_TAG_NAMES: readonly string[] = [
+  'tool_call',
+  'function_calls',
+  'function',
+  'parameter',
+  'invoke',
+  'think',
+  '|tool_call|',
+  '|channel|',
+];
+
+function stripTrailingPartialTag(text: string): string {
+  const m = /<\/?([a-z_|=]*)$/i.exec(text);
+  if (!m) return text;
+  const name = m[1]!.toLowerCase().split('=')[0]!;
+  return PARTIAL_TAG_NAMES.some((tag) => tag.startsWith(name)) ? text.slice(0, m.index) : text;
+}
 
 export interface StripVisibleToolCallMarkupOpts {
   /**
@@ -210,6 +242,7 @@ export function stripVisibleToolCallMarkup(
     for (const pat of TRAILING_OPEN_PATTERNS) {
       out = out.replace(pat, '');
     }
+    out = stripTrailingPartialTag(out);
   }
   if (out === text) return text;
   // Collapse 3+ blank lines to 2 — stripping mid-paragraph leaves a

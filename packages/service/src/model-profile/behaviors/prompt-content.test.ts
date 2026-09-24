@@ -78,7 +78,7 @@ describe('PromptToolCookbookCondensed', () => {
     const out = PromptToolCookbookCondensed.promptAppend!(promptCtx({}), undefined);
     expect(out).toContain('anti-fabrication rules');
     expect(out).toContain('Never claim past-tense action');
-    expect(out).toContain('Markup is not a tool call');
+    expect(out).toContain('Other markup is not a tool call');
     expect(out).toContain('If the path appears under "Workspace files"');
     expect(out).toContain('write it via `write_file`');
     expect(out).not.toContain('write_file` (or `write_artifact`)');
@@ -90,6 +90,34 @@ describe('PromptToolCookbookCondensed', () => {
   it('does not include the full cookbook table', () => {
     const out = PromptToolCookbookCondensed.promptAppend!(promptCtx({}), undefined);
     expect(out).not.toContain('Cookbook — common patterns');
+  });
+
+  it("never lists a local model's own call shape as decoration", () => {
+    // On a local engine a Qwen `<function=…>` block IS the call; telling the
+    // model never to write it contradicts its chat template.
+    const qwen = PromptToolCookbookCondensed.promptAppend!(
+      promptCtx({ family: 'qwen', catalogId: 'qwen3.5-2b-q4', modelId: 'qwen3.5-2b-q4' }),
+      undefined,
+    );
+    expect(qwen).not.toContain('<function=name><parameter=key>');
+    expect(qwen).toContain('<invoke name="...">');
+    expect(qwen).toContain('`<tool_call><function=…>` block is the call itself');
+    const full = PromptToolCookbookFull.promptAppend!(
+      promptCtx({ family: 'qwen', catalogId: 'qwen3.5-2b-q4', modelId: 'qwen3.5-2b-q4' }),
+      undefined,
+    );
+    expect(full).not.toContain('<function=name><parameter=key>');
+    expect(full).toContain('Never write any other tool-call markup');
+  });
+
+  it('keeps the generic wording on a structured-channel provider', () => {
+    const out = PromptToolCookbookCondensed.promptAppend!(
+      promptCtx({ providerName: 'openai', family: 'qwen' }),
+      undefined,
+    );
+    expect(out).toContain('**Markup is not a tool call.**');
+    expect(out).toContain('<function=name><parameter=key>val</parameter></function>');
+    expect(out).toContain('Real calls go through the function-calling channel.');
   });
 });
 

@@ -11,6 +11,8 @@
  * False positives waste one extra continuation nudge (cheap). False
  * negatives mean the user has to manually nudge the model.
  */
+import { isModeIndicatorOnly } from '@bendyline/gezel';
+
 export function looksStalled(text: string): boolean {
   return looksStalledImpl(text);
 }
@@ -86,7 +88,7 @@ export function claimsCompletion(text: string): boolean {
 
 function looksStalledImpl(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed.length === 0) return true;
+  if (trimmed.length === 0 || isModeIndicatorOnly(trimmed)) return true;
 
   // Take the last paragraph (after the final blank line).
   const blocks = trimmed.split(/\n\s*\n+/);

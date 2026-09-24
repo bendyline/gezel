@@ -21,12 +21,14 @@
  * MLX engine only (llama.cpp already has its own grammar via `--jinja`).
  * The provider checks `profileHasBehavior(profile, 'tools.mlx-grammar')` at
  * request-build time. The prompt reminder keeps the required-field rule
- * format-neutral, then adds the Hermes JSON escape syntax only on MLX families
- * that need it for object/array arguments. The model's own chat template
- * supplies its ordinary native syntax. Complements — never replaces — the
- * salvage layer, which stays as the post-hoc safety net.
+ * format-neutral, then adds the nested-argument form from the model's own
+ * idiom ([tool-call-idiom.ts](../tool-call-idiom.ts)) — for Qwen, JSON inside
+ * the parameter tag, which the grammar enforces. The model's chat template
+ * supplies everything else. Complements — never replaces — the salvage
+ * layer, which stays as the post-hoc safety net.
  */
 
+import { toolCallIdiomFor } from '../tool-call-idiom.js';
 import type { Behavior, PromptCtx } from '../types.js';
 
 export const ToolsMlxGrammar: Behavior = {
@@ -36,18 +38,13 @@ export const ToolsMlxGrammar: Behavior = {
 
   promptAppend(ctx: PromptCtx): string | null {
     if (ctx.availableToolNames.size === 0) return null;
-    const hermesJsonHint =
-      ctx.providerName === 'mlx' && ['qwen', 'qwq', 'nemotron', 'granite'].includes(ctx.family)
-        ? `
-
-On this engine, a tool with an object or array argument must use the JSON envelope so its structure is preserved: \`<tool_call>{"name":"…","arguments":{"…":{}}}</tool_call>\`. Use the ordinary native parameter format shown by the tool template for scalar-only calls.`
-        : '';
+    const nested = ctx.providerName === 'mlx' ? toolCallIdiomFor(ctx)?.nestedArgument : null;
     return `
 
 ---
 
 ## Tool-call schema contract
 
-Treat each tool schema as literal: every field listed in \`required\` must be present in that call. Optional fields may be omitted. Copy the function and parameter names exactly; an optional control does not replace a missing required input.${hermesJsonHint}`;
+Treat each tool schema as literal: every field listed in \`required\` must be present in that call. Optional fields may be omitted. Copy the function and parameter names exactly; an optional control does not replace a missing required input.${nested ? `\n\n${nested}` : ''}`;
   },
 };

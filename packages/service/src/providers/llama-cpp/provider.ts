@@ -110,6 +110,11 @@ export {
 import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
+import {
+  type RequiredInput,
+  requiredInputsRead,
+  unreadRequiredInputs,
+} from '../required-input-reads.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import {
   TERMINAL_ACTION_SKIPPED_OUTPUT,
@@ -3105,6 +3110,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let directFileWorkMutationSucceeded = false;
     let scenarioRepairNoMutationNudges = 0;
     let scenarioRepairReadOnlyCalls = 0;
+    const requiredInputReads: RequiredInput[] = [];
+    let requiredInputHoldLogged = false;
     const prerequisiteRepairReadPaths =
       opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
         ? opts.fileTurnIntent.readPaths.map(normalizeWorkspacePathForCompare)
@@ -3276,7 +3283,22 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
+        const unreadInputs = unreadRequiredInputs(
+          this.deps.activeCraftbookStep?.requiredInputs,
+          requiredInputReads,
+        );
+        const immediateFileWriteTurn =
+          fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
+        if (
+          fileTurnPlan.kind === 'create-file' &&
+          unreadInputs.length > 0 &&
+          !requiredInputHoldLogged
+        ) {
+          requiredInputHoldLogged = true;
+          log.info(
+            `[llama-cpp] turn ${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+          );
+        }
         const immediateFileWriteTarget = immediateFileWriteTurn
           ? (opts?.fileTurnIntent?.path ?? extractDirectFileWorkTargetPath(prompt))
           : null;
@@ -6472,6 +6494,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               );
             }
           }
+          requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           const tracked = failureTracker.recordResult(call.function.name, output);
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,

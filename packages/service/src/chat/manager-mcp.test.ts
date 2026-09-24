@@ -1366,6 +1366,44 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     ).toEqual({ complete: true });
   }, 30_000);
 
+  // Default always holds the Meester's Night Shift oversight task. Its edit
+  // gate (night-shift-report.md) made every front-door reply that read as
+  // finished "unmet", and the nudge turn — still clamped to invoke_craftbook
+  // on a routed PowerPoint ask — launched a second deck crew (2026-09-23).
+  it.each([
+    ['is not nudged toward a Night Shift task', { nightShift: { enabled: true } }, false],
+    ['is still nudged toward an ordinary owned task (control)', {}, true],
+  ] as const)(
+    'an unpinned session %s',
+    async (_label, schedule, expectNudge) => {
+      await svc.context.tasks.create('default', {
+        title: 'Overnight oversight',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        ...schedule,
+        steps: [
+          {
+            id: 'oversee',
+            name: 'Write the oversight report',
+            prompt: 'Update the report.',
+            advanceWhen: { file: 'night-shift-report.md', artifact: true, requireChange: true },
+          },
+        ],
+        entryStepId: 'oversee',
+      });
+      manager.setTaskAdvancer(async () => ({ status: 'advanced' as const }));
+      const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+      mock.script('', "All done — I've kicked off the deck and the team is on it.");
+      mock.script('', 'Still on it.');
+      mock.script('', 'Still on it.');
+      await manager.send(session.id, 'Create a PowerPoint about pizza');
+      const prompts = mock.calls
+        .filter((call) => call.kind === 'send')
+        .map((call) => String((call as { prompt?: unknown }).prompt));
+      expect(prompts.some((p) => p.includes('night-shift-report.md'))).toBe(expectNudge);
+    },
+    30_000,
+  );
+
   // Default is where the Meester files craftbooks. The observable-progress
   // hook once skipped it outright, and because the checkpoint write ends the
   // turn, nothing could advance the step: default/11 paused after three

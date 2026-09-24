@@ -226,6 +226,22 @@ function normalizeForKnownMatch(p: string): string {
 }
 
 /**
+ * A cited glob (`powerpoint/task-*`) names a family of the task's own paths,
+ * not a source. It is forgiven only when it matches a path the task supplied;
+ * any other glob stays unresolved, so a pattern cannot launder a fabrication.
+ */
+function globMatchesKnown(cited: string, known: ReadonlySet<string>): boolean {
+  if (!/[*?]/.test(cited)) return false;
+  const pattern = normalizeForKnownMatch(cited)
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]');
+  const re = new RegExp(`^${pattern}$`);
+  for (const path of known) if (re.test(path)) return true;
+  return false;
+}
+
+/**
  * Every source `file` cites must exist. File-path citations are resolved
  * against the workspace listing (tolerant of leading `./`, `/`, and
  * `workspace/`, case-insensitive), with a per-path read probe for listing
@@ -313,7 +329,7 @@ export async function citationsResolve(
       continue;
     }
     if (corpus?.has(c.toLowerCase()) || (await citedPathExists(c))) resolved.push(c);
-    else if (known.has(normalizeForKnownMatch(c))) forgiven.push(c);
+    else if (known.has(normalizeForKnownMatch(c)) || globMatchesKnown(c, known)) forgiven.push(c);
     else unresolved.push(c);
   }
 

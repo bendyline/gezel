@@ -1,0 +1,84 @@
+{
+  "about": "Calls written in each tool-call idiom (tool-call-idiom.ts). tool-call-idiom.test.ts proves the salvage parser reads each one as `expect`; providers/mlx/python/tool_grammar_modeltest.py proves the decode grammar accepts it on real tokenizers. Add an example here before teaching a model a new shape.",
+  "examples": [
+    {
+      "format": "hermes",
+      "why": "An object argument, written the way the Qwen chat template renders one (tojson inside the parameter tag).",
+      "tool": {
+        "name": "invoke_craftbook",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "craftbookId": { "type": "string" },
+            "params": { "type": "object" }
+          },
+          "required": ["craftbookId"]
+        }
+      },
+      "text": "<tool_call>\n<function=invoke_craftbook>\n<parameter=craftbookId>\npowerpoint-deck\n</parameter>\n<parameter=params>\n{\"topic\": \"Pizza\"}\n</parameter>\n</function>\n</tool_call>",
+      "expect": { "craftbookId": "powerpoint-deck", "params": { "topic": "Pizza" } }
+    },
+    {
+      "format": "hermes",
+      "why": "An array of objects, the DocBlocks convert_document shape.",
+      "tool": {
+        "name": "convert_document",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "object" },
+            "targets": { "type": "array" }
+          },
+          "required": ["source", "targets"]
+        }
+      },
+      "text": "<tool_call>\n<function=convert_document>\n<parameter=source>\n{\"kind\": \"file\", \"path\": \"deck.md\"}\n</parameter>\n<parameter=targets>\n[{\"format\": \"pptx\"}]\n</parameter>\n</function>\n</tool_call>",
+      "expect": {
+        "source": { "kind": "file", "path": "deck.md" },
+        "targets": [{ "format": "pptx" }]
+      }
+    },
+    {
+      "format": "hermes",
+      "why": "Scalars stay free text.",
+      "tool": {
+        "name": "read_file",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
+      },
+      "text": "<tool_call>\n<function=read_file>\n<parameter=path>\nnotes.md\n</parameter>\n</function>\n</tool_call>",
+      "expect": { "path": "notes.md" }
+    },
+    {
+      "format": "gemma",
+      "why": "Gemma 4's special-token call.",
+      "tool": {
+        "name": "read_file",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
+      },
+      "text": "<|tool_call>call:read_file{path:<|\"|>notes.md<|\"|>}<tool_call|>",
+      "expect": { "path": "notes.md" }
+    },
+    {
+      "format": "glm",
+      "why": "GLM's bare-name call with arg_key/arg_value pairs.",
+      "tool": {
+        "name": "read_file",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
+      },
+      "text": "<tool_call>read_file<arg_key>path</arg_key><arg_value>notes.md</arg_value></tool_call>",
+      "expect": { "path": "notes.md" }
+    }
+  ]
+}

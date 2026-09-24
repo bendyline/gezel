@@ -2988,6 +2988,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
           ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
           artifactDir: task.artifactDir ?? `tasks/${task.num}`,
+          steps: task.craftbook.steps,
         }),
         // The nodeRuns executor — same security fence as user scripts:
         // when the policy disables script execution, the check rejects

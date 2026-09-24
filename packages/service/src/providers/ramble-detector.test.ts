@@ -235,6 +235,38 @@ describe('RambleDetector', () => {
       expect(d.observeContent(opener + body + closer + 'p'.repeat(1600))).toBe(true);
     });
 
+    it('does not let ORPHAN closers re-anchor the prose counter', () => {
+      // qwen3.8-27b MLX, 2026-09-23: a finished JSON-envelope call, then
+      // `</function>` on every line. Each orphan used to reset the anchor,
+      // so the post-action cap never accumulated and the turn ran to
+      // max_tokens.
+      const d = new RambleDetector({
+        threshold: 8000,
+        postActionThreshold: 500,
+        enabled: true,
+        repetitionGuardEnabled: false,
+      });
+      const call = '<tool_call>\n{"name":"invoke_craftbook","arguments":{}}\n</tool_call>\n';
+      let content = call;
+      let fired = false;
+      for (let i = 0; i < 60 && !fired; i++) {
+        content += '</function>\n';
+        fired = d.observeContent(content);
+      }
+      expect(fired).toBe(true);
+      expect(d.proseSinceLastAction).toBeGreaterThanOrEqual(500);
+    });
+
+    it('still anchors at the OUTER close of a nested Hermes call', () => {
+      const d = new RambleDetector({ threshold: 8000, postActionThreshold: 100, enabled: true });
+      const call =
+        '<tool_call>\n<function=read_file>\n<parameter=path>a</parameter>\n</function>\n</tool_call>';
+      expect(d.observeContent(call)).toBe(false);
+      expect(d.proseSinceLastAction).toBe(0);
+      expect(d.observeContent(`${call}${'p'.repeat(99)}`)).toBe(false);
+      expect(d.observeContent(`${call}${'p'.repeat(100)}`)).toBe(true);
+    });
+
     it('persists insideUnclosedCall across scan windows that contain no markers', () => {
       // Wild-caught regression (qwen3.6 matrix, after the
       // first open/close-span fix): the `<function=write_file>` opener
@@ -629,6 +661,59 @@ describe('RambleDetector', () => {
         expect(varied.length).toBeGreaterThan(6000);
         expect(d.observeContent(varied)).toBe(false);
         expect(d.hasAborted).toBe(false);
+      });
+
+      it('fires on a stuck closing-tag line after a tool call (the orphan-closer loop)', () => {
+        // The exact 2026-09-23 stream, as the MLX session's detector saw it.
+        const d = new RambleDetector({
+          threshold: 6000,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        const call =
+          '<tool_call>\n{\n"name": "invoke_craftbook",\n"arguments": {"craftbookId": "powerpoint-deck"}\n}\n</tool_call>\n</parameter>\n</invoke>\n</parameter>\n</function>\n';
+        let content = call;
+        let firedAtLine = -1;
+        for (let i = 0; i < 200; i++) {
+          content += '</function>\n';
+          if (d.observeContent(content)) {
+            firedAtLine = i;
+            break;
+          }
+        }
+        expect(firedAtLine).toBeGreaterThan(0);
+        expect(firedAtLine).toBeLessThan(40);
+        expect(d.firedOnRepetition).toBe(true);
+      });
+
+      it('fires on a short multi-line cycle, not only one repeated line', () => {
+        const d = new RambleDetector({
+          threshold: 6000,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        expect(d.observeContent('</invoke>\n</function>\n'.repeat(20))).toBe(true);
+        expect(d.firedOnRepetition).toBe(true);
+      });
+
+      it('does NOT fire on repeated lines inside a fenced code block', () => {
+        const d = new RambleDetector({
+          threshold: 6000,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        expect(d.observeContent(`\`\`\`xml\n${'</function>\n'.repeat(60)}`)).toBe(false);
+        expect(d.hasAborted).toBe(false);
+      });
+
+      it('does NOT fire on a varied list of short lines', () => {
+        const d = new RambleDetector({
+          threshold: 6000,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        const list = Array.from({ length: 60 }, (_, i) => `- item ${i}`).join('\n');
+        expect(d.observeContent(list)).toBe(false);
       });
 
       it('is still a full no-op when BOTH gates are off', () => {

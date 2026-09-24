@@ -620,6 +620,16 @@ export async function resolveSessionToolSurface(
     for (const name of STEP_COMPLETION_TOOLS) {
       if (rawAllowlist.has(name)) withStepCompletion.add(name);
     }
+    // A step's declared inputs are its working memory, so the tool that opens
+    // them survives every message-shaped clamp. The immediate-file-write
+    // clamp left a powerpoint-deck copywriter holding `write_file` alone: it
+    // wrote eight invented slide titles without ever seeing the outline it
+    // was told to follow, and the heading gate paused the task (gemma4-12b,
+    // 2026-09-23).
+    for (const input of opts.activeStep?.consumes ?? []) {
+      const reader = input.artifact ? 'read_artifact' : 'read_file';
+      if (rawAllowlist.has(reader)) withStepCompletion.add(reader);
+    }
     if (
       opts.activeStep &&
       normalizeScriptRefs(opts.activeStep.onExit).length > 0 &&

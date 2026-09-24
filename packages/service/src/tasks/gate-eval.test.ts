@@ -1310,6 +1310,22 @@ describe('evaluateGate — hardened kinds', () => {
     expect(stillCaught.failures.join('\n')).toContain('data/market.csv');
   });
 
+  it("taskSuppliedCitationPaths includes files the task's own steps declare", () => {
+    // The outline names the deck.md the next step writes; that is the plan,
+    // not a fabricated source (qwen3.8-27b powerpoint-deck, 2026-09-23).
+    const paths = taskSuppliedCitationPaths({
+      artifactDir: 'tasks/2',
+      steps: [
+        { advanceWhen: { file: 'tasks/2/outline.md' }, consumes: [{ file: 'tasks/2/sources.md' }] },
+        { advanceWhen: { file: 'powerpoint/task-2/deck.md' } },
+        { advanceWhen: null },
+      ],
+    });
+    expect(paths).toContain('powerpoint/task-2/deck.md');
+    expect(paths).toContain('tasks/2/outline.md');
+    expect(paths).toContain('tasks/2/sources.md');
+  });
+
   it('taskSuppliedCitationPaths collects param values and prompt path tokens', () => {
     const paths = taskSuppliedCitationPaths({
       stepPrompt:

@@ -44,7 +44,9 @@ export interface ToolGrammarHint {
   mode: 'name-only' | 'name-and-params';
 }
 
-export function familyToToolGrammarHint(style: ModelStyle | undefined): ToolGrammarHint | null {
+export function familyToToolGrammarHint(
+  style: Pick<ModelStyle, 'family'> | undefined,
+): ToolGrammarHint | null {
   switch (style?.family) {
     case 'qwen':
     case 'qwq': // Qwen 3.5/3.6/3.8 + QwQ emit the Hermes <function=NAME> nesting

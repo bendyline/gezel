@@ -13,6 +13,7 @@
  * behavior takes no manifest config.
  */
 
+import { decorativeMarkupShapes, realCallSentence, toolCallIdiomFor } from '../tool-call-idiom.js';
 import type { Behavior, PromptCtx } from '../types.js';
 
 export const PromptToolCookbookFull: Behavior = {
@@ -21,6 +22,11 @@ export const PromptToolCookbookFull: Behavior = {
     'Full tool-use cookbook (~500 tokens) appended to the system prompt. For tier:tiny models and verbose-family medium-tier models that need imperative table-driven guidance.',
 
   promptAppend(ctx: PromptCtx): string | null {
+    // A model with a known call format is never told its own call block is
+    // decoration — on a local engine that block IS the call.
+    const idiom = toolCallIdiomFor(ctx);
+    const shapes = [...decorativeMarkupShapes(idiom), '`{"tool": "...", "args": {...}}`'];
+    const markupRule = `5. **${idiom ? 'Never write any other tool-call markup' : 'Never write tool-use markup'}** in your reply. Not ${shapes.join(', not ')}. Those are decoration. ${realCallSentence(idiom)}`;
     const browseRow = ctx.hasPlaywright
       ? '| "fetch / look up / browse / read this URL" | `browser_navigate({ url: "https://..." })` (real URL only — search queries get rejected) |\n'
       : '';
@@ -77,7 +83,7 @@ For anything else, check your function-calling schema — every entry there is r
 2. **Never write placeholder content** like \`[Region X]\`, \`[Topic Y]\`, \`[Policy Z]\`. If you don't have real data, say so or call a tool.
 3. **When the user agrees, call the tool the same turn.** "Great, I'll create it!" without the call is not the same as creating it.
 4. **"I will call \`X\`" is not calling X.** Real tool calls go through the function-calling mechanism, not your prose.
-5. **Never write tool-use markup** in your reply. Not \`<|tool_call|>...\`, not \`<browser_navigate url="..." />\`, not \`<function_calls><invoke name="...">...</invoke></function_calls>\`, not \`<function=name><parameter=key>val</parameter></function>\`, not \`<tool_call>name key="value"\` shell-style lines, not \`{"tool": "...", "args": {...}}\`. Those are decoration; real calls go through the function-calling channel.
+${markupRule}
 6. **Don't speculatively chain unrelated tool calls in one turn.** When the next call's args depend on the previous call's result (read → decide → write), do them across turns so you can see what came back. When the next call is genuinely independent (writing 5 unrelated source files in a fresh scaffold), chaining them in one turn is fine and faster. Wait for results when the work needs them; chain when it doesn't.
 7. **Never paste a full source file in chat — write it via \`write_file\`.** Code in a chat bubble can't be run; code on disk can. If you'd write a code block longer than ~10 lines, that's a file. Use \`write_file({ path, content: "<the whole source>" })\` and tell the user "I wrote \`path/to/file.ts\`" — let them read it on disk, not from your reply. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path. A 2-line illustrative snippet inline is fine; a complete HTML page, TypeScript module, or stylesheet is not.
 

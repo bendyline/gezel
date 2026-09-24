@@ -495,6 +495,16 @@ async function isSessionRouteAllowed(
   if (/^\/api\/scripts\/standard(?:\/source)?$/.test(path) && method === 'GET') {
     return SESSION_ALLOW;
   }
+  // Installed knowledge catalogs are read-only reference material that
+  // `search` already quotes into every session. Opening one article by the
+  // knowledge:// URI a search hit carries is the same data at full length,
+  // and `read_document` is how every prompt says to do it. Without this each
+  // such read 403'd and a powerpoint-deck researcher fell back to search
+  // snippets, writing "restricted by permissions" into its source packet
+  // (gemma4-12b, 2026-09-23). Catalog install/admin routes stay first-party.
+  if (method === 'GET' && /^\/api\/knowledge\/catalogs\/[^/]+\/document$/.test(path)) {
+    return SESSION_ALLOW;
+  }
 
   // Media/render tools are model-facing, but their project binding is in the
   // body rather than the URL. Only generation calls are admitted; model/admin

@@ -1,6 +1,7 @@
 import { TurnIntentPlanSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  deckTopicFromRequest,
   detectExactArtifactRoute,
   falseCapabilityDenialCorrection,
   looksLikeImplementationRequest,
@@ -132,5 +133,31 @@ describe('turn intent planning', () => {
         toolCalls: [{ name: 'mcp__gezel__invoke_craftbook', durationMs: 1, success: false }],
       }),
     ).toBeNull();
+  });
+});
+
+describe('deckTopicFromRequest', () => {
+  it.each([
+    ['Create a PowerPoint about pizza', 'pizza'],
+    ['Can you create a new PowerPoint about PIzza?', 'PIzza'],
+    ['Can you create a PowerPoint about the history of lighthouses?', 'the history of lighthouses'],
+    ['Make me a slide deck on Alaska, please.', 'Alaska'],
+  ])('%s → %s', (text, topic) => {
+    expect(deckTopicFromRequest(text)).toBe(topic);
+  });
+
+  it('keeps the whole request when there is no subject clause', () => {
+    expect(deckTopicFromRequest('Make a PowerPoint for my class')).toBe(
+      'Make a PowerPoint for my class',
+    );
+  });
+
+  it('feeds the planned craftbook invocation', () => {
+    const plan = resolveTurnIntentPlan({
+      text: 'Create a PowerPoint about pizza',
+      isMeester: true,
+    });
+    expect(plan.craftbook?.invocation.params).toEqual({ topic: 'pizza' });
+    expect(plan.craftbook?.invocation.description).toBe('Create a PowerPoint about pizza');
   });
 });

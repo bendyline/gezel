@@ -54,6 +54,11 @@
       "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
       "craftbookId": "proj-skill-tune-model",
       "scriptNames": []
+    },
+    ".claude/skills/button-up/SKILL.md": {
+      "hash": "c257a53216996fa24a5ab623899a7f2e7289c5357690a7268b6a1ee5d9f45277",
+      "craftbookId": "proj-skill-button-up",
+      "scriptNames": []
     }
   }
 }

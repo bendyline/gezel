@@ -323,6 +323,16 @@ export function taskSuppliedCitationPaths(opts: {
   stepPrompt?: string;
   params?: Record<string, string>;
   artifactDir?: string;
+  /**
+   * The task's own steps. Every file a step declares it will produce or
+   * read is this run's plan, not a source: a powerpoint-deck outline naming
+   * the `deck.md` the next step writes burned a gate attempt as a
+   * "fabricated citation" on every run (qwen3.8-27b, 2026-09-23).
+   */
+  steps?: ReadonlyArray<{
+    advanceWhen?: { file?: string } | null;
+    consumes?: ReadonlyArray<{ file: string }>;
+  }>;
 }): string[] {
   const out = new Set<string>();
   for (const value of Object.values(opts.params ?? {})) {
@@ -330,6 +340,10 @@ export function taskSuppliedCitationPaths(opts: {
     if (v) out.add(v);
   }
   if (opts.artifactDir?.trim()) out.add(opts.artifactDir.trim());
+  for (const step of opts.steps ?? []) {
+    if (step.advanceWhen?.file?.trim()) out.add(step.advanceWhen.file.trim());
+    for (const input of step.consumes ?? []) if (input.file.trim()) out.add(input.file.trim());
+  }
   for (const m of (opts.stepPrompt ?? '').matchAll(/`([^`\s]*\/[^`\s]+)`/g)) {
     if (m[1]) out.add(m[1]);
   }

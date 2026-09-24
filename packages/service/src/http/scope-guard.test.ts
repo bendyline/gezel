@@ -383,6 +383,25 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(403);
   });
 
+  it('lets a session open a knowledge-catalog article but not administer catalogs', async () => {
+    // read_document on a knowledge:// URI 403'd for every worker, so a
+    // powerpoint-deck researcher could cite search snippets only (2026-09-23).
+    const app = sessionPolicyApp(session('proj-a'));
+    expect(
+      (await app.request('/api/knowledge/catalogs/wikipedia-food-drink/document?id=11797861'))
+        .status,
+    ).toBe(200);
+    expect((await app.request('/api/knowledge/catalogs')).status).toBe(403);
+    expect((await app.request('/api/knowledge/install', { method: 'POST' })).status).toBe(403);
+    expect(
+      (
+        await app.request('/api/knowledge/catalogs/wikipedia-food-drink/document?id=1', {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(403);
+  });
+
   it('allows linked workspace CRUD without opening other target-project capabilities', async () => {
     const app = sessionPolicyApp(
       session('proj-a'),

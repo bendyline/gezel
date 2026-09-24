@@ -47,6 +47,7 @@ import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
 import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
+import { hasCompleteToolCallMarkup } from '../complete-tool-call.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import {
@@ -102,6 +103,11 @@ import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queu
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
+import {
+  type RequiredInput,
+  requiredInputsRead,
+  unreadRequiredInputs,
+} from '../required-input-reads.js';
 import {
   type EnginePhaseEvent,
   type EngineStatsEvent,
@@ -165,6 +171,7 @@ import {
   validatorReportedMissingRequiredArgs,
 } from './tool-call-protocol.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
+import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
 import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
 
 export {
@@ -678,6 +685,7 @@ export class MlxProvider implements LLMProvider {
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
+      ...(opts.singleToolCallTurn ? { singleToolCallTurn: true } : {}),
       ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
@@ -851,6 +859,8 @@ interface MlxSessionDeps {
   tuning?: import('../../model-profile/index.js').ResolvedTuning;
   /** Manager-authoritative direct file-work classification. */
   forceDirectFileWork?: boolean;
+  /** See {@link SessionOpts.singleToolCallTurn}. */
+  singleToolCallTurn?: boolean;
   terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
@@ -1373,6 +1383,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // without truncating, or we hit MAX_IMMEDIATE_WRITE_CONTINUATIONS.
     let repairReadCalls = 0;
     const repairReadPaths: string[] = [];
+    const requiredInputReads: RequiredInput[] = [];
+    let requiredInputHoldLogged = false;
     let repairFailedMutations = 0;
     let repairMutationSucceeded = false;
     const requiredReadPaths =
@@ -1524,7 +1536,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const baseUrl = await this.deps.resolveBaseUrl();
         const body: Record<string, unknown> = {
           model: this.deps.model,
-          messages: this.messages,
+          messages: retireInspectedToolImages(this.messages),
           stream: true,
           // Per-turn output cap. mlx-vlm's stream_generate defaults to
           // a small built-in cap (256 in some versions) — verbose
@@ -1585,7 +1597,22 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // constrained turns narrow it below.
         let requestTools = tools;
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
+        const unreadInputs = unreadRequiredInputs(
+          this.deps.activeCraftbookStep?.requiredInputs,
+          requiredInputReads,
+        );
+        const immediateFileWriteTurn =
+          fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
+        if (
+          fileTurnPlan.kind === 'create-file' &&
+          unreadInputs.length > 0 &&
+          !requiredInputHoldLogged
+        ) {
+          requiredInputHoldLogged = true;
+          log.info(
+            `turn#${seq}.${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+          );
+        }
         const fileRepairTurn = fileTurnPlan.kind === 'repair-file';
         const remainingReadPaths = fileRepairTurn
           ? remainingPrerequisiteRepairReadPaths(requiredReadPaths, repairReadPaths)
@@ -2065,6 +2092,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               opensInReasoning: this.deps.templateOpensReasoning === true,
             });
         let rambleAborted = false;
+        // Single-call turn: stop the stream once the one usable call is
+        // complete in the VISIBLE text. Reasoning is excluded so a call the
+        // model drafts while thinking can't end the turn early.
+        let singleCallComplete = false;
+        let singleCallVisible = '';
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.
         let liveToolArgsName = '';
@@ -2210,8 +2242,23 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 const live = reasoningSplit.push(safeContent);
                 if (live.visible.length > 0) this.emitDelta(live.visible);
                 if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+                if (
+                  this.deps.singleToolCallTurn &&
+                  !singleCallComplete &&
+                  live.visible.length > 0
+                ) {
+                  singleCallVisible += live.visible;
+                  if (hasCompleteToolCallMarkup(singleCallVisible)) {
+                    singleCallComplete = true;
+                    log.info(
+                      `turn#${seq}.${turn} ABORT-FIRED reason=single-call-complete ` +
+                        `afterMs=${Date.now() - start}`,
+                    );
+                    ctrl.abort();
+                  }
+                }
               }
-              if (!rambleAborted && ramble.observeContent(turnContent)) {
+              if (!singleCallComplete && !rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;
                 abortReason ??= 'idle';
                 log.error(
@@ -2261,25 +2308,39 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           sseExitReason = 'error';
           cleanupTurn();
           this.deps.markUsed();
-          log.error(
-            `turn#${seq}.${turn} SSE-EXIT reason=error chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start} ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}${abortReason ? ` (abort=${abortReason})` : ''}`,
-          );
+          const stoppedAfterSingleCall =
+            singleCallComplete && (err as Error).name === 'AbortError' && !externalSignal?.aborted;
+          if (stoppedAfterSingleCall) {
+            log.info(
+              `turn#${seq}.${turn} SSE-EXIT reason=single-call-complete chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start}`,
+            );
+          } else {
+            log.error(
+              `turn#${seq}.${turn} SSE-EXIT reason=error chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start} ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}${abortReason ? ` (abort=${abortReason})` : ''}`,
+            );
+          }
           // Recovery path: a `ramble` abort that has salvageable
           // tool-call markup falls through to the salvage block
           // below instead of throwing — keeps the model's queued
           // tools alive so the next iteration sees results. Set
           // by the ramble branch when we want the catch to NOT
-          // re-throw `err` at the end.
+          // re-throw `err` at the end. A single-call stop is the same
+          // fall-through with nothing to warn about.
           let recoveredFromRamble = false;
           if ((err as Error).name === 'AbortError') {
             if (externalSignal?.aborted) {
               throw new Error(turnCancelledMessage());
             }
-            if (rambleAborted) {
+            if (stoppedAfterSingleCall) {
+              finishReason ??= 'single-call-complete';
+              recoveredFromRamble = true;
+            } else if (rambleAborted) {
               const hasSalvageableMarkup = /<tool_call>|<function=/i.test(turnContent);
               if (hasSalvageableMarkup) {
                 this.emitWarning(
-                  `Stopped the planning monologue (${turnContent.length} chars without follow-through) — firing the tool calls you queued. Take a smaller next step.`,
+                  ramble.firedOnRepetition
+                    ? 'Stopped a repeating output loop — firing the tool calls you queued.'
+                    : `Stopped the planning monologue (${turnContent.length} chars without follow-through) — firing the tool calls you queued. Take a smaller next step.`,
                 );
                 finishReason ??= 'ramble-recovered';
                 recoveredFromRamble = true;
@@ -3705,6 +3766,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           this.turnPolicy.checkpoint();
+          requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           if (fileRepairTurn) {
             if (FILE_REPAIR_READ_TOOLS.has(call.function.name)) repairReadCalls++;
             repairReadPaths.push(...completeWorkspaceReadPaths(call.function.name, args, output));
@@ -3773,8 +3835,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         if (toolImages.length)
           this.messages.push({
             role: 'user',
-            content:
-              'Images returned by the preceding tools. Inspect the pixels before judging them.',
+            content: TOOL_IMAGES_MESSAGE,
             images: toolImages,
           });
         if (abortDueToFailureLoop) {

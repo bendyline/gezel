@@ -272,21 +272,18 @@ def _schema_is_structural(schema: Any, depth: int = 0) -> bool:
 def _has_structural_params(tools: List[Dict[str, Any]]) -> bool:
     """True if any wired tool declares a top-level object/array parameter.
 
-    The Hermes `<parameter=KEY>value</parameter>` shape is a flat KEY→text
-    map: it has no way to carry a nested object or array. When every tool
-    takes flat scalars that costs nothing, and tier-2 key pinning is pure
-    win. The moment one tool wants `{...}` or `[...]` — DocBlocks'
-    `convert_document.source` / `targets`, `save_artifact.destination` —
-    the grammar is pinning the model into a shape that CANNOT express a
-    valid call, and no amount of retrying gets it out. Wild-caught: 19
-    consecutive failed attempts on one craftbook step, the model emitting
-    correct JSON every time and the markup flattening it to a string every
-    time.
+    Wild-caught before schema coercion existed: DocBlocks'
+    `convert_document.source` / `targets` failed 19 consecutive attempts, the
+    model emitting correct JSON inside `<parameter=…>` and the flat markup
+    reaching the validator as a string. Coercion now repairs that value, and
+    the markup branch holds it to JSON (`_markup_json_value_schema`), so the
+    in-tag form — the Qwen template's own — is the primary one.
 
-    When this returns True the Hermes grammar additionally admits a raw
-    JSON body inside the `<tool_call>` envelope, so the model has a
-    representable way to make the call. The JSON branch is schema-constrained
-    too, so function names, top-level keys, and required fields stay pinned.
+    When this returns True the Hermes grammar also admits a raw JSON body
+    inside the `<tool_call>` envelope as a fallback. That branch is
+    schema-constrained too, so function names, top-level keys, and required
+    fields stay pinned. The prompt never asks for it: see
+    model-profile/tool-call-idiom.ts.
     """
     for tool in tools:
         fn = tool.get("function") if isinstance(tool, dict) else None
@@ -415,7 +412,10 @@ _MAX_ANY_ORDER_REQUIRED_PARAMS = 4
 
 
 def _hermes_required_param_rules(
-    idx: int, keys: List[str], required: List[str]
+    idx: int,
+    keys: List[str],
+    required: List[str],
+    json_values: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Grammar rules that make every required markup parameter unavoidable.
 
@@ -428,11 +428,35 @@ def _hermes_required_param_rules(
     Optional keys, and required keys already seen, may occur between required
     transitions. The final state accepts any declared key, preserving the old
     grammar's tolerance for duplicate parameters.
+
+    `json_values` maps an object/array key to the rule for its value — JSON
+    inside the tag, the way the Qwen chat template itself renders one. Every
+    other key keeps the free `pval` text, so a scalar-only tool's grammar is
+    unchanged.
     """
-    all_keys = tool_name_alternation(keys)
-    rules = [f"k_{idx}: /({all_keys})/"]
+    json_values = json_values or {}
+    rules: List[str] = []
+
+    def value(key: str) -> str:
+        return json_values.get(key, "pval")
+
+    def item(name: str, subset: List[str]) -> str:
+        """One `<parameter=KEY>…</parameter>` for any key in `subset`."""
+        free = [key for key in subset if key not in json_values]
+        alts: List[str] = []
+        if free:
+            rules.append(f"{name}: /({tool_name_alternation(free)})/")
+            alts.append(f'POPEN {name} ">" pval')
+        alts.extend(
+            f"POPEN {json.dumps(key + '>')} {json_values[key]}"
+            for key in subset
+            if key in json_values
+        )
+        return alts[0] if len(alts) == 1 else f"({' | '.join(alts)})"
+
+    any_key = item(f"k_{idx}", keys)
     if not required:
-        rules.insert(0, f'params_{idx}: ( POPEN k_{idx} ">" pval )*')
+        rules.insert(0, f"params_{idx}: ( {any_key} )*")
         return rules
 
     if len(required) > _MAX_ANY_ORDER_REQUIRED_PARAMS:
@@ -442,14 +466,10 @@ def _hermes_required_param_rules(
         for pos, key in enumerate(required):
             neutral = optional + seen
             if neutral:
-                neutral_name = f"gap_{idx}_{pos}"
-                rules.append(
-                    f"{neutral_name}: /({tool_name_alternation(neutral)})/"
-                )
-                pieces.append(f'( POPEN {neutral_name} ">" pval )*')
-            pieces.append(f"POPEN {json.dumps(key + '>')} pval")
+                pieces.append(f"( {item(f'gap_{idx}_{pos}', neutral)} )*")
+            pieces.append(f"POPEN {json.dumps(key + '>')} {value(key)}")
             seen.append(key)
-        pieces.append(f'( POPEN k_{idx} ">" pval )*')
+        pieces.append(f"( {any_key} )*")
         rules.insert(0, f"params_{idx}: {' '.join(pieces)}")
         return rules
 
@@ -459,7 +479,7 @@ def _hermes_required_param_rules(
     for mask in range(full_mask + 1):
         state = f"params_{idx}_s_{mask}"
         if mask == full_mask:
-            rules.append(f'{state}: ( POPEN k_{idx} ">" pval )*')
+            rules.append(f"{state}: ( {any_key} )*")
             continue
 
         neutral = [
@@ -469,11 +489,7 @@ def _hermes_required_param_rules(
         ]
         prefix = ""
         if neutral:
-            neutral_name = f"seen_{idx}_{mask}"
-            rules.append(
-                f"{neutral_name}: /({tool_name_alternation(neutral)})/"
-            )
-            prefix = f'( POPEN {neutral_name} ">" pval )* '
+            prefix = f"( {item(f'seen_{idx}_{mask}', neutral)} )* "
 
         transitions = []
         for pos, key in enumerate(required):
@@ -481,26 +497,86 @@ def _hermes_required_param_rules(
                 continue
             next_state = f"params_{idx}_s_{mask | (1 << pos)}"
             transitions.append(
-                f"POPEN {json.dumps(key + '>')} pval {next_state}"
+                f"POPEN {json.dumps(key + '>')} {value(key)} {next_state}"
             )
         rules.append(f"{state}: {prefix}({' | '.join(transitions)})")
     return rules
 
 
+def _markup_json_value_schema(schema: Any) -> Optional[Dict[str, Any]]:
+    """Shallow schema for a parameter whose markup value must be JSON, or None.
+
+    Only a property that is an object or array and nothing else qualifies.
+    One that also accepts a string, or declares no type, stays free text:
+    forcing JSON there would make the model quote a plain path, and the
+    qwen3_coder parser keeps a string-typed value verbatim, quotes included.
+    """
+    if not isinstance(schema, dict):
+        return None
+    declared = schema.get("type")
+    types = [declared] if isinstance(declared, str) else declared
+    if declared is None:
+        # A union of object shapes (DocBlocks' `convert_document.source`:
+        # markdown | file | artifact) can never be a plain string either.
+        branches = schema.get("anyOf") or schema.get("oneOf")
+        if isinstance(branches, list) and branches:
+            branch_types = [
+                b.get("type") for b in branches if isinstance(b, dict) and "type" in b
+            ]
+            if len(branch_types) == len(branches) and all(
+                isinstance(t, str) for t in branch_types
+            ):
+                types = sorted(set(branch_types))
+    if not isinstance(types, list) or not types:
+        return None
+    if not all(isinstance(t, str) and t in ("object", "array", "null") for t in types):
+        return None
+    if not any(t in ("object", "array") for t in types):
+        return None
+    if declared is None:
+        return {"type": types[0] if len(types) == 1 else types}
+    return _shallow_json_property(schema)
+
+
 def _hermes_name_and_params(tools: List[Dict[str, Any]]) -> Optional[str]:
     """Tier 2 — constrain the function name AND each `<parameter=KEY>` key to
-    that tool's declared parameter names (values stay free).
+    that tool's declared parameter names.
 
     Branches per tool so the valid key set follows the chosen function. A
     tool with no declarable schema falls back to free keys (name still
-    constrained), so loose-schema tools are never broken. Values are a lazy
-    lexeme bounded by the text token `</parameter>`. Top-level keys only —
-    no value-schema recursion, so no ParserTooComplex exposure.
+    constrained), so loose-schema tools are never broken. Scalar values are a
+    lazy lexeme bounded by the text token `</parameter>`.
+
+    An object/array parameter takes JSON inside its tag —
+    `<parameter=params>\\n{"topic": "Pizza"}\\n</parameter>` — which is how
+    the Qwen chat template renders one (`args_value | tojson`) and what the
+    qwen3_coder parser and gezel's schema coercion both decode. That value is
+    held to a shallow per-type schema, one shared rule per distinct schema so
+    a wide roster compiles a handful of JSON sub-grammars, not one per key.
+
+    These tools used to be JSON-envelope only, on the theory that markup
+    flattens a nested value to a string. It does not on this path, and the
+    envelope is off-distribution for Qwen 3.x: a qwen3.8-27b Meester wrote the
+    envelope as told, closed the XML it expected (`</parameter></function>`),
+    and looped `</function>` to max_tokens (2026-09-23). The envelope stays
+    accepted as a fallback; the prompt no longer asks for it.
     """
     branches: List[str] = []
     rules: List[str] = []
+    json_value_rules: Dict[str, str] = {}
     seen: set = set()
     idx = 0
+
+    def json_value_rule(schema: Dict[str, Any]) -> str:
+        encoded = json.dumps(schema, separators=(",", ":"), sort_keys=True)
+        rule = json_value_rules.get(encoded)
+        if rule is None:
+            rule = f"jv_{len(json_value_rules)}"
+            json_value_rules[encoded] = rule
+            rules.append(f'{rule}: JSON_WS {rule}_body JSON_WS "</parameter>"')
+            rules.append(f"{rule}_body: %json {encoded}")
+        return rule
+
     for tool in tools:
         fn = tool.get("function") if isinstance(tool, dict) else None
         name = fn.get("name") if isinstance(fn, dict) else None
@@ -509,25 +585,24 @@ def _hermes_name_and_params(tools: List[Dict[str, Any]]) -> Optional[str]:
         seen.add(name)
         params = fn.get("parameters") if isinstance(fn, dict) else None
         props = params.get("properties") if isinstance(params, dict) else None
-        # A structural value cannot survive Hermes' flat parameter markup:
-        # the parser necessarily turns it into a string. These tools are
-        # represented exclusively by the constrained JSON branch below so the
-        # grammar cannot steer the model into a call the validator must reject.
-        if isinstance(props, dict) and any(
-            _schema_is_structural(value) for value in props.values()
-        ):
-            continue
         branches.append(f"fn_{idx}")
         head = json.dumps(name + ">")  # lark string literal, safely escaped
         rules.append(f"fn_{idx}: {head} params_{idx} CLOSE")
         keys = _param_keys_from_tool(tool)
         if keys:
             required = _required_param_keys_from_tool(tool, keys)
-            rules.extend(_hermes_required_param_rules(idx, keys, required))
+            json_values: Dict[str, str] = {}
+            for key in keys:
+                value_schema = _markup_json_value_schema((props or {}).get(key))
+                if value_schema is not None:
+                    json_values[key] = json_value_rule(value_schema)
+            rules.extend(_hermes_required_param_rules(idx, keys, required, json_values))
         else:
             rules.append(f'params_{idx}: ( POPEN FREEKEY ">" pval )*')
         idx += 1
     json_branch = _hermes_json_branch(tools)
+    if json_value_rules and not json_branch:
+        rules.append("JSON_WS: /\\s*/")
     if not branches and not json_branch:
         return None
     if branches and json_branch:

@@ -2260,6 +2260,13 @@ export class ChatManager extends LocalEngineRuntime {
       // the same reviewer owns both (wild-caught when a child read made the PR
       // review host spend its collect-gate attempt early).
       if (state.record.taskRef && task.ref !== state.record.taskRef) continue;
+      // A scheduled run always arrives task-scoped, so an unpinned session is
+      // never doing its step. Default always holds the Meester's Night Shift
+      // oversight task, which made every front-door reply that read as
+      // finished "unmet" on night-shift-report.md. On a routed PowerPoint ask
+      // the resulting nudge turn was still clamped to `invoke_craftbook`, and
+      // it launched a second deck crew (qwen3.8-27b, 2026-09-23).
+      if (!state.record.taskRef && (task.cron || task.nightShift?.enabled)) continue;
       if (taskEffectiveStatus(task) !== 'active' || !task.activeStepId) continue;
       const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
       const adv = step?.advanceWhen;
@@ -4491,14 +4498,14 @@ export class ChatManager extends LocalEngineRuntime {
         : resumedExisting
           ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
           : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}${fixedEntryProcedure}`
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}${fixedEntryProcedure}`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
                     : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`;
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -14776,6 +14783,14 @@ export class ChatManager extends LocalEngineRuntime {
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
         ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
         ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
+        ...(step.consumes?.length
+          ? {
+              requiredInputs: step.consumes.map((input) => ({
+                path: input.file,
+                artifact: input.artifact === true,
+              })),
+            }
+          : {}),
       };
       const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
       const fixedEvidenceAction =
@@ -16052,6 +16067,13 @@ export class ChatManager extends LocalEngineRuntime {
         .join(',');
     }
     if (constrainedAllowlist) opts.toolAllowlist = constrainedAllowlist;
+    if (
+      bridgeSurface.exactCraftbookConstrained &&
+      constrainedAllowlist?.size === 1 &&
+      constrainedAllowlist.has('invoke_craftbook')
+    ) {
+      opts.singleToolCallTurn = true;
+    }
     // The role allowlist deliberately applies only to built-ins. The authored
     // step policy is exact across the merged MCP surface, so carry it separately
     // to both schema filtering and call-time authorization in bridge providers.

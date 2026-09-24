@@ -287,6 +287,15 @@ export interface SessionOpts {
    */
   forceDirectFileWork?: boolean;
   /**
+   * The chat manager clamped this turn to ONE pre-resolved action (the
+   * exact-craftbook route). A local provider may stop generating the moment
+   * that call is complete in the stream: nothing written after it can be
+   * acted on, and a model that keeps going after an unfamiliar call shape
+   * can loop until max_tokens. Same lifetime as the clamp — the manager
+   * rebuilds the session when it flips. See `complete-tool-call.ts`.
+   */
+  singleToolCallTurn?: boolean;
+  /**
    * Local bridge-backed providers: a successful call to one of these
    * action tools is the terminal outcome for the turn. The provider
    * appends one short closing line (preferably from `closingArg`) and
@@ -425,6 +434,12 @@ export interface SessionOpts {
      * warned off it.
      */
     deliverableIsArtifact?: boolean;
+    /**
+     * The step's declared inputs (`consumes`). A local provider holds its
+     * write-only immediate-write mode until each has been read in the send,
+     * so a step that writes FROM an outline can open the outline first.
+     */
+    requiredInputs?: ReadonlyArray<{ path: string; artifact: boolean }>;
   };
   /**
    * Capability tier of the model running this session, derived from

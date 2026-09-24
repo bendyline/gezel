@@ -34,8 +34,21 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The task's display labels, not the work. A model re-emitting its call
+ * rarely reproduces them: a qwen3.8-27b Meester's two `invoke_craftbook`
+ * calls for one "Create a PowerPoint about pizza" differed only in `title`,
+ * and that alone launched a second deck crew (2026-09-23). Craftbook,
+ * project, version, assignee and params still separate genuinely different
+ * work — "a deck on pizza and one on pasta" differs in `params.topic`.
+ */
+const COSMETIC_INVOCATION_FIELDS = new Set(['title', 'description']);
+
 export function invocationSignature(invocation: Readonly<Record<string, unknown>>): string {
-  return JSON.stringify(canonicalize(invocation));
+  const work = Object.fromEntries(
+    Object.entries(invocation).filter(([key]) => !COSMETIC_INVOCATION_FIELDS.has(key)),
+  );
+  return JSON.stringify(canonicalize(work));
 }
 
 /** Durable, opaque key passed to task creation for cross-process dedupe. */
