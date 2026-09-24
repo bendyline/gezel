@@ -27,12 +27,14 @@ import {
   systemServiceHome,
 } from '@bendyline/gezel-client/node';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { connectForTui } from './connection.js';
 
 let gezelHome: string;
 let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
+/** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
+const daemonLog: string[] = [];
 const execFileAsync = promisify(execFile);
 const cliEntry = fileURLToPath(new URL('../dist/bin/gezel.js', import.meta.url));
 
@@ -80,8 +82,11 @@ beforeAll(async () => {
     detached: false,
     stdio: 'pipe',
     home: gezelHome,
-    env: {
-      ...process.env,
+    // Stripped of VITEST like every CLI child: inheriting it put this daemon's
+    // indexing and embedding on its event loop, and about a minute after the
+    // suite first touched the cwd project that stalled health checks past
+    // the CLI's 5s probe.
+    env: childEnv({
       GEZEL_HOME: gezelHome,
       // Skip the heavy LLM provider boot — mock is deterministic and has
       // no network dependency, which keeps this test CI-friendly.
@@ -92,11 +97,22 @@ beforeAll(async () => {
       // race a real local daemon or another spawning suite.
       GEZEL_PORT: '0',
       GEZEL_SERVICE_ROLE: 'user',
-    },
+    }),
     timeoutMs: 15_000,
   });
   client = spawned.client;
+  // Drained here or nowhere: a daemon whose pipe fills blocks on its next log line.
+  for (const stream of [spawned.child?.stdout, spawned.child?.stderr])
+    stream?.on('data', (chunk: Buffer) => {
+      daemonLog.push(...chunk.toString().split('\n').filter(Boolean));
+      daemonLog.splice(0, daemonLog.length - 200);
+    });
 }, 20_000);
+
+afterEach(({ task }) => {
+  if (task.result?.state === 'fail')
+    console.error(`gezeld output before this failure:\n${daemonLog.join('\n')}`);
+});
 
 afterAll(async () => {
   await stopOwnedDaemon(spawned?.child);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { MessageGezelRequest, SendChatRequest } from '@bendyline/gezel';
-import { completedRepairActionSnapshot } from '../runner.ts';
+import { completedRepairActionSnapshot } from '../repair-actions.ts';
 import { conflictSynthesisScenario } from '../scenarios/conflict-synthesis.ts';
 import { dataWrangleScenario } from '../scenarios/data-wrangle.ts';
 import { failingTestsSpecScenario } from '../scenarios/failing-tests-spec.ts';
