@@ -85,17 +85,20 @@ vi.mock('./ChatComposer.js', () => ({
     sessionId,
     taskRef,
     belowAddressLine,
+    taskLaunch,
   }: {
     gezelId: string;
     sessionId?: string;
     taskRef?: string;
     belowAddressLine?: ReactNode;
+    taskLaunch?: unknown;
   }) => (
     <div
       data-testid="composer"
       data-gezel={gezelId}
       data-session={sessionId ?? ''}
       data-task={taskRef ?? ''}
+      data-task-launch={taskLaunch ? 'true' : 'false'}
     >
       {belowAddressLine}
     </div>
@@ -310,10 +313,10 @@ describe('ProjectChat task pill focus', () => {
     });
   });
 
-  it('opens the new-task dialog from the + button', async () => {
-    const user = userEvent.setup();
+  it('hands task creation to the composer rather than the pill row', async () => {
     render(<ProjectChat project={PROJECT} />);
-    await user.click(await screen.findByRole('button', { name: 'New task' }));
-    expect(screen.getByTestId('new-task-dialog')).toBeVisible();
+    await screen.findByTestId('composer');
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-task-launch', 'true');
   });
 });

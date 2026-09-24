@@ -35,6 +35,7 @@ import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
 import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { PromptDraftManager } from '../prompt-drafts/manager.js';
+import type { InputStagingManager } from '../tasks/inputs/staging.js';
 
 import type { RemotesRegistry } from '../remotes/registry.js';
 
@@ -48,6 +49,7 @@ import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-re
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 
+import type { TaskLauncher } from '../tasks/launcher.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { NightShiftManager } from '../tasks/night-shift-manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
@@ -77,6 +79,8 @@ export interface ServiceContext extends EngineContext {
   history: HistoryManager;
   growth: GrowthEngine;
   tasks: TaskManager;
+  /** Create-and-dispatch with invocation-key dedupe; every HTTP launch goes through it. */
+  taskLauncher: TaskLauncher;
   taskRunner: TaskRunner;
   taskScheduler: TaskScheduler;
   nightShift: NightShiftManager;
@@ -126,6 +130,8 @@ export interface ServiceContext extends EngineContext {
   diffpacks: DiffpackManager;
   /** Chat prompt drafts the user is writing (artifacts/prompts/). */
   promptDrafts: PromptDraftManager;
+  /** Upload staging for craftbook inputs picked from the user's computer. */
+  inputStaging: InputStagingManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   /**

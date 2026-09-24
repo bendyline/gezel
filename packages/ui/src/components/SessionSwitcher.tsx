@@ -931,12 +931,13 @@ export function SessionSwitcher({
       </Select.Root>
       <button
         type="button"
-        className="gezel-chat-session-btn"
+        className="gezel-chat-session-btn gezel-chat-session-btn-new"
         onClick={startFreshThread}
         disabled={busy || isFreshThread}
         title={isFreshThread ? 'Already on a new thread' : 'Start a new thread'}
       >
-        + New thread
+        <NewThreadIcon />
+        {NEW_THREAD_LABEL}
       </button>
       <ContextMeter status={contextStatus} sessionId={sessionId} />
       {/* Only on a thread: a second message in progress inside the current

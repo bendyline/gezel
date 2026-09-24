@@ -153,6 +153,7 @@ import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
+import { InputStagingManager } from './tasks/inputs/staging.js';
 
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
@@ -194,12 +195,14 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
+import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
+import { extractSpawnItems } from './tasks/spawn-items.js';
 import { evaluateStepGate } from './tasks/step-gate.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
@@ -1260,34 +1263,6 @@ export async function startProductService(
   // state. Kept out of the `TaskManager` constructor to avoid a circular
   // dep — and kept here (not inline in chat/) so the wiring is visible
   // alongside the other cross-manager plumbing.
-  // Parse a spawn-host's `overFile` JSON into the item array that drives a
-  // declarative fanout. `itemsPath` (dotted) navigates to a nested array;
-  // absent → the parsed value must itself be the array. Returns [] on any
-  // parse/shape problem so a malformed run degrades to "no fanout", never a
-  // throw. Only plain-object items are kept (each becomes a child's context).
-  const extractSpawnItems = (raw: string, itemsPath?: string): Record<string, unknown>[] => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-    let node: unknown = parsed;
-    if (itemsPath) {
-      for (const key of itemsPath.split('.')) {
-        if (node && typeof node === 'object' && key in (node as Record<string, unknown>)) {
-          node = (node as Record<string, unknown>)[key];
-        } else {
-          return [];
-        }
-      }
-    }
-    if (!Array.isArray(node)) return [];
-    return node.filter(
-      (it): it is Record<string, unknown> => !!it && typeof it === 'object' && !Array.isArray(it),
-    );
-  };
-
   tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
     // ── Automated ACTIVATION gate ───────────────────────────────────────
     // When the newly-activated step declares an activation-moment gate
@@ -1742,6 +1717,8 @@ export async function startProductService(
   // and to clean up after a deleted thread.
   const promptDrafts = new PromptDraftManager({ store, events: chatEvents });
   chat.setPromptDrafts(promptDrafts);
+  const inputStaging = new InputStagingManager(store);
+  tasks.setInputStaging(inputStaging);
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
@@ -2532,6 +2509,7 @@ export async function startProductService(
     history,
     growth,
     tasks,
+    taskLauncher: new TaskLauncher({ tasks, store, taskRunner, history }),
     taskRunner,
     taskScheduler: scheduler,
     nightShift,
@@ -2551,6 +2529,7 @@ export async function startProductService(
     reportActions,
     diffpacks,
     promptDrafts,
+    inputStaging,
     connectors,
     connectorActions,
     duck,
@@ -2997,6 +2976,7 @@ export async function startProductService(
   });
   const promptDraftSweeper = new PromptDraftSweeper({ store, drafts: promptDrafts });
   promptDraftSweeper.start();
+  inputStaging.startSweeping(store);
   digestGenerator.start();
   gildeUpdates.startScheduler();
   activityTracker.start();
@@ -3078,6 +3058,7 @@ export async function startProductService(
       memoryCompactor.stop();
       digestGenerator.stop();
       promptDraftSweeper.stop();
+      inputStaging.stopSweeping();
       gildeUpdates.stop();
       await shutdownStep('knowledge workers', async () => knowledge?.stop());
       keurmeesterDigest.stop();

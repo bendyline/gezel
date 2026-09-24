@@ -140,6 +140,19 @@ the `just-chat` project type, which hides the work-oriented tabs to match. Tests
   one required action, not a suggest/invoke menu. If it nevertheless denies the capability
   without attempting that invocation, the post-turn loop supplies one corrective
   continuation and then stops retrying this detector.
+  A second, lower tier runs when no exact format matched: a craftbook's declared
+  `triggers` found in the text on word boundaries ([`craftbook-trigger-route.ts`](../packages/service/src/chat/craftbook-trigger-route.ts)).
+  It is advisory only — `reason: 'trigger-phrase'`, medium confidence, no `output`, so
+  `renderTurnIntentPrelude` and the exact-craftbook clamp never fire on it — and it
+  proposes only books the message alone can start (toolsets installed, no file input,
+  every required parameter filled from the message or a default).
+  Two things sit outside this channel now. The composer no longer *sends* a routed
+  request: it turns the same plan into an attached task and `POST
+  /api/sessions/:id/launch-task` creates the task deterministically, with the message as
+  the brief and a receipt in the thread — no model turn, so no prelude. And a send that
+  carries `turnIntent: 'off'` (the person dismissed the suggested task for that text)
+  skips the plan, the prelude, and the `invoke_craftbook` clamp for that one turn. The
+  prelude path remains for the CLI, evals, and older clients, which send neither.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, and shared
   library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.

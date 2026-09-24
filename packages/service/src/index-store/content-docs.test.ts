@@ -93,6 +93,32 @@ describe('doc-intel: docx conversion + search + read', () => {
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('lazy conversion works');
   }, 15_000);
+
+  it('reads a document in the artifacts drawer, with its twin beside it', async () => {
+    // An uploaded craftbook input lives in the artifacts drawer; a workspace
+    // file of the same relative path must never be what gets converted.
+    const docx = await makeDocx('# Uploaded\n\nfrom the user’s computer.\n');
+    await mkdir(join(artifacts, 'tasks/7/inputs/source'), { recursive: true });
+    await writeFile(join(artifacts, 'tasks/7/inputs/source/brief.docx'), docx);
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => artifacts,
+      } as unknown as Store,
+      home,
+    );
+    const read = await ci.readDocAsMarkdown('c', 'tasks/7/inputs/source/brief.docx', {
+      artifact: true,
+    });
+    expect(read.found).toBe(true);
+    expect(read.markdown).toContain('from the user’s computer');
+    expect(read.markdownPath).toBe('artifacts/tasks/7/inputs/source/brief_files/brief.md');
+
+    const workspaceRead = await ci.readDocAsMarkdown('c', 'tasks/7/inputs/source/brief.docx');
+    expect(workspaceRead.found).toBe(false);
+    const traversal = await ci.readDocAsMarkdown('c', '../outside.docx', { artifact: true });
+    expect(traversal.found).toBe(false);
+  }, 15_000);
 });
 
 describe('doc-intel: pdf conversion + search + read', () => {

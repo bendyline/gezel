@@ -1456,7 +1456,7 @@ export function ChatTimelineView({
         next.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
         return next;
       });
-      if (!liveRef.current.has(message.sessionId)) {
+      if (message.expectsTurn !== false && !liveRef.current.has(message.sessionId)) {
         const lastForSession = findLastForSession(messagesRef.current, message.sessionId);
         const slotStart = Number.isFinite(sentAtMs) ? sentAtMs : Date.now();
         liveRef.current.set(message.sessionId, {

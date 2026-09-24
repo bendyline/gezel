@@ -4,11 +4,13 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
+  type TaskInputRecord,
   applyStepToolPolicy,
   deliverableKindForStep,
   isLocalProvider,
   normalizeScriptRefs,
   resolveRoleId,
+  taskInputReadTools,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
@@ -142,6 +144,13 @@ export interface ResolveSessionToolSurfaceOptions {
   effectiveContextWindow?: number;
   latestUserMessage: string | undefined;
   /**
+   * False when the send opted out of the turn-intent route (the person
+   * dismissed the suggested task the composer showed for this text): the
+   * exact-craftbook clamp must not force the model into the launch they
+   * declined. Default true.
+   */
+  exactCraftbookRouting?: boolean;
+  /**
    * The persisted active craftbook step for a step-scoped session
    * (taskRef + stepId). Drives the deliverable-kind tool KIT (the
    * surface narrows to what this step's class + gate checks need) and
@@ -183,6 +192,12 @@ export interface ResolveSessionToolSurfaceOptions {
    * ordinary single-step surface.
    */
   generalistSteps?: ReadonlyArray<NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>>;
+  /**
+   * The task's craftbook inputs. Their read tools count as mandated by the
+   * active step, so they survive the kit and every clamp; the book's own
+   * step `toolPolicy` still has the last word.
+   */
+  taskInputs?: ReadonlyArray<Pick<TaskInputRecord, 'drawer' | 'kind' | 'hasOfficeDocuments'>>;
   forceDirectFileWork?: boolean;
   existingSubstantialFileForImmediate?: () => Promise<boolean>;
   onCapTrim?: (event: { before: number; after: number; dropped: string[] }) => void;
@@ -289,6 +304,11 @@ export async function resolveSessionToolSurface(
     for (const name of stepMandatedTools(step)) mandatedStepTools.add(name);
     for (const name of promptConditionallyReferencedTools(step.prompt ?? '')) {
       conditionallyReferencedStepTools.add(name);
+    }
+  }
+  if (surfaceSteps.length > 0) {
+    for (const input of opts.taskInputs ?? []) {
+      for (const name of taskInputReadTools(input)) mandatedStepTools.add(name);
     }
   }
   let rawAllowlist = computeToolAllowlist({
@@ -555,10 +575,12 @@ export async function resolveSessionToolSurface(
   // small context). This is subtractive only: never grant invoke_craftbook if
   // the role/security ceiling did not already admit it.
   const exactCraftbookConstrained =
+    opts.exactCraftbookRouting !== false &&
     shouldConstrainToExactCraftbookInvocation({
       role: opts.role,
       latestUserMessage: opts.latestUserMessage,
-    }) && Boolean(allowlist?.has('invoke_craftbook'));
+    }) &&
+    Boolean(allowlist?.has('invoke_craftbook'));
   if (exactCraftbookConstrained) {
     allowlist = new Set(['invoke_craftbook']);
     opts.onClamp?.('exact-craftbook-invocation');
@@ -629,6 +651,11 @@ export async function resolveSessionToolSurface(
     for (const input of opts.activeStep?.consumes ?? []) {
       const reader = input.artifact ? 'read_artifact' : 'read_file';
       if (rawAllowlist.has(reader)) withStepCompletion.add(reader);
+    }
+    for (const input of opts.taskInputs ?? []) {
+      for (const name of taskInputReadTools(input)) {
+        if (rawAllowlist.has(name)) withStepCompletion.add(name);
+      }
     }
     if (
       opts.activeStep &&

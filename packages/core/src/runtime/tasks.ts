@@ -251,6 +251,13 @@ async function createTaskInternal(
     request.deliveryMode === 'propose'
   )
     throw new Error('Scheduled, spawned, and change-proposal tasks require desktop execution');
+  // Resolving a craftbook input (enumerating it, writing its manifest,
+  // adopting an upload) is desktop work. An input's plain path in
+  // `craftbookParams` still reaches the prompt as an ordinary param.
+  if (request.inputs && Object.keys(request.inputs).length > 0)
+    throw new Error(
+      'Picked input files require desktop execution; pass the folder as a craftbook param instead',
+    );
   if (request.craftbookId && (!resolved || resolved.id !== request.craftbookId))
     throw new Error('This craftbook is not bundled for offline execution');
   const base = `${projectRoot(projectId)}/tasks`;

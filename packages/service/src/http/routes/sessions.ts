@@ -2,16 +2,22 @@ import {
   type ChatSessionSource,
   CreateChatSessionRequestSchema,
   InterruptSessionRequestSchema,
+  LaunchTaskFromSessionRequestSchema,
+  type LaunchTaskFromSessionResponse,
   SearchSessionsRequestSchema,
   SendToSessionRequestSchema,
   TurnIntentPreviewRequestSchema,
   UpdateQueuedMessageRequestSchema,
+  composeCraftbookLaunch,
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
   rewritePromptDraftFileRefs,
+  stringifyCraftbookParamValues,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { chatLaunchInvocationKey } from '../../tasks/chat-launch-key.js';
+import { launchErrorResponse } from '../../tasks/launcher.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -242,6 +248,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             mentionGezelIds: body.mentions,
             ...(body.fileTurnIntent ? { fileTurnIntent: body.fileTurnIntent } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
+            ...(body.turnIntent ? { turnIntent: body.turnIntent } : {}),
           })
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -255,6 +262,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ...(body.fileTurnIntent ? { fileTurnIntent: body.fileTurnIntent } : {}),
             ...(body.nudge ? { nudge: true } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
+            ...(body.turnIntent ? { turnIntent: body.turnIntent } : {}),
           })
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -309,6 +317,152 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       }
     }
     return c.json({ accepted: true, sessionId: id }, 202);
+  });
+
+  // The composer's attached task: create the craftbook task from this
+  // message without a model turn. The preamble mirrors `/send` exactly —
+  // same 404/409/403, same draft lookup and ref rewrite — because the
+  // message lands in the thread the same way; only the reply differs.
+  app.post('/:id/launch-task', async (c) => {
+    const id = c.req.param('id');
+    const body = LaunchTaskFromSessionRequestSchema.parse(await c.req.json());
+    const target = await ctx.chat.getSessionRecord(id);
+    if (!target) return c.json({ error: 'not found' }, 404);
+    if (target.source?.kind === 'external' && target.source.readOnly) {
+      return c.json(externalReadOnlyError(target.source), 409);
+    }
+    const cfg = await ctx.store.readConfig();
+    if (!isEngagementAllowed(cfg)) {
+      return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
+    }
+    let text = body.message;
+    if (body.draftId) {
+      const draft = await ctx.promptDrafts.get(target.projectId, body.draftId);
+      if (!draft) {
+        return c.json(
+          { error: 'prompt draft not found in this project', code: 'prompt_draft_not_found' },
+          404,
+        );
+      }
+      text = rewritePromptDraftFileRefs(body.message, body.draftId);
+    }
+    const { launch } = body;
+    const book = await ctx.tasks.describeCraftbook(target.projectId, launch.craftbookId, {
+      ...(launch.craftbookSourceId ? { sourceId: launch.craftbookSourceId } : {}),
+    });
+    if (!book) {
+      return c.json(
+        { error: `craftbook "${launch.craftbookId}" is not available in this project` },
+        404,
+      );
+    }
+    const composed = composeCraftbookLaunch({
+      message: text,
+      craftbookName: book.name,
+      paramSchema: book.paramSchema,
+      params: stringifyCraftbookParamValues(launch.params),
+    });
+    const craftbookInvocationKey = chatLaunchInvocationKey({
+      sessionId: id,
+      ...(body.draftId ? { draftId: body.draftId } : {}),
+      message: body.message,
+      launch,
+    });
+
+    // A retried POST finds the task it already made; the receipt it wrote
+    // is the earlier one, and nothing is appended to the thread twice.
+    const priorTask = await ctx.taskLauncher.findLive(target.projectId, craftbookInvocationKey);
+    if (priorTask) {
+      const receipt = [...target.messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.synthetic === 'craftbook-launch' &&
+            message.toolCalls?.some((call) => call.card?.taskRef === priorTask.ref),
+        );
+      const receiptIndex = receipt ? target.messages.lastIndexOf(receipt) : -1;
+      const userMessage = receiptIndex > 0 ? target.messages[receiptIndex - 1] : undefined;
+      if (receipt && userMessage?.role === 'user') {
+        const out: LaunchTaskFromSessionResponse = {
+          task: priorTask,
+          userMessage,
+          receipt,
+          reused: true,
+        };
+        return c.json(out, 200);
+      }
+    }
+
+    let task: LaunchTaskFromSessionResponse['task'];
+    let dispatched = false;
+    try {
+      const launched = await ctx.taskLauncher.launch(
+        target.projectId,
+        {
+          title: launch.title?.trim() || book.name,
+          description: composed.description,
+          craftbookId: launch.craftbookId,
+          ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
+          ...(Object.keys(composed.params).length > 0 ? { craftbookParams: composed.params } : {}),
+          ...(launch.inputs && Object.keys(launch.inputs).length > 0
+            ? { inputs: launch.inputs }
+            : {}),
+          ...(launch.assignee ? { assignee: launch.assignee } : {}),
+          createdBy: { kind: 'user' },
+          launchSessionId: id,
+        },
+        { craftbookInvocationKey, dispatchEntry: true },
+      );
+      task = launched.task;
+      dispatched = launched.dispatch?.enqueued === true;
+    } catch (err) {
+      const rejection = launchErrorResponse(err);
+      if (rejection) return c.json(rejection.body, rejection.status);
+      throw err;
+    }
+
+    const recorded = await ctx.chat.recordCraftbookLaunch(id, {
+      userText: text,
+      ...(body.draftId ? { draftId: body.draftId } : {}),
+      task,
+    });
+    if (body.draftId) {
+      try {
+        await ctx.promptDrafts.markSent(target.projectId, body.draftId, {
+          sessionId: id,
+          content: body.message,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`[sessions] marking draft ${body.draftId} sent failed: ${message}`);
+      }
+    }
+    await ctx.history
+      .log({
+        kind: 'task.launched-from-chat',
+        projectId: target.projectId,
+        gezelId: target.gezelId,
+        summary: `Started "${book.name}" as ${task.ref} from chat`,
+        details: {
+          ref: task.ref,
+          sessionId: id,
+          gezelId: target.gezelId,
+          craftbookId: launch.craftbookId,
+          reused: false,
+          dispatched,
+        },
+      })
+      .catch(() => {});
+    log.info(
+      `[chat] craftbook-launch session=${id} task=${task.ref} craftbook=${launch.craftbookId} reused=false dispatched=${dispatched}`,
+    );
+    const out: LaunchTaskFromSessionResponse = {
+      task,
+      userMessage: recorded.userMessage,
+      receipt: recorded.receipt,
+      reused: false,
+    };
+    return c.json(out, 201);
   });
 
   app.post('/:id/retry', async (c) => {

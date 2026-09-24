@@ -1,4 +1,4 @@
-import type { PromptDraftMeta, PromptDraftSummary } from '@bendyline/gezel';
+import type { PatchPromptDraftRequest, PromptDraftSummary } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
@@ -56,7 +56,8 @@ export interface PromptDraftAutosave {
 
 export interface PromptDraftController {
   draftId: string | null;
-  meta: PromptDraftMeta | null;
+  /** What the server last told us about the open draft (a summary: meta plus file state). */
+  meta: PromptDraftSummary | null;
   /** The user explicitly chose to start a new thread with this draft. */
   isFreshThread: boolean;
   autosave: PromptDraftAutosave;
@@ -66,6 +67,10 @@ export interface PromptDraftController {
   markSent: () => void;
   discard: () => Promise<void>;
   noteFileAdded: () => void;
+  /** A task was attached to (or removed from) the draft, so emptiness is judged differently. */
+  noteTaskLaunch: (present: boolean) => void;
+  /** Re-file the live draft's metadata; the one PATCH path every caller shares. */
+  patchMeta: (patch: PatchPromptDraftRequest) => Promise<void>;
 }
 
 const DEBOUNCE_MS = 1000;
@@ -100,7 +105,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   const [draftId, setDraftIdState] = useState<string | null>(
     () => selectedDraftId ?? readActiveDraftId(slotKey) ?? null,
   );
-  const [meta, setMeta] = useState<PromptDraftMeta | null>(null);
+  const [meta, setMeta] = useState<PromptDraftSummary | null>(null);
   const [autosaveSnapshot, setAutosaveSnapshot] = useState<{
     phase: AutosavePhase;
     dirty: boolean;
@@ -112,6 +117,9 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   const draftIdRef = useRef<string | null>(draftId);
   const slotKeyRef = useRef(slotKey);
   const hasFilesRef = useRef(false);
+  // An attached task keeps an empty-looking draft alive exactly like a file
+  // does: the person configured a craftbook and has not typed yet.
+  const hasTaskLaunchRef = useRef(false);
   const bornWithoutSessionRef = useRef(sessionId === undefined);
   const freshThreadRef = useRef(false);
   const creatingRef = useRef<Promise<string> | null>(null);
@@ -146,7 +154,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       // A draft with no words and nothing attached is not a draft. Delete it
       // rather than leaving a blank row in the picker, and forget it locally so
       // the next keystroke starts a fresh one.
-      if (!value.trim() && !hasFilesRef.current) {
+      if (!value.trim() && !hasFilesRef.current && !hasTaskLaunchRef.current) {
         await api.deletePromptDraft(projectId, id).catch(() => {});
         forgetDraft(id);
         writeActiveDraftId(slotKeyRef.current, undefined);
@@ -170,6 +178,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
         if (result.draft) {
           setMeta(result.draft);
           hasFilesRef.current = result.draft.hasFiles;
+          hasTaskLaunchRef.current = Boolean(result.draft.taskLaunch);
         }
         writeDraftText(id, value);
       } catch (err) {
@@ -233,6 +242,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       }
       bornWithoutSessionRef.current = sessionIdRef.current === undefined;
       hasFilesRef.current = created.hasFiles;
+      hasTaskLaunchRef.current = Boolean(created.taskLaunch);
       writeActiveDraftId(slotKeyRef.current, created.id);
       setDraftId(created.id);
       setMeta(created);
@@ -304,6 +314,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     forgetDraft(id);
     writeActiveDraftId(slotKeyRef.current, undefined);
     hasFilesRef.current = false;
+    hasTaskLaunchRef.current = false;
     freshThreadRef.current = false;
     setDraftId(null);
     setMeta(null);
@@ -318,6 +329,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     controllerRef.current = null;
     controllerDraftRef.current = null;
     hasFilesRef.current = false;
+    hasTaskLaunchRef.current = false;
     freshThreadRef.current = false;
     setDraftId(null);
     setMeta(null);
@@ -332,6 +344,22 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   /** An upload landed, so an empty-looking draft is no longer empty. */
   const noteFileAdded = useCallback(() => {
     hasFilesRef.current = true;
+  }, []);
+
+  const noteTaskLaunch = useCallback((present: boolean) => {
+    hasTaskLaunchRef.current = present;
+  }, []);
+
+  const patchMeta = useCallback(async (patch: PatchPromptDraftRequest): Promise<void> => {
+    const id = draftIdRef.current;
+    if (!id) return;
+    const updated = await api.patchPromptDraft(addressRef.current.projectId, id, patch);
+    // The PATCH may have raced a later change; only adopt the answer for
+    // the draft still open.
+    if (draftIdRef.current === id) {
+      setMeta(updated);
+      hasTaskLaunchRef.current = Boolean(updated.taskLaunch);
+    }
   }, []);
 
   const retry = useCallback(async (): Promise<void> => {
@@ -355,6 +383,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
         const draft = await api.getPromptDraft(addressRef.current.projectId, id);
         if (generationRef.current !== generation) return;
         hasFilesRef.current = draft.hasFiles;
+        hasTaskLaunchRef.current = Boolean(draft.taskLaunch);
         freshThreadRef.current = draft.sessionId === null;
         writeDraftText(id, draft.content);
         setMeta(draft);
@@ -481,6 +510,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     setDraftId(null);
     setMeta(null);
     hasFilesRef.current = false;
+    hasTaskLaunchRef.current = false;
     freshThreadRef.current = false;
     // Never take words away. A composer holding text that has no draft yet is
     // mid-creation (or its creation failed); moving the address under it must
@@ -548,6 +578,8 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     markSent,
     discard,
     noteFileAdded,
+    noteTaskLaunch,
+    patchMeta,
   };
 }
 

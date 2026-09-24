@@ -1,4 +1,4 @@
-import { GezelApiError } from './api-error.js';
+import { GezelApiError, describeTransportError } from './api-error.js';
 export { GezelApiError } from './api-error.js';
 import type {
   AppToolCallResultRequest,
@@ -224,6 +224,8 @@ import type {
   InvokePageToolRequest,
   InvokePageToolResponse,
   InvokeSessionToolResponse,
+  LaunchTaskFromSessionRequest,
+  LaunchTaskFromSessionResponse,
   ListAiAppsResponse,
   ListAppServeSitesResponse,
   ListChatSessionsResponse,
@@ -465,6 +467,7 @@ import {
   SseStreamStaleError,
   consumeSseJson,
 } from './sse.js';
+import { TaskInputsClient } from './task-inputs.js';
 
 export type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 
@@ -2076,18 +2079,6 @@ export interface RunWorkspaceCommandResult {
   declined?: string;
 }
 
-function describeTransportError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause instanceof Error && cause.message && cause.message !== error.message) {
-    return `${error.message} (${cause.message})`;
-  }
-  if (cause && typeof cause === 'object' && 'code' in cause) {
-    return `${error.message} (${String((cause as { code?: unknown }).code)})`;
-  }
-  return error.message;
-}
-
 type ConsumeApiSseJsonOptions<T> = ConsumeSseJsonOptions<T> & {
   staleMessage?: string;
 };
@@ -2239,6 +2230,7 @@ export class GezelClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
+  readonly taskInputs: TaskInputsClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2249,6 +2241,7 @@ export class GezelClient {
     // site (browser, Electron renderer, Node 22+).
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
+    this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
   }
 
   private async request<T>(
@@ -4921,6 +4914,14 @@ export class GezelClient {
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);
+  }
+
+  /** The composer's attached task: create it from this message with no model turn. */
+  launchTaskFromChatSession(
+    sessionId: string,
+    body: LaunchTaskFromSessionRequest,
+  ): Promise<LaunchTaskFromSessionResponse> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/launch-task`, body);
   }
 
   /**

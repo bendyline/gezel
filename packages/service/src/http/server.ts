@@ -105,6 +105,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
+import { taskInputRoutes } from './routes/task-inputs.js';
 
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
@@ -483,6 +484,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*
+  // Before the task routes: `/tasks/input-preview` must not read as a task number.
+  app.route('/api/projects', taskInputRoutes(ctx));
   app.route('/api/projects', projectTaskRoutes(ctx));
   app.route('/api/projects', projectContinuationRoutes(ctx));
   app.route('/api/projects', scriptRoutes(ctx));

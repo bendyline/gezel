@@ -1,3 +1,4 @@
+import { fillMainContentParam } from '@bendyline/gezel';
 import { z } from 'zod';
 import {
   type BinaryDocumentCraftbookRoute,
@@ -14,41 +15,26 @@ import { coerceJsonObject } from './zod-coerce.js';
  */
 export const CraftbookInvocationParamsArgSchema = coerceJsonObject(z.record(z.string(), z.string()))
   .optional()
-  .describe('Invocation parameters declared by the craftbook, such as outputPath.');
-
-function stringParamProperties(paramSchema: unknown): Record<string, Record<string, unknown>> {
-  if (!paramSchema || typeof paramSchema !== 'object' || Array.isArray(paramSchema)) return {};
-  const properties = (paramSchema as { properties?: unknown }).properties;
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {};
-  return Object.fromEntries(
-    Object.entries(properties as Record<string, unknown>).filter(
-      (entry): entry is [string, Record<string, unknown>] =>
-        !!entry[1] && typeof entry[1] === 'object' && !Array.isArray(entry[1]),
-    ),
+  .describe(
+    'Invocation parameters declared by the craftbook, such as outputPath. An input param (the files the book works on, e.g. "source") takes a folder or file path in this project workspace; prefix "artifacts:" for one in the artifacts drawer. Files outside the project cannot be passed here — ask the user to launch the craftbook from Tasks and pick them from their computer.',
   );
-}
 
 /**
  * Preserve a free-text job when a craftbook exposes a `topic` input but the
- * caller omitted every supported source form. This is deliberately
- * schema-driven: books without a declared topic/source/content contract do
- * not gain an unrelated parameter.
+ * caller omitted every supported source form. The rule itself lives in core
+ * (`fillMainContentParam`) so the chat composer's launch route and this
+ * tool cannot disagree about it.
  */
 export function inferCraftbookJobParams(args: {
   paramSchema: unknown;
   params?: Record<string, string>;
   jobDescription?: string;
 }): Record<string, string> {
-  const params = { ...(args.params ?? {}) };
-  const jobDescription = args.jobDescription?.trim();
-  if (!jobDescription) return params;
-
-  const properties = stringParamProperties(args.paramSchema);
-  if (!properties.topic) return params;
-  const suppliedSource = ['sourcePath', 'topic', 'content'].some(
-    (key) => typeof params[key] === 'string' && params[key]!.trim().length > 0,
-  );
-  return suppliedSource ? params : { ...params, topic: jobDescription };
+  return fillMainContentParam({
+    paramSchema: args.paramSchema,
+    ...(args.params ? { params: args.params } : {}),
+    ...(args.jobDescription !== undefined ? { message: args.jobDescription } : {}),
+  });
 }
 
 /** Build the concrete follow-up advertised by suggest_craftbook. */

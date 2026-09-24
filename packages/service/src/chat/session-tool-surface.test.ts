@@ -457,6 +457,44 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
+  it('keeps the tools that open a craftbook input, short of the book’s own step policy', async () => {
+    const input = {
+      drawer: 'artifacts' as const,
+      kind: 'folder' as const,
+      hasOfficeDocuments: true,
+    };
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Build the ebook',
+        advanceWhen: { file: 'index.html', minBytes: 800 },
+        toolPolicy: { outputMedium: 'workspace' },
+      },
+      taskInputs: [input],
+    });
+    expect(allowlist).not.toBeNull();
+    for (const name of ['list_artifacts', 'read_artifact', 'read_doc_as_markdown']) {
+      expect(allowlist!.has(name)).toBe(true);
+    }
+
+    const { allowlist: authored } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Build the ebook',
+        advanceWhen: { file: 'index.html', minBytes: 800 },
+        toolPolicy: { outputMedium: 'workspace', disallowBuiltinToolsets: ['artifacts'] },
+      },
+      taskInputs: [input],
+    });
+    expect(authored!.has('read_artifact')).toBe(false);
+  });
+
   it('grants any assigned role its exact step kit through the hard ceiling', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -925,6 +963,42 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
 
     expect(clamps).toContain('exact-craftbook-invocation');
     expect([...allowlist!]).toEqual(['invoke_craftbook']);
+  });
+
+  // The composer sends `turnIntent: 'off'` after the person dismissed the
+  // suggested task for this text. The clamp must honor that: forcing the
+  // model into the one launch the person just declined is the wrong answer.
+  it('leaves the surface intact when the send opted out of exact craftbook routing', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'alaska-off',
+        gezelId: 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-14T00:00:00.000Z' }],
+        createdAt: '2026-09-14T00:00:00.000Z',
+        lastActivityAt: '2026-09-14T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'mlx',
+      modelId: 'qwen3.8-27b-q4',
+      parameterSize: '27B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'medium',
+      latestUserMessage: prompt,
+      exactCraftbookRouting: false,
+      onClamp: (kind: string) => clamps.push(kind),
+    } as never);
+
+    expect(clamps).not.toContain('exact-craftbook-invocation');
+    expect(!allowlist || allowlist.size > 1).toBe(true);
   });
 
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {

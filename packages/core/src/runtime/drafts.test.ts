@@ -81,6 +81,54 @@ describe('prompt drafts on the portable host', () => {
     expect(kept.draft?.fileCount).toBe(1);
   });
 
+  it('keeps an empty draft that carries an attached task, and clears the task with null', async () => {
+    const f = await fixture();
+    const launch = {
+      craftbookId: 'powerpoint-deck',
+      params: { topic: 'Delft', slides: 8 },
+      origin: 'user' as const,
+    };
+    const draft = await f.create({ content: '', taskLaunch: launch });
+    expect(draft.taskLaunch).toEqual(launch);
+    const kept = await f.store.writePromptDraftContent('default', draft.id, '');
+    expect(kept.deleted).toBe(false);
+    expect(kept.draft?.taskLaunch).toEqual(launch);
+    const patched = await f.store.patchPromptDraft('default', draft.id, {
+      taskLaunch: { ...launch, origin: 'suggested' },
+    });
+    expect(patched.taskLaunch?.origin).toBe('suggested');
+    const cleared = await f.store.patchPromptDraft('default', draft.id, { taskLaunch: null });
+    expect(cleared.taskLaunch).toBeUndefined();
+    expect(await f.store.writePromptDraftContent('default', draft.id, '')).toEqual({
+      draft: null,
+      deleted: true,
+    });
+  });
+
+  it('copies an attached task but drops its uploaded inputs', async () => {
+    const f = await fixture();
+    const source = await f.create({
+      taskLaunch: {
+        craftbookId: 'ebook-compile',
+        params: {},
+        origin: 'user' as const,
+        inputs: {
+          source: { from: 'upload' as const, stagingId: 'stg-abcdefgh' },
+          extras: { from: 'workspace' as const, path: 'notes' },
+        },
+        inputLabels: { source: { label: 'Notes', fileCount: 3 }, extras: { label: 'notes' } },
+      },
+    });
+    const copy = await f.store.duplicatePromptDraft('default', source.id);
+    expect(copy.taskLaunch).toEqual({
+      craftbookId: 'ebook-compile',
+      params: {},
+      origin: 'user',
+      inputs: { extras: { from: 'workspace', path: 'notes' } },
+      inputLabels: { extras: { label: 'notes' } },
+    });
+  });
+
   it('clears an optional ref with an explicit null and refuses edits to a sent draft', async () => {
     const f = await fixture();
     const draft = await f.create({ scope: 'notes' });

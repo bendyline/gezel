@@ -154,6 +154,10 @@ export * from './craftbook-output-media.js';
 export * from './tools/step-policy.js';
 
 export * from './craftbook-params.js';
+export * from './craftbook-inputs.js';
+export * from './craftbook-launch.js';
+export * from './craftbook-invocation-key.js';
+export * from './sync-junk.js';
 
 export * from './question-format.js';
 export * from './project-routing.js';

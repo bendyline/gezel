@@ -427,6 +427,113 @@ describe('NewTaskDialog', () => {
     });
   });
 
+  it('compose mode hands the configuration to the chat instead of creating', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('code-review', 'Code Review', {
+          paramSchema: { type: 'object', properties: { intensity: { type: 'string' } } },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    const onUseInChat = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <NewTaskDialog
+        open
+        launchMode="compose"
+        composerText="Review the auth changes before the release."
+        defaultProjectId="pj-alpha"
+        projects={PROJECTS}
+        gezels={GEZELS}
+        projectLocked
+        onClose={onClose}
+        onUseInChat={onUseInChat}
+      />,
+    );
+    expect(await screen.findByText('Task for this message')).toBeInTheDocument();
+    // No blank-task card: a message cannot attach "nothing in particular".
+    expect(screen.queryByRole('radio', { name: /general task|start fresh/i })).toBeNull();
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'Code Review' }));
+    expect(await screen.findByText('Brief · from your message')).toBeInTheDocument();
+    expect(screen.getByText('Review the auth changes before the release.')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing runs yet/)).toBeInTheDocument();
+    await user.click(screen.getByTestId('json-editor'));
+    await user.click(screen.getByRole('button', { name: 'Use in chat' }));
+
+    expect(onUseInChat).toHaveBeenCalledWith({
+      craftbookId: 'code-review',
+      craftbookSourceId: 'bundled',
+      craftbookName: 'Code Review',
+      params: { intensity: 'high' },
+      origin: 'user',
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(api.createTask).not.toHaveBeenCalled();
+    expect(api.appendTaskNote).not.toHaveBeenCalled();
+  });
+
+  it('compose mode reopens on the attached craftbook with its values restored', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('code-review', 'Code Review', {
+          paramSchema: {
+            type: 'object',
+            properties: {
+              intensity: { type: 'string' },
+              scope: { type: 'string', default: 'all' },
+            },
+          },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    const onUseInChat = vi.fn();
+    render(
+      <NewTaskDialog
+        open
+        launchMode="compose"
+        initialLaunch={{
+          craftbookId: 'code-review',
+          params: { intensity: 'low' },
+          title: 'Auth review',
+          assignee: { kind: 'gezel', gezelId: 'gz-maya' },
+          origin: 'suggested',
+        }}
+        defaultProjectId="pj-alpha"
+        projects={PROJECTS}
+        gezels={GEZELS}
+        projectLocked
+        onClose={vi.fn()}
+        onUseInChat={onUseInChat}
+      />,
+    );
+    // Straight to the configuration, no gallery.
+    expect(await screen.findByText('Brief · from your message')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Code Review' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Auth review')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Use in chat' }));
+    expect(onUseInChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        craftbookId: 'code-review',
+        // Declared defaults sit under the restored values; a suggestion
+        // confirmed here becomes the person's own pick.
+        params: { scope: 'all', intensity: 'low' },
+        title: 'Auth review',
+        assignee: { kind: 'gezel', gezelId: 'gz-maya' },
+        origin: 'user',
+      }),
+    );
+  });
+
   it('defers the assignee to the entry step role rather than pinning a gezel', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/4',

@@ -4,7 +4,7 @@ import type { TurnIntentPlan } from '@bendyline/gezel';
 import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { GezelApiError, streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -33,6 +33,8 @@ vi.mock('./useRoleBasedNameOnlyMode.js', () => ({
   useRoleBasedNameOnlyMode: () => roleBasedNameOnly.value,
 }));
 vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
+// The compose-mode dialog has its own suite; here it only needs to exist.
+vi.mock('../views/tasks/NewTaskDialog.js', () => ({ NewTaskDialog: () => null }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
@@ -276,7 +278,7 @@ describe('ChatComposer To line', () => {
   });
 });
 
-describe('ChatComposer route preview', () => {
+describe('ChatComposer attached task', () => {
   const powerpointPlan = {
     schemaVersion: 1,
     intent: 'artifact',
@@ -293,75 +295,332 @@ describe('ChatComposer route preview', () => {
     craftbook: {
       id: 'powerpoint-deck',
       name: 'PowerPoint from Content',
-      invocation: { description: 'Please make a PowerPoint about Mongolia.' },
+      invocation: {
+        description: 'Please make a PowerPoint about Mongolia.',
+        params: { topic: 'Mongolia' },
+      },
     },
     requiredTools: ['invoke_craftbook'],
   } satisfies TurnIntentPlan;
+  const quietPlan: TurnIntentPlan = {
+    schemaVersion: 1,
+    intent: 'conversation',
+    route: 'none',
+    confidence: 'low',
+    reason: 'no-strong-signal',
+    visible: false,
+    display: { label: 'Conversation', badges: [] },
+    requiredTools: [],
+  };
+  const deckListing = {
+    items: [
+      {
+        sourceId: 'bundled',
+        kind: 'craftbook-template',
+        manifest: {
+          kind: 'craftbook-template',
+          id: 'powerpoint-deck',
+          name: 'PowerPoint from Content',
+          description: 'A deck.',
+          paramSchema: {
+            type: 'object',
+            properties: { topic: { type: 'string' }, audience: { type: 'string' } },
+          },
+          steps: [{ id: 'write', name: 'Write' }],
+          entryStepId: 'write',
+        },
+      },
+    ],
+    missingToolsets: {},
+  };
+  // The mock API's default fresh draft; a PATCH echoes it back with the task.
+  const draftMeta = {
+    id: '2026-09-03-0001',
+    projectId: 'default',
+    gezelId: 'tomas',
+    sessionId: null,
+    createdAt: '2026-09-03T12:00:00.000Z',
+    updatedAt: '2026-09-03T12:00:00.000Z',
+    status: 'draft' as const,
+    title: '',
+    hasFiles: false,
+    fileCount: 0,
+    content: '',
+  };
+  const taskLaunch = { gezels: [], projects: [] };
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue(deckListing as never);
+    vi.mocked(api.patchPromptDraft).mockImplementation(
+      async (_p, _id, patch) =>
+        ({
+          ...draftMeta,
+          ...(patch.taskLaunch ? { taskLaunch: patch.taskLaunch } : {}),
+        }) as never,
+    );
   });
 
-  it('shows the daemon plan while the user is still composing', async () => {
+  // `vi.clearAllMocks` clears calls, not implementations: hand the shared
+  // mocks their defaults back so later suites see a plain composer.
+  afterEach(() => {
+    vi.mocked(api.listProjectCraftbooks)
+      .mockReset()
+      .mockResolvedValue({} as never);
+    vi.mocked(api.patchPromptDraft)
+      .mockReset()
+      .mockResolvedValue({} as never);
+    vi.mocked(api.getPromptDraft)
+      .mockReset()
+      .mockResolvedValue(draftMeta as never);
+    vi.mocked(api.createChatSession)
+      .mockReset()
+      .mockResolvedValue({} as never);
+  });
+
+  it('turns the daemon plan into a suggested task strip above the To line', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
     render(
-      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
     );
 
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'Please make a PowerPoint about Mongolia.' },
     });
 
-    const preview = await screen.findByRole('status', { name: /planned: powerpoint/i });
-    expect(preview).toHaveTextContent('PowerPoint');
-    expect(preview).not.toHaveTextContent('(.pptx)');
-    expect(preview).toHaveAttribute('title', expect.stringContaining('PowerPoint from Content'));
-    expect(preview.nextElementSibling).toBe(screen.getByRole('button', { name: 'Narrate prompt' }));
+    const strip = await screen.findByRole('group', { name: /attached task: powerpoint/i });
+    expect(strip).toHaveAttribute('data-origin', 'suggested');
+    expect(strip).toHaveTextContent('Suggested task');
+    expect(strip).toHaveTextContent('topic: Mongolia');
+    expect(screen.queryByRole('status')).toBeNull();
     expect(api.previewTurnIntent).toHaveBeenCalledWith({
       message: 'Please make a PowerPoint about Mongolia.',
       gezelId: 'tomas',
       projectId: 'default',
       sessionId: 'session-1',
     });
-    expect(screen.queryByText(/docblocks/i)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.patchPromptDraft).toHaveBeenCalledWith(
+        'default',
+        draftMeta.id,
+        expect.objectContaining({
+          taskLaunch: expect.objectContaining({
+            craftbookId: 'powerpoint-deck',
+            origin: 'suggested',
+          }),
+        }),
+      ),
+    );
   });
 
-  it('keeps the confirmed plan visible until the latest preview supersedes it', async () => {
+  it('clears the suggestion when the plan goes quiet', async () => {
     const latestPreview = deferred<TurnIntentPlan>();
     vi.mocked(api.previewTurnIntent)
       .mockResolvedValueOnce(powerpointPlan)
       .mockReturnValueOnce(latestPreview.promise);
     render(
-      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
     );
 
     const editor = screen.getByLabelText('Message');
-    fireEvent.change(editor, {
-      target: { value: 'Can you create a PowerPoint' },
-    });
-    expect(await screen.findByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+    fireEvent.change(editor, { target: { value: 'Can you create a PowerPoint' } });
+    expect(await screen.findByRole('group', { name: /attached task/i })).toBeVisible();
 
-    fireEvent.change(editor, {
-      target: { value: 'Can you create a PowerPoint about Mongolia' },
-    });
-    expect(screen.getByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+    fireEvent.change(editor, { target: { value: 'Can you create a PowerPoint about Mongolia' } });
     await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('status', { name: /planned: powerpoint/i })).toBeVisible();
+    expect(screen.getByRole('group', { name: /attached task/i })).toBeVisible();
 
-    latestPreview.resolve({
-      schemaVersion: 1,
-      intent: 'conversation',
-      route: 'none',
-      confidence: 'low',
-      reason: 'no-strong-signal',
-      visible: false,
-      display: { label: 'Conversation', badges: [] },
-      requiredTools: [],
+    latestPreview.resolve(quietPlan);
+    await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
+  });
+
+  it('dismissing a suggestion keeps it away for that text and opts the send out of the route', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.sendToChatSession).mockResolvedValue({ accepted: true, sessionId: 'session-1' });
+    vi.mocked(streamChatEvents).mockImplementation(async function* () {
+      yield { type: 'done' } as never;
     });
-    await waitFor(() => {
-      expect(screen.queryByRole('status', { name: /planned: powerpoint/i })).toBeNull();
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia.' },
     });
+    await screen.findByRole('group', { name: /attached task/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the attached task' }));
+    await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
+    await waitFor(() =>
+      expect(api.patchPromptDraft).toHaveBeenLastCalledWith('default', draftMeta.id, {
+        taskLaunch: null,
+      }),
+    );
+
+    pressSendShortcut();
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
+    expect(api.sendToChatSession).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ turnIntent: 'off' }),
+    );
+    expect(api.launchTaskFromChatSession).not.toHaveBeenCalled();
+  });
+
+  it('sending with an attached task creates it instead of a chat turn', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.launchTaskFromChatSession).mockResolvedValue({
+      task: { ref: 'default/7', num: 7, projectId: 'default', title: 'Deck' },
+      userMessage: { role: 'user', content: 'x', at: '2026-09-24T00:00:01.000Z' },
+      receipt: { role: 'assistant', content: 'Started', at: '2026-09-24T00:00:01.000Z' },
+      reused: false,
+    } as never);
+    const onLaunched = vi.fn();
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={{ ...taskLaunch, onLaunched }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia.' },
+    });
+    await screen.findByRole('group', { name: /attached task/i });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start the task' })).toBeEnabled(),
+    );
+
+    pressSendShortcut();
+    await waitFor(() => expect(api.launchTaskFromChatSession).toHaveBeenCalled());
+    expect(api.launchTaskFromChatSession).toHaveBeenCalledWith('session-1', {
+      message: 'Please make a PowerPoint about Mongolia.',
+      draftId: draftMeta.id,
+      launch: { craftbookId: 'powerpoint-deck', params: { topic: 'Mongolia' } },
+    });
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+    expect(streamChatEvents).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(onLaunched).toHaveBeenCalledWith(expect.objectContaining({ ref: 'default/7' })),
+    );
+    await waitFor(() => expect(screen.getByTestId('editor-draft')).toHaveTextContent(''));
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
+  });
+
+  /** Mount empty, then pick a task-bearing draft — the way the thread picker hands one over. */
+  async function openDraftWithTask() {
+    vi.mocked(api.getPromptDraft).mockResolvedValue({
+      ...draftMeta,
+      taskLaunch: {
+        craftbookId: 'powerpoint-deck',
+        params: { topic: 'Delft', audience: 'new hires' },
+        origin: 'user',
+      },
+    } as never);
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        taskLaunch={taskLaunch}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Attach a task' })).toBeVisible();
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        draftId={draftMeta.id}
+        taskLaunch={taskLaunch}
+      />,
+    );
+    return screen.findByRole('group', { name: /attached task/i }, { timeout: 8_000 });
+  }
+
+  it('paints a strip from a draft that already carries a task', async () => {
+    const strip = await openDraftWithTask();
+    expect(strip).toHaveAttribute('data-origin', 'user');
+    expect(strip).toHaveTextContent('topic: Delft · audience: new hires');
+    expect(screen.getByRole('button', { name: 'Change the attached task' })).toBeVisible();
+  }, 15_000);
+
+  it('can start the attached task with no words, creating the thread first', async () => {
+    vi.mocked(api.launchTaskFromChatSession).mockResolvedValue({
+      task: { ref: 'default/8', num: 8, projectId: 'default', title: 'Deck' },
+      userMessage: { role: 'user', content: '', at: '2026-09-24T00:00:01.000Z' },
+      receipt: { role: 'assistant', content: 'Started', at: '2026-09-24T00:00:01.000Z' },
+      reused: false,
+    } as never);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-new' } as never);
+    await openDraftWithTask();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start the task' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Start the task' }));
+    await waitFor(() => expect(api.launchTaskFromChatSession).toHaveBeenCalled(), {
+      timeout: 8_000,
+    });
+    expect(api.launchTaskFromChatSession).toHaveBeenCalledWith(
+      'session-new',
+      expect.objectContaining({ message: '' }),
+    );
+  }, 15_000);
+
+  it('offers the Task key only on a fresh thread, and never inside a task thread', () => {
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        taskLaunch={taskLaunch}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Attach a task' })).toBeVisible();
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Attach a task' })).toBeNull();
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        taskRef="default/3"
+        taskLaunch={taskLaunch}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Attach a task' })).toBeNull();
   });
 });
 

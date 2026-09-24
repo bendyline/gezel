@@ -3,7 +3,6 @@ import {
   type ChatSessionSummary,
   type Craftbook,
   type CraftbookConnectorNeed,
-  type CraftbookToolsetNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
   GATE_MAX_PROGRESS_ATTEMPTS,
@@ -105,6 +104,9 @@ import {
   gateCheckLabel,
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
+import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './inputs/resolve.js';
+import type { InputStagingManager } from './inputs/staging.js';
+import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import {
@@ -140,45 +142,6 @@ export interface CraftbookResolver {
     sourceId: string;
     version?: string;
   } | null>;
-}
-
-/** A craftbook was selected correctly, but its declared runtime is not ready. */
-export class CraftbookSetupRequiredError extends Error {
-  readonly code = 'CRAFTBOOK_SETUP_REQUIRED';
-
-  constructor(
-    readonly craftbookId: string,
-    readonly missingToolsets: CraftbookToolsetNeed[],
-  ) {
-    const details = missingToolsets
-      .map((need) => `${need.toolsetId}${need.reason ? ` (${need.reason})` : ''}`)
-      .join(', ');
-    super(
-      `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${details} before creating this task. No task was created.`,
-    );
-    this.name = 'CraftbookSetupRequiredError';
-  }
-}
-
-/**
- * A craftbook reads a connector corpus the project has not bound. The
- * launcher offers to bind it (defaults come from the project) and retries.
- */
-export class ConnectorSetupRequiredError extends Error {
-  readonly code = 'CONNECTOR_SETUP_REQUIRED';
-
-  constructor(
-    readonly craftbookId: string,
-    readonly missingConnectors: CraftbookConnectorNeed[],
-  ) {
-    const details = missingConnectors
-      .map((need) => `${need.typeId}${need.reason ? ` (${need.reason})` : ''}`)
-      .join(', ');
-    super(
-      `SETUP REQUIRED for craftbook "${craftbookId}": connect ${details} before creating this task. No task was created.`,
-    );
-    this.name = 'ConnectorSetupRequiredError';
-  }
 }
 
 /**
@@ -365,6 +328,7 @@ export type TaskNeedsHelpHook = (ctx: {
  */
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
 export type { ExecutionModeResolution, ExecutionModeResolver } from './execution-mode.js';
+export { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 
 /**
  * The gezel a step is bound to on its OWN terms — an explicit assignee,
@@ -481,6 +445,7 @@ export class TaskManager {
   private onTaskStatusChanged?: TaskStatusChangedHook;
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
+  private inputStaging?: InputStagingManager;
   private readonly autoPreparedConnectorTypes = new Set<string>();
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
@@ -688,6 +653,26 @@ export class TaskManager {
 
   setTaskNeedsHelpHook(fn: TaskNeedsHelpHook): void {
     this.onTaskNeedsHelp = fn;
+  }
+
+  /**
+   * What a launcher needs before creating a task from a craftbook: its name
+   * for the default title and the paramSchema its params and inputs resolve
+   * against. Null when the book does not resolve for this project.
+   */
+  async describeCraftbook(
+    projectId: string,
+    craftbookId: string,
+    opts: { version?: string; sourceId?: string } = {},
+  ): Promise<{ name: string; paramSchema: Craftbook['paramSchema'] } | null> {
+    const resolved = await this.craftbookResolver?.resolve(craftbookId, { ...opts, projectId });
+    if (!resolved) return null;
+    return { name: resolved.craftbook.name, paramSchema: resolved.craftbook.paramSchema ?? {} };
+  }
+
+  /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
+  setInputStaging(staging: InputStagingManager): void {
+    this.inputStaging = staging;
   }
 
   /**
@@ -1074,6 +1059,14 @@ export class TaskManager {
       // these — their deliverables live at mode-neutral locations.
       ...(draftsDiffpack ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` } : {}),
     };
+    // Inputs resolve here for the same reason connector prep does: the task
+    // number is known and interpolation is just below. Nothing is written
+    // until the task write commits the plan.
+    const inputsPlan = await planLaunchInputs(
+      { store: this.store, staging: this.inputStaging },
+      { projectId, num, book: mainBook, request: input, params: effectiveCraftbookParams },
+    );
+    if (inputsPlan) Object.assign(craftbookParamOverrides, inputsPlan.params);
     Object.assign(
       craftbookParamOverrides,
       resolveRuntimeTokensInParams(craftbookParamOverrides, runtimeCraftbookContext),
@@ -1214,6 +1207,7 @@ export class TaskManager {
       ...(Object.keys(effectiveCraftbookParams).length > 0
         ? { craftbookParams: effectiveCraftbookParams }
         : {}),
+      ...(inputsPlan ? { inputs: inputsPlan.records } : {}),
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
@@ -1234,7 +1228,7 @@ export class TaskManager {
       createdBy: input.createdBy ?? { kind: 'user' },
     };
 
-    await this.store.writeTask(task);
+    await writeTaskWithInputs(inputsPlan, () => this.store.writeTask(task));
     // Pre-create the task's artifact folder so it shows in the artifacts
     // browser from minute one. Purely a UX affordance — `write_artifact`
     // mkdir -p's on its own — so a failure must never block the task.
@@ -1259,6 +1253,7 @@ export class TaskManager {
         ...(spawnsCraftbook ? { spawnSteps: spawnsCraftbook.steps.length } : {}),
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
+        ...(task.inputs ? { inputs: inputsHistoryDetails(task.inputs) } : {}),
       },
     });
 
@@ -4420,6 +4415,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         : {}),
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+      // A shard works on its host's input; its template already carries those paths.
+      ...(parent.inputs ? { inputs: parent.inputs } : {}),
       // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
       // a shard that carries one drafts into that change proposal, so its
       // workspace-write tools re-root at the pack instead of the workspace.

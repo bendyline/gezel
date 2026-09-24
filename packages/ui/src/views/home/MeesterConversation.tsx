@@ -201,6 +201,14 @@ export function MeesterConversation({
               draftScope="meester"
               draftId={draftId || undefined}
               onDraftIdChange={(next) => setDraftId(next ?? '')}
+              // The attached task launches in the composer's current project
+              // (Default runs real work). `projects` is only read when the
+              // dialog's project picker shows, which the lock suppresses.
+              taskLaunch={{
+                gezels,
+                projects: [],
+                onLaunched: () => setSessionRefreshKey((k) => k + 1),
+              }}
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={activeGezelId}

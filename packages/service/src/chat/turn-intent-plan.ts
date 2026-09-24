@@ -26,16 +26,34 @@ const EXISTING_WORK_RE =
   /\b(?:cancel|stop|pause|resume|retry|restart|abort|delete|remove|update|edit|revise|fix|change|tweak|shorten|extend|finish|check\s+on|status\s+of|progress\s+on|how(?:'s|\s+is|\s+are)?|where(?:'s|\s+is|\s+are)?)\s+(?:the|that|this|my|our|your)\s+(?:[\w-]+\s+){0,2}?(?:power\s*point|pptx?|deck|presentation|slides?|slide\s*show|docx?|document|report|pdf|task)\b/i;
 
 /**
+ * Is this text asking for work at all — rather than asking a question, or
+ * asking after work already under way? Shared by the exact-format routes
+ * and the catalog trigger tier so neither proposes a launch for "how do I
+ * write meeting minutes?" or "cancel the deck".
+ */
+export function looksLikeWorkRequest(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  if (INFORMATIONAL_OPEN_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return false;
+  if (EXISTING_WORK_RE.test(normalized)) return false;
+  return true;
+}
+
+/** Meester or voorman: the roles a person asks for work through. */
+export function isCoordinatorRole(input: { isMeester: boolean; role?: string }): boolean {
+  const roleId = resolveRoleId(input.role);
+  return input.isMeester || roleId === 'meester' || roleId === 'voorman';
+}
+
+/**
  * Deterministic, high-precision artifact routing. This is intentionally much
  * narrower than catalog search: a preview must not flash merely because a
  * file type was mentioned while the user is asking a question about it.
  */
 export function detectExactArtifactRoute(text: string): ExactArtifactRoute | null {
   const normalized = text.trim();
-  if (!normalized) return null;
-  if (INFORMATIONAL_OPEN_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
+  if (!looksLikeWorkRequest(normalized)) return null;
   if (!PRODUCTION_ACTION_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
-  if (EXISTING_WORK_RE.test(normalized)) return null;
 
   if (/\b(?:power\s*point|pptx?|slide\s+deck|presentation\s+deck)\b/i.test(normalized)) {
     return {
@@ -120,8 +138,7 @@ export interface ResolveTurnIntentPlanInput {
  */
 export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIntentPlan {
   const text = input.text.trim();
-  const roleId = resolveRoleId(input.role);
-  const isCoordinator = input.isMeester || roleId === 'meester' || roleId === 'voorman';
+  const isCoordinator = isCoordinatorRole(input);
   const artifact = detectExactArtifactRoute(text);
   if (artifact && isCoordinator) {
     return {

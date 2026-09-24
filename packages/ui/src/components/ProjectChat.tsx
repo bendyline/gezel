@@ -3,7 +3,6 @@ import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
@@ -266,7 +265,6 @@ function ProjectChatBody({
   // thread is out of scope, and auto-picks the gezel's lobby thread over
   // it — silently posting the user's next message to the wrong place.
   const [activeTask, setActiveTask] = useState<{ ref: string; stepId?: string } | null>(null);
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
   // Bumped after a write the pill row should re-read (a created task).
   const [pillRefreshKey, setPillRefreshKey] = useState(0);
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
@@ -602,7 +600,6 @@ function ProjectChatBody({
                 }
               : undefined
           }
-          onNewTask={runtimeCapabilities().tasks ? () => setNewTaskOpen(true) : undefined}
         />
       )}
     >
@@ -675,6 +672,18 @@ function ProjectChatBody({
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
                   draftScope={DRAFT_SCOPE}
+                  // The attached task: the Task key, the strip, and the daemon's
+                  // route suggestions. The pill row also hears the new task
+                  // through the shared task stream; the bump is for immediacy.
+                  {...(runtimeCapabilities().tasks
+                    ? {
+                        taskLaunch: {
+                          gezels: recipientGezels,
+                          projects: [project],
+                          onLaunched: () => setPillRefreshKey((k) => k + 1),
+                        },
+                      }
+                    : {})}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus
@@ -761,23 +770,6 @@ function ProjectChatBody({
               )}
             </div>
           </div>
-          {/* Portals, so its position in the tree is cosmetic. `projects` is
-              only read when the project picker shows, which `projectLocked`
-              suppresses — we're scoped to one project by construction. */}
-          {runtimeCapabilities().tasks && (
-            <NewTaskDialog
-              open={newTaskOpen}
-              defaultProjectId={project.id}
-              projects={[project]}
-              gezels={recipientGezels}
-              projectLocked
-              onClose={() => setNewTaskOpen(false)}
-              onCreated={() => {
-                setNewTaskOpen(false);
-                setPillRefreshKey((k) => k + 1);
-              }}
-            />
-          )}
         </>
       )}
     </ChatReferences>

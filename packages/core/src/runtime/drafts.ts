@@ -43,6 +43,7 @@ import {
   type PromptDraftSummary,
   type WritePromptDraftContentResponse,
 } from '../schemas/prompt-draft.js';
+import type { PromptDraftTaskLaunch } from '../schemas/task-launch.js';
 
 const log = createLogger('prompt-drafts');
 
@@ -180,6 +181,27 @@ function derived(
   return { title: derivePromptDraftTitle(content), hasFiles: fileCount > 0, fileCount };
 }
 
+/**
+ * A copied draft keeps its attached task but not its uploaded inputs: the
+ * originals' staging areas were adopted by a launch or swept, so the copy
+ * would point at folders that are gone. The person re-picks those files.
+ */
+function duplicatedTaskLaunch(launch: PromptDraftTaskLaunch): PromptDraftTaskLaunch {
+  if (!launch.inputs) return launch;
+  const inputs: NonNullable<PromptDraftTaskLaunch['inputs']> = Object.fromEntries(
+    Object.entries(launch.inputs).filter(([, source]) => source.from !== 'upload'),
+  );
+  const inputLabels = launch.inputLabels
+    ? Object.fromEntries(Object.entries(launch.inputLabels).filter(([key]) => key in inputs))
+    : undefined;
+  const { inputs: _inputs, inputLabels: _labels, ...rest } = launch;
+  return {
+    ...rest,
+    ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+    ...(inputLabels && Object.keys(inputLabels).length > 0 ? { inputLabels } : {}),
+  };
+}
+
 function metaBytes(meta: PromptDraftMeta): string {
   return `${JSON.stringify(PromptDraftMetaSchema.parse(meta), null, 2)}\n`;
 }
@@ -256,6 +278,7 @@ export async function createPromptDraft(
     ...(input.taskRef ? { taskRef: input.taskRef } : {}),
     ...(input.craftbookRef ? { craftbookRef: input.craftbookRef } : {}),
     ...(input.scope ? { scope: input.scope } : {}),
+    ...(input.taskLaunch ? { taskLaunch: input.taskLaunch } : {}),
     createdAt: at,
     updatedAt: at,
     status: 'draft',
@@ -287,7 +310,9 @@ export async function writePromptDraftContent(
   const draft = await requireDraft(files, host, projectId, id);
   if (draft.status !== 'draft') throw new Error('A sent draft cannot be edited');
   const { content: _content, title: _t, hasFiles: _h, fileCount: _f, ...meta } = draft;
-  if (!content.trim() && !draft.hasFiles) {
+  // An attached task is as much "something in it" as a file: a person who
+  // configured a craftbook and has not typed yet still owns a draft.
+  if (!content.trim() && !draft.hasFiles && !draft.taskLaunch) {
     await files.apply({ removes: [id] });
     return { draft: null, deleted: true, meta: { ...meta, updatedAt: host.now() } };
   }
@@ -321,6 +346,10 @@ export async function patchPromptDraft(
     if (value === undefined) continue;
     if (value === null) delete next[key];
     else next[key] = value;
+  }
+  if (patch.taskLaunch !== undefined) {
+    if (patch.taskLaunch === null) delete next.taskLaunch;
+    else next.taskLaunch = patch.taskLaunch;
   }
   await host.validateRecipient?.(projectId, next);
   await files.apply({ writes: new Map([[metaPath(id), metaBytes(next)]]) });
@@ -415,6 +444,7 @@ export async function duplicatePromptDraft(
     ...(source.taskRef ? { taskRef: source.taskRef } : {}),
     ...(source.craftbookRef ? { craftbookRef: source.craftbookRef } : {}),
     ...(source.scope ? { scope: source.scope } : {}),
+    ...(source.taskLaunch ? { taskLaunch: duplicatedTaskLaunch(source.taskLaunch) } : {}),
     createdAt: at,
     updatedAt: at,
     status: 'draft',

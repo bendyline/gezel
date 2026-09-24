@@ -428,6 +428,24 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-b', { headers })).status).toBe(403);
   });
 
+  it('keeps craftbook-input uploads to first-party clients', async () => {
+    // A staged upload is labelled "from your computer" in every prompt that
+    // names it; a session staging one would forge that provenance.
+    const app = sessionPolicyApp(session('proj-a', true));
+    expect((await app.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(
+      403,
+    );
+    expect(
+      (
+        await app.request('/api/projects/proj-a/input-staging/stg-0123456789ab/file?path=a.md', {
+          method: 'PUT',
+        })
+      ).status,
+    ).toBe(403);
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(200);
+  });
+
   it('lets coordinator sessions cross projects but still blocks UI/admin capabilities', async () => {
     const app = sessionPolicyApp(session('proj-a', true));
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(200);

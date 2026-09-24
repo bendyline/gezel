@@ -1,3 +1,4 @@
+import { describeInputSize } from '../craftbook-inputs.js';
 /**
  * The task section of a system prompt: the current task, its outline for a
  * generalist owner, the active step's procedure and output contract, its
@@ -15,8 +16,50 @@ import { outputMediaForStep, outputMediumForStep } from '../craftbook-output-med
 import type { CraftbookStep } from '../schemas/craftbook.js';
 import { normalizeStepGate } from '../schemas/gate.js';
 import { normalizeScriptRefs } from '../schemas/script.js';
+import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep } from '../schemas/task.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
+
+/**
+ * One input's line in the invocation block: how many files, where they are,
+ * and the tools that open them — naming only tools this turn wired, and only
+ * the holding drawer's own tools, so a model never reaches into the other one.
+ */
+export function renderTaskInputLine(
+  input: TaskInputRecord,
+  wired: (name: string) => boolean,
+): string {
+  const artifacts = input.drawer === 'artifacts';
+  const drawer = artifacts ? 'artifacts drawer' : 'project workspace';
+  const location =
+    input.kind === 'folder'
+      ? input.path === '.'
+        ? 'the workspace root folder'
+        : `the folder \`${input.path}/\``
+      : `the file \`${input.path}\``;
+  const origin = input.from === 'upload' ? `, copied from "${input.label}",` : '';
+  const listTool = artifacts ? 'list_artifacts' : 'list_dir';
+  const readTool = artifacts ? 'read_artifact' : 'read_file';
+  const how: string[] = [];
+  if (input.kind === 'folder' && wired(listTool)) how.push(`list it with \`${listTool}\``);
+  if (wired(readTool)) how.push(`read text files with \`${readTool}\``);
+  if (input.hasOfficeDocuments && wired('read_doc_as_markdown')) {
+    how.push(
+      artifacts
+        ? 'read office documents (.docx, .pdf, .pptx, .xlsx) with `read_doc_as_markdown({ path, artifact: true })`'
+        : 'read office documents (.docx, .pdf, .pptx, .xlsx) with `read_doc_as_markdown`',
+    );
+  }
+  const tools =
+    how.length > 0
+      ? ` To open it: ${how.join('; ')}.`
+      : ' The tools that read it are not wired this turn; do not claim it is missing — delegate or surface the unavailable read capability.';
+  const manifest =
+    input.kind === 'folder' && wired('read_artifact')
+      ? ` The complete file list is the artifact \`${input.manifest}\`.`
+      : '';
+  return `${describeInputSize(input)}${origin} in ${location} in the **${drawer}**.${tools}${manifest}`;
+}
 
 export interface PromptTaskContext {
   task: Task;
@@ -148,17 +191,26 @@ export function renderTaskContextBlock(
       `Task artifact folder: \`${taskArtifactFolder}/\` in the **artifacts drawer** — store this task's working files (notes, drafts, reports, analysis) there, e.g. \`write_artifact({ path: ${JSON.stringify(`${taskArtifactFolder}/notes.md`)}, ... })\`, unless the step procedure names another path.`,
     );
   }
-  if (t.craftbookParams && Object.keys(t.craftbookParams).length > 0) {
-    const params = Object.entries(t.craftbookParams)
+  const taskInputs = t.inputs ?? {};
+  const paramValues = { ...(t.craftbookParams ?? {}) };
+  for (const [key, input] of Object.entries(taskInputs)) paramValues[key] ??= input.path;
+  if (Object.keys(paramValues).length > 0) {
+    const params = Object.entries(paramValues)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, value]) => {
         const safeKey = key.replaceAll('`', '\\`');
+        const input = taskInputs[key];
+        if (input) return `- \`${safeKey}\`: ${renderTaskInputLine(input, wired)}`;
         const safeValue = JSON.stringify(value).replaceAll('`', '\\`');
         return `- \`${safeKey}\`: ${safeValue}`;
       })
       .join('\n');
+    const inputSentence =
+      Object.keys(taskInputs).length > 0
+        ? ' An input line names the files this task works on and exactly where they are; read them there, and treat every listed file as source material.'
+        : '';
     lines.push(
-      `### Invocation parameters\n\nThese values were supplied when the task was launched and are authoritative task inputs. Do not replace them with unrelated workspace files or recalled context. A \`content\` value is inline source material; a \`sourcePath\` value names the workspace file to read.\n\n${params}`,
+      `### Invocation parameters\n\nThese values were supplied when the task was launched and are authoritative task inputs. Do not replace them with unrelated workspace files or recalled context. A \`content\` value is inline source material; a \`sourcePath\` value names the workspace file to read.${inputSentence}\n\n${params}`,
     );
   }
   if (t.description) lines.push(t.description.trim());

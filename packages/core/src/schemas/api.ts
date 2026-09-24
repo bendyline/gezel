@@ -5251,6 +5251,8 @@ export type SearchDocsResponse = z.infer<typeof SearchDocsResponseSchema>;
 
 export const ReadDocAsMarkdownRequestSchema = z.object({
   path: z.string().min(1),
+  /** Read from the artifacts drawer instead of the project workspace. */
+  artifact: z.boolean().optional(),
 });
 export type ReadDocAsMarkdownRequest = z.infer<typeof ReadDocAsMarkdownRequestSchema>;
 
@@ -6845,6 +6847,7 @@ export const SessionDebugSnapshotSchema = z.object({
           'turn-aborted',
           'growth-announcement',
           'keurmeester-notice',
+          'craftbook-launch',
         ])
         .optional(),
       /**

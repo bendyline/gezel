@@ -7,6 +7,8 @@ import {
   isReservedPromptDraftArtifactPath,
   isReservedShadowArtifactPath,
   isReservedTabularArtifactPath,
+  isTaskInputArtifactPath,
+  touchesTaskInputArtifactPath,
 } from '@bendyline/gezel';
 import {
   type ExternalFolders,
@@ -141,6 +143,22 @@ export class PromptDraftPathWriteDeniedError extends Error {
       "artifacts/prompts/ holds the user's chat prompt drafts. You can read them, but only the person writing one may change it. Write your file elsewhere in artifacts.",
     );
     this.name = 'PromptDraftPathWriteDeniedError';
+  }
+}
+
+/**
+ * `artifacts/tasks/<num>/inputs/` holds the files a run was launched to work
+ * on. A gezel reads them; it does not get to rewrite its own source — a run
+ * that edits its input can make any gate pass. Gezel-conditional, like the
+ * prompt-draft guard: the person who supplied the files may still change them.
+ */
+export class TaskInputPathWriteDeniedError extends Error {
+  readonly code = 'task-inputs-readonly' as const;
+  constructor() {
+    super(
+      "This folder holds the task's input files, which are read-only to gezels. Read them where they are and write your results elsewhere in the task folder.",
+    );
+    this.name = 'TaskInputPathWriteDeniedError';
   }
 }
 
@@ -445,6 +463,9 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
     }
+    if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
+      throw new TaskInputPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -468,6 +489,9 @@ export class ProjectArtifactsStore {
     if (options?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
     }
+    if (options?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
+      throw new TaskInputPathWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -486,6 +510,9 @@ export class ProjectArtifactsStore {
     if (!cleaned) return;
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
+    }
+    if (opts?.initiatedByGezel && touchesTaskInputArtifactPath(cleaned)) {
+      throw new TaskInputPathWriteDeniedError();
     }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
@@ -507,6 +534,9 @@ export class ProjectArtifactsStore {
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
+    }
+    if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
+      throw new TaskInputPathWriteDeniedError();
     }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
@@ -542,6 +572,12 @@ export class ProjectArtifactsStore {
       (isReservedPromptDraftArtifactPath(from) || isReservedPromptDraftArtifactPath(to))
     ) {
       throw new PromptDraftPathWriteDeniedError();
+    }
+    if (
+      opts?.initiatedByGezel &&
+      (touchesTaskInputArtifactPath(from) || isTaskInputArtifactPath(to))
+    ) {
+      throw new TaskInputPathWriteDeniedError();
     }
     const fromFull = safeJoin(base, from);
     const toFull = safeJoin(base, to);

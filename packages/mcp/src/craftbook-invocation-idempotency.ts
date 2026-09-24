@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CRAFTBOOK_INVOCATION_KEY_PREFIX, invocationSignature } from '@bendyline/gezel';
 
 export interface RootTurnMessage {
   role: 'user' | 'assistant';
@@ -21,42 +22,14 @@ export function rootTurnIdFromMessages(
   return null;
 }
 
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, entry]) => entry !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, entry]) => [key, canonicalize(entry)]),
-    );
-  }
-  return value;
-}
-
-/**
- * The task's display labels, not the work. A model re-emitting its call
- * rarely reproduces them: a qwen3.8-27b Meester's two `invoke_craftbook`
- * calls for one "Create a PowerPoint about pizza" differed only in `title`,
- * and that alone launched a second deck crew (2026-09-23). Craftbook,
- * project, version, assignee and params still separate genuinely different
- * work — "a deck on pizza and one on pasta" differs in `params.topic`.
- */
-const COSMETIC_INVOCATION_FIELDS = new Set(['title', 'description']);
-
-export function invocationSignature(invocation: Readonly<Record<string, unknown>>): string {
-  const work = Object.fromEntries(
-    Object.entries(invocation).filter(([key]) => !COSMETIC_INVOCATION_FIELDS.has(key)),
-  );
-  return JSON.stringify(canonicalize(work));
-}
+export { invocationSignature };
 
 /** Durable, opaque key passed to task creation for cross-process dedupe. */
 export function rootTurnInvocationKey(
   rootTurnId: string,
   invocation: Readonly<Record<string, unknown>>,
 ): string {
-  return `craftbook-root-v1:${createHash('sha256')
+  return `${CRAFTBOOK_INVOCATION_KEY_PREFIX}${createHash('sha256')
     .update(rootTurnId)
     .update('\n')
     .update(invocationSignature(invocation))

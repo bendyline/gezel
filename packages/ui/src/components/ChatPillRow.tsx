@@ -29,14 +29,13 @@ function timestampMs(iso: string): number {
 
 /**
  * The status band across the top of a project chat: one pill per active
- * task, enriched with its latest chat; the newest independent thread plus
- * other recent/attention-worthy threads; and a "Do +" action that starts a
- * new task from a craftbook.
+ * task, enriched with its latest chat, and the newest independent thread
+ * plus other recent/attention-worthy threads. Starting a task lives in the
+ * composer (the Task key beside Send), not here.
  *
  * Purely presentational apart from the two data hooks — it owns no dialog
  * and performs no navigation. The parent decides what focusing a thread or
- * a task means, which is what lets the same row serve a surface with no
- * task authority (omit `onNewTask` and "Do +" disappears).
+ * a task means.
  */
 export function ChatPillRow({
   projectId,
@@ -48,7 +47,6 @@ export function ChatPillRow({
   onFocusThread,
   onFocusTask,
   onFocusTerminal,
-  onNewTask,
   refreshKey,
   terminalRefreshKey,
 }: {
@@ -65,8 +63,6 @@ export function ChatPillRow({
   onFocusTask: (task: Task) => void;
   /** Omit on chat-only surfaces; supplying it adds recent terminal windows. */
   onFocusTerminal?: (thread: TerminalThreadSummary) => void;
-  /** Omit to hide "Do +" on surfaces that can't create project tasks. */
-  onNewTask?: (() => void) | undefined;
   refreshKey?: number | undefined;
   terminalRefreshKey?: number | undefined;
 }) {
@@ -228,18 +224,6 @@ export function ChatPillRow({
         </div>
         {overflowBar.node}
       </div>
-
-      {onNewTask && (
-        <button
-          type="button"
-          className="chat-pill-new-task"
-          onClick={onNewTask}
-          aria-label="New task"
-          title="New task — pick a craftbook"
-        >
-          Do +
-        </button>
-      )}
     </div>
   );
 }

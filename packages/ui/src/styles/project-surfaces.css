@@ -2019,6 +2019,32 @@
   letter-spacing: 0.04em;
 }
 
+/* Compose mode: the message so far, shown as the brief the task will get.
+   Read-only here — the chat box is the one place the words are edited. */
+.gz-ntd-brief-from-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gz-ntd-brief-text {
+  max-height: 9rem;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  overflow: auto;
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gz-ntd-brief-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
 /* Missing-toolset setup, inlined into the pane before Create unlocks. */
 .gz-ntd-needs {
   display: flex;
@@ -2028,6 +2054,141 @@
   border: 1px solid color-mix(in srgb, var(--warning, #e8c34a) 45%, var(--border));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--warning, #e8c34a) 6%, transparent);
+}
+
+/* Craftbook input — the source picker for the files a run works on.
+   The tray is the shared keys-in-trays recipe; the body under it is either
+   the project picker or the upload drop zone. See docs/ux.md. */
+.gz-cbi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.gz-cbi-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-cbi-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.gz-cbi-help {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.gz-cbi-tray {
+  align-self: flex-start;
+}
+
+.gz-cbi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.gz-cbi-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gz-cbi-summary {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* A recessed well, like the tray above it: a place files are set down. */
+.gz-cbi-drop {
+  padding: 0.7rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  transition: border-color 140ms ease-out, background-color 140ms ease-out;
+}
+
+.gz-cbi-drop--over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.gz-cbi-progress {
+  width: 100%;
+  height: 0.4rem;
+  accent-color: var(--accent);
+}
+
+.gz-cbi-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.gz-cbi-filter {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.gz-cbi-list {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  margin: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.gz-cbi-node {
+  justify-content: flex-start;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  box-shadow: none;
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gz-cbi-node:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.gz-cbi-node.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  font-weight: 600;
+}
+
+.gz-cbi-error {
+  margin: 0;
+}
+
+.gz-cbi-skipped {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.gz-cbi-skipped ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.gz-cbi-path {
+  font-family: var(--font-mono, monospace);
+  user-select: text;
 }
 
 .gz-ntd-schedule {

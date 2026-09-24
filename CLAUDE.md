@@ -239,6 +239,8 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 
 A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase. Each task gets its own working folder inside the drawer — `artifacts/tasks/<num>/`, auto-created at task creation, stamped on the task as `artifactDir`, and inherited by fanout children so batch shards share the host's namespace. Craftbooks reach it through the reserved `{{task.dir}}` interpolation token (conventionally via a `workPath` param defaulting to `{{task.dir}}`), and ad-hoc task sessions are told the folder in their injected task context. It joins `notes/`/`reviews/`/`reports/` in `ACCESSORY_ARTIFACT_PREFIXES` ([packages/catalog/src/artifact-surface.ts](packages/catalog/src/artifact-surface.ts)).
 
+A craftbook that works *on* files — notes to compile, photos to cull — declares an **input** param (`"input": { "kind": "folder" }` on a paramSchema property). At launch the user picks a workspace folder or file (read in place) or files from their computer (uploaded, then adopted into `artifacts/tasks/<num>/inputs/<param>/`); `TaskManager.create` resolves it before interpolation, writes a manifest, stamps `Task.inputs`, and every step's prompt names the drawer and the tools that open it. Contract in [docs/craftbook-inputs.md](docs/craftbook-inputs.md); decision in [ADR 0014](docs/decisions/0014-craftbook-inputs.md).
+
 **Every session belongs to a (gezel, project) pair.** There is no "gezel-only" session — the `default` project is the implicit bucket.
 
 Each project also carries:
@@ -342,6 +344,37 @@ the resolved security policy. Copilot's SDK-native built-ins (`bash`,
 `web_fetch`, file operations, and `grep`) are denied by default so they cannot
 bypass those layers. An explicit install-level or per-gezel
 `sandboxCopilot: false` is the deliberate compatibility escape hatch.
+
+### Launching a craftbook from chat
+
+Two surfaces turn a person's words into a craftbook task, and they share one
+owner for the parts that must agree. The chat composer's **attached task**
+(`POST /api/sessions/:id/launch-task`, [routes/sessions.ts](packages/service/src/http/routes/sessions.ts))
+creates the task deterministically — no coordinator model turn — with the
+message as the description and a synthetic `craftbook-launch` receipt in the
+thread; the MCP `invoke_craftbook` tool is the model's path. Both call
+[core/craftbook-launch.ts](packages/core/src/craftbook-launch.ts)'s
+`composeCraftbookLaunch` (verbatim message first, padded only below the
+create minimum; `topic` filled from the message when the book declares one and
+no source form was given) and go through
+[tasks/launcher.ts](packages/service/src/tasks/launcher.ts)'s `TaskLauncher`
+(invocation-key dedupe, in-flight coalescing, entry dispatch). The launch is
+parked on the prompt draft as `taskLaunch` ([schemas/task-launch.ts](packages/core/src/schemas/task-launch.ts))
+so it survives a restart; a send carrying `turnIntent: 'off'` tells the daemon
+the person dismissed the suggested task for that text, and the turn-intent
+prelude and `invoke_craftbook` clamp stand down for that one turn.
+
+Suggestions come in two tiers, both from `ChatManager.previewTurnIntent`.
+The exact-format routes (pptx/docx/pdf/slideshow) are high confidence and
+still drive the prelude for model-routed sends. The catalog tier
+([chat/craftbook-trigger-route.ts](packages/service/src/chat/craftbook-trigger-route.ts))
+matches a book's declared `triggers` on word boundaries against the text,
+proposes only books the message alone can start, and is advisory: no
+prelude, no clamp, just the strip. Which parameter carries the message is
+the `fromMessage: true` annotation on a paramSchema property, read only by
+`mainContentParamKey`; a book without one falls back to a property named
+`topic`. Adding the annotation to a gilde book needs no schema regeneration —
+`paramSchema` is an open record.
 
 ### Diffpack (change proposal)
 
@@ -471,6 +504,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/git-clones/` and per-project checkouts (`workingDir`, `<workingDir>/gh/`, or the project workspace) — git working copies, owned by [git/manager.ts](packages/service/src/git/manager.ts)'s `resolveCheckout`
   - `~/.gezel/projects/{id}/diffpacks.json` plus `artifacts/diffpacks/<packId>/` — change proposals a gezel drafted but never applied, owned by [diffpack/manager.ts](packages/service/src/diffpack/manager.ts). The pack folder holds `after/` (the copy-on-write draft tree the re-rooted workspace-write tools land in), `files/` (the sealed single-file unified diffs), `notes.md`, and `manifest.json`. `after/` and `files/` are written straight to disk by [diffpack/draft-store.ts](packages/service/src/diffpack/draft-store.ts) and are write-denied through the artifact store (`isReservedDiffpackArtifactPath`), so a model cannot forge a diff it never drafted; `notes.md` stays writable because explaining the fix is the model's job
   - `~/.gezel/projects/{id}/artifacts/prompts/<draftId>/` — **chat prompt drafts**: `message.md` (the prompt), `message_files/` (its uploads, referenced document-relatively as `message_files/<name>` while editing and rewritten to `artifacts/prompts/<draftId>/message_files/<name>` at send time), and `draft.json` (thread association, status, sent stamps). Owned by [prompt-drafts/manager.ts](packages/service/src/prompt-drafts/manager.ts); surfaced at `/api/projects/:id/prompt-drafts`. `draftId` is `YYYY-MM-DD-NNNN` — the date is decoration, the zero-padded project-wide sequence is the identity, allocated by scanning folder names under a per-project `KeyedLock` so there is no counter file to corrupt. The manager never calls `touchProject`: autosave writes here about once a second and `project.updatedAt` is read elsewhere as "the project saw activity". Readable by gezels and write-denied to them via `isReservedPromptDraftArtifactPath`, which is **gezel-conditional** (like the connector-corpus guard, unlike `shadow/`) because the composer writes `message_files/` through the ordinary artifact raw route. Sent drafts are swept after `config.promptDrafts.keepSentDays` (default 90, `0` = forever) by [prompt-drafts/sweeper.ts](packages/service/src/prompt-drafts/sweeper.ts); that also removes bytes an old transcript still displays, which is why the window is generous. Unsent drafts are never auto-deleted, and a draft with no text and no files is deleted on save. `artifacts/attachments/` is deprecated for new uploads but still read
+  - `~/.gezel/projects/{id}/input-staging/<stagingId>/` — `meta.json` + `files/`: craftbook-input uploads the user picked from their computer but has not launched yet, owned by [InputStagingManager](packages/service/src/tasks/inputs/staging.ts). The client streams the bytes in (the daemon never opens a host path it was handed), and launch adopts the folder into `artifacts/tasks/<num>/inputs/<param>/` with one same-volume rename — which is why it sits beside `artifacts/`, not under it. That adopted folder is **gezel-conditionally write-denied** (`isTaskInputArtifactPath`, like `prompts/`): a run that could edit its own source could make any gate pass. Unlaunched staging is swept after a day. Session tokens cannot reach the staging routes. See [docs/craftbook-inputs.md](docs/craftbook-inputs.md)
   - `~/.gezel/projects/{id}/artifacts/data/{corpus}/tables/` — **observation
     corpora**: the tabular connector shape, mirrored as Hive-partitioned Parquet
     (plus not-yet-compacted NDJSON) with a per-table `manifest.json` semantic

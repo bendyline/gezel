@@ -217,6 +217,11 @@ async function isSessionRouteAllowed(
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }
+    // An upload is labelled "from your computer" in every prompt that names
+    // it; a gezel staging files would forge that provenance.
+    if (/^\/input-staging(?:\/|$)/.test(rest)) {
+      return sessionDeny('input uploads require a first-party client');
+    }
     if (rest === '/tools' || rest === '/tools/') {
       return sessionDeny('the unfiltered human terminal tool list is not a session route');
     }

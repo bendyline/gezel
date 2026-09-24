@@ -100,7 +100,7 @@ describe('SessionSwitcher', () => {
     await screen.findByRole('option', { name: /Landing page plan/ });
     expect(screen.getByRole('combobox')).toHaveDisplayValue('New thread');
     expect(screen.getByRole('combobox')).toBeEnabled();
-    expect(screen.getByRole('button', { name: '+ New thread' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeDisabled();
     expect(screen.getAllByRole('option', { name: 'New thread' })).toHaveLength(1);
     expect(screen.getByRole('option', { name: 'New thread' })).toHaveValue('');
   });
@@ -499,8 +499,8 @@ describe('SessionSwitcher', () => {
     );
 
     await screen.findByRole('option', { name: /Landing page plan/ });
-    expect(screen.getByRole('button', { name: '+ New thread' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '+ New thread' }));
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onDraftSelect).toHaveBeenCalledWith(undefined);
     expect(onSessionIdChange).toHaveBeenCalledWith(undefined);

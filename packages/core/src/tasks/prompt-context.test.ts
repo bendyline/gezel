@@ -60,6 +60,42 @@ describe('renderTaskContextBlock', () => {
     expect(block).toContain('finish and pass them before the next step is revealed');
   });
 
+  it('describes an input by where it is and the tools that open it', () => {
+    const withInput = {
+      ...task,
+      craftbookParams: { source: 'tasks/3/inputs/source', audience: 'teens' },
+      inputs: {
+        source: {
+          kind: 'folder',
+          drawer: 'artifacts',
+          path: 'tasks/3/inputs/source',
+          from: 'upload',
+          label: 'Blog drafts',
+          manifest: 'tasks/3/inputs/source.json',
+          fileCount: 37,
+          totalBytes: 2_200_000,
+          skippedCount: 0,
+          hasOfficeDocuments: true,
+        },
+      },
+    } as Task;
+    const block = renderTaskContextBlock({ task: withInput, step });
+    expect(block).toContain(
+      '- `source`: 37 files (2.1 MB), copied from "Blog drafts", in the folder `tasks/3/inputs/source/` in the **artifacts drawer**.',
+    );
+    expect(block).toContain('`read_doc_as_markdown({ path, artifact: true })`');
+    expect(block).toContain('The complete file list is the artifact `tasks/3/inputs/source.json`.');
+    expect(block).toContain('- `audience`: "teens"');
+
+    const narrow = renderTaskContextBlock(
+      { task: withInput, step },
+      { availableToolNames: new Set(['read_artifact']) },
+    );
+    expect(narrow).not.toContain('list_artifacts');
+    expect(narrow).not.toContain('read_doc_as_markdown');
+    expect(narrow).toContain('read text files with `read_artifact`');
+  });
+
   it('is deterministic and carries no timestamp', () => {
     expect(renderTaskContextBlock({ task, step })).toBe(renderTaskContextBlock({ task, step }));
     expect(renderTaskOutline(task, step, { advanceWired: true })).toContain('`advance_task_step`');

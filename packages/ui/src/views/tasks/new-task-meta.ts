@@ -11,6 +11,7 @@ import {
   CRAFTBOOK_ROLE_META,
   listProjectTypes,
   resolveCraftbookCategory,
+  stringifyCraftbookParamValues,
 } from '@bendyline/gezel';
 import { seedableParamDefault } from '../../components/craftbook-command.js';
 import type { ProjectGlyphId } from '../projects/new-project-meta.js';
@@ -189,16 +190,12 @@ export function composeCraftbookDescription(
   );
 }
 
-/** Coerce a squisq param value object to the wire's `Record<string,string>`. */
+/**
+ * Coerce a squisq param value object to the wire's `Record<string,string>`.
+ * The rule lives in core so the chat launch route stringifies identically.
+ */
 export function stringifyParamValues(value: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, v] of Object.entries(value)) {
-    if (v === undefined || v === null || v === '') continue;
-    if (typeof v === 'boolean') out[key] = v ? 'true' : 'false';
-    else if (typeof v === 'number') out[key] = String(v);
-    else if (typeof v === 'string') out[key] = v;
-  }
-  return out;
+  return stringifyCraftbookParamValues(value);
 }
 
 /**

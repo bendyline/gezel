@@ -10,6 +10,7 @@ import {
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  SendToSessionRequest,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
 } from '@bendyline/gezel';
@@ -291,6 +292,8 @@ import {
   FORCEFIT_MARKER,
   fitMessagesToBudget,
 } from './context-forcefit.js';
+import { CraftbookOfferCache } from './craftbook-offer-cache.js';
+import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import {
   deliverableWrittenThisTurn,
@@ -388,12 +391,13 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
-import { extractToolCard } from './tool-cards.js';
+import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
+  isCoordinatorRole,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
   shouldConstrainToExactCraftbookInvocation,
@@ -878,6 +882,12 @@ interface InflightTurn {
   startedAt: number;
   /** Who started the turn; gates user-only actions like a task retry. */
   origin: TurnMessageOrigin;
+  /**
+   * The route opt-out for this turn. Read by `buildSessionOpts` rather than
+   * threaded through it, because that builder also runs on mid-turn
+   * rebuilds that never see the send's opts.
+   */
+  turnIntent?: TurnIntentMode;
   abort?: AbortController;
   /** True once a provider request has actually been issued for this turn. */
   providerStarted?: boolean;
@@ -950,8 +960,12 @@ interface PendingSendEntry {
   nudge: boolean;
   /** The prompt draft this send was written in, if any. */
   draftId: string | undefined;
+  /** See send() opts — a queued turn keeps its route opt-out. */
+  turnIntent: TurnIntentMode | undefined;
   waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
 }
+
+type TurnIntentMode = NonNullable<SendToSessionRequest['turnIntent']>;
 
 export interface ChatManagerOptions {
   store: Store;
@@ -3189,6 +3203,7 @@ export class ChatManager extends LocalEngineRuntime {
         hidden: false,
         nudge: false,
         draftId: opts?.draftId,
+        turnIntent: undefined,
         waiters: [{ resolve, reject }],
       };
       q.unshift(entry);
@@ -6110,6 +6125,7 @@ export class ChatManager extends LocalEngineRuntime {
      */
     draftId?: string;
     fileTurnIntent?: FileTurnIntent;
+    turnIntent?: TurnIntentMode;
   }): Promise<{ mentionSessionIds: string[] }> {
     const { primarySessionId, text } = args;
     const primary = await this.getSessionRecord(primarySessionId);
@@ -6150,6 +6166,7 @@ export class ChatManager extends LocalEngineRuntime {
       await this.send(primarySessionId, text, {
         draftId: args.draftId,
         fileTurnIntent: args.fileTurnIntent,
+        ...(args.turnIntent ? { turnIntent: args.turnIntent } : {}),
       });
     }
     // Note: the silent-primary branch (notifyUserMessage) runs AFTER
@@ -6334,6 +6351,69 @@ export class ChatManager extends LocalEngineRuntime {
     // the voorman bubble counting up "THINKING · 3:28" indefinitely.
     this.events.publish(scope, { type: 'done' });
     return userMessage;
+  }
+
+  /**
+   * Record a craftbook task the composer launched directly from this
+   * thread: the person's message as an ordinary user turn, then a
+   * synthetic assistant receipt shaped like an `invoke_craftbook` call
+   * with its start card, so the transcript shows the same receipt a
+   * model-invoked launch gets and a stateless provider's rebuild replays
+   * the task ref as evidence. No provider turn runs and `inflight` is
+   * never touched.
+   *
+   * Unlike `notifyUserMessage`, the message IS addressed to this gezel, so
+   * a fresh thread is titled from it exactly as `send` would.
+   */
+  async recordCraftbookLaunch(
+    sessionId: string,
+    args: { userText: string; draftId?: string; task: Task; reused?: boolean },
+  ): Promise<{ userMessage: ChatMessage; receipt: ChatMessage }> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record) throw new Error(`session ${sessionId} not found`);
+    const at = nowIso();
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: args.userText,
+      at,
+      ...(args.draftId ? { draftId: args.draftId } : {}),
+    };
+    const craftbookName = args.task.craftbook.name;
+    const card = craftbookStartCardForTask(args.task, {
+      ...(args.reused ? { reused: true } : {}),
+    });
+    const receipt: ChatMessage = {
+      role: 'assistant',
+      synthetic: 'craftbook-launch',
+      content: `Started the "${craftbookName}" craftbook — task ${args.task.ref}.${args.reused ? ' (already running)' : ''}`,
+      at: nowIso(),
+      toolCalls: [
+        {
+          name: 'invoke_craftbook',
+          at,
+          durationMs: 0,
+          success: true,
+          argsSummary: `${craftbookName} · ${args.task.ref}`,
+          ...(card ? { card } : {}),
+        },
+      ],
+    };
+    record.messages.push(userMessage, receipt);
+    if (!record.title || record.title === NEW_THREAD_TITLE) {
+      record.title = deriveThreadTitleFromMessages([userMessage]) ?? craftbookName;
+    }
+    await this.store.writeSession(record);
+    const live = this.states.get(sessionId);
+    if (live) live.record = record;
+
+    const scope: PublishScope = { sessionId, gezelId: record.gezelId, projectId: record.projectId };
+    this.events.publish(scope, { type: 'user_message', message: userMessage });
+    this.events.publish(scope, { type: 'complete', message: receipt });
+    // Full-scope for the same reason as `notifyUserMessage`: the project
+    // timeline opens a thinking slot on `user_message` and only a
+    // full-scope `done` closes it.
+    this.events.publish(scope, { type: 'done' });
+    return { userMessage, receipt };
   }
 
   /**
@@ -6978,6 +7058,12 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       /** Strong provenance used by per-turn behavior hooks. */
       messageOrigin?: TurnMessageOrigin;
+      /**
+       * `'off'` skips the turn-intent route for this turn — no craftbook
+       * prelude and no `invoke_craftbook` clamp. The composer sends it after
+       * the person dismissed the suggested task for this very text.
+       */
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -7049,6 +7135,7 @@ export class ChatManager extends LocalEngineRuntime {
           hidden: opts?.hidden === true,
           nudge: opts?.nudge === true,
           draftId: opts?.draftId,
+          turnIntent: opts?.turnIntent,
           waiters: [{ resolve, reject }],
         };
         q.push(entry);
@@ -7101,12 +7188,14 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = {
       userText,
       startedAt: Date.now(),
       origin: resolveTurnMessageOrigin(opts),
+      ...(opts?.turnIntent ? { turnIntent: opts.turnIntent } : {}),
     };
     this.inflight.set(sessionId, inflightTurn);
     // Claim a clean question slot synchronously with the in-flight lock.
@@ -7244,8 +7333,10 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     } = {};
     if (next.from) runOpts.from = next.from;
+    if (next.turnIntent) runOpts.turnIntent = next.turnIntent;
     if (next.lane) runOpts.lane = next.lane;
     if (next.ambient) runOpts.ambient = true;
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
@@ -7300,6 +7391,7 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -7899,7 +7991,7 @@ export class ChatManager extends LocalEngineRuntime {
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
       let turnIntentPlan: TurnIntentPlan | null = null;
-      if (messageOrigin === 'direct-user') {
+      if (messageOrigin === 'direct-user' && opts?.turnIntent !== 'off') {
         try {
           turnIntentPlan = await this.previewTurnIntent({
             message: userText,
@@ -11623,12 +11715,30 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    return resolveTurnIntentPlan({
-      text: input.message,
-      isMeester: config.meesterGezelId === input.gezelId,
-      role: gezel.role,
-    });
+    const isMeester = config.meesterGezelId === input.gezelId;
+    const plan = resolveTurnIntentPlan({ text: input.message, isMeester, role: gezel.role });
+    if (plan.route !== 'none' || !isCoordinatorRole({ isMeester, role: gezel.role })) return plan;
+    // The catalog tier: a declared trigger phrase in the text proposes that
+    // book as the composer's attached task. Advisory only — see
+    // craftbook-trigger-route.ts — so a failed listing just means no proposal.
+    try {
+      this.craftbookOffers ??= new CraftbookOfferCache({
+        catalog: this.catalog,
+        store: this.store,
+      });
+      const offer = await this.craftbookOffers.get(input.projectId);
+      const candidates = triggerCandidatesFromListing(offer.items, offer.missingToolsets);
+      return triggerPhrasePlan(input.message, candidates) ?? plan;
+    } catch (err) {
+      log.debug(
+        `turn intent: craftbook listing unavailable for ${input.projectId}: ${err instanceof Error ? err.message : err}`,
+      );
+      return plan;
+    }
   }
+
+  /** Built on first use: the catalog is assigned in the constructor body. */
+  private craftbookOffers?: CraftbookOfferCache;
 
   /**
    * Concurrent one-shot width for a provider: its queue's configured
@@ -14393,6 +14503,7 @@ export class ChatManager extends LocalEngineRuntime {
       surface: 'prompt',
       session: record,
       role: gezel?.role,
+      exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
       mode: globalConfig.toolFilterMode,
       provider: record.providerName,
       ...(modelForTier !== undefined ? { modelId: modelForTier } : {}),
@@ -14419,6 +14530,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),
+      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       onCapTrim: ({ before, after }) => {
@@ -15989,6 +16101,7 @@ export class ChatManager extends LocalEngineRuntime {
       surface: 'bridge',
       session: record,
       role: gezel?.role,
+      exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
       mode: globalConfig.toolFilterMode,
       provider: providerNameForFilter,
       ...(modelForFilter !== undefined ? { modelId: modelForFilter } : {}),
@@ -16016,6 +16129,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),
+      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),

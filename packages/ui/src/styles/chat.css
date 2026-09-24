@@ -2068,8 +2068,8 @@ body.chat-rail-resizing webview {
 
 /* ---- Chat pill row -------------------------------------------------
    The status band at the top of a project chat: threads that are
-   streaming / failed / recently active, the project's active tasks merged
-   with their latest chats, and a "Do +" action that starts a new task.
+   streaming / failed / recently active, and the project's active tasks merged
+   with their latest chats. Starting a task lives in the composer's Task key.
 
    It rides in the rail's `.chat-rail-banner` row, spanning the chat column
    and the context pane; in compact mode the banner stays above the pane tabs
@@ -2090,7 +2090,7 @@ body.chat-rail-resizing webview {
 }
 /* Wraps the scroller so the overflow indicator can be positioned against
    it rather than against the whole row — the track must stop where the
-   pills stop, not run under the "Do +" key. */
+   pills stop. */
 .chat-pill-row-scroller {
   position: relative;
   flex: 1 1 auto;
@@ -2343,37 +2343,6 @@ body.chat-rail-resizing webview {
   align-items: flex-start;
   width: 18rem;
   max-width: 100%;
-}
-
-/* Pinned right so "start a new task" stays put while the pills scroll
-   under it. The panel background is what keeps the pills from showing
-   through as they pass beneath. */
-.chat-pill-new-task {
-  flex: 0 0 auto;
-  position: sticky;
-  right: 0;
-  width: auto;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.55rem;
-  border: 1px solid var(--key-border);
-  border-radius: var(--radius-md);
-  background: var(--key-bg);
-  color: var(--fg);
-  box-shadow: var(--key-shadow);
-  font-size: var(--text-sm);
-  line-height: 1;
-  cursor: pointer;
-  transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
-}
-.chat-pill-new-task:hover {
-  background: var(--key-bg-hover);
-}
-.chat-pill-new-task:active {
-  transform: translateY(1px);
-  box-shadow: var(--key-pressed-shadow);
 }
 
 /* Narrow chat rail: keep the three-line summary, but tighten its card.

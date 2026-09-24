@@ -11,6 +11,8 @@ import {
   ReferencedFileSchema,
 } from './gezel.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
+import { TaskLaunchSpecSchema } from './task-launch.js';
+import { TaskSchema } from './task.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
 /**
@@ -579,6 +581,16 @@ export const SendToSessionRequestSchema = z.object({
    * the draft sent. Must belong to this session's project.
    */
   draftId: z.string().optional(),
+  /**
+   * `'off'` skips the daemon's turn-intent route for this one turn: no
+   * craftbook prelude is prepended and the tool list is not clamped to
+   * `invoke_craftbook`. The composer sends it after the person dismissed
+   * the suggested task it had shown for this text — the daemon would
+   * otherwise re-derive the same route and push the model into the launch
+   * the person just declined. Absent (older clients, CLI, evals) means
+   * `'auto'`: today's behavior.
+   */
+  turnIntent: z.enum(['auto', 'off']).optional(),
 });
 export type SendToSessionRequest = z.infer<typeof SendToSessionRequestSchema>;
 
@@ -587,6 +599,34 @@ export const SendToSessionResponseSchema = z.object({
   sessionId: z.string(),
 });
 export type SendToSessionResponse = z.infer<typeof SendToSessionResponseSchema>;
+
+/**
+ * Body for `POST /api/sessions/:id/launch-task` — the chat composer turning
+ * an attached craftbook into a task without a model turn. `message` may be
+ * empty: an attached task with a fully configured book is a complete
+ * request on its own, and the daemon pads the description to the create
+ * minimum. `draftId` is the prompt draft the message was written in, exactly
+ * as on a send.
+ */
+export const LaunchTaskFromSessionRequestSchema = z.object({
+  message: z.string(),
+  draftId: z.string().optional(),
+  launch: TaskLaunchSpecSchema,
+});
+export type LaunchTaskFromSessionRequest = z.infer<typeof LaunchTaskFromSessionRequestSchema>;
+
+/**
+ * `reused` is true when the same launch already ran for this session and
+ * message (a retried POST) — the task and the receipt are the earlier ones
+ * and nothing was appended to the thread.
+ */
+export const LaunchTaskFromSessionResponseSchema = z.object({
+  task: TaskSchema,
+  userMessage: ChatMessageSchema,
+  receipt: ChatMessageSchema,
+  reused: z.boolean(),
+});
+export type LaunchTaskFromSessionResponse = z.infer<typeof LaunchTaskFromSessionResponseSchema>;
 
 /**
  * One pending entry in a session's mid-turn message queue, as returned
@@ -822,6 +862,7 @@ export const TimelineMessageSchema = z.object({
       'turn-aborted',
       'growth-announcement',
       'keurmeester-notice',
+      'craftbook-launch',
     ])
     .optional(),
   /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */

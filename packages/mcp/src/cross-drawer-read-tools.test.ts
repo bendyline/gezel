@@ -282,6 +282,26 @@ describe('cross-drawer read tools', () => {
       expect(dependencies.readWorkspaceFile).toHaveBeenCalledWith('source/corrupt.docx');
     });
 
+    it('reroutes an artifact DOCX — an uploaded craftbook input — the same way', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerArtifactReadTools(dependencies);
+
+      const result = await tools.handler('read_artifact')({
+        path: 'tasks/7/inputs/source/brief.docx',
+      });
+      expect(resultText(result)).toContain('Rerouted read_artifact → read_doc_as_markdown');
+      expect(dependencies.api.toolReadDocAsMarkdown).toHaveBeenCalledWith('project-a', {
+        path: 'tasks/7/inputs/source/brief.docx',
+        artifact: true,
+      });
+      expect(dependencies.api.readProjectArtifactSlice).not.toHaveBeenCalled();
+      expect(result.structuredContent).toMatchObject({
+        requestedTool: 'read_artifact',
+        resolvedSurface: 'artifact',
+      });
+    });
+
     it('leaves ordinary text files alone', async () => {
       const tools = captureTools();
       const dependencies = docxDependencies(tools);

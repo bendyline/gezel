@@ -129,6 +129,12 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     display: { label: 'Conversation', badges: [] },
     requiredTools: [],
   },
+  launchTaskFromChatSession: {
+    task: { ref: 'default/1', num: 1, projectId: 'default', title: 'Task', status: 'active' },
+    userMessage: { role: 'user', content: '', at: '2026-01-01T00:00:00.000Z' },
+    receipt: { role: 'assistant', content: '', at: '2026-01-01T00:00:00.000Z' },
+    reused: false,
+  },
   listSuggestedWork: { items: [] },
   getReportActions: { actions: [], issues: [], stale: [] },
   listDiffpacks: { diffpacks: [] },

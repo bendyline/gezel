@@ -232,6 +232,61 @@ describe('ChatManager turn intent routing', () => {
     expect(sends[1]?.prompt).toContain('Correction: that capability is available');
     expect(sends[1]?.prompt).toContain('invoke_craftbook');
   }, 30_000);
+
+  it('skips the route and the denial retry when the send opted out', async () => {
+    const meester = await store.createGezel({ name: 'Nils', role: 'Meester' });
+    await store.writeConfig({
+      provider: 'copilot',
+      toolFilterMode: 'never',
+      meesterGezelId: meester.id,
+    });
+    const session = await manager.createSession({
+      gezelId: meester.id,
+      projectId: 'default',
+    });
+    mock.script("I can't create a PowerPoint because I don't have a direct conversion tool.");
+
+    await manager.send(session.id, 'Please create a PowerPoint about Mongolia.', {
+      turnIntent: 'off',
+    });
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.prompt).not.toContain('System route for this turn');
+  }, 30_000);
+
+  it('records a direct craftbook launch as a user turn plus a receipt, and titles the thread', async () => {
+    const meester = await store.createGezel({ name: 'Ilse', role: 'Meester' });
+    const session = await manager.createSession({ gezelId: meester.id, projectId: 'default' });
+    const task = await svc.context.tasks.create('default', {
+      title: 'Deck',
+      description: 'A short deck about Delft for the onboarding crew, six slides at most.',
+      steps: [{ name: 'Write' }],
+    });
+    const seen: string[] = [];
+    const unsubscribe = events.subscribe(session.id, (event) => {
+      seen.push(event.type);
+    });
+    const { userMessage, receipt } = await manager.recordCraftbookLaunch(session.id, {
+      userText: 'A short deck about Delft',
+      task,
+    });
+    unsubscribe();
+
+    expect(userMessage).toMatchObject({ role: 'user', content: 'A short deck about Delft' });
+    expect(userMessage.origin).toBeUndefined();
+    expect(receipt.synthetic).toBe('craftbook-launch');
+    expect(receipt.toolCalls?.[0]).toMatchObject({
+      name: 'invoke_craftbook',
+      success: true,
+      card: { kind: 'craftbook-start', taskRef: task.ref },
+    });
+    expect(seen).toEqual(['user_message', 'complete', 'done']);
+    const stored = await manager.getSessionRecord(session.id);
+    expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(stored?.title).not.toBe('New session');
+    expect(stored?.title).toContain('Delft');
+  }, 30_000);
 });
 
 describe.runIf(process.platform === 'darwin')(

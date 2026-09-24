@@ -86,6 +86,7 @@ import {
   applyStepPatch,
   assertCraftbookGraph,
   coerceDeliverableKind,
+  composeCraftbookLaunch,
   contextBudgetCeiling,
   craftbookDocFormatFromEnv,
   deliverableStep,
@@ -133,7 +134,6 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
-  inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
@@ -4816,11 +4816,6 @@ function craftbookSetupRequiredText(craftbookId: string, missing: CraftbookTools
   return `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${needs} from the project's Craftbooks/Commands setup before invoking it. Do not create a substitute task, hand-write replacement steps, or silently change the requested output format.`;
 }
 
-function normalizedCraftbookTaskDescription(description: string | undefined, craftbookId: string) {
-  const text = description?.trim() || `Run the ${craftbookId} craftbook against this project.`;
-  return text.length >= 40 ? text : `${text} Complete every gated production and review step.`;
-}
-
 /**
  * Install only exact, first-party, pinned, zero-configuration dependencies.
  * Other zero-configuration MCP dependencies take the approval path below;
@@ -5046,19 +5041,20 @@ async function launchCraftbookTask(args: {
   const craftbookName =
     projectCraftbooks.items.find((item) => item.manifest.id === args.craftbookId)?.manifest.name ??
     args.craftbookId;
-  const effectiveParams = inferCraftbookJobParams({
+  const { description, params: effectiveParams } = composeCraftbookLaunch({
+    ...(args.description !== undefined ? { message: args.description } : {}),
+    craftbookName,
     paramSchema:
       declaredCraftbook?.manifest.kind === 'craftbook-template'
         ? declaredCraftbook.manifest.paramSchema
         : undefined,
-    params: args.params,
-    jobDescription: args.description,
+    ...(args.params ? { params: args.params } : {}),
   });
   const resolvedAssignee = await resolveAssigneeArg(args.assignee);
   const task = await api.createTask(args.project, {
     ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
-    description: normalizedCraftbookTaskDescription(args.description, args.craftbookId),
+    description,
     craftbookId: args.craftbookId,
     ...(args.version ? { craftbookVersion: args.version } : {}),
     ...(Object.keys(effectiveParams).length > 0 ? { craftbookParams: effectiveParams } : {}),
@@ -11553,9 +11549,16 @@ server.tool(
 
 server.tool(
   'read_doc_as_markdown',
-  'Read an office document (Word/PDF/PowerPoint/Excel) as scannable markdown. gezel converts the binary document on demand and returns its markdown — use this instead of trying to read_file a binary doc. Pass the document path (e.g. notes/spec.docx).',
+  'Read an office document (Word/PDF/PowerPoint/Excel) as scannable markdown. gezel converts the binary document on demand and returns its markdown — use this instead of trying to read_file a binary doc. Pass the document path (e.g. notes/spec.docx); set `artifact: true` for a document in the artifacts drawer.',
   {
-    path: z.string().min(1).describe('Workspace-relative path to the document.'),
+    path: z
+      .string()
+      .min(1)
+      .describe('Path to the document, relative to the workspace (or to the artifacts drawer).'),
+    artifact: z
+      .boolean()
+      .optional()
+      .describe('True when the document is in the artifacts drawer rather than the workspace.'),
   },
   async (args) => {
     try {

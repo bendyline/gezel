@@ -6,6 +6,8 @@ import {
 import '@bendyline/squisq-editor-react/styles';
 import {
   type GezelSummary,
+  type Project,
+  type Task,
   type TurnIntentPlan,
   displayName,
   parseTaskRef,
@@ -20,11 +22,13 @@ import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { ComposerImageClipboard } from './ComposerImageClipboard.js';
+import { ComposerTaskBar } from './ComposerTaskBar.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
 import { createPromptDraftMediaProvider } from './PromptDraftMediaProvider.js';
@@ -39,7 +43,9 @@ import {
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
 import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
+import { launchRequestBody } from './composer-task-launch.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
+import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -89,25 +95,15 @@ function CollapseDraftIcon() {
   );
 }
 
-/** A quiet routing spark for the compact pre-send intent readout. */
-function TurnIntentGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path
-        d="M7 1.75c.3 2.55 1.7 3.95 4.25 4.25C8.7 6.3 7.3 7.7 7 10.25 6.7 7.7 5.3 6.3 2.75 6 5.3 5.7 6.7 4.3 7 1.75Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="10.75" cy="10.75" r="0.75" fill="currentColor" />
-    </svg>
-  );
-}
-
-function compactTurnIntentLabel(plan: TurnIntentPlan): string {
-  const label = plan.output?.label ?? plan.specialist?.label ?? plan.display.label;
-  return label.replace(/^Planned:\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '');
+/**
+ * What a surface hands the composer so it can attach a craftbook task to
+ * the message: the roster and project list the New Task dialog needs, and a
+ * hook for when a launch went out (the pill row re-reads its tasks).
+ */
+export interface ComposerTaskLaunchProps {
+  gezels: GezelSummary[];
+  projects: Project[];
+  onLaunched?: (task: Task) => void;
 }
 
 export interface ChatComposerProps {
@@ -256,6 +252,12 @@ export interface ChatComposerProps {
   draftId?: string;
   /** The composer created, switched, or finished with a draft. */
   onDraftIdChange?: (draftId: string | undefined) => void;
+  /**
+   * Enables the attached task: the Task key beside Send on a fresh thread,
+   * the strip above the To line, and the daemon's route suggestions landing
+   * there. Surfaces that cannot create project tasks leave it undefined.
+   */
+  taskLaunch?: ComposerTaskLaunchProps;
 }
 
 interface ComposerNarrateButtonProps {
@@ -345,6 +347,7 @@ export function ChatComposer({
   draftScope,
   draftId: selectedDraftId,
   onDraftIdChange,
+  taskLaunch: taskLaunchProps,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -529,6 +532,19 @@ export function ChatComposer({
   draftEnsureRef.current = draft.ensureDraft;
   draftNoteFileRef.current = draft.noteFileAdded;
   draftFreshThreadRef.current = draft.isFreshThread;
+  // The attached task: what Send starts instead of a chat turn. Off inside a
+  // task thread or a craftbook-editing thread, where a launch makes no sense.
+  const taskLaunchEnabled =
+    Boolean(taskLaunchProps) && runtimeCapabilities().tasks && !taskRef && !craftbookRef;
+  const taskLaunch = useComposerTaskLaunch({
+    enabled: taskLaunchEnabled,
+    projectId,
+    draft,
+    getText: () => draftRef.current,
+    plan: turnIntentPlan,
+    planText: intentPreviewText,
+  });
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.
@@ -914,14 +930,19 @@ export function ChatComposer({
     return merged;
   }, []);
 
-  const beginDraftSubmission = useCallback((): ComposerDraftSnapshot | null => {
-    if (draftSubmissionPendingRef.current) return null;
-    const source = draftRef.current;
-    if (!source.trim()) return null;
-    draftSubmissionPendingRef.current = true;
-    setDraftSubmissionPending(true);
-    return { source, editVersion: draftEditVersionRef.current };
-  }, []);
+  const beginDraftSubmission = useCallback(
+    (opts: { allowEmpty?: boolean } = {}): ComposerDraftSnapshot | null => {
+      if (draftSubmissionPendingRef.current) return null;
+      const source = draftRef.current;
+      // An attached task is a complete request on its own; the words are
+      // optional then.
+      if (!source.trim() && !opts.allowEmpty) return null;
+      draftSubmissionPendingRef.current = true;
+      setDraftSubmissionPending(true);
+      return { source, editVersion: draftEditVersionRef.current };
+    },
+    [],
+  );
 
   const finishDraftSubmission = useCallback(() => {
     draftSubmissionPendingRef.current = false;
@@ -1045,7 +1066,9 @@ export function ChatComposer({
     }
     if (!gezelId || turnActive) return;
     if (engagementOff) return;
-    const draftSnapshot = beginDraftSubmission();
+    const attachedLaunch = taskLaunch.attached;
+    if (attachedLaunch && !taskLaunch.readiness.ready) return;
+    const draftSnapshot = beginDraftSubmission({ allowEmpty: attachedLaunch !== null });
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
     setError(null);
@@ -1070,6 +1093,39 @@ export function ChatComposer({
     } catch (err) {
       setError(humanizeTransportError(apiErrorMessage(err)));
       finishDraftSubmission();
+      return;
+    }
+
+    // An attached task: the daemon creates it from this message and answers
+    // with a receipt. No model turn, so no event stream to follow — and no
+    // mention fan-out either, since a launch is not a message to a crowd.
+    // A failure keeps the draft, the attachment, and the editor intact.
+    if (attachedLaunch) {
+      try {
+        const { task, userMessage } = await api.launchTaskFromChatSession(activeSessionId, {
+          message: userText,
+          ...(sentDraftId ? { draftId: sentDraftId } : {}),
+          launch: launchRequestBody(attachedLaunch),
+        });
+        if (sentDraftId) draft.markSent();
+        clearAcceptedDraft(draftSnapshot);
+        taskLaunch.clearAfterSend();
+        if (userText) {
+          publishOptimisticUserMessage({
+            sessionId: activeSessionId,
+            gezelId,
+            projectId,
+            content: sentDraftId ? rewritePromptDraftFileRefs(userText, sentDraftId) : userText,
+            at: userMessage.at,
+            expectsTurn: false,
+          });
+        }
+        taskLaunchProps?.onLaunched?.(task);
+      } catch (err) {
+        setError(humanizeTransportError(apiErrorMessage(err)));
+      } finally {
+        finishDraftSubmission();
+      }
       return;
     }
 
@@ -1194,12 +1250,16 @@ export function ChatComposer({
         mentions?: string[];
         passiveCcGezelIds?: string[];
         draftId?: string;
+        turnIntent?: 'auto' | 'off';
       } = { message: userText };
       if (runtimeCapabilities().multiRecipientChat && mentionIds.length > 0)
         body.mentions = mentionIds;
       if (runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
         body.passiveCcGezelIds = ccIds;
       if (sentDraftId) body.draftId = sentDraftId;
+      // The person dismissed the task the daemon would suggest for exactly
+      // this text; a plain send must not have the daemon re-derive it.
+      if (taskLaunchEnabled && taskLaunch.dismissedForText(userText)) body.turnIntent = 'off';
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
@@ -1286,6 +1346,9 @@ export function ChatComposer({
     onPassiveCcConsumed,
     executeOpenTarget,
     draft,
+    taskLaunch,
+    taskLaunchEnabled,
+    taskLaunchProps,
   ]);
 
   const cancelWedged = useCallback(async () => {
@@ -1527,6 +1590,16 @@ export function ChatComposer({
           </div>
         </div>
       )}
+      {taskLaunch.attached && (
+        <ComposerTaskBar
+          launch={taskLaunch.attached}
+          art={taskLaunch.art}
+          readiness={taskLaunch.readiness}
+          stale={taskLaunch.stale}
+          onOpen={() => setTaskDialogOpen(true)}
+          onDismiss={() => void taskLaunch.dismiss()}
+        />
+      )}
       <div className="chat-composer-to">
         <span className="chat-composer-to-label muted">To:</span>
         <GezelIcon
@@ -1711,16 +1784,6 @@ export function ChatComposer({
                 <ComposerImageClipboard onError={setError} />
               )}
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
-              {turnIntentPlan && (
-                <output
-                  className="chat-turn-intent-preview"
-                  aria-label={`${turnIntentPlan.display.label}. ${turnIntentPlan.display.detail ?? ''}`.trim()}
-                  title={`${turnIntentPlan.display.label}${turnIntentPlan.display.detail ? ` — ${turnIntentPlan.display.detail}` : ''}. Gezel will add this route when you send.`}
-                >
-                  <TurnIntentGlyph />
-                  <span>{compactTurnIntentLabel(turnIntentPlan)}</span>
-                </output>
-              )}
               {runtimeCapabilities().audio && (
                 <ComposerNarrateButton
                   projectId={projectId}
@@ -1729,6 +1792,22 @@ export function ChatComposer({
                   onError={setError}
                 />
               )}
+              {taskLaunchEnabled &&
+                liveSessionId === null &&
+                !turnActive &&
+                openCommandQuery === null && (
+                  <button
+                    type="button"
+                    className="chat-task-btn"
+                    data-testid="chat-task"
+                    onClick={() => setTaskDialogOpen(true)}
+                    disabled={engagementOff || draftSubmissionPending}
+                    aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
+                    title="Attach a craftbook task to this message"
+                  >
+                    Task
+                  </button>
+                )}
               {openCommandQuery !== null ? (
                 <button
                   type="button"
@@ -1782,16 +1861,33 @@ export function ChatComposer({
                   className="chat-send-btn chat-send-btn-icon"
                   data-testid="chat-send"
                   onClick={send}
-                  disabled={!gezelId || engagementOff || draftSubmissionPending}
+                  disabled={
+                    !gezelId ||
+                    engagementOff ||
+                    draftSubmissionPending ||
+                    (taskLaunch.attached !== null && !taskLaunch.readiness.ready)
+                  }
                   // The glyph replaced the label, so the button's whole
                   // accessible name lives here — including the pending state,
                   // which used to be readable on its face as "Sending…".
-                  aria-label={draftSubmissionPending ? 'Sending…' : 'Send'}
+                  aria-label={
+                    draftSubmissionPending
+                      ? taskLaunch.attached
+                        ? 'Starting…'
+                        : 'Sending…'
+                      : taskLaunch.attached
+                        ? 'Start the task'
+                        : 'Send'
+                  }
                   aria-busy={draftSubmissionPending}
                   title={
                     engagementOff
                       ? 'AI is disabled in Settings → General'
-                      : 'Enter to send, Shift+Enter for newline'
+                      : taskLaunch.attached && !taskLaunch.readiness.ready
+                        ? taskLaunch.readiness.reason
+                        : taskLaunch.attached
+                          ? 'Enter to start the task with this message as its brief'
+                          : 'Enter to send, Shift+Enter for newline'
                   }
                 >
                   <SubmitArrow />
@@ -1801,6 +1897,24 @@ export function ChatComposer({
           }
         />
       </div>
+      {/* Portals, so its position in the tree is cosmetic. `projects` is only
+          read when the project picker shows, which `projectLocked` suppresses. */}
+      {taskLaunchEnabled && taskLaunchProps && (
+        <NewTaskDialog
+          open={taskDialogOpen}
+          launchMode="compose"
+          initialLaunch={taskLaunch.attached}
+          composerText={draftRef.current}
+          defaultProjectId={projectId}
+          projects={taskLaunchProps.projects}
+          gezels={taskLaunchProps.gezels}
+          projectLocked
+          onClose={() => setTaskDialogOpen(false)}
+          onUseInChat={(launch) => {
+            void taskLaunch.attach(launch);
+          }}
+        />
+      )}
     </div>
   );
 }

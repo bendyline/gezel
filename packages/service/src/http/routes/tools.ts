@@ -1033,7 +1033,11 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = ReadDocAsMarkdownRequestSchema.parse(await c.req.json());
-    return c.json(await ctx.contentIndex.readDocAsMarkdown(id, body.path));
+    return c.json(
+      await ctx.contentIndex.readDocAsMarkdown(id, body.path, {
+        ...(body.artifact ? { artifact: true } : {}),
+      }),
+    );
   });
 
   // ── image-intel ──────────────────────────────────────────────────────────

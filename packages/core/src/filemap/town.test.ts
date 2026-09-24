@@ -241,6 +241,40 @@ describe('packTownRoot geometry', () => {
     }
   });
 
+  it('gives every green a unique id when several compass cells leave one', () => {
+    // Each cell column-packs its own boxes, so a leftover green in column 1
+    // appears once per multi-box cell. The ids are the map_layout primary key:
+    // a repeat 500s every Village build (the gezel repo's v6 re-seed did).
+    const files: LayoutFileInput[] = [];
+    const anchors = [];
+    for (const [top, region] of [
+      ['north', 'N'],
+      ['west', 'W'],
+      ['south', 'S'],
+    ] as const) {
+      for (let i = 0; i < 24; i++) files.push(file(`${top}/big/f${i}.ts`, 220));
+      for (const small of ['a', 'b']) {
+        for (let i = 0; i < 3; i++) files.push(file(`${top}-${small}/s${i}.ts`, 40));
+        anchors.push({ path: `${top}-${small}`, region, cx: 0.5, cy: 0.5, recordedAt: NOW });
+      }
+      anchors.push({ path: top, region, cx: 0.5, cy: 0.5, recordedAt: NOW });
+    }
+    const town = packTownRoot(files, { nowIso: NOW, anchors });
+    const rootGreens = town.plazas.filter((p) => p.kind === 'green' && p.folder === '');
+    expect(rootGreens.length).toBeGreaterThan(1);
+    const ids = town.plazas.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const seeded = layoutFileMap(files, [], [], {
+      width: 1600,
+      height: 1600,
+      nowIso: NOW,
+      anchors,
+    });
+    const keys = seeded.persist.map((p) => `${p.nodeKind}|${p.nodeId}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it('is deterministic', () => {
     const a = packTownRoot(fixture(), { nowIso: NOW });
     const b = packTownRoot(fixture(), { nowIso: NOW });

@@ -834,6 +834,11 @@ export const ChatMessageSchema = z.object({
    *   growth engine appends to the gezel's most recent session ("I just
    *   reached level N…"). First-person and factually true, but not a
    *   real model turn.
+   * - `'craftbook-launch'` — the chat composer created a craftbook task
+   *   directly from the user's message. Carries one `toolCalls` entry
+   *   shaped like an `invoke_craftbook` call with its start card, so the
+   *   transcript shows the same receipt a model-invoked launch gets and a
+   *   stateless provider's rebuild replays the task ref as evidence.
    * - `'keurmeester-notice'` — the Keurmeester stepped in on a stalled
    *   turn: one-line diagnosis + what was done, dropped into the thread
    *   before the granted recovery continuation runs.
@@ -848,6 +853,7 @@ export const ChatMessageSchema = z.object({
       'turn-aborted',
       'growth-announcement',
       'keurmeester-notice',
+      'craftbook-launch',
     ])
     .optional(),
   /**
