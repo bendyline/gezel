@@ -104,6 +104,144 @@ describe('Web Worker script boundary', () => {
     });
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
+  it('rejects an invalid deadline or an oversized source before spawning a worker', async () => {
+    const createWorker = vi.fn();
+    const executor = new WebWorkerScriptExecutor(createWorker);
+    const { options } = fixture();
+    await expect(executor.execute({ ...options, timeoutMs: 0 })).rejects.toThrow(/timeout/);
+    await expect(executor.execute({ ...options, timeoutMs: 1.5 })).rejects.toThrow(/timeout/);
+    await expect(executor.execute({ ...options, source: 'x'.repeat(1_000_001) })).rejects.toThrow(
+      /too large/,
+    );
+    expect(createWorker).not.toHaveBeenCalled();
+  });
+  it('does not spawn a worker for an already-cancelled run', async () => {
+    const createWorker = vi.fn();
+    const { options } = fixture();
+    const result = await new WebWorkerScriptExecutor(createWorker).execute({
+      ...options,
+      signal: AbortSignal.abort(),
+    });
+    expect(result).toMatchObject({ exitCode: 1, timedOut: false });
+    expect(result.stderr).toContain('cancelled');
+    expect(createWorker).not.toHaveBeenCalled();
+  });
+  it('answers host requests and forwards notifications and stderr', async () => {
+    const { worker, executor, options, send } = fixture();
+    const run = executor.execute(options);
+    expect(JSON.parse(worker.postMessage.mock.calls[0]![0])).toMatchObject({
+      scriptName: 'example',
+      timeoutMs: 500,
+    });
+    send({ runId: 'run', kind: 'started' });
+    send({ runId: 'run', kind: 'request', id: 1, method: 'fs.read', params: { path: 'a' } });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+    expect(options.onRequest).toHaveBeenCalledWith('fs.read', { path: 'a' });
+    expect(JSON.parse(worker.postMessage.mock.calls[1]![0])).toEqual({
+      runId: 'run',
+      id: 1,
+      result: 'value',
+    });
+    send({ runId: 'run', kind: 'notification', method: 'script.log', params: ['hi'] });
+    send({ runId: 'run', kind: 'stderr', line: 'warning: careful' });
+    send({ runId: 'run', kind: 'notification', method: 'script.output', params: { ok: true } });
+    send({
+      runId: 'run',
+      kind: 'result',
+      result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+    });
+    expect((await run).exitCode).toBe(0);
+    expect(options.onNotification).toHaveBeenNthCalledWith(1, 'script.log', ['hi']);
+    expect(options.onNotification).toHaveBeenNthCalledWith(2, 'script.output', { ok: true });
+    expect(options.onStderr).toHaveBeenCalledWith('warning: careful');
+  });
+  it('replies with the host error message and its string code', async () => {
+    const { worker, executor, options, send } = fixture();
+    options.onRequest = vi.fn(async () => {
+      throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    });
+    const run = executor.execute(options);
+    send({ runId: 'run', kind: 'request', id: 1, method: 'fs.write' });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(worker.postMessage.mock.calls[1]![0])).toEqual({
+      runId: 'run',
+      id: 1,
+      error: { message: 'denied', code: 'EACCES' },
+    });
+    send({
+      runId: 'run',
+      kind: 'result',
+      result: { exitCode: 1, stdout: '', stderr: 'denied', timedOut: false },
+    });
+    expect((await run).exitCode).toBe(1);
+  });
+  it.each([
+    ['a non-string frame', 42],
+    ['an unknown frame kind', JSON.stringify({ runId: 'run', kind: 'mystery' })],
+    ['a non-string stderr line', JSON.stringify({ runId: 'run', kind: 'stderr', line: 7 })],
+    [
+      'a method name that is not a string',
+      JSON.stringify({ runId: 'run', kind: 'request', id: 1, method: 7 }),
+    ],
+  ])('fails closed on %s', async (_label, data) => {
+    const { worker, executor, options } = fixture();
+    const run = executor.execute(options);
+    worker.onmessage?.({ data } as MessageEvent<unknown>);
+    expect((await run).exitCode).toBe(1);
+    expect(options.onRequest).not.toHaveBeenCalled();
+  });
+  it('fails closed when the worker reuses a request id', async () => {
+    const { executor, options, send } = fixture();
+    options.onRequest = () => new Promise(() => {});
+    const run = executor.execute(options);
+    send({ runId: 'run', kind: 'request', id: 1, method: 'fs.read' });
+    send({ runId: 'run', kind: 'request', id: 1, method: 'fs.read' });
+    expect((await run).stderr).toMatch(/call limit/);
+  });
+  it('refuses output or a clean exit while host calls are still pending', async () => {
+    for (const frame of [
+      { runId: 'run', kind: 'notification', method: 'script.output', params: {} },
+      {
+        runId: 'run',
+        kind: 'result',
+        result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+      },
+    ]) {
+      const { executor, options, send } = fixture();
+      options.onRequest = () => new Promise(() => {});
+      const run = executor.execute(options);
+      send({ runId: 'run', kind: 'request', id: 1, method: 'fs.read' });
+      send(frame);
+      expect((await run).stderr).toMatch(/pending host calls/);
+    }
+  });
+  it('stops on worker error and message-deserialization events', async () => {
+    const errored = fixture();
+    const errorRun = errored.executor.execute(errored.options);
+    const preventDefault = vi.fn();
+    (errored.worker.onerror as unknown as (event: Partial<ErrorEvent>) => void)({
+      message: 'worker crashed',
+      preventDefault,
+    });
+    expect((await errorRun).stderr).toBe('worker crashed');
+    expect(preventDefault).toHaveBeenCalled();
+
+    const garbled = fixture();
+    const garbledRun = garbled.executor.execute(garbled.options);
+    (garbled.worker.onmessageerror as unknown as () => void)();
+    expect((await garbledRun).stderr).toBe('Invalid script worker message');
+  });
+  it('fails the run when the worker cannot accept its instructions', async () => {
+    const { worker, executor, options } = fixture();
+    worker.postMessage.mockImplementation(() => {
+      throw new Error('DataCloneError');
+    });
+    expect(await executor.execute(options)).toMatchObject({
+      exitCode: 1,
+      stderr: 'DataCloneError',
+    });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
   it('cancels pending host work without posting late replies', async () => {
     const { worker, executor, options, send } = fixture();
     const controller = new AbortController();

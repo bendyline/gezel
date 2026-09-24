@@ -1,6 +1,6 @@
-import type { ScriptMeta } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { ScriptInputError, validateScriptInput } from './input-validator.js';
+import { ScriptInputError, validateScriptInput } from './script-input.js';
+import type { ScriptMeta } from './script.js';
 
 function meta(inputs: NonNullable<ScriptMeta['inputs']>): ScriptMeta {
   return { name: 's', description: 'ten chars.', inputs };
