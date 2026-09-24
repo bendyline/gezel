@@ -591,8 +591,11 @@
     // This override exists only in the separately injected test bundle. All client
     // routes, policies, task scheduling and native filesystem calls remain real.
     // Unplanned generation fails closed instead of reaching a real model.
+    // Product inference runs through GezelRuntime; GezelMobile still exposes the
+    // same methods natively, so both are held behind the fixture.
+    const inferencePlugin = (name) => name === 'GezelRuntime' || name === 'GezelMobile';
     capacitor.nativePromise = function (pluginName, method, options) {
-      if (pluginName === 'GezelMobile' && method === 'providers') {
+      if (inferencePlugin(pluginName) && method === 'providers') {
         return Promise.resolve({
           providers: [
             {
@@ -613,7 +616,7 @@
           ],
         });
       }
-      if (pluginName === 'GezelMobile' && method === 'generate') {
+      if (inferencePlugin(pluginName) && method === 'generate') {
         requests.push(options);
         const text = queued.shift();
         if (text === undefined) return Promise.reject(new Error('Unexpected contract generation'));
@@ -634,7 +637,13 @@
     try {
       await runContract({ check, requests, queued, settle, completion });
     } catch (error) {
-      check(`${phase}product-mechanics-finished`, false, String(error.stack || error));
+      // JavaScriptCore's `stack` omits the message, so recording it alone left
+      // CI saying only which frame threw, never why.
+      check(
+        `${phase}product-mechanics-finished`,
+        false,
+        error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error),
+      );
     } finally {
       try {
         for (const item of (await api('/api/sessions/inflight')).inflight)
@@ -746,8 +755,9 @@
       });
       const beforeTask = requests.length;
       queued.push(
-        completion('advance_task_step', { ref: task.ref }),
-        completion('advance_task_step', { ref: task.ref }),
+        ...task.craftbook.steps.map((step) =>
+          completion('advance_task_step', { ref: task.ref, stepId: step.id }),
+        ),
       );
       await api(`${taskPath(task)}/retry`, 'POST', {});
       // Inflight sessions may briefly be empty between scheduled task steps.

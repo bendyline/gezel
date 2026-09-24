@@ -36,15 +36,12 @@ import {
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
-import type { ToolsMlxTemplateFixConfig } from '../../model-profile/behaviors/tools-mlx-template-fix.js';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
   profileBehaviorConfig,
   profileHasBehavior,
 } from '../../model-profile/runtime.js';
-import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
-import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
 import { hasCompleteToolCallMarkup } from '../complete-tool-call.js';
@@ -144,6 +141,7 @@ import {
 } from './chat-protocol.js';
 import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
+import { applyMlxRequestShape } from './request-shape.js';
 import {
   PRE_FIRST_BYTE_BASE_MS,
   buildMidStreamDropMessage,
@@ -1074,22 +1072,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       stream: false,
       max_tokens: 1,
     };
-    if (this.deps.tuning) applyTuning(body, this.deps.tuning, MLX_TUNING_MAP);
+    applyMlxRequestShape(body, this.deps, { hasTools: tools.length > 0 });
     // A warm must remain a one-token prefill even when catalog tuning carries
     // a wider output cap.
     body.max_tokens = 1;
-    if (tools.length > 0) {
-      body.tools = tools;
-      if (profileHasBehavior(this.deps.profile, 'tools.mlx-grammar')) {
-        const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
-        if (grammarHint) body.tool_grammar = grammarHint;
-      }
-    }
-    const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
-      this.deps.profile,
-      'tools.mlx-template-fix',
-    );
-    if (templateFix?.template) body.chat_template_override = templateFix.template;
+    if (tools.length > 0) body.tools = tools;
     if (opts?.sessionId) {
       const adapter = this.deps.provider.getCacheAdapter();
       if (adapter) {
@@ -1546,17 +1533,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // catalog `tuning.sampling.maxTokens`.
           max_tokens: 16_384,
         };
-        // Per-model tuning. Replaces the Gemma-family-hardcoded sampling
-        // values (temperature=1.0/top_p=0.95/top_k=64/repetition_penalty=1.1)
-        // that used to live in this method. Catalog manifests own these
-        // values now — see `tuning.sampling` on each chat-model identity.
-        // When no catalog tuning is set, mlx-vlm falls back to its own
-        // defaults (effectively greedy on older versions) — every
-        // shipped manifest now declares sampling explicitly to avoid
-        // that.
-        if (this.deps.tuning) {
-          applyTuning(body, this.deps.tuning, MLX_TUNING_MAP);
-        }
+        applyMlxRequestShape(body, this.deps, { hasTools: Boolean(tools?.length) });
         // Continuation-iteration output cap — see SendAndWaitOpts.
         // Iteration 0 keeps the catalog cap so a tool call is never cut
         // off before it starts; wrap-up iterations get the tight cap.
@@ -1565,34 +1542,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
-        // Decode-time tool-call grammar (opt-in via the `tools.mlx-grammar`
-        // behavior). Constrains the tool-call function name to the known
-        // tools at sampling time so a quantized model can't hallucinate a
-        // name — the gezel MLX server builds the llguidance grammar from
-        // this hint plus the advertised `tools`. Family-derived because
-        // Qwen's catalog toolCallFormat is the coarse `function-call`. The
-        // TS salvage cascade below stays as the post-hoc safety net.
-        if (
-          tools &&
-          tools.length > 0 &&
-          profileHasBehavior(this.deps.profile, 'tools.mlx-grammar')
-        ) {
-          const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
-          if (grammarHint) body.tool_grammar = grammarHint;
-        }
         if (this.forceSequentialToolGrammar && hermesRequiredArgGrammarRequested(body)) {
           body.disable_speculation = true;
         }
-        // Per-family chat-template fix (opt-in via `tools.mlx-template-fix`).
-        // Swaps the model's stored Jinja template for a curated one at
-        // request time (no reinstall); the server applies it via
-        // `apply_chat_template(..., chat_template=...)`. No config (e.g.
-        // env-forced in an A/B without a manifest template) → no override.
-        const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
-          this.deps.profile,
-          'tools.mlx-template-fix',
-        );
-        if (templateFix?.template) body.chat_template_override = templateFix.template;
         // Tool surface actually sent this turn. Defaults to the full roster;
         // constrained turns narrow it below.
         let requestTools = tools;

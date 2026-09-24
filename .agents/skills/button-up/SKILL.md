@@ -13,8 +13,15 @@ green. You find the failures, fix them at the root, and keep cycling until a
 full pass needs no further edits.
 
 If the branch has an open pull request, its GitHub CI is part of the job
-too: every failing check must end up with a local fix or a clear
-explanation.
+too: every failing check must end up with a local fix.
+
+**Origin does not matter.** Fix every failure a gate or check reports,
+whoever caused it: this session, another session, the user, an earlier
+commit, or `main`. "Pre-existing", "not introduced here", "was already
+red", and "platform-only" describe a failure; none of them is a reason to
+leave it failing. The only failures you may leave are the few that need a
+decision only the user can make (see The loop), and you still diagnose
+those as far as you can.
 
 The gates, in order:
 
@@ -47,6 +54,9 @@ The gates, in order:
   may be changing files while you run. Do not revert or rewrite changes you
   did not make except where they are the failure you are fixing, and then
   make the minimal fix.
+- **Fix every reported failure, whatever its origin.** A red gate or check
+  is yours to fix even if it predates the branch or came from someone else.
+  Label its origin in the report; do not use it as a reason to skip.
 - **Stay in scope.** Fix what the gates report. Do not refactor, rename, or
   "improve" code the gates are not complaining about.
 
@@ -123,7 +133,8 @@ often unmasks a deeper one further along the same test, and that is
 progress, not a regression. (Run `--jq` from Bash: PowerShell mangles the
 quotes.)
 
-**Triage every failing check** into one of these:
+**Triage every failing check** into one of these. Triage decides *how* you
+fix it, never *whether*:
 
 - **Already fixed locally.** The working diff or an unpushed commit
   addresses it. Confirm the local gate that covers it passes (or, for a
@@ -134,10 +145,12 @@ quotes.)
   usual cause is timing on the 4-vCPU runner: reproduce with `pnpm test:ci`
   (one package at a time, as CI runs it) before touching timeouts.
 - **Platform-only** (Android, iOS, macOS/Linux packaging, Windows service).
-  Run the job's command locally if this machine can, or else the closest
-  proxy (for example, building the web payload the archive verifier
-  inspects). Fix what the log proves and say plainly what could not be
-  verified on this machine.
+  Still fix it. Run the job's command locally if this machine can (a Mac
+  can run the iOS jobs), or else the closest proxy (for example, building
+  the web payload the archive verifier inspects). When the log hides the
+  cause, download the job's uploaded artifacts (`gh api .../artifacts`)
+  before concluding it cannot be diagnosed. Fix what the evidence proves,
+  and say plainly what could not be verified on this machine.
 - **Conventional commits.** Report it once and move on. It does not block,
   and fixing it would mean rewriting pushed history, which is the user's
   call. Do not propose a rebase.
@@ -259,8 +272,9 @@ it fails:
   record it as environmental rather than "fixing" it.
 - **Pre-existing vs introduced.** Use the Step 0 snapshot and
   `git diff` to judge whether a failure touches the branch's changes. Both
-  kinds must be fixed for the branch to be clean, but say which is which in
-  the report.
+  kinds must be fixed for the branch to be clean; say which is which in the
+  report. A failure that has been red on every commit for days is still a
+  failure to fix now, not background noise.
 - **New failures between runs.** A test that passed last run and now fails,
   in code you did not touch, usually means someone else changed the tree
   mid-run. Check `git rev-parse --short HEAD` and `git status --porcelain`
@@ -296,7 +310,8 @@ PR → A → B → C
 - If five full cycles pass without converging, or a fix needs a decision
   that belongs to the user (dependency change, deleting a test, changing a
   guard's budget, an environmental failure you cannot clear), stop and
-  report what remains instead of looping.
+  report what remains instead of looping. A failure being pre-existing,
+  someone else's, or platform-specific is not such a decision.
 
 ## Finish
 

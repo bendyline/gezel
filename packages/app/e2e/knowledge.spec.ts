@@ -52,6 +52,10 @@ function pinnedGildeDataDir(): string {
 
 async function buildGildeData(root: string, archivePath: string): Promise<void> {
   await cp(pinnedGildeDataDir(), root, { recursive: true });
+  // A pinned kind index lists only the published items, and the loader
+  // trusts it over the folders, so the fixture would never be seen. Without
+  // it the loader walks the folders, which it documents as equivalent.
+  await rm(join(root, 'knowledge-catalogs', 'index.json'), { force: true });
   const bytes = await readFile(archivePath);
   const itemDir = join(root, 'knowledge-catalogs', 'sh', 'shop-notes');
   await mkdir(join(itemDir, 'versions', '1.0.0'), { recursive: true });
@@ -350,10 +354,11 @@ test.describe('Knowledge catalogs', () => {
     await page.getByTestId('settings-nav-knowledge').click();
     await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
 
-    // The gilde entry renders as a catalog card with its Hugging Face link.
+    // The gilde entry renders as a catalog card. It names no license page,
+    // so its license link lands on the Hugging Face dataset publishing it.
     const card = page.locator('.catalog-item', { hasText: 'Shop Notes' });
     await expect(card).toBeVisible({ timeout: 20_000 });
-    await expect(card.getByTitle(`View ${GILDE_REPO} on Hugging Face`)).toHaveAttribute(
+    await expect(card.getByRole('link', { name: /MIT/ })).toHaveAttribute(
       'href',
       `https://huggingface.co/datasets/${GILDE_REPO}`,
     );
