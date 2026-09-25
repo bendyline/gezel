@@ -11,6 +11,7 @@ import {
   launchReadiness,
   launchRequestBody,
   mergeSuggestedLaunch,
+  paramAlternativesMessage,
   taskLaunchFromDialog,
   uploadStagingIds,
 } from './composer-task-launch.js';
@@ -45,6 +46,24 @@ const compile = {
   },
   steps: [{ id: 'compile', name: 'Compile' }],
   entryStepId: 'compile',
+} as unknown as CraftbookTemplateManifest;
+
+const applyFindings = {
+  kind: 'craftbook-template',
+  id: 'apply-review-findings',
+  name: 'Apply Review Findings',
+  paramSchema: {
+    type: 'object',
+    required: ['reviewId'],
+    properties: {
+      findingsPath: { type: 'string', default: '', askUser: false },
+      reviewId: { type: 'string', askUser: false },
+      focus: { type: 'string' },
+      workPath: { type: 'string', default: '{{task.dir}}' },
+    },
+  },
+  steps: [{ id: 'triage', name: 'Triage' }],
+  entryStepId: 'triage',
 } as unknown as CraftbookTemplateManifest;
 
 const item = { sourceId: 'bundled', kind: 'craftbook-template' } as unknown as CatalogItemSummary;
@@ -137,7 +156,97 @@ describe('launchReadiness', () => {
   });
 });
 
+const deckWithRule = {
+  kind: 'craftbook-template',
+  id: 'powerpoint-deck',
+  name: 'PowerPoint from Content',
+  paramSchema: {
+    type: 'object',
+    anyOf: [{ required: ['sourcePath'] }, { required: ['topic'] }, { required: ['content'] }],
+    properties: {
+      sourcePath: { type: 'string', title: 'Source file' },
+      topic: { type: 'string', title: 'Topic' },
+      content: { type: 'string', title: 'Source material' },
+    },
+  },
+  steps: [{ id: 'research', name: 'Research' }],
+  entryStepId: 'research',
+} as unknown as CraftbookTemplateManifest;
+
+describe('launchReadiness with a "fill at least one" rule', () => {
+  it('counts the message as the main content, so Send is not held', () => {
+    const launch: PromptDraftTaskLaunch = {
+      craftbookId: 'powerpoint-deck',
+      params: {},
+      origin: 'user',
+    };
+    expect(launchReadiness(launch, deckWithRule)).toEqual({ ready: true });
+  });
+
+  it('holds Send in plain words when the rule does not include the main content', () => {
+    const noTopic = {
+      ...deckWithRule,
+      paramSchema: {
+        type: 'object',
+        anyOf: [{ required: ['sourcePath'] }, { required: ['content'] }],
+        properties: {
+          sourcePath: { type: 'string', title: 'Source file' },
+          content: { type: 'string', title: 'Source material' },
+        },
+      },
+    } as unknown as CraftbookTemplateManifest;
+    const launch: PromptDraftTaskLaunch = { craftbookId: 'x', params: {}, origin: 'user' };
+    expect(launchReadiness(launch, noTopic)).toEqual({
+      ready: false,
+      reason: 'Fill in Source file or Source material.',
+    });
+    expect(launchReadiness({ ...launch, params: { content: 'Q3 numbers' } }, noTopic).ready).toBe(
+      true,
+    );
+  });
+});
+
+describe('paramAlternativesMessage', () => {
+  const schema = deckWithRule.paramSchema;
+  it('names each alternative by its field title', () => {
+    expect(paramAlternativesMessage(schema, [['sourcePath'], ['topic'], ['content']])).toBe(
+      'Fill in Source file, Topic, or Source material.',
+    );
+    expect(paramAlternativesMessage(schema, [['sourcePath']])).toBe('Fill in Source file.');
+  });
+
+  it('joins a multi-key branch and honors a surface label', () => {
+    expect(
+      paramAlternativesMessage(schema, [['sourcePath', 'content'], ['topic']], { topic: 'Brief' }),
+    ).toBe('Fill in Source file and Source material or Brief.');
+  });
+
+  it('falls back to the key when a field has no title', () => {
+    expect(paramAlternativesMessage({}, [['a'], ['b']])).toBe('Fill in a or b.');
+  });
+});
+
+describe('launchReadiness with params a person is never asked for', () => {
+  it('does not hold Send for a required param the form does not show', () => {
+    const launch: PromptDraftTaskLaunch = {
+      craftbookId: 'apply-review-findings',
+      params: {},
+      origin: 'user',
+    };
+    expect(launchReadiness(launch, applyFindings)).toEqual({ ready: true });
+  });
+});
+
 describe('formatTaskLaunchPreview', () => {
+  it('leaves out params a person is never asked for, even with values', () => {
+    const launch: PromptDraftTaskLaunch = {
+      craftbookId: 'apply-review-findings',
+      params: { reviewId: 'rv-12', workPath: 'tasks/4', focus: 'security' },
+      origin: 'user',
+    };
+    expect(formatTaskLaunchPreview(launch, applyFindings).full).toBe('focus: security');
+  });
+
   it('orders by the schema, clips values, caps entries, and lists inputs first', () => {
     const launch: PromptDraftTaskLaunch = {
       craftbookId: 'powerpoint-deck',

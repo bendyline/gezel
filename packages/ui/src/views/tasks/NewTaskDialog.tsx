@@ -9,9 +9,11 @@ import {
   type TaskCronOverlap,
   type TaskInputSource,
   craftbookInputParams,
+  launchFormParamSchema,
+  mainContentParamKey,
   prioritizePullsForCurrentBranch,
+  unmetParamAlternatives,
   visibleCatalogItems,
-  withoutInputParams,
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,8 +22,10 @@ import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
+import { MarkdownField } from '../../components/MarkdownField.js';
 import {
   inputValuesFromLaunch,
+  paramAlternativesMessage,
   taskLaunchFromDialog,
   uploadStagingIds,
 } from '../../components/composer-task-launch.js';
@@ -127,6 +131,7 @@ export function NewTaskDialog({
   launchMode = 'immediate',
   initialLaunch,
   composerText,
+  onComposerTextChange,
   onUseInChat,
   defaultProjectId,
   projects,
@@ -143,6 +148,11 @@ export function NewTaskDialog({
   initialLaunch?: PromptDraftTaskLaunch | null;
   /** Compose mode: the message so far, shown as the task's brief. */
   composerText?: string;
+  /**
+   * Compose mode: an edit to the brief, written straight back to the chat
+   * box so the two stay one text. Without it the brief is read-only.
+   */
+  onComposerTextChange?: (text: string) => void;
   onUseInChat?: (launch: PromptDraftTaskLaunch) => void;
   defaultProjectId: string;
   projects: Project[];
@@ -616,7 +626,13 @@ export function NewTaskDialog({
           setError(`Choose the ${missingInput.title.toLowerCase()} this craftbook works on.`);
           return;
         }
-        const schema = withoutInputParams(m.paramSchema) as SquisqAnnotatedSchema | undefined;
+        // In compose mode the chat message is the brief, and the brief is the
+        // book's main content: it is never a field here and never missing.
+        const briefKey = launchMode === 'compose' ? mainContentParamKey(m.paramSchema) : null;
+        const briefFills = briefKey ? [briefKey] : [];
+        const schema = launchFormParamSchema(m.paramSchema, briefFills) as
+          | SquisqAnnotatedSchema
+          | undefined;
         const required = Array.isArray(schema?.required) ? (schema.required as string[]) : [];
         const missingKey = required.find((k) => {
           const v = params[k];
@@ -624,6 +640,14 @@ export function NewTaskDialog({
         });
         if (missingKey) {
           setError(`"${missingKey}" is required.`);
+          return;
+        }
+        const unmet = unmetParamAlternatives(m.paramSchema, params, [
+          ...briefFills,
+          ...inputParams.filter((input) => inputValues[input.key]?.source).map((i) => i.key),
+        ]);
+        if (unmet) {
+          setError(paramAlternativesMessage(m.paramSchema, unmet));
           return;
         }
         // Compose mode stops here: the configuration goes to the composer's
@@ -634,7 +658,9 @@ export function NewTaskDialog({
             taskLaunchFromDialog({
               manifest: m,
               item: selectedBook.item,
-              params,
+              params: briefKey
+                ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== briefKey))
+                : params,
               inputValues,
               title,
               assignee,
@@ -803,13 +829,20 @@ export function NewTaskDialog({
     ],
   );
 
-  // Inputs render as source pickers of their own; the generic form gets the
-  // rest of the schema, and disappears when inputs were all there was.
+  // Inputs render as source pickers of their own, params the daemon or
+  // another screen fills are never asked, and in compose mode the brief box
+  // stands in for the book's main content param. The generic form gets the
+  // rest of the schema, and disappears when nothing is left to ask.
   const selectedInputs = selectedBook
     ? craftbookInputParams(selectedBook.manifest.paramSchema)
     : [];
+  const composeBriefKey =
+    composeMode && selectedBook ? mainContentParamKey(selectedBook.manifest.paramSchema) : null;
   const nonInputParamSchema = selectedBook
-    ? withoutInputParams(selectedBook.manifest.paramSchema)
+    ? launchFormParamSchema(
+        selectedBook.manifest.paramSchema,
+        composeBriefKey ? [composeBriefKey] : [],
+      )
     : undefined;
   const selectedSchema =
     selectedBook &&
@@ -1121,8 +1154,18 @@ export function NewTaskDialog({
                       </label>
                       {composeMode && selectedBook && (
                         <div className="gz-ntd-brief-from-message">
-                          <p className="gz-npd-give-eyebrow">Brief · from your message</p>
-                          {composerText?.trim() ? (
+                          <p className="gz-npd-give-eyebrow">Brief · your chat message</p>
+                          {onComposerTextChange ? (
+                            <MarkdownField
+                              key={selectedBook.manifest.id}
+                              value={composerText ?? ''}
+                              placeholder="What should this be about? Edits here change your chat message too."
+                              minHeight="96px"
+                              maxHeight="30vh"
+                              onChange={onComposerTextChange}
+                              onCommit={onComposerTextChange}
+                            />
+                          ) : composerText?.trim() ? (
                             <p className="gz-ntd-brief-text">{composerText}</p>
                           ) : (
                             <p className="gz-ntd-brief-empty muted">

@@ -7,6 +7,7 @@ import {
   type PendingImportItem,
   type WorkspaceCommandIndex,
   type WorkspaceIndexStatus,
+  paramFormSchema,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -74,9 +75,13 @@ function loadTerminalPlatform(): Promise<string | undefined> {
   return platformPromise;
 }
 
-/** A craftbook declares params iff its paramSchema has ≥1 property. */
+/**
+ * A craftbook opens the param form iff it asks a person for at least one
+ * property. Books whose only params the daemon fills stage the bare command.
+ */
 function craftbookHasParams(m: CraftbookTemplateManifest): boolean {
-  const props = (m.paramSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  const props = (paramFormSchema(m.paramSchema) as { properties?: Record<string, unknown> })
+    ?.properties;
   return !!props && Object.keys(props).length > 0;
 }
 

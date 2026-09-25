@@ -39,6 +39,10 @@ export default defineConfig({
     // static-site export can run the documentation engine without importing
     // the whole daemon.
     handboek: 'src/handboek/engine.ts',
+    // Standalone subpath (`@bendyline/gezel-service/native-release`): the pinned
+    // native engine release as data, for hosts that ship engines beside the
+    // daemon. A leaf — importing it loads no daemon code.
+    'native-release': 'src/native-release-entry.ts',
   },
   format: ['esm'],
   // Only the package's two public import surfaces need bundled declarations.
@@ -52,6 +56,7 @@ export default defineConfig({
       index: 'src/index.ts',
       gezapp: 'src/gezapp-entry.ts',
       handboek: 'src/handboek/engine.ts',
+      'native-release': 'src/native-release-entry.ts',
     },
   },
   sourcemap: true,

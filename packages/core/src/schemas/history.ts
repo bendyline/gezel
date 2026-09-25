@@ -162,12 +162,6 @@ export const HistoryEventKindSchema = z.enum([
   'keurmeester.intervention',
   'keurmeester.digest.generated',
   'task.created',
-  /**
-   * The chat composer created a craftbook task directly from a message —
-   * no coordinator turn decided to. `details` carries `{ ref, sessionId,
-   * gezelId, craftbookId, reused, dispatched }`.
-   */
-  'task.launched-from-chat',
   'task.activated',
   'task.updated',
   'task.status.changed',

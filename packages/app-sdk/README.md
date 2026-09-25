@@ -214,10 +214,37 @@ await gezel.close();
 - **Their models, read-only.** Models the user already installed are found through a read-only overlay, so a 2 GB download does not happen twice. Nothing of yours is ever written there.
 - **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
 - **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
+- **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
 
 Install `@bendyline/gezel-service` alongside this SDK to host — it is an optional peer dependency, so apps that only connect never download it.
 
-**Under Electron**, `process.execPath` is your app binary, not Node, and gezel runs its tool server as a child process. Ship a Node binary and pass `host: { nodePath }`; the SDK fails immediately with `node_binary_required` rather than coming up with no tools.
+**Under Electron**, `process.execPath` is your app binary, not Node, and gezel runs its tool server as a child process. Ship a Node binary and pass `host: { nodePath }`. Without one, the SDK uses the Node a Gezel install keeps at `<Gezel home>/bin/node` when there is one; otherwise it fails immediately with `node_binary_required` rather than coming up with no tools.
+
+### When hosting happens
+
+By default only a Gezel that is not running falls through to hosting. A person who declines the connection, or lets the approval expire, gets exactly that: no private daemon started behind their back. Two things change the ladder:
+
+- **A saved grant is reused first.** An app with no `onVerificationCode` handler cannot complete a new handshake, but if `tokenStorage` or `existingToken` holds a grant from an earlier session, the SDK joins the running Gezel with it before hosting. It cannot prompt: without a code handler the SDK refuses to register a new grant, and that refusal is what falls through.
+- **`hostWhenRefused: true`** also hosts after a refusal, an expired or unanswered approval, or a connected-app surface switched off in Gezel. It is for apps that obtain their own consent — the AI is optional and the person switched it on inside the app. A daemon that is alive but unwell still fails loudly.
+
+### Shipping the engines with your app
+
+A hosted daemon downloads the native engine it pins (`llama-server`, from the `native-v<release>` GitHub release) the first time a model needs it. To skip that download — or to work offline from the first launch — ship the engines and pass their directory:
+
+```ts
+host: { nodePath, daemonEntry, nativeBinDir: '/opt/acme/gezel-host/native-bin' }
+```
+
+The directory holds the extracted release archives as `<platform>-<backend>/` — for example `win32-x64-vulkan/` and `win32-x64-cpu/`, each with its `gezel-llama-server` and libraries. Discovery falls back from CUDA to Vulkan to CPU, so Vulkan plus CPU serves most machines without the much larger CUDA archive. Ship the release the bundled service pins, verified against its digests; the service publishes both as data, without loading any daemon code:
+
+```ts
+import {
+  NATIVE_ENGINE_RELEASE,
+  NATIVE_ENGINE_ARCHIVE_SHA256,
+} from '@bendyline/gezel-service/native-release';
+```
+
+Engines from another release may not accept the flags the daemon passes them. On macOS the release's binaries arrive Developer ID signed; exclude that tree from re-signing so the pinned bytes stay intact.
 
 ### Shipping a model with your app
 

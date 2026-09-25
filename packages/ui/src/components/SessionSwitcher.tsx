@@ -101,8 +101,9 @@ const NEW_THREAD_LABEL = 'New thread';
 const UNTITLED_DRAFT_LABEL = 'Untitled draft';
 
 /** A plus set in a circle: the one true circle in this menu, and an act
- *  rather than a thing, which is what tells it apart from the rows. */
-function NewThreadIcon() {
+ *  rather than a thing, which is what tells it apart from the rows. The
+ *  Thread and Draft keys carry it too, so all three read as "start one". */
+function CircledPlusIcon() {
   return (
     <svg
       width="13"
@@ -125,7 +126,7 @@ function NewThreadIcon() {
 
 const newThreadLabel = (
   <span className="session-row session-row-action">
-    <NewThreadIcon />
+    <CircledPlusIcon />
     <span className="session-row-title">{NEW_THREAD_LABEL}</span>
   </span>
 );
@@ -935,9 +936,10 @@ export function SessionSwitcher({
         onClick={startFreshThread}
         disabled={busy || isFreshThread}
         title={isFreshThread ? 'Already on a new thread' : 'Start a new thread'}
+        aria-label={NEW_THREAD_LABEL}
       >
-        <NewThreadIcon />
-        {NEW_THREAD_LABEL}
+        <CircledPlusIcon />
+        Thread
       </button>
       <ContextMeter status={contextStatus} sessionId={sessionId} />
       {/* Only on a thread: a second message in progress inside the current
@@ -945,12 +947,14 @@ export function SessionSwitcher({
       {sessionId && (
         <button
           type="button"
-          className="gezel-chat-session-btn"
+          className="gezel-chat-session-btn gezel-chat-session-btn-new"
           onClick={() => void createDraft()}
           disabled={busy}
           title="Start another message in this thread and keep the one you have"
+          aria-label="New draft"
         >
-          + Draft
+          <CircledPlusIcon />
+          Draft
         </button>
       )}
     </div>

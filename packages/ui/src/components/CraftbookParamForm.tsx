@@ -1,7 +1,12 @@
-import type { CraftbookTemplateManifest } from '@bendyline/gezel';
+import {
+  type CraftbookTemplateManifest,
+  paramFormSchema,
+  unmetParamAlternatives,
+} from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useMemo, useState } from 'react';
 import { GezelJsonEditor } from './GezelJsonEditor.js';
+import { paramAlternativesMessage } from './composer-task-launch.js';
 import { renderCraftbookCommand, seedableParamDefault } from './craftbook-command.js';
 
 /**
@@ -9,7 +14,9 @@ import { renderCraftbookCommand, seedableParamDefault } from './craftbook-comman
  * `JsonEditor`), then hand the stringified values back so the launcher
  * can render + stage the command. The form fields come ENTIRELY from the
  * craftbook's `paramSchema` (a squisq/JSON schema) — no hand-rolled
- * fields. A live preview shows exactly what will be staged.
+ * fields — minus the ones a person is never asked for (`askUser`), and
+ * without a top-level "fill at least one of these" rule, which submit checks
+ * instead. A live preview shows exactly what will be staged.
  *
  * Rendered inside a popover anchored to the clicked craftbook item; the
  * popover container itself lives in CommandsPanel.
@@ -23,9 +30,13 @@ export function CraftbookParamForm({
   onSubmit: (values: Record<string, string>) => void;
   onCancel: () => void;
 }) {
-  const schema = manifest.paramSchema as SquisqAnnotatedSchema | undefined;
+  const fullSchema = manifest.paramSchema as SquisqAnnotatedSchema | undefined;
+  const schema = useMemo(
+    () => paramFormSchema(manifest.paramSchema) as SquisqAnnotatedSchema | undefined,
+    [manifest.paramSchema],
+  );
 
-  const [value, setValue] = useState<Record<string, unknown>>(() => seedDefaults(schema));
+  const [value, setValue] = useState<Record<string, unknown>>(() => seedDefaults(fullSchema));
   const [error, setError] = useState<string | null>(null);
 
   const stringified = useMemo(() => stringifyValues(value), [value]);
@@ -38,6 +49,11 @@ export function CraftbookParamForm({
     const missing = requiredMissing(schema, value);
     if (missing) {
       setError(`"${missing}" is required.`);
+      return;
+    }
+    const unmet = unmetParamAlternatives(manifest.paramSchema, value);
+    if (unmet) {
+      setError(paramAlternativesMessage(manifest.paramSchema, unmet));
       return;
     }
     onSubmit(stringified);

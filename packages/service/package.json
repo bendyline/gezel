@@ -44,6 +44,10 @@
       "types": "./dist/handboek.d.ts",
       "import": "./dist/handboek.js"
     },
+    "./native-release": {
+      "types": "./dist/native-release.d.ts",
+      "import": "./dist/native-release.js"
+    },
     "./dist/bin/gezeld.js": "./dist/bin/gezeld.js",
     "./package.json": "./package.json"
   },

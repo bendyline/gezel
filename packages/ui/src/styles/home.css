@@ -363,8 +363,8 @@
   cursor: not-allowed;
 }
 
-/* Carries the same circled plus as the picker's New thread row, so the two
-   read as one act. */
+/* The Thread and Draft keys carry the same circled plus as the picker's New
+   thread row, so all three read as one kind of act. */
 .gezel-chat-session-btn-new {
   display: inline-flex;
   align-items: center;

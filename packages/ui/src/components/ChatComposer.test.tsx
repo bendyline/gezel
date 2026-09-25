@@ -523,7 +523,10 @@ describe('ChatComposer attached task', () => {
       expect(onLaunched).toHaveBeenCalledWith(expect.objectContaining({ ref: 'default/7' })),
     );
     await waitFor(() => expect(screen.getByTestId('editor-draft')).toHaveTextContent(''));
-    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
+    // The stale plan must not resurrect the suggestion onto a fresh draft
+    // after the message went out: exactly one draft was ever created.
+    expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
   });
 
   /** Mount empty, then pick a task-bearing draft — the way the thread picker hands one over. */

@@ -437,22 +437,10 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
         log.warn(`[sessions] marking draft ${body.draftId} sent failed: ${message}`);
       }
     }
-    await ctx.history
-      .log({
-        kind: 'task.launched-from-chat',
-        projectId: target.projectId,
-        gezelId: target.gezelId,
-        summary: `Started "${book.name}" as ${task.ref} from chat`,
-        details: {
-          ref: task.ref,
-          sessionId: id,
-          gezelId: target.gezelId,
-          craftbookId: launch.craftbookId,
-          reused: false,
-          dispatched,
-        },
-      })
-      .catch(() => {});
+    // No history kind of its own: `task.created` (from the manager) and
+    // `task.entry.dispatched` (from the dispatch) already record the launch,
+    // and a new kind would put every gilde release between this branch and
+    // green — the generated schemas carry the enum.
     log.info(
       `[chat] craftbook-launch session=${id} task=${task.ref} craftbook=${launch.craftbookId} reused=false dispatched=${dispatched}`,
     );

@@ -907,6 +907,32 @@ export function ChatComposer({
     [onTerminalEscape],
   );
 
+  // The task dialog's brief is this draft under another name. Its edits land
+  // here as text and persistence only, never through `handleDraftChange`:
+  // a brief that starts with `> ` must not fire the terminal escape. The
+  // editor behind the modal is reseeded once, when the dialog closes, rather
+  // than remounted on every keystroke.
+  const briefEditedRef = useRef(false);
+  const applyBriefEdit = useCallback((text: string) => {
+    if (draftRef.current === text) return;
+    draftRef.current = text;
+    draftUpdateRef.current(text);
+    draftEditVersionRef.current += 1;
+    prevDraftLenRef.current = text.length;
+    setDraftNonEmpty(text.trim().length > 0);
+    setIntentPreviewText(text);
+    setOpenCommandQuery(parseOpenChatQuery(text));
+    const next = extractMentionTokens(text);
+    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+    briefEditedRef.current = true;
+  }, []);
+  const closeTaskDialog = useCallback(() => {
+    setTaskDialogOpen(false);
+    if (!briefEditedRef.current) return;
+    briefEditedRef.current = false;
+    setEditorRevision((revision) => revision + 1);
+  }, []);
+
   // Progressive STT returns one finalized fragment per self-contained audio
   // segment. Append each fragment to whatever is currently in the editor so
   // narration extends an existing prompt and never replaces typing that
@@ -966,6 +992,11 @@ export function ChatComposer({
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
     setIntentPreviewText('');
+    // Cleared in the same batch as the text, not by the debounced preview
+    // effect a render later: an attached task was just cleared too, and a
+    // render that still held the old plan would re-attach it — and create a
+    // ghost draft for the message that just went out.
+    setTurnIntentPlan(null);
     setOpenCommandQuery(null);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
@@ -1905,11 +1936,12 @@ export function ChatComposer({
           launchMode="compose"
           initialLaunch={taskLaunch.attached}
           composerText={draftRef.current}
+          onComposerTextChange={applyBriefEdit}
           defaultProjectId={projectId}
           projects={taskLaunchProps.projects}
           gezels={taskLaunchProps.gezels}
           projectLocked
-          onClose={() => setTaskDialogOpen(false)}
+          onClose={closeTaskDialog}
           onUseInChat={(launch) => {
             void taskLaunch.attach(launch);
           }}

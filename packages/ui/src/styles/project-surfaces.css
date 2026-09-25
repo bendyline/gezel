@@ -2020,7 +2020,8 @@
 }
 
 /* Compose mode: the message so far, shown as the brief the task will get.
-   Read-only here — the chat box is the one place the words are edited. */
+   Editable, and mirrored into the chat box: the two are one text. The
+   read-only paragraph remains for a host that cannot take edits back. */
 .gz-ntd-brief-from-message {
   display: flex;
   flex-direction: column;

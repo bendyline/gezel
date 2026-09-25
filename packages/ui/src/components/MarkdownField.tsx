@@ -18,6 +18,12 @@ interface MarkdownFieldProps {
    * keystroke doesn't fire a PATCH per character.
    */
   onCommit: (markdown: string) => void;
+  /**
+   * Fired on every edit, for a field mirrored live into another surface
+   * (the task dialog's brief writes through to the chat box). Most callers
+   * want `onCommit` alone.
+   */
+  onChange?: (markdown: string) => void;
 }
 
 /**
@@ -40,13 +46,20 @@ export function MarkdownField({
   minHeight = '80px',
   maxHeight = '40vh',
   onCommit,
+  onChange,
 }: MarkdownFieldProps) {
   const theme = useEffectiveTheme();
   const draftRef = useRef(value);
   const committedRef = useRef(value);
+  // Through a ref so `handleChange` keeps one identity: Squisq re-runs its
+  // [markdownSource, onChange] effect whenever the callback changes.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const handleChange = useCallback((source: string) => {
+    if (source === draftRef.current) return;
     draftRef.current = source;
+    onChangeRef.current?.(source);
   }, []);
 
   const commit = useCallback(() => {

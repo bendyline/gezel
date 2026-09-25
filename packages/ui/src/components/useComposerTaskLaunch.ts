@@ -171,9 +171,12 @@ export function useComposerTaskLaunch(
   // Fold the daemon's suggestion in once its book's manifest is known.
   useEffect(() => {
     if (!enabled) return;
+    // A plan only means something for the text it was computed on. With the
+    // composer emptied (a send, a discard) the plan is stale until the
+    // preview effect clears it, and must not resurrect a suggestion.
     const next = mergeSuggestedLaunch({
       current: attachedRef.current,
-      plan,
+      plan: planText.trim() ? plan : null,
       text: planText,
       suppressed: suppressedRef.current,
       manifest: suggestionArt?.manifest ?? manifest,

@@ -219,6 +219,12 @@ export function MeesterConversation({
                   activeDraftId={draftId || undefined}
                   onDraftSelect={(next) => setDraftId(next ?? '')}
                   draftScope="meester"
+                  // The front door opens on a fresh thread: that is where the
+                  // Task key lives, and a launch should not land inside
+                  // yesterday's conversation. "Where was I" still wins —
+                  // the remembered selection is honoured above, and an
+                  // unsent thread starter is still restored by the picker.
+                  autoPickNewest={false}
                 />
               }
             />

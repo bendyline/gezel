@@ -72,14 +72,31 @@ cancellation need no special case.
 
 `connectOrHost` tries an explicit `baseUrl`, then the user's running Gezel, then
 a daemon hosted by the consuming app — and only the last of those is opt-in.
-Only "nothing is running" falls through: a refusal, a timeout, or a daemon that
-is alive but unwell all stay loud, because an app that quietly started its own
-daemon after the user declined would be doing the thing they declined.
+By default only "nothing is running" falls through: a refusal, a timeout, or a
+daemon that is alive but unwell all stay loud, because an app that quietly
+started its own daemon after the user declined would be doing the thing they
+declined. `hostWhenRefused: true` lets an app that obtains its own consent (its
+AI is optional and the person switched it on inside the app) answer a refusal,
+an expired or unanswered approval, or a disabled connected-app surface by
+hosting instead. An alive-but-unwell daemon stays loud even then.
+
+An app with no `onVerificationCode` handler cannot complete a new handshake,
+but it still reuses a grant saved by an earlier session before hosting: joining
+the Gezel the person already runs beats loading every model again in a private
+daemon. This cannot raise a prompt — `authorize` refuses to register a new
+grant without a code handler, and that refusal is what falls through.
+
+A hosted daemon always listens on an ephemeral port. The canonical 6228 belongs
+to the machine broker on a machine install and is the stable address the
+user's own Gezel wants; a private daemon that happened to start first must not
+take it.
 
 `HostOptions.mode` decides how that hosted daemon runs.
 
 - **`child`** spawns `gezeld` under `HostOptions.nodePath`. Native dependencies
-  then load under real Node.
+  then load under real Node. Under Electron with no `nodePath`, the Node a
+  Gezel install keeps at `<Gezel home>/bin/node` is used when present, so
+  hosting works on a machine with Gezel installed without shipping one.
 - **`in-process`** imports the service into the caller. Faster, no second
   process, but every native dependency must match this process's ABI.
 

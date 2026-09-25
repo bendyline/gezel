@@ -123,6 +123,19 @@ export interface ConnectOrHostInput extends Omit<LocalConnectInput, 'scopes'> {
    * home, whatever else is installed.
    */
   adoptUserDaemon?: boolean;
+  /**
+   * Also host when the running Gezel will not connect this app: the user
+   * declined, the approval expired or went unanswered, Gezel already lists a
+   * connection it will not reissue, its connected-app surface is switched
+   * off, or a stored grant can no longer be reused. Default false — then only
+   * a Gezel that is not running falls through to `host`, because a private
+   * daemon started after the person said no does what they declined.
+   *
+   * For an app that obtains its own consent: its AI is optional and the
+   * person switched it on inside the app. A daemon that is alive but unwell
+   * still fails loudly either way. Ignored without `host`.
+   */
+  hostWhenRefused?: boolean;
 }
 
 /**

@@ -376,6 +376,17 @@ the `fromMessage: true` annotation on a paramSchema property, read only by
 `topic`. Adding the annotation to a gilde book needs no schema regeneration —
 `paramSchema` is an open record.
 
+Launch forms ask a person only for what a person can answer. A param whose
+default is a runtime template (`{{task.dir}}`, `powerpoint/task-{{task.num}}`)
+is never shown, because the daemon resolves it at create. `askUser: false`
+hides a param another screen or the task description fills (the Review
+panel's `reviewId`, the night-fix planner's `issueRefs`), and `askUser: true`
+forces one back. Every form reads this through `withoutUnaskedParams` /
+`launchFormParamSchema` in [core/craftbook-launch.ts](packages/core/src/craftbook-launch.ts),
+so a book with nothing left to ask opens no form at all; the terminal still
+accepts every param. Never ask a person for an artifacts-drawer path — default
+it, derive it, or give it an `input` picker.
+
 ### Diffpack (change proposal)
 
 A bundle of file edits a gezel drafted **without touching the project**. The

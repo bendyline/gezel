@@ -666,7 +666,10 @@ land in the thread with a Craftbook-started receipt), and an empty draft is
 allowed because a configured book is a complete request on its own. The key
 takes the Stop/Interrupt secondary recipe (`.chat-task-btn`) and never appears
 on a reply to an existing thread, inside a task pane, or mid-turn — a task is
-how a conversation *starts*, not something bolted onto one in progress. The
+how a conversation *starts*, not something bolted onto one in progress. Which
+is why the Meester home opens on a fresh thread at launch rather than
+auto-picking the newest one: the front door has to show the key. A thread the
+person was just in (a navigation away and back) is still restored. The
 dialog's compose mode ("Task for this message", submit **Use in chat**) shows
 the message so far as a read-only *Brief · from your message* block: the chat
 box is the one place the words are edited.

@@ -44,7 +44,10 @@ describe('applyHostEnvironment', () => {
     expect(env.GEZEL_HOME).toBe(applied.home);
     expect(env.GEZEL_SERVICE_ROLE).toBe('user');
     // An inherited port or system scope belongs to something else entirely.
-    expect(env.GEZEL_PORT).toBeUndefined();
+    // The port is pinned ephemeral rather than cleared: cleared, gezeld would
+    // claim the canonical 6228 that the machine broker or the user's own
+    // Gezel expects to own.
+    expect(env.GEZEL_PORT).toBe('0');
     expect(env.GEZEL_SYSTEM_SCOPE).toBeUndefined();
     // No Chromium download for an app that just wants a chat bot.
     expect(env.GEZEL_SKIP_SYSTEM_BOOTSTRAP).toBe('1');
@@ -98,7 +101,34 @@ describe('resolveNodePath', () => {
     const versions = process.versions as { electron?: string };
     versions.electron = '32.0.0';
     try {
-      expect(() => resolveNodePath({}, {})).toThrow(/host\.nodePath/);
+      expect(() => resolveNodePath({}, { GEZEL_HOME: '/no/gezel' }, () => false)).toThrow(
+        /host\.nodePath/,
+      );
+    } finally {
+      delete versions.electron;
+    }
+  });
+
+  it('uses the Node a Gezel install keeps when an Electron host ships none', () => {
+    const versions = process.versions as { electron?: string };
+    versions.electron = '32.0.0';
+    const managed = join(
+      '/tmp/user-gezel',
+      'bin',
+      process.platform === 'win32' ? 'node.exe' : 'node',
+    );
+    try {
+      expect(
+        resolveNodePath({}, { GEZEL_HOME: '/tmp/user-gezel' }, (path) => path === managed),
+      ).toBe(managed);
+      // An app that ships its own Node never borrows Gezel's.
+      expect(
+        resolveNodePath(
+          { nodePath: '/opt/app/node' },
+          { GEZEL_HOME: '/tmp/user-gezel' },
+          () => true,
+        ),
+      ).toBe('/opt/app/node');
     } finally {
       delete versions.electron;
     }
@@ -125,15 +155,22 @@ describe('computeHostEnvironment', () => {
     expect(variables.has('GEZEL_DISTRIBUTION_PROFILE')).toBe(false);
   });
 
-  it('marks an inherited port and system scope for removal, not for keeping', () => {
+  it('replaces an inherited port with an ephemeral one and removes a system scope', () => {
     const { variables } = computeHostEnvironment('qualla', base, {
       PATH: '/usr/bin',
       GEZEL_PORT: '6228',
       GEZEL_SYSTEM_SCOPE: '1',
     });
-    expect(variables.has('GEZEL_PORT')).toBe(true);
-    expect(variables.get('GEZEL_PORT')).toBeUndefined();
+    expect(variables.get('GEZEL_PORT')).toBe('0');
+    expect(variables.has('GEZEL_SYSTEM_SCOPE')).toBe(true);
     expect(variables.get('GEZEL_SYSTEM_SCOPE')).toBeUndefined();
+  });
+
+  it('never lets a private daemon take the canonical port, inherited or not', () => {
+    // With nothing inherited, gezeld's own default is 6228 — the address the
+    // machine broker or the user's Gezel expects to own.
+    const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
+    expect(variables.get('GEZEL_PORT')).toBe('0');
   });
 });
 
@@ -159,10 +196,15 @@ describe('childHostEnvironment', () => {
   it('unsets rather than blanks a variable the daemon must not inherit', () => {
     const { env } = childHostEnvironment('qualla', base, {
       PATH: '/usr/bin',
-      GEZEL_PORT: '6228',
+      GEZEL_SYSTEM_SCOPE: '1',
     });
     // An empty string is a value; the daemon would read it and try to use it.
-    expect('GEZEL_PORT' in env).toBe(false);
+    expect('GEZEL_SYSTEM_SCOPE' in env).toBe(false);
+  });
+
+  it('hands the spawned daemon an ephemeral port', () => {
+    const { env } = childHostEnvironment('qualla', base, { PATH: '/usr/bin', GEZEL_PORT: '6228' });
+    expect(env.GEZEL_PORT).toBe('0');
   });
 
   it('agrees with the applied environment on every variable', () => {

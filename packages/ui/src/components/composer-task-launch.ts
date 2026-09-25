@@ -7,7 +7,10 @@ import {
   type TaskInputSource,
   type TurnIntentPlan,
   craftbookInputParams,
-  withoutInputParams,
+  launchFormParamSchema,
+  mainContentParamKey,
+  paramAsksUser,
+  unmetParamAlternatives,
 } from '@bendyline/gezel';
 import type { CraftbookInputValue } from './craftbook-input/CraftbookInputField.js';
 
@@ -106,13 +109,48 @@ export function launchReadiness(
       };
     }
   }
-  const schema = withoutInputParams(manifest.paramSchema) as { required?: unknown } | undefined;
+  // The message being sent is the book's main content, so that param is
+  // never a reason to hold Send.
+  const mainKey = mainContentParamKey(manifest.paramSchema);
+  const messageFills = mainKey ? [mainKey] : [];
+  const schema = launchFormParamSchema(manifest.paramSchema, messageFills) as
+    | { required?: unknown }
+    | undefined;
   const required = Array.isArray(schema?.required)
     ? schema.required.filter((key): key is string => typeof key === 'string')
     : [];
   const missing = required.find((key) => isBlank(launch.params[key]));
   if (missing) return { ready: false, reason: `"${missing}" is required.` };
+  const unmet = unmetParamAlternatives(manifest.paramSchema, launch.params, [
+    ...messageFills,
+    ...Object.keys(launch.inputs ?? {}),
+  ]);
+  if (unmet) return { ready: false, reason: paramAlternativesMessage(manifest.paramSchema, unmet) };
   return { ready: true };
+}
+
+/**
+ * Plain words for a "fill at least one of these" rule, naming each
+ * alternative by its field title: `Fill in Source file, Topic, or Source
+ * material.` `labels` renames a field a surface shows under its own name —
+ * the composer dialog's Brief stands in for the book's main content param.
+ */
+export function paramAlternativesMessage(
+  paramSchema: unknown,
+  alternatives: string[][],
+  labels: Record<string, string> = {},
+): string {
+  const properties = ((paramSchema as { properties?: Record<string, unknown> } | undefined)
+    ?.properties ?? {}) as Record<string, { title?: unknown } | undefined>;
+  const nameOf = (key: string): string => {
+    if (labels[key]) return labels[key];
+    const title = properties[key]?.title;
+    return typeof title === 'string' && title.trim() ? title.trim() : key;
+  };
+  const names = alternatives.map((keys) => keys.map(nameOf).join(' and '));
+  if (names.length === 1) return `Fill in ${names[0]}.`;
+  if (names.length === 2) return `Fill in ${names[0]} or ${names[1]}.`;
+  return `Fill in ${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}.`;
 }
 
 const PREVIEW_VALUE_MAX = 32;
@@ -127,20 +165,27 @@ function clip(value: string): string {
  * The strip's one-line readout of the launch: `topic: France · audience:
  * executives`, in the book's own property order, inputs as `source: Notes
  * (3 files)`, at most three entries then `+N more`. `full` is the unclipped
- * list for the title attribute.
+ * list for the title attribute. Params a person is never asked for stay out
+ * even when the launch carries a value: the strip mirrors the form.
  */
 export function formatTaskLaunchPreview(
   launch: PromptDraftTaskLaunch,
   manifest: CraftbookTemplateManifest | null,
 ): { short: string; full: string } {
   const properties = manifest
-    ? ((withoutInputParams(manifest.paramSchema) as { properties?: Record<string, unknown> })
+    ? ((launchFormParamSchema(manifest.paramSchema) as { properties?: Record<string, unknown> })
         ?.properties ?? {})
     : {};
+  const allProperties = (manifest?.paramSchema?.properties ?? {}) as Record<string, unknown>;
+  const unasked = new Set(
+    Object.entries(allProperties)
+      .filter(([, property]) => !paramAsksUser(property))
+      .map(([key]) => key),
+  );
   const declared = Object.keys(properties);
   const paramKeys = [
     ...declared.filter((key) => key in launch.params),
-    ...Object.keys(launch.params).filter((key) => !declared.includes(key)),
+    ...Object.keys(launch.params).filter((key) => !declared.includes(key) && !unasked.has(key)),
   ];
   const inputKeys = Object.keys(launch.inputs ?? {});
   const entries: Array<{ key: string; value: string }> = [];
