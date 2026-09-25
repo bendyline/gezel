@@ -12,8 +12,8 @@ The **Release Electron App** workflow is manually dispatched and always creates 
 
 The workflow fails closed:
 
-- `nativeTag` is required and must match `native-vX.Y.Z` (an optional version suffix is allowed).
-- The referenced native release must already be published, must not be a draft, and must contain every platform/variant asset plus `SHA256SUMS` expected by preflight.
+- The native release it bundles is the one pinned in source (`NATIVE_ENGINE_RELEASE` in [`native-manifest.ts`](packages/service/src/engines/native-manifest.ts)) — the same one the npm packages download. There is no input for it; to ship newer engines, commit a new pin first.
+- The pinned native release must already be published, must not be a draft, and must contain every platform/variant asset plus `SHA256SUMS` expected by preflight.
 - Every Windows signing and Apple signing/notarization secret listed below must be present before any build begins.
 - Quality, packaging, signature, notarization, and artifact-presence failures stop the release.
 - An already-published release with the generated tag is never modified.
@@ -98,12 +98,12 @@ A failed leg produces no draft at all, so an absent release usually means a red 
 
 ## Cut a release
 
-1. Publish a complete native-engine release from the commit you intend to ship, as above. Its tag must be `native-vX.Y.Z` and it must contain every asset checked by the Electron workflow preflight.
+1. Confirm the source ref pins the native release you want to ship. If the engines need to change, publish a complete native-engine release and commit its pin first, as above.
 2. Confirm all required signing and notarization secrets are configured.
 3. Open **Actions → Release Electron App → Run workflow**.
-4. Select the source ref and enter the exact published `nativeTag`. There is no “draft” checkbox: draft creation is mandatory.
+4. Select the source ref. There is nothing else to enter, and no “draft” checkbox: draft creation is mandatory.
 5. Wait for the workflow to complete. It runs these gates in order:
-   - preflight validates credentials, the native tag, and all native release assets;
+   - preflight reads the pinned native release, then validates credentials and all native release assets;
    - quality builds the workspace, typechecks, lints, runs unit plus browser/Electron E2E tests, generates the SBOM, audits vulnerabilities, and audits licenses;
    - Windows, macOS, and the two-entry Linux architecture matrix stage the same native release, verify the staged engine payload is complete for that host, and build platform artifacts;
    - platform verification checks Windows signatures and macOS signing/notarization;

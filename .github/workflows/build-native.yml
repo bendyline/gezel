@@ -245,6 +245,13 @@ jobs:
           # generation unaccelerated on precisely the ARM hosts with capable
           # GPUs. build.sh already supports -DSD_CUDA=ON; only the matrix
           # declaration was missing.
+          #
+          # Architectures and toolkit mirror the llama-cpp CUDA leg for the
+          # same platform, deliberately. sd-server links the libcudart /
+          # libcublas that leg stages into the shared key, so it must be
+          # built against the same toolkit, and a GPU that gets an accelerated
+          # llama-server should get an accelerated sd-server too.
+          # native-payload.test.mjs holds the two in step.
           - engine: sd-cpp
             platform: linux-x64
             variant: cuda
@@ -254,6 +261,7 @@ jobs:
             sd_backend: cuda
             needs_cuda: true
             needs_vulkan: false
+            sd_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120'
           - engine: sd-cpp
             platform: linux-arm64
             variant: cuda
@@ -263,6 +271,10 @@ jobs:
             sd_backend: cuda
             needs_cuda: true
             needs_vulkan: false
+            # GB10 / DGX Spark only, like llama's and ds4's arm64 legs;
+            # 121a-real needs CUDA 12.9.
+            sd_cuda_arch: '121a-real'
+            cuda_pkg: '12-9'
           - engine: sd-cpp
             platform: win32-x64
             variant: ''
@@ -609,6 +621,8 @@ jobs:
       # is intentionally unsupported in CI because GPU-less runners cannot
       # resolve it and nvcc otherwise falls back to a legacy target.
       LLAMA_CUDA_ARCH: ${{ matrix.llama_cuda_arch || '' }}
+      # sd-cpp's CUDA legs read this the same way. Empty everywhere else.
+      SD_CUDA_ARCH: ${{ matrix.sd_cuda_arch || '' }}
       # workflow_dispatch can target a comma-separated engine subset. Push
       # builds always resolve this to `all`.
       REQUESTED_ENGINES: ${{ inputs.engines || 'all' }}
@@ -883,13 +897,15 @@ jobs:
                 [[ -n "$lib" ]] || continue
                 # Driver-provided lib — not in the bundle by design.
                 if [[ "$lib" == "libcuda.so.1" ]]; then continue; fi
-                # ds4 shares the `-cuda` key with llama-server's CUDA leg,
-                # which is the single writer of the NVIDIA redistributables
-                # (see native/engines/ds4/build.sh 5b). They are absent from
-                # THIS leg's output and appear when the draft-release job
-                # merges the two artifacts, so they cannot resolve here. The
-                # merged tree is checked instead by "Verify CUDA payload".
-                if [[ "${{ matrix.engine }}" == ds4 ]]; then
+                # ds4 and sd-cpp share the `-cuda` key with llama-server's
+                # CUDA leg, which is the single writer of the NVIDIA
+                # redistributables (see native/engines/ds4/build.sh 5b and
+                # sd-cpp/build.sh 7b). They are absent from THIS leg's output
+                # and appear when the draft-release job merges the artifacts;
+                # here they resolve only if the runner's toolkit happens to be
+                # on the loader path. The merged tree is checked instead by
+                # "Verify CUDA payload".
+                if [[ "${{ matrix.engine }}" == ds4 || "${{ matrix.engine }}" == sd-cpp ]]; then
                   case "$lib" in libcudart.so.*|libcublas.so.*|libcublasLt.so.*) continue ;; esac
                 fi
                 missing+=("$lib")
@@ -1009,6 +1025,17 @@ jobs:
           node scripts/verify-cuda-architecture.mjs \
             --library "$lib" \
             --expected '${{ matrix.llama_cuda_arch }}'
+
+      # sd-cpp links ggml-cuda statically, so the device code lives in the
+      # executable itself rather than in a libggml-cuda peer.
+      - name: Verify sd.cpp CUDA architecture payload
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'sd-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-cuda-architecture.mjs \
+            --library "${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}" \
+            --expected '${{ matrix.sd_cuda_arch }}'
 
       - name: Verify llama.cpp CUDA architecture payload (Windows)
         if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && matrix.platform == 'win32-x64'
@@ -1758,21 +1785,25 @@ jobs:
                 bad=1
               fi
             done
-            # ds4 resolves these through $ORIGIN once merged. Prove it here
-            # rather than trusting the layout. Host-arch only: this job runs on
-            # x64, so ldd cannot introspect the linux-arm64 binary and that leg
-            # falls back to the filename presence check above.
-            if [[ "$dir" == *linux-x64-cuda && -x "$dir/gezel-ds4-server" ]]; then
-              unresolved="$(env -u LD_LIBRARY_PATH ldd "$dir/gezel-ds4-server" 2>/dev/null \
-                | grep 'not found' | awk '{print $1}' | grep -v '^libcuda\.so\.1$' || true)"
-              if [[ -n "$unresolved" ]]; then
-                echo "::error::$dir/gezel-ds4-server has unresolved deps after merge: $unresolved"
-                bad=1
-              fi
+            # ds4 and sd-server resolve these through $ORIGIN once merged.
+            # Prove it here rather than trusting the layout. Host-arch only:
+            # this job runs on x64, so ldd cannot introspect the linux-arm64
+            # binaries and that leg falls back to the filename presence check
+            # above.
+            if [[ "$dir" == *linux-x64-cuda ]]; then
+              for bin in gezel-ds4-server gezel-sd-server; do
+                [[ -x "$dir/$bin" ]] || continue
+                unresolved="$(env -u LD_LIBRARY_PATH ldd "$dir/$bin" 2>/dev/null \
+                  | grep 'not found' | awk '{print $1}' | grep -v '^libcuda\.so\.1$' || true)"
+                if [[ -n "$unresolved" ]]; then
+                  echo "::error::$dir/$bin has unresolved deps after merge: $unresolved"
+                  bad=1
+                fi
+              done
             fi
           done
           if (( bad )); then exit 1; fi
-          echo "CUDA redistributables present in every -cuda key; ds4 resolves against them."
+          echo "CUDA redistributables present in every -cuda key; ds4 and sd-server resolve against them."
 
       # Generate this before spending several minutes recompressing the merged
       # tree. The manifest pins concrete native bytes and exact internal

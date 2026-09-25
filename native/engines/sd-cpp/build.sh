@@ -128,6 +128,17 @@ case "$backend" in
     cmake_flags+=(
       "-DCMAKE_CUDA_FLAGS=-Xcompiler=-ffile-prefix-map=$src=stable-diffusion.cpp -Xcompiler=-fmacro-prefix-map=$src=stable-diffusion.cpp -Xcompiler=-fdebug-prefix-map=$src=stable-diffusion.cpp"
     )
+    # Release legs MUST set SD_CUDA_ARCH, for the reasons in llama-cpp's
+    # LLAMA_CUDA_ARCH note. Left unset, ggml's portable default is nine
+    # targets that ignore the platform: the first linux-arm64 CUDA build
+    # compiled 50/61/70-virtual for a leg whose only purpose is GB10, and no
+    # sm_121 at all. Each target is also another nvcc pass per object,
+    # which is what ran both runners out of memory in run 36143841437.
+    sd_cuda_arch="${SD_CUDA_ARCH:-}"
+    if [[ -n "$sd_cuda_arch" ]]; then
+      cmake_flags+=("-DCMAKE_CUDA_ARCHITECTURES=$sd_cuda_arch")
+    fi
+    echo "[build] cuda_architectures=${sd_cuda_arch:-unset (ggml defaults)}"
     ;;
   cpu)    : ;;
   *) echo "unknown SD_BACKEND=$backend (valid: metal, vulkan, cuda, cpu)" >&2; exit 1 ;;
@@ -137,7 +148,22 @@ echo "[build] platform=$platform backend=$backend"
 # ── 4. Configure + build ───────────────────────────────────────────
 build_dir="$src/build-$platform-$backend"
 cmake -S "$src" -B "$build_dir" "${cmake_flags[@]}"
-cmake --build "$build_dir" --config Release --target sd-server -j
+# Cap parallelism for CUDA on Linux. A bare `-j` lets make fork every ready
+# target at once; that is harmless for the CPU/Vulkan/Metal legs but not
+# once nvcc is involved. Run 36143841437 started ~40 ggml-cuda template
+# instances inside one second on both 16GB hosted runners, and the OOM
+# killer took cc1plus and then the runner agent itself ("received a
+# shutdown signal", exit 143) — never a compile error. llama-cpp compiles
+# the same ggml-cuda sources at -j2 on the same runners. Override with
+# SD_BUILD_JOBS=N.
+jobs_flag="-j"
+if [[ -n "${SD_BUILD_JOBS:-}" ]]; then
+  jobs_flag="-j${SD_BUILD_JOBS}"
+elif [[ "$os" == "Linux" && "$backend" == "cuda" ]]; then
+  jobs_flag="-j2"
+fi
+echo "[build] parallelism: $jobs_flag"
+cmake --build "$build_dir" --config Release --target sd-server $jobs_flag
 
 # ── 5. Locate + strip the produced binary ──────────────────────────
 found=""

@@ -32,13 +32,10 @@
 # report itself unavailable rather than trying to install anything.
 name: Release MAS (Mac App Store)
 
+# No native-tag input: the package bundles the native release the source pins
+# in packages/service/src/engines/native-manifest.ts, like release-electron.yml.
 on:
   workflow_dispatch:
-    inputs:
-      nativeTag:
-        description: 'Required native-binaries tag to bundle (e.g. native-v1.2.3).'
-        required: true
-        type: string
 
 env:
   NODE_VERSION: '24'
@@ -58,25 +55,36 @@ jobs:
     timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
+      nativeTag: ${{ steps.native.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject local workspace links
         run: node scripts/check-no-local-links.mjs
 
+      - name: Resolve pinned native release
+        id: native
+        run: |
+          set -euo pipefail
+          pinned_release="$(
+            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\([^']*\)';/\1/p" \
+              packages/service/src/engines/native-manifest.ts
+          )"
+          if [[ ! "$pinned_release" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/service/src/engines/native-manifest.ts (got '${pinned_release}')"
+            exit 1
+          fi
+          echo "tag=native-v${pinned_release}" >> "$GITHUB_OUTPUT"
+          echo "Native engines: native-v${pinned_release} (source pin)" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Require Mac App Store signing credentials
         env:
-          NATIVE_TAG: ${{ inputs.nativeTag }}
           APPLE_MAS_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_MAS_CERTIFICATE_P12_BASE64 }}
           APPLE_MAS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_CERTIFICATE_PASSWORD }}
           APPLE_MAS_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_MAS_PROVISIONING_PROFILE_BASE64 }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          if [[ ! "$NATIVE_TAG" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::nativeTag is required and must name a versioned native release (native-vX.Y.Z)"
-            exit 1
-          fi
           # Deliberately NOT the notarization secrets — a MAS package is never
           # notarized, so requiring APPLE_ID here would gate the lane on a
           # credential it has no use for.
@@ -91,7 +99,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ steps.native.outputs.tag }}
         run: |
           set -euo pipefail
           version="${NATIVE_TAG#native-v}"
@@ -121,15 +129,6 @@ jobs:
           node scripts/verify-native-file-manifest.mjs \
             --manifest packages/service/src/engines/native-file-manifest.json \
             --release "$version"
-          pinned_release="$(
-            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\([^']*\)';/\1/p" \
-              packages/service/src/engines/native-manifest.ts
-          )"
-          if [[ "$pinned_release" != "$version" ]]; then
-            echo "::error::nativeTag ${NATIVE_TAG} does not match source-pinned native-v${pinned_release}"
-            echo "::error::Run scripts/pin-native-release.mjs ${NATIVE_TAG} before building a store package."
-            exit 1
-          fi
 
       - name: Determine package version
         id: version
@@ -185,7 +184,7 @@ jobs:
         shell: bash
         env:
           GEZEL_GITHUB_TOKEN: ${{ github.token }}
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ needs.store-preflight.outputs.nativeTag }}
         run: |
           set -euo pipefail
           version="${NATIVE_TAG#native-v}"
@@ -199,7 +198,7 @@ jobs:
         # order in which both statements stay true.
         shell: bash
         env:
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ needs.store-preflight.outputs.nativeTag }}
         run: |
           version="${NATIVE_TAG#native-v}"
           node scripts/check-native-payload.mjs --root packages/app/native-bin

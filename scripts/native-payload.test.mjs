@@ -120,6 +120,41 @@ test('x64 CUDA builds retain the Pascal PTX compatibility floor', () => {
   }
 });
 
+test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', () => {
+  const matrix = parseMatrix();
+  const llamaCuda = new Map(
+    matrix
+      .filter((entry) => entry.engine === 'llama-cpp' && entry.variant === 'cuda')
+      .map((entry) => [entry.platform, entry]),
+  );
+  const sdCuda = matrix.filter((entry) => entry.engine === 'sd-cpp' && entry.variant === 'cuda');
+  assert.deepEqual(sdCuda.map((entry) => entry.platform).sort(), ['linux-arm64', 'linux-x64']);
+  for (const entry of sdCuda) {
+    const llama = llamaCuda.get(entry.platform);
+    assert.ok(llama, `no llama-cpp CUDA leg on ${entry.platform} stages the libraries sd-server links`);
+    assert.equal(
+      entry.cuda_pkg,
+      llama.cuda_pkg,
+      `${entry.platform} sd-server must build against the toolkit whose libcudart/libcublas llama stages`,
+    );
+    assert.ok(entry.sd_cuda_arch, `${entry.platform} sd CUDA leg must pin sd_cuda_arch`);
+    assert.equal(
+      entry.sd_cuda_arch,
+      llama.llama_cuda_arch,
+      `${entry.platform} sd-server and llama-server ship in one -cuda key; change their GPU coverage together`,
+    );
+  }
+
+  const sd = unixWrapperPaths.find(([path]) => path.includes('sd-cpp/build.sh'))?.[1] ?? '';
+  assert.match(sd, /-DCMAKE_CUDA_ARCHITECTURES=\$sd_cuda_arch/);
+  assert.match(
+    sd,
+    /"\$os" == "Linux" && "\$backend" == "cuda" \]\]; then\s+jobs_flag="-j2"/,
+    'an uncapped -j runs the hosted runners out of memory under nvcc',
+  );
+  assert.match(workflow, /^ {6}SD_CUDA_ARCH: \$\{\{ matrix\.sd_cuda_arch \|\| '' \}\}$/m);
+});
+
 test('native-payload.mjs covers exactly the platform keys the matrix builds', () => {
   const fromMatrix = [...payloadFromMatrix().keys()].sort();
   assert.deepEqual(allPlatformKeys().sort(), fromMatrix);

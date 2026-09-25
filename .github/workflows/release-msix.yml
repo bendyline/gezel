@@ -20,13 +20,11 @@
 # validate on a clean Windows VM before the first submission.
 name: Release MSIX (Microsoft Store)
 
+# No native-tag input: the package bundles the native release the source pins
+# in packages/service/src/engines/native-manifest.ts, like release-electron.yml.
 on:
   workflow_dispatch:
     inputs:
-      nativeTag:
-        description: 'Required native-binaries tag to bundle (e.g. native-v1.2.3).'
-        required: true
-        type: string
       installSmoke:
         description: 'Self-sign the package, install it, and launch it once. Slower; unproven on hosted runners.'
         required: false
@@ -51,27 +49,33 @@ jobs:
     timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
+      nativeTag: ${{ steps.native.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject local workspace links
         run: node scripts/check-no-local-links.mjs
 
-      - name: Validate native tag
-        env:
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+      - name: Resolve pinned native release
+        id: native
         run: |
           set -euo pipefail
-          if [[ ! "$NATIVE_TAG" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::nativeTag is required and must name a versioned native release (native-vX.Y.Z)"
+          pinned_release="$(
+            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\\([^']*\\)';/\\1/p" \
+              packages/service/src/engines/native-manifest.ts
+          )"
+          if [[ ! "$pinned_release" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/service/src/engines/native-manifest.ts (got '${pinned_release}')"
             exit 1
           fi
+          echo "tag=native-v${pinned_release}" >> "$GITHUB_OUTPUT"
+          echo "Native engines: native-v${pinned_release} (source pin)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify native release assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ steps.native.outputs.tag }}
         run: |
           set -euo pipefail
           version="${NATIVE_TAG#native-v}"
@@ -106,15 +110,6 @@ jobs:
           node scripts/verify-native-file-manifest.mjs \
             --manifest packages/service/src/engines/native-file-manifest.json \
             --release "$version"
-          pinned_release="$(
-            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\\([^']*\\)';/\\1/p" \
-              packages/service/src/engines/native-manifest.ts
-          )"
-          if [[ "$pinned_release" != "$version" ]]; then
-            echo "::error::nativeTag ${NATIVE_TAG} does not match source-pinned native-v${pinned_release}"
-            echo "::error::Run scripts/pin-native-release.mjs ${NATIVE_TAG} before building a store package."
-            exit 1
-          fi
 
       - name: Determine package version
         id: version
@@ -177,7 +172,7 @@ jobs:
         shell: bash
         env:
           GEZEL_GITHUB_TOKEN: ${{ github.token }}
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ needs.store-preflight.outputs.nativeTag }}
         run: |
           set -euo pipefail
           version="${NATIVE_TAG#native-v}"
@@ -187,7 +182,7 @@ jobs:
       - name: Verify staged native payload is complete
         shell: bash
         env:
-          NATIVE_TAG: ${{ inputs.nativeTag }}
+          NATIVE_TAG: ${{ needs.store-preflight.outputs.nativeTag }}
         run: |
           version="${NATIVE_TAG#native-v}"
           node scripts/check-native-payload.mjs --root packages/app/native-bin
