@@ -236,8 +236,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@bendyline/gilde':
-        specifier: 0.1.71
-        version: 0.1.71
+        specifier: 0.1.73
+        version: 0.1.73
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -1087,8 +1087,8 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@bendyline/gilde@0.1.71':
-    resolution: {integrity: sha512-eRVLdQgO9Ak2YEYgzXKYg4Jv6oRoBox9Q1QqKVZ0crB08urSQsgjQ6WxIVE4fHr6G3KjflzIR1MzdDPMbpbMrg==}
+  '@bendyline/gilde@0.1.73':
+    resolution: {integrity: sha512-k27c43qgE9UeXFuFvwC2hklmgvJXlwPmMB3WtUOujJqNSWjE3u38EW5EnRBnZuk/xbDAm5BdPUsb7T/q7nEBGw==}
 
   '@bendyline/squisq-calc@2.11.0':
     resolution: {integrity: sha512-KFikTwiMOmTytb8U9qhKTaHLe1O8cNJAaONtteUOCGIWuMSR8tUuT+sLqIRCuWoOyTyI3zqitrDwRezwAzZ4ww==}
@@ -8588,7 +8588,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@bendyline/gilde@0.1.71': {}
+  '@bendyline/gilde@0.1.73': {}
 
   '@bendyline/squisq-calc@2.11.0(@ironcalc/wasm@0.8.4)':
     optionalDependencies:
