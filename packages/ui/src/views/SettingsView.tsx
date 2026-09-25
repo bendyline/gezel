@@ -4,8 +4,10 @@ import {
   type HealthResponse,
   type ProviderName,
   displayName,
+  isLocalProvider,
   isOllamaReasoningModel,
   normalizeCodexPermissionMode,
+  resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import type {
   ConfigResponse,
@@ -35,6 +37,7 @@ import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
@@ -294,6 +297,21 @@ function clampPercent(value: string, fallback: number): number {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(100, Math.max(0, n));
 }
+
+/**
+ * The provider tabs that only exist to configure an *external* chat provider.
+ * Hidden wholesale when the security posture forbids external chat — the
+ * daemon refuses to construct these providers, so their sign-in flows and
+ * permission modes configure nothing. Local engines (llama.cpp / MLX / ds4 /
+ * Ollama) are always permitted and never appear here.
+ */
+const EXTERNAL_CHAT_SECTIONS: ReadonlySet<SectionId> = new Set<SectionId>([
+  'copilot',
+  'openai',
+  'codexCli',
+  'anthropic',
+  'anthropicCli',
+]);
 
 function buildSections(platform: string | undefined): SettingsSection[] {
   return [
@@ -1414,6 +1432,27 @@ function DaemonSettingsView() {
   const showAnthropicProvider =
     provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
+  // Super Lockdown — and any custom posture with external chat switched off —
+  // refuses to build a non-local provider at all: `ChatManager.ensureProvider`
+  // throws before the SDK or CLI is touched. Offering those as live choices
+  // produced a configured-but-unusable install, and the failure landed far
+  // from the cause: a stored `codex-cli` default whose probe came back
+  // policy-blocked sent the whole app back through first-run onboarding.
+  //
+  // The capability is the gate, not the level name, so a custom posture that
+  // turns external chat off behaves identically. A config that hasn't loaded
+  // yet resolves fail-safe to Lockdown (external chat allowed), which keeps
+  // the pills from blinking out on every mount.
+  const externalChatPolicy = resolveSecurityPolicy({ securityPolicy: config?.securityPolicy });
+  const externalChatBlocked = !externalChatPolicy.allowExternalChat;
+  const securityLevelLabel =
+    SECURITY_LEVEL_PRESETS.find((p) => p.id === externalChatPolicy.level)?.label ??
+    'your current security level';
+  const blockedProviderTitle = (name: ProviderName) =>
+    `${providerLabel(name, uiPlatform)} sends chat off this device, which ${securityLevelLabel} does not allow. Change the level in Security & Compliance to use it.`;
+  /** Blocked *and* on offer — the pill stays, greyed, so the state is legible. */
+  const providerBlocked = (name: ProviderName) => externalChatBlocked && !isLocalProvider(name);
+
   // Subline under the "Artificial Intelligence" nav header: which engine and
   // model a new chat gets by default. Answering that used to mean opening the
   // tab and reading two controls.
@@ -1509,6 +1548,11 @@ function DaemonSettingsView() {
       if (s.id === 'ds4' && !showDs4Provider) return false;
       if (s.id === 'openai' && !showOpenaiProvider) return false;
       if (s.id === 'anthropic' && !showAnthropicProvider) return false;
+      // A posture with external chat off can't run these at all, so their
+      // setup tabs are dead ends — sign-in flows and CLI permission modes for
+      // a provider the daemon refuses to construct. The greyed pill on the
+      // Artificial Intelligence tab carries the explanation.
+      if (EXTERNAL_CHAT_SECTIONS.has(s.id) && externalChatBlocked) return false;
       // Benchmarks is a debug-only surface — hidden until the user turns on
       // Debug mode under the About tab.
       if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
@@ -1523,9 +1567,20 @@ function DaemonSettingsView() {
     showDs4Provider,
     showOpenaiProvider,
     showAnthropicProvider,
+    externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
   ]);
+
+  // Landing on a hidden tab is reachable two ways: the posture drops to Super
+  // Lockdown while one is open, or a deep link (`takePendingSettingsSection`)
+  // points at one. Send those to the Artificial Intelligence tab, where the
+  // greyed pill explains why the provider is gone. Deliberately narrower than
+  // "any section missing from `sections`" — config loads async, and a blanket
+  // rule would bounce every deep link before its gate had an answer.
+  useEffect(() => {
+    if (externalChatBlocked && EXTERNAL_CHAT_SECTIONS.has(section)) setSection('defaults');
+  }, [externalChatBlocked, section]);
 
   const activeSectionGroup = useMemo(
     () => sections.find((s) => s.id === section)?.group,
@@ -2611,6 +2666,10 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('copilot')}
+                      disabled={providerBlocked('copilot')}
+                      title={
+                        providerBlocked('copilot') ? blockedProviderTitle('copilot') : undefined
+                      }
                     >
                       GitHub Copilot
                     </button>
@@ -2620,6 +2679,8 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('openai')}
+                      disabled={providerBlocked('openai')}
+                      title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
                     >
                       OpenAI
                     </button>
@@ -2628,7 +2689,12 @@ function DaemonSettingsView() {
                     type="button"
                     className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
                     onClick={() => void setProvider('codex-cli')}
-                    title="Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                    disabled={providerBlocked('codex-cli')}
+                    title={
+                      providerBlocked('codex-cli')
+                        ? blockedProviderTitle('codex-cli')
+                        : 'Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here.'
+                    }
                   >
                     OpenAI Codex CLI
                   </button>
@@ -2637,6 +2703,10 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('anthropic')}
+                      disabled={providerBlocked('anthropic')}
+                      title={
+                        providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
+                      }
                     >
                       Anthropic Claude
                     </button>
@@ -2645,7 +2715,12 @@ function DaemonSettingsView() {
                     type="button"
                     className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
                     onClick={() => void setProvider('anthropic-cli')}
-                    title="Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                    disabled={providerBlocked('anthropic-cli')}
+                    title={
+                      providerBlocked('anthropic-cli')
+                        ? blockedProviderTitle('anthropic-cli')
+                        : 'Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here.'
+                    }
                   >
                     Anthropic Claude CLI
                   </button>
@@ -2658,7 +2733,34 @@ function DaemonSettingsView() {
                   </button>
                 </div>
 
-                {provider === 'copilot' && (
+                {externalChatBlocked && (
+                  <p className="muted small" style={{ marginTop: '0.6rem' }}>
+                    {providerBlocked(provider) ? (
+                      <>
+                        <strong>{providerLabel(provider, uiPlatform)}</strong> is your default
+                        provider, but {securityLevelLabel} keeps every chat on this device — no
+                        gezel can use it until you pick an on-device engine above.{' '}
+                      </>
+                    ) : (
+                      <>
+                        Cloud and CLI providers are greyed out because {securityLevelLabel} keeps
+                        every chat on this device.{' '}
+                      </>
+                    )}
+                    Change the level in{' '}
+                    <button
+                      type="button"
+                      className="gz-link-button"
+                      onClick={() => setSection('securityCompliance')}
+                      style={{ padding: 0 }}
+                    >
+                      Security &amp; Compliance
+                    </button>{' '}
+                    to use them.
+                  </p>
+                )}
+
+                {provider === 'copilot' && !externalChatBlocked && (
                   <div
                     className="new-row"
                     style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
@@ -2680,7 +2782,7 @@ function DaemonSettingsView() {
                   </div>
                 )}
 
-                {provider === 'codex-cli' && (
+                {provider === 'codex-cli' && !externalChatBlocked && (
                   <>
                     {codexCliProbe.kind === 'ok' && (
                       <>
@@ -2741,7 +2843,7 @@ function DaemonSettingsView() {
                   </>
                 )}
 
-                {provider === 'anthropic-cli' && (
+                {provider === 'anthropic-cli' && !externalChatBlocked && (
                   <>
                     {anthropicCliProbe.kind === 'ok' && (
                       <>
@@ -2937,6 +3039,7 @@ function DaemonSettingsView() {
                             className={`gz-key${
                               nightShiftProvider === choice.id ? ' gz-key-active' : ''
                             }`}
+                            disabled={providerBlocked(choice.id)}
                             onClick={() =>
                               void saveNightShiftModelOverride({
                                 enabled: true,
@@ -2944,7 +3047,11 @@ function DaemonSettingsView() {
                                 model: config?.defaultModel?.[choice.id],
                               })
                             }
-                            title={choice.title}
+                            title={
+                              providerBlocked(choice.id)
+                                ? blockedProviderTitle(choice.id)
+                                : choice.title
+                            }
                           >
                             {choice.label}
                           </button>

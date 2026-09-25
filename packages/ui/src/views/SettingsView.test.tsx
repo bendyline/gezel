@@ -848,6 +848,104 @@ describe('SettingsView', () => {
     expect(await pills.findByRole('button', { name: 'Anthropic Claude' })).toBeInTheDocument();
   });
 
+  // Super Lockdown makes `ChatManager.ensureProvider` refuse every non-local
+  // provider, so offering them here sets the user up for a failure that
+  // surfaces nowhere near this screen — a stored `codex-cli` default whose
+  // probe comes back policy-blocked sends the whole app into first-run
+  // onboarding.
+  describe('with external chat disabled by the security posture', () => {
+    const SUPER_LOCKDOWN = {
+      level: 'super-lockdown',
+      allowFileEdits: false,
+      allowExternalChat: false,
+      allowExternalServices: false,
+      allowScriptExecution: false,
+      allowAppNetwork: false,
+    };
+
+    it('greys out the external providers and leaves the on-device ones alone', async () => {
+      // An earlier case leaves Copilot reported as absent; this one is about
+      // the policy hiding a Copilot that IS installed.
+      vi.mocked(api.getCopilotStatus).mockResolvedValue({
+        ...UNAVAILABLE,
+        available: true,
+        source: 'managed',
+        managed: 'current',
+      } as never);
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        hasGithubToken: true,
+        securityPolicy: SUPER_LOCKDOWN,
+      } as never);
+      render(<SettingsView />);
+      const pills = await defaultProviderSwitch();
+
+      const codex = await pills.findByRole('button', { name: 'OpenAI Codex CLI' });
+      expect(codex).toBeDisabled();
+      expect(codex).toHaveAttribute('title', expect.stringContaining('Super Lockdown'));
+      expect(pills.getByRole('button', { name: 'Anthropic Claude CLI' })).toBeDisabled();
+      // Copilot arrives on its own availability probe; it is blocked too.
+      expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeDisabled();
+
+      // Ollama and the on-device engines never leave the machine, so the
+      // policy has nothing to say about them.
+      expect(pills.getByRole('button', { name: 'Ollama' })).toBeEnabled();
+      expect(pills.getByRole('button', { name: /This PC/ })).toBeEnabled();
+    });
+
+    it('drops their setup tabs from the navigation', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        hasGithubToken: true,
+        securityPolicy: SUPER_LOCKDOWN,
+      } as never);
+      render(<SettingsView />);
+      await defaultProviderSwitch();
+
+      await waitFor(() => expect(screen.queryByTestId('settings-nav-codexCli')).toBeNull());
+      expect(screen.queryByTestId('settings-nav-anthropicCli')).toBeNull();
+      expect(screen.queryByTestId('settings-nav-copilot')).toBeNull();
+      // The local engine tab is untouched.
+      expect(screen.getByTestId('settings-nav-llamaCpp')).toBeInTheDocument();
+    });
+
+    it('says why chat is dead when the stored default is one of them', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'codex-cli',
+        meesterGezelId: 'gz-meester',
+        hasGithubToken: true,
+        securityPolicy: SUPER_LOCKDOWN,
+      } as never);
+      render(<SettingsView />);
+      await defaultProviderSwitch();
+
+      expect(
+        await screen.findByText(/keeps every chat on this device/, { exact: false }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Codex CLI')).toBeInTheDocument();
+      // The dead provider's own configuration block is gone with its tab.
+      expect(screen.queryByTestId('model-picker-codex-cli')).toBeNull();
+    });
+
+    it('sends a deep link to a hidden tab back to the AI tab', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        hasGithubToken: true,
+        securityPolicy: SUPER_LOCKDOWN,
+      } as never);
+      render(<SettingsView />);
+      // Reachable before config lands, and from `takePendingSettingsSection`.
+      window.dispatchEvent(
+        new CustomEvent('gezel:navigate', { detail: { view: 'settings', section: 'codexCli' } }),
+      );
+
+      expect(await screen.findByTestId('default-provider-switch')).toBeInTheDocument();
+    });
+  });
+
   it('keeps the Copilot pill when Copilot is already the configured provider', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'copilot',
