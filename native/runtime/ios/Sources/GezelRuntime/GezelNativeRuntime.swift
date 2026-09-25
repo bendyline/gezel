@@ -79,6 +79,11 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private var thermalObserver: NSObjectProtocol?
     private var lastMemoryWarning: TimeInterval = -.infinity
     private var appleTask: Task<Void, Never>?
+    /// Native tool calls parked until the app's tool loop completes them.
+    private var pendingToolCalls: [String: CheckedContinuation<NativeToolReply, Error>] = [:]
+    /// Awake-time start of the model's current stretch of generation. Time the
+    /// app spends executing a tool is not the model's and is not charged.
+    private var modelSegmentStart: TimeInterval = 0
     private var activeFailure: MobileInferenceError?
     private var releasing = false
     private var releaseScheduled = false
@@ -264,12 +269,15 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private func cancelActive(_ id: String?) {
         operationLock.lock()
         var task: Task<Void, Never>?
+        var parked: [CheckedContinuation<NativeToolReply, Error>] = []
         if let activeId, id == nil || id == activeId {
             cancelled = true
             gezel_llama_cancel(engine, activeNativeId)
             task = appleTask
+            parked = Array(pendingToolCalls.values); pendingToolCalls.removeAll()
         }
         operationLock.unlock()
+        parked.forEach { $0.resume(throwing: CancellationError()) }
         task?.cancel()
     }
 
@@ -281,8 +289,64 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         cancelWaiters.append(call)
         gezel_llama_cancel(engine, activeNativeId)
         let task = appleTask
+        let parked = Array(pendingToolCalls.values); pendingToolCalls.removeAll()
         operationLock.unlock()
+        parked.forEach { $0.resume(throwing: CancellationError()) }
         task?.cancel()
+    }
+
+    private func beginModelSegment() {
+        operationLock.lock(); defer { operationLock.unlock() }
+        modelSegmentStart = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// Model time in the current stretch; zero while the app executes a tool.
+    private func modelSegmentSeconds() -> TimeInterval {
+        operationLock.lock(); defer { operationLock.unlock() }
+        return pendingToolCalls.isEmpty ? ProcessInfo.processInfo.systemUptime - modelSegmentStart : 0
+    }
+
+    /// Completes a native tool call with the app tool loop's result.
+    public func completeToolCall(_ call: NativeCall) {
+        guard let requestId = call.getString("requestId"), let callId = call.getString("callId") else {
+            call.reject("A request and tool call ID are required", "INVALID_ARGUMENT"); return
+        }
+        let result: Result<NativeToolReply, Error>
+        if let error = call.getString("error") {
+            result = .failure(MobileInferenceError(code: "TOOL_FAILED", message: String(error.prefix(2_000))))
+        } else if let output = call.getString("output"), output.utf8.count <= 262_144, !output.contains("\0") {
+            result = .success(NativeToolReply(output: output, endTurn: call.getBool("endTurn") ?? false))
+        } else {
+            call.reject("Invalid tool result", "INVALID_ARGUMENT"); return
+        }
+        operationLock.lock()
+        let continuation = activeId == requestId ? pendingToolCalls.removeValue(forKey: callId) : nil
+        if continuation != nil { modelSegmentStart = ProcessInfo.processInfo.systemUptime }
+        operationLock.unlock()
+        guard let continuation else { call.reject("This tool call is no longer running", "NOT_RUNNING"); return }
+        continuation.resume(with: result)
+        call.resolve()
+    }
+
+    /// Parks one native tool call until the app completes it, announcing it to JavaScript.
+    private func awaitToolCall(requestId: String, name: String, arguments: String) async throws -> NativeToolReply {
+        let callId = UUID().uuidString
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NativeToolReply, Error>) in
+                operationLock.lock()
+                guard activeId == requestId, !cancelled else {
+                    operationLock.unlock(); continuation.resume(throwing: CancellationError()); return
+                }
+                pendingToolCalls[callId] = continuation
+                operationLock.unlock()
+                DispatchQueue.main.async {
+                    self.notifyListeners("toolCall", data: ["requestId": requestId, "callId": callId, "name": name, "arguments": arguments])
+                }
+            }
+        } onCancel: {
+            operationLock.lock(); let continuation = pendingToolCalls.removeValue(forKey: callId); operationLock.unlock()
+            continuation?.resume(throwing: CancellationError())
+        }
     }
 
     private func nextOperation(_ requestId: String) -> UInt64? {
@@ -325,6 +389,13 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         guard ["maxTokens", "contextSize"].allSatisfy({ !call.contains($0) || call.getInt($0) != nil }) else {
             call.reject("Token budgets must be integers", "INVALID_REQUEST"); return
         }
+        var tools: [[String: Any]] = []
+        if call.contains("tools") {
+            guard providerId == "apple-foundation-models", let specs = call.getArray("tools", [String: Any].self), (1...64).contains(specs.count) else {
+                call.reject("Native tool calling is only available from Apple on-device AI", "UNSUPPORTED"); return
+            }
+            tools = specs
+        }
         let maxTokens = call.getInt("maxTokens") ?? 1024
         let outputLimit = providerId == "llama-cpp" ? 4096 : AppleFoundationProvider.maximumOutputTokens
         let contextSize = call.getInt("contextSize") ?? 4096
@@ -337,7 +408,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         activeId = requestId; cancelled = false; activeFailure = nil
         if providerId == "apple-foundation-models" {
             appleTask = Task {
-                await self.runAppleGeneration(call, requestId: requestId, turns: turns, maxTokens: maxTokens, contextSize: contextSize)
+                await self.runAppleGeneration(call, requestId: requestId, turns: turns, maxTokens: maxTokens, contextSize: contextSize, tools: tools)
             }
             operationLock.unlock()
         } else {
@@ -401,7 +472,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
                     "id": id, "name": name, "locality": "on-device",
                     "availability": reason == nil ? "available" : "unavailable",
                     "contextTokens": context, "maxOutputTokens": output,
-                    "capabilities": ["text": true, "tools": false, "structuredOutput": false, "images": false, "foregroundOnly": true]
+                    "capabilities": ["text": true, "tools": id == "apple-foundation-models", "structuredOutput": false, "images": false, "foregroundOnly": true]
                 ]
                 if let reason { value["reason"] = reason }
                 return value
@@ -504,9 +575,11 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         operationLock.lock()
         let result: Result<[String: Any], Error> = activeFailure.map { .failure($0) } ?? terminal
         activeId = nil; activeNativeId = 0; appleTask = nil; activeFailure = nil
+        let parked = Array(pendingToolCalls.values); pendingToolCalls.removeAll()
         let waiting = cancelWaiters
         cancelWaiters.removeAll()
         operationLock.unlock()
+        parked.forEach { $0.resume(throwing: CancellationError()) }
         scheduleReleaseIfIdle()
         DispatchQueue.main.async {
             switch result {
@@ -517,12 +590,19 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         }
     }
 
-    private func runAppleGeneration(_ call: NativeCall, requestId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int) async {
+    private func runAppleGeneration(_ call: NativeCall, requestId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int, tools: [[String: Any]]) async {
         var text = ""
+        beginModelSegment()
+        // A minute of the model's own time between tool results. Polling, rather
+        // than one armed timer, lets a completed tool call restart the minute.
         let timeout = Task {
-            do { try await Task.sleep(nanoseconds: 60_000_000_000) }
-            catch { return }
-            self.failActive(requestId, error: MobileInferenceError(code: "TIMEOUT", message: "Apple on-device AI exceeded the one-minute response limit."))
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+                if self.modelSegmentSeconds() > 60 {
+                    self.failActive(requestId, error: MobileInferenceError(code: "TIMEOUT", message: "Apple on-device AI exceeded the one-minute response limit."))
+                    return
+                }
+            }
         }
         defer { timeout.cancel() }
         let terminal: Result<[String: Any], Error>
@@ -533,7 +613,13 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             try checkResources(additionalBytes: 256 * 1024 * 1024)
             if isCancelled(requestId) { throw CancellationError() }
             guard #available(iOS 26.0, *) else { throw MobileInferenceError(code: "UNAVAILABLE", message: "Apple on-device AI requires iOS 26 or later.") }
-            let reason = try await AppleFoundationProvider.generate(turns: turns, maxTokens: maxTokens, contextSize: contextSize) { delta in
+            let reason = try await AppleFoundationProvider.generate(
+                turns: turns, maxTokens: maxTokens, contextSize: contextSize, tools: tools,
+                invoke: { [weak self] name, arguments in
+                    guard let self else { throw CancellationError() }
+                    return try await self.awaitToolCall(requestId: requestId, name: name, arguments: arguments)
+                }
+            ) { delta in
                 if self.isCancelled(requestId) { throw CancellationError() }
                 text.append(delta)
                 DispatchQueue.main.async {

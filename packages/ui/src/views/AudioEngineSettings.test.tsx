@@ -77,6 +77,24 @@ describe('AudioEngineSettings', () => {
     expect(picker).toHaveValue('');
   });
 
+  it('offers progress updates as a sub-option of narration', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ narrateAssistantReplies: false } as never);
+    vi.mocked(api.updateConfig).mockImplementation(async (patch) => patch as never);
+    render(<AudioEngineSettings />);
+    const progress = await screen.findByRole('checkbox', { name: /Include progress updates/ });
+    // On by default, but inert until narration itself is on.
+    expect(progress).toBeChecked();
+    expect(progress).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox', { name: /Narrate assistant replies/ }));
+    await waitFor(() => expect(progress).toBeEnabled());
+    await user.click(progress);
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenLastCalledWith({ narrateProgressUpdates: false }),
+    );
+    expect(progress).not.toBeChecked();
+  });
+
   it('renders both engine sections with their model managers', async () => {
     render(<AudioEngineSettings />);
     await waitFor(() => {

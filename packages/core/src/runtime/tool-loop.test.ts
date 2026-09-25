@@ -5,6 +5,7 @@ import { portableFixture } from './test-files.js';
 import {
   type PortableToolListing,
   type PortableToolSpec,
+  nativeToolSpecs,
   runPortableToolLoop,
   toolProtocol,
 } from './tool-loop.js';
@@ -212,5 +213,307 @@ describe('fitting the tool listing to the provider context', () => {
     });
     await expect(run(missing, { inventory })).rejects.toThrow('missing');
     expect(missing).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('native tool calling', () => {
+  async function runNative(
+    generate: PortableInference['generate'],
+    listing?: PortableToolListing,
+    narrowed?: (listing: PortableToolListing) => void,
+  ) {
+    const { store, session, inventory } = await fixture();
+    const checkpoint = vi.fn(async () => {});
+    const tool = vi.fn();
+    const result = runPortableToolLoop({
+      store,
+      session,
+      inference: { providers: async () => [], generate, cancel: async () => {} },
+      requestId: 'req',
+      providerId: 'apple-foundation-models',
+      modelId: 'apple-foundation-models',
+      contextSize: 4096,
+      maxTokens: 1024,
+      nativeTools: { teamScope: false },
+      messages: [
+        { role: 'system', content: 'Reply briefly.' },
+        { role: 'user', content: 'Write the note.' },
+      ],
+      tools: { inventory, listing, narrowed },
+      actions: { ...actions, askQuestion: async () => ({ questionId: 'q-1' }) },
+      cancelled: () => false,
+      checkpoint,
+      tool,
+      delta: () => {},
+    });
+    return { store, result, checkpoint, tool };
+  }
+
+  it("runs the provider's own calls through the shared call path", async () => {
+    const outputs: string[] = [];
+    const generate = vi.fn<PortableInference['generate']>(async (request, _onDelta, onToolCall) => {
+      expect(request.tools?.some(({ name }) => name === 'write_artifact')).toBe(true);
+      expect(request.messages[0]!.content).not.toContain('"parameters"');
+      expect(request.messages[0]!.content).toContain('Most messages need no tool');
+      const reply = await onToolCall!({
+        requestId: 'req',
+        callId: 'c1',
+        name: 'write_artifact',
+        arguments: JSON.stringify({ path: 'note.md', content: 'Noor opens at 09:30.' }),
+      });
+      outputs.push(reply.output);
+      expect(reply.endTurn).toBeFalsy();
+      return { text: 'Saved note.md.', stopReason: 'stop' };
+    });
+    const { store, result, checkpoint, tool } = await runNative(generate);
+    const done = await result;
+    expect(done.text).toBe('Saved note.md.');
+    expect(done.message?.toolCalls?.[0]).toMatchObject({ name: 'write_artifact', success: true });
+    expect(outputs[0]).toMatch(/^Tool result for write_artifact \(reference data\):/);
+    expect(await store.readFile('artifacts', 'default', 'note.md')).toBe('Noor opens at 09:30.');
+    expect(checkpoint).toHaveBeenCalledTimes(2);
+    expect(tool).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it('ends the turn after a call that waits on the user', async () => {
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        const reply = await onToolCall!({
+          requestId: 'req',
+          callId: 'c1',
+          name: 'ask_user_question',
+          arguments: JSON.stringify({ question: 'Which colour should the poster be?' }),
+        });
+        expect(reply).toEqual({ output: '', endTurn: true });
+        // The native host stops generation once told the turn ended.
+        return { text: '', stopReason: 'stop' };
+      },
+    );
+    const { result } = await runNative(generate);
+    const done = await result;
+    expect(done).toMatchObject({ text: '', stopReason: 'stop' });
+    expect(done.message?.pendingQuestionId).toBe('q-1');
+  });
+
+  it('narrows native tools before generating: descriptions, then the core kit, then none', async () => {
+    const seen: Array<{ tools: number; described: boolean; none: boolean }> = [];
+    const generate = vi.fn<PortableInference['generate']>(async (request, _onDelta, onToolCall) => {
+      seen.push({
+        tools: request.tools?.length ?? 0,
+        described: !!request.tools?.some(({ parameters }) =>
+          parameters.properties.some(({ schema }) => schema.description),
+        ),
+        none: request.messages[0]!.content.includes('None: the tool list does not fit'),
+      });
+      if (request.tools)
+        throw Object.assign(new Error('Budget refused'), { code: 'CONTEXT_LIMIT' });
+      expect(onToolCall).toBeUndefined();
+      return { text: 'Done.', stopReason: 'stop' };
+    });
+    const narrowed = vi.fn();
+    const { result } = await runNative(generate, undefined, narrowed);
+    expect(await result).toMatchObject({ text: 'Done.' });
+    expect(narrowed.mock.calls.map(([listing]) => listing)).toEqual(['compact', 'core', 'none']);
+    expect(seen[0]!.described).toBe(true);
+    expect(seen[1]!.described).toBe(false);
+    expect(seen[1]!.tools).toBe(seen[0]!.tools);
+    expect(seen[2]!.tools).toBeLessThan(seen[1]!.tools);
+    expect(seen[2]!.tools).toBeGreaterThan(0);
+    expect(seen[3]).toEqual({ tools: 0, described: false, none: true });
+  });
+
+  it('never retries a refusal once a native call has committed its effect', async () => {
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        await onToolCall!({
+          requestId: 'req',
+          callId: 'c1',
+          name: 'write_artifact',
+          arguments: JSON.stringify({ path: 'once.md', content: 'Written once.' }),
+        });
+        throw Object.assign(new Error('Budget refused'), { code: 'CONTEXT_LIMIT' });
+      },
+    );
+    const { store, result } = await runNative(generate);
+    await expect(result).rejects.toThrow('Budget refused');
+    expect(generate).toHaveBeenCalledOnce();
+    expect(await store.readFile('artifacts', 'default', 'once.md')).toBe('Written once.');
+  });
+
+  it('hides the session project and the step tools outside a task, and drops a stray project', async () => {
+    const { inventory } = await fixture();
+    const specs = nativeToolSpecs(inventory, 'full', { teamScope: false });
+    expect(inventory.some(({ name }) => name === 'write_artifact')).toBe(true);
+    expect(specs.map(({ name }) => name)).not.toContain('advance_task_step');
+    expect(specs.map(({ name }) => name)).not.toContain('write_task_note');
+    for (const spec of specs)
+      expect(
+        spec.parameters.properties.map(({ name }) => name),
+        spec.name,
+      ).not.toContain('project');
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        await onToolCall!({
+          requestId: 'req',
+          callId: 'c1',
+          name: 'write_artifact',
+          arguments: JSON.stringify({
+            project: 'eval craftsperson',
+            path: 'p.md',
+            content: 'In scope.',
+          }),
+        });
+        return { text: 'Saved.', stopReason: 'stop' };
+      },
+    );
+    const { store, result } = await runNative(generate);
+    expect((await result).message?.toolCalls?.[0]).toMatchObject({ success: true });
+    expect(await store.readFile('artifacts', 'default', 'p.md')).toBe('In scope.');
+  });
+
+  it('fills the task and step a task session is bound to', async () => {
+    const { store } = portableFixture();
+    await store.ensureLayout();
+    const gezel = await store.createGezel({ name: 'Native tester', role: 'Generalist' });
+    const created = await store.createTask('default', {
+      title: 'Finish task',
+      description: 'Finish this single-step task for the native binding test.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [{ name: 'Finish', terminal: true }],
+    });
+    await store.setTaskStatus(created.ref, 'active');
+    const task = (await store.getTask(created.ref))!;
+    const session = await store.createSession({
+      gezelId: gezel.id,
+      providerName: 'apple-foundation-models',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+    const inventory = await portableToolSurface(store, session);
+    const binding = { teamScope: false, taskRef: task.ref, stepId: task.activeStepId };
+    const advance = nativeToolSpecs(inventory, 'full', binding).find(
+      ({ name }) => name === 'advance_task_step',
+    );
+    expect(advance?.parameters.properties.map(({ name }) => name)).not.toContain('ref');
+    expect(advance?.parameters.properties.map(({ name }) => name)).not.toContain('stepId');
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        const reply = await onToolCall!({
+          requestId: 'req',
+          callId: 'c1',
+          name: 'advance_task_step',
+          arguments: JSON.stringify({ ref: 'tasks/1/', stepId: 'wrong' }),
+        });
+        expect(reply.endTurn).toBe(true);
+        return { text: '', stopReason: 'stop' };
+      },
+    );
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: { providers: async () => [], generate, cancel: async () => {} },
+      requestId: 'req',
+      providerId: 'apple-foundation-models',
+      modelId: 'apple-foundation-models',
+      contextSize: 4096,
+      maxTokens: 1024,
+      nativeTools: binding,
+      messages: [{ role: 'user', content: 'Finish the step.' }],
+      tools: { inventory },
+      actions: {
+        ...actions,
+        completeTask: (ref) => store.completeTaskStep(ref, task.activeStepId!),
+      },
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta: () => {},
+    });
+    expect(result.text).toBe('The task is complete.');
+    expect((await store.getTask(task.ref))?.status).toBe('complete');
+  });
+
+  it("caps each tool result to a share of the model's window", async () => {
+    let output = '';
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        output = (
+          await onToolCall!({
+            requestId: 'req',
+            callId: 'c1',
+            name: 'read_file',
+            arguments: JSON.stringify({ path: 'big.md' }),
+          })
+        ).output;
+        return { text: 'Read.', stopReason: 'stop' };
+      },
+    );
+    const { store } = portableFixture();
+    await store.ensureLayout();
+    await store.writeFile('workspace', 'default', 'big.md', 'x'.repeat(10_000));
+    const gezel = await store.createGezel({ name: 'Native tester', role: 'Helper' });
+    const session = await store.createSession({ gezelId: gezel.id, providerName: 'llama-cpp' });
+    await runPortableToolLoop({
+      store,
+      session,
+      inference: { providers: async () => [], generate, cancel: async () => {} },
+      requestId: 'req',
+      providerId: 'apple-foundation-models',
+      modelId: 'apple-foundation-models',
+      contextSize: 4096,
+      maxTokens: 1024,
+      nativeTools: { teamScope: false },
+      messages: [{ role: 'user', content: 'Read big.md.' }],
+      tools: { inventory: await portableToolSurface(store, session) },
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta: () => {},
+    });
+    expect(output).toContain('[Result truncated; narrow the next request.]');
+    expect(output.length).toBeLessThan(4096 + 200);
+  });
+
+  it('ends the turn when the same call keeps failing the same way', async () => {
+    const replies: Array<{ output: string; endTurn?: boolean }> = [];
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        for (const order of [0, 1, 2]) {
+          const reply = await onToolCall!({
+            requestId: 'req',
+            callId: `c${order}`,
+            name: 'read_file',
+            arguments: JSON.stringify({ path: 'missing.md' }),
+          });
+          replies.push(reply);
+          if (reply.endTurn) break;
+        }
+        return { text: '', stopReason: 'stop' };
+      },
+    );
+    const { result } = await runNative(generate);
+    const done = await result;
+    expect(replies.map(({ endTurn }) => !!endTurn)).toEqual([false, false, true]);
+    expect(done.text).toMatch(/^Stopped: the same read_file call failed three times/);
+    expect(done.message?.toolCalls).toHaveLength(3);
+  });
+
+  it('stops at the action limit', async () => {
+    const generate = vi.fn<PortableInference['generate']>(
+      async (_request, _onDelta, onToolCall) => {
+        for (let call = 0; call < 9; call++)
+          await onToolCall!({
+            requestId: 'req',
+            callId: `c${call}`,
+            name: 'list_dir',
+            arguments: '{}',
+          });
+        return { text: 'Never reached.', stopReason: 'stop' };
+      },
+    );
+    const { result } = await runNative(generate);
+    await expect(result).rejects.toThrow('This turn reached its action limit');
   });
 });

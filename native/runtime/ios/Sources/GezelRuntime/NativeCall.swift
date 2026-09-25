@@ -20,6 +20,10 @@ public final class NativeCall: @unchecked Sendable {
               number.doubleValue >= Double(Int32.min), number.doubleValue <= Double(Int32.max) else { return nil }
         return number.intValue
     }
+    public func getBool(_ key: String) -> Bool? {
+        guard let number = input[key] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
     public func getObject(_ key: String) -> [String: Any]? { input[key] as? [String: Any] }
     public func getArray<T>(_ key: String, _ type: T.Type) -> [T]? { input[key] as? [T] }
     private func takeReply() -> Bool {

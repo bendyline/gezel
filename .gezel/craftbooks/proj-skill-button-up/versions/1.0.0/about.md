@@ -7,8 +7,15 @@ green. You find the failures, fix them at the root, and keep cycling until a
 full pass needs no further edits.
 
 If the branch has an open pull request, its GitHub CI is part of the job
-too: every failing check must end up with a local fix or a clear
-explanation.
+too: every failing check must end up with a local fix.
+
+**Origin does not matter.** Fix every failure a gate or check reports,
+whoever caused it: this session, another session, the user, an earlier
+commit, or `main`. "Pre-existing", "not introduced here", "was already
+red", and "platform-only" describe a failure; none of them is a reason to
+leave it failing. The only failures you may leave are the few that need a
+decision only the user can make (see The loop), and you still diagnose
+those as far as you can.
 
 The gates, in order:
 

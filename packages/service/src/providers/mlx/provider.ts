@@ -140,7 +140,11 @@ import {
   setChatTemplateKwarg,
 } from './chat-protocol.js';
 import { EngineLogRouter } from './engine-log-router.js';
-import { StreamingReasoningSplit } from './reasoning-stream.js';
+import {
+  requestOpensReasoning,
+  StreamingReasoningSplit,
+  type TemplateReasoningOpen,
+} from './reasoning-stream.js';
 import { applyMlxRequestShape } from './request-shape.js';
 import {
   PRE_FIRST_BYTE_BASE_MS,
@@ -309,7 +313,7 @@ export class MlxProvider implements LLMProvider {
    */
   private readonly catalogModelId?: string;
   /** See the constructor option of the same name. */
-  private readonly templateOpensReasoning: boolean = false;
+  private readonly templateOpensReasoning?: TemplateReasoningOpen;
   private readonly activeSessions = new Set<MlxSession>();
   /**
    * Engine stdout → per-session phase events, plus the "is this line fatal?"
@@ -406,10 +410,10 @@ export class MlxProvider implements LLMProvider {
     catalogModelId?: string;
     /**
      * Whether this model's chat template opens a reasoning block as the last
-     * thing it emits. Detected once from the model directory at build time —
-     * see {@link templateOpensReasoning}.
+     * thing it emits, and whether `enable_thinking` controls it. Detected once
+     * from the model directory at build time — see {@link templateOpensReasoning}.
      */
-    templateOpensReasoning?: boolean;
+    templateOpensReasoning?: TemplateReasoningOpen;
   }) {
     if (!opts.supervisor && !opts.baseUrl) {
       throw new Error('[mlx] need either a supervisor or baseUrl');
@@ -427,7 +431,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.modelManager) this.modelManager = opts.modelManager;
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
-    if (opts.templateOpensReasoning) this.templateOpensReasoning = true;
+    if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     // Interactive turns are capped at the memory-safe engine width (`batchMax`);
@@ -679,7 +683,9 @@ export class MlxProvider implements LLMProvider {
       ...(opts.debug ? { debug: opts.debug } : {}),
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
       ...(opts.profile ? { profile: opts.profile } : {}),
-      ...(this.templateOpensReasoning ? { templateOpensReasoning: true } : {}),
+      ...(this.templateOpensReasoning
+        ? { templateOpensReasoning: this.templateOpensReasoning }
+        : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
@@ -843,8 +849,10 @@ interface MlxSessionDeps {
    * thing it emits, so the stream starts mid-thought with only a closing tag
    * to come. Read from the model directory at build time — guessing it from
    * the token stream is exactly the ambiguity that made reasoning leak.
+   * Resolve per request with `requestOpensReasoning`: a switch-aware template
+   * opens nothing when the request turns thinking off.
    */
-  templateOpensReasoning?: boolean;
+  templateOpensReasoning?: TemplateReasoningOpen;
   /** Active craftbook step — passed to anti-spin abort messages. */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -2007,6 +2015,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // waited 90+ seconds. Gated on profile opt-in via
         // `turn.ramble-detection`; per-model thresholds come from
         // the validated config. Absent → detector disabled.
+        //
+        // Read from the request, not only the template: a thinking-off
+        // request renders the block already closed, and seeding from the
+        // template streamed a whole `write_file` call into the reasoning pane.
+        const opensInReasoning = requestOpensReasoning(this.deps.templateOpensReasoning, body);
         const rambleConfig = profileBehaviorConfig<TurnRambleDetectionConfig>(
           this.deps.profile,
           'turn.ramble-detection',
@@ -2030,7 +2043,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // detector an open marker — so without this the whole
               // reasoning block is scored as cold prose. Same flag the
               // StreamingReasoningSplit below is seeded with.
-              opensInReasoning: this.deps.templateOpensReasoning === true,
+              opensInReasoning,
             })
           : // Repetition guard is safe on any local model (fires only on
             // degenerate low-novelty loops); arm it even without the
@@ -2041,7 +2054,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               threshold: 6000,
               enabled: false,
               repetitionGuardEnabled: true,
-              opensInReasoning: this.deps.templateOpensReasoning === true,
+              opensInReasoning,
             });
         let rambleAborted = false;
         // Single-call turn: stop the stream once the one usable call is
@@ -2066,7 +2079,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // otherwise render thinking as the answer. This is the dedicated
         // reasoning channel llama.cpp and ds4 get from their engines.
         const reasoningSplit = new StreamingReasoningSplit({
-          opensInReasoning: this.deps.templateOpensReasoning === true,
+          opensInReasoning,
           enabled: this.deps.profile?.style.reasoningFormat !== 'none',
         });
         // Throttle live phase emissions during generation so we don't

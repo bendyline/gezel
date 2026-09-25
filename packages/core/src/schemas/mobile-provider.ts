@@ -19,7 +19,8 @@ export const MobileProviderSchema = z
     capabilities: z
       .object({
         text: z.literal(true),
-        tools: z.literal(false),
+        /** Native tool calling (`PortableInference.generate` tools); text engines use the envelope protocol. */
+        tools: z.boolean(),
         structuredOutput: z.literal(false),
         images: z.literal(false),
         foregroundOnly: z.literal(true),

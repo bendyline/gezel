@@ -15,8 +15,20 @@ const CLOSE_MARKERS = ['</think>', '</reasoning>', '[/THINK]', '<|end|>'] as con
 const MAX_MARKER_LENGTH = Math.max(...CLOSE_MARKERS.map((marker) => marker.length));
 
 /**
+ * How a chat template's generation prompt leaves the model inside a reasoning
+ * block:
+ *
+ *  - `always` — the opener is unconditional (DeepSeek-R1 distills).
+ *  - `unless-thinking-off` — the generation branch reads `enable_thinking`, so
+ *    the opener depends on the request. Qwen 3.x renders a bare `<think>\n`
+ *    when it is on and a closed, empty `<think>\n\n</think>\n\n` when it is off.
+ */
+export type TemplateReasoningOpen = 'always' | 'unless-thinking-off';
+
+/**
  * Whether the model's chat template opens a reasoning block as the last thing
- * it emits before the model starts generating.
+ * it emits before the model starts generating, and whether that depends on
+ * `enable_thinking`.
  *
  * Qwen-family templates end their generation prompt with a bare `<think>`, so
  * the model's output begins *inside* reasoning and the only tag that ever
@@ -26,10 +38,10 @@ const MAX_MARKER_LENGTH = Math.max(...CLOSE_MARKERS.map((marker) => marker.lengt
  * leaking chain-of-thought as answer text or withholding an answer that may
  * never have had a reasoning block at all.
  *
- * Unreadable or unrecognized templates return false — the caller then only
+ * Unreadable or unrecognized templates return undefined — the caller then only
  * splits on explicit paired tags, which is unambiguous.
  */
-export function templateOpensReasoning(modelDir: string): boolean {
+export function templateOpensReasoning(modelDir: string): TemplateReasoningOpen | undefined {
   let template: string;
   try {
     template = readFileSync(join(modelDir, 'chat_template.jinja'), 'utf8');
@@ -38,11 +50,11 @@ export function templateOpensReasoning(modelDir: string): boolean {
       const config = JSON.parse(readFileSync(join(modelDir, 'tokenizer_config.json'), 'utf8')) as {
         chat_template?: unknown;
       };
-      if (typeof config.chat_template !== 'string') return false;
+      if (typeof config.chat_template !== 'string') return undefined;
       template = config.chat_template;
     } catch (err) {
       log.debug(`chat template unreadable in ${modelDir}: ${String(err)}`);
-      return false;
+      return undefined;
     }
   }
   return templateTextOpensReasoning(template);
@@ -55,9 +67,9 @@ export function templateOpensReasoning(modelDir: string): boolean {
  * `add_generation_prompt` — because an opener anywhere else belongs to a
  * *replayed* assistant turn rather than the one about to be generated.
  */
-export function templateTextOpensReasoning(template: string): boolean {
+export function templateTextOpensReasoning(template: string): TemplateReasoningOpen | undefined {
   const generationBranch = template.lastIndexOf('add_generation_prompt');
-  if (generationBranch === -1) return false;
+  if (generationBranch === -1) return undefined;
   const tail = template.slice(generationBranch);
   // The opener must be the last literal the template emits. Anything after it
   // (a closing tag, more prose) means the block is already balanced.
@@ -66,8 +78,30 @@ export function templateTextOpensReasoning(template: string): boolean {
   for (let match = opener.exec(tail); match; match = opener.exec(tail)) {
     lastOpenerEnd = match.index + match[0].length;
   }
-  if (lastOpenerEnd === -1) return false;
-  return !/<\/think>|<\/reasoning>|\[\/THINK\]/i.test(tail.slice(lastOpenerEnd));
+  if (lastOpenerEnd === -1) return undefined;
+  if (/<\/think>|<\/reasoning>|\[\/THINK\]/i.test(tail.slice(lastOpenerEnd))) return undefined;
+  return /\benable_thinking\b/.test(tail) ? 'unless-thinking-off' : 'always';
+}
+
+/**
+ * Whether THIS request's generation starts inside a reasoning block.
+ *
+ * The template fact alone is not enough: every constrained write turn, and
+ * every turn under a tuning profile with `enableThinking: false`, sends
+ * `enable_thinking: false`. A switch-aware template then closes the block in
+ * the prompt itself, so no close marker ever streams — and a splitter seeded
+ * from the template alone routed the whole reply, `write_file` markup and all,
+ * into the reasoning pane. Absent means on, matching the engine's default.
+ */
+export function requestOpensReasoning(
+  templateOpen: TemplateReasoningOpen | undefined,
+  body: Record<string, unknown>,
+): boolean {
+  if (templateOpen === undefined) return false;
+  if (templateOpen === 'always') return true;
+  const kwargs = body.chat_template_kwargs;
+  if (!kwargs || typeof kwargs !== 'object' || Array.isArray(kwargs)) return true;
+  return (kwargs as Record<string, unknown>).enable_thinking !== false;
 }
 
 export interface ReasoningSplitChunk {

@@ -1308,6 +1308,11 @@ export interface ConfigResponse {
    * speaking gezel's per-character voice. Opt-in; default `false`.
    */
   narrateAssistantReplies?: boolean;
+  /**
+   * Also narrate the short updates a gezel gives between tool calls, not
+   * only its final reply. Default `true`; inert while narration is off.
+   */
+  narrateProgressUpdates?: boolean;
   /** Catalog id of the whisper.cpp model transcription runs on. */
   defaultSttModel?: string;
   /** Preferred browser microphone for prompt narration. */

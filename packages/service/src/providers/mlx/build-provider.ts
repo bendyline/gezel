@@ -436,7 +436,7 @@ export async function buildMlxProvider(opts: {
   const mlxGeometry = modelDir ? readMlxModelGeometry(modelDir) : undefined;
   // Read once per provider build: whether the chat template leaves a reasoning
   // block open, so a streamed turn starts mid-thought.
-  const opensReasoning = modelDir ? templateOpensReasoning(modelDir) : false;
+  const opensReasoning = modelDir ? templateOpensReasoning(modelDir) : undefined;
   const mlxExactPerSlotKvF16 = mlxGeometry
     ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
     : undefined;
@@ -787,7 +787,7 @@ export async function buildMlxProvider(opts: {
     // warm and avoids the offline-fetch attempt entirely.
     defaultModel: modelDir,
     numCtx: effectiveNumCtx,
-    ...(opensReasoning ? { templateOpensReasoning: true } : {}),
+    ...(opensReasoning ? { templateOpensReasoning: opensReasoning } : {}),
     ...(opts.mlxModels ? { modelManager: opts.mlxModels } : {}),
     ...(modelCatalogInfo ? { modelDisplayName: modelCatalogInfo.name } : {}),
     // Catalog id, distinct from `defaultModel` (the on-disk path).

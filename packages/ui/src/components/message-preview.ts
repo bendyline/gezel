@@ -180,3 +180,32 @@ export function humanMessagePreview(raw: string): string {
   if (IMAGE_MARKDOWN.test(visible)) return 'Shared an image';
   return '';
 }
+
+/**
+ * The words a narrator should say for an assistant message, or `''` when
+ * nothing speakable is left.
+ *
+ * Same scrub as {@link humanMessagePreview}, minus its translations: a voice
+ * saying "Using a tool" after every call is noise, not narration. Code blocks
+ * are dropped outright — nobody wants a listing read aloud — and each line
+ * ends in a pause, because the speech engine splits on sentence punctuation
+ * and a list flattened onto one line otherwise runs together into one breath.
+ */
+export function speakableMessageText(raw: string): string {
+  if (!raw) return '';
+  const reasoningAt = raw.search(UNCLOSED_REASONING);
+  const visible = reasoningAt === -1 ? raw : raw.slice(0, reasoningAt);
+  const lines = stripJsonToolEnvelopes(
+    stripVisibleToolCallMarkup(visible, { hideMidStreamOpener: true }),
+  )
+    .replace(/```[\s\S]*?(?:```|$)/g, '\n')
+    // Orphan closers and stray protocol tags the paired-markup scrub leaves.
+    .replace(/<\/?[A-Za-z|][^<>\n]*>/g, ' ')
+    .replace(/^\s*\|?[\s:|-]*-{3,}[\s:|-]*$/gm, '')
+    .replace(/\|/g, ' ')
+    .split(/\n+/)
+    .map((line) => flattenMessageMarkdown(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')))
+    .filter(Boolean);
+  const spoken = lines.map((line) => (/[.!?:;,…]$/.test(line) ? line : `${line}.`)).join(' ');
+  return /\p{L}/u.test(spoken) ? spoken : '';
+}

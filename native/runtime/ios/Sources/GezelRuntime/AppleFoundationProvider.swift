@@ -54,9 +54,37 @@ enum AppleFoundationProvider {
         }
     }
 
+    /// `tools` run inside Apple's own tool loop and call back through `invoke`,
+    /// where the app's shared tool loop records and executes each call. A tool
+    /// ending the turn (a handoff, a question) stops generation as a normal stop.
+    /// Apple's generation errors carry no user-facing description ("error -1").
+    @available(iOS 26.0, *)
+    static func described(_ error: Error) -> Error {
+        guard let error = error as? LanguageModelSession.GenerationError else { return error }
+        NSLog("[GezelRuntime] Apple on-device generation failed: %@", String(describing: error))
+        switch error {
+        case .exceededContextWindowSize:
+            return MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.")
+        case .guardrailViolation:
+            return MobileInferenceError(code: "GUARDRAIL", message: "Apple on-device AI's safety guardrails declined this request.")
+        case .decodingFailure:
+            return MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI produced a response or tool call it could not complete.")
+        case .assetsUnavailable:
+            return MobileInferenceError(code: "UNAVAILABLE", message: "Apple's on-device model is not ready. iOS manages its download and preparation.")
+        case .rateLimited, .concurrentRequests:
+            return MobileInferenceError(code: "BUSY", message: "Apple on-device AI is busy. Try again in a moment.")
+        case .unsupportedLanguageOrLocale:
+            return MobileInferenceError(code: "UNSUPPORTED", message: "Apple on-device AI does not support this language.")
+        default:
+            return MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI could not complete this response.")
+        }
+    }
+
     @available(iOS 26.0, *)
     static func generate(
         turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
+        tools toolSpecs: [[String: Any]] = [],
+        invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply = { _, _ in throw CancellationError() },
         onDelta: (String) throws -> Void
     ) async throws -> String {
         let readiness = availability()
@@ -87,24 +115,37 @@ enum AppleFoundationProvider {
                 throw MobileInferenceError(code: "INVALID_ARGUMENT", message: "Unsupported conversation role.")
             }
         }
-        if !instructions.isEmpty {
-            entries.insert(.instructions(.init(segments: [.text(.init(content: instructions.joined(separator: "\n\n")))], toolDefinitions: [])), at: 0)
+        guard toolSpecs.count <= 64 else {
+            throw MobileInferenceError(code: "INVALID_ARGUMENT", message: "Too many tools for one request.")
+        }
+        let tools = try toolSpecs.map { try AppleBridgedTool($0, invoke: invoke) }
+        guard Set(tools.map(\.name)).count == tools.count else {
+            throw MobileInferenceError(code: "INVALID_ARGUMENT", message: "Tool names must be unique.")
+        }
+        if !instructions.isEmpty || !tools.isEmpty {
+            // The model reads tool definitions from the instructions entry, as
+            // LanguageModelSession(tools:instructions:) arranges them itself.
+            entries.insert(.instructions(.init(
+                segments: instructions.isEmpty ? [] : [.text(.init(content: instructions.joined(separator: "\n\n")))],
+                toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) })), at: 0)
         }
         let model = SystemLanguageModel.default
         let finalEntry = Transcript.Entry.prompt(.init(segments: [.text(.init(content: final.content))]))
         let promptTokens: Int
         if #available(iOS 26.4, *) {
+            // Counting the transcript includes the tool definitions it carries.
             promptTokens = try await model.tokenCount(for: entries + [finalEntry])
         } else {
             // Older systems expose no tokenizer. UTF-8 bytes plus entry overhead
             // conservatively bound this adapter's admission; no history is cut.
-            promptTokens = turns.reduce(0, { $0 + $1.content.utf8.count + 32 })
+            let toolBytes = (try? JSONSerialization.data(withJSONObject: toolSpecs).count) ?? 0
+            promptTokens = turns.reduce(toolBytes, { $0 + $1.content.utf8.count + 32 })
         }
         try requireContextBudget(promptTokens: promptTokens, maxTokens: maxTokens, contextSize: contextSize, modelContext: readiness.contextTokens)
         try Task.checkCancellation()
         // Fresh state on every turn. All prior messages come from the durable
         // app transcript; no hidden provider session can drift after restart.
-        let session = LanguageModelSession(model: model, tools: [], transcript: Transcript(entries: entries))
+        let session = LanguageModelSession(model: model, tools: tools, transcript: Transcript(entries: entries))
         let stream = session.streamResponse(to: final.content, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maxTokens))
         var text = ""
         var reachedTokenLimit = false
@@ -132,10 +173,17 @@ enum AppleFoundationProvider {
                     reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
                 }
             }
+        } catch let error as LanguageModelSession.ToolCallError where error.underlyingError is NativeToolTurnEnded {
+            // The app ended the turn after a tool result; nothing was revised.
+            await awaitProviderRelease()
+            try Task.checkCancellation()
+            return "stop"
         } catch {
             withUnsafeCurrentTask { $0?.cancel() }
             await awaitProviderRelease()
-            throw error
+            // Overflow while appending a tool's output surfaces as that tool's error.
+            if let error = error as? LanguageModelSession.ToolCallError { throw described(error.underlyingError) }
+            throw described(error)
         }
         await awaitProviderRelease()
         try Task.checkCancellation()

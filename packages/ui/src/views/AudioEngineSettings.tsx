@@ -30,6 +30,7 @@ export function AudioEngineSettings() {
   >({ kind: 'idle' });
   const [defaultSttModel, setDefaultSttModel] = useState<string | undefined>(undefined);
   const [narrate, setNarrate] = useState<boolean>(false);
+  const [narrateProgress, setNarrateProgress] = useState<boolean>(true);
   const [narrateSaving, setNarrateSaving] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -45,6 +46,7 @@ export function AudioEngineSettings() {
       setVoices(v.voices);
       setSttModels(installed?.models ?? []);
       setNarrate(cfg.narrateAssistantReplies ?? false);
+      setNarrateProgress(cfg.narrateProgressUpdates !== false);
       setDefaultSttModel(cfg.defaultSttModel);
       setStatusError(null);
     } catch (err) {
@@ -57,22 +59,37 @@ export function AudioEngineSettings() {
     void refresh();
   }, [refresh]);
 
-  const onToggleNarrate = useCallback(async (next: boolean) => {
-    setNarrateSaving(true);
-    setNarrate(next);
-    try {
-      const res = await api.updateConfig({ narrateAssistantReplies: next });
-      // Fan out so any open chat surfaces pick up the change live without
-      // a route change. Same channel SettingsView uses for boring mode.
-      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-    } catch (err) {
-      // Revert the optimistic update if the save fails.
-      setNarrate(!next);
-      setStatusError((err as Error).message);
-    } finally {
-      setNarrateSaving(false);
-    }
-  }, []);
+  const saveNarration = useCallback(
+    async (
+      patch: { narrateAssistantReplies: boolean } | { narrateProgressUpdates: boolean },
+      apply: (value: boolean) => void,
+      next: boolean,
+    ) => {
+      setNarrateSaving(true);
+      apply(next);
+      try {
+        const res = await api.updateConfig(patch);
+        // Fan out so any open chat surfaces pick up the change live without
+        // a route change. Same channel SettingsView uses for boring mode.
+        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+      } catch (err) {
+        // Revert the optimistic update if the save fails.
+        apply(!next);
+        setStatusError((err as Error).message);
+      } finally {
+        setNarrateSaving(false);
+      }
+    },
+    [],
+  );
+  const onToggleNarrate = useCallback(
+    (next: boolean) => saveNarration({ narrateAssistantReplies: next }, setNarrate, next),
+    [saveNarration],
+  );
+  const onToggleNarrateProgress = useCallback(
+    (next: boolean) => saveNarration({ narrateProgressUpdates: next }, setNarrateProgress, next),
+    [saveNarration],
+  );
 
   const onSetActiveSttModel = useCallback(
     async (id: string) => {
@@ -217,6 +234,21 @@ export function AudioEngineSettings() {
                 Narrate assistant replies
                 <span className="muted small" style={{ marginLeft: '0.5rem' }}>
                   — speak each completed gezel reply aloud using that gezel's voice.
+                </span>
+              </span>
+            </label>
+            <label className="provider-row" style={{ marginLeft: '1.5rem' }}>
+              <input
+                type="checkbox"
+                checked={narrateProgress}
+                disabled={narrateSaving || !narrate}
+                onChange={(e) => void onToggleNarrateProgress(e.target.checked)}
+              />
+              <span>
+                Include progress updates
+                <span className="muted small" style={{ marginLeft: '0.5rem' }}>
+                  — also speak the short notes a gezel gives while it works, like "Now I'll draft
+                  the outline."
                 </span>
               </span>
             </label>

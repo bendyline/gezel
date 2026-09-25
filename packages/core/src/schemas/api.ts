@@ -905,6 +905,12 @@ export const GezelConfigSchema = z.object({
    */
   narrateAssistantReplies: z.boolean().optional(),
   /**
+   * Sub-option of {@link narrateAssistantReplies}: also speak the short
+   * updates a gezel gives between tool calls, not only the reply it ends
+   * its turn with. Defaults to `true`; has no effect while narration is off.
+   */
+  narrateProgressUpdates: z.boolean().optional(),
+  /**
    * Catalog id of the whisper.cpp model transcription runs on. whisper-server
    * binds one model per process, so this is the model the engine launches
    * with. Unset (or naming a model that is no longer installed) falls back to

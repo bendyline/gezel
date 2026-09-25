@@ -42,6 +42,7 @@ import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
+import { roleHasTeamScope } from '../tools/access.js';
 import { ChatEventBus } from './chat-events.js';
 import type { PortableContent } from './content.js';
 import { portableConversationHistory } from './conversation-history.js';
@@ -77,6 +78,7 @@ import { evaluatePortableTaskGate } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
+  type NativeToolBinding,
   type PortableToolListing,
   type PortableToolSpec,
   runPortableToolLoop,
@@ -722,7 +724,23 @@ export class PortableProductService {
       this.turn = turn;
       this.publishStatus();
       this.emit(session, { type: 'user_message', message: user });
-      turn.finished = this.runTurn(turn, providerId, input, { modelId, ...limits }, inventoryTools);
+      turn.finished = this.runTurn(
+        turn,
+        providerId,
+        input,
+        {
+          modelId,
+          ...limits,
+          nativeTools: provider.capabilities.tools
+            ? {
+                teamScope: roleHasTeamScope(context.gezel.role, context.project.mode),
+                taskRef: session.taskRef,
+                stepId: session.stepId,
+              }
+            : undefined,
+        },
+        inventoryTools,
+      );
       return { accepted: true, sessionId: id };
     } finally {
       if (!ownsTurn && admission.cancelled && savedSession?.turnStartedAt) {
@@ -764,7 +782,12 @@ export class PortableProductService {
     turn: Turn,
     providerId: MobileProviderId,
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-    limits: { modelId: string; contextSize: number; maxTokens: number },
+    limits: {
+      modelId: string;
+      contextSize: number;
+      maxTokens: number;
+      nativeTools?: NativeToolBinding;
+    },
     inventory: readonly PortableToolSpec[],
   ): Promise<void> {
     const { session } = turn;
