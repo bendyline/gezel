@@ -174,6 +174,11 @@ $cmakeFlags += @(
   '-DLLAMA_BUILD_TESTS=OFF',
   '-DLLAMA_BUILD_EXAMPLES=OFF',
   '-DLLAMA_CURL=OFF',
+  # No embedded web UI: the prebuilt bundle is an unpinned build-time download
+  # of ~160 npm packages for a page gezel never serves (`--no-webui`). Mirrors
+  # build.sh.
+  '-DLLAMA_BUILD_UI=OFF',
+  '-DLLAMA_USE_PREBUILT_UI=OFF',
   # No OpenSSL. This gates cpp-httplib's CPPHTTPLIB_OPENSSL_SUPPORT -
   # llama-server terminating TLS itself - which gezel never uses: the
   # engine is spawned on loopback and spoken to over plain HTTP.

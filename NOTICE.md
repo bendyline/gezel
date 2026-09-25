@@ -204,8 +204,8 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`) | tag `v0.4.1` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
-| **ggml** (`libggml*` — Metal/BLAS/CPU/RPC backends) | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
+| **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v0.4.1` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **ggml** (`libggml*` — CPU, Metal and BLAS on macOS, CUDA, Vulkan backends) | bundled with llama.cpp, whisper.cpp, and stable-diffusion.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `8db1d1d1` (`main-2026-09-16`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-919-19bbbca` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
@@ -213,10 +213,19 @@ copies and their engine- and helper-aware manifest live in
 | **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 | **AMD Display Library (ADL) SDK headers** (ABI definitions compiled into Windows `gezel-device-health.exe`; no AMD binary redistributed) | `18.0` | MIT | [GPUOpen-LibrariesAndSDKs/display-library](https://github.com/GPUOpen-LibrariesAndSDKs/display-library) |
 
-The `ggml` compute library is vendored as a submodule of both
-llama.cpp and whisper.cpp and is compiled into the shared libraries
-that ship beside those servers; its MIT license travels with those
-binaries. `uv` is used only to bootstrap the managed Python venv for
+The `ggml` compute library is an in-tree copy inside llama.cpp and
+whisper.cpp and a submodule (leejet's fork) inside stable-diffusion.cpp. It is
+compiled into the libraries and binaries that ship with each engine, and its
+MIT license travels with them. ggml carries code under its own notices, compiled
+into every ggml engine: a **YaRN** RoPE implementation (MIT, © 2023 Jeffrey
+Quesnelle and Bowen Peng), FP16 conversion from **Maratyszcza/FP16** (MIT,
+© 2017 Facebook Inc., 2017 Georgia Institute of Technology, 2019 Google LLC),
+and vector math adapted from **Arm Optimized Routines** (MIT OR Apache-2.0 WITH
+LLVM-exception, © Arm Limited). CUDA builds of llama.cpp and
+stable-diffusion.cpp also compile NVIDIA's **CUB** (BSD-3-Clause, © Duane
+Merrill and NVIDIA) from the CUDA toolkit, and Vulkan builds compile the
+Khronos **Vulkan-Headers** (Apache-2.0 OR MIT). The license texts these notices
+require ship in `native/licenses/` with every native artifact. `uv` is used only to bootstrap the managed Python venv for
 the MLX provider — the MLX framework and `mlx-vlm` are installed into
 that venv at runtime (Apache-2.0/MIT) and are not bundled. The `duckdb` CLI —
 the query engine for observation corpora — is listed under **Bundled
@@ -248,12 +257,44 @@ NVIDIA's `libcudart`/`libcublas` runtime libraries — see the proprietary-
 components note below (the same NVIDIA redistributables llama.cpp's CUDA
 variant ships).
 
-The **stable-diffusion.cpp** `sd-server` binary statically incorporates two
-libraries upstream vendors for Hugging Face tokenizer support:
-**Oniguruma** 6.9.10 (BSD-2-Clause, © K.Kosako) and **utf8proc** (MIT, whose
-`utf8proc_data.c` is derived from Unicode data files under the Unicode data
-license). Their texts ship in `native/licenses/` with every sd-server
-artifact.
+**llama.cpp**, **whisper.cpp**, and **stable-diffusion.cpp** all compile
+**cpp-httplib** (MIT, © yhirose) and **nlohmann/json** (MIT, © Niels Lohmann)
+into their servers; nlohmann/json embeds Björn Hoehrmann's UTF-8 decoder (MIT,
+© 2008-2009 Björn Hoehrmann) and Florian Loitsch's Grisu2 (MIT, © 2009 Florian
+Loitsch).
+
+**llama.cpp** also compiles in **llamafile**'s sgemm kernels (MIT, © 2024
+Mozilla Foundation) in every CPU backend; image resampling adapted from
+**Pillow** (MIT-CMU, © Secret Labs AB, Fredrik Lundh, Jeffrey A. Clark and
+contributors) and **rotate-bits** (MIT, © 2021 William Casarin) in `libmtmd`;
+and Unicode data tables generated from the Unicode Character Database
+(Unicode-3.0). The linux-arm64 SVE CPU variants add an `exp` routine borrowed
+from Intel's **OpenVINO** (Apache-2.0). Its stb_image, miniaudio,
+`subprocess.h`, base64, and sha256 code are public domain or MIT-0 and carry no
+notice requirement.
+
+**whisper.cpp** decodes audio with **miniaudio** (including dr_wav, dr_flac, and
+dr_mp3, which builds on minimp3) and **stb_vorbis**. We take these under their
+public-domain, MIT-0, and CC0 options, which carry no notice requirement.
+
+The **stable-diffusion.cpp** `sd-server` binary additionally incorporates
+**Oniguruma** 6.9.10 (BSD-2-Clause, © K.Kosako) and **utf8proc** (MIT, with
+`utf8proc_data.c` derived from Unicode data under the Unicode license) for
+Hugging Face tokenizers; **libwebp** and **libwebm** (BSD-3-Clause plus Google's
+patent grants, © Google) for WebP and WebM output; **darts-clone**
+(BSD-2-Clause, © Susumu Yata); **kuba--/zip** (MIT) with **miniz** (MIT, © RAD
+Game Tools, Valve Software, Rich Geldreich, and Tenacious Software); a unigram
+tokenizer ported from Google's **sentencepiece** (Apache-2.0); and interpolation
+helpers from **NumCpp** (MIT, © David Pilger). Its stb_image, stb_image_write,
+and stb_image_resize code is taken under the public-domain option. CUDA builds
+also compile **SageAttention** kernels (Apache-2.0, © Jintao Zhang and Haofeng
+Huang), parts of which are adapted from FlashInfer (Apache-2.0, © FlashInfer
+team). The binary embeds tokenizer vocabularies: CLIP's BPE merges (MIT, © 2021
+OpenAI), the T5 and UMT5 tokenizers (Apache-2.0, Google), Qwen2 merges
+(Apache-2.0, Alibaba Cloud), a Mistral tokenizer (Apache-2.0, Mistral AI), and
+the Gemma 3 tokenizer, which Google distributes with Gemma under the Gemma Terms
+of Use. `LICENSE-stable-diffusion-cpp-APACHE-2.0.txt` is the Apache-2.0 text for
+sentencepiece and the tokenizer data.
 
 The DeepSeek-V4 model **weights** ds4 runs are not bundled — they are
 downloaded on demand from Hugging Face (`antirez/deepseek-v4-gguf`, MIT) and
