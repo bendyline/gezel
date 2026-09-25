@@ -7,7 +7,10 @@ export const DEFAULT_UI_STARTUP_BUDGET = Object.freeze({
   // The pre-review graph was 3.41 MB gzip; the first navigation-boundary pass
   // brought it below 0.9 MB. Keep modest headroom for ordinary work while
   // preventing large features from silently re-entering the shell.
-  jsGzipBytes: 950_000,
+  // Raised from 950_000 for Squisq 2.11.8, whose media-edit schema, narrated
+  // segment transform, and animated-image inspection reach the startup graph
+  // (~959 KB); moving those behind a lazy boundary upstream is the follow-up.
+  jsGzipBytes: 975_000,
   cssGzipBytes: 80_000,
   resourceCount: 44,
   forbiddenAssetNames: [/(?:^|\/)(?:pdf|docx|pptx|jszip|standalone-source)[-.]/i],
