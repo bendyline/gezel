@@ -101,7 +101,7 @@ describe('transformText', () => {
       opts.onDelta?.('<think>considering tone</think>');
       opts.onDelta?.('Result ');
       opts.onDelta?.('text.');
-      return '```markdown\nResult text.\n```';
+      return '<think>final reasoning</think>\n```markdown\nResult text.\n```';
     });
     const result = await transformText(
       manager,

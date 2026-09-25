@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CRAFTBOOK_INVOCATION_KEY_PREFIX, invocationSignature } from '@bendyline/gezel';
 
 export interface RootTurnMessage {
   role: 'user' | 'assistant';
@@ -21,29 +22,14 @@ export function rootTurnIdFromMessages(
   return null;
 }
 
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, entry]) => entry !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, entry]) => [key, canonicalize(entry)]),
-    );
-  }
-  return value;
-}
-
-export function invocationSignature(invocation: Readonly<Record<string, unknown>>): string {
-  return JSON.stringify(canonicalize(invocation));
-}
+export { invocationSignature };
 
 /** Durable, opaque key passed to task creation for cross-process dedupe. */
 export function rootTurnInvocationKey(
   rootTurnId: string,
   invocation: Readonly<Record<string, unknown>>,
 ): string {
-  return `craftbook-root-v1:${createHash('sha256')
+  return `${CRAFTBOOK_INVOCATION_KEY_PREFIX}${createHash('sha256')
     .update(rootTurnId)
     .update('\n')
     .update(invocationSignature(invocation))

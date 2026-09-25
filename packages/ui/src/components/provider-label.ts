@@ -68,6 +68,10 @@ export function providerLabel(
 ): string {
   const compact = opts.compact ?? false;
   switch (provider) {
+    case 'apple-foundation-models':
+      return 'Apple Intelligence';
+    case 'android-mlkit':
+      return 'Android system AI';
     case 'copilot':
       return 'Copilot';
     case 'openai':

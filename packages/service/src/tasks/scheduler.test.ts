@@ -1422,11 +1422,28 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     // lets a doomed self-message through and relies on the sweep's
     // catch-and-warn is indistinguishable from a clean skip without this.
     const attempts: Array<{ fromGezelId: string; toGezelIdOrName: string }> = [];
+    // Runtime-authored nudges, for steps owned by the would-be sender.
+    const nudged: Array<{ gezelId: string; taskRef: string; stepId: string; text: string }> = [];
     let activeGezels = new Set<string>();
     let projectActive = false;
     return {
       delivered,
       attempts,
+      nudged,
+      nudgeTaskStep: async (args: {
+        gezelId: string;
+        taskRef: string;
+        stepId: string;
+        text: string;
+      }) => {
+        nudged.push({
+          gezelId: args.gezelId,
+          taskRef: args.taskRef,
+          stepId: args.stepId,
+          text: args.text,
+        });
+        return { sessionId: 'mock' };
+      },
       setActiveGezels(ids: string[]) {
         activeGezels = new Set(ids);
       },
@@ -1611,7 +1628,7 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered.filter((d) => d.taskRef === parent.ref)).toHaveLength(1);
   });
 
-  it('skips the re-drive when the voorman IS the assignee under a different spelling', async () => {
+  it('nudges the step itself when the voorman IS the assignee under a different spelling', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     // Wild-caught on `space-invaders-clone/2`: the project's voorman was
     // stored as the slug `alejandro` while the task's assignee kept the
@@ -1620,16 +1637,54 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     // resolves the name and threw `cannot message yourself`. Nothing
     // about that is transient, so the sweep re-threw every 30s forever.
     await setProjectVoorman('alejandro');
-    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000, gezel: 'Alejandro' });
+    const { num, entryStepId } = await makeStalledTask({
+      now,
+      agoMs: 30 * 60_000,
+      gezel: 'Alejandro',
+    });
     const chat = fakeChat();
     await makeScheduler(chat, now).sweepStuckSteps();
-    // Skipped cleanly — the self-message is never even ATTEMPTED. Asserting
-    // on `delivered` alone would pass against the old guard too, since the
-    // throw was swallowed by the sweep's per-task catch.
+    // The self-message is never even ATTEMPTED — asserting on `delivered`
+    // alone would pass against a guard that threw, since the sweep's
+    // per-task catch swallows it.
     expect(chat.attempts).toHaveLength(0);
     expect(chat.delivered).toHaveLength(0);
+    // …but the step is still re-driven, by the runtime, and the re-drive
+    // counts. Skipping it outright left the step with no path to escalation.
+    expect(chat.nudged).toEqual([
+      expect.objectContaining({
+        gezelId: 'alejandro',
+        taskRef: `cron/${num}`,
+        stepId: entryStepId,
+      }),
+    ]);
     const rec = await store.readTask('cron', num);
-    expect(rec!.craftbook.steps[0]!.redriveCount ?? 0).toBe(0);
+    expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
+  });
+
+  // The Meester is both the sweep's fallback sender and the natural owner of
+  // a Default-project step, so it hit the self-message skip every time.
+  it('escalates a Meester-owned step in a project with no voorman', async () => {
+    // recordStepRedrive stamps the real clock, so the sweep's clock must be
+    // real-based for the next tick to read the step as stale again.
+    let now = new Date();
+    await store.writeConfig({ meesterGezelId: 'zephyr' });
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000, gezel: 'zephyr' });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+    });
+    for (let tick = 0; tick < 10; tick += 1) {
+      if ((await store.readTask('cron', num))?.status !== 'active') break;
+      await scheduler.sweepStuckSteps();
+      now = new Date(now.getTime() + 60 * 60_000);
+    }
+    expect(chat.attempts).toHaveLength(0);
+    expect(chat.nudged.length).toBeGreaterThan(0);
+    expect((await store.readTask('cron', num))?.status).toBe('paused');
   });
 
   it('skips the re-drive when the project has an unanswered user question', async () => {
@@ -1652,6 +1707,39 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered).toHaveLength(0);
     const rec = await store.readTask('cron', num);
     expect(rec!.craftbook.steps[0]!.redriveCount ?? 0).toBe(0);
+  });
+
+  it("does not let another chat's or another task's question freeze the re-drive", async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    // The Meester asking the user something in its front-door chat — which
+    // lives in Default alongside Meester-run craftbooks.
+    await store.writeQuestion({
+      id: 'q-front-door',
+      projectId: 'cron',
+      gezelId: 'zephyr',
+      sessionId: 'sess-meester',
+      prompt: 'Want me to set up a project for that?',
+      createdAt: now.toISOString(),
+    });
+    // The step's own gezel, waiting on the user about a different task.
+    await store.writeQuestion({
+      id: 'q-other-task',
+      projectId: 'cron',
+      gezelId: 'freja',
+      sessionId: 'sess-freja-other',
+      prompt: 'Which palette for the other deck?',
+      taskRef: 'cron/999',
+      createdAt: now.toISOString(),
+    });
+
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+
+    expect(chat.delivered).toHaveLength(1);
+    const rec = await store.readTask('cron', num);
+    expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
   });
 
   it('does not let an unanswered notification card freeze unrelated task re-drives', async () => {
@@ -1804,15 +1892,17 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
   it('pauses for help instead of re-driving into a session whose last turn aborted', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setProjectVoorman('leo');
-    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
-    // The assignee's only session aborted its last turn: a re-drive would
-    // land there and replay the failure, and returning silently left an
-    // active task dead for ninety minutes (invoice-run, 2026-09-18).
+    const { num, entryStepId } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    // The step's own thread aborted its last turn: a re-drive would land
+    // there and replay the failure, and returning silently left an active
+    // task dead for ninety minutes (invoice-run, 2026-09-18).
     await store.writeSession({
       version: 1,
       id: 'freja-poisoned',
       gezelId: 'freja',
       projectId: 'cron',
+      taskRef: `cron/${num}`,
+      stepId: entryStepId,
       providerName: 'copilot',
       title: 'Scope',
       createdAt: new Date(now.getTime() - 25 * 60_000).toISOString(),
@@ -1826,6 +1916,32 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     await makeScheduler(chat, now).sweepStuckSteps();
     expect(chat.delivered).toHaveLength(0);
     expect((await store.readTask('cron', num))!.status).toBe('paused');
+  });
+
+  // The re-drive lands in the step's own thread, so only that thread's
+  // failure predicts a replay. In Default an assignee's newest session is
+  // often an unrelated Meester consultation.
+  it('re-drives past a failed session that is not the step thread', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    await store.writeSession({
+      version: 1,
+      id: 'freja-consult',
+      gezelId: 'freja',
+      projectId: 'cron',
+      providerName: 'copilot',
+      title: 'Quick question',
+      createdAt: new Date(now.getTime() - 25 * 60_000).toISOString(),
+      lastActivityAt: new Date(now.getTime() - 20 * 60_000).toISOString(),
+      messages: [],
+      providerState: {},
+      lastTurnError: '[Mac AI] the on-device engine dropped the connection',
+    });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(1);
+    expect((await store.readTask('cron', num))!.status).toBe('active');
   });
 
   it('pauses the task for a human once the re-drive budget is spent', async () => {

@@ -1,0 +1,70 @@
+/* The shared file browser measures its own width, so the desktop mobile
+   preview and the native shell follow the same list → document flow. */
+.project-files-layout.has-tree-grip.is-narrow,
+.project-files-layout.has-tree-grip.is-narrow.has-index-pane {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.project-files-layout.is-narrow > [hidden] {
+  display: none;
+}
+
+.project-files-layout.is-narrow .file-tree-panel {
+  min-width: 0;
+  border-right: none;
+}
+
+.project-files-layout.is-narrow .file-viewer-panel:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.project-files-layout.is-narrow .file-viewer-panel > :not(.file-mobile-navigation) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.project-files-layout.is-narrow .tree-row,
+.project-files-layout.is-narrow .file-flat-row,
+.project-files-layout.is-narrow .gz-key,
+.project-files-layout.is-narrow .tree-actions-trigger {
+  min-height: 44px;
+}
+
+.project-files-layout.is-narrow .gz-key--icon,
+.project-files-layout.is-narrow .tree-actions-trigger {
+  min-width: 44px;
+}
+
+.project-files-layout.is-narrow .tree-actions-trigger {
+  opacity: 1;
+}
+
+.project-files-layout.is-narrow.has-index-pane .workspace-index-pane {
+  width: 100%;
+}
+
+.file-mobile-navigation {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.file-mobile-navigation > button {
+  min-height: 44px;
+  flex: 0 0 auto;
+}
+
+.file-mobile-navigation > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

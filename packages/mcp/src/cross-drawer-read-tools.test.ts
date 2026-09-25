@@ -77,6 +77,124 @@ function resultText(result: ToolResult): string {
 }
 
 describe('cross-drawer read tools', () => {
+  describe('artifact pagination', () => {
+    function artifactTools(
+      content: string,
+      totalLines: number,
+      linesReturned: number,
+      hasMore: boolean,
+    ) {
+      const tools = captureTools();
+      registerArtifactReadTools(
+        createDependencies(tools.server, {
+          api: {
+            readProjectArtifactSlice: vi.fn(async () => ({
+              kind: 'found',
+              path: 'sources.json',
+              fuzzy: false,
+              content,
+              totalLines,
+              linesReturned,
+              hasMore,
+              totalBytes: 1000,
+              bytesReturned: content.length,
+            })),
+          } as unknown as Dependencies['api'],
+        }),
+      );
+      return tools;
+    }
+
+    it('stops forward paging beyond EOF even when a legacy service reports omitted earlier lines', async () => {
+      const tools = artifactTools('', 172, 0, true);
+      const result = await tools.handler('read_artifact')({
+        path: 'sources.json',
+        startLine: 1201,
+        endLine: 1600,
+      });
+      expect(resultText(result)).toContain('End of file: 172 total lines');
+      expect(resultText(result)).toContain('No lines exist at or after requested startLine 1201');
+      expect(resultText(result)).not.toMatch(/Next:|more available|Re-call/);
+      expect(result.structuredContent).toMatchObject({
+        linesReturned: 0,
+        hasMore: false,
+        totalLines: 172,
+      });
+      expect(result.isError).not.toBe(true);
+    });
+
+    it.each([
+      { startLine: 101, endLine: 500 },
+      { tail: 72 },
+      { lines: { start: 101, count: 400 } },
+    ])('distinguishes the last slice from a complete file for %j', async (args) => {
+      const tools = artifactTools('last slice', 172, 72, true);
+      const result = await tools.handler('read_artifact')({ path: 'sources.json', ...args });
+      expect(resultText(result)).toContain('lines 101-172 of 172');
+      expect(resultText(result)).toContain('Earlier lines are not included');
+      expect(resultText(result)).toContain('End of file; no later lines');
+      expect(resultText(result)).not.toMatch(/Next:|more available|Re-call/);
+      expect(result.structuredContent).toMatchObject({ hasMore: false });
+    });
+
+    it('gives the next valid bounded range instead of making the model guess', async () => {
+      const tools = artifactTools('middle slice', 650, 100, true);
+      const result = await tools.handler('read_artifact')({
+        path: 'sources.json',
+        startLine: 101,
+        endLine: 200,
+      });
+      expect(resultText(result)).toContain('lines 101-200 of 650');
+      expect(resultText(result)).toContain(
+        'read_artifact({"path":"sources.json","startLine":201,"endLine":600})',
+      );
+      expect(result.structuredContent).toMatchObject({
+        startLine: 101,
+        endLine: 200,
+        hasMore: true,
+      });
+    });
+
+    it('clamps the final suggested range to EOF', async () => {
+      const tools = artifactTools('near the end', 650, 50, true);
+      const result = await tools.handler('read_artifact')({
+        path: 'sources.json',
+        startLine: 501,
+        endLine: 550,
+      });
+      expect(resultText(result)).toContain(
+        'read_artifact({"path":"sources.json","startLine":551,"endLine":650})',
+      );
+    });
+
+    it('reports an empty file without suggesting another read', async () => {
+      const tools = artifactTools('', 0, 0, false);
+      const result = await tools.handler('read_artifact')({ path: 'sources.json' });
+      expect(resultText(result)).toContain('End of file: 0 total lines');
+      expect(resultText(result)).not.toContain('Next:');
+      expect(result.structuredContent).toMatchObject({ linesReturned: 0, hasMore: false });
+    });
+
+    it.each([{ head: 0 }, { tail: 0 }, { lines: { start: 1, count: 0 } }])(
+      'keeps intentional zero-line metadata probes distinct from EOF for %j',
+      async (args) => {
+        const tools = artifactTools('', 172, 0, true);
+        const result = await tools.handler('read_artifact')({ path: 'sources.json', ...args });
+        expect(resultText(result)).toContain('No lines requested; file has 172 total lines');
+        expect(resultText(result)).not.toContain('End of file');
+        expect(result.structuredContent).toMatchObject({ hasMore: true });
+      },
+    );
+
+    it('preserves whole JSON reads byte for byte', async () => {
+      const content = '{"value":1}';
+      const tools = artifactTools(content, 1, 1, false);
+      const result = await tools.handler('read_artifact')({ path: 'sources.json' });
+      expect(resultText(result)).toBe(content);
+      expect(JSON.parse(resultText(result))).toEqual({ value: 1 });
+    });
+  });
+
   it('registers the single and batch readers for both drawers', () => {
     const tools = captureTools();
     const dependencies = createDependencies(tools.server);
@@ -162,6 +280,26 @@ describe('cross-drawer read tools', () => {
       await tools.handler('read_file')({ path: 'source/corrupt.docx' });
       // The real error belongs to the real read path, not to a swallowed reroute.
       expect(dependencies.readWorkspaceFile).toHaveBeenCalledWith('source/corrupt.docx');
+    });
+
+    it('reroutes an artifact DOCX — an uploaded craftbook input — the same way', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerArtifactReadTools(dependencies);
+
+      const result = await tools.handler('read_artifact')({
+        path: 'tasks/7/inputs/source/brief.docx',
+      });
+      expect(resultText(result)).toContain('Rerouted read_artifact → read_doc_as_markdown');
+      expect(dependencies.api.toolReadDocAsMarkdown).toHaveBeenCalledWith('project-a', {
+        path: 'tasks/7/inputs/source/brief.docx',
+        artifact: true,
+      });
+      expect(dependencies.api.readProjectArtifactSlice).not.toHaveBeenCalled();
+      expect(result.structuredContent).toMatchObject({
+        requestedTool: 'read_artifact',
+        resolvedSurface: 'artifact',
+      });
     });
 
     it('leaves ordinary text files alone', async () => {

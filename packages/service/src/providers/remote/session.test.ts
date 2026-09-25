@@ -402,6 +402,12 @@ describe('RemoteSession', () => {
     expect(requests[1]!.attachments).toBeUndefined();
     expect(requests[2]!.prompt).toBe('');
     expect(requests[2]!.attachments).toBeUndefined();
+    expect(requests[1]!.protocolVersion).toBe(2);
+    expect(requests[2]!.priorMessages).toContainEqual({
+      role: 'user',
+      content: 'Record the checklist, then build index.html.',
+      images: ['aW1hZ2U='],
+    });
     expect(
       (requests[2]!.priorMessages as Array<Record<string, unknown>>).filter(
         (message) => message.role === 'user' && message.content === '',

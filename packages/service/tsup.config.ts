@@ -33,15 +33,21 @@ export default defineConfig({
     // synchronous (node:sqlite), so shard scans must run off the daemon
     // loop (docs/gezk-format.md).
     'knowledge/search-worker': 'src/knowledge/search-worker.ts',
+    // Portable guest execution must never occupy the daemon/Electron event loop.
+    'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.
     handboek: 'src/handboek/engine.ts',
+    // Standalone subpath (`@bendyline/gezel-service/native-release`): the pinned
+    // native engine release as data, for hosts that ship engines beside the
+    // daemon. A leaf — importing it loads no daemon code.
+    'native-release': 'src/native-release-entry.ts',
   },
   format: ['esm'],
   // Only the package's two public import surfaces need bundled declarations.
   // Passing every executable entry to rollup-plugin-dts also makes its worker
-  // typecheck the daemon and all six internal workers as independent roots.
+  // typecheck the daemon and all internal workers as independent roots.
   // Those 13-byte `export {}` worker declarations are not published APIs and
   // can push Node's isolated worker heap over its limit on memory-constrained
   // builds.
@@ -50,6 +56,7 @@ export default defineConfig({
       index: 'src/index.ts',
       gezapp: 'src/gezapp-entry.ts',
       handboek: 'src/handboek/engine.ts',
+      'native-release': 'src/native-release-entry.ts',
     },
   },
   sourcemap: true,
@@ -125,6 +132,18 @@ export default defineConfig({
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.
     cpSync('src/providers/video/python', 'dist/providers/video/python', { recursive: true });
+
+    // Kokoro's pronunciation dictionaries. The daemon phonemizes text itself
+    // rather than calling eSpeak NG (GPL-3, unshippable), so these files are a
+    // hard requirement for speech: without them synthesis has no dictionary.
+    // Staged by scripts/build-kokoro-lexicon.mjs from the pinned voice pack.
+    const kokoroSrc = resolve(__dirname, 'assets', 'kokoro');
+    if (!existsSync(kokoroSrc)) {
+      throw new Error(
+        `Kokoro lexicon assets missing at ${kokoroSrc} — run node scripts/build-kokoro-lexicon.mjs`,
+      );
+    }
+    cpSync(kokoroSrc, 'dist/kokoro-lexicon', { recursive: true });
 
     // Stage the workspace UI bundle into `dist/ui/` so an installed
     // service (e.g. the Node-only CLI distribution) can serve the browser

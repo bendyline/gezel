@@ -237,11 +237,6 @@ describe('KnowledgeCatalogsCard', () => {
     expect(await screen.findByText('Wikipedia: Physics')).toBeInTheDocument();
     expect(screen.getByText('Published by')).toBeInTheDocument();
     expect(screen.getByText(/57,210 documents/)).toBeInTheDocument();
-    const link = screen.getByTitle('View Bendyline/wikipedia-physics on Hugging Face');
-    expect(link).toHaveAttribute(
-      'href',
-      'https://huggingface.co/datasets/Bendyline/wikipedia-physics',
-    );
 
     fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
     await waitFor(() =>

@@ -232,6 +232,37 @@ jobs:
             sd_backend: cpu
             needs_cuda: false
             needs_vulkan: false
+          # CUDA sd-server, one per Linux arch, emitted into the EXISTING
+          # `-cuda` key beside llama-server and ds4 so the NVIDIA
+          # redistributables ship once rather than three times. The rows
+          # above stay exactly as they are: they remain the portable build
+          # every non-NVIDIA host resolves, and a CUDA-linked binary would
+          # die at exec there. Consumers probe and pick — see
+          # scripts/native-payload.mjs.
+          #
+          # This exists because the bare key's single slot has to go to the
+          # build that runs everywhere, which on arm64 is CPU — leaving image
+          # generation unaccelerated on precisely the ARM hosts with capable
+          # GPUs. build.sh already supports -DSD_CUDA=ON; only the matrix
+          # declaration was missing.
+          - engine: sd-cpp
+            platform: linux-x64
+            variant: cuda
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-sd-server
+            sd_backend: cuda
+            needs_cuda: true
+            needs_vulkan: false
+          - engine: sd-cpp
+            platform: linux-arm64
+            variant: cuda
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-sd-server
+            sd_backend: cuda
+            needs_cuda: true
+            needs_vulkan: false
           - engine: sd-cpp
             platform: win32-x64
             variant: ''
@@ -545,12 +576,19 @@ jobs:
     # a slow-but-working compile is never the thing that trips this.
     timeout-minutes: 180
     env:
-      # Multi-variant engines (currently only llama-cpp) read these
-      # to pick the cmake backend flag and emit to a per-variant
-      # output directory. Single-variant engines (sd-cpp) ignore
-      # them — variant is empty in the matrix entries above.
+      # llama-cpp reads these to pick the cmake backend flag and emit to a
+      # per-variant output directory. sd-cpp ignores them: it takes its
+      # backend from SD_BACKEND below and its output keying from
+      # SD_BACKEND_TAG, because for sd-cpp the two are independent — the
+      # linux `-cuda` rows carry variant AND a backend, while the bare rows
+      # carry a backend and no variant.
       LLAMA_BACKEND: ${{ matrix.variant }}
       LLAMA_BACKEND_TAG: ${{ matrix.variant != '' && '1' || '' }}
+      # Emit sd-server into `<platform>-<backend>/` for any sd row that
+      # declares a variant, so the Linux CUDA build lands beside llama-server
+      # and ds4 in the `-cuda` key instead of overwriting the portable build
+      # in the bare one.
+      SD_BACKEND_TAG: ${{ matrix.variant != '' && '1' || '' }}
       # sd-cpp ships one binary per platform, so its backend is a property
       # of the matrix row rather than of `variant`. Declare it explicitly:
       # build.sh's `auto` path resolves the backend from `command -v

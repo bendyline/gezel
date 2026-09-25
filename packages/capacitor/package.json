@@ -1,0 +1,56 @@
+{
+  "name": "@bendyline/gezel-capacitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "On-device Gezel App SDK transport and native host for Capacitor.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "ios/Sources",
+    "android/src",
+    "android/build.gradle",
+    "native",
+    "Package.swift",
+    "README.md",
+    "LICENSE",
+    "!native/**/.build/**",
+    "!native/**/.swiftpm/**"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run && node --test scripts/*.test.mjs",
+    "stage:native": "node scripts/stage-native.mjs",
+    "prepack": "node scripts/verify-package.mjs"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-app-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/core": "8.5.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

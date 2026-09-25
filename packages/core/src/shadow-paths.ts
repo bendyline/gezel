@@ -3,7 +3,7 @@ import {
   PROJECT_PROMPTS_DIR_NAME,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
-} from './paths.js';
+} from './storage-names.js';
 
 /**
  * Normalize an artifacts-relative path to its collapsed segment list so

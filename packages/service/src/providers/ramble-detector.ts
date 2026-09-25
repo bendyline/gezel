@@ -200,12 +200,30 @@ const DEFAULT_REPETITION_MIN_NOVELTY = 0.4;
  * The repetition guard ignores windows with fewer than this many
  * DISTINCT words. A single token repeated forever (`aaaa…`, `plan plan
  * plan…`) has near-zero novelty but is the degenerate filler used in
- * tests and the rare stuck-token stream — the length caps already bound
- * those. Requiring real lexical variety keeps the guard targeted at the
+ * tests. Requiring real lexical variety keeps the guard targeted at the
  * actual failure: many distinct words arranged into a few repeating
- * sentences (planning paralysis), not a stuck character.
+ * sentences (planning paralysis), not a stuck character. A stuck LINE is
+ * the stuck-line guard's job ({@link STUCK_LINE_LOOP_MIN_LINES}) — the
+ * length caps are off in guard-only mode, so they bound nothing there.
  */
 const REPETITION_MIN_DISTINCT_WORDS = 8;
+
+/**
+ * Consecutive trailing lines that must repeat a short cycle before the
+ * stuck-line guard fires. 32 × `</function>` is ~100 tokens — a couple
+ * of seconds of decode, not the minutes the loop otherwise runs.
+ */
+const STUCK_LINE_LOOP_MIN_LINES = 32;
+
+/** Longest line cycle the stuck-line guard recognizes (`a b a b …` is 2). */
+const STUCK_LINE_LOOP_MAX_PERIOD = 4;
+
+/**
+ * Trailing chars the stuck-line guard scans. It runs on every chunk, so
+ * it reads a bounded tail; loops of long lines carry enough distinct
+ * words for the novelty guard instead.
+ */
+const STUCK_LINE_LOOP_SCAN_CHARS = 4096;
 
 export class RambleDetector {
   private readonly threshold: number;
@@ -263,6 +281,18 @@ export class RambleDetector {
    * `lastCloseEndAtChars` to compute `insideUnclosedCall`.
    */
   private lastOpenEndAtChars = -1;
+  /**
+   * Tool-call opens not yet matched by a close. A close marker only
+   * counts (anchors the prose counter) while this is positive — see the
+   * orphan-closer note in {@link observeContent}.
+   */
+  private openCallDepth = 0;
+  /**
+   * End offset of the last open/close marker folded into
+   * {@link openCallDepth}. The 16-char lookback re-scans markers near the
+   * previous boundary; this dedupes them so one marker is counted once.
+   */
+  private lastToolMarkerEndAtChars = -1;
   /**
    * True iff the most recent OPEN marker has not yet been matched by
    * a CLOSE marker — i.e., the model is mid-tool-call. While true,
@@ -380,6 +410,30 @@ export class RambleDetector {
   }
 
   /**
+   * True when the last {@link STUCK_LINE_LOOP_MIN_LINES} non-blank lines
+   * of `text` each equal the line `period` before them, for some period
+   * up to {@link STUCK_LINE_LOOP_MAX_PERIOD}.
+   */
+  private static endsInStuckLineLoop(text: string): boolean {
+    const lines = text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (let period = 1; period <= STUCK_LINE_LOOP_MAX_PERIOD; period++) {
+      if (lines.length < STUCK_LINE_LOOP_MIN_LINES + period) return false;
+      let cycling = true;
+      for (let i = lines.length - STUCK_LINE_LOOP_MIN_LINES; i < lines.length; i++) {
+        if (lines[i] !== lines[i - period]) {
+          cycling = false;
+          break;
+        }
+      }
+      if (cycling) return true;
+    }
+    return false;
+  }
+
+  /**
    * Record that a structured tool-call delta arrived from the
    * provider. Resets the counter so subsequent prose is measured
    * against this point AND switches the detector into post-action
@@ -454,12 +508,32 @@ export class RambleDetector {
         lastActionEnd = m.index + m[0].length + lookbackStart;
       }
       let lastToolOpenEnd = -1;
+      const toolMarkers: Array<{ end: number; open: boolean }> = [];
       for (const m of window.matchAll(toolOpenRe)) {
         lastToolOpenEnd = m.index + m[0].length + lookbackStart;
+        toolMarkers.push({ end: lastToolOpenEnd, open: true });
       }
-      let lastCloseEnd = -1;
       for (const m of window.matchAll(closeRe)) {
-        lastCloseEnd = m.index + m[0].length + lookbackStart;
+        toolMarkers.push({ end: m.index + m[0].length + lookbackStart, open: false });
+      }
+      // A close only ends a call when one is open. Wild-caught (qwen3.8-27b
+      // MLX Meester, 2026-09-23): after a finished JSON-envelope call the
+      // model emitted `</function>` 1300+ times. Every orphan closer
+      // re-anchored the prose counter, so neither the post-action cap nor
+      // the repetition guard could ever accumulate a window — the turn ran
+      // to max_tokens. Depth, not "last open vs last close", because the
+      // Hermes nesting closes twice (`</function>` then `</tool_call>`).
+      let lastCloseEnd = -1;
+      toolMarkers.sort((a, b) => a.end - b.end);
+      for (const marker of toolMarkers) {
+        if (marker.end <= this.lastToolMarkerEndAtChars) continue;
+        this.lastToolMarkerEndAtChars = marker.end;
+        if (marker.open) {
+          this.openCallDepth++;
+        } else if (this.openCallDepth > 0) {
+          this.openCallDepth--;
+          lastCloseEnd = marker.end;
+        }
       }
       if (lastActionEnd >= 0 && lastActionEnd > this.lastActionAtChars) {
         this.lastActionAtChars = lastActionEnd;
@@ -572,6 +646,28 @@ export class RambleDetector {
         turnContent.slice(regionStart),
       );
       if (distinctWords >= REPETITION_MIN_DISTINCT_WORDS && ratio < this.repetitionMinNovelty) {
+        this.aborted = true;
+        this.repetitionFired = true;
+        return true;
+      }
+    }
+    // Stuck-line loop — the shape the novelty guard's distinct-word floor
+    // deliberately skips: one short line (or a 2–4 line cycle) re-emitted
+    // forever, e.g. `</function>` × 1300 after a tool call. No answer
+    // repeats a line 32 times running outside a code fence, so this needs
+    // no window to fill before it can tell.
+    if (
+      this.repetitionGuardEnabled &&
+      !this.insideUnclosedCall &&
+      !this.insideReasoning &&
+      !this.insideFencedCode &&
+      proseSinceAction >= STUCK_LINE_LOOP_MIN_LINES * 2
+    ) {
+      const regionStart = Math.max(
+        this.lastActionAtChars,
+        turnContent.length - STUCK_LINE_LOOP_SCAN_CHARS,
+      );
+      if (RambleDetector.endsInStuckLineLoop(turnContent.slice(regionStart))) {
         this.aborted = true;
         this.repetitionFired = true;
         return true;

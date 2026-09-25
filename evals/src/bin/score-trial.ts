@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ContinuityFacts, summarizeContinuityForRunDir } from '../continuity-facts.ts';
 import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
@@ -342,6 +342,7 @@ interface SessionMessage {
 }
 
 interface SessionFile {
+  id?: string;
   messages?: SessionMessage[];
   [k: string]: unknown;
 }
@@ -681,6 +682,43 @@ const SCENARIO_EXPECTED_ROLES: Record<string, string[]> = {
   // developer/builder — too contested to encode here.
 };
 
+/** Shared trace inspection for native and daemon eval evidence. */
+export function sessionBehaviorRedFlags(
+  gezel: string,
+  messages: SessionMessage[],
+): TrialFacts['toolUse']['redFlags'] {
+  const flags: TrialFacts['toolUse']['redFlags'] = [];
+  messages.forEach((message, atTurn) => {
+    if (message.role !== 'assistant') return;
+    for (const call of message.toolCalls ?? [])
+      for (const rule of RED_FLAGS) {
+        if (rule.test(call))
+          flags.push({
+            gezel,
+            tool: call.name,
+            argsSummary: call.argsSummary ?? '',
+            atTurn,
+            pattern: rule.pattern,
+            explanation: rule.explanation,
+          });
+      }
+  });
+  for (const rule of SESSION_RED_FLAGS)
+    for (const hit of rule.test(messages, gezel)) {
+      flags.push({ gezel, ...hit, pattern: rule.pattern, explanation: rule.explanation });
+    }
+  return flags;
+}
+
+export function missingScenarioRoles(scenarioId: string, rolesCreated: string[]): string[] {
+  const normalize = (role: string) => role.toLowerCase().replace(/[\s_-]+/g, '');
+  const created = rolesCreated.map(normalize);
+  return (SCENARIO_EXPECTED_ROLES[scenarioId] ?? []).filter((role) => {
+    const expected = normalize(role);
+    return !created.some((item) => item === expected || item.includes(expected));
+  });
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 export function score(runDir: string): TrialFacts {
@@ -738,22 +776,11 @@ export function score(runDir: string): TrialFacts {
       // skip bad line
     }
   }
-  const expectedRoles = SCENARIO_EXPECTED_ROLES[result.scenarioId] ?? [];
-  // Normalize role names before comparing: gezel-template display names
-  // are "Title Case With Spaces" (e.g. "Image Generator") but the
-  // SPECIALIST_ROLES enum + scenario expectations are "kebab-case"
-  // ("image-generator"). Drop hyphens/spaces + lowercase for a stable
-  // comparison. Accept descriptive role strings too ("image-generator
-  // for AI-created PNG logo") so the scorer doesn't penalize correct
-  // delegation just because the Meester made the job title concrete.
-  const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '');
-  const createdNorm = rolesCreated.map(norm);
-  const missingExpectedRoles = expectedRoles.filter((r) => {
-    const expected = norm(r);
-    return !createdNorm.some((created) => created === expected || created.includes(expected));
-  });
+  const missingExpectedRoles = missingScenarioRoles(result.scenarioId, rolesCreated);
 
-  // Tool calls from sessions/*.json.
+  // Completed turns persist in sessions; interrupted turns may exist only in
+  // project history. Reconcile per session/tool without double counting the
+  // same calls in both sources. Native CLI tools can be session-only.
   const sessionFiles = (() => {
     try {
       return readdirSync(join(runDir, 'sessions'))
@@ -787,7 +814,8 @@ export function score(runDir: string): TrialFacts {
     if (firstToolCallAt === null || atMs < firstToolCallAt) firstToolCallAt = atMs;
   };
   const projectHistoryToolCounts: Record<string, number> = {};
-  let projectHistoryToolCalls = 0;
+  const historyCountsBySession = new Map<string, Record<string, number>>();
+  const transcriptCountsBySession = new Map<string, Record<string, number>>();
   let projectHistoryFirstArtifactAt: number | null = null;
   let projectHistoryLastArtifactAt: number | null = null;
   // Map question-id → question text, for cross-referencing auto-answer events.
@@ -800,8 +828,13 @@ export function score(runDir: string): TrialFacts {
     if (event.kind === 'tool.called') {
       const name = event.details?.name;
       if (name) {
-        projectHistoryToolCalls++;
         projectHistoryToolCounts[name] = (projectHistoryToolCounts[name] ?? 0) + 1;
+        const sessionId = event.details?.sessionId;
+        if (typeof sessionId === 'string') {
+          const counts = historyCountsBySession.get(sessionId) ?? {};
+          counts[name] = (counts[name] ?? 0) + 1;
+          historyCountsBySession.set(sessionId, counts);
+        }
         if (event.at) noteFirstToolCall(isoToMsSince(result.startedAt, event.at));
       }
     }
@@ -819,32 +852,21 @@ export function score(runDir: string): TrialFacts {
   for (const sessPath of sessionFiles) {
     const sess = readJson<SessionFile>(sessPath);
     if (!sess?.messages) continue;
+    const sessionKey = sess.id ?? basename(sessPath, '.json').split('--').at(-1)!;
+    const sessionCounts = transcriptCountsBySession.get(sessionKey) ?? {};
+    transcriptCountsBySession.set(sessionKey, sessionCounts);
     const gezelFromFilename = (sessPath.split('/').pop() ?? '').split('--')[0] ?? 'unknown';
-    sess.messages.forEach((msg, idx) => {
-      if (msg.role !== 'assistant') return;
+    for (const msg of sess.messages) {
+      if (msg.role !== 'assistant') continue;
       const calls = msg.toolCalls ?? [];
       for (const c of calls) {
-        totalToolCalls++;
-        byTool[c.name] = (byTool[c.name] ?? 0) + 1;
+        sessionCounts[c.name] = (sessionCounts[c.name] ?? 0) + 1;
         if (msg.at) noteFirstToolCall(isoToMsSince(result.startedAt, msg.at));
         // Time-to-artifact.
         if (FILE_WRITE_TOOLS.has(c.name) && c.success !== false && msg.at) {
           const atMs = isoToMsSince(result.startedAt, msg.at);
           if (firstArtifactAt === null || atMs < firstArtifactAt) firstArtifactAt = atMs;
           if (lastArtifactAt === null || atMs > lastArtifactAt) lastArtifactAt = atMs;
-        }
-        // Red flags.
-        for (const rf of RED_FLAGS) {
-          if (rf.test(c)) {
-            redFlags.push({
-              gezel: gezelFromFilename,
-              tool: c.name,
-              argsSummary: c.argsSummary ?? '',
-              atTurn: idx,
-              pattern: rf.pattern,
-              explanation: rf.explanation,
-            });
-          }
         }
         // (Session-level red flag scanning happens once per session
         // after this per-call loop completes — see SESSION_RED_FLAGS.)
@@ -869,37 +891,37 @@ export function score(runDir: string): TrialFacts {
           }
         }
       }
-    });
-    // Session-level red flags. These look across the message stream
-    // for patterns the per-call loop can't see — most importantly
-    // "model emitted a long-form deliverable as chat content without
-    // a write_file in the same turn." Run once per session, not once
-    // per call.
-    for (const srf of SESSION_RED_FLAGS) {
-      for (const hit of srf.test(sess.messages, gezelFromFilename)) {
-        redFlags.push({
-          gezel: gezelFromFilename,
-          tool: hit.tool,
-          argsSummary: hit.argsSummary,
-          atTurn: hit.atTurn,
-          pattern: srf.pattern,
-          explanation: srf.explanation,
-        });
-      }
     }
+    redFlags.push(...sessionBehaviorRedFlags(gezelFromFilename, sess.messages));
   }
 
-  if (totalToolCalls === 0 && projectHistoryToolCalls > 0) {
-    totalToolCalls = projectHistoryToolCalls;
-    for (const [name, count] of Object.entries(projectHistoryToolCounts)) {
-      byTool[name] = count;
+  for (const sessionId of new Set([
+    ...historyCountsBySession.keys(),
+    ...transcriptCountsBySession.keys(),
+  ])) {
+    const history = historyCountsBySession.get(sessionId) ?? {};
+    const transcript = transcriptCountsBySession.get(sessionId) ?? {};
+    for (const name of new Set([...Object.keys(history), ...Object.keys(transcript)])) {
+      byTool[name] = (byTool[name] ?? 0) + Math.max(history[name] ?? 0, transcript[name] ?? 0);
     }
   }
-  if (firstArtifactAt === null && projectHistoryFirstArtifactAt !== null) {
-    firstArtifactAt = projectHistoryFirstArtifactAt;
+  // Older histories omit session IDs. Their totals are a lower bound, not
+  // extra calls to add to transcripts whose overlap cannot be reconstructed.
+  for (const [name, count] of Object.entries(projectHistoryToolCounts)) {
+    byTool[name] = Math.max(byTool[name] ?? 0, count);
   }
-  if (lastArtifactAt === null && projectHistoryLastArtifactAt !== null) {
-    lastArtifactAt = projectHistoryLastArtifactAt;
+  totalToolCalls = Object.values(byTool).reduce((sum, count) => sum + count, 0);
+  if (projectHistoryFirstArtifactAt !== null) {
+    firstArtifactAt = Math.min(
+      firstArtifactAt ?? Number.POSITIVE_INFINITY,
+      projectHistoryFirstArtifactAt,
+    );
+  }
+  if (projectHistoryLastArtifactAt !== null) {
+    lastArtifactAt = Math.max(
+      lastArtifactAt ?? Number.NEGATIVE_INFINITY,
+      projectHistoryLastArtifactAt,
+    );
   }
 
   // Sniff progression from log.txt.

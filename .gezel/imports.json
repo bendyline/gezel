@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": {
-    "hash": "4bea60527cd2eb018fd8b8870843fd4d61e041bab87738e80f337330397a0e76",
+    "hash": "27188d3e97b4bc75a7998a5fcb3a2c5a64deadceac0628b3c8a5b2920b2267fa",
     "sourceFile": "AGENTS.md"
   },
   "craftbooks": {
@@ -36,7 +36,7 @@
       "scriptNames": []
     },
     ".claude/skills/eval-run/SKILL.md": {
-      "hash": "7b90052d8a44aef50083a12791d20e962d85764e656688493c682840a2ef1123",
+      "hash": "455368ec181217e72daeef4ed205c9505ebc9a905bb1493f5dcb79034c157ca3",
       "craftbookId": "proj-skill-eval-run",
       "scriptNames": []
     },
@@ -53,6 +53,11 @@
     ".claude/skills/tune-model/SKILL.md": {
       "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
       "craftbookId": "proj-skill-tune-model",
+      "scriptNames": []
+    },
+    ".claude/skills/button-up/SKILL.md": {
+      "hash": "3581224f9293baf6c3315f454108129ea23a346d6eefe0de8d005e803a26fedf",
+      "craftbookId": "proj-skill-button-up",
       "scriptNames": []
     }
   }

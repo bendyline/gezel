@@ -1,4 +1,5 @@
 import * as RadixPopover from '@radix-ui/react-popover';
+import { appCollisionBoundary } from './appCollisionBoundary.js';
 
 export const Root = RadixPopover.Root;
 export const Trigger = RadixPopover.Trigger;
@@ -12,6 +13,7 @@ export function Content(props: RadixPopover.PopoverContentProps) {
     <RadixPopover.Portal>
       <RadixPopover.Content
         {...rest}
+        collisionBoundary={rest.collisionBoundary ?? appCollisionBoundary()}
         sideOffset={sideOffset}
         className={className ? `gz-popover ${className}` : 'gz-popover'}
       />

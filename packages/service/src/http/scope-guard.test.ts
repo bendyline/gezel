@@ -350,13 +350,17 @@ describe('gezelScopeGuard', () => {
 function sessionPolicyApp(
   auth: Auth | null,
   isProjectLinked?: (source: string, target: string) => Promise<boolean>,
+  isUserDirectedTurn?: (sessionId: string) => boolean,
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
     if (auth) c.set('auth', auth);
     await next();
   });
-  const guard = sessionRouteGuard({ ...(isProjectLinked ? { isProjectLinked } : {}) });
+  const guard = sessionRouteGuard({
+    ...(isProjectLinked ? { isProjectLinked } : {}),
+    ...(isUserDirectedTurn ? { isUserDirectedTurn } : {}),
+  });
   app.use('/api/*', guard);
   app.use('/events/*', guard);
   app.all('*', (c) => c.json({ ok: true }));
@@ -377,6 +381,25 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-a/workspace')).status).toBe(200);
     expect((await app.request('/api/projects/proj-a/tasks/1')).status).toBe(200);
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(403);
+  });
+
+  it('lets a session open a knowledge-catalog article but not administer catalogs', async () => {
+    // read_document on a knowledge:// URI 403'd for every worker, so a
+    // powerpoint-deck researcher could cite search snippets only (2026-09-23).
+    const app = sessionPolicyApp(session('proj-a'));
+    expect(
+      (await app.request('/api/knowledge/catalogs/wikipedia-food-drink/document?id=11797861'))
+        .status,
+    ).toBe(200);
+    expect((await app.request('/api/knowledge/catalogs')).status).toBe(403);
+    expect((await app.request('/api/knowledge/install', { method: 'POST' })).status).toBe(403);
+    expect(
+      (
+        await app.request('/api/knowledge/catalogs/wikipedia-food-drink/document?id=1', {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(403);
   });
 
   it('allows linked workspace CRUD without opening other target-project capabilities', async () => {
@@ -403,6 +426,24 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-b/artifacts', { headers })).status).toBe(403);
     expect((await app.request('/api/projects/proj-b/tasks/1', { headers })).status).toBe(403);
     expect((await app.request('/api/projects/proj-b', { headers })).status).toBe(403);
+  });
+
+  it('keeps craftbook-input uploads to first-party clients', async () => {
+    // A staged upload is labelled "from your computer" in every prompt that
+    // names it; a session staging one would forge that provenance.
+    const app = sessionPolicyApp(session('proj-a', true));
+    expect((await app.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(
+      403,
+    );
+    expect(
+      (
+        await app.request('/api/projects/proj-a/input-staging/stg-0123456789ab/file?path=a.md', {
+          method: 'PUT',
+        })
+      ).status,
+    ).toBe(403);
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(200);
   });
 
   it('lets coordinator sessions cross projects but still blocks UI/admin capabilities', async () => {
@@ -475,12 +516,33 @@ describe('sessionRouteGuard', () => {
     );
   });
 
+  // The Meester manages Default's craftbooks, so "retry the deck" typed to it
+  // must work — but the same call on its own initiative would be the loop the
+  // pause exists to stop. Only the service knows who started the turn.
+  it('lets a coordinator retry a paused task only inside a user-started turn', async () => {
+    const retry = '/api/projects/default/tasks/11/retry';
+    const userTurn = sessionPolicyApp(session('default', true), undefined, () => true);
+    expect((await userTurn.request(retry, jsonPost({}))).status).toBe(200);
+
+    const ownInitiative = sessionPolicyApp(session('default', true), undefined, () => false);
+    expect((await ownInitiative.request(retry, jsonPost({}))).status).toBe(403);
+
+    const worker = sessionPolicyApp(session('default'), undefined, () => true);
+    expect((await worker.request(retry, jsonPost({}))).status).toBe(403);
+  });
+
   it('keeps shared documents available without the foreign-project fallback', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/documents/read?path=guidelines%2Fcoding.md')).status).toBe(200);
     expect(
       (await app.request('/api/documents/read?path=projects%2Fproj-b%2Fartifacts%2Fsecret.md'))
         .status,
+    ).toBe(403);
+    expect(
+      (await app.request('/api/documents/read?path=artifacts%2Fsecret.md&project=proj-b')).status,
+    ).toBe(403);
+    expect(
+      (await app.request('/api/documents/read?path=artifacts%2Fsecret.md&project=proj-a')).status,
     ).toBe(403);
   });
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { StreamingReasoningSplit, templateTextOpensReasoning } from './reasoning-stream.js';
+import {
+  StreamingReasoningSplit,
+  requestOpensReasoning,
+  templateTextOpensReasoning,
+} from './reasoning-stream.js';
 
 /** Drive a split across arbitrary chunk boundaries and total the two channels. */
 function run(
@@ -20,13 +24,29 @@ function run(
 
 describe('templateTextOpensReasoning', () => {
   it('detects a generation prompt that opens thinking for the model', () => {
-    // The real LFM2.5 / Qwen shape: the last thing the template emits is a
-    // bare opener, so the model's output starts mid-reasoning.
+    // The real LFM2.5 shape: the last thing the template emits is a bare
+    // opener, so the model's output starts mid-reasoning whatever it is sent.
     expect(
       templateTextOpensReasoning(
         '{%- if add_generation_prompt -%}{{- "<|im_start|>assistant\\n<think>" -}}{%- endif -%}',
       ),
-    ).toBe(true);
+    ).toBe('always');
+  });
+
+  it('marks an opener gated on enable_thinking as request-dependent', () => {
+    // Qwen 3.8's shipped generation branch, verbatim.
+    expect(
+      templateTextOpensReasoning(
+        '{%- if add_generation_prompt %}\n' +
+          "    {{- '<|im_start|>assistant\\n' }}\n" +
+          '    {%- if enable_thinking is defined and enable_thinking is false %}\n' +
+          "        {{- '<think>\\n\\n</think>\\n\\n' }}\n" +
+          '    {%- else %}\n' +
+          "        {{- '<think>\\n' }}\n" +
+          '    {%- endif %}\n' +
+          '{%- endif %}',
+      ),
+    ).toBe('unless-thinking-off');
   });
 
   it('ignores an opener that the template itself closes', () => {
@@ -34,7 +54,7 @@ describe('templateTextOpensReasoning', () => {
       templateTextOpensReasoning(
         '{%- if add_generation_prompt -%}{{- "<|im_start|>assistant\\n<think>\\n</think>\\n" -}}{%- endif -%}',
       ),
-    ).toBe(false);
+    ).toBeUndefined();
   });
 
   it('ignores openers outside the generation prompt', () => {
@@ -45,11 +65,41 @@ describe('templateTextOpensReasoning', () => {
         '{%- for message in messages -%}{{- "<think>" + message.thinking + "</think>" -}}{%- endfor -%}' +
           '{%- if add_generation_prompt -%}{{- "<|im_start|>assistant\\n" -}}{%- endif -%}',
       ),
-    ).toBe(false);
+    ).toBeUndefined();
   });
 
   it('is false for a template with no generation prompt at all', () => {
-    expect(templateTextOpensReasoning('{{ messages }}')).toBe(false);
+    expect(templateTextOpensReasoning('{{ messages }}')).toBeUndefined();
+  });
+});
+
+describe('requestOpensReasoning', () => {
+  const off = { chat_template_kwargs: { enable_thinking: false } };
+
+  it('follows enable_thinking for a switch-aware template', () => {
+    expect(requestOpensReasoning('unless-thinking-off', off)).toBe(false);
+    expect(
+      requestOpensReasoning('unless-thinking-off', {
+        chat_template_kwargs: { enable_thinking: true },
+      }),
+    ).toBe(true);
+    // The engine renders with thinking on unless told otherwise.
+    expect(requestOpensReasoning('unless-thinking-off', {})).toBe(true);
+    expect(
+      requestOpensReasoning('unless-thinking-off', {
+        chat_template_kwargs: { reasoning_effort: 'medium' },
+      }),
+    ).toBe(true);
+  });
+
+  it('ignores the switch when the template opens unconditionally', () => {
+    // Constrained turns send `enable_thinking: false` to every model; a
+    // template that never reads it still starts the model mid-thought.
+    expect(requestOpensReasoning('always', off)).toBe(true);
+  });
+
+  it('is false when the template opens nothing', () => {
+    expect(requestOpensReasoning(undefined, {})).toBe(false);
   });
 });
 
@@ -76,6 +126,23 @@ describe('StreamingReasoningSplit', () => {
     expect(
       run(['Sure. ', '<think>', 'weighing it', '</think>', 'Done.'], { opensInReasoning: false }),
     ).toEqual({ visible: 'Sure. Done.', reasoning: 'weighing it' });
+  });
+
+  it('streams a thinking-off tool call as reply text, not reasoning', () => {
+    // Wild-caught 2026-09-24 on qwen3.8-27b-q4: a Writer gezel under the
+    // `creative` profile (thinking off) streamed its whole `write_file` call
+    // into the reasoning pane, because the prompt had already closed the
+    // block and no `</think>` ever arrived.
+    const opensInReasoning = requestOpensReasoning('unless-thinking-off', {
+      chat_template_kwargs: { enable_thinking: false },
+    });
+    const call =
+      '<tool_call>\n<function=write_file>\n<parameter=path>\npowerpoint/task-18/deck.md\n' +
+      '</parameter>\n<parameter=content>\n# Valencia\n</parameter>\n</function>\n</tool_call>';
+    expect(run([call.slice(0, 40), call.slice(40)], { opensInReasoning })).toEqual({
+      visible: call,
+      reasoning: '',
+    });
   });
 
   it('streams a plain reply untouched when no reasoning appears', () => {

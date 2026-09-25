@@ -1,7 +1,16 @@
+import { DESKTOP_RUNTIME_CAPABILITIES, OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
+
+const capabilityFixture = vi.hoisted(() => ({ bundled: false }));
+vi.mock('../runtime-capabilities.js', () => ({
+  runtimeCapabilities: () =>
+    capabilityFixture.bundled
+      ? { ...OFFLINE_RUNTIME_CAPABILITIES, audio: true }
+      : DESKTOP_RUNTIME_CAPABILITIES,
+}));
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
@@ -29,6 +38,7 @@ const READY_STATUS = {
 
 describe('AudioEngineSettings', () => {
   beforeEach(() => {
+    capabilityFixture.bundled = false;
     vi.mocked(api.getAudioEngineStatus).mockResolvedValue(READY_STATUS as never);
     vi.mocked(api.listAudioVoices).mockResolvedValue({
       voices: [
@@ -37,6 +47,52 @@ describe('AudioEngineSettings', () => {
       ],
     } as never);
     vi.mocked(api.getConfig).mockResolvedValue({} as never);
+  });
+
+  it('reuses voice previews and narration with bundled offline speech, without download controls', async () => {
+    capabilityFixture.bundled = true;
+    render(<AudioEngineSettings />);
+    expect(await screen.findByText('Preview a voice')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Narrate assistant replies/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('model-manager-stt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-manager-tts')).not.toBeInTheDocument();
+    expect(screen.getByText(/prefers this device's offline recognizer/)).toBeInTheDocument();
+  });
+
+  it('lets an explicit Whisper choice return to automatic recognition', async () => {
+    capabilityFixture.bundled = true;
+    vi.mocked(api.getConfig).mockResolvedValue({ defaultSttModel: 'whisper-tiny' } as never);
+    vi.mocked(api.listInstalledSttModels).mockResolvedValue({
+      models: [{ id: 'whisper-tiny', name: 'Whisper tiny', approxSizeBytes: 100 }],
+    });
+    vi.mocked(api.updateConfig).mockImplementation(async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({} as never);
+      return {} as never;
+    });
+    render(<AudioEngineSettings />);
+    const picker = await screen.findByRole('combobox', { name: 'Speech recognition' });
+    await waitFor(() => expect(picker).toHaveValue('whisper-tiny'));
+    await userEvent.setup().selectOptions(picker, '');
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ defaultSttModel: null }));
+    expect(picker).toHaveValue('');
+  });
+
+  it('offers progress updates as a sub-option of narration', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ narrateAssistantReplies: false } as never);
+    vi.mocked(api.updateConfig).mockImplementation(async (patch) => patch as never);
+    render(<AudioEngineSettings />);
+    const progress = await screen.findByRole('checkbox', { name: /Include progress updates/ });
+    // On by default, but inert until narration itself is on.
+    expect(progress).toBeChecked();
+    expect(progress).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox', { name: /Narrate assistant replies/ }));
+    await waitFor(() => expect(progress).toBeEnabled());
+    await user.click(progress);
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenLastCalledWith({ narrateProgressUpdates: false }),
+    );
+    expect(progress).not.toBeChecked();
   });
 
   it('renders both engine sections with their model managers', async () => {

@@ -236,16 +236,42 @@ describe('GezelDetail', () => {
       expect(screen.getByRole('heading', { name: 'Maya' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('heading', { name: 'Maya' }));
-    const input = screen.getByDisplayValue('Maya') as HTMLInputElement;
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Maya' }));
+    const input = screen.getByRole('textbox', { name: 'Gezel name' });
     await user.clear(input);
     await user.type(input, 'Mai{Enter}');
 
     await waitFor(() => {
       expect(api.renameGezel).toHaveBeenCalledWith('gz-maya', { name: 'Mai' });
     });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mai' })).toHaveFocus());
+    expect(api.renameGezel).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['{Enter}', ' '])(
+    'renames with keyboard activation %s and restores focus on Escape',
+    async (activation) => {
+      const user = userEvent.setup();
+      render(<GezelDetail gezelId="gz-maya" />);
+      const heading = await screen.findByRole('heading', { name: 'Maya', level: 3 });
+      const button = within(heading).getByRole('button', { name: 'Maya' });
+      expect(button).not.toHaveFocus();
+      await user.tab();
+      expect(button).toHaveFocus();
+      await user.keyboard(activation);
+      const input = screen.getByRole('textbox', { name: 'Gezel name' }) as HTMLInputElement;
+      expect(input).toHaveFocus();
+      expect([input.selectionStart, input.selectionEnd]).toEqual([0, 4]);
+      await user.keyboard('Mia');
+      expect(input).toHaveValue('Mia');
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('textbox', { name: 'Gezel name' })).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Maya', level: 3 })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Maya' })).toHaveFocus();
+      expect(api.renameGezel).not.toHaveBeenCalled();
+    },
+  );
 
   it('typing in the about editor schedules a debounced save', async () => {
     render(<GezelDetail gezelId="gz-maya" />);

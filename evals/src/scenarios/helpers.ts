@@ -21,6 +21,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { isSharedLibraryProject } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { type RuntimeAssertion, type RuntimeReport, renderAndAssert } from '../html-validation.ts';
 import { postRuntimeFeedback } from '../runtime-feedback.ts';
@@ -164,6 +165,22 @@ export function runtimeReportForGate(report: RuntimeReport): RuntimeReport {
       },
     ],
   };
+}
+
+/**
+ * Whether a project can hold a scenario's deliverable. `default` is where an
+ * orchestration punt lands, and the shared documents library has been a
+ * project since ADR 0006 — the user's own, often cloud-synced, folder, not a
+ * jobsite. Scanning the library for a deliverable read its seeded
+ * `About this library.md` as a "wrong deliverable" near-miss, the nudge told
+ * the developer to write the deliverable there, and every petshop trial on
+ * 2026-09-23 shipped `index.html` into the library.
+ */
+export function isScenarioWorkProject(project: {
+  id: string;
+  properties?: Record<string, string>;
+}): boolean {
+  return project.id !== 'default' && !isSharedLibraryProject(project);
 }
 
 export interface ProjectFileRef {
@@ -480,7 +497,7 @@ export async function pollHtmlSniff<TExtra>(opts: {
 }): Promise<SuccessCheckResult> {
   const { client, logChanged, recordSniff } = opts.ctx;
   const { projects } = await client.listProjects();
-  const scopedProjects = projects.filter((project) => project.id !== 'default');
+  const scopedProjects = projects.filter(isScenarioWorkProject);
   const projectCandidates: Array<{
     project: { id: string };
     candidates: ProjectFileRef[];
@@ -551,6 +568,7 @@ export async function pollHtmlSniff<TExtra>(opts: {
         await postSniffFeedback(opts.ctx, ref.filePath, sniff, {
           ...sniffFeedback,
           projectId: sniffFeedback.projectId ?? project.id,
+          surface: ref.surface,
           sourceText: text,
         });
         continue;

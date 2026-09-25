@@ -384,6 +384,51 @@ not a process row
     }
   });
 
+  it('never health-restarts an engine that is serving a turn, only an idle one', async () => {
+    const spawned: number[] = [];
+    const fakeSpawn = (() => {
+      spawned.push(1);
+      return makeFakeChild(4300 + spawned.length) as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >;
+    }) as unknown as typeof import('node:child_process').spawn;
+    let answering = true;
+    const fakeFetch: typeof fetch = async () => {
+      if (!answering) throw new Error('probe timed out');
+      return new Response('ok', { status: 200 });
+    };
+    let busy = true;
+    const logs: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9996',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: fakeFetch,
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 20,
+      idleTimeoutMs: 60_000,
+      isBusy: () => busy,
+      onLog: (line) => logs.push(line),
+    });
+    try {
+      await sup.ensureRunning();
+      answering = false;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(logs.some((l) => /health failures — restarting/.test(l))).toBe(false);
+      expect(spawned).toHaveLength(1);
+
+      busy = false;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(logs.some((l) => /health failures — restarting/.test(l))).toBe(true);
+    } finally {
+      answering = true;
+      await sup.stop('stop');
+    }
+  });
+
   it('flushes and releases an idle engine early under memory pressure', async () => {
     const fakeSpawn = (() =>
       makeFakeChild(4243) as unknown as ReturnType<

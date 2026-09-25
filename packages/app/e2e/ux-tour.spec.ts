@@ -96,14 +96,15 @@ test('01 - home workshop renders and a chat turn round-trips', async () => {
 });
 
 test('02 - the home tour tab shows the intro article', async () => {
-  const tour = page.getByRole('tab', { name: /New here/ });
+  const tour = page.getByRole('button', { name: /New here/ });
   await tour.click();
+  await expect(tour).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible({
     timeout: 15_000,
   });
   await shot('03-home-tour-article.png');
   // Back to the default greeting tab for later dark-mode shots.
-  await page.getByRole('tab').first().click();
+  await page.locator('.home-workshop-tabs').getByRole('button').first().click();
 });
 
 test('03 - sidebar groups expand and list entities', async () => {

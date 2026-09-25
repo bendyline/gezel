@@ -79,6 +79,8 @@ const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optional
  * the surfaces that do not spin up heavy machinery on import.
  */
 const IMPORTABLE = [
+  '@bendyline/gezel/poppetje',
+  '@bendyline/gezel/mobile-providers',
   '@bendyline/gezk',
   '@bendyline/gezk/node',
   '@bendyline/gezel',
@@ -90,8 +92,11 @@ const IMPORTABLE = [
   '@bendyline/gezel-client',
   '@bendyline/gezel-client/node',
   '@bendyline/gezel-sdk',
+  '@bendyline/gezel-sdk/portable',
   '@bendyline/gezel-sdk/checks',
   '@bendyline/gezel-sdk/stores',
+  '@bendyline/gezel-script-runtime',
+  '@bendyline/gezel-script-runtime/quickjs',
   '@bendyline/gezel-app-sdk',
   '@bendyline/gezel-app-sdk/host',
   '@bendyline/gezel-app-sdk/advanced',

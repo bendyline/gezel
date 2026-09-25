@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnPnpm } from './pnpm-cli.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const reportRoot = join(root, 'artifacts', 'coverage');
@@ -76,6 +77,12 @@ export const targets = [
     thresholds: { statements: 76, branches: 67, functions: 55, lines: 77 },
   },
   {
+    id: 'script-runtime',
+    root: 'packages/script-runtime',
+    include: sourceInclude,
+    thresholds: { statements: 90, branches: 85, functions: 95, lines: 92 },
+  },
+  {
     id: 'app-sdk',
     root: 'packages/app-sdk',
     include: sourceInclude,
@@ -141,9 +148,12 @@ export function parseArgs(args) {
   return options;
 }
 
+// pnpm goes through spawnPnpm: a bare `spawn('pnpm')` cannot resolve
+// pnpm.cmd on Windows, so `pnpm all` died at its coverage step there.
 function run(command, args) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd: root, env: process.env, stdio: 'inherit' });
+    const options = { cwd: root, env: process.env, stdio: 'inherit' };
+    const child = command === 'pnpm' ? spawnPnpm(args, options) : spawn(command, args, options);
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (signal) reject(new Error(`${command} terminated by ${signal}`));
@@ -229,6 +239,11 @@ export async function main() {
       `--coverage.reportsDirectory=${reportsDirectory}`,
       `--coverage.include=${target.include}`,
       ...exclusions.map((pattern) => `--coverage.exclude=${pattern}`),
+      // The CLI integration suite runs a real daemon and many CLI children.
+      // Parallel coverage workers contend with them on the CI runner, causing
+      // child deadlines and daemon connection resets. Keep all tests in the
+      // coverage pass, but run this package's files one at a time.
+      ...(target.id === 'cli' ? ['--maxWorkers=1'] : []),
     ];
     // The override is useful while the checkout's dependency mutation lease is
     // occupied: a separately installed Vitest can measure this tree without

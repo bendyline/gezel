@@ -341,8 +341,25 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   // the bare key) still resolves and an in-place upgrade doesn't lose ds4.
   // On unsupported platforms the binary is simply absent → 'not-found' → the
   // provider's actionable error / the UI availability probe hides ds4.
+  // sd-server rides the same `-cuda` key on Linux, but the choice is a
+  // capability question rather than a fact about where the archive is: unlike
+  // ds4, sd-cpp ALSO ships a portable build in the bare key, and installers
+  // stage every variant for the platform — so a non-NVIDIA host has a `-cuda`
+  // directory sitting right there, and preferring it blindly would hand that
+  // host a CUDA-linked binary that dies at exec before sd.cpp can fall back.
+  //
+  // Reuse llama's resolved backend rather than probing again. It answers the
+  // same question, it is already memoized, and it honours
+  // `llamaCppBackendOverride` — so a user who pinned `cpu` to work around a
+  // broken CUDA install gets a working sd-server too, which is what they
+  // meant. When llama's binary was pre-set the probe never ran and this is
+  // undefined; the bare key is then the safe answer, and in that path the
+  // supervisor has already stamped GEZEL_SD_SERVER_BIN anyway.
+  const cudaCapable = result.llamaBackend?.backend === 'cuda';
   const subdirFor = (name: NativeBinaryName): string =>
-    name === 'ds4-server' && platform === 'linux' ? `${platformKey}-cuda` : platformKey;
+    platform === 'linux' && (name === 'ds4-server' || (name === 'sd-server' && cudaCapable))
+      ? `${platformKey}-cuda`
+      : platformKey;
   for (const { name, envVar } of [
     { name: 'ds4-server' as const, envVar: 'GEZEL_DS4_SERVER_BIN' },
     { name: 'sd-server' as const, envVar: 'GEZEL_SD_SERVER_BIN' },

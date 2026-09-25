@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PromptDraftTaskLaunchSchema } from './task-launch.js';
 
 /**
  * Chat prompt drafts — a message the user is still writing, stored on disk as
@@ -44,6 +45,13 @@ export const PromptDraftMetaSchema = z.object({
   craftbookRef: z.string().optional(),
   /** The composer surface (`meester`, `gezel`, `project`, …) that owns it. */
   scope: z.string().optional(),
+  /**
+   * A craftbook launch parked on this draft. Sending the draft then creates
+   * that task with the text as its brief instead of starting a chat turn.
+   * Present on a draft with no text at all — an attached task is enough to
+   * keep a draft alive.
+   */
+  taskLaunch: PromptDraftTaskLaunchSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   status: PromptDraftStatusSchema,
@@ -78,6 +86,7 @@ export const CreatePromptDraftRequestSchema = z.object({
   taskRef: z.string().optional(),
   craftbookRef: z.string().optional(),
   scope: z.string().optional(),
+  taskLaunch: PromptDraftTaskLaunchSchema.optional(),
 });
 export type CreatePromptDraftRequest = z.infer<typeof CreatePromptDraftRequestSchema>;
 
@@ -104,6 +113,7 @@ export const PatchPromptDraftRequestSchema = z.object({
   taskRef: z.string().nullable().optional(),
   craftbookRef: z.string().nullable().optional(),
   scope: z.string().nullable().optional(),
+  taskLaunch: PromptDraftTaskLaunchSchema.nullable().optional(),
 });
 export type PatchPromptDraftRequest = z.infer<typeof PatchPromptDraftRequestSchema>;
 

@@ -674,8 +674,10 @@ describe('cross-corpus merge ordering (scoring tripwire)', () => {
       'document:guides/nozzles.md', // library, no score → FTS rank-1 pseudo-relevance × 680
       'overview:p1:src', // area lexical 0.7 × 420
       `memory:project:p1:2026-08-01:${projectMemoryHash}`, // project memory 0.8 × 360
-      'content:p1:docs/thrust.docx:2', // docs FTS rank 0 (0.6 × 420, bit-identical)
+      // Both FTS rank 0 (0.6 × 420): an exact tie, which the shared ranking
+      // breaks by id so a page is stable across hosts and runs.
       'content:p1:artifacts:reports/thrust.md:1', // artifacts FTS rank 0
+      'content:p1:docs/thrust.docx:2', // docs FTS rank 0 (0.6 × 420, bit-identical)
       'session:s1', // session FTS rank 0 (0.6 × 400)
       'content:p1:docs/nozzle.docx:5', // docs FTS rank 1 (decayed)
       'content:p1:src/hud.ts:1', // code hybrid 0.5 × 420

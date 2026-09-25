@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync } from 'node:zlib';
-import { canonicalizeJson } from '@bendyline/gezk';
+import { type KnowledgeEmbeddingProfile, canonicalizeJson } from '@bendyline/gezk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extractGezkVerified, readGezkManifest } from '../archive/read.js';
 import { compileKnowledgeCatalog } from '../compiler/compile.js';
@@ -20,23 +20,42 @@ import {
   generateFixtureCorpus,
 } from '../test/fixture.js';
 import { duckdbVersion, runDuckdbScript } from './duckdb.js';
-import { PARQUET_REPORT_PATH, exportCatalogParquet, findDuckdbBinary } from './parquet.js';
+import {
+  PARQUET_EXPORT_VERSION,
+  PARQUET_REPORT_PATH,
+  exportCatalogParquet,
+  findDuckdbBinary,
+  parquetKvMetadata,
+} from './parquet.js';
 
 const binaryPath = await findDuckdbBinary();
 
 let dir: string;
 let archivePath: string;
+let centeredArchivePath: string;
 
-async function query(sql: string): Promise<Array<Record<string, unknown>>> {
-  if (!binaryPath) throw new Error('no duckdb');
-  const out = await runDuckdbScript({ binaryPath }, `.mode json\n${sql}`);
-  return out.trim() ? (JSON.parse(out) as Array<Record<string, unknown>>) : [];
-}
+/**
+ * A `centered-sign` twin of the fixture profile. The alternating ±0.04 center
+ * is large next to the fixture's ~±0.09 components, so sign(x) and
+ * sign(x − c) disagree on roughly a fifth of the bits — enough to tell which
+ * rule a file's bits actually follow.
+ */
+const CENTER = Array.from({ length: 384 }, (_, i) => (i % 2 === 0 ? 0.04 : -0.04));
+const CENTERED_PROFILE: KnowledgeEmbeddingProfile = {
+  ...FIXTURE_EMBEDDING_PROFILE,
+  id: 'test-hash-embed@2',
+  quantization: {
+    ...FIXTURE_EMBEDDING_PROFILE.quantization,
+    binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center: CENTER },
+  },
+};
 
-beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'gezk-parquet-'));
-  archivePath = join(dir, 'fixture-en-1.0.0.gezk');
-  const docs = generateFixtureCorpus(120, 7);
+async function compileFixture(
+  outputPath: string,
+  embeddingProfile: KnowledgeEmbeddingProfile,
+  count: number,
+): Promise<void> {
+  const docs = generateFixtureCorpus(count, 7);
   await compileKnowledgeCatalog({
     catalog: {
       id: 'fixture-en',
@@ -52,14 +71,28 @@ beforeAll(async () => {
     documents: (async function* () {
       for (const doc of docs) yield doc;
     })(),
-    outputPath: archivePath,
-    embeddingProfile: FIXTURE_EMBEDDING_PROFILE,
+    outputPath,
+    embeddingProfile,
     chunkingProfile: FIXTURE_CHUNKING_PROFILE,
     embed: fakeEmbed,
     countTokens: fakeCountTokens,
-    workDir: join(dir, 'work'),
+    workDir: `${outputPath}.work`,
     assets: FIXTURE_ASSETS,
   });
+}
+
+async function query(sql: string): Promise<Array<Record<string, unknown>>> {
+  if (!binaryPath) throw new Error('no duckdb');
+  const out = await runDuckdbScript({ binaryPath }, `.mode json\n${sql}`);
+  return out.trim() ? (JSON.parse(out) as Array<Record<string, unknown>>) : [];
+}
+
+beforeAll(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'gezk-parquet-'));
+  archivePath = join(dir, 'fixture-en-1.0.0.gezk');
+  centeredArchivePath = join(dir, 'centered', 'fixture-en-1.0.0.gezk');
+  await compileFixture(archivePath, FIXTURE_EMBEDDING_PROFILE, 120);
+  await compileFixture(centeredArchivePath, CENTERED_PROFILE, 40);
 }, 120_000);
 
 afterAll(async () => {
@@ -174,6 +207,53 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
     expect(byKey.get('gezk_embedding_dimensions')).toBe(
       String(FIXTURE_EMBEDDING_PROFILE.dimensions),
     );
+    expect(byKey.get('gezk_embedding_bit_method')).toBe('sign');
+    expect(byKey.get('gezk_embedding_bit')).toContain('bit = x > 0');
+    expect(byKey.has('gezk_embedding_bit_center')).toBe(false);
+    expect(byKey.get('gezk_parquet_export_version')).toBe(String(PARQUET_EXPORT_VERSION));
+  }, 120_000);
+
+  it('states the centered-sign rule and its center, and that rule reproduces the stored bits', async () => {
+    if (!binaryPath) return;
+    const out = join(dir, 'out-centered');
+    await exportCatalogParquet({
+      source: { archivePath: centeredArchivePath },
+      outDir: out,
+      duckdb: { binaryPath },
+    });
+    const chunks = join(out, 'chunks-000.parquet');
+    const metadata = await query(
+      `SELECT key::VARCHAR AS key, value::VARCHAR AS value FROM parquet_kv_metadata('${chunks}');`,
+    );
+    const byKey = new Map(metadata.map((m) => [m.key, m.value]));
+    expect(byKey.get('gezk_embedding_bit_method')).toBe('centered-sign');
+    expect(byKey.get('gezk_embedding_bit')).toContain('bit = (x - c) > 0');
+    const center = JSON.parse(String(byKey.get('gezk_embedding_bit_center'))) as number[];
+    expect(center).toEqual(CENTER);
+
+    // The bits were taken from the float vector, so recomputing them from the
+    // int8 column flips only dimensions within rounding error of the center.
+    // The stated rule must explain the bits; the plain-sign rule must not.
+    const rows = await query(
+      `SELECT embedding, hex(embedding_bit) AS bits FROM '${chunks}' ORDER BY id;`,
+    );
+    expect(rows.length).toBeGreaterThan(20);
+    let centeredAgree = 0;
+    let plainAgree = 0;
+    let total = 0;
+    for (const row of rows) {
+      const q = row.embedding as number[];
+      const bits = Buffer.from(String(row.bits), 'hex');
+      for (let i = 0; i < q.length; i++) {
+        const stored = ((bits[i >> 3] ?? 0) >> (i & 7)) & 1;
+        const x = (q[i] ?? 0) / 127;
+        if (Number(x - (center[i] ?? 0) > 0) === stored) centeredAgree++;
+        if (Number(x > 0) === stored) plainAgree++;
+        total++;
+      }
+    }
+    expect(centeredAgree / total).toBeGreaterThan(0.97);
+    expect(plainAgree / total).toBeLessThan(0.9);
   }, 120_000);
 
   it('exports an extracted catalog directory the same way', async () => {
@@ -188,4 +268,35 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
     });
     expect(report.files.map((f) => f.sha256)).toEqual(fromArchive.files.map((f) => f.sha256));
   }, 120_000);
+});
+
+describe('parquetKvMetadata', () => {
+  it('describes a sign profile with the plain rule and no center', async () => {
+    const metadata = parquetKvMetadata(await readGezkManifest(archivePath));
+    expect(metadata.gezk_embedding_bit_method).toBe('sign');
+    expect(metadata.gezk_embedding_bit).toContain('bit = x > 0');
+    expect(metadata.gezk_embedding_bit_center).toBeUndefined();
+  });
+
+  it('describes a centered-sign profile with its rule and center', async () => {
+    const metadata = parquetKvMetadata(await readGezkManifest(centeredArchivePath));
+    expect(metadata.gezk_embedding_bit_method).toBe('centered-sign');
+    expect(metadata.gezk_embedding_bit).toContain('bit = (x - c) > 0');
+    expect(metadata.gezk_embedding_bit).not.toContain('bit = x > 0');
+    expect(JSON.parse(metadata.gezk_embedding_bit_center ?? 'null')).toEqual(CENTER);
+    expect(metadata.gezk_parquet_export_version).toBe(String(PARQUET_EXPORT_VERSION));
+  });
+
+  it('refuses a centered-sign profile that has lost its center', async () => {
+    const manifest = await readGezkManifest(centeredArchivePath);
+    const { center: _center, ...binary } = manifest.embedding.quantization.binary;
+    const broken = {
+      ...manifest,
+      embedding: {
+        ...manifest.embedding,
+        quantization: { ...manifest.embedding.quantization, binary },
+      },
+    };
+    expect(() => parquetKvMetadata(broken)).toThrow(/centered-sign requires/);
+  });
 });

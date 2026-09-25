@@ -1,4 +1,4 @@
-import { PROJECT_PROMPTS_DIR_NAME } from './paths.js';
+import { PROJECT_PROMPTS_DIR_NAME } from './storage-names.js';
 
 /**
  * Shared vocabulary for prompt drafts — id shape, the artifacts-relative

@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Dialog } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelIcon } from './GezelIcon.js';
 
 type GezelTemplateItem = CatalogItemSummary & {
@@ -108,7 +109,7 @@ export function ProjectAddGezelDialog({
   const projectType = getProjectType(resolveProjectTypeId(project));
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !runtimeCapabilities().catalog) return;
     let cancelled = false;
     setLoading(true);
     setError(null);

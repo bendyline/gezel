@@ -29,7 +29,19 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./poppetje": {
+      "types": "./dist/poppetje/index.d.ts",
+      "import": "./dist/poppetje/index.js"
+    },
     ".": {
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "import": "./dist/browser.js"
+      },
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
@@ -40,6 +52,18 @@
     "./schemas": {
       "types": "./dist/schemas/index.d.ts",
       "import": "./dist/schemas/index.js"
+    },
+    "./mobile-inference": {
+      "types": "./dist/mobile/inference.d.ts",
+      "import": "./dist/mobile/inference.js"
+    },
+    "./mobile-providers": {
+      "types": "./dist/schemas/mobile-provider.d.ts",
+      "import": "./dist/schemas/mobile-provider.js"
+    },
+    "./kokoro": {
+      "types": "./dist/kokoro/index.d.ts",
+      "import": "./dist/kokoro/index.js"
     },
     "./markdown": {
       "types": "./dist/markdown/index.d.ts",

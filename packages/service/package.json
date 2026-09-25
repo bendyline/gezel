@@ -44,6 +44,10 @@
       "types": "./dist/handboek.d.ts",
       "import": "./dist/handboek.js"
     },
+    "./native-release": {
+      "types": "./dist/native-release.d.ts",
+      "import": "./dist/native-release.js"
+    },
     "./dist/bin/gezeld.js": "./dist/bin/gezeld.js",
     "./package.json": "./package.json"
   },
@@ -75,6 +79,7 @@
     "@bendyline/gezel-knowledge": "workspace:*",
     "@bendyline/gezel-mcp": "workspace:*",
     "@bendyline/gezel-plugin-sdk": "workspace:*",
+    "@bendyline/gezel-script-runtime": "workspace:*",
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/squisq": "2.11.5",

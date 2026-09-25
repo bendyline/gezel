@@ -477,10 +477,12 @@ describe('ChatEventSchema', () => {
         success: true,
         resultText: 'Matched presentations/powerpoint',
         resultTruncated: false,
+        deliveredResultTruncated: true,
       }),
     ).toMatchObject({
       resultText: 'Matched presentations/powerpoint',
       resultTruncated: false,
+      deliveredResultTruncated: true,
     });
   });
 

@@ -1,3 +1,5 @@
+@import "./ui-fonts.css";
+
 /* Self-hosted WOFF2 fonts — Latin subset only.
    Two cohorts:
      1. Gezel UX fonts — Hanken Grotesk (sans, UI chrome) + PT Serif
@@ -8,72 +10,6 @@
         typography without reaching out to Google Fonts.
    Per-font licenses live in ./licenses/. WOFFs were sourced from
    DocBlocks (same family of apps, same Latin subset). */
-
-/* ── Gezel UX fonts ───────────────────────────────────── */
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./hanken-grotesk-400.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./hanken-grotesk-400i.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("./hanken-grotesk-500.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("./hanken-grotesk-600.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("./hanken-grotesk-700.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "PT Serif";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./pt-serif-400.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "PT Serif";
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./pt-serif-400i.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "PT Serif";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("./pt-serif-700.woff2") format("woff2");
-}
 
 /* ── Squisq theme fonts ─────────────────────────────────
    Included so every built-in Squisq theme renders with its intended

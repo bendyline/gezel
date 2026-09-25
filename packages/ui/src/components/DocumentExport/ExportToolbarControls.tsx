@@ -14,6 +14,7 @@ import { getTransformStyleSummaries } from '@bendyline/squisq/transform';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { Dialog, DropdownMenu } from '../../primitives/index.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { ExportDialog } from './ExportDialog.js';
 import { downloadBlob } from './download-blob.js';
 import type { ExportOptions } from './export-options.js';
@@ -104,7 +105,7 @@ export function ExportToolbarControls({
 
   const handleMediaExport = useCallback(
     async (outputFormat: 'mp4' | 'gif') => {
-      if (!selectedFile || !mediaSource) return;
+      if (!runtimeCapabilities().mediaExport || !selectedFile || !mediaSource) return;
       const controller = new AbortController();
       mediaAbortRef.current?.abort();
       mediaAbortRef.current = controller;
@@ -212,7 +213,7 @@ export function ExportToolbarControls({
             <DropdownMenu.Item className="app-nav-menu-item" onSelect={handleOpenDialog}>
               Export…
             </DropdownMenu.Item>
-            {selectedFile && mediaSource && (
+            {runtimeCapabilities().mediaExport && selectedFile && mediaSource && (
               <>
                 <div className="gezel-export-menu-divider" role="separator" tabIndex={-1} />
                 <DropdownMenu.Item

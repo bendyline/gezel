@@ -5,7 +5,12 @@ import {
   type WorkspaceReadFileRequest,
   type WorkspaceReadFileSuccess,
 } from '@bendyline/gezel';
-import { binaryDocumentExtension, isBinaryDocumentPath } from '@bendyline/gezel';
+import {
+  ReadArtifactInputSchema,
+  ReadFileInputSchema,
+  binaryDocumentExtension,
+  isBinaryDocumentPath,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -163,6 +168,79 @@ function reroutedReadNotice(
   } for subsequent operations on this path.`;
 }
 
+/**
+ * `read_file` on an office document used to decode the container as UTF-8 and
+ * hand the model line-numbered mojibake — `1→PK\x03\x04…[Content_Types].xml…`
+ * for a DOCX. Wild-caught on the first binary-source PowerPoint trial: two
+ * different gezels each "read" the brief this way, believed they had the
+ * source, and the run produced no deck. The step prompt's "never interpret
+ * binary bytes as text" is unenforceable while the tool cheerfully does it.
+ *
+ * Reroute rather than refuse. The sibling artifact-collision path already
+ * establishes the pattern — serve the right content and SAY what was
+ * substituted — and an error would be worse here than useless: a small model
+ * that gets one tends to retry the same call, which is the loop shape the
+ * repeat tracker exists to kill. `read_artifact` takes the same path for
+ * documents in the artifacts drawer — uploaded craftbook inputs, mostly.
+ */
+async function rerouteBinaryDocumentRead(
+  dependencies: CrossDrawerReadDependencies,
+  path: string,
+  surface: 'workspace' | 'artifact',
+): Promise<{
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
+} | null> {
+  const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
+  if (!isBinaryDocumentPath(path)) return null;
+  const artifact = surface === 'artifact';
+  const requestedTool = artifact ? 'read_artifact' : 'read_file';
+  const exactCall = renderExactToolCall('read_doc_as_markdown', {
+    path,
+    ...(artifact ? { artifact: true } : {}),
+  });
+  if (!toolIsAuthorized('read_doc_as_markdown')) {
+    const kind = binaryDocumentExtension(path)?.toUpperCase() ?? 'office';
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${requestedTool} "${path}": this is a binary ${kind} document, not text. Reading it as text returns container bytes, not its content. \`read_doc_as_markdown\` is not authorized for this session — hand this source to a gezel that has it (${exactCall}).`,
+        },
+      ],
+    };
+  }
+  try {
+    const res = await api.toolReadDocAsMarkdown(projectId, {
+      path,
+      ...(artifact ? { artifact: true } : {}),
+    });
+    if (!res.found) return null;
+    const notice = reroutedReadNotice(requestedTool, 'read_doc_as_markdown', surface, path);
+    const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
+    return {
+      content: [
+        { type: 'text' as const, text: `${notice}\n\n${head}\n---\n${res.markdown ?? ''}` },
+      ],
+      structuredContent: {
+        requestedTool,
+        requestedPath: path,
+        resolvedTool: 'read_doc_as_markdown',
+        resolvedSurface: surface,
+        resolvedPath: res.sourcePath,
+        rerouted: true,
+        content: res.markdown ?? '',
+        truncated: res.truncated ?? false,
+      },
+    };
+  } catch (error) {
+    // Conversion is best-effort. A failure falls through to the ordinary read
+    // so a corrupt or unsupported container still reports its real error.
+    void unwrapApiError(error);
+    return null;
+  }
+}
+
 export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependencies): void {
   const {
     server,
@@ -176,81 +254,10 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
     unwrapApiError,
   } = dependencies;
 
-  /**
-   * `read_file` on an office document used to decode the container as UTF-8 and
-   * hand the model line-numbered mojibake — `1→PK\x03\x04…[Content_Types].xml…`
-   * for a DOCX. Wild-caught on the first binary-source PowerPoint trial: two
-   * different gezels each "read" the brief this way, believed they had the
-   * source, and the run produced no deck. The step prompt's "never interpret
-   * binary bytes as text" is unenforceable while the tool cheerfully does it.
-   *
-   * Reroute rather than refuse. The sibling artifact-collision path below
-   * already establishes the pattern — serve the right content and SAY what was
-   * substituted — and an error would be worse here than useless: a small model
-   * that gets one tends to retry the same call, which is the loop shape the
-   * repeat tracker exists to kill.
-   */
-  async function rerouteBinaryDocumentRead(
-    dependencies: CrossDrawerReadDependencies,
-    path: string,
-  ): Promise<{
-    content: Array<{ type: 'text'; text: string }>;
-    structuredContent?: Record<string, unknown>;
-  } | null> {
-    const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
-    if (!isBinaryDocumentPath(path)) return null;
-    const exactCall = renderExactToolCall('read_doc_as_markdown', { path });
-    if (!toolIsAuthorized('read_doc_as_markdown')) {
-      const kind = binaryDocumentExtension(path)?.toUpperCase() ?? 'office';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `read_file "${path}": this is a binary ${kind} document, not text. Reading it as text returns container bytes, not its content. \`read_doc_as_markdown\` is not authorized for this session — hand this source to a gezel that has it (${exactCall}).`,
-          },
-        ],
-      };
-    }
-    try {
-      const res = await api.toolReadDocAsMarkdown(projectId, { path });
-      if (!res.found) return null;
-      const notice = reroutedReadNotice('read_file', 'read_doc_as_markdown', 'workspace', path);
-      const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
-      return {
-        content: [
-          { type: 'text' as const, text: `${notice}\n\n${head}\n---\n${res.markdown ?? ''}` },
-        ],
-        structuredContent: {
-          requestedTool: 'read_file',
-          requestedPath: path,
-          resolvedTool: 'read_doc_as_markdown',
-          resolvedSurface: 'workspace',
-          resolvedPath: res.sourcePath,
-          rerouted: true,
-          content: res.markdown ?? '',
-          truncated: res.truncated ?? false,
-        },
-      };
-    } catch (error) {
-      // Conversion is best-effort. A failure falls through to the ordinary read
-      // so a corrupt or unsupported container still reports its real error.
-      void unwrapApiError(error);
-      return null;
-    }
-  }
-
   server.tool(
     'read_file',
     'Read one project-workspace file, optionally only an inclusive line range. This tool never reads the separate artifacts drawer; use read_artifact for artifact inputs. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
-    {
-      path: z.string().min(1).max(4096).describe('File path relative to the project root.'),
-      startLine: z
-        .number()
-        .int()
-        .min(1)
-        .max(10_000_000)
-        .optional()
-        .describe('1-based first line to return (inclusive). Defaults to 1.'),
+    ReadFileInputSchema.extend({
       endLine: z
         .number()
         .int()
@@ -260,15 +267,11 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
         .describe(
           `1-based last line to return (inclusive). Maximum ${WORKSPACE_READ_MAX_RANGE_LINES} lines per ranged read; omit to read the next bounded chunk.`,
         ),
-      raw: z
-        .boolean()
-        .optional()
-        .describe('Return the file content without `N→` line-number gutters. Default false.'),
-    },
+    }).shape,
     async ({ path, startLine, endLine, raw }) => {
       try {
         // Before any range maths: a binary document has no lines to slice.
-        const rerouted = await rerouteBinaryDocumentRead(dependencies, path);
+        const rerouted = await rerouteBinaryDocumentRead(dependencies, path, 'workspace');
         if (rerouted) return rerouted;
         const rangeError = workspaceReadRangeError({ startLine, endLine });
         if (rangeError) throw new Error(rangeError);
@@ -607,19 +610,7 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
   server.tool(
     'read_artifact',
     'Read one artifact, using a path returned by `list_artifacts`. Paths are relative to the artifact root: use "reports/summary.md", never add "artifacts/" (a legacy redundant prefix is still accepted). Use the same inclusive `startLine`/`endLine` range shape as `read_file`; the older `lines`/`head`/`tail` shapes remain accepted for compatibility. If the exact path is actually a workspace file and `read_file` is authorized, this read is safely rerouted and reports its resolved surface. Use `read_artifacts` for several known artifact paths.',
-    {
-      path: z
-        .string()
-        .describe(
-          'File path or basename. A redundant "artifacts/" prefix is stripped automatically.',
-        ),
-      startLine: z
-        .number()
-        .int()
-        .min(1)
-        .max(10_000_000)
-        .optional()
-        .describe('Canonical 1-based first line to return (inclusive). Defaults to 1.'),
+    ReadArtifactInputSchema.extend({
       endLine: z
         .number()
         .int()
@@ -638,13 +629,15 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
         .describe('Legacy range shape; prefer `startLine` / `endLine`.'),
       head: z.number().int().min(0).optional().describe('Legacy: read just the first N lines.'),
       tail: z.number().int().min(0).optional().describe('Legacy: read just the last N lines.'),
-    },
+    }).shape,
     async ({ path, startLine, endLine, lines, head, tail }) => {
       const sliceArgs = { startLine, endLine, lines, head, tail };
       const sliceError = artifactSliceArgsError(sliceArgs);
       if (sliceError) return errorResult(`read_artifact "${path}": ${sliceError}`);
       const opts = artifactSliceOpts(sliceArgs);
       const clean = normalizeArtifactPath(path);
+      const rerouted = await rerouteBinaryDocumentRead(dependencies, clean, 'artifact');
+      if (rerouted) return rerouted;
       const result = await api.readProjectArtifactSlice(projectId, clean, opts);
       if (result.kind === 'missing') {
         const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
@@ -767,10 +760,27 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
       }
       const header = result.fuzzy ? `(matched ${result.path} by basename)\n` : '';
       const sliceStart = artifactSliceStart(sliceArgs, result.totalLines, result.linesReturned);
-      const sliceTail =
-        result.hasMore || result.linesReturned !== result.totalLines
-          ? `\n\n…[lines ${result.linesReturned} of ${result.totalLines}; ${result.hasMore ? 'more available' : 'this is the last slice'}. Re-call with \`startLine\` / \`endLine\` to read more.]`
-          : '';
+      const sliceEnd = sliceStart + Math.max(0, result.linesReturned - 1);
+      const emptyRequested = head === 0 || tail === 0 || lines?.count === 0;
+      const beyondEnd =
+        !emptyRequested && result.linesReturned === 0 && sliceStart > result.totalLines;
+      let sliceTail = '';
+      if (beyondEnd) {
+        // The service's legacy hasMore also counts omitted *earlier* lines.
+        // Treating that as forward pagination sent a local reviewer into a
+        // loop requesting lines 1201–1600 of a 172-line artifact until timeout.
+        sliceTail = `\n\n[End of file: ${result.totalLines} total lines. No lines exist at or after requested startLine ${sliceStart}; do not page further.]`;
+      } else if (emptyRequested) {
+        sliceTail = `\n\n[No lines requested; file has ${result.totalLines} total lines.]`;
+      } else if (result.linesReturned !== result.totalLines) {
+        const earlier = sliceStart > 1 ? ' Earlier lines are not included in this slice.' : '';
+        const nextStart = sliceEnd + 1;
+        const continuation =
+          nextStart <= result.totalLines
+            ? ` Next: ${renderExactToolCall('read_artifact', { path: result.path, startLine: nextStart, endLine: Math.min(result.totalLines, nextStart + WORKSPACE_READ_MAX_RANGE_LINES - 1) })}`
+            : ' End of file; no later lines.';
+        sliceTail = `\n\n[lines ${sliceStart}-${sliceEnd} of ${result.totalLines}.${earlier}${continuation}]`;
+      }
       return {
         content: [{ type: 'text' as const, text: header + result.content + sliceTail }],
         structuredContent: {
@@ -779,10 +789,12 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
           fuzzy: result.fuzzy,
           content: result.content,
           startLine: sliceStart,
-          endLine: sliceStart + Math.max(0, result.linesReturned - 1),
+          endLine: sliceEnd,
           linesReturned: result.linesReturned,
           totalLines: result.totalLines,
-          hasMore: result.hasMore,
+          hasMore: emptyRequested
+            ? result.totalLines > 0
+            : !beyondEnd && sliceEnd < result.totalLines,
         },
       };
     },

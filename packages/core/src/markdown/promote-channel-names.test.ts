@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { promoteBareChannelNames } from './promote-channel-names.js';
+import { isModeIndicatorOnly, promoteBareChannelNames } from './promote-channel-names.js';
 
 describe('promoteBareChannelNames', () => {
   it('returns input unchanged when no bare channel names appear', () => {
@@ -80,5 +80,18 @@ describe('promoteBareChannelNames', () => {
     expect(out).toContain('_Thinking…_');
     expect(out).toContain("I've reviewed");
     expect(out).toContain('the rest');
+  });
+});
+
+describe('isModeIndicatorOnly', () => {
+  it('recognizes a reply that is only reasoning-mode indicators', () => {
+    expect(isModeIndicatorOnly('_Thinking…_')).toBe(true);
+    expect(isModeIndicatorOnly(' _Analyzing…_\n\n_Thinking…_ ')).toBe(true);
+  });
+
+  it('is false for real text, with or without an indicator', () => {
+    expect(isModeIndicatorOnly('_Thinking…_\n\nThe deck is saved.')).toBe(false);
+    expect(isModeIndicatorOnly('Thinking about it.')).toBe(false);
+    expect(isModeIndicatorOnly('')).toBe(false);
   });
 });

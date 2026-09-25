@@ -523,6 +523,21 @@ export function projectAllowsAmbientWork(project: {
 }
 
 /**
+ * Who picks up work nobody in particular owns: the project's voorman, or, in
+ * the Default project (which never gets one), the Meester. Only for
+ * ownership. Do not feed it to voorman nudges or the voorman tool filter:
+ * the Meester's front-door chat lives in Default, and treating it as an
+ * ordinary voorman there re-prompts every casual turn and swaps out its
+ * delegation tools.
+ */
+export function projectLeadGezelId(
+  project: { id: string; voormanGezelId?: string },
+  meesterGezelId: string | undefined,
+): string | undefined {
+  return project.voormanGezelId ?? (project.id === 'default' ? meesterGezelId : undefined);
+}
+
+/**
  * True when the project has not opted out of overnight bug fixing. Missing =
  * on; see `nightlyFixesEnabled`. This is only the *user's* half of the gate —
  * the planner additionally requires a Boekwachter and a developer on the

@@ -176,11 +176,12 @@ jobs:
       # installed multi-semantic-release has no such option and silently
       # forwards unknown flags to semantic-release.
       #
-      # packages/sharp-compat is ignored rather than left to its `private: true`
-      # flag. That flag stops the publish, but multi-semantic-release would
-      # still version it, write it a CHANGELOG, and cut a git tag named
-      # literally `sharp@x.y.z` — it occupies the `sharp` dependency slot for
-      # Transformers.js and is not a gezel release line.
+      # packages/sharp-compat and packages/phonemizer-compat are ignored rather
+      # than left to their `private: true` flag. That flag stops the publish,
+      # but multi-semantic-release would still version them, write CHANGELOGs,
+      # and cut git tags named literally `sharp@x.y.z` / `phonemizer@x.y.z` —
+      # they occupy those dependency slots for Transformers.js and kokoro-js
+      # and are not gezel release lines.
       - name: Release
         id: release
         env:
@@ -188,7 +189,7 @@ jobs:
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,packages/ml-runtime,evals)
+          args=(--ignore-packages=packages/ui,packages/mobile,packages/capacitor,packages/eval-viewer,packages/sharp-compat,packages/phonemizer-compat,packages/ml-runtime,evals)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi

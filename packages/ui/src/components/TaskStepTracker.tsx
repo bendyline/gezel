@@ -17,7 +17,7 @@ interface TaskStepTrackerProps {
   /** Which step the user has clicked on for viewing — independent of active. */
   selectedStepId: string | null;
   onSelect: (stepId: string) => void;
-  onAddStep: () => void;
+  onAddStep?: () => void;
   /** Disables all interaction (e.g., while a mutation is in flight). */
   busy?: boolean;
   /** Roster used to resolve a step assignee to a name/role/figure. */

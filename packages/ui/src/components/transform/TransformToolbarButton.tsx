@@ -1,6 +1,7 @@
 import type { RewriteTextContext } from '@bendyline/gezel';
 import { useEditorContext } from '@bendyline/squisq-editor-react';
 import { useCallback, useState } from 'react';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { TransformDialog } from './TransformDialog.js';
 import type { SelectionSnapshot } from './types.js';
 
@@ -138,6 +139,8 @@ export function TransformToolbarButton({
     },
     [tiptapEditor, monacoEditor, insertAtCursor],
   );
+
+  if (!runtimeCapabilities().textTransforms) return null;
 
   return (
     <>

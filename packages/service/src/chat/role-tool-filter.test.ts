@@ -276,20 +276,24 @@ describe('roleToolAllowlist', () => {
     expect(allow.has('remove_gezel_from_project')).toBe(true);
   });
 
-  it('post-trim: meester gets the read-only task subset, not the full tasks surface', () => {
+  it('meester oversees tasks but does not author, advance, or complete them', () => {
     const allow = roleToolAllowlist('meester');
-    // Visibility kept — Meester pings projects to see status.
+    // Visibility — Meester pings projects to see status.
     expect(allow.has('list_tasks')).toBe(true);
     expect(allow.has('get_task')).toBe(true);
     expect(allow.has('read_task_notes')).toBe(true);
-    // Mutation gone — the macros + voorman handle these.
+    // Oversight — Default has no voorman, so the Meester manages the
+    // craftbook runs it launches there.
+    expect(allow.has('manage_task')).toBe(true);
+    expect(allow.has('assign_task')).toBe(true);
+    expect(allow.has('write_task_note')).toBe(true);
+    // Authoring and progression stay with the macros, the assignee, and the
+    // step gates. `set_task_status` would let it mark work complete.
     expect(allow.has('create_task')).toBe(false);
     expect(allow.has('update_task')).toBe(false);
-    expect(allow.has('assign_task')).toBe(false);
     expect(allow.has('set_task_status')).toBe(false);
     expect(allow.has('add_task_step')).toBe(false);
     expect(allow.has('advance_task_step')).toBe(false);
-    expect(allow.has('write_task_note')).toBe(false);
     expect(allow.has('spawn_task_instances')).toBe(false);
     expect(allow.has('list_task_children')).toBe(false);
   });
@@ -1992,14 +1996,15 @@ describe('BUILTIN_TOOLSETS coverage', () => {
   });
 
   it('group tool lists do not overlap with each other (except declared subset groups)', () => {
-    // Subset-group exceptions: a `<base>-readonly` group is allowed to
-    // be a strict subset of `<base>` so delegation roles can take a
-    // narrower slice of the same surface (Meester gets
-    // `tasks-readonly` instead of `tasks`). Every other pair must be
-    // disjoint.
+    // Declared slices: a coordinator group may share tools with `tasks` so
+    // delegation roles take a narrower cut of the same surface (the
+    // Meester gets `tasks-readonly` + `task-oversight` instead of `tasks`).
+    // `task-oversight` also carries `manage_task`, which only coordinators
+    // need. Every other pair must be disjoint.
     const SUBSET_OF: Record<string, string> = {
       'tasks-readonly': 'tasks',
       'craftbook-launch': 'tasks',
+      'task-oversight': 'tasks',
     };
     const seen = new Map<string, string>();
     for (const g of BUILTIN_TOOLSETS) {

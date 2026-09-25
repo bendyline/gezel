@@ -94,7 +94,7 @@ The version a running install *reports* — `gezel --version`, `/api/health`
 (which the UI renders as "development build" when it reads `0.0.0`), the system
 diagnostics, the OpenAPI document, the MCP server handshake and the
 engine-download User-Agent — all come from one source constant,
-`GEZEL_VERSION` in [`packages/core/src/index.ts`](../packages/core/src/index.ts).
+`GEZEL_VERSION` in [`packages/core/src/browser.ts`](../packages/core/src/browser.ts).
 It is a literal rather than a read of `package.json` because core is bundled for
 the browser and cannot reach for `node:module` at runtime.
 
@@ -234,7 +234,7 @@ part of the canonical `pnpm all` / `pnpm validate` gate and has a dedicated PR
 job; the publish workflow reaches it through that same gate. `check:packages`
 proves ordinary development packs; this proves the artifacts npm will actually
 receive. It stamps
-`packages/core/src/index.ts` with the current core version exactly as
+`packages/core/src/browser.ts` with the current core version exactly as
 `prepare-package.mjs` does at release time, packs every published package, and
 hands the result to `check-package-consumers.mjs` in strict release mode
 (`--require-release-stamp`), which additionally asserts the installed

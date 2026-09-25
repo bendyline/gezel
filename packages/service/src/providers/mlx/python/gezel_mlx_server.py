@@ -29,9 +29,9 @@ path); the gezel side already handles that better. The model's
 textual tool-call markup flows through as content; the gezel
 `LeakyToolCallStripper` extracts and repairs it.
 
-Out of scope: vision tokens, audio tokens, batch generation,
-quantized KV cache. All can be added later when the use case needs
-them; today they'd just be dead code.
+Vision requests use the full installed tower, serialized against text batch
+waves. Their KV is deliberately uncached so image identity cannot be lost in
+text-prefix reuse. Ordinary text retains the existing batched cache path.
 """
 
 from __future__ import annotations
@@ -78,6 +78,7 @@ import tool_grammar  # noqa: E402
 import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
+import vision_inputs  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
 from qwen4_ple import prepare_external_ple_view  # noqa: E402
@@ -353,6 +354,7 @@ parser.add_argument(
         "after every save when over budget. 0 disables pruning."
     ),
 )
+parser.add_argument("--vision", action="store_true", help="Load and enable the installed vision tower")
 parser.add_argument(
     "--max-concurrency",
     type=int,
@@ -560,8 +562,8 @@ if _QWEN3_5_TEXT_ONLY:
 
 # ── Tower selection (2026-08-28) ──
 #
-# This server has always served TEXT ONLY ("Vision support is out of scope
-# for v1" — _build_prompt): mlx_vlm here is a loader, not a vision path.
+# Text-only launches can use the faster language tower. --vision retains
+# the full VLM tower for pixel encoding and serialized multimodal requests.
 # Yet mlx_vlm's language towers pay a large context-growing decode tax
 # under the BatchGenerator this server runs on. Measured on
 # qwen3.8-27b-q4 (matched-thermal 2x2, ms per decoded token at
@@ -599,7 +601,8 @@ def _model_architecture(model_dir: str) -> str:
 _tower_pref = os.environ.get("GEZEL_MLX_TEXT_TOWER", "auto").strip().lower()
 _arch = _model_architecture(ARGS.model)
 if (
-    _tower_pref not in ("0", "off", "false")
+    not ARGS.vision
+    and _tower_pref not in ("0", "off", "false")
     and int(getattr(ARGS, "max_concurrency", 1) or 0) >= 1
     and (_tower_pref == "force" or _arch in _TEXT_TOWER_ALLOWED_ARCHS)
     # A configured MTP drafter needs the vlm tower (rollback lives there);
@@ -625,6 +628,7 @@ if (
 if _TEXT_TOWER is None:
     MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
     _reason = (
+        "native vision enabled" if ARGS.vision else
         "GEZEL_MLX_TEXT_TOWER=off"
         if _tower_pref in ("0", "off", "false")
         else "serial mode (--max-concurrency 0)"
@@ -636,6 +640,10 @@ if _TEXT_TOWER is None:
         else "mlx_lm load failed"
     )
     print(f"[tower] active=mlx_vlm ({_reason})", flush=True)
+_VISION_ENABLED = bool(ARGS.vision and getattr(PROCESSOR, "image_processor", None) is not None)
+if ARGS.vision and not _VISION_ENABLED:
+    raise RuntimeError("Native vision was requested but this checkpoint has no image processor")
+print(f"[vision] enabled={_VISION_ENABLED}", flush=True)
 print("Model and processor loaded successfully.", flush=True)
 
 # ── MTP speculative decoding (2026-08-28) ──
@@ -1874,195 +1882,201 @@ class BatchEngine:
             if not self._pending and not self._subs:
                 self._wake.clear()
                 await self._wake.wait()
+            async with _get_generation_lock():
+                await self._step_wave()
+                while self._subs:
+                    await self._step_wave()
 
-            # Evict client-disconnected sequences before stepping.
-            gone = [uid for uid, s in self._subs.items() if s.cancelled]
-            if gone:
-                try:
-                    self._gen.remove(gone)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[batch] remove failed: {exc}", flush=True)
-                for uid in gone:
-                    self._subs.pop(uid, None)
+    async def _step_wave(self):
+        # Evict client-disconnected sequences before stepping.
+        gone = [uid for uid, s in self._subs.items() if s.cancelled]
+        if gone:
+            try:
+                self._gen.remove(gone)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[batch] remove failed: {exc}", flush=True)
+            for uid in gone:
+                self._subs.pop(uid, None)
 
-            # Static-wave admission: only start a new batch when the current
-            # one has fully drained. mlx_lm's continuous merge of a mid-flight
-            # prompt batch into the running generation batch isn't supported by
-            # the mlx_vlm model caches here (raises broadcast (N),(M)), so we
-            # batch co-arriving requests into a wave and run it to completion
-            # before admitting the next. Co-arriving turns (multi-pane,
-            # ask-chains) still share batched decode; a turn that arrives
-            # mid-wave waits for the wave to drain — no worse than the old
-            # serial path, and strictly better when turns arrive together.
-            if self._pending and not self._subs:
-                admit_n = self._admit_count(len(self._pending))
-                batch = self._pending[:admit_n]
-                self._pending = self._pending[admit_n:]
-                if self._pending:
-                    # Deferred by the configured concurrency ceiling or live
-                    # memory pressure. The remaining subs run in the next wave,
-                    # after this one drains and frees its KV. The outer loop
-                    # re-enters admission once _subs empties (it never blocks on
-                    # _wake while _pending is non-empty).
-                    print(
-                        f"[batch] admission-throttled: admitting {len(batch)}, "
-                        f"deferring {len(self._pending)} to next wave "
-                        f"(max_concurrency={self._max}, "
-                        f"active={_safe_active_memory() // (1024 * 1024)}MB, "
-                        f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
-                        flush=True,
-                    )
-                if len(batch) == 1 and _SPEC is not None:
-                    spec_sub = batch[0]
-                    mode, why = spec_decode.spec_mode(
-                        spec_sub.request, spec_sub.grammar
-                    )
-                    if mode is not None:
-                        admit, gate_why = spec_decode.draft_prefill_gate(
-                            _SPEC, len(spec_sub.prompt_tokens)
-                        )
-                        if not admit:
-                            mode, why = None, gate_why
-                    if mode is not None:
-                        await self._run_spec_wave(spec_sub, mode)
-                        continue
-                    print(
-                        f"[spec] off request={spec_sub.request_id} reason={why}",
-                        flush=True,
-                    )
-                segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
-                for sub in batch:
-                    seg, c, at = self._seed_args(sub)
-                    segments.append(self._snapshot_segments(sub, seg))
-                    caches.append(c)
-                    alltoks.append(at)
-                    samplers.append(self._sampler_for(sub.request))
-                    lps.append(self._processors_for(sub.request, sub.grammar))
-                    maxtoks.append(int(sub.request.max_tokens) if sub.request.max_tokens else 2048)
-                try:
-                    uids = self._gen.insert_segments(
-                        segments=segments,
-                        max_tokens=maxtoks,
-                        caches=caches,
-                        all_tokens=alltoks,
-                        samplers=samplers,
-                        logits_processors=lps,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[batch] insert failed: {exc}", flush=True)
-                    log_contained_exception("batch")
-                    for sub in batch:
-                        sub.queue.put_nowait(("err", str(exc)))
-                    continue
-                for uid, sub in zip(uids, batch):
-                    sub.uid = uid
-                    sub.prefill_started_at = time.perf_counter()
-                    self._subs[uid] = sub
-                # Arm prefill-liveness for the wave: total new tokens to
-                # prefill across its subs (authoritative — from the seed
-                # plans above). Reset the throttle so the first marker
-                # emits immediately (before the blocking decode below).
-                self._prefill_total = sum(
-                    max(0, int(getattr(s, "prefill_total", 0))) for s in batch
+        # Static-wave admission: only start a new batch when the current
+        # one has fully drained. mlx_lm's continuous merge of a mid-flight
+        # prompt batch into the running generation batch isn't supported by
+        # the mlx_vlm model caches here (raises broadcast (N),(M)), so we
+        # batch co-arriving requests into a wave and run it to completion
+        # before admitting the next. Co-arriving turns (multi-pane,
+        # ask-chains) still share batched decode; a turn that arrives
+        # mid-wave waits for the wave to drain — no worse than the old
+        # serial path, and strictly better when turns arrive together.
+        if self._pending and not self._subs:
+            admit_n = self._admit_count(len(self._pending))
+            batch = self._pending[:admit_n]
+            self._pending = self._pending[admit_n:]
+            if self._pending:
+                # Deferred by the configured concurrency ceiling or live
+                # memory pressure. The remaining subs run in the next wave,
+                # after this one drains and frees its KV. The outer loop
+                # re-enters admission once _subs empties (it never blocks on
+                # _wake while _pending is non-empty).
+                print(
+                    f"[batch] admission-throttled: admitting {len(batch)}, "
+                    f"deferring {len(self._pending)} to next wave "
+                    f"(max_concurrency={self._max}, "
+                    f"active={_safe_active_memory() // (1024 * 1024)}MB, "
+                    f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
+                    flush=True,
                 )
-                self._prefill_done = {}
-                self._prefill_meta = {
-                    uid: (
-                        getattr(s.request, "cache_id", None),
-                        max(0, int(getattr(s, "prefill_total", 0))),
+            if len(batch) == 1 and _SPEC is not None:
+                spec_sub = batch[0]
+                mode, why = spec_decode.spec_mode(
+                    spec_sub.request, spec_sub.grammar
+                )
+                if mode is not None:
+                    admit, gate_why = spec_decode.draft_prefill_gate(
+                        _SPEC, len(spec_sub.prompt_tokens)
                     )
-                    for uid, s in self._subs.items()
-                }
-                self._last_prefill_emit = 0.0
+                    if not admit:
+                        mode, why = None, gate_why
+                if mode is not None:
+                    await self._run_spec_wave(spec_sub, mode)
+                    return
+                print(
+                    f"[spec] off request={spec_sub.request_id} reason={why}",
+                    flush=True,
+                )
+            segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
+            for sub in batch:
+                seg, c, at = self._seed_args(sub)
+                segments.append(self._snapshot_segments(sub, seg))
+                caches.append(c)
+                alltoks.append(at)
+                samplers.append(self._sampler_for(sub.request))
+                lps.append(self._processors_for(sub.request, sub.grammar))
+                maxtoks.append(int(sub.request.max_tokens) if sub.request.max_tokens else 2048)
+            try:
+                uids = self._gen.insert_segments(
+                    segments=segments,
+                    max_tokens=maxtoks,
+                    caches=caches,
+                    all_tokens=alltoks,
+                    samplers=samplers,
+                    logits_processors=lps,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[batch] insert failed: {exc}", flush=True)
+                log_contained_exception("batch")
+                for sub in batch:
+                    sub.queue.put_nowait(("err", str(exc)))
+                return
+            for uid, sub in zip(uids, batch):
+                sub.uid = uid
+                sub.prefill_started_at = time.perf_counter()
+                self._subs[uid] = sub
+            # Arm prefill-liveness for the wave: total new tokens to
+            # prefill across its subs (authoritative — from the seed
+            # plans above). Reset the throttle so the first marker
+            # emits immediately (before the blocking decode below).
+            self._prefill_total = sum(
+                max(0, int(getattr(s, "prefill_total", 0))) for s in batch
+            )
+            self._prefill_done = {}
+            self._prefill_meta = {
+                uid: (
+                    getattr(s.request, "cache_id", None),
+                    max(0, int(getattr(s, "prefill_total", 0))),
+                )
+                for uid, s in self._subs.items()
+            }
+            self._last_prefill_emit = 0.0
 
-            # One engine step across all active sequences. `next()` (not
-            # `next_generated()`) so control returns after EVERY internal
-            # step — prompt chunks included. That is what makes the
-            # end-of-prompt snapshot capturable at its exact boundary
-            # (see _capture_prompt_snapshot), gives the liveness marker
-            # real per-chunk progress instead of a constant 0%, and lets
-            # the event loop breathe between prefill chunks.
-            if self._subs:
-                # Emit a prefill marker before the (potentially long, event-
-                # loop-blocking) step so the watchdog sees liveness.
-                # No-op once the first token lands (_prefill_total → 0).
-                self._emit_prefill_liveness()
-                try:
-                    prompt_responses, responses = self._gen.next()
-                    step_ended_at = time.perf_counter()
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[batch] step failed: {exc}", flush=True)
-                    log_contained_exception("batch")
-                    for sub in list(self._subs.values()):
-                        sub.queue.put_nowait(("err", str(exc)))
-                    self._subs.clear()
+        # One engine step across all active sequences. `next()` (not
+        # `next_generated()`) so control returns after EVERY internal
+        # step — prompt chunks included. That is what makes the
+        # end-of-prompt snapshot capturable at its exact boundary
+        # (see _capture_prompt_snapshot), gives the liveness marker
+        # real per-chunk progress instead of a constant 0%, and lets
+        # the event loop breathe between prefill chunks.
+        if self._subs:
+            # Emit a prefill marker before the (potentially long, event-
+            # loop-blocking) step so the watchdog sees liveness.
+            # No-op once the first token lands (_prefill_total → 0).
+            self._emit_prefill_liveness()
+            try:
+                prompt_responses, responses = self._gen.next()
+                step_ended_at = time.perf_counter()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[batch] step failed: {exc}", flush=True)
+                log_contained_exception("batch")
+                for sub in list(self._subs.values()):
+                    sub.queue.put_nowait(("err", str(exc)))
+                self._subs.clear()
+                return
+            # set_cache_limit bounds future reuse, while this periodic
+            # pressure check also catches temporary overshoot during a
+            # long prefill/decode. It replaces reliance on mlx_lm's much
+            # coarser 512-generation-step cache clear.
+            self._memory_check_steps += 1
+            if self._memory_check_steps >= 32:
+                self._memory_check_steps = 0
+                _reclaim_mlx_buffer_cache("batch-pressure")
+            for pr in prompt_responses:
+                progress = getattr(pr, "progress", None)
+                has_progress = isinstance(progress, tuple) and len(progress) == 2
+                if has_progress:
+                    self._prefill_done[pr.uid] = int(progress[0])
+                psub = self._subs.get(pr.uid)
+                if psub is None or not self._needs_snapshot or not psub.request.cache_id:
                     continue
-                # set_cache_limit bounds future reuse, while this periodic
-                # pressure check also catches temporary overshoot during a
-                # long prefill/decode. It replaces reliance on mlx_lm's much
-                # coarser 512-generation-step cache clear.
-                self._memory_check_steps += 1
-                if self._memory_check_steps >= 32:
-                    self._memory_check_steps = 0
-                    _reclaim_mlx_buffer_cache("batch-pressure")
-                for pr in prompt_responses:
-                    progress = getattr(pr, "progress", None)
-                    has_progress = isinstance(progress, tuple) and len(progress) == 2
-                    if has_progress:
-                        self._prefill_done[pr.uid] = int(progress[0])
-                    psub = self._subs.get(pr.uid)
-                    if psub is None or not self._needs_snapshot or not psub.request.cache_id:
-                        continue
-                    if getattr(pr, "end_of_prompt", False):
-                        continue
-                    if has_progress and getattr(pr, "end_of_segment", False):
-                        # Capture only the deliberately planted edge. Chunk
-                        # edges are observable too, but copying at each one is
-                        # expensive and unnecessary. extract_cache(uid) is
-                        # padding-aware after PromptProcessingBatch.prompt()
-                        # finalizes this step, so every sub in a multi-request
-                        # wave can safely take its own snapshot.
-                        boundary = psub.reused_tokens + int(progress[0])
-                        if boundary == psub.snapshot_target:
-                            self._capture_prompt_snapshot(psub, boundary)
-                if responses:
-                    # A token came back → prefill for this wave is done; stop
-                    # the liveness markers (the SSE first byte now drives the
-                    # watchdog's tighter streaming-idle bound).
-                    self._prefill_total = 0
-                    self._prefill_done = {}
-                    self._prefill_meta = {}
-                for r in responses:
-                    sub = self._subs.get(r.uid)
-                    if sub is None:
-                        continue
-                    if sub.generation_started_at is None:
-                        # The step that yields the first token is the closest
-                        # boundary BatchGenerator exposes between prefill and
-                        # decode. Count it with prefill/TTFT, then measure decode
-                        # from the inter-token intervals that follow; otherwise
-                        # a short prompt can produce a near-zero denominator and
-                        # a wildly inflated first-token rate.
-                        sub.generation_started_at = step_ended_at
-                        prefill_started_at = sub.prefill_started_at or step_ended_at
-                        prefill_seconds = max(
-                            step_ended_at - prefill_started_at,
-                            1e-9,
-                        )
-                        if sub.prefill_total > 0:
-                            sub.prompt_tps = sub.prefill_total / prefill_seconds
-                    sub.first_token_seen = True
-                    sub.token_ids.append(int(r.token))
-                    generated_intervals = len(sub.token_ids) - 1
-                    generation_seconds = step_ended_at - sub.generation_started_at
-                    if generated_intervals > 0 and generation_seconds > 0:
-                        sub.generation_tps = generated_intervals / generation_seconds
-                    self._emit_delta(sub)
-                    if r.finish_reason is not None:
-                        self._finish(sub, r)
-                        self._subs.pop(r.uid, None)
-                # Yield so SSE generators flush + new requests get admitted.
-                await asyncio.sleep(0)
+                if getattr(pr, "end_of_prompt", False):
+                    continue
+                if has_progress and getattr(pr, "end_of_segment", False):
+                    # Capture only the deliberately planted edge. Chunk
+                    # edges are observable too, but copying at each one is
+                    # expensive and unnecessary. extract_cache(uid) is
+                    # padding-aware after PromptProcessingBatch.prompt()
+                    # finalizes this step, so every sub in a multi-request
+                    # wave can safely take its own snapshot.
+                    boundary = psub.reused_tokens + int(progress[0])
+                    if boundary == psub.snapshot_target:
+                        self._capture_prompt_snapshot(psub, boundary)
+            if responses:
+                # A token came back → prefill for this wave is done; stop
+                # the liveness markers (the SSE first byte now drives the
+                # watchdog's tighter streaming-idle bound).
+                self._prefill_total = 0
+                self._prefill_done = {}
+                self._prefill_meta = {}
+            for r in responses:
+                sub = self._subs.get(r.uid)
+                if sub is None:
+                    continue
+                if sub.generation_started_at is None:
+                    # The step that yields the first token is the closest
+                    # boundary BatchGenerator exposes between prefill and
+                    # decode. Count it with prefill/TTFT, then measure decode
+                    # from the inter-token intervals that follow; otherwise
+                    # a short prompt can produce a near-zero denominator and
+                    # a wildly inflated first-token rate.
+                    sub.generation_started_at = step_ended_at
+                    prefill_started_at = sub.prefill_started_at or step_ended_at
+                    prefill_seconds = max(
+                        step_ended_at - prefill_started_at,
+                        1e-9,
+                    )
+                    if sub.prefill_total > 0:
+                        sub.prompt_tps = sub.prefill_total / prefill_seconds
+                sub.first_token_seen = True
+                sub.token_ids.append(int(r.token))
+                generated_intervals = len(sub.token_ids) - 1
+                generation_seconds = step_ended_at - sub.generation_started_at
+                if generated_intervals > 0 and generation_seconds > 0:
+                    sub.generation_tps = generated_intervals / generation_seconds
+                self._emit_delta(sub)
+                if r.finish_reason is not None:
+                    self._finish(sub, r)
+                    self._subs.pop(r.uid, None)
+            # Yield so SSE generators flush + new requests get admitted.
+            await asyncio.sleep(0)
+
 
     async def _run_spec_wave(self, sub, mode="greedy"):
         """Serve one eligible sub via MTP speculation (sidecar-owned wave).
@@ -2690,7 +2704,8 @@ def _flush_all_to_disk() -> int:
 
 class ChatMessageReq(BaseModel):
     role: str
-    content: Any  # str or list[dict] (vision); we coerce to str below
+    content: Any
+    images: Optional[List[str]] = None  # raw base64, never a file path or URL
     tool_call_id: Optional[str] = None
     # Undeclared fields are dropped by pydantic, and a dropped
     # `tool_calls` silently costs the model its own tool-call history:
@@ -2824,7 +2839,7 @@ except (ValueError, AttributeError):
 @app.get("/health")
 async def health() -> JSONResponse:
     """Same shape mlx_vlm.server emits — keeps our supervisor probe happy."""
-    return JSONResponse({"status": "ok"})
+    return JSONResponse({"status": "ok", "vision": _VISION_ENABLED})
 
 
 @app.post("/admin/flush")
@@ -2927,6 +2942,8 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     snapshot boundary inside the stable system prefix, before either fake user
     can contaminate an untrimmable entry.
     """
+    if any(m.images for m in req.messages):
+        raise HTTPException(status_code=422, detail="Vision requests cannot warm text-prefix caches")
     synthetic_user = not any(m.role == "user" for m in req.messages)
     warm_messages = list(req.messages)
     if synthetic_user:
@@ -3314,8 +3331,8 @@ def _build_prompt(
     reinstalling — used for the A/B and as an escape hatch for models
     with a known-bad embedded template.
 
-    Vision support is out of scope for v1; list-shaped content is
-    flattened to text by extracting text parts.
+    Vision messages keep structured image placeholders in the canonical
+    template; decoded pixels are supplied separately to mlx_vlm.
     """
     # Text-only models (e.g. laguna): load_processor returns the bare
     # tokenizer itself — no `.tokenizer` attribute. Falling back to
@@ -3330,11 +3347,7 @@ def _build_prompt(
     )
     raw = []
     for m in messages:
-        content = m.content
-        if isinstance(content, list):
-            parts = [p.get("text", "") for p in content if isinstance(p, dict)]
-            content = "\n".join(p for p in parts if p)
-        entry: Dict[str, Any] = {"role": m.role, "content": content or ""}
+        entry: Dict[str, Any] = {"role": m.role, "content": vision_inputs.message_content(m)}
         # Carry the tool-call linkage through to the template, but ONLY for
         # templates that actually need it — see _template_needs_tool_linkage.
         # Templates that render a bare tool message stay byte-identical to
@@ -3350,7 +3363,7 @@ def _build_prompt(
     use_tokenizer = (
         tokenizer is not None
         and hasattr(tokenizer, "apply_chat_template")
-        and (bool(tools) or bool(chat_template_override))
+        and (bool(tools) or bool(chat_template_override) or any(m.images for m in messages))
     )
     if use_tokenizer:
         base_kwargs: Dict[str, Any] = dict(
@@ -3465,6 +3478,82 @@ def _serial_prompt_token_variants(prompt_text: str) -> "List[List[int]]":
     return variants
 
 
+async def _vision_stream(request, http_request, images):
+    """One full-tower vision request. Never share text-prefix KV or speculate."""
+    request_id = f"chatcmpl-{uuid.uuid4()}"
+    generator = None
+    try:
+        prompt = _build_prompt(request.messages, request.tools,
+                               request.chat_template_override, request.chat_template_kwargs)
+        kwargs = {"prefill_step_size": ARGS.prefill_step_size, **_kv_quant_kwargs()}
+        for key in ("max_tokens", "temperature", "top_p", "top_k",
+                    "repetition_penalty", "repetition_context_size"):
+            value = getattr(request, key, None)
+            if value is not None:
+                kwargs[key] = value
+        tokenizer = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+        processors = []
+        if request.tool_grammar:
+            grammar = tool_grammar.build_tool_grammar_processor(
+                tokenizer, request.tools, request.tool_grammar)
+            if grammar is not None:
+                processors.append(grammar)
+        if request.max_thinking_tokens:
+            processor = think_budget.build_think_budget_processor(
+                tokenizer, request.max_thinking_tokens,
+                opens_in_think=prompt.rstrip().endswith("<think>"))
+            if processor is not None:
+                processors.append(processor)
+        if processors:
+            kwargs["logits_processors"] = processors
+        last = None
+        async with _get_generation_lock():
+            if await http_request.is_disconnected():
+                return
+            print(f"[vision] start request={request_id} images={len(images)} cache=disabled", flush=True)
+            with vision_inputs.isolated_position_state(MODEL):
+                generator = stream_generate(model=MODEL, processor=PROCESSOR,
+                                            prompt=prompt, image=images, **kwargs)
+                try:
+                    for chunk in generator:
+                        if await http_request.is_disconnected():
+                            return
+                        if chunk is None or not hasattr(chunk, "text"):
+                            continue
+                        last = chunk
+                        text = _scrub_leaked_markers(chunk.text)
+                        if text:
+                            yield "data: " + json.dumps({
+                                "id": request_id, "object": "chat.completion.chunk",
+                                "model": request.model,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                            }) + "\n\n"
+                        await asyncio.sleep(0)
+                finally:
+                    generator.close()
+                    generator = None
+                    _reclaim_mlx_buffer_cache("vision-end", force=True, log=True)
+        usage = {"input_tokens": getattr(last, "prompt_tokens", 0),
+                 "output_tokens": getattr(last, "generation_tokens", 0),
+                 "cached_tokens": 0,
+                 "prompt_tps": getattr(last, "prompt_tps", 0),
+                 "generation_tps": getattr(last, "generation_tps", 0)}
+        finish = "length" if request.max_tokens and usage["output_tokens"] >= request.max_tokens else "stop"
+        yield "data: " + json.dumps({
+            "id": request_id, "object": "chat.completion.chunk", "model": request.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": usage,
+        }) + "\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as exc:
+        log_contained_exception("vision")
+        yield "data: " + json.dumps({"error": str(exc)}) + "\n\n"
+    finally:
+        if generator is not None:
+            generator.close()
+        for image in images:
+            image.close()
+
+
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
 async def chat_completions(request: ChatRequest, http_request: Request):
@@ -3475,6 +3564,17 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             status_code=501,
             detail="gezel-mlx-server only supports streaming completions",
         )
+
+    if any(message.images for message in request.messages):
+        if not _VISION_ENABLED:
+            raise HTTPException(status_code=422, detail="This MLX engine has no enabled vision tower")
+        try:
+            images = vision_inputs.decode_images(request.messages)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid image input: {exc}") from exc
+        return StreamingResponse(_vision_stream(request, http_request, images),
+                                 media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     prompt_text = _build_prompt(
         request.messages,

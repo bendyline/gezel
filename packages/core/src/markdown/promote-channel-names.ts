@@ -39,6 +39,20 @@ const MODE_INDICATORS: Record<KnownChannelName, string | null> = {
 };
 
 /**
+ * True when `text` is nothing but mode indicators — the reply a turn leaves
+ * when it spent everything on reasoning and said nothing. Stall detection
+ * must read that as empty: a gemma4-12b publish step reasoned to its token
+ * cap, the reply was `_Thinking…_`, and because that read as content the
+ * step sat unworked until the 8-minute stuck-step sweep (2026-09-23).
+ */
+export function isModeIndicatorOnly(text: string): boolean {
+  const indicators = Object.values(MODE_INDICATORS).filter((v): v is string => v !== null);
+  let rest = text;
+  for (const indicator of indicators) rest = rest.split(indicator).join('');
+  return rest.trim().length === 0 && rest.length !== text.length;
+}
+
+/**
  * Inline-leak split: when a channel name appears at the start of a line
  * directly followed by an uppercase letter (e.g. `analysisI've reviewed
  * the task…`), insert a newline so the line-based promotion below

@@ -4,17 +4,17 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
+  type TaskInputRecord,
+  applyStepToolPolicy,
   deliverableKindForStep,
   isLocalProvider,
   normalizeScriptRefs,
   resolveRoleId,
+  taskInputReadTools,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
-import {
-  builtinToolsetIdsDisabledForStep,
-  outputMediaForStep,
-} from '../craftbook/step-toolsets.js';
+import { outputMediaForStep } from '../craftbook/step-toolsets.js';
 import type { LocalModelTier } from './local-model-tier.js';
 import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
 import {
@@ -38,8 +38,8 @@ import {
   gateRepairToolsForKind,
   repairClampDisabled,
   stepGateRepairActive,
-  stepToolKit,
   stepToolKitDisabled,
+  unionStepKit,
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { shouldConstrainToExactCraftbookInvocation } from './turn-intent-plan.js';
@@ -144,6 +144,13 @@ export interface ResolveSessionToolSurfaceOptions {
   effectiveContextWindow?: number;
   latestUserMessage: string | undefined;
   /**
+   * False when the send opted out of the turn-intent route (the person
+   * dismissed the suggested task the composer showed for this text): the
+   * exact-craftbook clamp must not force the model into the launch they
+   * declined. Default true.
+   */
+  exactCraftbookRouting?: boolean;
+  /**
    * The persisted active craftbook step for a step-scoped session
    * (taskRef + stepId). Drives the deliverable-kind tool KIT (the
    * surface narrows to what this step's class + gate checks need) and
@@ -185,6 +192,12 @@ export interface ResolveSessionToolSurfaceOptions {
    * ordinary single-step surface.
    */
   generalistSteps?: ReadonlyArray<NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>>;
+  /**
+   * The task's craftbook inputs. Their read tools count as mandated by the
+   * active step, so they survive the kit and every clamp; the book's own
+   * step `toolPolicy` still has the last word.
+   */
+  taskInputs?: ReadonlyArray<Pick<TaskInputRecord, 'drawer' | 'kind' | 'hasOfficeDocuments'>>;
   forceDirectFileWork?: boolean;
   existingSubstantialFileForImmediate?: () => Promise<boolean>;
   onCapTrim?: (event: { before: number; after: number; dropped: string[] }) => void;
@@ -192,35 +205,6 @@ export interface ResolveSessionToolSurfaceOptions {
 }
 
 type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>;
-type StepKitLike = NonNullable<ReturnType<typeof stepToolKit>>;
-
-/**
- * The kit for a generalist run: the active step's kit widened by every
- * other step's. `kind`/`path` stay the ACTIVE step's so the tier cap's
- * priority prefix still ranks the current deliverable's producers first.
- * Null only when no step in the run targets a file.
- */
-function unionStepKit(
-  activeStep: StepSurfaceInput,
-  steps: ReadonlyArray<StepSurfaceInput>,
-): StepKitLike | null {
-  const active = stepToolKit(activeStep);
-  if (steps.length <= 1) return active;
-  const tools = new Set<string>(active?.tools ?? []);
-  let kind = active?.kind;
-  let path = active?.path;
-  let anyKit = active !== null;
-  for (const step of steps) {
-    const kit = stepToolKit(step);
-    if (!kit) continue;
-    anyKit = true;
-    for (const tool of kit.tools) tools.add(tool);
-    kind ??= kit.kind;
-    path ??= kit.path;
-  }
-  if (!anyKit || kind === undefined) return null;
-  return { kind, path, tools } as StepKitLike;
-}
 
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
@@ -236,8 +220,6 @@ export function stepAllowsOnlyBuiltinTools(
   return !!names?.length && names.every((name) => Object.hasOwn(TOOL_REGISTRY, name));
 }
 
-const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
-
 /** Materialize the primary built-in roster when an unrestricted surface must be subtracted. */
 function allModelFacingBuiltinTools(): Set<string> {
   const out = new Set<string>();
@@ -247,92 +229,43 @@ function allModelFacingBuiltinTools(): Set<string> {
   return out;
 }
 
-/**
- * Apply the active step's authored JSON policy as a hard, subtractive
- * ceiling. This runs after role/kit grants so a prompt mention, planner
- * exception, tier floor, or explicit gezel toolset selection cannot revive
- * a tool the craftbook declared irrelevant for this phase.
- */
 export function applyActiveStepToolPolicy(
   allowlist: Set<string> | null,
   step: ResolveSessionToolSurfaceOptions['activeStep'],
 ): Set<string> | null {
-  const disabledGroups = builtinToolsetIdsDisabledForStep(step);
-  const exactAllowedTools = step?.toolPolicy?.allowTools;
-  const disabledTools = step?.toolPolicy?.disallowTools ?? [];
-  const explicitMedium = step?.toolPolicy?.outputMedium;
-  if (
-    disabledGroups.size === 0 &&
-    !exactAllowedTools &&
-    disabledTools.length === 0 &&
-    !explicitMedium
-  )
-    return allowlist;
-
-  const next = allowlist ? new Set(allowlist) : allModelFacingBuiltinTools();
-  for (const name of expandToolsetGroups([...disabledGroups])) next.delete(name);
-  for (const name of disabledTools) next.delete(name);
-  if (exactAllowedTools) {
-    const ceiling = new Set(exactAllowedTools);
-    for (const name of next) if (!ceiling.has(name)) next.delete(name);
-  }
-
-  if (explicitMedium) {
-    const allowedMedia = outputMediaForStep(step);
-    const workspaceWriters = expandToolsetGroups(['workspace-fs-write']);
-    const stripWorkspace = (): void => {
-      for (const name of workspaceWriters) next.delete(name);
-      // `derive_file` is grouped with execution but persists into workspace.
-      next.delete('derive_file');
-    };
-    const stripArtifact = (): void => {
-      next.delete('write_artifact');
-    };
-    const stripTaskNote = (): void => {
-      next.delete('write_task_note');
-    };
-    for (const name of SHARED_DOCUMENT_MUTATION_TOOLS) next.delete(name);
-
-    if (!allowedMedia.has('workspace')) stripWorkspace();
-    if (!allowedMedia.has('artifact')) stripArtifact();
-    if (!allowedMedia.has('task-note')) stripTaskNote();
-  }
-
-  // A broad subtractive policy may slim the task group, but it must not make
-  // the active workflow impossible to move or impossible to ask for a
-  // decision. An authored `allowTools`, however, is genuinely exact. Adding
-  // lifecycle escape hatches to a fixed-action step lets local models select
-  // the escape hatch instead of the one required action (wild-caught in the
-  // PR-review corpus opener, which repeated set_task_status indefinitely).
-  const workflowSafetyTools = exactAllowedTools
-    ? []
-    : ['advance_task_step', 'set_task_status', 'ask_user_question'];
-  for (const name of workflowSafetyTools) {
-    if (allowlist === null || allowlist.has(name)) next.add(name);
-  }
-  return next;
+  return applyStepToolPolicy(allowlist, step, allModelFacingBuiltinTools);
 }
 
-let platformUnavailableToolNames: ReadonlySet<string> | undefined;
+/** Keyed by `networkAllowed`: the platform probe runs once, the policy varies. */
+const platformUnavailableToolNames = new Map<boolean, ReadonlySet<string>>();
 
-function unavailableBuiltinNamesOnThisPlatform(): ReadonlySet<string> {
-  platformUnavailableToolNames ??= new Set(unavailableToolsForPlatform(process.platform));
-  return platformUnavailableToolNames;
+function unavailableBuiltinNamesOnThisPlatform(networkAllowed: boolean): ReadonlySet<string> {
+  let names = platformUnavailableToolNames.get(networkAllowed);
+  if (!names) {
+    names = new Set(unavailableToolsForPlatform(process.platform, { networkAllowed }));
+    platformUnavailableToolNames.set(networkAllowed, names);
+  }
+  return names;
 }
 
 /**
  * Materialize the built-in portion of a resolved allowlist exactly as the
  * cold-session prompt predictor does. Shared with the prompt-contract matrix
  * so CI exercises the production inventory and first-group-wins dedupe rules.
+ * `networkAllowed` must match what the session's gezel-mcp child was told
+ * (the External services switch), or the prompt lists tools it lacks.
  */
 export function availableBuiltinToolsForAllowlist(
   allowlist: ReadonlySet<string> | null,
   contextualBuiltinTools: readonly string[] = [],
   registeredToolNames?: ReadonlySet<string>,
+  options: { networkAllowed?: boolean } = {},
 ): AvailableToolInfo[] {
   const predicted: AvailableToolInfo[] = [];
   const seenNames = new Set<string>();
-  const platformUnavailable = unavailableBuiltinNamesOnThisPlatform();
+  const platformUnavailable = unavailableBuiltinNamesOnThisPlatform(
+    options.networkAllowed ?? false,
+  );
   for (const group of BUILTIN_TOOLSETS) {
     for (const toolName of group.tools) {
       if (allowlist && !allowlist.has(toolName)) continue;
@@ -381,6 +314,11 @@ export async function resolveSessionToolSurface(
     for (const name of stepMandatedTools(step)) mandatedStepTools.add(name);
     for (const name of promptConditionallyReferencedTools(step.prompt ?? '')) {
       conditionallyReferencedStepTools.add(name);
+    }
+  }
+  if (surfaceSteps.length > 0) {
+    for (const input of opts.taskInputs ?? []) {
+      for (const name of taskInputReadTools(input)) mandatedStepTools.add(name);
     }
   }
   let rawAllowlist = computeToolAllowlist({
@@ -647,10 +585,12 @@ export async function resolveSessionToolSurface(
   // small context). This is subtractive only: never grant invoke_craftbook if
   // the role/security ceiling did not already admit it.
   const exactCraftbookConstrained =
+    opts.exactCraftbookRouting !== false &&
     shouldConstrainToExactCraftbookInvocation({
       role: opts.role,
       latestUserMessage: opts.latestUserMessage,
-    }) && Boolean(allowlist?.has('invoke_craftbook'));
+    }) &&
+    Boolean(allowlist?.has('invoke_craftbook'));
   if (exactCraftbookConstrained) {
     allowlist = new Set(['invoke_craftbook']);
     opts.onClamp?.('exact-craftbook-invocation');
@@ -711,6 +651,21 @@ export async function resolveSessionToolSurface(
     const withStepCompletion = new Set(allowlist);
     for (const name of STEP_COMPLETION_TOOLS) {
       if (rawAllowlist.has(name)) withStepCompletion.add(name);
+    }
+    // A step's declared inputs are its working memory, so the tool that opens
+    // them survives every message-shaped clamp. The immediate-file-write
+    // clamp left a powerpoint-deck copywriter holding `write_file` alone: it
+    // wrote eight invented slide titles without ever seeing the outline it
+    // was told to follow, and the heading gate paused the task (gemma4-12b,
+    // 2026-09-23).
+    for (const input of opts.activeStep?.consumes ?? []) {
+      const reader = input.artifact ? 'read_artifact' : 'read_file';
+      if (rawAllowlist.has(reader)) withStepCompletion.add(reader);
+    }
+    for (const input of opts.taskInputs ?? []) {
+      for (const name of taskInputReadTools(input)) {
+        if (rawAllowlist.has(name)) withStepCompletion.add(name);
+      }
     }
     if (
       opts.activeStep &&
@@ -898,6 +853,10 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'list_tasks',
   'get_task',
   'read_task_notes',
+  // Oversight of the craftbook runs it launches — Default has no voorman.
+  'manage_task',
+  'assign_task',
+  'write_task_note',
   'search',
   'search_memory',
   'save_memory',

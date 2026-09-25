@@ -312,6 +312,38 @@ where a link needs forcing back to sans.
 
 ## Foundation
 
+Gezel has one responsive product UX. Window width determines its layout; the
+operating system determines available capabilities. A desktop window around
+400px wide is the mobile experience, with the same projects, documents, crew,
+navigation, and project sections. At 760px and below (also on a touch screen
+500px high or shorter, such as a landscape phone), the ordinary navigation
+rail becomes the full-width entry surface. Selecting an entity opens the same
+view at full width; Navigation returns to the rail. Wider windows restore the
+side-by-side arrangement and the user's saved rail side and size. Switching
+width or opening navigation must preserve the current view, editor, and draft.
+`?layout=mobile` constrains the same app to a phone width for convenient desktop
+testing; it never switches to a second application or a different data store.
+
+The native shell shares the responsive frame, brand, navigation rows, project
+section tabs, character renderer, palette, typography, and controls. Its current
+portable runtime supports projects, crews, files, conversations, scripts and
+foreground tasks through the shared views. Host capability flags identify
+operations that require the desktop daemon. Do not build a second mobile
+project/document UX to fill those gaps.
+Model setup belongs in Settings, with a compact link from an unconfigured chat.
+Interactive targets are at least 44px, project tabs retain readable labels,
+and narrow file browsers use list → detail/back while keeping editors mounted.
+Compact chat composers extend to both edges of their pane, with no outer
+desktop gutter. Only the text and controls keep a small inner inset. Native
+shells reserve the system's safe rectangle for content, including landscape
+cutouts and the home indicator; the composer surface continues through the
+bottom safe area so device corners never clip the draft. Read Capacitor's
+safe-area variables with the browser `env()` values as fallback, and apply
+insets once. The native composer follows the visual viewport above the keyboard,
+as do portaled dialogs. Menus, selects, popovers, and tooltips use that same
+safe app rectangle for collision detection. Replies render as text without privileged HTML or external
+navigation inside the native web view.
+
 The UI is React + Vite with **plain CSS + CSS variables** — no Tailwind, no
 CSS-in-JS. All complex interactive controls (dialog, select, tabs, popover,
 tooltip, dropdown, alert-dialog) come from **Radix UI Primitives**,
@@ -530,6 +562,33 @@ all (`data-blank`); a full-width column beside either leaves two-thirds of
 the dialog standing empty. Both stack into one centered column instead, at
 the same dialog size.
 
+**A craftbook's input is a source picker, not a text field.** When a book
+works *on* files (see [craftbook-inputs.md](craftbook-inputs.md)), its input
+params come out of the generic parameter form and render above it, under a
+"Works on" eyebrow, as `CraftbookInputField`
+([components/craftbook-input/](../packages/ui/src/components/craftbook-input/),
+`.gz-cbi-*` in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
+The source goes first because it is the thing the book works on. It is
+a keys-in-a-tray choice — **In this project** / **From your computer** —
+over one body:
+
+- *In this project* opens an indented list of the workspace's folders (or,
+  for a single-file input, its accepted files) with a filter once it is long,
+  and answers a pick with one muted line: "notes — 37 files · 2.1 MB".
+- *From your computer* is a recessed well — dashed border, `--radius-lg`,
+  the same inset tone as a tray — holding *Choose folder…* / *Choose files…*
+  keys, and it doubles as the drop zone; the border takes the accent while
+  something is dragged over it. The upload starts at once, with a thin
+  accent `<progress>` bar, and **Create waits for it** rather than racing it.
+
+Files a book cannot use are never an error by themselves: they are left out
+and counted in a collapsed "5 files left out" disclosure that lists each
+with its reason. What *is* an error — nothing usable, or more than the book
+can take — says so in one sentence and names the fix. The picker refuses an
+oversize pick outright rather than quietly taking the first N files. A
+scheduled launch disables *From your computer* with a tooltip saying why
+(a schedule re-reads the project each run).
+
 **Shelve a big catalog by subject, not by lifecycle.** A rail whose shelves
 answer "where in a project's life does this fit?" collapses on a large
 catalog — New Task's 255 craftbooks landed in two piles, the larger one
@@ -579,6 +638,41 @@ strip and the typing surface — so flipping compose mode never moves the primar
 key out from under the cursor. Being glyph-only, each carries `title` and
 `aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
 announces the pending turn now that "Sending…" is no longer on its face.
+
+**A task rides above the message, not in the toolbar.** When a message will
+start a craftbook task — because the person picked one, or because the
+daemon's route preview proposed one from the text — the composer shows it as
+a strip spanning the composer directly above the To line
+([`ComposerTaskBar`](../packages/ui/src/components/ComposerTaskBar.tsx),
+`.chat-composer-task-bar*` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css)):
+the craftbook's artwork in a small `--radius-md` tile, an uppercase eyebrow
+(**Task**, or **Suggested task** with the routing spark), the book's name, a
+one-line readout of its parameters (`topic: France · audience: executives`,
+at most three entries then `+N more`, inputs first as `source: Notes (3
+files)`), and one dismiss key. The strip's face is a button: it reopens the
+New Task dialog on that book's configuration with every value restored. A
+suggestion draws the same strip **dashed**, so a proposal reads as tentative
+beside a pick, and dismissing it is remembered for that text — the daemon is
+told not to re-derive the route when the plain message goes. This retired the
+read-only sparkle chip in the toolbar, which showed the route and could not be
+acted on.
+
+**Task is a secondary word key beside Send, offered only on a fresh thread.**
+The key attaches a craftbook to the message; it never fires one. Send stays
+the single terracotta glyph, and with a task attached it still means *this
+draft goes now*: the task starts, the message becomes its brief (the words
+land in the thread with a Craftbook-started receipt), and an empty draft is
+allowed because a configured book is a complete request on its own. The key
+takes the Stop/Interrupt secondary recipe (`.chat-task-btn`) and never appears
+on a reply to an existing thread, inside a task pane, or mid-turn — a task is
+how a conversation *starts*, not something bolted onto one in progress. Which
+is why the Meester home opens on a fresh thread at launch rather than
+auto-picking the newest one: the front door has to show the key. A thread the
+person was just in (a navigation away and back) is still restored. The
+dialog's compose mode ("Task for this message", submit **Use in chat**) shows
+the message so far as a read-only *Brief · from your message* block: the chat
+box is the one place the words are edited.
 
 **Enter submits; Shift+Enter adds a new line.** Chat and terminal share the
 same primary-key convention: Enter commits the draft, while Shift+Enter keeps
@@ -691,7 +785,9 @@ which on a one-slot engine put them back at the end of the same queue.
 
 **A craftbook run gets a receipt card, not just a pill.** When a tool call
 starts a craftbook (`invoke_craftbook`) or moves a task a step
-(`advance_task_step`), the transcript renders an inline card under the tool
+(`advance_task_step`) — or the composer launches an attached task directly,
+which the daemon records as a synthetic `craftbook-launch` assistant turn
+shaped like that tool call — the transcript renders an inline card under the tool
 row ([`ToolCraftbookCard`](../packages/ui/src/components/ToolCraftbookCard.tsx),
 `msg-tool-card-*` block in [styles/chat.css](../packages/ui/src/styles/chat.css)):
 the craftbook's workshop-mark artwork in a small `--radius-md` tile, an

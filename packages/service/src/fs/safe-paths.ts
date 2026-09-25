@@ -1,5 +1,13 @@
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import {
+  DESKTOP_SEGMENT_RULES,
+  findPathRuleViolation,
+  isReservedWindowsName,
+  unresolvedTemplatePlaceholders,
+} from '@bendyline/gezel';
+
+export { isReservedWindowsName, unresolvedTemplatePlaceholders };
 
 /**
  * Shared path-safety primitives. Every write or execution inside a
@@ -168,56 +176,9 @@ async function realpathNearest(p: string): Promise<string | null> {
   return normalize(join(realParent, basename(p)));
 }
 
-/**
- * Windows forbids files named after legacy DOS devices. Creating them
- * tends to break Explorer, crashes some editors, and is almost always
- * a mistake. Reject at the boundary so gezels on any platform can't
- * produce a file that'll blow up on a Windows teammate's checkout.
- *
- * The check is on the basename only — a directory somewhere in the
- * path can legitimately be called `conference` without matching `CON`.
- */
-const RESERVED_WINDOWS_BASENAMES = new Set([
-  'CON',
-  'PRN',
-  'AUX',
-  'NUL',
-  'COM1',
-  'COM2',
-  'COM3',
-  'COM4',
-  'COM5',
-  'COM6',
-  'COM7',
-  'COM8',
-  'COM9',
-  'LPT1',
-  'LPT2',
-  'LPT3',
-  'LPT4',
-  'LPT5',
-  'LPT6',
-  'LPT7',
-  'LPT8',
-  'LPT9',
-]);
-
-export function isReservedWindowsName(name: string): boolean {
-  if (!name) return false;
-  // Strip an extension before comparing — `CON.txt` is also reserved.
-  const normalized = name.replace(/[ .]+$/g, '');
-  const base = (normalized.split('.')[0] ?? '').replace(/[ ]+$/g, '');
-  return RESERVED_WINDOWS_BASENAMES.has(base.toUpperCase());
-}
-
+/** The desktop's per-segment screen; containment is `safeJoin`'s job. */
 function hasUnsafePortableSegment(relPath: string): boolean {
-  if (relPath.includes('\0') || relPath.startsWith('\\\\')) return true;
-  const segments = relPath.split(/[\\/]+/);
-  return segments.some((segment) => {
-    if (!segment || segment === '.' || segment === '..') return false;
-    if (segment.includes(':') || /[ .]$/.test(segment)) return true;
-    return isReservedWindowsName(segment);
-  });
+  return findPathRuleViolation(relPath, DESKTOP_SEGMENT_RULES) !== null;
 }
 
 export type PathSafetyCode =
@@ -226,17 +187,6 @@ export type PathSafetyCode =
   | 'reserved-name'
   | 'empty-path'
   | 'template-placeholder';
-
-/**
- * Same token shape `interpolateStepsContext` substitutes, so this sees
- * exactly what launch interpolation left behind.
- */
-const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
-
-/** Distinct `{{param}}` tokens still present in a path. */
-export function unresolvedTemplatePlaceholders(p: string): string[] {
-  return [...new Set(p.match(TEMPLATE_PLACEHOLDER) ?? [])];
-}
 
 /**
  * Refuse a write whose path still carries an unresolved `{{param}}` token.

@@ -4,7 +4,13 @@ import {
   type NormalizedStepGate,
   type ScriptRun,
   createLogger,
+  evaluateGateScripts,
+  tailGateLogs,
+  unresolvedGatePlaceholders,
+  withSdkImportHint,
 } from '@bendyline/gezel';
+
+export { tailGateLogs, withSdkImportHint };
 import {
   type GateCheckOutcome,
   type GateEvalDeps,
@@ -13,58 +19,6 @@ import {
 } from './gate-eval.js';
 
 const log = createLogger('tasks');
-
-/** Same shape `interpolateStepsContext` substitutes, so this sees exactly what it left behind. */
-const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
-
-/**
- * Gate fields still carrying a `{{param}}` token at evaluation time.
- *
- * Launch interpolation deliberately leaves UNKNOWN placeholders intact so
- * a craftbook typo stays visible rather than silently blanking to an
- * empty string. Visible to a human reading the recipe — but the model on
- * the other end of the gate just sees a rejection it cannot satisfy,
- * because the literal `{{…}}` is being handed to a regex engine or a
- * path resolver. Pull Request Review shipped `PR\s*#{{number}}` that way:
- * the reviewer had written the note correctly, spent three attempts
- * re-deriving why a correct note kept failing, and finally "passed" the
- * gate by writing the raw template token into the task's audit trail.
- *
- * No assignee can repair this, so it is an infrastructure fault — it
- * pauses for a human instead of charging attempts and climbing the
- * repair ladder.
- *
- * The rejection copy has to say that outright. An earlier version told the
- * assignee to "fix the craftbook or relaunch with that parameter", neither of
- * which a gezel can do, and on task gezel/7 the retry took the only remaining
- * reading: it wrote its deliverable to the literal `{{task.dir}}/…` path to
- * make the check match. That is unreachable — this branch returns before any
- * check is evaluated — and it left a real directory named `{{task.dir}}` in
- * the artifacts drawer. `assertNoTemplatePlaceholderPath` now refuses the
- * write; the message names the dead end so it is not attempted.
- */
-function unresolvedGatePlaceholders(gate: NormalizedStepGate): string[] {
-  const found: string[] = [];
-  const scan = (value: unknown, path: string): void => {
-    if (typeof value === 'string') {
-      const hits = value.match(TEMPLATE_PLACEHOLDER);
-      if (hits) found.push(`${path} (${[...new Set(hits)].join(' ')})`);
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach((entry, i) => scan(entry, `${path}[${i}]`));
-      return;
-    }
-    if (value && typeof value === 'object') {
-      for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-        scan(entry, `${path}.${key}`);
-      }
-    }
-  };
-  gate.checks.forEach((check, i) => scan(check, `checks[${i}] ${check.kind}`));
-  gate.scripts.forEach((ref, i) => scan(ref.inputs, `scripts[${i}] ${ref.name} inputs`));
-  return found;
-}
 
 /**
  * ─ Step-gate evaluation engine ───────────────────────────────────────
@@ -128,45 +82,14 @@ export interface StepGateOutcome {
 /** How the caller executes one gate script (policy decisions live there). */
 export type GateScriptExecutor = (ref: GateScriptRef) => Promise<ScriptRun | 'skipped'>;
 
-/**
- * Symbols a script author reliably reaches for from the wrong SDK subpath,
- * mapped to where they actually live.
- *
- * A gate script legitimately needs two imports — `defineScript`/`gezel`
- * from the package root and the check predicates plus `gateResult` from
- * `/checks` — and the runtime's bare
- * "does not provide an export named X" names the problem without naming
- * the fix. Wild-caught on the first frontier run of craftbook-author-gate-script:
- * claude-sonnet-4-6 imported `defineScript` from `/checks`, hit the identical
- * SyntaxError three times, and paused the task rather than moving the import.
- * A message that says where the symbol lives is the difference between a
- * one-line correction and an abandoned run.
- */
-const SDK_SYMBOL_HOMES: ReadonlyArray<{ symbols: readonly string[]; from: string }> = [
-  { symbols: ['defineScript', 'gezel', 'InferredInput'], from: '@bendyline/gezel-sdk' },
-  { symbols: ['gateResult', 'workspaceFromGezel'], from: '@bendyline/gezel-sdk/checks' },
-];
-
-/**
- * Append the correct import when a script failed on a missing export we
- * recognize. Returns the error unchanged when nothing matches, so an
- * unrelated failure is never dressed up as an import problem.
- */
-export function withSdkImportHint(error: string): string {
-  const missing = /does not provide an export named ['"`]?([A-Za-z0-9_]+)/.exec(error);
-  const symbol = missing?.[1];
-  if (!symbol) return error;
-  const home = SDK_SYMBOL_HOMES.find((entry) => entry.symbols.includes(symbol));
-  if (!home) return error;
-  return `${error} \`${symbol}\` is exported from "${home.from}" — import it from there. A gate script normally needs both: \`import { defineScript, gezel } from '@bendyline/gezel-sdk'\` and \`import { gateResult, workspaceFromGezel } from '@bendyline/gezel-sdk/checks'\`.`;
-}
-
 export async function evaluateStepGate(opts: {
   gate: NormalizedStepGate;
   ws: GateWorkspaceReader;
   runScript: GateScriptExecutor;
   /** Injected capabilities for the spawning checks (`nodeRuns`). */
   deps?: GateEvalDeps;
+  /** The task's declared steps; a gate route to any other step is a fault. */
+  steps?: ReadonlyArray<{ id: string }>;
 }): Promise<StepGateOutcome> {
   const { gate, ws, runScript, deps } = opts;
   const runs: StepGateOutcome['runs'] = [];
@@ -207,89 +130,10 @@ export async function evaluateStepGate(opts: {
     }
   }
 
-  let goto: string | undefined;
-  let handoff: StepGateOutcome['handoff'];
-  for (const ref of gate.scripts) {
-    let run: ScriptRun | 'skipped';
-    try {
-      run = await runScript(ref);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      runs.push({ scriptName: ref.name, error: message });
-      return {
-        decision: 'reject',
-        message: `Gate script "${ref.name}" could not run: ${message}. Fix the gate configuration or ask the user for help.`,
-        infrastructureError: true,
-        skipped,
-        runs,
-        ...(checkResults ? { checkResults } : {}),
-      };
-    }
-    if (run === 'skipped') {
-      skipped.push(ref.name);
-      continue;
-    }
-    if (run.status !== 'ok') {
-      runs.push({
-        scriptName: ref.name,
-        runId: run.id,
-        error: run.error ?? 'failed',
-        ...(tailGateLogs(run.logs) ? { logsTail: tailGateLogs(run.logs) } : {}),
-      });
-      return {
-        decision: 'reject',
-        message: `Gate script "${ref.name}" failed: ${withSdkImportHint(run.error ?? 'unknown error')}.`,
-        infrastructureError: true,
-        skipped,
-        runs,
-        ...(checkResults ? { checkResults } : {}),
-      };
-    }
-    const parsed = GateScriptResultSchema.safeParse(run.output);
-    if (!parsed.success) {
-      runs.push({
-        scriptName: ref.name,
-        runId: run.id,
-        error: 'invalid gate result',
-        ...(tailGateLogs(run.logs) ? { logsTail: tailGateLogs(run.logs) } : {}),
-      });
-      return {
-        decision: 'reject',
-        message: `Gate script "${ref.name}" returned an invalid result (${parsed.error.issues[0]?.message ?? 'shape mismatch'}). A gate script must output { decision: 'approve' | 'reject', message, ... }.`,
-        infrastructureError: true,
-        skipped,
-        runs,
-        ...(checkResults ? { checkResults } : {}),
-      };
-    }
-    const verdict = parsed.data;
-    runs.push({ scriptName: ref.name, runId: run.id, decision: verdict.decision });
-    if (verdict.decision === 'reject') {
-      return {
-        decision: 'reject',
-        // The schema requires a message on reject.
-        message: verdict.message ?? 'Gate rejected the step.',
-        ...(verdict.goto !== undefined ? { goto: verdict.goto } : {}),
-        skipped,
-        runs,
-        ...(checkResults ? { checkResults } : {}),
-      };
-    }
-    if (verdict.goto !== undefined) goto = verdict.goto;
-    if (verdict.handoff !== undefined) handoff = verdict.handoff;
-  }
-
-  if (skipped.length > 0) {
-    log.warn(`[gate] scripts skipped by policy: ${skipped.join(', ')} — approving (fail-open)`);
-  }
-  return {
-    decision: 'approve',
-    ...(goto !== undefined ? { goto } : {}),
-    ...(handoff !== undefined ? { handoff } : {}),
-    skipped,
-    runs,
-    ...(checkResults ? { checkResults } : {}),
-  };
+  const scripts = await evaluateGateScripts(gate.scripts, runScript, {
+    ...(opts.steps ? { steps: opts.steps } : {}),
+  });
+  return { ...scripts, ...(checkResults ? { checkResults } : {}) };
 }
 
 /** Stable fingerprint for rejection-nudge dedup (same text → same print). */
@@ -300,10 +144,4 @@ export function gateMessageFingerprint(message: string): string {
     h = ((h << 5) + h + message.charCodeAt(i)) | 0;
   }
   return (h >>> 0).toString(36);
-}
-
-function tailGateLogs(logs: string, maxChars = 2_000): string {
-  const trimmed = logs.trim();
-  if (trimmed.length <= maxChars) return trimmed;
-  return `…${trimmed.slice(trimmed.length - maxChars)}`;
 }

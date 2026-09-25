@@ -6,10 +6,13 @@
  * long enrichment batch also no longer janks the UI.
  *
  * Protocol (structured-clone messages over the worker port):
- *   host → worker:  { id, texts, profile? }       — profile: embed as a
- *                                                     knowledge-catalog QUERY
- *                                                     with that profile
- *   worker → host:  { id, vectors }                 — success
+ *   host → worker:  { id, texts, profile?,          — profile: embed as a
+ *                     reportProgress? }               knowledge-catalog QUERY
+ *                                                     with that profile;
+ *                                                     reportProgress: send the
+ *                                                     model download's bytes
+ *   worker → host:  { id, progress }                — interim, zero or more
+ *                   { id, vectors }                 — success
  *                   { id, error, fatal,             — failure (fatal ⇒ model
  *                     retryable, optionalPeerMissing } unloadable, disable for
  *                                                     good; optionalPeerMissing
@@ -31,13 +34,20 @@ interface EmbedRequest {
   id: number;
   texts: string[];
   profile?: KnowledgeEmbeddingProfile;
+  reportProgress?: boolean;
 }
 
 port.on('message', (msg: EmbedRequest) => {
   void (async () => {
     try {
       const vectors = msg.profile
-        ? await runProfileQueryEmbed(msg.texts, msg.profile)
+        ? await runProfileQueryEmbed(
+            msg.texts,
+            msg.profile,
+            msg.reportProgress
+              ? (progress) => port.postMessage({ id: msg.id, progress })
+              : undefined,
+          )
         : await runEmbed(msg.texts);
       port.postMessage({ id: msg.id, vectors });
     } catch (err) {

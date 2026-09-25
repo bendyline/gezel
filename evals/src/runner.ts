@@ -58,6 +58,7 @@ import {
   startChatEventRecorder,
 } from './recording/recorder.ts';
 import { captureRecordingScreenshots } from './recording/screenshots.ts';
+import { completedRepairActionSnapshot } from './repair-actions.ts';
 import { withRepairPolicy } from './repair-policy.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
@@ -67,7 +68,6 @@ import {
   noteHarnessInterventionDelivered,
 } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
-import { bareToolName } from './tool-names.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
   EvalContext,
@@ -87,77 +87,7 @@ export {
   describeSendFailure,
   isCoordinationOnlyRole,
 } from './handoff.ts';
-
-/**
- * Tools whose successful call means the model actually changed something.
- *
- * Matched through `bareToolName`, so every spelling of the same capability
- * lands here: the plain gezel-mcp name a local engine emits, the
- * `mcp__gezel__` namespacing CLI providers apply, and the CLI providers'
- * own built-in editors. Legacy camelCase spellings are kept for scoring
- * pre-rename run dirs.
- *
- * Bare-name-only matching made this counter read ZERO for the whole of
- * every anthropic-cli trial, which is the second arm of
- * `advanceEscalationState`: with the failure text frozen too, the
- * escalation ladder could never leave attempt 1, so the harness delivered
- * exactly ONE repair message and then sat silent until the retry-loop
- * killed the trial — reporting "(retry-loop nudge was sent and ignored)"
- * for a ladder that never escalated. Wild-caught on
- * craftbook-author-fanout x claude-sonnet-4-6: one nudge at 19:28:06,
- * 17 minutes of real work (9 `mcp__gezel__append_to_file`, 5 `Write`),
- * no second message, killed at 19:45:22.
- */
-const COMPLETED_REPAIR_MUTATION_TOOLS = new Set([
-  'write_file',
-  'write_artifact',
-  'replace_in_file',
-  'replace_lines',
-  'apply_patch',
-  'append_to_file',
-  'insert_at_marker',
-  'copy_artifact_to_workspace',
-  'writefile',
-  'replaceinfile',
-  'replacelines',
-  'applypatch',
-  'appendtofile',
-  'insertatmarker',
-  // CLI providers' built-in editors — Claude has no gezel-mcp `write_file`.
-  'write',
-  'edit',
-  'multiedit',
-  'notebookedit',
-]);
-
-/**
- * Count committed assistant turns that completed at least one successful
- * file mutation. A turn is the unit (rather than each tool call) because one
- * repair response may try a failed surgical edit and then land a successful
- * rewrite; that is one model attempt, not two. In-flight calls are absent
- * from `session.messages` until the turn commits, which makes this safe as a
- * bounded-repair action token.
- */
-export function completedRepairActionSnapshot(
-  session: {
-    messages: Array<{
-      role: 'user' | 'assistant';
-      toolCalls?: Array<{ name: string; success: boolean }>;
-    }>;
-  },
-  inflight = false,
-): EvalRepairActionSnapshot {
-  return {
-    completedMutationTurns: session.messages.filter(
-      (message) =>
-        message.role === 'assistant' &&
-        message.toolCalls?.some(
-          (call) => call.success && COMPLETED_REPAIR_MUTATION_TOOLS.has(bareToolName(call.name)),
-        ),
-    ).length,
-    inflight,
-  };
-}
+export { completedRepairActionSnapshot } from './repair-actions.ts';
 
 /**
  * Eval-only switch for clean speculative-decoding A/Bs. Keeping the lever in
@@ -385,13 +315,12 @@ export async function runTrial(
   // that value was calibrated against a ~20 tok/s reference machine and
   // otherwise makes the verdict a property of the hardware.
   const authoredMaxDurationMs = scenario.timeoutMs ?? DEFAULT_MAX_DURATION_MS;
-  const requestedMaxDurationMs =
-    opts.timeoutMs ??
-    throughputScaledMaxDurationMs({
-      authoredMaxDurationMs,
-      decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
-    });
-  const maxDurationMs = Math.max(requestedMaxDurationMs, llamaEvalLaunch?.minTrialTimeoutMs ?? 0);
+  const maxDurationMs = trialMaxDurationMs({
+    authoredMaxDurationMs,
+    timeoutMs: opts.timeoutMs,
+    decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    minTrialTimeoutMs: llamaEvalLaunch?.minTrialTimeoutMs,
+  });
   // `scenario.progressTimeoutMs`, when set, acts as the HARD timeout
   // override (real-progress watchdog).
   //
@@ -727,6 +656,12 @@ export async function runTrial(
   }
 
   // Phase 3: spawn trial daemon.
+  const requestedMaxDurationMs =
+    opts.timeoutMs ??
+    throughputScaledMaxDurationMs({
+      authoredMaxDurationMs,
+      decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    });
   if (requestedMaxDurationMs !== authoredMaxDurationMs && opts.timeoutMs === undefined) {
     log(
       `[trial] throughput-scaled ceiling: ${Math.round(authoredMaxDurationMs / 60_000)}m → ${Math.round(requestedMaxDurationMs / 60_000)}m at ${opts.decodeRateTokensPerSec} tok/s (reference ${CEILING_REFERENCE_TOKENS_PER_SEC} tok/s)`,
@@ -738,6 +673,8 @@ export async function runTrial(
       log(
         `[trial] large-model minimum timeout raised maxDuration ${requestedMaxDurationMs}ms → ${maxDurationMs}ms`,
       );
+    } else if (opts.timeoutMs !== undefined) {
+      log(`[trial] explicit timeout retained: ${maxDurationMs}ms`);
     }
   }
   // Per-run behavior overrides (A/B toggle) — injected into the daemon
@@ -1572,6 +1509,18 @@ export function throughputScaledMaxDurationMs(args: {
     MAX_CEILING_THROUGHPUT_SCALE,
   );
   return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
+}
+
+/** Explicit operator budgets also take precedence over engine startup presets. */
+export function trialMaxDurationMs(args: {
+  authoredMaxDurationMs: number;
+  timeoutMs?: number;
+  decodeRateTokensPerSec?: number | null;
+  minTrialTimeoutMs?: number;
+}): number {
+  return (
+    args.timeoutMs ?? Math.max(throughputScaledMaxDurationMs(args), args.minTrialTimeoutMs ?? 0)
+  );
 }
 
 export function defaultSoftProgressTimeoutMsForModel(
@@ -3202,7 +3151,9 @@ export async function captureFinalState(args: {
         await cp(artifactsSrc, join(runDir, 'artifacts', project.id), { recursive: true });
       }
 
-      const workspaceSrc = join(projectDir, 'workspace');
+      // Scenarios may create disposable external workspaces. Capturing only
+      // the internal fallback silently loses their generated assets.
+      const workspaceSrc = project.workingDir ?? join(projectDir, 'workspace');
       if (existsSync(workspaceSrc)) {
         await cp(workspaceSrc, join(runDir, 'workspace', project.id), { recursive: true });
       }
@@ -3280,6 +3231,8 @@ interface WatchdogSessionSnapshot {
   lastActivityAt?: string;
   archived?: boolean;
   lastTurnError?: string;
+  taskRef?: string | null;
+  stepId?: string | null;
 }
 
 export interface PoisonedSessionSnapshot {
@@ -3307,18 +3260,47 @@ async function listPoisonedSessionsForWatchdog(
   meesterId: string,
 ): Promise<PoisonedSessionSnapshot[]> {
   const { sessions } = await client.listChatSessions();
-  return pickPoisonedSessionsForRecovery(sessions ?? [], meesterId);
+  const list = (sessions ?? []) as WatchdogSessionSnapshot[];
+  const projects = new Set(
+    list
+      .filter((session) => session.taskRef && session.stepId && session.lastTurnError)
+      .map((session) => session.projectId),
+  );
+  const activeSteps = new Map<string, string | null>();
+  for (const projectId of projects) {
+    const listed = await client.listProjectTasks(projectId).catch(() => null);
+    for (const task of listed?.tasks ?? []) {
+      const live = task.status === 'active' || task.status === 'paused';
+      activeSteps.set(task.ref, live ? (task.activeStepId ?? null) : null);
+    }
+  }
+  return pickPoisonedSessionsForRecovery(list, meesterId, activeSteps);
 }
 
+/**
+ * `activeSteps` maps a task ref to its live active step (null once the task
+ * is finished). A poisoned session pinned to a step the task has already left
+ * is history, not a stuck deliverable: the docx-meester-e2e re-run on
+ * 2026-09-24 sent a repair turn into the finished `sources` step's session,
+ * where it rambled for 12 minutes on the only engine slot while `write` waited,
+ * and then failed the trial for that stale session's recovery allowance.
+ * Tasks the listing did not return are left to the ordinary rules.
+ */
 export function pickPoisonedSessionsForRecovery(
   sessions: WatchdogSessionSnapshot[],
   meesterId: string,
+  activeSteps?: ReadonlyMap<string, string | null>,
 ): PoisonedSessionSnapshot[] {
   const tsOf = (session: WatchdogSessionSnapshot): number => {
     if (!session.lastActivityAt) return 0;
     const ts = Date.parse(session.lastActivityAt);
     return Number.isFinite(ts) ? ts : 0;
   };
+  const leftStep = (session: WatchdogSessionSnapshot): boolean =>
+    !!session.taskRef &&
+    !!session.stepId &&
+    !!activeSteps?.has(session.taskRef) &&
+    activeSteps.get(session.taskRef) !== session.stepId;
   return sessions
     .filter(
       (session) =>
@@ -3327,7 +3309,8 @@ export function pickPoisonedSessionsForRecovery(
         session.gezelId !== meesterId &&
         session.projectId &&
         typeof session.lastTurnError === 'string' &&
-        session.lastTurnError.trim().length > 0,
+        session.lastTurnError.trim().length > 0 &&
+        !leftStep(session),
     )
     .sort((a, b) => tsOf(b) - tsOf(a))
     .map((session) => ({
@@ -3720,6 +3703,28 @@ async function lastAbortTeachingWarning(
   return undefined;
 }
 
+const MISSING_TARGET_WORDING =
+  /\b(?:not present|not found|missing|does not exist|doesn't exist|absent|never created)\b/i;
+
+/**
+ * Does the scenario check itself report that `filePath` is not on disk?
+ *
+ * Only a named path counts. A bare "missing=[tests-present, …]" signal list
+ * names gates, not files, and inferring a path from a gate id would guess —
+ * the cost of guessing wrong here is routing an existing file into a
+ * full-rewrite, which throws away work the patch branch would have kept.
+ */
+export function sniffReportsMissingTarget(
+  filePath: string | null | undefined,
+  failReason: string | undefined,
+): boolean {
+  if (!filePath || !failReason) return false;
+  if (!MISSING_TARGET_WORDING.test(failReason)) return false;
+  if (failReason.includes(filePath)) return true;
+  const base = filePath.split('/').pop() ?? '';
+  return base.length > 3 && failReason.includes(base);
+}
+
 export function buildPoisonedSessionRecoveryMessage(args: {
   lastTurnError?: string;
   /** The aborting guard's teaching text — preferred over the toast. */
@@ -3755,7 +3760,19 @@ export function buildPoisonedSessionRecoveryMessage(args: {
     /(?:\b(?:replace_lines|replace_in_file|apply_patch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic|(?:same|exact|identical)\s+arguments|repeat(?:ed|ing)?)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replace_lines|replace_in_file|apply_patch)\b)/i.test(
       errorForStrategy,
     );
-  const existingCheckedFile = !!filePath && !!sniff && sniff.bytes > 0;
+  // `sniff.bytes` is the SCENARIO's scored byte count, not this file's. A run
+  // that has written three of four deliverables reports healthy bytes while
+  // the one file we are about to send the model to patch does not exist, and
+  // the patch branch then says "read it once, then patch, do not replace the
+  // complete file" in the same message whose own failure line says it is not
+  // present. Wild-caught on schema-migration: `tests/migrate.test.ts` was
+  // missing at bytes=3088, and every repair turn was spent on a file that
+  // could not be read or patched into existence.
+  const existingCheckedFile =
+    !!filePath &&
+    !!sniff &&
+    sniff.bytes > 0 &&
+    !sniffReportsMissingTarget(filePath, sniff.failReason);
   const editLine =
     taskGraphLine ??
     (filePath

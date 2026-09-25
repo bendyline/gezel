@@ -127,7 +127,9 @@ export const ScriptCodeEditor = forwardRef<ScriptCodeEditorHandle, ScriptCodeEdi
         try {
           setup = await import('./monaco-setup.js');
           const { api } = await import('../../api.js');
-          await setup.ensureScriptTypescript(() => api.getSdkTypes());
+          const { runtimeCapabilities } = await import('../../runtime-capabilities.js');
+          if (runtimeCapabilities().scriptAuthoring)
+            await setup.ensureScriptTypescript(() => api.getSdkTypes());
         } catch (err) {
           if (!disposed) setLoadError((err as Error).message);
           return;

@@ -1,8 +1,8 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { basename } from 'node:path';
 
-function runPnpm(args) {
-  const configuredStore = process.env.GEZEL_PNPM_STORE_DIR;
+function runPnpm(args, storeDir) {
+  const configuredStore = process.env.GEZEL_PNPM_STORE_DIR ?? storeDir;
   const effectiveArgs = configuredStore ? [`--config.store-dir=${configuredStore}`, ...args] : args;
   const configuredCli = process.env.GEZEL_PNPM_CLI;
   const invokingCli = process.env.npm_execpath;
@@ -83,14 +83,19 @@ const NON_SHIPPING_PROJECTS = ['@bendyline/gezel-evals', '@bendyline/gezel-eval-
 const DECLARED_BUT_NOT_SHIPPED = new Set(['@ffmpeg/core']);
 
 /** Read pnpm's exact production package/version/license inventory. */
-export function readProductionLicenseInventory() {
-  const raw = runPnpm([
-    'licenses',
-    'list',
-    '--prod',
-    '--json',
-    ...NON_SHIPPING_PROJECTS.map((name) => `--filter=!${name}`),
-  ]);
+export function readProductionLicenseInventory({ filters, storeDir } = {}) {
+  const raw = runPnpm(
+    [
+      'licenses',
+      'list',
+      '--prod',
+      '--json',
+      ...(filters ?? NON_SHIPPING_PROJECTS.map((name) => `!${name}`)).map(
+        (name) => `--filter=${name}`,
+      ),
+    ],
+    storeDir,
+  );
   const inventory = JSON.parse(raw);
   if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) {
     throw new Error('pnpm returned an invalid production dependency inventory');

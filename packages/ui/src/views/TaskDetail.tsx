@@ -25,6 +25,7 @@ import { TransformToolbarButton } from '../components/transform/TransformToolbar
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 
 type CronOverlap = 'skip' | 'queue' | 'concurrent';
@@ -224,7 +225,7 @@ export function TaskDetail({
   const loadChildren = useCallback(async () => {
     // Only meaningful for parents with a template — skip the extra round
     // trip for regular tasks.
-    if (!task.spawnsCraftbook) {
+    if (!task.spawnsCraftbook || !runtimeCapabilities().background) {
       setChildren([]);
       return;
     }
@@ -551,14 +552,15 @@ export function TaskDetail({
                 disabled={busy}
                 onChange={(status) => void setStatus(status)}
               />
-              {task.status === 'paused' && (
+              {(task.status === 'paused' ||
+                (!runtimeCapabilities().background && task.status === 'active')) && (
                 <button
                   type="button"
                   className="primary"
                   disabled={busy}
                   onClick={() => void retry()}
                 >
-                  {busy ? 'Restarting…' : 'Try again'}
+                  {busy ? 'Starting…' : task.status === 'active' ? 'Run step' : 'Try again'}
                 </button>
               )}
             </>
@@ -581,7 +583,7 @@ export function TaskDetail({
                 {systemOwner?.name ?? 'Boekwachter'} <small>· system-run</small>
               </span>
             </div>
-          ) : (
+          ) : runtimeCapabilities().taskStructureEditing ? (
             <Select.Root
               value={task.assignee.kind === 'user' ? '__user' : task.assignee.gezelId}
               disabled={busy}
@@ -589,7 +591,7 @@ export function TaskDetail({
                 void setAssignee(v === '__user' ? { kind: 'user' } : { kind: 'gezel', gezelId: v });
               }}
             >
-              <Select.Trigger>
+              <Select.Trigger aria-label="Task assignee">
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -602,6 +604,10 @@ export function TaskDetail({
                 ))}
               </Select.Content>
             </Select.Root>
+          ) : (
+            <span className="task-assignee">
+              {task.assignee.kind === 'user' ? 'You' : gezelName(task.assignee.gezelId)}
+            </span>
           )}
         </div>
       </header>
@@ -611,11 +617,10 @@ export function TaskDetail({
           selectedStepId !== null || tab === 'task' ? ' has-docked-panel' : ''
         }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
-        <div className="task-tab-rail" role="tablist" aria-label="Task view">
+        <fieldset className="task-tab-rail" aria-label="Task view">
           <button
             type="button"
-            role="tab"
-            aria-selected={selectedStepId === null && tab === 'task'}
+            aria-pressed={selectedStepId === null && tab === 'task'}
             className={`task-tab-btn${selectedStepId === null && tab === 'task' ? ' active' : ''}`}
             onClick={() => handleSelectTab('task')}
           >
@@ -623,24 +628,29 @@ export function TaskDetail({
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected={selectedStepId === null && tab === 'chat'}
+            aria-pressed={selectedStepId === null && tab === 'chat'}
             className={`task-tab-btn${selectedStepId === null && tab === 'chat' ? ' active' : ''}`}
             onClick={() => handleSelectTab('chat')}
           >
             Chat{sessions.length > 0 ? ` (${sessions.length})` : ''}
           </button>
-        </div>
+        </fieldset>
         <TaskStepTracker
           steps={task.craftbook.steps}
           {...(task.activeStepId ? { activeStepId: task.activeStepId } : {})}
           selectedStepId={selectedStepId}
           onSelect={handleSelectStep}
-          onAddStep={() => setAddStepOpen(true)}
+          onAddStep={
+            runtimeCapabilities().taskStructureEditing ? () => setAddStepOpen(true) : undefined
+          }
           busy={busy || isSystemJob || effectiveStatus !== 'active'}
           gezels={gezels}
           taskStatus={effectiveStatus}
-          onAssign={(stepId, assignee) => void updateStep(stepId, { assignee })}
+          onAssign={
+            runtimeCapabilities().taskStructureEditing
+              ? (stepId, assignee) => void updateStep(stepId, { assignee })
+              : undefined
+          }
           taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
         />
       </div>
@@ -654,7 +664,11 @@ export function TaskDetail({
           gateRejection={gateRejection}
           onActivate={activateStep}
           onComplete={completeStep}
-          onForceComplete={(stepId) => completeStep(stepId, true)}
+          onForceComplete={
+            runtimeCapabilities().taskGateOverride
+              ? (stepId) => completeStep(stepId, true)
+              : undefined
+          }
           onPatch={updateStep}
         />
       )}
@@ -775,7 +789,7 @@ export function TaskDetail({
                       {step && (
                         <span className="task-note-step muted small">step: {step.name}</span>
                       )}
-                      {!editing && (
+                      {!editing && runtimeCapabilities().taskNoteEditing && (
                         <button
                           type="button"
                           className="task-note-edit"
@@ -793,14 +807,16 @@ export function TaskDetail({
                           </svg>
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="task-note-delete"
-                        title="Remove this note"
-                        onClick={() => void removeNote(n.id)}
-                      >
-                        ×
-                      </button>
+                      {runtimeCapabilities().taskNoteEditing && (
+                        <button
+                          type="button"
+                          className="task-note-delete"
+                          title="Remove this note"
+                          onClick={() => void removeNote(n.id)}
+                        >
+                          ×
+                        </button>
+                      )}
                     </header>
                     <div className="task-note-body">
                       <EditorShell
@@ -870,11 +886,13 @@ export function TaskDetail({
                   <strong>Default plan:</strong> {task.spawnsCraftbook.plan}
                 </p>
               )}
-              <div className="task-template-actions">
-                <button type="button" onClick={() => void spawnInstance()} disabled={busy}>
-                  + Spawn instance
-                </button>
-              </div>
+              {runtimeCapabilities().background && (
+                <div className="task-template-actions">
+                  <button type="button" onClick={() => void spawnInstance()} disabled={busy}>
+                    + Spawn instance
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -893,7 +911,7 @@ export function TaskDetail({
             </section>
           )}
 
-          {task.spawnsCraftbook && (
+          {task.spawnsCraftbook && runtimeCapabilities().background && (
             <section className="task-children">
               <h4>
                 Instances <span className="muted small">({children.length})</span>
@@ -917,7 +935,7 @@ export function TaskDetail({
             </section>
           )}
 
-          {task.cron && (
+          {task.cron && runtimeCapabilities().background && (
             <section className="task-cron">
               <h4>Cron</h4>
               <p className="muted small">

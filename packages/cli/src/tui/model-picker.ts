@@ -83,6 +83,10 @@ export function modelProviderLabel(provider: ProviderName): string {
       return 'Ollama';
     case 'llama-cpp':
       return 'llama.cpp';
+    case 'apple-foundation-models':
+      return 'Apple Intelligence';
+    case 'android-mlkit':
+      return 'Android system AI';
     case 'mlx':
       return 'MLX';
     case 'ds4':

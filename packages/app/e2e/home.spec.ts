@@ -23,6 +23,7 @@ let app: ElectronApplication;
 let page: Page;
 
 test.beforeAll(async () => {
+  test.setTimeout(90_000);
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-home-e2e-'));
   app = await electron.launch({
     args: [appRoot],
@@ -34,7 +35,8 @@ test.beforeAll(async () => {
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
+  // The first document is the splash; wait for the daemon-served UI.
+  await expect(page.locator('.app-header')).toBeVisible({ timeout: 60_000 });
 });
 
 test.afterAll(async () => {
@@ -44,8 +46,7 @@ test.afterAll(async () => {
 
 test('Home renders the workshop once configured', async () => {
   // The app opens on Home; the workshop appears after the provider probe
-  // resolves ok (mock provider) and the meester is auto-provisioned. Use a
-  // generous timeout — provisioning + probe race the 2500ms beforeAll wait.
+  // resolves ok (mock provider) and the meester is auto-provisioned.
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20000 });
 
   // Greeting band (time-of-day headline, no stored user name).
@@ -81,9 +82,9 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await expect(page.getByText('Tip of the day')).toBeVisible();
 
   // The tour tab swaps the greeting + tip for the tour content in place.
-  const tour = page.getByRole('tab', { name: 'New here? What is gezel' });
+  const tour = page.getByRole('button', { name: 'New here? What is gezel' });
   await tour.click();
-  await expect(tour).toHaveAttribute('aria-selected', 'true');
+  await expect(tour).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Tip of the day')).toBeHidden();
   await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Read' })).toBeVisible();
@@ -97,18 +98,17 @@ test('the greeting collapses and the tour tab swaps content', async () => {
 });
 
 test('renders the workshop in dark (dusk) mode', async () => {
-  // Return to the greeting tab left inactive by the previous test (the
-  // date tab is always the first in the strip) for a clean shot.
+  // Return to the greeting button left inactive by the previous test for a clean shot.
   if (
     await page
       .getByRole('button', { name: /Open in Handboek/ })
       .isVisible()
       .catch(() => false)
   ) {
-    await page.getByRole('tab').first().click();
+    await page.locator('.home-workshop-tabs').getByRole('button').first().click();
   }
 
-  await expect(page.getByTestId('home-workshop')).toBeVisible();
+  await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });
 
   // The day surface stays on the shared mushroom-beige foundation tone rather
   // than drifting back to yellow parchment or to the old flat greige.

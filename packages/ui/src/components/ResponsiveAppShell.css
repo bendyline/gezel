@@ -1,0 +1,25 @@
+.responsive-app-shell {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.responsive-app-navigation {
+  display: contents;
+}
+
+.responsive-app-shell > .app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.responsive-app-shell > [hidden] {
+  display: none !important;
+}
+
+.responsive-app-shell > .app-main:focus {
+  outline: none;
+}

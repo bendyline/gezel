@@ -3,7 +3,6 @@ import {
   type ChatSessionSummary,
   type Craftbook,
   type CraftbookConnectorNeed,
-  type CraftbookToolsetNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
   GATE_MAX_PROGRESS_ATTEMPTS,
@@ -30,11 +29,13 @@ import {
   type TaskVariation,
   type UpdateTaskRequest,
   type UpdateTaskStepRequest,
+  applyGateRejection,
   applyStepPatch,
   assertCraftbookGraph,
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
+  gateHandoffNoteText,
   isEngagementAllowed,
   nightShiftDayKey,
   normalizeScriptRefs,
@@ -45,8 +46,10 @@ import {
   projectManagedWorkspaceWritable,
   removeStepAndCleanEdges,
   reorderStepsArray,
+  resolveNextStep,
   resolveSecurityPolicy,
   resolveSteps,
+  stampGateHandoff,
   stepInsertionIndex,
   summarizePlanDocument,
   taskEffectiveStatus,
@@ -77,6 +80,7 @@ import {
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
 import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
+import { gateDampingHash } from './gate-damping.js';
 import {
   type DeliverableSurface,
   type EscalationStage,
@@ -100,6 +104,9 @@ import {
   gateCheckLabel,
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
+import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './inputs/resolve.js';
+import type { InputStagingManager } from './inputs/staging.js';
+import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import {
@@ -137,42 +144,24 @@ export interface CraftbookResolver {
   } | null>;
 }
 
-/** A craftbook was selected correctly, but its declared runtime is not ready. */
-export class CraftbookSetupRequiredError extends Error {
-  readonly code = 'CRAFTBOOK_SETUP_REQUIRED';
-
-  constructor(
-    readonly craftbookId: string,
-    readonly missingToolsets: CraftbookToolsetNeed[],
-  ) {
-    const details = missingToolsets
-      .map((need) => `${need.toolsetId}${need.reason ? ` (${need.reason})` : ''}`)
-      .join(', ');
-    super(
-      `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${details} before creating this task. No task was created.`,
-    );
-    this.name = 'CraftbookSetupRequiredError';
-  }
-}
-
 /**
- * A craftbook reads a connector corpus the project has not bound. The
- * launcher offers to bind it (defaults come from the project) and retries.
+ * Completion must wait until the task and its ancestors are active.
+ *
+ * Keep the task metadata used by the HTTP response while sharing the
+ * step-completion error contract used by every refused state transition.
  */
-export class ConnectorSetupRequiredError extends Error {
-  readonly code = 'CONNECTOR_SETUP_REQUIRED';
+export class TaskNotActiveError extends StepCompletionBlockedError {
+  readonly responseCode = 'TASK_NOT_ACTIVE' as const;
 
   constructor(
-    readonly craftbookId: string,
-    readonly missingConnectors: CraftbookConnectorNeed[],
+    readonly taskRef: string,
+    readonly stepId: string,
+    readonly effectiveStatus: TaskStatus,
   ) {
-    const details = missingConnectors
-      .map((need) => `${need.typeId}${need.reason ? ` (${need.reason})` : ''}`)
-      .join(', ');
     super(
-      `SETUP REQUIRED for craftbook "${craftbookId}": connect ${details} before creating this task. No task was created.`,
+      `task ${taskRef}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
+      'task_not_active',
     );
-    this.name = 'ConnectorSetupRequiredError';
   }
 }
 
@@ -339,6 +328,7 @@ export type TaskNeedsHelpHook = (ctx: {
  */
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
 export type { ExecutionModeResolution, ExecutionModeResolver } from './execution-mode.js';
+export { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 
 /**
  * The gezel a step is bound to on its OWN terms — an explicit assignee,
@@ -455,6 +445,7 @@ export class TaskManager {
   private onTaskStatusChanged?: TaskStatusChangedHook;
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
+  private inputStaging?: InputStagingManager;
   private readonly autoPreparedConnectorTypes = new Set<string>();
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
@@ -662,6 +653,26 @@ export class TaskManager {
 
   setTaskNeedsHelpHook(fn: TaskNeedsHelpHook): void {
     this.onTaskNeedsHelp = fn;
+  }
+
+  /**
+   * What a launcher needs before creating a task from a craftbook: its name
+   * for the default title and the paramSchema its params and inputs resolve
+   * against. Null when the book does not resolve for this project.
+   */
+  async describeCraftbook(
+    projectId: string,
+    craftbookId: string,
+    opts: { version?: string; sourceId?: string } = {},
+  ): Promise<{ name: string; paramSchema: Craftbook['paramSchema'] } | null> {
+    const resolved = await this.craftbookResolver?.resolve(craftbookId, { ...opts, projectId });
+    if (!resolved) return null;
+    return { name: resolved.craftbook.name, paramSchema: resolved.craftbook.paramSchema ?? {} };
+  }
+
+  /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
+  setInputStaging(staging: InputStagingManager): void {
+    this.inputStaging = staging;
   }
 
   /**
@@ -1048,6 +1059,14 @@ export class TaskManager {
       // these — their deliverables live at mode-neutral locations.
       ...(draftsDiffpack ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` } : {}),
     };
+    // Inputs resolve here for the same reason connector prep does: the task
+    // number is known and interpolation is just below. Nothing is written
+    // until the task write commits the plan.
+    const inputsPlan = await planLaunchInputs(
+      { store: this.store, staging: this.inputStaging },
+      { projectId, num, book: mainBook, request: input, params: effectiveCraftbookParams },
+    );
+    if (inputsPlan) Object.assign(craftbookParamOverrides, inputsPlan.params);
     Object.assign(
       craftbookParamOverrides,
       resolveRuntimeTokensInParams(craftbookParamOverrides, runtimeCraftbookContext),
@@ -1188,6 +1207,7 @@ export class TaskManager {
       ...(Object.keys(effectiveCraftbookParams).length > 0
         ? { craftbookParams: effectiveCraftbookParams }
         : {}),
+      ...(inputsPlan ? { inputs: inputsPlan.records } : {}),
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
@@ -1208,7 +1228,7 @@ export class TaskManager {
       createdBy: input.createdBy ?? { kind: 'user' },
     };
 
-    await this.store.writeTask(task);
+    await writeTaskWithInputs(inputsPlan, () => this.store.writeTask(task));
     // Pre-create the task's artifact folder so it shows in the artifacts
     // browser from minute one. Purely a UX affordance — `write_artifact`
     // mkdir -p's on its own — so a failure must never block the task.
@@ -1233,6 +1253,7 @@ export class TaskManager {
         ...(spawnsCraftbook ? { spawnSteps: spawnsCraftbook.steps.length } : {}),
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
+        ...(task.inputs ? { inputs: inputsHistoryDetails(task.inputs) } : {}),
       },
     });
 
@@ -2332,10 +2353,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
     const effectiveStatus = await this.effectiveStatusFor(task);
     if (effectiveStatus !== 'active') {
-      throw new StepCompletionBlockedError(
-        `task ${task.ref}: cannot complete step "${stepId}" while its effective status is ${effectiveStatus}. A ${effectiveStatus} task takes no step completions; if the runtime paused it for help, record the blocker in a task note and end your turn rather than reactivating it.`,
-        'task_not_active',
-      );
+      throw new TaskNotActiveError(task.ref, stepId, effectiveStatus);
     }
 
     // ── Completion gate guard ─────────────────────────────────────────
@@ -2398,45 +2416,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       i === idx ? { ...s, completedAt } : s,
     );
 
-    // Decide next active step.
-    let newActive: string | undefined = task.activeStepId;
-    let terminating = false;
+    // Decide next active step: the shared precedence both hosts follow.
     const stepExists = (id: string | undefined): id is string =>
       id !== undefined && task.craftbook.steps.some((s) => s.id === id);
-
-    if (nextArg && nextArg !== 'next') {
-      const target = task.craftbook.steps.find((s) => s.id === nextArg);
-      if (!target) throw new Error(`task ${task.ref}: no step "${nextArg}" to activate`);
-      newActive = nextArg;
-    } else if (stepExists(gateOutcome?.goto)) {
-      newActive = gateOutcome?.goto;
-    } else if (stepExists(gateOnApprove)) {
-      newActive = gateOnApprove;
-    } else if (completedStep.terminal) {
-      terminating = true;
-      newActive = undefined;
-    } else {
-      const branchTarget = completedStep.branches
-        ? findBranchGoto(completedStep.branches, exitRun?.output)
-        : undefined;
-      if (branchTarget) {
-        newActive = branchTarget;
-      } else if (completedStep.next) {
-        newActive = completedStep.next;
-      } else {
-        const following = task.craftbook.steps[idx + 1];
-        if (following) {
-          newActive = following.id;
-        } else {
-          // A last step with no `next` ends the book. Left as-is, `newActive`
-          // still held this step's id and the book re-activated itself (gemma's
-          // invoice-run children re-ran `draft-invoice` three times each and the
-          // fanout barrier never released, 2026-09-19); an intended self-loop says so with `next`.
-          terminating = true;
-          newActive = undefined;
-        }
-      }
-    }
+    const route = resolveNextStep({
+      steps: task.craftbook.steps,
+      currentId: stepId,
+      ...(nextArg !== undefined ? { override: nextArg } : {}),
+      ...(gateOutcome?.goto !== undefined ? { gateGoto: gateOutcome.goto } : {}),
+      ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
+      branchOutput: exitRun?.output,
+    });
+    if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
+      throw new Error(`task ${task.ref}: no step "${nextArg}" to activate`);
+    const terminating = route.kind === 'terminate';
+    const newActive: string | undefined = route.kind === 'terminate' ? undefined : route.to;
 
     // A route that names no step used to be silently accepted here: the task
     // was written with an `activeStepId` matching nothing, so no handoff
@@ -2486,15 +2480,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       ...(terminating ? { status: 'complete' as TaskStatus } : {}),
       ...(nightShiftPatch ?? {}),
       ...(handoff
-        ? {
-            lastGateHandoff: {
-              fromStepId: stepId,
-              ...(newActive ? { toStepId: newActive } : {}),
-              message: handoff.message,
-              ...(handoff.params ? { params: handoff.params } : {}),
-              at: nowIso(),
-            },
-          }
+        ? { lastGateHandoff: stampGateHandoff(stepId, newActive, handoff, nowIso()) }
         : {}),
       updatedAt: nowIso(),
     };
@@ -2537,13 +2523,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
     // Durable copy of the gate handoff on the receiving step's notes.
     if (handoff && newActive) {
-      const paramLines = handoff.params
-        ? Object.entries(handoff.params)
-            .map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join('\n')
-        : '';
       await this.appendNote(projectId, num, {
-        text: `# Handoff from gate on "${completedStep.name}"\n\n${handoff.message}${paramLines ? `\n\n${paramLines}` : ''}`,
+        text: gateHandoffNoteText(completedStep.name, handoff),
         author: { kind: 'user' },
         stepId: newActive,
       }).catch(() => {});
@@ -2787,38 +2768,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         ...(extra ? { extra } : {}),
       });
 
-    // Repeat-reject damping: when the gated deliverable is byte-identical
-    // to what this gate last rejected, skip the re-evaluation — zero
-    // sandbox spawns, no attempt bump. Legacy behavior returned the cached
-    // rejection whose fingerprint the chat layer then deduped into
-    // SILENCE — a frozen resubmitter stopped being nudged entirely (the
-    // verified gap). Model-driven frozen resubmits now climb
-    // the escalation ladder instead: fresh stage directive, fresh
-    // fingerprint, so the nudge actually delivers.
-    //
-    // The hash covers ONE input: the `advanceWhen` deliverable. A gate
-    // script reads whatever it likes — `checkTaskNoteContains` reads the
-    // task NOTES — so for a scripted gate "byte-identical deliverable"
-    // does not imply "same verdict", and damping on it caches a verdict
-    // the model has already earned its way out of. Pull Request Review's
-    // `scope` gate is the wild-caught case: its deliverable is the batch
-    // file the runtime publishes onEnter and the prompt forbids touching,
-    // so the hash was immutable by construction while the note the script
-    // actually judges was rewritten twice. Three of four recorded
-    // "failures" never ran the check, and the ladder paused the task with
-    // a verdict that was false when it was replayed. Scripted gates
-    // re-evaluate; the plateau ladder in the rejection path below still
-    // terminates the loop, on verdicts that came from a real run.
-    let contentHash: string | undefined;
-    if (step.advanceWhen?.file && gate.scripts.length === 0) {
-      const content = await (step.advanceWhen.artifact
-        ? this.store.readProjectArtifact(projectId, step.advanceWhen.file)
-        : this.store.readProjectWorkspaceFile(projectId, step.advanceWhen.file)
-      ).catch(() => null);
-      if (content !== null) {
-        contentHash = createHash('sha256').update(content).digest('hex');
-      }
-    }
+    // Repeat-reject damping: when every file the gate reads is byte-identical
+    // to what it last rejected, skip the re-evaluation — zero sandbox spawns,
+    // no attempt bump. Legacy behavior returned the cached rejection whose
+    // fingerprint the chat layer then deduped into SILENCE — a frozen
+    // resubmitter stopped being nudged entirely (the verified gap).
+    // Model-driven frozen resubmits now climb the escalation ladder instead:
+    // fresh stage directive, fresh fingerprint, so the nudge actually
+    // delivers. Which inputs are hashed, and why scripted gates and
+    // multi-input checks are never damped, is gate-damping.ts's contract.
+    const contentHash = await gateDampingHash(gate, step, (file, artifact) =>
+      (artifact
+        ? this.store.readProjectArtifact(projectId, file)
+        : this.store.readProjectWorkspaceFile(projectId, file)
+      ).catch(() => null),
+    );
     if (
       contentHash !== undefined &&
       step.lastGateReject?.contentHash !== undefined &&
@@ -3008,6 +2972,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const outcome = await evaluateStepGate({
       gate,
       ws,
+      steps: task.craftbook.steps,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
         // Paths the task itself handed the assignee (invocation params,
@@ -3018,6 +2983,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
           ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
           artifactDir: task.artifactDir ?? `tasks/${task.num}`,
+          steps: task.craftbook.steps,
         }),
         // The nodeRuns executor — same security fence as user scripts:
         // when the policy disables script execution, the check rejects
@@ -3044,6 +3010,31 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           }
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
+        },
+        imageEvidence: async () => {
+          if (!this.history) return { observable: false, paths: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: ['tool.called'],
+            ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+          });
+          const paths = events.flatMap((event) => {
+            const d = event.details;
+            return d?.success === true &&
+              d.name === 'read_image_as_base64' &&
+              d.imageArtifact === false &&
+              d.taskRef === task.ref &&
+              // Generalist sessions survive graph transitions; their bridge's
+              // step tag can name the previous step after a repair back-edge.
+              // The current activation's timestamp is the authority in that
+              // mode. Stepwise workers still require the exact step tag.
+              (d.stepId === step.id ||
+                (task.executionMode === 'generalist' && Boolean(step.lastActivatedAt))) &&
+              typeof d.path === 'string'
+              ? [d.path]
+              : [];
+          });
+          return { observable: true, paths };
         },
         researchEvidence: async ({ sourcePath, tools }) => {
           if (!this.history) return { observable: false, matches: [] };
@@ -3377,10 +3368,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // size: Pull Request Review's scan step burns one per 25-file batch,
     // so a PR needing more batches than the budget could never finish no
     // matter how well the reviewer worked.
-    const priorProgress = step.gateProgressAttempts ?? 0;
-    const progressAttempts = converging ? priorProgress + 1 : priorProgress;
-    const attempt = converging ? Math.max(priorAttempts, 1) : priorAttempts + 1;
-    const progressExhausted = progressAttempts >= GATE_MAX_PROGRESS_ATTEMPTS;
+    const plan = applyGateRejection({
+      step,
+      gate,
+      verdict: { converging, ...(outcome.goto !== undefined ? { goto: outcome.goto } : {}) },
+      steps: task.craftbook.steps,
+    });
+    const { attempt, progressAttempts, progressExhausted } = plan;
     const message =
       stage === 1
         ? buildStageOneNudge({
@@ -3461,7 +3455,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       );
     }
 
-    if ((attempt >= gate.maxAttempts && !converging) || progressExhausted || stage === 3) {
+    if (plan.paused || stage === 3) {
       // Keurmeester escalation point: the gate budget is spent and the
       // pause-for-help is imminent. Consult first — an applied verdict
       // (corrective message, step/craftbook rewrite, or takeover) keeps
@@ -3791,6 +3785,10 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const workspaceChecks = new Map<string, string | undefined>();
     for (const c of gate.checks) {
+      // Read receipts are satisfied by reading existing artifacts, not by
+      // changing the workspace. corpusReadEvidence may read its batch manifest
+      // from the workspace, but that does not make a missing read a write.
+      if (c.kind === 'artifactReadEvidence' || c.kind === 'corpusReadEvidence') continue;
       if ((c as { artifact?: boolean }).artifact === true) continue;
       workspaceChecks.set(gateCheckLabel(c), (c as { file?: string }).file);
     }
@@ -4417,6 +4415,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         : {}),
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+      // A shard works on its host's input; its template already carries those paths.
+      ...(parent.inputs ? { inputs: parent.inputs } : {}),
       // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
       // a shard that carries one drafts into that change proposal, so its
       // workspace-write tools re-root at the pack instead of the workspace.

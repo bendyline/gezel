@@ -1,3 +1,5 @@
+import { GezelApiError, describeTransportError } from './api-error.js';
+export { GezelApiError } from './api-error.js';
 import type {
   AppToolCallResultRequest,
   AudioEngineStatusResponse,
@@ -222,6 +224,8 @@ import type {
   InvokePageToolRequest,
   InvokePageToolResponse,
   InvokeSessionToolResponse,
+  LaunchTaskFromSessionRequest,
+  LaunchTaskFromSessionResponse,
   ListAiAppsResponse,
   ListAppServeSitesResponse,
   ListChatSessionsResponse,
@@ -367,6 +371,7 @@ import type {
   SecurityScanResponse,
   SendChatRequest,
   SendChatResponse,
+  SendToSessionRequest,
   SessionDebugSnapshot,
   SessionTelemetry,
   SessionTelemetryListResponse,
@@ -421,6 +426,8 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WikimediaImageSearchRequest,
+  WikimediaImageSearchResponse,
   WikipediaReadRequest,
   WikipediaReadResponse,
   WikipediaSearchRequest,
@@ -452,14 +459,32 @@ import {
   VideoModelPullEventSchema,
 } from '@bendyline/gezel/schemas';
 import { z } from 'zod';
+import type {
+  FolderMovePlan,
+  FolderMovePolicy,
+  FolderMoveStatus,
+  FolderScope,
+  FoldersStatusResponse,
+} from './folders.js';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
+import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
 import {
   type ConsumeSseJsonOptions,
   SseResponseError,
   SseStreamStaleError,
   consumeSseJson,
 } from './sse.js';
+import { TaskInputsClient } from './task-inputs.js';
 
+export type {
+  FolderBackupSnapshot,
+  FolderMovePlan,
+  FolderMovePlanValidation,
+  FolderMovePolicy,
+  FolderMoveStatus,
+  FolderScope,
+  FoldersStatusResponse,
+} from './folders.js';
 export type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 
 export interface ScanModelBundleOptions {
@@ -578,6 +603,8 @@ export interface UsageResponse {
     'codex-cli'?: ProviderUsage;
     ollama?: ProviderUsage;
     'llama-cpp'?: ProviderUsage;
+    'apple-foundation-models'?: ProviderUsage;
+    'android-mlkit'?: ProviderUsage;
     mlx?: ProviderUsage;
     ds4?: ProviderUsage;
     remote?: ProviderUsage;
@@ -911,77 +938,6 @@ export interface ProviderCacheStatsResponse {
   }>;
 }
 
-export type FolderScope = 'documents' | 'gezels' | 'projects';
-export type FolderMovePolicy = 'overwrite-all' | 'skip-all' | 'use-destination';
-
-/** One pre-move snapshot under `~/.gezel/backup/<timestamp>/`. */
-export interface FolderBackupSnapshot {
-  id: string;
-  path: string;
-  scopes: FolderScope[];
-  bytes: number;
-  /** ISO timestamp, or null when the folder name doesn't parse. */
-  createdAt: string | null;
-}
-
-export interface FoldersStatusResponse {
-  /** Default (un-externalized) location of each scope. */
-  defaults: Record<FolderScope, string>;
-  /** Currently-resolved location (external if configured, else default). */
-  current: Record<FolderScope, string>;
-  /** Configured external path per scope, or null when on default. */
-  externalized: Record<FolderScope, string | null>;
-  /** True when a folder-move job is queued or running — the UI should
-   *  disable the move buttons rather than queueing parallel ops. */
-  activeJob: boolean;
-  /** Latest move job in this service process. Lets the UI recover progress or
-   *  the restart prompt when the settings view is remounted. */
-  job?: FolderMoveStatus | null;
-  /** Pre-move snapshot summary, newest first. */
-  backups: {
-    count: number;
-    totalBytes: number;
-    path: string;
-    snapshots: FolderBackupSnapshot[];
-  };
-}
-
-export interface FolderMovePlanValidation {
-  ok: boolean;
-  reason?: string;
-}
-
-export interface FolderMovePlan {
-  scope: FolderScope;
-  sourcePath: string;
-  destPath: string;
-  files: number;
-  bytes: number;
-  conflicts: number;
-  sourceExists: boolean;
-  destExists: boolean;
-  destNonEmpty: boolean;
-  validation: FolderMovePlanValidation;
-}
-
-export interface FolderMoveStatus {
-  id: string;
-  scope: FolderScope;
-  sourcePath: string;
-  destPath: string;
-  conflictPolicy: FolderMovePolicy;
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
-  phase?: 'scan' | 'backup' | 'copy' | 'verify' | 'swap' | 'cleanup' | 'prune';
-  filesDone: number;
-  totalFiles: number;
-  bytesDone: number;
-  totalBytes: number;
-  error?: string;
-  restartRequired: boolean;
-  startedAt: string;
-  endedAt?: string;
-}
-
 export interface ConfigResponse {
   provider: ProviderName;
   /** Generalist mode setting (`auto` when unset). See docs/generalist-mode.md. */
@@ -1142,6 +1098,8 @@ export interface ConfigResponse {
     'codex-cli'?: string;
     ollama?: string;
     'llama-cpp'?: string;
+    'apple-foundation-models'?: string;
+    'android-mlkit'?: string;
     mlx?: string;
     ds4?: string;
     /** Namespaced `remote:<remoteId>/<model>` default; rarely set. */
@@ -1155,6 +1113,8 @@ export interface ConfigResponse {
     'codex-cli'?: string;
     ollama?: string;
     'llama-cpp'?: string;
+    'apple-foundation-models'?: string;
+    'android-mlkit'?: string;
     mlx?: string;
     ds4?: string;
     remote?: string;
@@ -1293,6 +1253,11 @@ export interface ConfigResponse {
    * speaking gezel's per-character voice. Opt-in; default `false`.
    */
   narrateAssistantReplies?: boolean;
+  /**
+   * Also narrate the short updates a gezel gives between tool calls, not
+   * only its final reply. Default `true`; inert while narration is off.
+   */
+  narrateProgressUpdates?: boolean;
   /** Catalog id of the whisper.cpp model transcription runs on. */
   defaultSttModel?: string;
   /** Preferred browser microphone for prompt narration. */
@@ -2064,29 +2029,6 @@ export interface RunWorkspaceCommandResult {
   declined?: string;
 }
 
-export class GezelApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = 'GezelApiError';
-  }
-}
-
-function describeTransportError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause instanceof Error && cause.message && cause.message !== error.message) {
-    return `${error.message} (${cause.message})`;
-  }
-  if (cause && typeof cause === 'object' && 'code' in cause) {
-    return `${error.message} (${String((cause as { code?: unknown }).code)})`;
-  }
-  return error.message;
-}
-
 type ConsumeApiSseJsonOptions<T> = ConsumeSseJsonOptions<T> & {
   staleMessage?: string;
 };
@@ -2238,6 +2180,7 @@ export class GezelClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
+  readonly taskInputs: TaskInputsClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2248,6 +2191,7 @@ export class GezelClient {
     // site (browser, Electron renderer, Node 22+).
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
+    this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
   }
 
   private async request<T>(
@@ -2960,6 +2904,26 @@ export class GezelClient {
     if (opts?.excludeWorkspaces) params.set('excludeWorkspaces', '1');
     const query = params.toString();
     return this.request('GET', `/api/storage/backup/plan${query ? `?${query}` : ''}`);
+  }
+
+  /** Portable hosts return a bounded archive for the OS save/share picker. */
+  exportPortableBackup(
+    options: Pick<BackupRequest, 'include' | 'excludeWorkspaces'> = {},
+  ): Promise<Uint8Array> {
+    return exportPortableBackup(this.fetchImpl, this.baseUrl, this.token, options);
+  }
+
+  /** Uploads content for inspection only; confirmation remains a separate call. */
+  scanPortableRestore(bytes: Uint8Array): Promise<RestoreReview> {
+    return scanPortableRestore(this.fetchImpl, this.baseUrl, this.token, bytes);
+  }
+
+  confirmPortableRestore(restoreId: string, body: RestoreConfirm): Promise<{ restored: number }> {
+    return this.request(
+      'POST',
+      `/api/storage/restore/${encodeURIComponent(restoreId)}/confirm`,
+      body,
+    );
   }
 
   /**
@@ -4896,19 +4860,18 @@ export class GezelClient {
 
   sendToChatSession(
     sessionId: string,
-    body:
-      | string
-      | {
-          message: string;
-          mentions?: string[];
-          passiveCcGezelIds?: string[];
-          nudge?: boolean;
-          /** The prompt draft this message was written in. */
-          draftId?: string;
-        },
+    body: string | SendToSessionRequest,
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);
+  }
+
+  /** The composer's attached task: create it from this message with no model turn. */
+  launchTaskFromChatSession(
+    sessionId: string,
+    body: LaunchTaskFromSessionRequest,
+  ): Promise<LaunchTaskFromSessionResponse> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/launch-task`, body);
   }
 
   /**
@@ -6512,6 +6475,17 @@ export class GezelClient {
     );
   }
 
+  toolWikimediaImageSearch(
+    id: string,
+    body: WikimediaImageSearchRequest,
+  ): Promise<WikimediaImageSearchResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/wikimedia-image-search`,
+      body,
+    );
+  }
+
   toolWikipediaRead(id: string, body: WikipediaReadRequest): Promise<WikipediaReadResponse> {
     return this.request(
       'POST',
@@ -7435,6 +7409,11 @@ export class GezelClient {
        * wants the bytes it can round-trip, so this is opt-in.
        */
       as?: 'markdown';
+      /**
+       * Project context for a bare path: after the shared library misses,
+       * the server tries this project's `documents/` then `artifacts/`.
+       */
+      project?: string;
     },
   ): Promise<{
     path: string;
@@ -7459,7 +7438,11 @@ export class GezelClient {
     size?: number;
   }> {
     const as = opts?.as ? `&as=${opts.as}` : '';
-    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);
+    const project = opts?.project ? `&project=${encodeURIComponent(opts.project)}` : '';
+    return this.request(
+      'GET',
+      `/api/documents/read?path=${encodeURIComponent(filePath)}${as}${project}`,
+    );
   }
 
   writeDocument(

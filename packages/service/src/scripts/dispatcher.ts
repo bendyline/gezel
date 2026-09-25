@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import {
+  CapabilityDeniedError,
+  EngagementDeniedError,
+  assertScriptMethodAllowed,
+  isEngagementAllowed,
+  toScriptTaskStep as toTaskStep,
+} from '@bendyline/gezel';
+export { CapabilityDeniedError, EngagementDeniedError } from '@bendyline/gezel';
 import type {
   CreateTaskRequest,
   IndexReadinessReport,
   ScriptCapability,
-  TaskCraftbookStep,
   UpdateTaskRequest,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
@@ -35,9 +42,6 @@ export interface DispatcherContext {
   runId: string;
   /** Name of the running script. Used for audit events. */
   scriptName: string;
-  engagementFlags: {
-    llmAllowed: boolean;
-  };
   allowedCapabilities: Set<ScriptCapability>;
   /**
    * Capabilities the script DID declare in `meta.requires` but a runtime
@@ -63,7 +67,8 @@ export type DispatchHandler = (ctx: DispatcherContext, params: unknown) => Promi
 
 export interface DispatcherDeps {
   store: Store;
-  chat: ChatManager;
+  /** Backs `llm.oneShot`; absent when no chat manager is wired. */
+  oneShot?: ChatManager['oneShotCompletion'];
   /**
    * Optional. When provided, the `memory.*` methods forward to it.
    * Injected by `service.ts`; when omitted those calls return a typed
@@ -83,15 +88,6 @@ export interface DispatcherDeps {
    * return a typed error.
    */
   mcpCall?: (ctx: DispatcherContext, tool: string, args: unknown) => Promise<unknown>;
-  /**
-   * Optional. Wired by ScriptRunner so `script.run` can recurse without
-   * a circular import between runner and dispatcher.
-   */
-  runNested?: (
-    parentCtx: DispatcherContext,
-    name: string,
-    input?: Record<string, unknown>,
-  ) => Promise<{ runId: string; status: 'ok' | 'error'; output?: unknown; error?: string }>;
   /**
    * Optional. When provided, the dispatcher resolves `credential:<name>`
    * capabilities through it for the `http.authed` method. Scripts whose
@@ -115,26 +111,6 @@ export interface DispatcherDeps {
   };
 }
 
-export class CapabilityDeniedError extends Error {
-  readonly code = 'CAPABILITY_DENIED';
-  constructor(capability: ScriptCapability, method: string, strippedReason?: string) {
-    super(
-      strippedReason
-        ? `script attempted to call "${method}" (capability: ${capability}); the capability is declared in meta.requires but is currently denied: ${strippedReason}`
-        : `script attempted to call "${method}" (capability: ${capability}) but did not declare it in meta.requires`,
-    );
-    this.name = 'CapabilityDeniedError';
-  }
-}
-
-export class EngagementDeniedError extends Error {
-  readonly code = 'ENGAGEMENT_DENIED';
-  constructor(method: string) {
-    super(`script called "${method}" but AI engagement mode is set to "off"`);
-    this.name = 'EngagementDeniedError';
-  }
-}
-
 interface ParamsShape {
   [k: string]: unknown;
 }
@@ -154,7 +130,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
   handlers: Record<string, { capability: ScriptCapability | null; handler: DispatchHandler }>;
   dispatch: (ctx: DispatcherContext, method: string, params: unknown) => Promise<unknown>;
 } {
-  const { store, chat } = deps;
+  const { store, oneShot } = deps;
 
   const handlers: Record<
     string,
@@ -450,15 +426,18 @@ export function buildDispatcher(deps: DispatcherDeps): {
     'llm.oneShot': {
       capability: 'llm',
       handler: async (ctx, params) => {
-        if (!ctx.engagementFlags.llmAllowed) {
+        // Engagement is read at call time, so a setting flipped mid-run
+        // takes effect on the next call without the runner relaying it.
+        if (!isEngagementAllowed(await store.readConfig())) {
           throw new EngagementDeniedError('llm.oneShot');
         }
+        if (!oneShot) throw new Error('llm.oneShot is not available (no chat manager wired)');
         const prompt = requireParam<string>(params, 'prompt');
         const opts = (param<Record<string, unknown>>(params, 'opts') ?? {}) as {
           timeoutMs?: number;
           model?: string;
         };
-        return chat.oneShotCompletion(prompt, opts.timeoutMs ?? 120_000, {
+        return oneShot(prompt, opts.timeoutMs ?? 120_000, {
           model: opts.model,
           jobLabel: 'script · llm.oneShot',
         });
@@ -573,16 +552,6 @@ export function buildDispatcher(deps: DispatcherDeps): {
         return fetchScriptHttp(url, init);
       },
     },
-
-    'script.run': {
-      capability: null,
-      handler: async (ctx, params) => {
-        const name = requireParam<string>(params, 'name');
-        const input = param<Record<string, unknown>>(params, 'input');
-        if (!deps.runNested) throw new Error('nested script.run is not available');
-        return deps.runNested(ctx, name, input);
-      },
-    },
   };
 
   async function dispatch(
@@ -592,13 +561,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
   ): Promise<unknown> {
     const entry = handlers[method];
     if (!entry) throw new Error(`unknown method "${method}"`);
-    if (entry.capability && !ctx.allowedCapabilities.has(entry.capability)) {
-      throw new CapabilityDeniedError(
-        entry.capability,
-        method,
-        ctx.strippedCapabilities?.get(entry.capability),
-      );
-    }
+    assertScriptMethodAllowed(method, ctx.allowedCapabilities, ctx.strippedCapabilities);
     return entry.handler(ctx, params);
   }
 
@@ -725,24 +688,4 @@ function splitRef(ref: string, ctx: DispatcherContext): [string, string] {
     throw new Error(`invalid project id in task ref "${ref}"`);
   }
   return [projectId, ref.slice(idx + 1)];
-}
-
-/**
- * Project a task's embedded craftbook step down to the curated, read-only
- * `TaskStep` view the SDK exposes — the internal routing machinery (gates,
- * branches, hook script refs) is dropped, and a lifecycle `status` is
- * derived from the task's `activeStepId` and the step's `completedAt`.
- */
-function toTaskStep(step: TaskCraftbookStep, activeStepId: string | undefined) {
-  const isActive = step.id === activeStepId;
-  return {
-    id: step.id,
-    name: step.name,
-    ...(step.description !== undefined ? { description: step.description } : {}),
-    status: isActive ? 'active' : step.completedAt ? 'complete' : 'pending',
-    isActive,
-    ...(step.completedAt !== undefined ? { completedAt: step.completedAt } : {}),
-    ...(step.attemptCount !== undefined ? { attemptCount: step.attemptCount } : {}),
-    ...(step.terminal !== undefined ? { terminal: step.terminal } : {}),
-  };
 }

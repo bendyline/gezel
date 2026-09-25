@@ -142,6 +142,55 @@ const QUERY_STOP_WORDS = new Set([
   'many',
   'few',
   'own',
+  // conversational scaffolding
+  'hey',
+  'hi',
+  'hiya',
+  'hello',
+  'thanks',
+  'thank',
+  'okay',
+  'ok',
+  'yep',
+  'yeah',
+  'yes',
+  'nope',
+  'good',
+  'great',
+  'fine',
+  'nice',
+  'cool',
+  'ready',
+  'going',
+  'doing',
+  'sounds',
+  'morning',
+  'afternoon',
+  'evening',
+  'night',
+  // Apostrophes are token boundaries, so contractions otherwise leave these
+  // fragments looking like rare, highly distinctive query terms.
+  's',
+  't',
+  're',
+  've',
+  'll',
+  'd',
+  'm',
+  'isn',
+  'aren',
+  'wasn',
+  'weren',
+  'don',
+  'doesn',
+  'didn',
+  'hasn',
+  'haven',
+  'hadn',
+  'won',
+  'wouldn',
+  'shouldn',
+  'couldn',
 ]);
 
 /**
@@ -172,6 +221,22 @@ export function queryTerms(text: string): string[] {
   const unique = [...new Set(tokenizeText(text))].slice(0, MAX_QUERY_TERMS);
   const meaningful = unique.filter((token) => !QUERY_STOP_WORDS.has(token));
   return meaningful.length > 0 ? meaningful : unique;
+}
+
+/**
+ * Terms that make automatic, pre-inference retrieval worthwhile.
+ *
+ * Unlike {@link queryTerms}, this never falls back to filler-only input. That
+ * fallback is useful for an explicit search (a user really may search for
+ * "how to" or "hello"), but it is the wrong contract for proactive context injection:
+ * greetings and acknowledgements should stay ordinary conversation. One-letter
+ * terms are also excluded here because contraction shards such as the `s` in
+ * "how's" create extremely broad FTS matches.
+ */
+export function proactiveRetrievalTerms(text: string): string[] {
+  return [...new Set(tokenizeText(text))]
+    .slice(0, MAX_QUERY_TERMS)
+    .filter((token) => token.length > 1 && !QUERY_STOP_WORDS.has(token));
 }
 
 /**

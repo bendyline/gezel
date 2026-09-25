@@ -15,7 +15,9 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { TASK_STATUS_KEY_ORDER, TaskStatusKeys } from '../components/TaskStatusKeys.js';
+import { useCompactLayout } from '../components/useCompactLayout.js';
 import { DropdownChevron, DropdownMenu, Select } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { TaskTabContent } from './TaskTabContent.js';
 import { NewTaskDialog, type TaskCreationMode } from './tasks/NewTaskDialog.js';
 
@@ -217,6 +219,9 @@ export interface TasksViewProps {
 }
 
 export function TasksView({ projectId }: TasksViewProps = {}) {
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const compact = useCompactLayout(layoutRef, 640);
+  const [showCompactDetail, setShowCompactDetail] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -271,6 +276,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   const openTask = useCallback(
     (ref: string) => {
       setCreating(null);
+      setShowCompactDetail(true);
       selectionAnchorRef.current = ref;
       commitSelection(new Set([ref]), ref);
     },
@@ -440,6 +446,10 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     onMouseDown: (event: ReactMouseEvent<HTMLButtonElement>) => beginMouseSelection(ref, event),
     onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) => extendMouseSelection(ref, event),
     onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (compact) {
+        openTask(ref);
+        return;
+      }
       // A real mouse click was already handled on mousedown so dragging can
       // paint the range live. Keyboard/programmatic clicks have detail 0.
       if (event.detail === 0) {
@@ -482,12 +492,15 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
 
   return (
     <div
-      className={`tasks-view${standalone ? ' tasks-view-overall' : ''}`}
+      ref={layoutRef}
+      className={`tasks-view${standalone ? ' tasks-view-overall' : ''}${compact ? ' tasks-view-compact' : ''}`}
       data-testid="tasks-view"
     >
-      <header className="tasks-header">
+      <header className="tasks-header" hidden={compact && showCompactDetail}>
         <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
-          {TASK_KIND_OPTIONS.map((option) => (
+          {TASK_KIND_OPTIONS.filter(
+            (option) => runtimeCapabilities().background || option.value === 'one-time',
+          ).map((option) => (
             <button
               key={option.value}
               type="button"
@@ -561,46 +574,53 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
             >
               + New task
             </button>
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  type="button"
-                  className="primary tasks-create-more"
-                  aria-label="More task types"
-                  disabled={!(projectFilter || projects[0])}
-                >
-                  <DropdownChevron />
-                </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  className="app-nav-menu tasks-create-menu"
-                  sideOffset={4}
-                  align="end"
-                >
-                  <DropdownMenu.Item
-                    className="app-nav-menu-item"
-                    onSelect={() => openCreate('scheduled')}
+            {runtimeCapabilities().background && (
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    className="primary tasks-create-more"
+                    aria-label="More task types"
+                    disabled={!(projectFilter || projects[0])}
                   >
-                    <span>New scheduled task</span>
-                    <small>Runs a fresh copy on a cadence</small>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="app-nav-menu-item"
-                    onSelect={() => openCreate('night-shift')}
+                    <DropdownChevron />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="app-nav-menu tasks-create-menu"
+                    sideOffset={4}
+                    align="end"
                   >
-                    <span>New Night Shift task</span>
-                    <small>Waits for the unattended work window</small>
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+                    <DropdownMenu.Item
+                      className="app-nav-menu-item"
+                      onSelect={() => openCreate('scheduled')}
+                    >
+                      <span>New scheduled task</span>
+                      <small>Runs a fresh copy on a cadence</small>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className="app-nav-menu-item"
+                      onSelect={() => openCreate('night-shift')}
+                    >
+                      <span>New Night Shift task</span>
+                      <small>Waits for the unattended work window</small>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
           </div>
         </div>
       </header>
 
       {error && <p className="error">{error}</p>}
 
+      {compact && showCompactDetail && (
+        <button type="button" className="secondary" onClick={() => setShowCompactDetail(false)}>
+          Back to tasks
+        </button>
+      )}
       <div className="tasks-layout">
         {!hasLoadedTasks && (
           <output className="tasks-empty-state">
@@ -618,7 +638,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
             )}
           </div>
         )}
-        <aside className="tasks-list" hidden={hideTaskPanes}>
+        <aside className="tasks-list" hidden={hideTaskPanes || (compact && showCompactDetail)}>
           <ul aria-label="Tasks — use Control or Command to toggle and Shift to select a range">
             {groups.map((g) => {
               const badge = taskBadge(g.parent);
@@ -729,7 +749,10 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
           </ul>
         </aside>
 
-        <section className="task-detail-panel" hidden={hideTaskPanes}>
+        <section
+          className="task-detail-panel"
+          hidden={hideTaskPanes || (compact && !showCompactDetail)}
+        >
           {selectedTasks.length > 1 ? (
             <BulkTaskDetail tasks={selectedTasks} onTaskChanged={onTaskChanged} />
           ) : selectedRef ? (

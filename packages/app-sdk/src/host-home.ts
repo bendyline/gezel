@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { GezelSdkError } from './errors.js';
@@ -32,19 +33,42 @@ export function assertAppId(appId: string): void {
 }
 
 /**
+ * The Node a Gezel install keeps for its own daemon, `<Gezel home>/bin/node`,
+ * when there is one. Resolved against the user's Gezel home — never an app's
+ * hosted home — so callers must pass the environment before `GEZEL_HOME` is
+ * repointed.
+ */
+export function gezelManagedNodePath(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string | null {
+  const root = env.GEZEL_HOME?.trim() || join(homedir(), '.gezel');
+  const candidate = join(root, 'bin', process.platform === 'win32' ? 'node.exe' : 'node');
+  return exists(candidate) ? candidate : null;
+}
+
+/**
  * Resolve the Node binary the daemon's child processes will run.
  *
  * Under Electron `process.execPath` is the app binary, which cannot run a
- * script — so an Electron host must ship a real Node and say where it is.
- * Failing here, with that sentence, beats a tool surface that silently comes
- * up empty because the MCP child could not start.
+ * script. An Electron host that ships Node says where it is; on a machine with
+ * Gezel installed the Node that Gezel keeps for its own daemon serves instead,
+ * so hosting works there without shipping one. Otherwise fail here, with that
+ * sentence — it beats a tool surface that silently comes up empty because the
+ * MCP child could not start.
  */
-export function resolveNodePath(opts: HostOptions, env: NodeJS.ProcessEnv = process.env): string {
+export function resolveNodePath(
+  opts: HostOptions,
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string {
   if (opts.nodePath) return opts.nodePath;
   if (env.GEZEL_NODE_PATH) return env.GEZEL_NODE_PATH;
   if (!process.versions.electron) return process.execPath;
+  const managed = gezelManagedNodePath(env, exists);
+  if (managed) return managed;
   throw new GezelSdkError(
-    'hosting Gezel under Electron needs host.nodePath: an absolute path to a node binary the daemon can run for its tool server and scripts (process.execPath is the Electron app, not node)',
+    'hosting Gezel under Electron needs host.nodePath: an absolute path to a node binary the daemon can run for its tool server and scripts (process.execPath is the Electron app, not node, and no Gezel install provides one here)',
     { code: 'node_binary_required' },
   );
 }
@@ -87,9 +111,14 @@ export function computeHostEnvironment(
 
   variables.set('GEZEL_HOME', home);
   variables.set('GEZEL_SERVICE_ROLE', 'user');
-  // A port or system scope inherited from a service host or a developer shell
-  // is never right for a daemon this app owns.
-  variables.set('GEZEL_PORT', undefined);
+  // '0' pins an ephemeral port. Unset, gezeld prefers the canonical 6228 —
+  // which belongs to the machine broker on a machine install and is the
+  // stable /v1 address the user's own Gezel wants — so a private daemon that
+  // happened to start first would squat on it. An inherited port is replaced
+  // for the same reason, as `userDaemonEnv` does for SDK-started daemons.
+  variables.set('GEZEL_PORT', '0');
+  // A system scope inherited from a service host or a developer shell is
+  // never right for a daemon this app owns.
   variables.set('GEZEL_SYSTEM_SCOPE', undefined);
   if (!opts.systemBootstrap) variables.set('GEZEL_SKIP_SYSTEM_BOOTSTRAP', '1');
   // A store build must refuse runtime code downloads, and the daemon reads

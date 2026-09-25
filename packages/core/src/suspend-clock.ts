@@ -67,6 +67,8 @@ interface MonitorState {
 }
 
 let monitor: MonitorState | null = null;
+let monitorLeases = 0;
+let leasedMonitor: MonitorState | null = null;
 let suspendedTotal = 0;
 let recent: SuspensionEvent[] = [];
 let reconciling = false;
@@ -141,6 +143,24 @@ export function isSuspendMonitorRunning(): boolean {
   return monitor !== null;
 }
 
+/** Keep the shared heartbeat while work runs, without stopping a daemon-owned monitor. */
+export function acquireSuspendMonitor(): () => void {
+  if (!monitor) {
+    startSuspendMonitor();
+    leasedMonitor = monitor;
+  }
+  monitorLeases++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    monitorLeases = Math.max(0, monitorLeases - 1);
+    if (monitorLeases !== 0) return;
+    if (leasedMonitor && monitor === leasedMonitor) stopSuspendMonitor();
+    leasedMonitor = null;
+  };
+}
+
 /**
  * Wall-clock ms minus every suspension observed so far. Strictly increasing:
  * a suspension is credited as `gap - tickMs`, so the clock still advances by
@@ -189,6 +209,8 @@ export function onSuspension(cb: (event: SuspensionEvent) => void): () => void {
 /** Test seam: forget all accumulated state and stop the heartbeat. */
 export function resetSuspendClockForTests(): void {
   stopSuspendMonitor();
+  monitorLeases = 0;
+  leasedMonitor = null;
   suspendedTotal = 0;
   recent = [];
   listeners.clear();

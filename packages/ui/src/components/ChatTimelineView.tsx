@@ -32,6 +32,7 @@ import {
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -62,7 +63,7 @@ import {
   queueNoticeIsFresh,
   staleLiveSessionIds,
 } from './chat-live-slot.js';
-import { playAssistantNarration, stopNarration } from './chat-narration.js';
+import { ChatNarrationTracker, chatNarrationQueue } from './chat-narration.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import {
   type OptimisticUserMessage,
@@ -91,7 +92,7 @@ import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
-import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
+import { useChatNarrationMode } from './useChatNarrationMode.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 const PAGE_SIZE = 100;
@@ -113,6 +114,7 @@ const SCROLL_NEAR_TOP_PX = 80;
 const SCROLLBAR_IDLE_MS = 700;
 /** Stable tail budget consumed by live work before the timeline is allowed to grow. */
 const TIMELINE_WORKING_RESERVE_PX = 300;
+const TIMELINE_MIN_CONVERSATION_HEIGHT_PX = 192;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
 // A terminal "session" is a run of commands inside one
@@ -385,41 +387,35 @@ export function ChatTimelineView({
   scopedSessionIdsRef.current = scopedSessionIds;
   const onUnknownSessionRef = useRef(onUnknownSession);
   onUnknownSessionRef.current = onUnknownSession;
-  const narrateAssistantReplies = useNarrateAssistantReplies();
-  // Live ref so the `complete` event handler reads the current value
-  // without the streaming `useEffect` re-subscribing whenever the
-  // setting flips. Mirrors the long-lived ref pattern below.
-  const narrateRef = useRef(narrateAssistantReplies);
-  narrateRef.current = narrateAssistantReplies;
+  const narrationMode = useChatNarrationMode();
+  // Live ref so the envelope handler reads the current mode without the
+  // streaming `useEffect` re-subscribing whenever the setting flips.
+  // Mirrors the long-lived ref pattern below.
+  const narrationModeRef = useRef(narrationMode);
+  narrationModeRef.current = narrationMode;
   /**
-   * The currently-playing narration audio element. Stopped before the
-   * next reply plays so we don't stack overlapping voices when multiple
-   * assistants complete in quick succession, or when a slow reply
-   * arrives after the user has already moved on. Cleared on cleanup.
+   * Spoken narration (Settings → Audio). The tracker cuts this timeline's
+   * event stream into progress updates and end-of-turn replies; the shared
+   * queue speaks them in order, once each, across every mounted timeline.
    */
-  const narrationAudioRef = useRef<HTMLAudioElement | null>(null);
-  /** Abort controller for the in-flight narration synth, so a new turn can
-   *  cancel a slow prior synth instead of letting them pile up. */
-  const narrationAbortRef = useRef<AbortController | null>(null);
-  /**
-   * Per-session buffer for the most recent non-empty assistant content
-   * seen on `complete`. `complete` events fire per iteration of the
-   * chat manager's continuation loop (tool-only stall recoveries fire
-   * extra iterations after the user-visible reply already landed). We
-   * defer narration to `done` so the user only hears the final reply
-   * once the chain settles — and the kokoro inference doesn't fight
-   * llama for CPU during the continuation iterations themselves.
-   */
-  const pendingNarrationRef = useRef<
-    Map<string, { content: string; gezelId: string; projectId: string }>
-  >(new Map());
-  // Unmount cleanup — stop any audio in flight so navigating away mid-
-  // narration doesn't leave a disembodied gezel talking off-screen.
+  const narrationRef = useRef<ChatNarrationTracker | null>(null);
+  narrationRef.current ??= new ChatNarrationTracker({
+    mode: () => narrationModeRef.current,
+    speak: (request) => chatNarrationQueue.enqueue(request),
+  });
+  // Unmount cleanup — the last timeline to go stops the voice, so
+  // navigating away mid-narration doesn't leave a disembodied gezel
+  // talking off-screen.
+  useEffect(() => chatNarrationQueue.retain(), []);
+  // Turning narration off silences what is already queued. Only on the
+  // transition: every timeline mounts `off` until its config read lands,
+  // and that must not cut off a voice another timeline started.
+  const previousNarrationModeRef = useRef(narrationMode);
   useEffect(() => {
-    return () => {
-      stopNarration(narrationAudioRef, narrationAbortRef);
-    };
-  }, []);
+    const previous = previousNarrationModeRef.current;
+    previousNarrationModeRef.current = narrationMode;
+    if (previous !== 'off' && narrationMode === 'off') chatNarrationQueue.stop();
+  }, [narrationMode]);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const messagesRef = useRef<TimelineMessage[]>([]);
   // Timeline snapshots are reconciled often while any thread starts, streams,
@@ -538,7 +534,7 @@ export function ChatTimelineView({
   // for the *actively-viewed* session — we don't pre-warm every
   // open chat (that's an opt-in operator setting for later).
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!runtimeCapabilities().daemonSettings || !activeSessionId) return;
     void api.warmSessionCache(activeSessionId).catch(() => {
       // Best-effort. Engine may not be ready, may not support warming,
       // or session may have no prior history. None of those are
@@ -860,27 +856,28 @@ export function ChatTimelineView({
         // while their own message is queued would see nothing until
         // the queue drained — then the bubble would pop in, read as
         // a delay rather than a pending state.
-        try {
-          const q = await api.getQueueStatus();
-          if (cancelled) return;
-          for (const sess of q.sessions) {
-            if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(sess.sessionId)) {
-              continue;
+        if (runtimeCapabilities().queuedChat)
+          try {
+            const q = await api.getQueueStatus();
+            if (cancelled) return;
+            for (const sess of q.sessions) {
+              if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(sess.sessionId)) {
+                continue;
+              }
+              queuedRef.current.set(
+                sess.sessionId,
+                sess.entries.map((e) => ({
+                  id: e.queueId,
+                  preview: e.preview,
+                  enqueuedAt: e.enqueuedAt,
+                  ...(e.nudge ? { nudge: true } : {}),
+                })),
+              );
             }
-            queuedRef.current.set(
-              sess.sessionId,
-              sess.entries.map((e) => ({
-                id: e.queueId,
-                preview: e.preview,
-                enqueuedAt: e.enqueuedAt,
-                ...(e.nudge ? { nudge: true } : {}),
-              })),
-            );
+            if (q.sessions.length > 0) liveStore.markStructureChanged();
+          } catch {
+            /* non-fatal */
           }
-          if (q.sessions.length > 0) liveStore.markStructureChanged();
-        } catch {
-          /* non-fatal */
-        }
         // Close the initial snapshot → SSE subscription race. A turn can
         // finish after the first disk read but before this component's stream
         // is attached; in that window it is absent from both `inflight` and
@@ -1080,6 +1077,7 @@ export function ChatTimelineView({
   // form when the user re-loads the timeline. SSE refreshes the same
   // map below.
   const refreshQuestions = useCallback(async () => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     try {
       // Pull pending across every project AND a per-project full list
       // for the few projects that actually have any. The pending-only
@@ -1113,6 +1111,7 @@ export function ChatTimelineView({
   // file as well. This keeps answered cards collapsed in place after submit
   // and after reload instead of reverting to a raw tool-only summary.
   useEffect(() => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     const projectIds = new Set<string>();
     for (const message of messages) {
       if (!message.pendingQuestionId && !messageAskedUserQuestion(message)) continue;
@@ -1174,6 +1173,9 @@ export function ChatTimelineView({
             signal: ctrl.signal,
             fetch: api.getFetch(),
           };
+          // The bus replays every in-flight turn from its start on
+          // (re)connect; narration rebuilds its text windows from that.
+          narrationRef.current!.resetWindows();
           for await (const env of streamSharedProjectChatEvents(opts)) {
             if (stopped) return;
             handleEnvelope(env);
@@ -1408,7 +1410,7 @@ export function ChatTimelineView({
         if (stale.length === 0) return;
         for (const sessionId of stale) {
           liveRef.current.delete(sessionId);
-          pendingNarrationRef.current.delete(sessionId);
+          narrationRef.current!.forget(sessionId);
         }
         liveStore.markStructureChanged();
         void refreshLatest();
@@ -1451,7 +1453,7 @@ export function ChatTimelineView({
         next.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
         return next;
       });
-      if (!liveRef.current.has(message.sessionId)) {
+      if (message.expectsTurn !== false && !liveRef.current.has(message.sessionId)) {
         const lastForSession = findLastForSession(messagesRef.current, message.sessionId);
         const slotStart = Number.isFinite(sentAtMs) ? sentAtMs : Date.now();
         liveRef.current.set(message.sessionId, {
@@ -1539,12 +1541,25 @@ export function ChatTimelineView({
         // e.g. checkers' "[Checkers page]: …") is machine facilitation: it
         // must not interrupt the user's narration, nor render a bubble. We
         // still fall through to the eager-slot logic below so the gezel's
-        // reply (its move + table talk) streams immediately.
-        if (!event.message.hidden && !event.message.from) {
-          stopNarration(narrationAudioRef, narrationAbortRef);
-          // Drop any buffered narration for this session — a fresh send
-          // means whatever was queued from the prior chain is stale.
-          pendingNarrationRef.current.delete(sessionId);
+        // reply (its move + table talk) streams immediately. A system
+        // dispatch seed is the runtime starting work, not the user either.
+        // Only the first sighting of a message counts: the bus replays it
+        // to every reconnecting subscriber, and a second mounted timeline
+        // sees it too.
+        if (event.message.role === 'user') {
+          const turnKey = event.message.at;
+          const freshTurn = chatNarrationQueue.noteTurn(sessionId, turnKey);
+          // A fresh send means whatever this session had buffered from the
+          // prior chain is stale.
+          narrationRef.current!.beginTurn(sessionId, turnKey, { gezelId, projectId });
+          if (
+            freshTurn &&
+            !event.message.hidden &&
+            !event.message.from &&
+            event.message.origin !== 'system'
+          ) {
+            chatNarrationQueue.stop();
+          }
         }
         // Insert the user's message immediately so the bubble appears
         // before the assistant starts streaming. Brand-new sessions
@@ -1700,6 +1715,7 @@ export function ChatTimelineView({
         } else {
           slot.segments.push({ kind: 'text', content: event.content });
         }
+        narrationRef.current!.text(sessionId, event.content, { gezelId, projectId });
         slot.lastActivityAt = now;
         slot.hasProgress = true;
         // First delta means the provider actually started this turn —
@@ -1739,6 +1755,8 @@ export function ChatTimelineView({
         // slow-token pause would scatter it into boxes that each carry
         // their own "Thinking" label.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
+        // Back to thinking: whatever the gezel just said is finished.
+        narrationRef.current!.boundary(sessionId, { gezelId, projectId });
         const reasoningTail = slot.segments[slot.segments.length - 1];
         if (reasoningTail?.kind === 'reasoning') {
           reasoningTail.content += event.content;
@@ -1769,6 +1787,10 @@ export function ChatTimelineView({
         // out a `"path": …` even after the tail has scrolled past it.
         const TOOL_ARGS_HEAD_CAP = 400;
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
+        // The first argument fragment is the earliest sign a tool call has
+        // begun — minutes before its `tool` event for a long write — so the
+        // text before it is a finished progress update.
+        narrationRef.current!.boundary(sessionId, { gezelId, projectId });
         const prev = slot.liveToolArgs;
         const name = event.name.length > 0 ? event.name : (prev?.name ?? '');
         const head = ((prev?.head ?? '') + event.content).slice(0, TOOL_ARGS_HEAD_CAP);
@@ -1812,6 +1834,7 @@ export function ChatTimelineView({
         // bumps the activity clock.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.segments.push({ kind: 'intent', label: event.label });
+        narrationRef.current!.boundary(sessionId, { gezelId, projectId });
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         slot.wirePulseCount = 0;
@@ -1914,6 +1937,7 @@ export function ChatTimelineView({
         // order so the user reads "wrote X · then read Y · then
         // continues writing" instead of all tools stacked at the top.
         slot.segments.push({ kind: 'tool', tool });
+        narrationRef.current!.boundary(sessionId, { gezelId, projectId });
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         slot.wirePulseCount = 0;
@@ -2000,29 +2024,13 @@ export function ChatTimelineView({
         // sessions; one round-trip per iteration is the same cost
         // as before this change.
         void refreshLatest();
-        // Spoken narration. Opt-in via Settings → Audio → "Narrate
-        // assistant replies"; reads each completed assistant message
-        // aloud using the speaking gezel's per-character voice (voice
-        // resolution lives in /api/audio/synthesize). Fire-and-forget
-        // — failures here shouldn't disturb the chat flow.
-        // Buffer the latest non-empty content; play it on `done`.
-        // `complete` fires per continuation iteration — stalled-tool
-        // nudges and tool-only iterations would otherwise trigger
-        // narration mid-turn while llama is still grinding the next
-        // 15K-token continuation prompt. Waiting for `done` decouples
-        // narration from intermediate iterations and keeps the kokoro
-        // ONNX run off the critical path of the LLM turn.
-        const narrateLen = event.message.content.trim().length;
-        console.debug(
-          `[narrate] complete event — contentLen=${narrateLen} gezelId=${gezelId} projectId=${projectId} sessionId=${sessionId} (buffering for done)`,
-        );
-        if (narrateLen > 0) {
-          pendingNarrationRef.current.set(sessionId, {
-            content: event.message.content,
-            gezelId,
-            projectId,
-          });
-        }
+        // Spoken narration holds the reply until `done`: `complete` fires
+        // per continuation iteration, and a later one (a stall recovery,
+        // more tool work) can still supersede it.
+        narrationRef.current!.complete(sessionId, event.message.content, {
+          gezelId,
+          projectId,
+        });
       } else if (event.type === 'error') {
         setAcknowledgedErrorProjects((prev) => {
           if (!prev.has(projectId)) return prev;
@@ -2064,6 +2072,8 @@ export function ChatTimelineView({
         // Retire the live bubble without attaching an error; the manager
         // emits this event again after it persists any salvaged partial
         // response, so the refresh below converges on the durable row.
+        // A stopped turn has no reply to read.
+        narrationRef.current!.forget(sessionId);
         if (liveRef.current.delete(sessionId)) {
           liveStore.markStructureChanged();
         }
@@ -2093,26 +2103,9 @@ export function ChatTimelineView({
           liveRef.current.delete(sessionId);
           liveStore.markStructureChanged();
         }
-        // Drain any buffered narration for this session. We waited for
-        // `done` so all continuation iterations (tool-only stall
-        // recoveries etc.) have settled and llama isn't still grinding
-        // a 15K-token prompt that would starve the kokoro inference.
-        const pending = pendingNarrationRef.current.get(sessionId);
-        if (pending) {
-          pendingNarrationRef.current.delete(sessionId);
-          if (narrateRef.current) {
-            console.debug(
-              `[narrate] done event — playing buffered narration chars=${pending.content.length} sessionId=${sessionId}`,
-            );
-            void playAssistantNarration(
-              pending.content,
-              pending.gezelId,
-              pending.projectId,
-              narrationAudioRef,
-              narrationAbortRef,
-            );
-          }
-        }
+        // Every continuation iteration has settled, so the held reply is
+        // the one the gezel ended on.
+        narrationRef.current!.finish(sessionId);
         // `complete` normally performs this refresh, but it is a separate SSE
         // envelope and can be the one frame lost during reconnect/backpressure.
         // `done` is the authoritative end-of-turn fallback: reconcile the
@@ -2517,11 +2510,14 @@ export function ChatTimelineView({
   }, []);
 
   /**
-   * Keep a 300px tail below the timeline, but let live chat/indexing cards
+   * Keep up to a 300px tail below the timeline, but let live chat/indexing cards
    * consume that tail before they increase scrollHeight. The cards remain in
    * their normal chronological/thread positions; only the otherwise-empty
    * runway changes size. ResizeObserver follows streaming bubbles as their
    * text grows without routing token-frequency updates through this parent.
+   * Reserve conversation space first, including the last completed reply and
+   * its sticky context. A short viewport must not scroll that reply out of view
+   * just to make room for artificial blank space after it.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: loading and the store structure versions are deliberate DOM re-measure triggers; their values are not read inside the effect.
   useLayoutEffect(() => {
@@ -2553,19 +2549,35 @@ export function ChatTimelineView({
           : timelineGap;
         consumed += localGap;
       }
-      runway.style.blockSize = `${Math.max(0, TIMELINE_WORKING_RESERVE_PX - consumed)}px`;
+      const reserve = Math.min(
+        TIMELINE_WORKING_RESERVE_PX,
+        Math.max(
+          0,
+          timeline.clientHeight -
+            Math.max(
+              TIMELINE_MIN_CONVERSATION_HEIGHT_PX,
+              (lastReply?.getBoundingClientRect().height ?? 0) + stickyHeightRef.current + 24,
+            ),
+        ),
+      );
+      runway.style.blockSize = `${Math.max(0, reserve - consumed)}px`;
     };
 
+    const lastReply = [
+      ...timeline.querySelectorAll<HTMLElement>('[data-msg-id^="msg:"][data-msg-id$=":assistant"]'),
+    ].at(-1);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
+    observer.observe(timeline);
+    if (lastReply) observer.observe(lastReply);
     for (const node of timeline.querySelectorAll<HTMLElement>(
       '[data-msg-id^="live:"], .terminal-group-streaming',
     )) {
       observer.observe(node);
     }
     return () => observer.disconnect();
-  }, [loading, liveStructureVersion, terminalLiveStructureVersion]);
+  }, [loading, liveStructureVersion, terminalLiveStructureVersion, rows.length]);
 
   /**
    * Align a locally-submitted prompt after its row has rendered. The target

@@ -11,11 +11,19 @@ vi.mock('../../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 // The squisq JsonEditor doesn't load in jsdom — replace it with a button
 // that emits one param change so we can drive values without Monaco.
 vi.mock('@bendyline/squisq-editor-react', () => ({
-  JsonEditor: ({ onChange }: { onChange?: (v: unknown) => void }) => (
+  JsonEditor: ({
+    onChange,
+    schema,
+  }: {
+    onChange?: (v: unknown) => void;
+    schema?: { properties?: Record<string, unknown>; anyOf?: unknown };
+  }) => (
     <>
       <button
         type="button"
         data-testid="json-editor"
+        data-fields={Object.keys(schema?.properties ?? {}).join(',')}
+        data-alternatives={schema?.anyOf ? 'yes' : 'no'}
         onClick={() => onChange?.({ intensity: 'high' })}
       >
         params
@@ -24,6 +32,25 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
         pr number
       </button>
     </>
+  ),
+}));
+// The brief is a squisq editor; a textarea stands in so the mirror can be driven.
+vi.mock('../../components/MarkdownField.js', () => ({
+  MarkdownField: ({
+    value,
+    placeholder,
+    onChange,
+  }: {
+    value: string;
+    placeholder?: string;
+    onChange?: (markdown: string) => void;
+  }) => (
+    <textarea
+      aria-label="Brief"
+      defaultValue={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange?.(e.target.value)}
+    />
   ),
 }));
 vi.mock('../../components/CraftbookToolsetSetup.js', () => ({
@@ -425,6 +452,220 @@ describe('NewTaskDialog', () => {
         expect.objectContaining({ stepId: 'build' }),
       );
     });
+  });
+
+  it('shows no param form when every param is filled by the daemon or another screen', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('apply-review-findings', 'Apply Review Findings', {
+          paramSchema: {
+            type: 'object',
+            properties: {
+              findingsPath: { type: 'string', default: '', askUser: false },
+              workPath: { type: 'string', default: '{{task.dir}}' },
+            },
+          },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Apply Review Findings' })).toBeInTheDocument();
+    });
+    await userEvent.setup().click(screen.getByRole('radio', { name: 'Apply Review Findings' }));
+
+    expect(screen.getByRole('button', { name: 'Create & start' })).toBeInTheDocument();
+    expect(screen.queryByTestId('json-editor')).not.toBeInTheDocument();
+  });
+
+  it('compose mode hands the configuration to the chat instead of creating', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('code-review', 'Code Review', {
+          paramSchema: { type: 'object', properties: { intensity: { type: 'string' } } },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    const onUseInChat = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <NewTaskDialog
+        open
+        launchMode="compose"
+        composerText="Review the auth changes before the release."
+        defaultProjectId="pj-alpha"
+        projects={PROJECTS}
+        gezels={GEZELS}
+        projectLocked
+        onClose={onClose}
+        onUseInChat={onUseInChat}
+      />,
+    );
+    expect(await screen.findByText('Task for this message')).toBeInTheDocument();
+    // No blank-task card: a message cannot attach "nothing in particular".
+    expect(screen.queryByRole('radio', { name: /general task|start fresh/i })).toBeNull();
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'Code Review' }));
+    expect(await screen.findByText('Brief · your chat message')).toBeInTheDocument();
+    expect(screen.getByText('Review the auth changes before the release.')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing runs yet/)).toBeInTheDocument();
+    await user.click(screen.getByTestId('json-editor'));
+    await user.click(screen.getByRole('button', { name: 'Use in chat' }));
+
+    expect(onUseInChat).toHaveBeenCalledWith({
+      craftbookId: 'code-review',
+      craftbookSourceId: 'bundled',
+      craftbookName: 'Code Review',
+      params: { intensity: 'high' },
+      origin: 'user',
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(api.createTask).not.toHaveBeenCalled();
+    expect(api.appendTaskNote).not.toHaveBeenCalled();
+  });
+
+  const deckBook = () =>
+    bookItem('powerpoint-deck', 'PowerPoint from Content', {
+      paramSchema: {
+        type: 'object',
+        anyOf: [{ required: ['sourcePath'] }, { required: ['topic'] }, { required: ['content'] }],
+        properties: {
+          workPath: { type: 'string', default: '{{task.dir}}' },
+          sourcePath: { type: 'string', title: 'Source file', default: '' },
+          topic: { type: 'string', title: 'Topic', default: '' },
+          content: { type: 'string', title: 'Source material', default: '' },
+          audience: { type: 'string', title: 'Audience', default: 'general audience' },
+        },
+      },
+    });
+
+  it('compose mode: the brief edits the chat message and replaces the topic field', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [deckBook()],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    const onUseInChat = vi.fn();
+    const onComposerTextChange = vi.fn();
+    render(
+      <NewTaskDialog
+        open
+        launchMode="compose"
+        composerText="A deck about Delft"
+        onComposerTextChange={onComposerTextChange}
+        defaultProjectId="pj-alpha"
+        projects={PROJECTS}
+        gezels={GEZELS}
+        projectLocked
+        onClose={vi.fn()}
+        onUseInChat={onUseInChat}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'PowerPoint from Content' }));
+
+    const form = screen.getByTestId('json-editor');
+    expect(form.dataset.fields).toBe('sourcePath,content,audience');
+    expect(form.dataset.alternatives).toBe('no');
+
+    const brief = screen.getByRole('textbox', { name: 'Brief' });
+    expect(brief).toHaveValue('A deck about Delft');
+    await user.type(brief, ' canals');
+    expect(onComposerTextChange).toHaveBeenLastCalledWith('A deck about Delft canals');
+
+    // The brief is the topic, so the "one of these" rule is already met.
+    await user.click(screen.getByRole('button', { name: 'Use in chat' }));
+    expect(onUseInChat).toHaveBeenCalledWith(
+      expect.objectContaining({ craftbookId: 'powerpoint-deck' }),
+    );
+    expect(onUseInChat.mock.calls[0]?.[0].params).not.toHaveProperty('topic');
+  });
+
+  it('asks in plain words for one of the alternatives before creating', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [deckBook()],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'PowerPoint from Content' }));
+    expect(screen.getByTestId('json-editor').dataset.fields).toBe(
+      'sourcePath,topic,content,audience',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    expect(
+      await screen.findByText('Fill in Source file, Topic, or Source material.'),
+    ).toBeInTheDocument();
+    expect(api.createTask).not.toHaveBeenCalled();
+  });
+
+  it('compose mode reopens on the attached craftbook with its values restored', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('code-review', 'Code Review', {
+          paramSchema: {
+            type: 'object',
+            properties: {
+              intensity: { type: 'string' },
+              scope: { type: 'string', default: 'all' },
+            },
+          },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    const onUseInChat = vi.fn();
+    render(
+      <NewTaskDialog
+        open
+        launchMode="compose"
+        initialLaunch={{
+          craftbookId: 'code-review',
+          params: { intensity: 'low' },
+          title: 'Auth review',
+          assignee: { kind: 'gezel', gezelId: 'gz-maya' },
+          origin: 'suggested',
+        }}
+        defaultProjectId="pj-alpha"
+        projects={PROJECTS}
+        gezels={GEZELS}
+        projectLocked
+        onClose={vi.fn()}
+        onUseInChat={onUseInChat}
+      />,
+    );
+    // Straight to the configuration, no gallery.
+    expect(await screen.findByText('Brief · your chat message')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Code Review' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Auth review')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Use in chat' }));
+    expect(onUseInChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        craftbookId: 'code-review',
+        // Declared defaults sit under the restored values; a suggestion
+        // confirmed here becomes the person's own pick.
+        params: { scope: 'all', intensity: 'low' },
+        title: 'Auth review',
+        assignee: { kind: 'gezel', gezelId: 'gz-maya' },
+        origin: 'user',
+      }),
+    );
   });
 
   it('defers the assignee to the entry step role rather than pinning a gezel', async () => {

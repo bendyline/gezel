@@ -225,7 +225,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.doesNotMatch(rpmSection, /^\s+- libgtk-3-0$/m);
   assert.match(workflow, /rpm -qpR/);
 
-  assert.match(stamp, /packages\/core\/src\/index\.ts/);
+  assert.match(stamp, /packages\/core\/src\/browser\.ts/);
   assert.equal(
     workflow.match(/node scripts\/verify-release-version\.mjs/g)?.length,
     4,

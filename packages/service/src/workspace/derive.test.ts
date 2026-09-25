@@ -44,6 +44,36 @@ describe('deriveWorkspaceFile', () => {
     30_000,
   );
 
+  it('runs the inline transform on any host once External services allows the network', async () => {
+    // Without a boundary there is nothing left for denyNet to protect: the
+    // policy already lets gezellen reach the network through their tools.
+    await store.writeConfig({
+      securityPolicy: {
+        level: 'custom',
+        allowFileEdits: false,
+        allowExternalChat: false,
+        allowExternalServices: true,
+        allowScriptExecution: true,
+        allowAppNetwork: false,
+      },
+    });
+    await seedWorkspaceFile('data/raw.csv', 'email,name\na@x.com,Ada\n');
+    const res = await deriveWorkspaceFile(store, {
+      projectId: 'default',
+      script: `
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+const [, row] = readFileSync('data/raw.csv', 'utf8').trim().split('\\n');
+const [email, name] = row.split(',');
+mkdirSync('out', { recursive: true });
+writeFileSync('out/customers.json', JSON.stringify([{ email, name }]));
+`,
+      outputPath: 'out/customers.json',
+    });
+    expect(res.stderr).not.toContain('denyNet requires');
+    expect(res.ok).toBe(true);
+    expect(res.output?.path).toBe('out/customers.json');
+  }, 30_000);
+
   it.runIf(process.platform === 'linux')(
     'runs the inline transform through the Linux systemd boundary when available',
     async () => {

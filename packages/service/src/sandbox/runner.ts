@@ -11,6 +11,8 @@ export interface SandboxRunOptions {
   cwd: string;
   input: string;
   timeoutMs?: number;
+  /** Cancels the run: the child is killed and the result reports a cancellation. */
+  signal?: AbortSignal;
   onStdout?: (line: string) => void;
   onStderr?: (line: string) => void;
   extraReadPaths?: string[];
@@ -359,6 +361,14 @@ async function runSandboxChild(
         }, opts.timeoutMs)
       : null;
     timer?.unref?.();
+    let aborted = false;
+    const onAbort = () => {
+      if (aborted) return;
+      aborted = true;
+      killSandboxProcess(child);
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
 
     child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
@@ -404,12 +414,14 @@ async function runSandboxChild(
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
       const signalSuffix = code === null && signal ? `[process closed by signal ${signal}]\n` : '';
+      const cancelled = aborted ? 'Error: script execution cancelled\n' : '';
       resolve({
-        exitCode: code ?? -1,
+        exitCode: aborted ? 1 : (code ?? -1),
         signal,
         stdout,
-        stderr: `${stderr}${signalSuffix}`,
+        stderr: `${stderr}${signalSuffix}${cancelled}`,
         timedOut,
       });
     });
@@ -532,6 +544,17 @@ export function sandboxEnv(src: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'unavailable';
+
+/** Whether this host can enforce `denyNet` for ordinary (non-RPC) script work. */
+export async function denyNetBoundaryAvailable(): Promise<boolean> {
+  return (
+    selectDenyNetBoundary({
+      platform: process.platform,
+      macSandboxAvailable: process.platform === 'darwin' && (await canApplyMacSandbox()),
+      linuxSystemdSandboxAvailable: await canApplyLinuxSystemdSandbox(),
+    }) !== 'unavailable'
+  );
+}
 
 /** Pure policy selector kept separate from the executable probes for tests. */
 export function selectDenyNetBoundary(input: {

@@ -130,14 +130,17 @@ test('sessions — send a message, it persists, shows up after restart', async (
         fullPage: true,
       });
 
-      // Session dropdown auto-opens the most recent. The service compacts the
-      // starter into a deterministic thread title instead of retaining the
-      // raw prompt, so use that shared algorithm for the integration check.
-      const sessionTrigger = page.locator('.gezel-chat-session-select').first();
-      await expect(sessionTrigger.locator('.session-row-title')).toHaveText(
-        deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`),
-        { timeout: 10_000 },
-      );
+      // Home opens on a fresh thread, so the restored conversation is listed
+      // in the picker rather than selected. The service compacts the starter
+      // into a deterministic thread title instead of retaining the raw
+      // prompt, so use that shared algorithm for the integration check.
+      await page.locator('.gezel-chat-session-select').first().click();
+      await expect(
+        page
+          .locator('.gezel-chat-session-menu')
+          .getByText(deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`), { exact: true }),
+      ).toBeVisible({ timeout: 10_000 });
+      await page.keyboard.press('Escape');
     } finally {
       await closeApp(app);
     }
@@ -151,15 +154,19 @@ test("sessions — the picker's New thread row starts a fresh thread", async () 
 
   const { app, page } = await launch();
   try {
-    // The picker renders its "New thread" placeholder before the async
-    // session list restores the most recent thread. Wait for that restore so
-    // a slow CI host cannot sample the placeholder, click after auto-pick,
-    // and then compare "New thread" with itself.
+    // Home opens on a fresh thread, so pick the restored one first: leaving a
+    // thread is the behavior under test, and comparing "New thread" with
+    // itself would prove nothing.
+    const threadTitle = deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`);
     const sessionTrigger = page.locator('.gezel-chat-session-select').first();
-    await expect(sessionTrigger.locator('.session-row-title')).toHaveText(
-      deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`),
-      { timeout: 10_000 },
-    );
+    await sessionTrigger.click();
+    await page
+      .locator('.gezel-chat-session-menu')
+      .getByText(threadTitle, { exact: true })
+      .click({ timeout: 10_000 });
+    await expect(sessionTrigger.locator('.session-row-title')).toHaveText(threadTitle, {
+      timeout: 10_000,
+    });
 
     // A fresh thread is a destination in the picker, not a button — the
     // toolbar's own button drafts a second message inside the open thread.

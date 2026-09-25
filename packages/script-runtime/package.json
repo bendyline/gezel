@@ -1,0 +1,67 @@
+{
+  "name": "@bendyline/gezel-script-runtime",
+  "version": "1.0.10",
+  "description": "Portable, capability-mediated script execution for Gezel.",
+  "license": "MIT",
+  "homepage": "https://github.com/bendyline/gezel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/script-runtime"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./quickjs": {
+      "types": "./dist/quickjs.d.ts",
+      "import": "./dist/quickjs.js"
+    },
+    "./package.json": "./package.json",
+    "./meta": {
+      "types": "./dist/meta.d.ts",
+      "import": "./dist/meta.js"
+    },
+    "./web-worker": {
+      "types": "./dist/web-worker.d.ts",
+      "import": "./dist/web-worker.js"
+    },
+    "./worker-protocol": {
+      "types": "./dist/worker-protocol.d.ts",
+      "import": "./dist/worker-protocol.js"
+    },
+    "./source": {
+      "types": "./dist/source.d.ts",
+      "import": "./dist/source.js"
+    },
+    "./compile": {
+      "types": "./dist/compile.d.ts",
+      "import": "./dist/compile.js"
+    }
+  },
+  "files": ["dist", "!dist/**/*.map"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-sdk": "workspace:*",
+    "quickjs-emscripten": "0.32.0",
+    "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.10"
+  }
+}

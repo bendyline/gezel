@@ -101,6 +101,49 @@ describe('parseGemmaNativeToolCall', () => {
     expect(parsed?.arguments.content).toBe('const cfg = {"a": "b", c: 1};\n</html>\n');
   });
 
+  it('recovers a backtick-closed content followed by the path argument', () => {
+    // gemma4-12b closed a multi-line HTML string with a JS template-literal
+    // backtick; the whole tail, path included, became content and the
+    // validator rejected eight identical calls in a row (2026-09-20).
+    const body = `call:write_file{content:<|"|><!DOCTYPE html>
+<html lang="en">
+<body>
+    <p>Please make checks payable to Fieldnote Studio.</p>
+</body>
+</html>
+\`, path: "invoices/2026-043.html"}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.name).toBe('write_file');
+    expect(parsed?.arguments.path).toBe('invoices/2026-043.html');
+    expect(parsed?.arguments.content).toMatch(/^<!DOCTYPE html>/);
+    expect(parsed?.arguments.content).toMatch(/<\/html>\n$/);
+    expect(parsed?.arguments.content).not.toContain('path:');
+  });
+
+  it('recovers a triple-quote-closed content when the next value opens with the native quote', () => {
+    // The path value's opening <|"|> read as content's closer, so content
+    // swallowed `""",path:` and fifteen identical calls lost their path
+    // (gemma4-12b-q4 invoice child, 2026-09-21).
+    const body = `call:write_file{content:<|"|><!DOCTYPE html>
+<html><body>
+    <div class="total-section">Total: $975.00</div>
+</body>
+</html>
+""",path:<|"|>invoices/2026-044.html<|"|>}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.name).toBe('write_file');
+    expect(parsed?.arguments.path).toBe('invoices/2026-044.html');
+    expect(parsed?.arguments.content).toMatch(/^<!DOCTYPE html>/);
+    expect(parsed?.arguments.content).toMatch(/<\/html>\n$/);
+    expect(parsed?.arguments.content).not.toContain('path:');
+  });
+
+  it('keeps a native-quoted value that merely ends in quotes before a real closer', () => {
+    const body = `call:write_file{path:<|"|>notes.md<|"|>,content:<|"|>He said "done"<|"|>}`;
+    const parsed = parseGemmaNativeToolCall(body, TOOLS);
+    expect(parsed?.arguments).toEqual({ path: 'notes.md', content: 'He said "done"' });
+  });
+
   it('recovers a single-quote-closed content followed by the closing brace', () => {
     const body = `call:write_file{path:<|"|>notes.md<|"|>,content:<|"|># Notes
 Done."}`;
@@ -231,6 +274,61 @@ Done."}`;
       const spans = findGemmaNativeToolCallSpans(text, TOOLS);
       expect(spans).toHaveLength(1);
       expect(stripGemmaNativeToolCallsFromText(text, spans)).toBe('keep me ');
+    });
+  });
+
+  describe('complete call, rumination, then a call cut off at the cap (gemma4-31b / schema-migration)', () => {
+    // The scenario-repair turn hit max_tokens=4096 after a complete, correct
+    // write_file: the model rambled on the thought channel ("**Wait**, I still
+    // need MIGRATION.md") and opened a second write_file that never closed.
+    // File bodies trimmed; the envelope structure is verbatim.
+    const Q = '<|"|>';
+    const testFile = [
+      "import { describe, it, expect } from 'vitest';",
+      "import { migrateUser } from '../src/migrate';",
+      "describe('migrateUser', () => {",
+      "  it('should handle a one-word name', () => {",
+      "    const legacy = { id: '2', name: 'Cher', email: 'cher@example.com' };",
+      "    expect(migrateUser(legacy)).toEqual({ id: '2', firstName: 'Cher', lastName: '', email: 'cher@example.com' });",
+      '  });',
+      '});',
+    ].join('\n');
+    const completeCall = `<|tool_call>call:write_file{content:${Q}${testFile}${Q},path:${Q}tests/migrate.test.ts${Q}}<tool_call|>`;
+    const wildShape = [
+      completeCall,
+      '<|channel>thought\n<channel|>I wrote `tests/migrate.test.ts` with three test cases ',
+      'covering normal, one-word, and multi-word names to verify the migration logic. Moving on to the final deliverable.\n',
+      '**Wait**, I still need `MIGRATION.md`.\n<|channel>thought\n<channel|>',
+      `<|tool_call>call:write_file{content:${Q}# User Schema Migration: Name Split\n## Overview\n`,
+      'The `User` record has been updated to replace the single `name` string field',
+    ].join('');
+
+    it('recovers the complete leading call and drops the truncated trailing one', () => {
+      const spans = findGemmaNativeToolCallSpans(wildShape, TOOLS);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]).toMatchObject({
+        name: 'write_file',
+        arguments: { path: 'tests/migrate.test.ts', content: testFile },
+        matchStart: 0,
+        matchEnd: completeCall.length,
+      });
+    });
+
+    it('recovers the same call when the tail is only rumination', () => {
+      const text = `${completeCall}<|channel>thought\n<channel|>I wrote it.\n---\n**Wait, I can just call the tool!** (Stop).\n---\n**Actually,`;
+      const spans = findGemmaNativeToolCallSpans(text, TOOLS);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.arguments).toEqual({ path: 'tests/migrate.test.ts', content: testFile });
+    });
+
+    it('still refuses a tool that is not on the roster', () => {
+      expect(findGemmaNativeToolCallSpans(wildShape, new Set(['read_file']))).toEqual([]);
+    });
+
+    it('does not promote the cut-off trailing call when the closed leading call is unknown', () => {
+      const text = wildShape.replace('call:write_file{content:', 'call:not_a_real_tool{content:');
+      expect(text.startsWith('<|tool_call>call:not_a_real_tool{')).toBe(true);
+      expect(findGemmaNativeToolCallSpans(text, TOOLS)).toEqual([]);
     });
   });
 

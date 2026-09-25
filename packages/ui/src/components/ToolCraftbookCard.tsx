@@ -1,4 +1,4 @@
-import type { CatalogItemSummary, CraftbookTemplateManifest, ToolCallCard } from '@bendyline/gezel';
+import type { ToolCallCard } from '@bendyline/gezel';
 import { resolveSecurityPolicy } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
@@ -7,6 +7,7 @@ import { ProjectGlyph } from '../views/projects/new-project-meta.js';
 import { craftbookGlyph } from '../views/tasks/new-task-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 import { StepTracker } from './StepTracker.js';
+import { useCraftbookCatalogArt } from './craftbook-catalog-art.js';
 import { navigateToTab } from './nav-actions.js';
 
 /**
@@ -24,56 +25,6 @@ import { navigateToTab } from './nav-actions.js';
  * on), because nudging toward a switch that is already flipped would be
  * the card lying about the present, not recording the past.
  */
-
-interface CraftbookCatalogArt {
-  item: CatalogItemSummary;
-  manifest: CraftbookTemplateManifest;
-}
-
-/**
- * One in-flight/settled listing per project for the whole transcript — a
- * long session can hold many cards for the same project, and each needs
- * only a logo lookup.
- */
-const projectCraftbooksCache = new Map<
-  string,
-  Promise<Awaited<ReturnType<typeof api.listProjectCraftbooks>>>
->();
-
-function useCraftbookCatalogArt(
-  projectId: string,
-  craftbookId: string,
-): CraftbookCatalogArt | null {
-  const [art, setArt] = useState<CraftbookCatalogArt | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let listing = projectCraftbooksCache.get(projectId);
-    if (!listing) {
-      listing = api.listProjectCraftbooks(projectId);
-      projectCraftbooksCache.set(projectId, listing);
-      // A failed fetch must not poison the cache for every later card.
-      listing.catch(() => projectCraftbooksCache.delete(projectId));
-    }
-    listing
-      .then((res) => {
-        if (cancelled) return;
-        for (const item of res.items ?? []) {
-          if (item.manifest.kind === 'craftbook-template' && item.manifest.id === craftbookId) {
-            setArt({ item, manifest: item.manifest });
-            return;
-          }
-        }
-        setArt(null);
-      })
-      .catch(() => {
-        if (!cancelled) setArt(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, craftbookId]);
-  return art;
-}
 
 /**
  * `false` only when the resolved policy explicitly disables External

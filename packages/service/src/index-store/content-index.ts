@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readFile, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import type {
   BoekwachterIssue,
   BoekwachterIssueDismissalReason,
@@ -64,7 +64,7 @@ import {
 } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
-import { safeJoin } from '../fs/safe-paths.js';
+import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
 import type {
   FaceDetectOutcome,
@@ -90,7 +90,13 @@ import {
 } from './artifacts-indexer.js';
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
-import { ensureShadowDocSidecar, isConvertibleDoc, shadowDocFilesPaths } from './docs.js';
+import {
+  adjacentDocFilesPaths,
+  ensureConvertedMarkdownSidecar,
+  ensureShadowDocSidecar,
+  isConvertibleDoc,
+  shadowDocFilesPaths,
+} from './docs.js';
 import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
@@ -2068,7 +2074,12 @@ export class ContentIndex {
     return out;
   }
 
-  async readDocAsMarkdown(projectId: string, relPath: string): Promise<ReadDocAsMarkdownResponse> {
+  async readDocAsMarkdown(
+    projectId: string,
+    relPath: string,
+    opts: { artifact?: boolean } = {},
+  ): Promise<ReadDocAsMarkdownResponse> {
+    if (opts.artifact) return this.readArtifactDocAsMarkdown(projectId, relPath);
     let workspaceDir: string;
     try {
       workspaceDir = await this.store.projectWorkspaceDir(projectId);
@@ -2090,6 +2101,41 @@ export class ContentIndex {
       found: true,
       sourcePath: relPath,
       markdownPath: `artifacts/${ensured.paths.mdRel}`,
+      markdown: truncated ? `${md.slice(0, MAX_READ_BYTES)}\n…(truncated)` : md,
+      truncated,
+    };
+  }
+
+  /**
+   * An office document in the ARTIFACTS drawer — most often a craftbook input
+   * the user uploaded. Its markdown twin sits beside it (`brief.docx` →
+   * `brief_files/brief.md`), the placement the References preview already
+   * uses for artifacts, so both surfaces share one sidecar.
+   */
+  private async readArtifactDocAsMarkdown(
+    projectId: string,
+    relPath: string,
+  ): Promise<ReadDocAsMarkdownResponse> {
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
+    const absSource = safeJoin(artifactsDir, relPath);
+    if (!absSource || !isConvertibleDoc(extname(relPath))) {
+      return { found: false, sourcePath: relPath, truncated: false };
+    }
+    if (!(await realpathContained(artifactsDir, absSource))) {
+      return { found: false, sourcePath: relPath, truncated: false };
+    }
+    const paths = adjacentDocFilesPaths(artifactsDir, relPath);
+    if (!(await realpathContained(artifactsDir, paths.mdPath))) {
+      return { found: false, sourcePath: relPath, truncated: false };
+    }
+    const ensured = await ensureConvertedMarkdownSidecar(absSource, paths);
+    const md = ensured.markdown;
+    if (md == null) return { found: false, sourcePath: relPath, truncated: false };
+    const truncated = md.length > MAX_READ_BYTES;
+    return {
+      found: true,
+      sourcePath: relPath,
+      markdownPath: `artifacts/${paths.mdRel}`,
       markdown: truncated ? `${md.slice(0, MAX_READ_BYTES)}\n…(truncated)` : md,
       truncated,
     };

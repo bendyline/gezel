@@ -97,7 +97,7 @@ function findHarperRoot(from: string): string {
   );
 }
 
-export function harperWasmPlugin(): Plugin {
+export function harperWasmPlugin(dependencyRoot?: string): Plugin {
   let published = new Map<string, string>();
 
   const serve: Connect.NextHandleFunction = (req, res, next) => {
@@ -124,7 +124,7 @@ export function harperWasmPlugin(): Plugin {
       return id === STUB_MODULE_ID ? STUB_SOURCE : null;
     },
     configResolved(config) {
-      const root = findHarperRoot(config.root);
+      const root = findHarperRoot(dependencyRoot ?? config.root);
       published = new Map(
         PUBLISHED_FILES.map(([servedPath, packageRelative]) => [
           servedPath,

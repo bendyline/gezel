@@ -248,7 +248,11 @@ export function AudioModelManager({
                       <div className="muted small">{m.name}</div>
                     </td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
-                    <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
+                    <td className="muted small">
+                      {m.installedAt
+                        ? new Date(m.installedAt).toLocaleDateString()
+                        : 'Included with app'}
+                    </td>
                     <td>
                       <button
                         type="button"

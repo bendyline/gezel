@@ -1,11 +1,5 @@
-import type {
-  CraftbookStepOutputMedium,
-  CraftbookToolsetNeed,
-  NewCraftbookStep,
-  TaskCraftbookStep,
-} from '@bendyline/gezel';
-import { requiredOutputMediaForGate, stepOnEnterProducesAdvanceFile } from '@bendyline/gezel';
-import { outputMediaForCraftbookBlueprint } from '@bendyline/gezel-catalog';
+import type { CraftbookToolsetNeed, TaskCraftbookStep } from '@bendyline/gezel';
+export { outputMediumForStep, outputMediaForStep } from '@bendyline/gezel';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -56,75 +50,4 @@ export function builtinToolsetIdsDisabledForStep(
   step: Pick<TaskCraftbookStep, 'toolPolicy'> | undefined,
 ): ReadonlySet<string> {
   return new Set(step?.toolPolicy?.disallowBuiltinToolsets ?? []);
-}
-
-/**
- * Resolve the step's result surface. Explicit JSON wins. Legacy/file-gated
- * steps get the same unambiguous behavior immediately, before their catalog
- * entry has been republished with `toolPolicy.outputMedium`.
- */
-export function outputMediumForStep(
-  step: Pick<TaskCraftbookStep, 'toolPolicy' | 'advanceWhen' | 'gate' | 'onEnter'> | undefined,
-): CraftbookStepOutputMedium | null {
-  if (!step) return null;
-  const gateRequiredMedia = [...requiredOutputMediaForGate(step.gate)];
-  const runtimeOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
-  if (step.toolPolicy?.outputMedium) {
-    const advanceSurface = step.advanceWhen?.artifact ? 'artifact' : 'workspace';
-    if (runtimeOwnsAdvanceFile && step.toolPolicy.outputMedium === advanceSurface) {
-      return gateRequiredMedia[0] ?? 'none';
-    }
-    return step.toolPolicy.outputMedium;
-  }
-  if (step.advanceWhen?.file && !runtimeOwnsAdvanceFile) {
-    return step.advanceWhen.artifact ? 'artifact' : 'workspace';
-  }
-  if (runtimeOwnsAdvanceFile) return gateRequiredMedia[0] ?? 'none';
-  const gate = step.gate;
-  const checks = gate && 'checks' in gate && Array.isArray(gate.checks) ? gate.checks : [];
-  const fileCheck = checks.find(
-    (check): check is (typeof checks)[number] & { file: string; artifact?: boolean } =>
-      'file' in check && typeof check.file === 'string' && check.file.length > 0,
-  );
-  if (gateRequiredMedia[0]) return gateRequiredMedia[0];
-  if (fileCheck) return fileCheck.artifact ? 'artifact' : 'workspace';
-  return null;
-}
-
-/** Primary plus explicitly-authorized secondary result surfaces. */
-export function outputMediaForStep(
-  step:
-    | Partial<
-        Pick<
-          TaskCraftbookStep,
-          | 'name'
-          | 'description'
-          | 'prompt'
-          | 'suggestedRole'
-          | 'toolPolicy'
-          | 'advanceWhen'
-          | 'gate'
-          | 'consumes'
-          | 'onEnter'
-          | 'onExit'
-        >
-      >
-    | undefined,
-): ReadonlySet<CraftbookStepOutputMedium> {
-  const primary = outputMediumForStep(step);
-  const procedureMedia = step?.name
-    ? outputMediaForCraftbookBlueprint(step as NewCraftbookStep)
-    : new Set<CraftbookStepOutputMedium>();
-  if (!primary) return procedureMedia;
-  const gateRequiredMedia = requiredOutputMediaForGate(step?.gate);
-  if (primary === 'none') {
-    const required = new Set([...procedureMedia, ...gateRequiredMedia]);
-    return required.size > 0 ? required : new Set(['none']);
-  }
-  return new Set([
-    primary,
-    ...(step?.toolPolicy?.additionalOutputMedia ?? []),
-    ...procedureMedia,
-    ...gateRequiredMedia,
-  ]);
 }

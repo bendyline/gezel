@@ -74,6 +74,54 @@ async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | '
   });
 }
 
+describe('proactive retrieval eligibility', () => {
+  it('does not search or inject for a filler-only greeting', async () => {
+    let searches = 0;
+    const search = {
+      searchProject: async () => {
+        searches++;
+        return { results: [workspaceHit(1)], truncated: false };
+      },
+    } as unknown as SearchService;
+
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: "Hey, how's it going?",
+      messageOrigin: 'direct-user',
+    });
+
+    expect(result).toBeNull();
+    expect(searches).toBe(0);
+  });
+
+  it('still retrieves when a greeting contains a substantive subject', async () => {
+    let searches = 0;
+    const search = {
+      searchProject: async () => {
+        searches++;
+        return { results: [workspaceHit(1)], truncated: false };
+      },
+    } as unknown as SearchService;
+
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'Hey, how is the invoice reconciliation going?',
+      messageOrigin: 'direct-user',
+    });
+
+    expect(searches).toBe(1);
+    expect(result?.hits).toHaveLength(1);
+  });
+});
+
 /**
  * Wild-caught (qwen3.8 27B, France PowerPoint turn): an `artifacts/eval10/
  * contact-sheet.jpg` hit whose index row held a clean vision description was
@@ -377,6 +425,57 @@ describe('knowledge injection ceilings', () => {
     expect(result).not.toBeNull();
     expect(result?.hits.every((h) => h.source === 'knowledge')).toBe(true);
     expect(result?.policy.inheritedFrom).toBe('craftbook-step');
+  });
+
+  // Wild-caught in Default (2026-09-23): the Pasta deck's research turn was
+  // handed an earlier AI-startup deck's `powerpoint/task-8/` files as
+  // evidence, though its own procedure rules other task folders out.
+  it("keeps another task's declared folders out of a task step's injection", async () => {
+    const hit = (path: string, source: 'workspace' | 'artifacts'): UnifiedSearchResult => ({
+      ...workspaceHit(1),
+      id: `content:p1:${path}:1`,
+      title: path,
+      path,
+      source,
+      retrievalSource: source,
+      snippet: 'pasta evidence',
+    });
+    const search = {
+      searchProject: async () => ({
+        results: [
+          hit('powerpoint/task-8/source-evidence.md', 'workspace'),
+          hit('tasks/8/sources.md', 'artifacts'),
+          hit('powerpoint/task-11/deck.md', 'workspace'),
+          hit('notes/pasta.md', 'workspace'),
+        ],
+        truncated: false,
+      }),
+    } as unknown as SearchService;
+    const taskFor = (num: number) => ({
+      ref: `p1/${num}`,
+      num,
+      status: num === 8 ? 'complete' : 'active',
+      craftbookParams: { workPath: `tasks/${num}`, outputDir: `powerpoint/task-${num}` },
+      craftbook: { steps: [{ id: 'research' }] },
+    });
+    const result = await retrieveProjectContext({
+      store: {
+        ...STORE,
+        readProjectArtifact: async () => 'pasta evidence line one',
+        readTask: async (_projectId: string, num: number) => taskFor(num),
+        listProjectTasks: async () => [taskFor(8), taskFor(11)],
+      } as unknown as Store,
+      search,
+      record: { ...RECORD, taskRef: 'p1/11', stepId: 'research' } as unknown as ChatSession,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'research pasta evidence',
+      messageOrigin: 'direct-user',
+    });
+    const paths = result?.hits.map((h) => h.path);
+    expect(paths).toEqual(expect.arrayContaining(['powerpoint/task-11/deck.md', 'notes/pasta.md']));
+    expect(paths).not.toContain('powerpoint/task-8/source-evidence.md');
+    expect(paths).not.toContain('tasks/8/sources.md');
   });
 });
 

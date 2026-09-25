@@ -1,4 +1,9 @@
-import type { AccessoryOption, BodyArchetype, DressOption, HatOption } from '@bendyline/gezel';
+import type {
+  AccessoryOption,
+  BodyArchetype,
+  DressOption,
+  HatOption,
+} from '@bendyline/gezel/poppetje';
 import { type JSX, useLayoutEffect, useRef, useState } from 'react';
 import { renderAdditionalAccessory } from './accessories.js';
 import { type Felt, feltForSkin } from './color.js';

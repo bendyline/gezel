@@ -1,9 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import {
+  buildToolReceipt,
+  findAskCycleOrDepth,
+  inferTargetProject,
+  taskTranscriptCompatible,
+} from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  SendToSessionRequest,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
 } from '@bendyline/gezel';
@@ -54,6 +61,7 @@ import {
   normalizeScriptRefs,
   normalizeStepGate,
   nowIso,
+  oneShotSystemMessage,
   parseGezelMentionId,
   parseTaskRef,
   profileKind,
@@ -77,6 +85,7 @@ import {
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
@@ -85,6 +94,10 @@ import {
   outputMediumForStep,
   toolsetIdsExplicitlyDisabledForStep,
 } from '../craftbook/step-toolsets.js';
+import {
+  DEFAULT_PROJECT_ABOUT_MD,
+  DEFAULT_PROJECT_MISSION_MD,
+} from '../fs/default-project-docs.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
@@ -222,12 +235,6 @@ import {
 } from '../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
 import {
-  humanizeToolCall,
-  renderFullToolArgs,
-  summarizeToolArgs,
-  summarizeToolResult,
-} from './args-summary.js';
-import {
   type BeginExternalConversationInput,
   ExternalConversationRecorder,
   type ExternalConversationTurn,
@@ -286,6 +293,8 @@ import {
   FORCEFIT_MARKER,
   fitMessagesToBudget,
 } from './context-forcefit.js';
+import { CraftbookOfferCache } from './craftbook-offer-cache.js';
+import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import {
   deliverableWrittenThisTurn,
@@ -309,6 +318,7 @@ import {
   stripGezelMentions,
 } from './fixed-function-adapters.js';
 import {
+  checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
   renderEntryPreface,
@@ -347,6 +357,11 @@ import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { spliceIntoText } from './recognition-splice.js';
 import { type TurnImageLimits, resolveTurnImages } from './resolve-turn-images.js';
 import {
+  claimsCompletion,
+  isNoopConfirmationResponse,
+  looksStalled,
+} from './response-stall-heuristics.js';
+import {
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,
   extractDeliverableTargetPath,
@@ -377,12 +392,13 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
-import { extractToolCard } from './tool-cards.js';
+import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
+  isCoordinatorRole,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
   shouldConstrainToExactCraftbookInvocation,
@@ -391,8 +407,12 @@ import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { nativeVisionEnabledFor } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
+import { roleGetsWorkspaceOrientation } from './workspace-prompt-listing.js';
 
 const DEFAULT_PROJECT_ID = 'default';
+const SEEDED_DEFAULT_PROJECT_DOCS = new Set(
+  [DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD].map((doc) => doc.trim()),
+);
 
 /**
  * Upper bound on the streamed reply text buffered for abort salvage
@@ -861,6 +881,14 @@ const MAX_RESUMED_TURNS_PER_BOOT = 20;
 interface InflightTurn {
   userText: string;
   startedAt: number;
+  /** Who started the turn; gates user-only actions like a task retry. */
+  origin: TurnMessageOrigin;
+  /**
+   * The route opt-out for this turn. Read by `buildSessionOpts` rather than
+   * threaded through it, because that builder also runs on mid-turn
+   * rebuilds that never see the send's opts.
+   */
+  turnIntent?: TurnIntentMode;
   abort?: AbortController;
   /** True once a provider request has actually been issued for this turn. */
   providerStarted?: boolean;
@@ -933,8 +961,12 @@ interface PendingSendEntry {
   nudge: boolean;
   /** The prompt draft this send was written in, if any. */
   draftId: string | undefined;
+  /** See send() opts — a queued turn keeps its route opt-out. */
+  turnIntent: TurnIntentMode | undefined;
   waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
 }
+
+type TurnIntentMode = NonNullable<SendToSessionRequest['turnIntent']>;
 
 export interface ChatManagerOptions {
   store: Store;
@@ -1114,6 +1146,11 @@ export {
 export { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 export { buildLlamaCppProvider } from '../providers/llama-cpp/build-provider.js';
 export { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+export {
+  claimsCompletion,
+  isNoopConfirmationResponse,
+  looksStalled,
+} from './response-stall-heuristics.js';
 export {
   buildDeriveRepairClampNudge,
   deriveRepairClampEnabled,
@@ -2218,7 +2255,7 @@ export class ChatManager extends LocalEngineRuntime {
   }> {
     if (!this.taskAdvancer) return {};
     const projectId = state.record.projectId;
-    if (!projectId || projectId === DEFAULT_PROJECT_ID) return {};
+    if (!projectId) return {};
     const gezelId = state.record.gezelId;
     // The model's own advance wins — never double-advance in one turn.
     if (drained.some((d) => d.name === 'advance_task_step' && d.success)) return {};
@@ -2238,6 +2275,13 @@ export class ChatManager extends LocalEngineRuntime {
       // the same reviewer owns both (wild-caught when a child read made the PR
       // review host spend its collect-gate attempt early).
       if (state.record.taskRef && task.ref !== state.record.taskRef) continue;
+      // A scheduled run always arrives task-scoped, so an unpinned session is
+      // never doing its step. Default always holds the Meester's Night Shift
+      // oversight task, which made every front-door reply that read as
+      // finished "unmet" on night-shift-report.md. On a routed PowerPoint ask
+      // the resulting nudge turn was still clamped to `invoke_craftbook`, and
+      // it launched a second deck crew (qwen3.8-27b, 2026-09-23).
+      if (!state.record.taskRef && (task.cron || task.nightShift?.enabled)) continue;
       if (taskEffectiveStatus(task) !== 'active' || !task.activeStepId) continue;
       const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
       const adv = step?.advanceWhen;
@@ -2252,7 +2296,9 @@ export class ChatManager extends LocalEngineRuntime {
         !adv &&
         normalizedGate?.at === 'completion' &&
         normalizedGate.checks.length > 0 &&
-        normalizedGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+        normalizedGate.checks.every(
+          (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
+        ) &&
         normalizedGate.scripts.length === 0;
       if (!adv && !readEvidenceOnly) continue;
       // Only this gezel's step (step assignee → suggested → task assignee).
@@ -2340,11 +2386,15 @@ export class ChatManager extends LocalEngineRuntime {
       // the model having written to `adv.file` THIS turn — presence alone
       // would advance on turn 1 since the source already exists. The
       // turn's drained tool calls carry the path + success of each write.
-      // (artifact deliverables aren't edit-gated in practice, but the write
-      // set is matched by path either way.)
+      // Match the write's drawer too: a workspace edit cannot prove an
+      // artifact checkpoint changed, nor can another task's same-named file.
       const gate = evaluateDeliverableGate({ content, spec: adv, writes: drained });
       if (!gate.satisfied) {
-        if (adv.requireChange && !unmetEditGate && !deliverableWrittenThisTurn(drained, adv.file)) {
+        if (
+          adv.requireChange &&
+          !unmetEditGate &&
+          !deliverableWrittenThisTurn(drained, adv.file, adv.artifact === true)
+        ) {
           unmetEditGate = { taskRef: task.ref, file: adv.file };
         }
         continue;
@@ -2473,7 +2523,7 @@ export class ChatManager extends LocalEngineRuntime {
     const scripts = ed.scripts ?? [];
     if (checks.length === 0 && scripts.length === 0) return {};
     const projectId = state.record.projectId;
-    if (!projectId || projectId === DEFAULT_PROJECT_ID) return {};
+    if (!projectId) return {};
     const runner = this.scriptRunnerForHooks;
     // Scripts need the runner; if it isn't wired, don't half-evaluate.
     if (scripts.length > 0 && !runner) return {};
@@ -2608,6 +2658,18 @@ export class ChatManager extends LocalEngineRuntime {
    */
   isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0;
+  }
+
+  /**
+   * True while this session is running a turn the user started — a message
+   * they typed or an answer they gave. Nudges, handoffs, and other gezels'
+   * messages are not. Actions that exist to stop a model looping on its own
+   * (restarting a task that paused for help) require this, so a coordinator
+   * can do them for the user but never on its own initiative.
+   */
+  isUserDirectedTurn(sessionId: string): boolean {
+    const origin = this.inflight.get(sessionId)?.origin;
+    return origin === 'direct-user' || origin === 'question-answer';
   }
 
   /**
@@ -3142,6 +3204,7 @@ export class ChatManager extends LocalEngineRuntime {
         hidden: false,
         nudge: false,
         draftId: opts?.draftId,
+        turnIntent: undefined,
         waiters: [{ resolve, reject }],
       };
       q.unshift(entry);
@@ -3780,6 +3843,44 @@ export class ChatManager extends LocalEngineRuntime {
     });
   }
 
+  /**
+   * Post a runtime-authored nudge into one exact task step's session.
+   * `messageGezel` needs a distinct gezel to speak, and a step can be owned
+   * by the only one there is — the Meester on a Default craftbook, or a
+   * voorman on their own project — so the stuck-step sweep used to return
+   * silently there: no nudge, no re-drive count, so never an escalation.
+   */
+  async nudgeTaskStep(args: {
+    gezelId: string;
+    projectId: string;
+    taskRef: string;
+    stepId: string;
+    text: string;
+    lane?: Lane;
+    ambient?: boolean;
+  }): Promise<{ sessionId: string }> {
+    const session = await this.ensureOrCreateTaskSession({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+      taskRef: args.taskRef,
+      stepId: args.stepId,
+    });
+    this.trackBackground(
+      this.sendWithBusyRetry(session.id, args.text, {
+        messageOrigin: 'system',
+        ...(args.lane ? { lane: args.lane } : {}),
+        ...(args.ambient ? { ambient: true } : {}),
+      }).then(
+        () => undefined,
+        (err: unknown) =>
+          log.warn(
+            `[chat] task-step nudge for ${args.taskRef}/${args.stepId} failed: ${err instanceof Error ? err.message : err}`,
+          ),
+      ),
+    );
+    return { sessionId: session.id };
+  }
+
   /** Late-bind the fitness manager (see the field's docblock). */
   setModelFitness(manager: import('../fitness/manager.js').ModelFitnessManager): void {
     this.modelFitness = manager;
@@ -4072,12 +4173,6 @@ export class ChatManager extends LocalEngineRuntime {
         previous?.gezelId === args.gezelId &&
         previous.stepId !== dispatchStepId) ||
       (generalistTask && previous?.gezelId === args.gezelId);
-    const desiredModel =
-      dispatchGezel?.parsed.frontmatter.model ??
-      configuredNightShiftModel ??
-      routed?.model ??
-      dispatchConfig.defaultModel?.[dispatchProviderName];
-
     // Preserve the transcript across adjacent same-gezel steps. This is
     // particularly important for fixed-action evidence steps: their durable
     // History receipt proves the read happened, while the provider transcript
@@ -4090,11 +4185,16 @@ export class ChatManager extends LocalEngineRuntime {
     let reusedAcrossSteps = false;
     let resumedExisting = false;
     let session: ChatSession | null = null;
-    const compatibleTranscript = (prior: ChatSession): boolean =>
-      prior.providerName === dispatchProviderName &&
-      (desiredModel === undefined || prior.model === desiredModel) &&
-      Boolean(prior.nightShift) === Boolean(args.nightShift) &&
-      (prior.roleBasedNameOnlyMode ?? false) === roleBasedNameOnlyMode;
+    const transcriptTarget = {
+      providerName: dispatchProviderName,
+      model:
+        dispatchGezel?.parsed.frontmatter.model ??
+        configuredNightShiftModel ??
+        routed?.model ??
+        dispatchConfig.defaultModel?.[dispatchProviderName],
+      nightShift: args.nightShift,
+      roleBasedNameOnlyMode,
+    };
     if (
       args.kind !== 'entry' &&
       args.kind !== 'retry' &&
@@ -4110,12 +4210,12 @@ export class ChatManager extends LocalEngineRuntime {
       ((this.pendingSends.get(previous.id)?.length ?? 0) === 0 || generalistTask)
     ) {
       const prior = await this.store.getSession(args.gezelId, previous.id);
-      if (prior && compatibleTranscript(prior)) {
+      if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
         session = prior;
         reusedAcrossSteps = true;
       } else if (prior && generalistTask) {
         log.warn(
-          `[chat] generalist continuity broken for ${args.taskRef}: session ${prior.id.slice(0, 8)} ran on ${prior.providerName}/${prior.model ?? 'default'}, step "${dispatchStepId}" dispatches on ${dispatchProviderName}/${desiredModel ?? 'default'}; opening a fresh session`,
+          `[chat] generalist continuity broken for ${args.taskRef}: session ${prior.id.slice(0, 8)} ran on ${prior.providerName}/${prior.model ?? 'default'}, step "${dispatchStepId}" dispatches on ${dispatchProviderName}/${transcriptTarget.model ?? 'default'}; opening a fresh session`,
         );
       }
     }
@@ -4165,7 +4265,7 @@ export class ChatManager extends LocalEngineRuntime {
             candidate.stepId !== dispatchStepId,
         );
         const prior = adjacent ? await this.store.getSession(args.gezelId, adjacent.id) : null;
-        if (prior && compatibleTranscript(prior)) {
+        if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
           session = prior;
           resumedExisting = true;
           reusedAcrossSteps = true;
@@ -4382,7 +4482,9 @@ export class ChatManager extends LocalEngineRuntime {
       dispatchStep?.toolPolicy?.outputMedium === 'none' &&
       dispatchGate?.at === 'completion' &&
       dispatchGate.checks.length > 0 &&
-      dispatchGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+      dispatchGate.checks.every(
+        (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
+      ) &&
       dispatchGate.scripts.length === 0;
     const artifactCheckpointOutcome =
       dispatchStep?.toolPolicy?.outputMedium === 'artifact' &&
@@ -4412,14 +4514,14 @@ export class ChatManager extends LocalEngineRuntime {
         : resumedExisting
           ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
           : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}${fixedEntryProcedure}`
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}${fixedEntryProcedure}`
             : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`
               : `${
                   fromGezelDisplayName
                     ? `${fromGezelDisplayName} has`
                     : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.${progressClause}${completionClause}`;
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -4487,11 +4589,18 @@ export class ChatManager extends LocalEngineRuntime {
         // host after the provider has already spent its own corrective turns.
         const maxHandoffSendAttempts = 3;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
+          const gap = await checkpointGapForStep(
+            this.store,
+            args.taskRef,
+            dispatchStep,
+            attempt,
+            artifactCheckpointOutcome,
+          );
           const message =
             attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
-                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
+                ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4665,13 +4774,8 @@ export class ChatManager extends LocalEngineRuntime {
     // don't guess; the model has to be explicit.
     if (!args.projectId && projectId === DEFAULT_PROJECT_ID) {
       const targetSessions = await this.store.listSessions({ gezelId: target.id });
-      const distinctNonDefault = new Set(
-        targetSessions
-          .filter((s) => !s.archived && s.projectId && s.projectId !== DEFAULT_PROJECT_ID)
-          .map((s) => s.projectId),
-      );
-      if (distinctNonDefault.size === 1) {
-        const chosen = [...distinctNonDefault][0]!;
+      const chosen = inferTargetProject(targetSessions, undefined, projectId, DEFAULT_PROJECT_ID);
+      if (chosen !== projectId) {
         log.info(
           `[chat] messageGezel auto-routing target=${target.id} to project=${chosen} (caller did not pass project; target has a single active non-default session there)`,
         );
@@ -5298,41 +5402,22 @@ export class ChatManager extends LocalEngineRuntime {
     // A single gezel may have multiple in-flight asks at once (e.g.
     // two consultation sessions both currently re-asking someone),
     // so we collect all out-edges per asker gezel.
-    const outEdges = new Map<string, Set<string>>();
-    for (const edge of this.inflightAsks.values()) {
-      let bucket = outEdges.get(edge.askerGezelId);
-      if (!bucket) {
-        bucket = new Set();
-        outEdges.set(edge.askerGezelId, bucket);
-      }
-      bucket.add(edge.targetGezelId);
-    }
-
-    // BFS from targetGezelId. Visiting askerGezelId at any depth = cycle.
-    const queue: Array<{ gezel: string; depth: number }> = [{ gezel: targetGezelId, depth: 1 }];
-    const visited = new Set<string>();
-    while (queue.length > 0) {
-      const { gezel, depth } = queue.shift()!;
-      if (gezel === askerGezelId) {
-        return {
-          kind: 'cycle',
-          message: 'This question would create a cycle in the gezel-to-gezel ask graph.',
-        };
-      }
-      if (depth > maxDepth) {
-        return {
-          kind: 'depth',
-          message: `Ask chain would exceed the max depth of ${maxDepth}. Try a shallower call pattern.`,
-        };
-      }
-      if (visited.has(gezel)) continue;
-      visited.add(gezel);
-      const out = outEdges.get(gezel);
-      if (!out) continue;
-      for (const next of out) {
-        queue.push({ gezel: next, depth: depth + 1 });
-      }
-    }
+    const verdict = findAskCycleOrDepth(
+      this.inflightAsks.values(),
+      askerGezelId,
+      targetGezelId,
+      maxDepth,
+    );
+    if (verdict.kind === 'cycle')
+      return {
+        kind: 'cycle',
+        message: 'This question would create a cycle in the gezel-to-gezel ask graph.',
+      };
+    if (verdict.kind === 'depth')
+      return {
+        kind: 'depth',
+        message: `Ask chain would exceed the max depth of ${maxDepth}. Try a shallower call pattern.`,
+      };
     return { kind: 'ok' };
   }
 
@@ -6041,6 +6126,7 @@ export class ChatManager extends LocalEngineRuntime {
      */
     draftId?: string;
     fileTurnIntent?: FileTurnIntent;
+    turnIntent?: TurnIntentMode;
   }): Promise<{ mentionSessionIds: string[] }> {
     const { primarySessionId, text } = args;
     const primary = await this.getSessionRecord(primarySessionId);
@@ -6081,6 +6167,7 @@ export class ChatManager extends LocalEngineRuntime {
       await this.send(primarySessionId, text, {
         draftId: args.draftId,
         fileTurnIntent: args.fileTurnIntent,
+        ...(args.turnIntent ? { turnIntent: args.turnIntent } : {}),
       });
     }
     // Note: the silent-primary branch (notifyUserMessage) runs AFTER
@@ -6268,15 +6355,77 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Record a craftbook task the composer launched directly from this
+   * thread: the person's message as an ordinary user turn, then a
+   * synthetic assistant receipt shaped like an `invoke_craftbook` call
+   * with its start card, so the transcript shows the same receipt a
+   * model-invoked launch gets and a stateless provider's rebuild replays
+   * the task ref as evidence. No provider turn runs and `inflight` is
+   * never touched.
+   *
+   * Unlike `notifyUserMessage`, the message IS addressed to this gezel, so
+   * a fresh thread is titled from it exactly as `send` would.
+   */
+  async recordCraftbookLaunch(
+    sessionId: string,
+    args: { userText: string; draftId?: string; task: Task; reused?: boolean },
+  ): Promise<{ userMessage: ChatMessage; receipt: ChatMessage }> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record) throw new Error(`session ${sessionId} not found`);
+    const at = nowIso();
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: args.userText,
+      at,
+      ...(args.draftId ? { draftId: args.draftId } : {}),
+    };
+    const craftbookName = args.task.craftbook.name;
+    const card = craftbookStartCardForTask(args.task, {
+      ...(args.reused ? { reused: true } : {}),
+    });
+    const receipt: ChatMessage = {
+      role: 'assistant',
+      synthetic: 'craftbook-launch',
+      content: `Started the "${craftbookName}" craftbook — task ${args.task.ref}.${args.reused ? ' (already running)' : ''}`,
+      at: nowIso(),
+      toolCalls: [
+        {
+          name: 'invoke_craftbook',
+          at,
+          durationMs: 0,
+          success: true,
+          argsSummary: `${craftbookName} · ${args.task.ref}`,
+          ...(card ? { card } : {}),
+        },
+      ],
+    };
+    record.messages.push(userMessage, receipt);
+    if (!record.title || record.title === NEW_THREAD_TITLE) {
+      record.title = deriveThreadTitleFromMessages([userMessage]) ?? craftbookName;
+    }
+    await this.store.writeSession(record);
+    const live = this.states.get(sessionId);
+    if (live) live.record = record;
+
+    const scope: PublishScope = { sessionId, gezelId: record.gezelId, projectId: record.projectId };
+    this.events.publish(scope, { type: 'user_message', message: userMessage });
+    this.events.publish(scope, { type: 'complete', message: receipt });
+    // Full-scope for the same reason as `notifyUserMessage`: the project
+    // timeline opens a thinking slot on `user_message` and only a
+    // full-scope `done` closes it.
+    this.events.publish(scope, { type: 'done' });
+    return { userMessage, receipt };
+  }
+
+  /**
    * Pick the project a `@mention` from Meester chat should land in for the
    * given gezel. Delegates to {@link rankProjectsForGezel} and takes the
    * top result — the same ordering the per-gezel Chat tab uses for its
    * project picker, so the two stay coherent: the project the dropdown
    * pre-selects is also the one a fan-out routes to.
    *
-   * `fallback` (i.e. `default`) lands at the bottom of the ranked list,
-   * so we only end up there when the gezel has no real project presence —
-   * matching today's behavior.
+   * `default` ranks like any project when the gezel owns live task work
+   * there (a Meester-run craftbook); otherwise it is the bottom `fallback`.
    */
   private async resolveMentionProject(gezelId: string): Promise<string> {
     const ranked = await rankProjectsForGezel(this.store, gezelId);
@@ -6910,6 +7059,12 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       /** Strong provenance used by per-turn behavior hooks. */
       messageOrigin?: TurnMessageOrigin;
+      /**
+       * `'off'` skips the turn-intent route for this turn — no craftbook
+       * prelude and no `invoke_craftbook` clamp. The composer sends it after
+       * the person dismissed the suggested task for this very text.
+       */
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -6981,6 +7136,7 @@ export class ChatManager extends LocalEngineRuntime {
           hidden: opts?.hidden === true,
           nudge: opts?.nudge === true,
           draftId: opts?.draftId,
+          turnIntent: opts?.turnIntent,
           waiters: [{ resolve, reject }],
         };
         q.push(entry);
@@ -7033,9 +7189,15 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
-    const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
+    const inflightTurn: InflightTurn = {
+      userText,
+      startedAt: Date.now(),
+      origin: resolveTurnMessageOrigin(opts),
+      ...(opts?.turnIntent ? { turnIntent: opts.turnIntent } : {}),
+    };
     this.inflight.set(sessionId, inflightTurn);
     // Claim a clean question slot synchronously with the in-flight lock.
     // `stampPendingQuestion` can be called as soon as the provider starts
@@ -7172,8 +7334,10 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     } = {};
     if (next.from) runOpts.from = next.from;
+    if (next.turnIntent) runOpts.turnIntent = next.turnIntent;
     if (next.lane) runOpts.lane = next.lane;
     if (next.ambient) runOpts.ambient = true;
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
@@ -7228,6 +7392,7 @@ export class ChatManager extends LocalEngineRuntime {
       nudge?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      turnIntent?: TurnIntentMode;
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -7827,7 +7992,7 @@ export class ChatManager extends LocalEngineRuntime {
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
       let turnIntentPlan: TurnIntentPlan | null = null;
-      if (messageOrigin === 'direct-user') {
+      if (messageOrigin === 'direct-user' && opts?.turnIntent !== 'off') {
         try {
           turnIntentPlan = await this.previewTurnIntent({
             message: userText,
@@ -8397,25 +8562,26 @@ export class ChatManager extends LocalEngineRuntime {
         // skipped — they already stamped the prior assistant on
         // creation and re-stamping the new bubble would duplicate
         // the card across two timeline rows.
-        if (!assistantMessage.pendingQuestionId) {
-          try {
-            const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
-            const candidate = projectQuestions
-              .filter(
-                (q) =>
-                  q.sessionId === sessionId &&
-                  !q.answer &&
-                  q.intent !== undefined &&
-                  q.createdAt >= iterStartedAt,
-              )
+        let commandApprovalRaisedThisTurn = false;
+        try {
+          const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
+          const raisedQuestions = projectQuestions.filter(
+            (q) =>
+              q.sessionId === sessionId && q.intent !== undefined && q.createdAt >= iterStartedAt,
+          );
+          // An immediate answer may already be queued. It still owns the next
+          // turn: a stall-recovery nudge must not run ahead of that answer.
+          commandApprovalRaisedThisTurn = raisedQuestions.some(
+            (q) => q.intent?.kind === 'command-approval',
+          );
+          if (!assistantMessage.pendingQuestionId) {
+            const candidate = raisedQuestions
+              .filter((q) => !q.answer)
               .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
             if (candidate) assistantMessage.pendingQuestionId = candidate.id;
-          } catch (err) {
-            log.warn(
-              'mid-turn question stamping failed:',
-              err instanceof Error ? err.message : err,
-            );
           }
+        } catch (err) {
+          log.warn('mid-turn question stamping failed:', err instanceof Error ? err.message : err);
         }
         state.record.lastActivityAt = nowIso();
         // Capture provider-state (sessionId / previous_response_id) for resume.
@@ -8749,8 +8915,13 @@ export class ChatManager extends LocalEngineRuntime {
         // automatic continuation must stop here — including recovery for an
         // earlier failed tool in the same turn and inspector escalation after
         // an exhausted continuation budget.
-        if (drained.some((call) => call.name === 'ask_user_question' && call.success)) {
-          log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
+        if (
+          commandApprovalRaisedThisTurn ||
+          drained.some((call) => call.name === 'ask_user_question' && call.success)
+        ) {
+          log.info(
+            `session ${sessionId}: question or command approval posted — yielding to its answer`,
+          );
           break;
         }
         // Completing a task step transfers ownership to the successor session.
@@ -10015,6 +10186,10 @@ export class ChatManager extends LocalEngineRuntime {
         const part = candidate?.trim();
         const key = part?.replace(/\s+/g, ' ').toLowerCase();
         if (!part || !key || seenPromptParts.has(key)) continue;
+        // Default's seeded docs describe the catch-all bucket, not the
+        // picture; ~800 chars of it ahead of the step description can crowd
+        // the actual subject out of a short-prompt image engine.
+        if (SEEDED_DEFAULT_PROJECT_DOCS.has(part)) continue;
         seenPromptParts.add(key);
         promptParts.push(part);
       }
@@ -10087,6 +10262,13 @@ export class ChatManager extends LocalEngineRuntime {
     const project = await this.store.getProject(record.projectId).catch(() => null);
     if (!project?.voormanGezelId) return null;
     if (project.voormanGezelId !== record.gezelId) return null;
+    // The Meester's front-door chat lives in Default. A casual reply there is
+    // not a lead stalling on Default's craftbook work, even when the user has
+    // made the Meester Default's voorman.
+    if (!record.taskRef && record.projectId === DEFAULT_PROJECT_ID) {
+      const config = await this.store.readConfig().catch(() => null);
+      if (config?.meesterGezelId === record.gezelId) return null;
+    }
     // A message_gezel/delegate_* callback parked behind this sender is
     // concrete pending work. Nudging the voorman before releasing the turn
     // deadlocks that handoff and encourages a duplicate dispatch.
@@ -10116,10 +10298,17 @@ export class ChatManager extends LocalEngineRuntime {
     // without doing it; the voorman-idle arm is reserved for active work.
     // Likewise, when every task is terminal there is no active step to
     // advance, so the voorman's prose is already a valid terminal response.
+    // Scheduled hosts (cron, Night Shift) stay active between runs, and the
+    // scheduler — not the voorman — starts each one, so they are not live
+    // work to resume.
     const tasks = withEffectiveTaskStatuses(
       await this.store.listProjectTasks(record.projectId).catch(() => [] as Task[]),
     );
-    if (tasks.length === 0 || !tasks.some((task) => taskEffectiveStatus(task) === 'active')) {
+    if (
+      !tasks.some(
+        (task) => taskEffectiveStatus(task) === 'active' && !task.cron && !task.nightShift?.enabled,
+      )
+    ) {
       return null;
     }
     // Live work remains. Distinguish whether anything has actually been
@@ -11257,9 +11446,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    const baseSystem =
-      'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
-    const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const systemMessage = oneShotSystemMessage(personaAbout);
     const sessionDefaults = opts.tuningProfileId
       ? await wait(
           this.resolveModelSessionDefaults(effectiveProviderName, model, {
@@ -11529,12 +11716,30 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    return resolveTurnIntentPlan({
-      text: input.message,
-      isMeester: config.meesterGezelId === input.gezelId,
-      role: gezel.role,
-    });
+    const isMeester = config.meesterGezelId === input.gezelId;
+    const plan = resolveTurnIntentPlan({ text: input.message, isMeester, role: gezel.role });
+    if (plan.route !== 'none' || !isCoordinatorRole({ isMeester, role: gezel.role })) return plan;
+    // The catalog tier: a declared trigger phrase in the text proposes that
+    // book as the composer's attached task. Advisory only — see
+    // craftbook-trigger-route.ts — so a failed listing just means no proposal.
+    try {
+      this.craftbookOffers ??= new CraftbookOfferCache({
+        catalog: this.catalog,
+        store: this.store,
+      });
+      const offer = await this.craftbookOffers.get(input.projectId);
+      const candidates = triggerCandidatesFromListing(offer.items, offer.missingToolsets);
+      return triggerPhrasePlan(input.message, candidates) ?? plan;
+    } catch (err) {
+      log.debug(
+        `turn intent: craftbook listing unavailable for ${input.projectId}: ${err instanceof Error ? err.message : err}`,
+      );
+      return plan;
+    }
   }
+
+  /** Built on first use: the catalog is assigned in the constructor body. */
+  private craftbookOffers?: CraftbookOfferCache;
 
   /**
    * Concurrent one-shot width for a provider: its queue's configured
@@ -12523,6 +12728,7 @@ export class ChatManager extends LocalEngineRuntime {
     mmprojPath?: string;
     visionEncoderPath?: string;
     nativeVisionEnabled?: boolean;
+    mlxVisionAvailable?: boolean;
   }> {
     // Ask about the model that is actually SERVING this turn.
     //
@@ -12539,6 +12745,12 @@ export class ChatManager extends LocalEngineRuntime {
       ? parseEngineKey(state.record.engineKey)?.modelId
       : undefined;
     const modelId = boundModelId ?? state.record.model ?? undefined;
+    if (state.record.providerName === 'mlx')
+      return {
+        ...(modelId ? { modelId } : {}),
+        mlxVisionAvailable: state.session?.supportsImageInput === true,
+        nativeVisionEnabled: state.session?.supportsImageInput === true,
+      };
     const modelStore = state.record.providerName === 'ds4' ? this.ds4Models : this.llamaCppModels;
     if (!modelId || !modelStore) return modelId ? { modelId } : {};
     try {
@@ -13820,16 +14032,18 @@ export class ChatManager extends LocalEngineRuntime {
     // currently owned by them) in the same project as the session, so
     // the gezel doesn't have to call `list_tasks` to discover what
     // they're supposed to work on. Skipped when this session is itself
-    // task-scoped (taskContext above already injects the relevant task)
-    // or for the default "untitled" project (no real work tracked
-    // there).
+    // task-scoped (taskContext above already injects the relevant task).
     let assignedTasks: Task[] = [];
-    if (!record.taskRef && record.projectId !== DEFAULT_PROJECT_ID) {
+    if (!record.taskRef) {
       try {
         const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(record.projectId));
         assignedTasks = all.filter((t) => {
           const status = taskEffectiveStatus(t);
           if (status !== 'active' && status !== 'paused') return false;
+          // The scheduler dispatches these on its own clock. Listing them
+          // invites a chat turn to start the run — and Default always holds
+          // the Meester's perpetual Night Shift oversight task.
+          if (t.cron || t.nightShift?.enabled) return false;
           if (t.assignee.kind === 'gezel' && t.assignee.gezelId === record.gezelId) return true;
           // Step-level assignment: the active step may name this gezel
           // even if the task's top-level assignee is someone else.
@@ -13937,7 +14151,9 @@ export class ChatManager extends LocalEngineRuntime {
     // rendered/gated inside buildInstructions.
     const retrievalFirstActive = profileHasBehavior(modelProfile, 'prompt.retrieval-first');
     const workspaceGestaltActive =
-      Boolean(project) && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
+      Boolean(project) &&
+      roleGetsWorkspaceOrientation(gezel?.role) &&
+      profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
     const documentDescriptions =
       documentFiles.length > 0 &&
       libraryProjectId &&
@@ -14288,6 +14504,7 @@ export class ChatManager extends LocalEngineRuntime {
       surface: 'prompt',
       session: record,
       role: gezel?.role,
+      exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
       mode: globalConfig.toolFilterMode,
       provider: record.providerName,
       ...(modelForTier !== undefined ? { modelId: modelForTier } : {}),
@@ -14314,6 +14531,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),
+      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       onCapTrim: ({ before, after }) => {
@@ -14375,6 +14593,8 @@ export class ChatManager extends LocalEngineRuntime {
       availableBuiltinTools = availableBuiltinToolsForAllowlist(
         promptToolAllowlist,
         contextualBuiltinTools,
+        undefined,
+        { networkAllowed: securityPolicy.allowExternalServices },
       );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
@@ -14678,6 +14898,14 @@ export class ChatManager extends LocalEngineRuntime {
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
         ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
         ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
+        ...(step.consumes?.length
+          ? {
+              requiredInputs: step.consumes.map((input) => ({
+                path: input.file,
+                artifact: input.artifact === true,
+              })),
+            }
+          : {}),
       };
       const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
       const fixedEvidenceAction =
@@ -14685,7 +14913,9 @@ export class ChatManager extends LocalEngineRuntime {
         (step.toolPolicy.allowTools?.length ?? 0) > 0 &&
         normalizedGate?.at === 'completion' &&
         normalizedGate.checks.length > 0 &&
-        normalizedGate.checks.every((check) => check.kind === 'corpusReadEvidence') &&
+        normalizedGate.checks.every(
+          (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
+        ) &&
         normalizedGate.scripts.length === 0;
       const artifactCheckpointAction =
         step.toolPolicy?.outputMedium === 'artifact' &&
@@ -15026,8 +15256,6 @@ export class ChatManager extends LocalEngineRuntime {
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
       // the UI's expand + copy so a handoff's real content is verifiable.
-      const argsSummary = humanizeToolCall(info.name, info.args) ?? summarizeToolArgs(info.args);
-      const argsFull = renderFullToolArgs(info.args);
       // Read-heavy task steps intentionally carry their evidence into a
       // successor step or across a restart. The ordinary 4 KB UI/history cap
       // would keep only the beginning and end of a batched patch read, so a
@@ -15039,10 +15267,9 @@ export class ChatManager extends LocalEngineRuntime {
       const taskArtifactRead =
         Boolean(record.taskRef) &&
         (info.name === 'read_artifact' || info.name === 'read_artifacts');
-      const result = summarizeToolResult(
-        info.resultText,
-        taskArtifactRead ? toolEvidenceBudgetChars(record.contextWindow) : undefined,
-      );
+      const resultCap = taskArtifactRead
+        ? toolEvidenceBudgetChars(record.contextWindow)
+        : undefined;
       // Layer 4 surgical-edit tools surface `{diff, addedLines,
       // removedLines}` via MCP structuredContent. Pull the known fields
       // onto the persisted ChatMessageToolCall so the inline diff
@@ -15098,19 +15325,24 @@ export class ChatManager extends LocalEngineRuntime {
       // even a producer that never stamps startedAtMs yields a correct
       // `at` — which is why this line, not the producer stamps, carries
       // the replay-timeline guarantee.
-      const at = new Date(info.startedAtMs ?? Date.now() - info.durationMs).toISOString();
+      const startedAtMs = info.startedAtMs ?? Date.now() - info.durationMs;
+      const at = new Date(startedAtMs).toISOString();
       const call: ChatMessageToolCall = {
-        name: info.name,
-        at,
-        durationMs: info.durationMs,
-        success: info.success,
-        ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
+        ...buildToolReceipt({
+          name: info.name,
+          args: info.args,
+          startedAtMs,
+          durationMs: info.durationMs,
+          success: info.success,
+          errorMessage: info.errorMessage,
+          resultText: info.resultText,
+          resultCap,
+        }),
         ...(path ? { path } : {}),
         ...(paths.length > 0 ? { paths } : {}),
-        ...(argsSummary ? { argsSummary } : {}),
-        ...(argsFull ? { argsFull } : {}),
-        ...(result ? { resultText: result.text } : {}),
-        ...(result?.truncated ? { resultTruncated: true } : {}),
+        ...(info.deliveredResultTruncated !== undefined
+          ? { deliveredResultTruncated: info.deliveredResultTruncated }
+          : {}),
         ...(info.images && info.images.length > 0 ? { images: info.images } : {}),
         ...(info.audios && info.audios.length > 0 ? { audios: info.audios } : {}),
         ...(videos ? { videos } : {}),
@@ -15120,6 +15352,12 @@ export class ChatManager extends LocalEngineRuntime {
         ...(card ? { card } : {}),
         ...(reasoningOffset !== undefined ? { afterReasoningChars: reasoningOffset } : {}),
       };
+      const argsSummary = call.argsSummary;
+      const argsFull = call.argsFull;
+      const result =
+        call.resultText !== undefined
+          ? { text: call.resultText, truncated: call.resultTruncated === true }
+          : undefined;
       // Accumulate for persistence on the final assistant message. `send()`
       // clears this array at turn start and drains it at turn end.
       const bucket = currentTurnTools.get(record.id);
@@ -15140,6 +15378,9 @@ export class ChatManager extends LocalEngineRuntime {
           ...(argsFull ? { argsFull } : {}),
           ...(result ? { resultText: result.text } : {}),
           ...(result?.truncated ? { resultTruncated: true } : {}),
+          ...(info.deliveredResultTruncated !== undefined
+            ? { deliveredResultTruncated: info.deliveredResultTruncated }
+            : {}),
           ...(info.images && info.images.length > 0 ? { images: info.images } : {}),
           ...(info.audios && info.audios.length > 0 ? { audios: info.audios } : {}),
           ...(videos ? { videos } : {}),
@@ -15165,8 +15406,13 @@ export class ChatManager extends LocalEngineRuntime {
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
-            ...(info.deliveredResultTruncated === true ? { deliveredResultTruncated: true } : {}),
+            ...(info.deliveredResultTruncated !== undefined
+              ? { deliveredResultTruncated: info.deliveredResultTruncated }
+              : {}),
             ...(path ? { path } : {}),
+            ...(info.name === 'read_image_as_base64'
+              ? { imageArtifact: info.args?.artifact === true || info.args?.artifact === 'true' }
+              : {}),
             ...(paths.length > 0 ? { paths } : {}),
             ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
             ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),
@@ -15342,6 +15588,9 @@ export class ChatManager extends LocalEngineRuntime {
         ...(securityPolicy.allowExternalServices && hasSocialConnectorBinding(project?.connectors)
           ? { GEZEL_SOCIAL_ENABLED: '1' }
           : {}),
+        // A host with no deny-net boundary withholds run_nodejs_script and
+        // derive_file unless the policy already lets gezellen reach the network.
+        ...(securityPolicy.allowExternalServices ? { [SCRIPT_NETWORK_ALLOWED_ENV]: '1' } : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
         // Same pattern again for the observation-table tools. A project with
@@ -15858,6 +16107,7 @@ export class ChatManager extends LocalEngineRuntime {
       surface: 'bridge',
       session: record,
       role: gezel?.role,
+      exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
       mode: globalConfig.toolFilterMode,
       provider: providerNameForFilter,
       ...(modelForFilter !== undefined ? { modelId: modelForFilter } : {}),
@@ -15885,6 +16135,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),
+      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),
@@ -15936,6 +16187,13 @@ export class ChatManager extends LocalEngineRuntime {
         .join(',');
     }
     if (constrainedAllowlist) opts.toolAllowlist = constrainedAllowlist;
+    if (
+      bridgeSurface.exactCraftbookConstrained &&
+      constrainedAllowlist?.size === 1 &&
+      constrainedAllowlist.has('invoke_craftbook')
+    ) {
+      opts.singleToolCallTurn = true;
+    }
     // The role allowlist deliberately applies only to built-ins. The authored
     // step policy is exact across the merged MCP surface, so carry it separately
     // to both schema filtering and call-time authorization in bridge providers.
@@ -17423,266 +17681,6 @@ function isSuccessfulAsyncHandoffToolCall(toolCall: ChatMessageToolCall): boolea
     toolCall.name === 'ask_specialist' ||
     toolCall.name.startsWith('delegate_')
   );
-}
-
-/**
- * Heuristic: did the model end its turn announcing what it would do
- * instead of doing it? Looks at the last paragraph of the response and
- * matches first-person intent phrases ("I will now…", "Let me…"),
- * standalone gerund openers ("Processing…", "Reading the file…"), and
- * generic "thinking out loud" markers. Bails out when the same paragraph
- * also signals completion ("here's the result", "done", "complete") so
- * a model that says "I've finished processing — done." doesn't get
- * mis-flagged.
- *
- * False positives waste one extra continuation nudge (cheap). False
- * negatives mean the user has to manually nudge the model.
- */
-export function looksStalled(text: string): boolean {
-  return looksStalledImpl(text);
-}
-
-/**
- * Confirmation-only prompts are intentionally inert. A reply like
- * "Got it, I'll stay out of the way" looks like first-person future
- * intent to `looksStalled`, but it is exactly the requested outcome
- * when the user said no action is needed.
- */
-export function isNoopConfirmationResponse(prompt: string, response: string): boolean {
-  const promptText = prompt.toLowerCase();
-  const asksForNoAction =
-    /\byou\s+(?:do\s+not|don't|don['’]t)\s+need\s+to\s+do\s+anything\b/i.test(promptText) ||
-    /\bno\s+action\s+(?:is\s+)?(?:needed|required)\b/i.test(promptText) ||
-    /\bnothing\s+(?:for\s+you\s+)?to\s+do\b/i.test(promptText);
-  if (!asksForNoAction) return false;
-
-  const asksForConfirmation =
-    /\b(?:just\s+)?confirm\b[\s\S]{0,160}\b(?:seen|read|received|noted|acknowledged)\b/i.test(
-      prompt,
-    ) || /\backnowledge\b[\s\S]{0,80}\b(?:seen|read|received|noted)\b/i.test(prompt);
-  if (!asksForConfirmation) return false;
-
-  const normalized = response
-    .trim()
-    .replace(/^[#>*_`(\s]+/, '')
-    .replace(/[)*_`\s]+$/, '')
-    .replace(/\s+/g, ' ');
-  if (normalized.length === 0 || normalized.length > 800) return false;
-
-  const acknowledgement =
-    /^(?:got it|noted|seen|understood|acknowledged|okay|ok|sure|received)\b/i.test(normalized) ||
-    /\bI(?:['’]ve|\s+have)\s+(?:seen|read|received|noted|acknowledged)\b/i.test(normalized);
-  if (!acknowledgement) return false;
-
-  const workIntent =
-    /\b(?:let me|I(?:['’]ll|\s+will|\s+am\s+going\s+to|\s+am\s+now|\s+need\s+to)|I['’]m\s+(?:going\s+to|now)|next,?\s+I|now,?\s+I)\s+(?:read|write|create|build|implement|run|check|fix|start|continue|work|look|open|edit|generate|produce|draft|test|optimise|optimize|debug|review|finish|complete)\b/i;
-  return !workIntent.test(normalized);
-}
-
-/**
- * Does the reply CLAIM the work is finished? The inverse signal to
- * {@link looksStalled} — used by the false-"done" edit-gate re-prompt to
- * tell a confident "All done. Here's a summary…" (which `looksStalled`
- * deliberately treats as a clean finish and bails on) apart from a
- * genuine partial-progress update or a question. Deliberately narrow:
- * delivery markers anywhere, plus completion/shipped/fixed verbs in the
- * final block, excluding the subordinate-clause futures ("when complete")
- * that `looksStalled` already guards against.
- */
-export function claimsCompletion(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return false;
-  const blocks = trimmed.split(/\n\s*\n+/);
-  const lastBlock = (blocks[blocks.length - 1] ?? '').toLowerCase();
-  const whole = trimmed.toLowerCase();
-  // Delivery markers ("here's the summary", "all done") are unambiguous
-  // finish signals and win outright.
-  const delivery = /\b(?:here['’]s|here it is|results?:|summary:|all set|all done)\b/;
-  if (delivery.test(whole)) return true;
-  // A first-person future promise ("I'll let you know once X is complete")
-  // subordinates any completion verb inside it — it's a promise, not a
-  // claim. The token-level lookbehind below can't reach across the clause,
-  // so this paragraph-level guard wins (mirrors looksStalled's).
-  const futurePromise =
-    /\b(?:I['’]ll|I\s+will|I\s+am\s+going\s+to|I\s+am\s+about\s+to|I\s+intend\s+to|I\s+plan\s+to)\s+\w+/i;
-  if (futurePromise.test(whole)) return false;
-  const completion =
-    /(?<!\b(?:when|until|once|as|after|if|before|while|to)\s)\b(?:complete|completed|finished|shipped|fixed|implemented|resolved)\b/;
-  return completion.test(lastBlock);
-}
-
-function looksStalledImpl(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return true;
-
-  // Take the last paragraph (after the final blank line).
-  const blocks = trimmed.split(/\n\s*\n+/);
-  const lastBlockRaw = blocks[blocks.length - 1]!.trim();
-
-  // Strip surrounding markdown decoration so the patterns can match the
-  // bare text. Iterate because parens/italics can stack ("(*I will…*)").
-  const stripDecoration = (s: string): string => {
-    let out = s;
-    for (let i = 0; i < 5; i++) {
-      const before = out;
-      out = out.replace(/^[#>*_`(\s]+/, '').replace(/[)*_`\s]+$/, '');
-      if (out === before) break;
-    }
-    return out.trim();
-  };
-
-  const stripped = stripDecoration(lastBlockRaw);
-  if (stripped.length === 0) return true;
-
-  // Bail out when the paragraph signals actual completion — the model is
-  // finished, not stalled. Two distinct shapes:
-  //
-  //   1. `completionTail` — completion verbs NOT preceded by a
-  //      subordinating conjunction or an infinitive "to". "All done" /
-  //      "Processing complete" bails; "I'll update you when done" /
-  //      "as soon as finished" / "on track to complete" does NOT
-  //      (those are futures, not actual completion).
-  //
-  //   2. `completionDelivery` — explicit "here's the X" / "results:" /
-  //      "summary:" handoff markers.
-  //
-  // Deliberately omits a bare `ready` — "plan ready for review" was
-  // masking real stalls where the model narrated delegation without
-  // calling the tool. Deliberately excludes "to" before the verb —
-  // "on track to complete" / "need to finish" are intent, not done.
-  const completionTail =
-    /(?<!\b(?:when|until|once|as|after|if|before|while|to)\s+)\b(?:complete|completed|done|finished)\b/i;
-  const completionDelivery = /\b(?:here['’]s|here it is|results?:|summary:)\b/i;
-  // Future-intent guard: when the paragraph contains a first-person
-  // future promise ("I'll let you know", "I will notify you"), the
-  // completion verb is almost always subordinated inside a future
-  // clause ("the moment X is complete", "as soon as it's finished").
-  // The lexical lookbehind in `completionTail` can't reach past the
-  // immediately-preceding token, so this paragraph-level signal wins.
-  // False-positive cost: a rare "I'll clean up. Processing complete."
-  // becomes one wasted continuation; that's cheap.
-  const futurePromise =
-    /\b(?:I['’]ll|I\s+will|I\s+am\s+going\s+to|I\s+am\s+about\s+to|I\s+intend\s+to|I\s+plan\s+to)\s+\w+/i;
-  // "I have completed X. The next [logical] step is to start drafting Y."
-  // — wild-caught Gemma 4 E4B pattern on the petshop eval. Bautista
-  // declares one phase done and announces the next action without
-  // taking it. completionTail matches "completed" so the bail-out
-  // would fire if we relied only on it; the model's text doesn't
-  // contain a first-person future promise that futurePromise would
-  // catch either ("the next step is to start drafting" is impersonal).
-  // Scoped to *implementation* verbs (write/create/build/draft/...) so
-  // a genuine handoff like "the next step is for you to review" still
-  // bails out as a real completion. Also fires standalone — a turn
-  // that consists of just "Next, I'll write index.html" is itself
-  // stalled regardless of whether a completion verb appears.
-  const pendingNextStep =
-    /\b(?:the\s+next\s+(?:logical\s+|natural\s+|obvious\s+|clear\s+|immediate\s+|key\s+|critical\s+|necessary\s+|actionable\s+|important\s+|right\s+)?(?:step|phase|move|action|task)\s+is\s+(?:to\s+|going\s+to\s+)?(?:start\s+|begin\s+|now\s+)?(?:write|create|build|implement|generate|render|draft|drafting|produce|design|develop|code|add|edit|finalize|wrap|put|commence|kick\s*off|move\s+(?:on\s+)?to)|next(?:,|:)?\s+I(?:['’]ll|\s+will|\s+need\s+to|\s+should|\s+must|\s+have\s+to|\s+am\s+going\s+to)\s+(?:start\s+|begin\s+|now\s+)?(?:write|create|build|implement|generate|render|draft|produce|design|develop|code|add|edit|finalize|wrap|put))/i;
-  if (pendingNextStep.test(stripped)) return true;
-  if (
-    (completionTail.test(stripped) || completionDelivery.test(stripped)) &&
-    !futurePromise.test(stripped)
-  ) {
-    return false;
-  }
-
-  // Test the last block AND its final sentence — models often write a
-  // useful intro then end with intent ("Got it. I will now read the file.").
-  const sentences = stripped
-    .split(/(?<=[.!?…])\s+/)
-    .map((s) => stripDecoration(s))
-    .filter((s) => s.length > 0);
-  const lastSentence = sentences[sentences.length - 1] ?? stripped;
-
-  // Discourse-marker stripper: small models often write a verbose lead-in
-  // ("But first, let me check…", "Okay, I'll read it now") that buries the
-  // intent phrase past the `^`-anchored patterns below. Strip a narrow set
-  // of conjunction/filler openers so the match anchors land on the real
-  // verb. Iterate because they stack ("Okay, so first, let me check").
-  // Kept narrow on purpose — broader stripping risks eating real content.
-  const stripLeadingMarkers = (s: string): string => {
-    const markerHead =
-      /^(?:But (?:first|now|then),?|First (?:of all|things first),?|First,?|Okay,?|OK,?|Alright,?|So,?|Then,?|Well,?|Right,?|Sure,?|Got it,?|Of course,?)\s+/i;
-    let out = s;
-    for (let i = 0; i < 5; i++) {
-      const before = out;
-      out = out.replace(markerHead, '');
-      if (out === before) break;
-    }
-    return out;
-  };
-  const lastSentenceCore = stripLeadingMarkers(lastSentence);
-
-  // Patterns matched from the start of either the whole last paragraph or
-  // its final sentence. False positives waste one continuation; false
-  // negatives leave the user hanging.
-  const patterns: RegExp[] = [
-    // First-person intent followed by a verb.
-    /^(?:I (?:will|am going to|am about to|am attempting to|am now|need to|am)\s+\w+|I'll\s+\w+|I'm (?:now |about to |going to |attempting to )\w+|Let me\s+(?!know\b)\w+|Now,?\s+I\b|Next,?\s+I\b)/i,
-    // Bare gerund opener — often a heading the model wrote in place of
-    // doing the work ("Processing Mockup…", "Reading the spec…").
-    /^(?:Processing|Reading|Checking|Searching|Loading|Analyzing|Computing|Generating|Drafting|Writing|Preparing|Reviewing|Examining|Looking)\b/i,
-    // Standalone "thinking out loud" markers.
-    /^(?:One moment|Hold on|Working on (?:it|that)|On it|Stand by)\b/i,
-    // Passive "I'll report back" promises — classic shape of a model that
-    // narrated delegation to another agent/tool without actually firing
-    // the call. The real failure is upstream (the tool wasn't invoked),
-    // but detecting the shape here triggers a nudge that usually recovers.
-    // Matches anywhere in the last sentence, not just at its head, because
-    // these are typically tacked on after an unrelated clause ("Leo's on
-    // it now — I'll let you know when he's ready"). Future-tense only:
-    // `I've let you know` (past) is a genuine completion, not a stall.
-    // Verb list covers every "I'll <passively promise you something>"
-    // shape small voormen keep emitting instead of calling a tool.
-    /\bI'll\s+(?:let you know|keep you (?:posted|updated|informed)|update you|notify (?:you|us)|alert (?:you|us)|inform (?:you|us)|ping you|report back|circle back|follow up|reach out|touch base|flag\b)/i,
-    // "I've (read|retrieved|checked|reviewed|loaded) X to (understand|see
-    // |figure out|learn|find out) Y." — wild-caught Gemma 4 26B pattern:
-    // the model ran a few read tools, then closed the turn with a past-
-    // tense summary of what it now knows ("I've retrieved the task
-    // details ... to understand exactly where we left off"). It's
-    // grammatically a completion but functionally a stall — the actual
-    // work (writing the file, advancing the phase) never happened. The
-    // CONTINUATION_NUDGE fired by this match prompts the model to take
-    // the next concrete action. Past-tense gating + an explicit purpose
-    // clause is what distinguishes this from a real completion ("I've
-    // retrieved the data; here's the result.") which already bails out
-    // via `completionDelivery`.
-    /\bI['’]ve\s+(?:read|retrieved|reviewed|loaded|fetched|checked|examined|inspected|gathered|gotten|got|pulled|looked at|listed)\s+[\s\S]{0,200}?\bto\s+(?:understand|see|figure out|learn|find out|determine|know|grasp|get a sense of|get a feel for|familiarize myself with|orient myself)\b/i,
-    // "I have identified the need to implement X" / "I've determined we
-    // need to rewrite Y" — first-person DIAGNOSIS that names the change
-    // but ends the turn before making it. Wild-caught Gemma 4 E4B on the
-    // squisq Geohash bug: the dev read the file across two turns, then
-    // closed with "I have identified the need to implement great-circle
-    // path sampling instead of linear interpolation in `getGeohashPath`"
-    // and stopped — no edit followed. None of the bail-outs caught it:
-    // no done/complete verb (completionTail), no here's/results
-    // (completionDelivery), the read-verb context-gather pattern above
-    // keys on a read verb + "to understand" (here it's "identified" +
-    // "need to implement"), and the spelled-out "I have" isn't the
-    // `I've` contraction those patterns match. Gate the trailing clause
-    // to a modal (need to / have to / must / should) + an
-    // implementation/change verb so a genuine delivery ("I've identified
-    // and fixed it in index.html" — no modal + verb) does NOT trip, and
-    // a real completion still bails via completionTail/-Delivery first
-    // (both are checked before this patterns loop runs).
-    /\bI(?:['’]ve|\s+have)\s+(?:identified|determined|concluded|realiz\w+|realis\w+|figured\s+out|pinpointed|diagnosed)\b[\s\S]{0,160}?\b(?:needs?\s+to|have\s+to|must|should)\s+(?:implement|replace|change|fix|add|rewrite|refactor|update|modify|introduce|apply|write|create|build|switch|use)\b/i,
-    // Impersonal sibling: "The fix is to replace …", "The solution is to
-    // rewrite …" — the same diagnosis-without-action shape with the
-    // subject dropped. Distinct from `pendingNextStep` (keyed on "the
-    // next step is to …"); this keys on the problem/remedy noun.
-    /\bthe\s+(?:fix|solution|remedy|correction|change|approach|root\s+cause|issue|problem|bug)\s+is\s+(?:to\s+|going\s+to\s+)?(?:implement|replace|change|fix|add|rewrite|refactor|update|modify|introduce|apply|write|create|build|switch|use)\b/i,
-  ];
-
-  for (const pat of patterns) {
-    if (pat.test(stripped)) return true;
-    if (pat.test(lastSentence)) return true;
-    // Re-run the anchored patterns against the discourse-marker-stripped
-    // sentence: catches "But first, let me check…" / "Okay, I'll read it"
-    // shapes the raw `^`-anchor would miss. Unanchored patterns (#4) get
-    // tested redundantly but cheaply.
-    if (lastSentenceCore !== lastSentence && pat.test(lastSentenceCore)) return true;
-  }
-
-  return false;
 }
 
 /**

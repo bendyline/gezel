@@ -18,6 +18,9 @@ const ignoredDirectories = new Set([
 const ignoredRepoDirectories = new Set([
   '.tmp-qualla-batch',
   '.gezel/craftbooks',
+  'native/mobile/.build',
+  'packages/mobile/.build',
+  'packages/mobile/native/ios/.build',
   'artifacts',
   'evals/runs',
   'reports',

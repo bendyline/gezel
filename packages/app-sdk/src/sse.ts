@@ -49,6 +49,11 @@ export async function* readSseDataChunks(body: ReadableStream<Uint8Array>): Asyn
       if (dataParts.length > 0) yield dataParts.join('\n');
     }
   } finally {
-    reader.releaseLock();
+    try {
+      // Async-iterator return/break must stop native work as well as HTTP bodies.
+      await reader.cancel().catch(() => {});
+    } finally {
+      reader.releaseLock();
+    }
   }
 }

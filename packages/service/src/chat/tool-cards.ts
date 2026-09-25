@@ -1,4 +1,9 @@
-import { type ToolCallCard, ToolCallCardSchema, type ToolCardStep } from '@bendyline/gezel';
+import {
+  type Task,
+  type ToolCallCard,
+  ToolCallCardSchema,
+  type ToolCardStep,
+} from '@bendyline/gezel';
 import type { ToolCallEvent } from '../providers/types.js';
 
 /**
@@ -182,6 +187,19 @@ function lastCompletedStepId(steps: CardStepShape[]): string | undefined {
 function validated(candidate: unknown): ToolCallCard | undefined {
   const parsed = ToolCallCardSchema.safeParse(candidate);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The start card for a task the daemon launched itself — the chat
+ * composer's direct launch, where no tool call returned a structuredContent
+ * to extract from. Same builder as the `invoke_craftbook` path, fed the real
+ * task record, so both receipts are byte-for-byte the same shape.
+ */
+export function craftbookStartCardForTask(
+  task: Task,
+  opts: { reused?: boolean } = {},
+): ToolCallCard | undefined {
+  return startCard({ task, ...(opts.reused ? { details: { reused: true } } : {}) });
 }
 
 /**

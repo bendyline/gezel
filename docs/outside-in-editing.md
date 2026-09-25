@@ -2,8 +2,8 @@
 
 Gezel's project file viewer recognizes HTML, DOCX, PDF, PPTX, XLSX, and CSV
 files as outside-in documents. The rendered file stays visible in the
-Workspace or Artifacts tree; selecting it mounts Markdown from a hidden sibling
-companion:
+Workspace or Artifacts tree; selecting an office document mounts Markdown from a
+hidden sibling companion:
 
 ```text
 Tucson.pptx
@@ -26,10 +26,17 @@ inline Markdown tables. CSV companions are preview-only for now: the current
 CSV exporter does not yet materialize a sidecar reference when regenerating the
 visible source, so Gezel does not offer the Markdown-editing opt-in for them.
 
-If the companion does not exist, Gezel imports the rendered file through
-Squisq's format registry and creates it. For formats that support round-trip
-export, imported Markdown is read-only until the user chooses **Allow editing
-via markdown** from the rendered file's context menu. That action first writes
+Standalone HTML in a project's Workspace or Artifacts opens in the HTML viewer,
+where scripts and local assets can run in the host's isolated preview. Opening
+it creates no Markdown companion. If an existing companion is present, selecting
+the HTML file opens that document instead, preserving its editing intent. This
+rule is shared by desktop and mobile and does not inspect the HTML's contents.
+
+For the other formats, if the companion does not exist, Gezel imports the
+rendered file through Squisq's format registry and creates it. For formats that
+support round-trip export, imported Markdown is read-only until the user chooses
+**Allow editing via markdown** from the rendered file's context menu. On standalone
+HTML, this explicit action imports and creates the companion too. It then writes
 a create-only backup to
 `<stem>_files/.original/original.<format>`, then adds
 `squisq-updatefrommarkdown: true` to the companion frontmatter. Subsequent saves

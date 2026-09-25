@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "craftbook-template",
+  "id": "proj-skill-button-up",
+  "name": "Button Up",
+  "description": "Shepherd the local branch to a fully green state — install missing dependencies (pnpm deps:install), make lint pass (pnpm lint), then run every build and test (pnpm all), fixing whatever fails and re-running until all three pass back to back with no edits in between. If the branch has an open PR, also triages its failing GitHub CI checks and fixes them locally. Use when the user says \"button up\", \"button it up\", \"get the branch green\", or \"make everything pass before I commit\".\n\nTake the current branch plus its uncommitted changes and leave it in a state\nthe user can commit with confidence: dependencies installed, lint clean, and\n`pnpm all` (build, typecheck, lint, unit, published, e2e, bundle, coverage)\ngreen. You find the failures, fix them at the root, and keep cycling until a\nfull pass needs no further edits.\n\nIf the branch has an open pull request, its GitHub CI is part of the job\ntoo: every failing check must end up with a local fix or a clear\nexplanation.\n\nThe gates, in order:\n\n| Gate | Command | What it proves |\n|---|---|---|\n| PR | `gh pr checks` | the pushed branch's CI failures are understood and fixed locally |\n| A | `pnpm deps:install` | `node_modules` matches the lockfile |\n| B | `pnpm lint` | biome + every repo guard script (paths, module size, layer direction, patient-fetch, markdown links, NOTICE, audit) |\n| C | `pnpm all` | the full validation chain in `validate:unlocked` plus coverage |\n\n> Converted from `.claude/skills/button-up/SKILL.md` (skill \"button-up\").\n> - 1 shell block(s) kept as prose (not statically convertible)\n> - frontmatter keys not mapped: disable-model-invocation",
+  "tags": [],
+  "maintainer": {
+    "name": "project"
+  },
+  "yankedVersions": []
+}

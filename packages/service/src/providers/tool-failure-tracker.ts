@@ -292,7 +292,13 @@ export class ToolFailureTracker {
       }
       return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. Stop emitting source fragments or more surgical edits. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise your next attempt must use one complete \`write_file({ path, content })\` call for the same file, containing the entire corrected source file from first byte through final closing tag.`;
     }
-    return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. The model couldn't find a working call shape; the tool result history is preserved so you can see what went wrong. Ask the gezel to try a different approach, or report the bug.`;
+    // Deliberately does NOT assert that the arguments were malformed. This
+    // line used to read "the model couldn't find a working call shape", which
+    // on schema-migration was simply false — every call logged `keys=path`
+    // and the real cause was a repair surface with no creating tool in it.
+    // A wrong diagnosis here costs more than no diagnosis: it sends whoever
+    // reads it hunting for an argument-schema bug that does not exist.
+    return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. The tool result history is preserved, and the repeated error text there is the diagnosis — the arguments may be fine and the call still impossible (a path that does not exist, or a tool that cannot create one). Ask the gezel to try a different approach, or report the bug.`;
   }
 
   /**

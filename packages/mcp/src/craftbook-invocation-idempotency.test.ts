@@ -85,6 +85,43 @@ describe('RootTurnInvocationCache', () => {
     );
   });
 
+  it('treats a re-emitted call that only changes the title or description as the same work', async () => {
+    // qwen3.8-27b, 2026-09-23: the second call dropped `title` and launched a
+    // second deck crew for one "Create a PowerPoint about pizza".
+    const cache = new RootTurnInvocationCache<string>();
+    const execute = vi.fn(async () => 'default/2');
+    const params = { topic: 'pizza' };
+    await cache.run({
+      rootTurnId: 'turn',
+      invocation: { craftbookId: 'powerpoint-deck', title: 'Pizza PowerPoint', params },
+      execute,
+    });
+    const again = await cache.run({
+      rootTurnId: 'turn',
+      invocation: { craftbookId: 'powerpoint-deck', description: 'Create a deck', params },
+      execute,
+    });
+    expect(again).toEqual({ value: 'default/2', reused: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('still separates two decks on different topics in one turn', async () => {
+    const cache = new RootTurnInvocationCache<string>();
+    let n = 0;
+    const execute = vi.fn(async () => `default/${++n}`);
+    await cache.run({
+      rootTurnId: 'turn',
+      invocation: { craftbookId: 'powerpoint-deck', params: { topic: 'pizza' } },
+      execute,
+    });
+    await cache.run({
+      rootTurnId: 'turn',
+      invocation: { craftbookId: 'powerpoint-deck', params: { topic: 'pasta' } },
+      execute,
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('derives a stable opaque key that changes with the root turn', () => {
     const invocation = { craftbookId: 'build-loop', params: { outputPath: 'index.html' } };
     expect(rootTurnInvocationKey('turn-1', invocation)).toBe(

@@ -201,6 +201,14 @@ export function MeesterConversation({
               draftScope="meester"
               draftId={draftId || undefined}
               onDraftIdChange={(next) => setDraftId(next ?? '')}
+              // The attached task launches in the composer's current project
+              // (Default runs real work). `projects` is only read when the
+              // dialog's project picker shows, which the lock suppresses.
+              taskLaunch={{
+                gezels,
+                projects: [],
+                onLaunched: () => setSessionRefreshKey((k) => k + 1),
+              }}
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={activeGezelId}
@@ -211,6 +219,12 @@ export function MeesterConversation({
                   activeDraftId={draftId || undefined}
                   onDraftSelect={(next) => setDraftId(next ?? '')}
                   draftScope="meester"
+                  // The front door opens on a fresh thread: that is where the
+                  // Task key lives, and a launch should not land inside
+                  // yesterday's conversation. "Where was I" still wins —
+                  // the remembered selection is honoured above, and an
+                  // unsent thread starter is still restored by the picker.
+                  autoPickNewest={false}
                 />
               }
             />

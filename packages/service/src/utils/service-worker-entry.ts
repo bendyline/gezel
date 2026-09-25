@@ -20,6 +20,7 @@ export const SERVICE_WORKER_ENTRIES = {
   },
   'gguf-metadata': { built: 'providers/llama-cpp/gguf-metadata-worker.js' },
   knowledge: { built: 'knowledge/search-worker.js' },
+  quickjs: { built: 'scripts/quickjs-worker.js', source: 'scripts/quickjs-worker.ts' },
 } as const;
 
 export type ServiceWorkerEntry = keyof typeof SERVICE_WORKER_ENTRIES;

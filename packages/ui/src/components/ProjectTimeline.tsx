@@ -1,6 +1,7 @@
 import { parseTaskRef } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference } from './chat-open-command.js';
@@ -209,7 +210,7 @@ export function ProjectTimeline({
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
-      {...(gezelId || taskRef ? {} : { terminalStreamUrl })}
+      {...(gezelId || taskRef || !runtimeCapabilities().terminal ? {} : { terminalStreamUrl })}
       {...(terminalRefreshKey !== undefined ? { terminalRefreshKey } : {})}
       {...(terminalSubmission ? { terminalSubmission } : {})}
       {...(terminalFocusRequest ? { terminalFocusRequest } : {})}

@@ -1,0 +1,66 @@
+/* Shared by desktop projects and the native foreground shell. Keep the
+   section names visible; a phone should not require learning a new icon set. */
+.project-section-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-section-tabs .gz-tabs-list {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  border-bottom: none;
+}
+
+.project-section-tabs .gz-tabs-list::-webkit-scrollbar {
+  display: block;
+  height: 3px;
+}
+
+.project-section-tabs .gz-tabs-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-sm);
+}
+
+.project-section-tabs .gz-tabs-trigger {
+  flex: 0 0 auto;
+  margin-bottom: -1px;
+  padding: 0.4rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.project-section-tabs .gz-tabs-trigger:hover,
+.project-section-tabs .gz-tabs-trigger[data-state="active"] {
+  color: var(--text);
+}
+
+.project-section-tabs .gz-tabs-trigger[data-state="active"] {
+  border-bottom-color: var(--accent);
+}
+
+.project-section-tabs .gz-tabs-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.project-section-tabs .gz-tabs-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-section-tabs.is-compact .gz-tabs-trigger {
+  min-height: 44px;
+  padding-inline: 0.85rem;
+}

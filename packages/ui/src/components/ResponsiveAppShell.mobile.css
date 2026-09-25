@@ -1,0 +1,361 @@
+.responsive-app-shell[data-compact="true"] > .responsive-app-navigation:not([hidden]) {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar {
+  width: 100% !important;
+  min-width: 0;
+  box-shadow: none;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar::before,
+.responsive-app-shell[data-compact="true"] .app-sidebar::after {
+  display: none;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar-scroll {
+  padding: 0.75rem;
+  direction: ltr;
+}
+
+.responsive-app-shell[data-compact="true"] .app-sidebar-item,
+.responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
+.responsive-app-shell[data-compact="true"] .app-sidebar-add {
+  min-height: 44px;
+}
+
+.responsive-app-shell[data-compact="true"]
+  :is(.app-sidebar-item-label, .app-sidebar-group-label, .app-sidebar-item-role) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+/* Large text and an open phone keyboard can make the compose controls taller
+   than the pane. Keep them reachable without changing the user's draft. */
+.app.app-compact :is(.project-chat, .gezel-chat-tab) {
+  overflow-y: auto;
+}
+
+.app.app-compact :is(.project-chat-compose-shell, .chat-composer) {
+  flex-shrink: 0;
+}
+
+/* Compact chat is a dock, with no desktop gutters around the compose surface.
+   Text and controls retain their own small inset for touch and focus rings. */
+.app.app-compact .home-workshop-main {
+  padding-inline: 0;
+}
+
+.app.app-compact .home-workshop-greeting {
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.app.app-compact .home-workshop-conversation .chat-rail-main {
+  overflow-y: auto;
+}
+
+.app.app-compact .app-main:has(> .gezel-detail-chat),
+.app.app-compact .two-col > section:has(> .gezel-detail-chat),
+.app.app-compact .task-detail-panel:has(.task-detail-chat-mode) {
+  padding: 0;
+}
+
+.app.app-compact .gezel-detail-chat > :is(.detail-header, .entity-tabs-row),
+.app.app-compact .task-detail-chat-mode > :is(.task-detail-header, .task-bench-row) {
+  padding-inline: 0.75rem;
+}
+
+.app.app-compact .project-chat-compose-shell {
+  margin-inline: 0;
+  padding-bottom: 0;
+}
+
+.app.app-compact
+  :is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat)
+  .chat-composer,
+.app.app-compact .project-chat-compose-main {
+  margin: 0;
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.app.app-compact .chat-composer {
+  padding-bottom: 0.5rem;
+}
+
+/* A phone turned sideways has desktop width but very little vertical room.
+   Keep project navigation and the draft, with secondary chrome out of the way. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .app.app-compact :is(.app-header, .home-workshop-greeting, .chat-rail-banner) {
+    display: none;
+  }
+}
+
+.responsive-app-shell[data-compact="true"] > .app-main {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app.app-mobile-preview {
+  width: min(100%, 390px);
+  margin-inline: auto;
+  box-shadow: 0 0 0 1px var(--border), 0 0 3rem var(--titlebar-pane-shadow);
+  position: relative;
+  isolation: isolate;
+}
+
+.app.app-compact {
+  min-width: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app.app-compact .app-header {
+  min-height: 52px;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+:root[data-layout="mobile"] .app.app-compact .app-header {
+  height: auto;
+}
+
+:root[data-layout="mobile"] .app.app-mobile-preview .app-header {
+  padding-inline: 0.75rem;
+  --wco-right: 0px;
+  --wco-left: 0px;
+}
+
+/* Portaled dialogs live outside .app. The layout marker also covers the
+   desktop mobile preview, whose browser viewport may still be wide. */
+:root[data-layout="mobile"] .gz-dialog {
+  min-width: 0;
+  max-width: min(366px, calc(100vw - 1.5rem));
+}
+
+/* Question dialogs are portaled outside the compact App. Their shared
+   controls still need the same touch targets as inline question cards. */
+:root:has(.app-compact) .pending-question button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.app.app-compact .app-header-right {
+  display: none;
+}
+
+.app.app-compact .app-header-brand {
+  min-height: 44px;
+}
+
+.app-header-navigation {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app-header-navigation:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.app-header-navigation-icon {
+  width: 19px;
+  height: 19px;
+}
+
+/* Keep the same Settings navigation and sections when the app becomes narrow.
+   The navigation gets a bounded scroll area above the full-width form, so a
+   fixed desktop rail cannot squeeze model controls outside the viewport. */
+.app.app-compact .settings-layout {
+  flex-direction: column;
+}
+
+.app.app-compact .settings-nav {
+  width: auto;
+  max-height: min(35%, 14rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.app.app-compact .settings-nav h2 {
+  margin-bottom: 0.5rem;
+  padding: 0.75rem 0.75rem 0;
+}
+
+.app.app-compact .settings-nav ul {
+  padding: 0 0.75rem 0.5rem;
+}
+
+.app.app-compact .settings-nav-item,
+.app.app-compact .settings-nav-group-toggle {
+  min-height: 44px;
+}
+
+.app.app-compact .settings-panel {
+  padding: 0.75rem;
+}
+
+.app.app-compact .settings-panel :is(input, select, textarea) {
+  max-width: 100%;
+}
+
+.app.app-compact .memories-pane {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 35%) minmax(0, 1fr);
+}
+
+.app.app-compact .memories-tree {
+  width: auto;
+  max-height: none;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tasks-view.tasks-view-compact .tasks-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tasks-view.tasks-view-compact [hidden] {
+  display: none !important;
+}
+
+.tasks-view.tasks-view-compact > button {
+  min-height: 44px;
+  align-self: flex-start;
+  margin-block: 0.5rem;
+}
+
+.app.app-compact .task-detail-header,
+.app.app-compact .task-detail-actions {
+  flex-wrap: wrap;
+}
+
+.app.app-compact
+  :is(
+    .task-detail-actions button,
+    .task-step-panel .gz-select-trigger,
+    .gezel-chat-project-select,
+    .gezel-chat-session-select
+  ) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.app.app-compact .titlebar-search-trigger {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app.app-compact .titlebar-search-trigger:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.titlebar-search-trigger-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.app.app-compact .app-header:has(> .titlebar-search[data-compact-search="active"]) {
+  flex-wrap: nowrap;
+}
+
+.app.app-compact
+  .app-header:has(> .titlebar-search[data-compact-search="active"])
+  > :not(.titlebar-search, .search-results-overlay) {
+  display: none;
+}
+
+.app.app-compact .titlebar-search[data-compact-search="active"] {
+  flex: 1 1 100%;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+}
+
+.app.app-compact .titlebar-search-input {
+  min-height: 44px;
+  padding-right: 42px;
+}
+
+.app.app-compact .titlebar-search-close {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  transform: translateY(-50%);
+  color: #2c352a;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app.app-compact .titlebar-search-close:hover {
+  background: rgba(44, 53, 42, 0.1);
+}
+
+.app.app-compact .titlebar-search-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app-compact-navigation {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-compact-navigation > button {
+  min-height: 44px;
+  padding: 0.4rem 0.65rem;
+}
+
+.app.app-compact .app-questions-overlay {
+  width: calc(100% - 1rem);
+  max-width: calc(100% - 1rem);
+  margin-inline: 0.5rem;
+  right: 0;
+}
+
+:root:not([data-platform]) .app.app-compact .app-header {
+  padding-inline: 0.75rem;
+}

@@ -20,6 +20,7 @@ import {
   isEngineBusyError,
 } from '../../providers/native/capacity-broker.js';
 import {
+  IMAGE_HISTORY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   RemoteAdmissionRequestSchema,
   RemoteCacheEvictRequestSchema,
@@ -505,9 +506,15 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
 
   app.post('/infer', async (c) => {
     const body = RemoteInferRequestSchema.parse(await c.req.json());
-    if (body.protocolVersion > PROTOCOL_VERSION) {
-      return c.json({ error: 'protocol_version_unsupported', supported: PROTOCOL_VERSION }, 426);
+    if (body.protocolVersion > IMAGE_HISTORY_PROTOCOL_VERSION) {
+      return c.json(
+        { error: 'protocol_version_unsupported', supported: IMAGE_HISTORY_PROTOCOL_VERSION },
+        426,
+      );
     }
+    const hasImageHistory = body.priorMessages.some((m) => m.role === 'user' && m.images?.length);
+    if (hasImageHistory && body.protocolVersion < IMAGE_HISTORY_PROTOCOL_VERSION)
+      return c.json({ error: 'image_history_requires_protocol_2' }, 400);
 
     const target = resolveModelTarget(body.model);
     if (!target) {
@@ -552,6 +559,10 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
         // never enter the drain path and retain their safe batching width.
         engineDrainWaitMs: 0,
       });
+      if (hasImageHistory && provider.supportsImageInput !== true) {
+        release();
+        return c.json({ error: 'image_history_not_supported_by_engine' }, 422);
+      }
       session = await provider.createSession({
         systemMessage: body.systemMessage,
         model: target.model,
@@ -668,8 +679,11 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
       );
 
       try {
+        const lastPriorMessage = body.priorMessages.at(-1);
         const continueFromToolResult =
-          body.prompt.length === 0 && body.priorMessages.at(-1)?.role === 'tool';
+          body.prompt.length === 0 &&
+          (lastPriorMessage?.role === 'tool' ||
+            (lastPriorMessage?.role === 'user' && Boolean(lastPriorMessage.images?.length)));
         await session.sendAndWait(body.prompt, {
           timeoutMs: REMOTE_INFER_TIMEOUT_MS,
           ...(continueFromToolResult ? { continueFromToolResult: true } : {}),

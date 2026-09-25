@@ -1,0 +1,19 @@
+{
+  "source": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+    "sha256": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
+    "file": "kokoro-model.tar.bz2"
+  },
+  "files": {
+    "lexicon-us-en.txt.gz": {
+      "sha256": "67407cb21f2d323f25474bdd1f16c852028b171e154b4e34ddb4352c18cb58ce",
+      "entries": 178401,
+      "bytes": 1410434
+    },
+    "lexicon-gb-en.txt.gz": {
+      "sha256": "ed086f119676643b0caf28ed7e3a45004080b6702e55e0635fbfceceee33994c",
+      "entries": 191924,
+      "bytes": 1510569
+    }
+  }
+}

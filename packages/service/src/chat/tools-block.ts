@@ -124,6 +124,12 @@ export interface RenderToolsBlockOptions {
    * `write_file`. Wild-caught on Ada (Atari Combat Clone task).
    */
   bridgeFailed?: boolean;
+  /**
+   * Whether the prompt contains a `### Workspace files` inventory. Role-
+   * scoped prompts can omit it; the workspace-vs-artifacts reminder must not
+   * claim a listing exists in that case.
+   */
+  workspaceListingRendered?: boolean;
 }
 
 /**
@@ -163,7 +169,10 @@ const ARTIFACT_SURFACE_TOOLS = new Set([
   'copy_artifact_to_workspace',
 ]);
 
-function renderWorkspaceArtifactGuidance(tools: ReadonlyArray<AvailableToolInfo>): string | null {
+function renderWorkspaceArtifactGuidance(
+  tools: ReadonlyArray<AvailableToolInfo>,
+  workspaceListingRendered: boolean,
+): string | null {
   // Membership checks run in canonical space so the guidance renders in
   // the legacy A/B arm too — but the SPELLING pushed into the prompt is
   // the advertised one, so the model is never taught a name it can't
@@ -200,7 +209,10 @@ function renderWorkspaceArtifactGuidance(tools: ReadonlyArray<AvailableToolInfo>
     ? '; `write_artifact({ path: "packages/...", content: "..." })` does not edit the workspace.'
     : '.';
 
-  return `Workspace paths from "Workspace files" use ${workspacePhrase}. Artifacts are a separate drawer: use ${artifactPhrase} only for \`list_artifacts\` results or explicit artifact paths${writeArtifactWarning}`;
+  const workspaceLead = workspaceListingRendered
+    ? `Workspace paths from "Workspace files" use ${workspacePhrase}.`
+    : `Project workspace paths use ${workspacePhrase}; the workspace inventory is intentionally not preloaded for this role.`;
+  return `${workspaceLead} Artifacts are a separate drawer: use ${artifactPhrase} only for \`list_artifacts\` results or explicit artifact paths${writeArtifactWarning}`;
 }
 
 /**
@@ -284,7 +296,10 @@ export function renderAvailableToolsBlock(opts: RenderToolsBlockOptions): string
     lines.push('');
   }
 
-  const workspaceArtifactGuidance = renderWorkspaceArtifactGuidance(opts.tools);
+  const workspaceArtifactGuidance = renderWorkspaceArtifactGuidance(
+    opts.tools,
+    opts.workspaceListingRendered ?? true,
+  );
   if (workspaceArtifactGuidance) {
     lines.push('### Workspace vs Artifacts');
     lines.push(workspaceArtifactGuidance);

@@ -389,6 +389,17 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     ).toEqual(['draft_connector_action']);
   });
 
+  it('predicts the deny-net script tools on any host once the policy allows the network', () => {
+    // Must agree with gezel-mcp registration, which gets the same answer
+    // through GEZEL_SCRIPT_NETWORK_ALLOWED.
+    const allowlist = new Set(['run_nodejs_script', 'derive_file']);
+    expect(
+      availableBuiltinToolsForAllowlist(allowlist, [], undefined, { networkAllowed: true })
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual(['derive_file', 'run_nodejs_script']);
+  });
+
   it('admits the social post trio only when granted, and strips it under a no-services posture', async () => {
     const granted = await resolveSessionToolSurface({
       ...baseOpts,
@@ -455,6 +466,44 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('replace_in_file')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps the tools that open a craftbook input, short of the book’s own step policy', async () => {
+    const input = {
+      drawer: 'artifacts' as const,
+      kind: 'folder' as const,
+      hasOfficeDocuments: true,
+    };
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Build the ebook',
+        advanceWhen: { file: 'index.html', minBytes: 800 },
+        toolPolicy: { outputMedium: 'workspace' },
+      },
+      taskInputs: [input],
+    });
+    expect(allowlist).not.toBeNull();
+    for (const name of ['list_artifacts', 'read_artifact', 'read_doc_as_markdown']) {
+      expect(allowlist!.has(name)).toBe(true);
+    }
+
+    const { allowlist: authored } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Build the ebook',
+        advanceWhen: { file: 'index.html', minBytes: 800 },
+        toolPolicy: { outputMedium: 'workspace', disallowBuiltinToolsets: ['artifacts'] },
+      },
+      taskInputs: [input],
+    });
+    expect(authored!.has('read_artifact')).toBe(false);
   });
 
   it('grants any assigned role its exact step kit through the hard ceiling', async () => {
@@ -546,8 +595,10 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       tier: 'medium',
     });
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('write_task_note')).toBe(false);
+    // `write_task_note` is part of the Meester's own oversight kit now, so
+    // the step grant is observed through the progression tools it adds.
     expect(allowlist!.has('advance_task_step')).toBe(false);
+    expect(allowlist!.has('set_task_status')).toBe(false);
   });
 
   it.each([
@@ -925,6 +976,42 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
     expect([...allowlist!]).toEqual(['invoke_craftbook']);
   });
 
+  // The composer sends `turnIntent: 'off'` after the person dismissed the
+  // suggested task for this text. The clamp must honor that: forcing the
+  // model into the one launch the person just declined is the wrong answer.
+  it('leaves the surface intact when the send opted out of exact craftbook routing', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'alaska-off',
+        gezelId: 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-09-14T00:00:00.000Z' }],
+        createdAt: '2026-09-14T00:00:00.000Z',
+        lastActivityAt: '2026-09-14T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'mlx',
+      modelId: 'qwen3.8-27b-q4',
+      parameterSize: '27B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'medium',
+      latestUserMessage: prompt,
+      exactCraftbookRouting: false,
+      onClamp: (kind: string) => clamps.push(kind),
+    } as never);
+
+    expect(clamps).not.toContain('exact-craftbook-invocation');
+    expect(!allowlist || allowlist.size > 1).toBe(true);
+  });
+
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {
     const prompt =
       'Create a reusable weekly procedure for reviewing project quality and invoking the right crew.';
@@ -974,8 +1061,8 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
   it('does not clamp a coordinator executing a step that declares a deliverable', async () => {
     const seed =
       'The previous step has been completed and handed step `oversight` of task default/1 to ' +
-      'you. Follow the step instructions already in your prompt — make the first tool call they ' +
-      'name this turn. Append focused notes with `write_task_note` as you go so the next gezel ' +
+      'you. Follow the step instructions already in your prompt — start with the first tool call ' +
+      'they name, then keep working through the procedure. Append focused notes with `write_task_note` as you go so the next gezel ' +
       'can pick up where you left off. When the step is done, call `advance_task_step` to hand ' +
       "off to whoever's next.";
     const clamps: string[] = [];

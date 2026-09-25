@@ -1,6 +1,7 @@
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+import { validatePortablePath } from '@bendyline/gezel/runtime';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   PathSafetyError,
@@ -260,5 +261,29 @@ describe('assertNoTemplatePlaceholderPath', () => {
     expect(() => assertNoTemplatePlaceholderPath('tasks/7/security/scope.md')).not.toThrow();
     expect(() => assertNoTemplatePlaceholderPath('src/{index}.ts')).not.toThrow();
     expect(() => assertNoTemplatePlaceholderPath('notes/a{b}c.md')).not.toThrow();
+  });
+});
+
+describe('segment rules agree with the portable runtime', () => {
+  // These are the rules the shared table governs on both hosts. Dot segments,
+  // templates and symlinks are deliberately absent: the desktop handles those
+  // in `safeJoin`, `assertNoTemplatePlaceholderPath` and `realpath`.
+  const hostile = ['CON', 'con.txt', 'CON .txt', 'a:b', 'x.', 'x ', 'a\0b', 'docs/lpt1.md'];
+  const benign = ['report.md', 'notes/2026.md', 'conference/agenda.md'];
+  const portableRejects = (segment: string) => {
+    try {
+      validatePortablePath(segment);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  it.each(hostile)('both hosts refuse %j', (segment) => {
+    expect(safeJoin('/base', segment)).toBeNull();
+    expect(portableRejects(segment)).toBe(true);
+  });
+  it.each(benign)('both hosts accept %j', (segment) => {
+    expect(safeJoin('/base', segment)).not.toBeNull();
+    expect(portableRejects(segment)).toBe(false);
   });
 });

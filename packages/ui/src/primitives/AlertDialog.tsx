@@ -1,5 +1,6 @@
 import * as RadixAlertDialog from '@radix-ui/react-alert-dialog';
 import { type ComponentPropsWithoutRef, type ElementRef, type ReactNode, forwardRef } from 'react';
+import { useDialogReturnFocus } from './useDialogReturnFocus.js';
 
 export const Root = RadixAlertDialog.Root;
 export const Trigger = RadixAlertDialog.Trigger;
@@ -26,11 +27,13 @@ Overlay.displayName = RadixAlertDialog.Overlay.displayName;
 export const Content = forwardRef<
   ElementRef<typeof RadixAlertDialog.Content>,
   ComponentPropsWithoutRef<typeof RadixAlertDialog.Content>
->(function Content({ className, ...rest }, ref) {
+>(function Content({ className, onOpenAutoFocus, onCloseAutoFocus, ...rest }, ref) {
+  const focusHandlers = useDialogReturnFocus(onOpenAutoFocus, onCloseAutoFocus);
   return (
     <RadixAlertDialog.Content
       {...rest}
       ref={ref}
+      {...focusHandlers}
       className={className ? `gz-dialog ${className}` : 'gz-dialog'}
     />
   );

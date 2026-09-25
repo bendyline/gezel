@@ -329,9 +329,9 @@
   pointer-events: auto;
 }
 .msg-action-button {
-  width: 26px;
-  height: 26px;
-  padding: 0;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0.2rem 0.35rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -347,6 +347,27 @@
   background: var(--accent);
   color: var(--titlebar-ink, #fff);
   border-color: var(--accent);
+}
+
+/* Touch screens and compact windows keep actions in the message flow, where
+   they remain visible and cannot overflow the narrow chat gutter. */
+@media (hover: none), (max-width: 600px) {
+  .msg-actions-anchor {
+    position: static;
+    height: auto;
+    padding: 0.5rem 0 0;
+  }
+  .msg-actions {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .msg-action-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* Debug-only "copy debug bundle" button — same shape as the regular
@@ -680,12 +701,6 @@
   color: inherit;
 }
 
-.msg-retrieval-note {
-  margin: 0.25rem 0 0;
-  color: var(--muted, #888);
-  font-size: 0.72rem;
-}
-
 .msg-retrieval-list {
   list-style: none;
   margin: 0.25rem 0 0;
@@ -982,36 +997,110 @@
   white-space: nowrap;
 }
 
-/* Inspectable pre-send routing, tucked into the composer action rail. This is
-   a read-only status chip rather than a mode or action; its tooltip retains
-   the full route while the face stays quiet beside narration and Send. */
-.chat-turn-intent-preview {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 1 100px;
-  gap: 0.3rem;
-  box-sizing: border-box;
-  max-width: 100px;
-  height: 1.75rem;
-  margin: 2px;
-  padding: 0 0.45rem;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+/* The attached task — the strip above the To line that shows what Send will
+   start. The main face is one button (reopen the configuration); the dismiss
+   is its own key. A daemon suggestion uses the same strip, dashed, so a
+   proposal reads as tentative next to a pick. See docs/ux.md. */
+.chat-composer-task-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  min-inline-size: 0;
+  margin: 0 0 0.25rem 0.25rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.5rem;
+  color: var(--text);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: var(--radius-md);
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  line-height: 1;
 }
 
-.chat-turn-intent-preview svg {
+.chat-composer-task-bar[data-origin="suggested"] {
+  border-style: dashed;
+}
+
+.chat-composer-task-bar-main {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 0.55rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.1rem 0.25rem;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-composer-task-bar-main:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.chat-composer-task-bar-art {
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-radius: var(--radius-md);
 }
 
-.chat-turn-intent-preview span {
+.chat-composer-task-bar-art-svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.chat-composer-task-bar-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.05rem;
+  line-height: 1.25;
+}
+
+.chat-composer-task-bar-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-composer-task-bar-name {
   overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-task-bar-params {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-task-bar-note {
+  align-self: center;
+  flex: 0 0 auto;
+  padding: 0.1rem 0.4rem;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--warning, #e8c34a) 12%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -1025,6 +1114,7 @@
 
 .chat-composer-recipient-trigger,
 .chat-composer-recipient-remove,
+.chat-composer-task-bar-dismiss,
 .chat-composer-expand-btn,
 .chat-recipient-add {
   display: inline-grid;
@@ -1941,7 +2031,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    secondary recipe (Stop previously inherited the filled global button
    default and read as a second primary next to Send). */
 .chat-stop-btn,
-.chat-interrupt-btn {
+.chat-interrupt-btn,
+.chat-task-btn {
   margin: 1px 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1951,9 +2042,20 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .chat-stop-btn:hover,
-.chat-interrupt-btn:hover {
+.chat-interrupt-btn:hover,
+.chat-task-btn:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--text);
+}
+
+/* The Task key: a word key beside Send that attaches a craftbook to the
+   message. Secondary on purpose — Send stays the one terracotta primary. */
+.chat-task-btn {
+  height: 1.65rem;
+  padding: 0 0.5rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1;
 }
 
 .chat-nudge-btn {

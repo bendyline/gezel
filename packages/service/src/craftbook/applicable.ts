@@ -342,6 +342,36 @@ export async function installedToolsetIds(store: Store, projectId?: string): Pro
  * the craftbook can run. `optional` toolsets are intentionally excluded
  * (they're hints, never blockers).
  */
+/**
+ * The craftbooks a project can launch right now, as the New Task dialog
+ * lists them: applicable catalog books shadowed by same-id project-local
+ * ones, plus the unmet-toolset map. One owner for the HTTP listing and the
+ * chat manager's trigger tier, so what the composer proposes is exactly
+ * what the dialog would offer.
+ */
+export async function listProjectCraftbookOffer(
+  catalog: CatalogService,
+  store: Store,
+  projectId: string,
+  opts: { git?: ProjectGitStatusReader } = {},
+): Promise<{
+  items: CatalogItemSummary[];
+  missingToolsets: Record<string, CraftbookToolsetNeed[]>;
+  establishedCodebase: boolean;
+}> {
+  const establishedCodebase = await projectHasEstablishedCodebase(store, projectId);
+  const requirementContext = await craftbookContextForProject(store, projectId, opts.git);
+  const catalogItems = await listApplicableCraftbooks(catalog, store, projectId, {
+    establishedCodebase,
+    requirementContext,
+  });
+  const projectItems = await projectCraftbookSummaries(store, projectId, { requirementContext });
+  const projectIds = new Set(projectItems.map((it) => it.manifest.id));
+  const items = [...projectItems, ...catalogItems.filter((it) => !projectIds.has(it.manifest.id))];
+  const missingToolsets = await missingToolsetsForCraftbooks(store, items, projectId);
+  return { items, missingToolsets, establishedCodebase };
+}
+
 export async function missingToolsetsForCraftbooks(
   store: Store,
   items: CatalogItemSummary[],

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
+import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
 import { ScriptRunner } from '../scripts/runner.js';
@@ -87,6 +88,124 @@ function gatedSteps(gate: unknown) {
 }
 
 describe('completion gates — checks floor', () => {
+  it('accepts current generalist image evidence across a stale bridge step tag, but excludes earlier activations', async () => {
+    const history = new HistoryManager(home);
+    const imageTasks = new TaskManager(store, history);
+    await writeWorkspaceFile(
+      'asset/build.json',
+      JSON.stringify({ images: [{ path: 'front.png' }] }),
+    );
+    const task = await imageTasks.create('default', {
+      title: 'Generalist rework',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      executionMode: 'generalist',
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          {
+            kind: 'imageEvidence',
+            file: 'asset/build.json',
+            imagesKey: 'images',
+            baseDir: 'asset',
+          },
+        ],
+      }),
+    });
+    const stepId = task.activeStepId!;
+    expect(task.executionMode).toBe('generalist');
+    expect(task.craftbook.steps.find((s) => s.id === stepId)?.lastActivatedAt).toBeTruthy();
+    const details = {
+      name: 'read_image_as_base64',
+      path: 'asset/front.png',
+      success: true,
+      imageArtifact: false,
+      taskRef: task.ref,
+      stepId: 'previous-review-step',
+    };
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      at: '2000-01-01T00:00:00Z',
+      summary: 'Previous activation',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe('held');
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Image delivered in current activation',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe(
+      'advanced',
+    );
+  });
+
+  it('counts only successful workspace image reads from this task and step activation', async () => {
+    const history = new HistoryManager(home);
+    const imageTasks = new TaskManager(store, history);
+    await writeWorkspaceFile(
+      'asset/build.json',
+      JSON.stringify({ images: [{ path: 'front.png' }] }),
+    );
+    const task = await imageTasks.create('default', {
+      title: 'Inspect render',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          {
+            kind: 'imageEvidence',
+            file: 'asset/build.json',
+            imagesKey: 'images',
+            baseDir: 'asset',
+          },
+        ],
+      }),
+    });
+    const stepId = task.activeStepId!;
+    const details = {
+      name: 'read_image_as_base64',
+      path: 'asset/front.png',
+      success: true,
+      imageArtifact: false,
+      taskRef: task.ref,
+      stepId,
+    };
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      at: '2000-01-01T00:00:00Z',
+      summary: 'Old activation',
+      details,
+    });
+    for (const override of [
+      { taskRef: 'default/999' },
+      { stepId: 'other' },
+      { success: false },
+      { imageArtifact: true },
+      { name: 'run_package_script' },
+      { path: 'asset/old.png' },
+    ]) {
+      await history.log({
+        kind: 'tool.called',
+        projectId: 'default',
+        summary: 'Unrelated image evidence',
+        details: { ...details, ...override },
+      });
+    }
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe('held');
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Delivered the current render',
+      details,
+    });
+    expect((await imageTasks.completeStepChecked('default', task.num, stepId)).status).toBe(
+      'advanced',
+    );
+  });
+
   it('holds the step (not completed, gateAttempts bumped, note appended) on reject', async () => {
     const task = await tasks.create('default', {
       title: 'Gated build',
@@ -1648,6 +1767,104 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     const after = await tasks.get('default', task.num);
     expect(after!.status).not.toBe('paused');
     expect(after!.craftbook.steps[0]!.gateAttempts).toBe(1);
+  });
+
+  it.each(['artifactReadEvidence', 'corpusReadEvidence'] as const)(
+    '%s stays repairable without workspace writes and advances after the missing read',
+    async (kind) => {
+      const { HistoryManager } = await import('../history/manager.js');
+      const history = new HistoryManager(home);
+      tasks = new TaskManager(store, history);
+      const records = ['sources/first.json', 'sources/second.json'];
+      // The corpus manifest may be workspace-side; the missing work is
+      // reading its existing artifact records, never rewriting that manifest.
+      await writeWorkspaceFile('batches.json', JSON.stringify([{ batchNumber: 1, records }]));
+      await writeArtifactFile('report.json', '{"review":"complete"}');
+      await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+      const check =
+        kind === 'artifactReadEvidence'
+          ? { kind, paths: JSON.stringify(records) }
+          : { kind, batchesFile: 'batches.json', batchNumber: '1' };
+      const task = await tasks.create('default', {
+        title: 'Read every source',
+        description: 'A read-evidence gate must not demand workspace write permission.',
+        assignee: { kind: 'user' },
+        steps: gatedSteps({
+          at: 'completion',
+          checks: [
+            { kind: 'sniff', file: 'report.json', artifact: true, sniff: 'json-valid' },
+            check,
+          ],
+          maxAttempts: 3,
+        }),
+      });
+      expect(task.status).toBe('active');
+      const stepId = task.craftbook.steps[0]!.id;
+      const recordRead = (path: string) =>
+        history.log({
+          kind: 'tool.called',
+          projectId: 'default',
+          summary: 'Read a source artifact',
+          details: {
+            success: true,
+            taskRef: task.ref,
+            stepId,
+            artifactReadSlices: [{ path, startLine: 1, endLine: 3, totalLines: 3 }],
+          },
+        });
+      await recordRead(records[0]!);
+      const missing = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+        cause: 'model',
+      });
+      expect(missing.status).toBe('held');
+      if (missing.status !== 'held') return;
+      expect(missing.gate.unsatisfiable).toBeUndefined();
+      expect(missing.gate.paused).toBe(false);
+      expect(missing.gate.attempt).toBe(1);
+      expect(missing.gate.message).toContain(records[1]);
+      expect(missing.gate.message).not.toContain('workspace writes are OFF');
+      expect((await tasks.get('default', task.num))!.status).toBe('active');
+
+      await recordRead(records[1]!);
+      const repaired = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+        cause: 'model',
+      });
+      expect(repaired.status).toBe('advanced');
+      expect((await store.getProject('default'))?.managedWorkspaceWritePolicy).toBe('deny');
+      const notes = await tasks.listNotes('default', task.num, stepId);
+      expect(notes.some((note) => note.text.includes('Gate unsatisfiable'))).toBe(false);
+    },
+  );
+
+  it('still pauses a mixed read-evidence gate when its workspace deliverable fails', async () => {
+    await writeWorkspaceFile('report.md', 'short');
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+    const task = await tasks.create('default', {
+      title: 'Mixed evidence and workspace report',
+      description: 'Exempting read evidence must not exempt actual workspace edits.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          { kind: 'artifactReadEvidence', paths: '["source.json"]' },
+          { kind: 'minBytes', file: 'report.md', bytes: 100 },
+        ],
+      }),
+    });
+    expect(task.status).toBe('active');
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+      undefined,
+      { cause: 'model' },
+    );
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.unsatisfiable).toBe(true);
+    expect(outcome.gate.paused).toBe(true);
+    expect(outcome.gate.attempt).toBe(0);
+    expect(outcome.gate.message).toContain('report.md');
   });
 
   it('a writable project keeps the ordinary attempt-charging reject path', async () => {

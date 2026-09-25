@@ -33,9 +33,10 @@ function quickOpenShortcutLabel(): string {
  * quick-open (name/file) mode, Command/Ctrl+K in full-search mode — both via
  * the `gezel:focus-search` event dispatched from `App`.
  */
-export function TitlebarSearch() {
+export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [compactSearchActive, setCompactSearchActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sourcesIncomplete, setSourcesIncomplete] = useState(false);
@@ -49,6 +50,17 @@ export function TitlebarSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const modeRef = useRef<SearchMode>('search');
   const quickOpenShortcut = quickOpenShortcutLabel();
+
+  const focusInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, []);
+
+  useEffect(() => {
+    if (compactSearchActive) focusInput();
+  }, [compactSearchActive, focusInput]);
 
   const groups: SearchGroup[] = useMemo(
     () => groupResults(results, { perGroupLimit: PER_GROUP_LIMIT }),
@@ -120,16 +132,16 @@ export function TitlebarSearch() {
       const detail = (e as CustomEvent<{ mode?: SearchMode }>).detail;
       modeRef.current = detail?.mode ?? 'search';
       window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
-      const el = inputRef.current;
-      if (el) {
-        el.focus();
-        el.select();
+      if (compact && !compactSearchActive) {
+        setCompactSearchActive(true);
+      } else {
+        focusInput();
       }
       if (query.trim()) setOpen(true);
     };
     window.addEventListener('gezel:focus-search', onFocusSearch);
     return () => window.removeEventListener('gezel:focus-search', onFocusSearch);
-  }, [query]);
+  }, [compact, compactSearchActive, focusInput, query]);
 
   // Cooperative dismissal: close our palette when another header popover opens.
   useEffect(() => {
@@ -143,6 +155,7 @@ export function TitlebarSearch() {
     setQuery('');
     setResults([]);
     inputRef.current?.blur();
+    setCompactSearchActive(false);
   }, []);
 
   const pick = useCallback(
@@ -175,37 +188,71 @@ export function TitlebarSearch() {
           e.preventDefault();
           e.stopPropagation();
           setOpen(false);
+        } else if (compact && compactSearchActive) {
+          e.preventDefault();
+          reset();
         } else {
           inputRef.current?.blur();
         }
       }
     },
-    [flat, activeIndex, open, pick],
+    [activeIndex, compact, compactSearchActive, flat, open, pick, reset],
   );
 
   return (
     <Popover.Root open={open && query.trim().length > 0} onOpenChange={setOpen}>
       <Popover.Anchor asChild>
-        <div className="titlebar-search" data-testid="titlebar-search">
-          <SearchIcon />
-          <input
-            ref={inputRef}
-            type="text"
-            className="titlebar-search-input"
-            data-testid="titlebar-search-input"
-            placeholder={`Search projects, files, docs…  ${quickOpenShortcut}`}
+        {compact && !compactSearchActive ? (
+          <button
+            type="button"
+            className="titlebar-search-trigger"
             aria-label="Search"
-            value={query}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onInputKeyDown}
-            onFocus={() => {
+            title="Search"
+            onClick={() => {
+              modeRef.current = 'search';
               window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
-              if (query.trim() && results.length > 0) setOpen(true);
+              setCompactSearchActive(true);
             }}
-          />
-        </div>
+          >
+            <SearchIcon className="titlebar-search-trigger-icon" />
+          </button>
+        ) : (
+          <div
+            className="titlebar-search"
+            data-testid="titlebar-search"
+            data-compact-search={compact ? 'active' : undefined}
+          >
+            <SearchIcon />
+            <input
+              ref={inputRef}
+              type="text"
+              className="titlebar-search-input"
+              data-testid="titlebar-search-input"
+              placeholder={`Search projects, files, docs…  ${quickOpenShortcut}`}
+              aria-label="Search"
+              value={query}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onInputKeyDown}
+              onFocus={() => {
+                window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
+                if (query.trim() && results.length > 0) setOpen(true);
+              }}
+            />
+            {compact && (
+              <button
+                type="button"
+                className="titlebar-search-close"
+                aria-label="Close search"
+                title="Close search"
+                onClick={reset}
+              >
+                <SearchCloseIcon />
+              </button>
+            )}
+          </div>
+        )}
       </Popover.Anchor>
       {query.trim().length > 0 ? (
         <Popover.Content
@@ -233,6 +280,7 @@ export function TitlebarSearch() {
               const q = query.trim();
               if (!q) return;
               setOpen(false);
+              setCompactSearchActive(false);
               openSearchResults(q);
             }}
           />
@@ -242,15 +290,29 @@ export function TitlebarSearch() {
   );
 }
 
-function SearchIcon() {
+function SearchIcon({ className = 'titlebar-search-icon' }: { className?: string }) {
   return (
-    <svg className="titlebar-search-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <svg className={className} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       <path
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
         d="M7 1.8a5.2 5.2 0 1 0 0 10.4A5.2 5.2 0 0 0 7 1.8zm3.8 8.9 3.4 3.4"
+      />
+    </svg>
+  );
+}
+
+function SearchCloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="m3.5 3.5 9 9m0-9-9 9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
       />
     </svg>
   );

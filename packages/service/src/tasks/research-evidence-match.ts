@@ -19,11 +19,15 @@
  */
 export const EXACT_SOURCE_READ_TOOLS: ReadonlySet<string> = new Set([
   'read_file',
+  'read_artifact',
   'read_doc_as_markdown',
 ]);
 
 /** Batch readers report their targets in `paths` rather than `path`. */
-export const BATCH_SOURCE_READ_TOOLS: ReadonlySet<string> = new Set(['read_files']);
+export const BATCH_SOURCE_READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_files',
+  'read_artifacts',
+]);
 
 /**
  * Compare two workspace paths the way the gate must: separator- and
@@ -45,15 +49,24 @@ export interface RecordedReadCall {
   paths?: readonly string[];
 }
 
-/** True when `call` opened exactly `expectedPath`. Empty expectation never matches. */
+/**
+ * True when `opened` is the expected source or, for a source that is a
+ * folder (a craftbook input), a file inside it. A file source can never
+ * prefix-match `file/…`, so the folder rule costs single-file sources nothing.
+ */
+function opensSource(opened: string | undefined, expected: string): boolean {
+  if (opened === undefined) return false;
+  const path = normalizeSourcePath(opened);
+  return path === expected || path.startsWith(`${expected.replace(/\/+$/, '')}/`);
+}
+
+/** True when `call` opened `expectedPath` (or a file in it). Empty expectation never matches. */
 export function isExactLocalSourceRead(call: RecordedReadCall, expectedPath: string): boolean {
   const expected = normalizeSourcePath(expectedPath);
   if (expected.length === 0) return false;
-  if (EXACT_SOURCE_READ_TOOLS.has(call.tool)) {
-    return call.path !== undefined && normalizeSourcePath(call.path) === expected;
-  }
+  if (EXACT_SOURCE_READ_TOOLS.has(call.tool)) return opensSource(call.path, expected);
   if (BATCH_SOURCE_READ_TOOLS.has(call.tool)) {
-    return (call.paths ?? []).some((value) => normalizeSourcePath(value) === expected);
+    return (call.paths ?? []).some((value) => opensSource(value, expected));
   }
   return false;
 }

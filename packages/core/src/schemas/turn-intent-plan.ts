@@ -13,7 +13,18 @@ export const TurnIntentPlanSchema = z.object({
   intent: z.enum(['conversation', 'artifact', 'implementation']),
   route: z.enum(['none', 'craftbook', 'specialist']),
   confidence: z.enum(['low', 'medium', 'high']),
-  reason: z.enum(['no-strong-signal', 'exact-output-format', 'implementation-request']),
+  /**
+   * `trigger-phrase` is the catalog tier: the text contains one of a
+   * craftbook's declared `triggers`. Medium confidence — it proposes an
+   * attached task in the composer and never becomes a prelude or a tool
+   * clamp on send.
+   */
+  reason: z.enum([
+    'no-strong-signal',
+    'exact-output-format',
+    'implementation-request',
+    'trigger-phrase',
+  ]),
   visible: z.boolean(),
   display: z.object({
     label: z.string().min(1).max(120),

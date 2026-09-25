@@ -2,7 +2,7 @@ import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
 import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
@@ -265,7 +265,6 @@ function ProjectChatBody({
   // thread is out of scope, and auto-picks the gezel's lobby thread over
   // it — silently posting the user's next message to the wrong place.
   const [activeTask, setActiveTask] = useState<{ ref: string; stepId?: string } | null>(null);
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
   // Bumped after a write the pill row should re-read (a created task).
   const [pillRefreshKey, setPillRefreshKey] = useState(0);
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
@@ -299,7 +298,8 @@ function ProjectChatBody({
   // on coding-typed projects, and only when "Show advanced features" is on.
   // Everyone else just gets the chat composer, no mode concept at all.
   const showAdvancedFeatures = useShowAdvancedFeatures();
-  const showComposeModeTabs = showAdvancedFeatures && isCodingProject(project);
+  const showComposeModeTabs =
+    runtimeCapabilities().terminal && showAdvancedFeatures && isCodingProject(project);
   // If the gate closes while terminal mode is up (settings toggle flipped
   // live, or a project's detected type changed), land back on chat rather
   // than stranding the user on a surface with no switch to leave it.
@@ -600,7 +600,6 @@ function ProjectChatBody({
                 }
               : undefined
           }
-          onNewTask={() => setNewTaskOpen(true)}
         />
       )}
     >
@@ -673,6 +672,18 @@ function ProjectChatBody({
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
                   draftScope={DRAFT_SCOPE}
+                  // The attached task: the Task key, the strip, and the daemon's
+                  // route suggestions. The pill row also hears the new task
+                  // through the shared task stream; the bump is for immediacy.
+                  {...(runtimeCapabilities().tasks
+                    ? {
+                        taskLaunch: {
+                          gezels: recipientGezels,
+                          projects: [project],
+                          onLaunched: () => setPillRefreshKey((k) => k + 1),
+                        },
+                      }
+                    : {})}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus
@@ -697,7 +708,9 @@ function ProjectChatBody({
                     );
                     onSelectGezel(mentionedGezelId);
                   }}
-                  passiveCcGezelIds={pendingPassiveCcIds}
+                  passiveCcGezelIds={
+                    runtimeCapabilities().multiRecipientChat ? pendingPassiveCcIds : []
+                  }
                   onPassiveCcConsumed={() => setPendingPassiveCcIds([])}
                   onTerminalEscape={
                     showComposeModeTabs
@@ -757,21 +770,6 @@ function ProjectChatBody({
               )}
             </div>
           </div>
-          {/* Portals, so its position in the tree is cosmetic. `projects` is
-              only read when the project picker shows, which `projectLocked`
-              suppresses — we're scoped to one project by construction. */}
-          <NewTaskDialog
-            open={newTaskOpen}
-            defaultProjectId={project.id}
-            projects={[project]}
-            gezels={recipientGezels}
-            projectLocked
-            onClose={() => setNewTaskOpen(false)}
-            onCreated={() => {
-              setNewTaskOpen(false);
-              setPillRefreshKey((k) => k + 1);
-            }}
-          />
         </>
       )}
     </ChatReferences>

@@ -287,10 +287,29 @@ def test_hermes_json_escape(model_dir):
         }
     )
     flat_call = TC("<function=create_project>\n<parameter=name>\nX\n</parameter>\n</function>")
-    flat_structural = TC(
+    # Exactly what the Qwen template renders for a nested value
+    # (`args_value | tojson` inside `<parameter=NAME>`).
+    in_tag_json = TC(
         "<function=convert_document>\n"
-        "<parameter=source>\n{}\n</parameter>\n"
+        '<parameter=source>\n{"kind": "file", "rootId": "root-1", "path": "deck.md"}\n</parameter>\n'
+        '<parameter=targets>\n[{"format": "pptx"}]\n</parameter>\n'
+        "</function>"
+    )
+    in_tag_not_json = TC(
+        "<function=convert_document>\n"
+        "<parameter=source>\nkind: file, path: deck.md\n</parameter>\n"
         "<parameter=targets>\n[]\n</parameter>\n"
+        "</function>"
+    )
+    in_tag_wrong_type = TC(
+        "<function=convert_document>\n"
+        "<parameter=source>\n[]\n</parameter>\n"
+        "<parameter=targets>\n[]\n</parameter>\n"
+        "</function>"
+    )
+    in_tag_missing_required = TC(
+        "<function=convert_document>\n"
+        '<parameter=source>\n{"path": "deck.md"}\n</parameter>\n'
         "</function>"
     )
     bad_key = TC("<function=create_project>\n<parameter=bogus>\nX\n</parameter>\n</function>")
@@ -301,12 +320,48 @@ def test_hermes_json_escape(model_dir):
             ("JSON envelope missing a required arg rejected", accepts(TC(missing_required)), False),
             ("JSON envelope with unknown function rejected", accepts(TC(fake_json_name)), False),
             ("markup branch still accepted", accepts(flat_call), True),
-            ("structural tool rejected on lossy markup branch", accepts(flat_structural), False),
+            ("nested args as JSON inside the tag accepted", accepts(in_tag_json), True),
+            ("non-JSON object value inside the tag rejected", accepts(in_tag_not_json), False),
+            ("array where an object is declared rejected", accepts(in_tag_wrong_type), False),
+            ("in-tag call missing a required arg rejected", accepts(in_tag_missing_required), False),
             ("markup branch still pins names", accepts(TC("<function=nope>\n</function>")), False),
             ("markup branch still pins param keys", accepts(bad_key), False),
             ("plain text, no call accepted", accepts("Just a normal answer."), True),
         ],
     )
+
+
+IDIOM_EXAMPLES = (
+    Path(__file__).resolve().parents[3] / "model-profile" / "tool-call-idiom-examples.json"
+)
+
+
+def test_idiom_examples(model_dir, fmt):
+    """Every call the prompt teaches for `fmt` must be one the grammar admits.
+
+    The same fixture is read by model-profile/tool-call-idiom.test.ts, which
+    proves the salvage parser reads each example back — so prompt, grammar
+    and parser are held to one set of strings.
+    """
+    import json
+
+    from llguidance import LLMatcher
+
+    if not IDIOM_EXAMPLES.exists():
+        print(f"SKIP [idiom-{fmt}] fixture not found: {IDIOM_EXAMPLES}")
+        return 0, 0
+    examples = [
+        e for e in json.loads(IDIOM_EXAMPLES.read_text())["examples"] if e["format"] == fmt
+    ]
+    tok, llg = _load(model_dir)
+    cases = []
+    for e in examples:
+        tools = [{"type": "function", "function": e["tool"]}]
+        grammar = tg.build_grammar_string(tools, {"format": fmt})
+        assert grammar is not None
+        assert LLMatcher.validate_grammar(grammar, llg) == "", f"idiom grammar invalid: {e['why']}"
+        cases.append((e["why"], _accepts_fn(tok, llg, grammar)(e["text"]), True))
+    return _report(f"idiom-{fmt}", cases)
 
 
 def test_hermes_large_roster(model_dir):
@@ -474,11 +529,17 @@ def main():
         f, t = test_hermes_large_roster(qwen)
         failed += f
         total += t
+        f, t = test_idiom_examples(qwen, "hermes")
+        failed += f
+        total += t
     if not qwens:
         print("SKIP hermes: no installed Qwen MLX model")
     for gemma in gemmas:
         print(f"== gemma / tokenizer: {gemma} ==")
         f, t = test_gemma(gemma)
+        failed += f
+        total += t
+        f, t = test_idiom_examples(gemma, "gemma")
         failed += f
         total += t
     if not gemmas:

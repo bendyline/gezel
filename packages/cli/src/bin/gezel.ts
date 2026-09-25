@@ -310,7 +310,7 @@ async function startForeground(env: NodeJS.ProcessEnv): Promise<void> {
 
 program
   .command('status')
-  .description('Show daemon status')
+  .description('Show daemon status (exits 1 when gezeld is not running or not healthy)')
   .action(async () => {
     const globals = cliGlobals();
     if (globals.connect) {
@@ -344,14 +344,20 @@ program
         `gezeld machine service: runtime files present but unreachable (port ${broker.port})`,
       );
     }
+    // Scripts gate on this command, so "not running" and "not healthy" are
+    // failures, not just lines of output.
     const runtime = await readRuntime();
     if (!runtime) {
       console.log('gezeld is not running');
+      process.exitCode = 1;
       return;
     }
     const alive = isProcessAlive(runtime.pid);
     console.log(`gezeld pid=${runtime.pid} port=${runtime.port} alive=${alive}`);
-    if (!alive) return;
+    if (!alive) {
+      process.exitCode = 1;
+      return;
+    }
     const client = new GezelClient({
       baseUrl: runtime.baseUrl,
       // Health is intentionally unauthenticated; diagnostics do not need to
@@ -370,12 +376,15 @@ program
       );
     } catch (err) {
       console.error(`health failed: ${(err as Error).message}`);
+      process.exitCode = 1;
     }
   });
 
 program
   .command('stop')
-  .description('Hard stop all AI work and switch Gezel to Reactive mode')
+  .description(
+    'Hard stop all AI work and switch Gezel to Reactive mode; gezeld keeps running (use --daemon to shut it down)',
+  )
   .option('--daemon', 'Shut down the user-owned daemon process itself')
   .action(async (opts: { daemon?: boolean }) => {
     const globals = cliGlobals();
@@ -387,9 +396,10 @@ program
     // Do not manufacture a local daemon merely to tell it to stop. Explicit
     // and rolling-upgrade system connections are already concrete targets;
     // otherwise require a live per-user runtime and adopt it below.
+    let userRuntime: Awaited<ReturnType<typeof readRuntime>> = null;
     if (!globals.connect && !(await findHealthySystemService(globals))) {
-      const runtime = await readRuntime();
-      if (!runtime || !isProcessAlive(runtime.pid)) {
+      userRuntime = await readRuntime();
+      if (!userRuntime || !isProcessAlive(userRuntime.pid)) {
         console.log('Gezel has no running AI work to stop.');
         return;
       }
@@ -405,6 +415,13 @@ program
     console.log(
       `Hard stop complete: ${details.join(', ')}. Local engines unloaded; Gezel is Reactive.`,
     );
+    // This is the app's emergency brake, not a shutdown — the app still needs
+    // gezeld. Say so: scripts that read "stop" as "exit" leak the process.
+    if (userRuntime) {
+      console.log(
+        `gezeld is still running (pid ${userRuntime.pid}); run \`gezel stop --daemon\` to shut it down.`,
+      );
+    }
   });
 
 async function stopUserDaemon(globals: CliGlobals): Promise<void> {

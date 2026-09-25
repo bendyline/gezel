@@ -31,13 +31,12 @@ import {
 import type { CraftbookDocError, CraftbookDocFormat } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ConnectorPrepError } from '../../connectors/task-prep.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
-import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
+import { type TaskLaunchResult, launchErrorResponse } from '../../tasks/launcher.js';
 import {
-  ConnectorSetupRequiredError,
-  CraftbookSetupRequiredError,
+  type CompleteStepOutcome,
   StepCompletionBlockedError,
+  TaskNotActiveError,
 } from '../../tasks/manager.js';
 import { retryPausedTask } from '../../tasks/retry.js';
 import type { ServiceContext } from '../context.js';
@@ -101,7 +100,6 @@ async function resolveActor(
 
 export function projectTaskRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
-  const inflightCraftbookInvocations = new Map<string, Promise<Task>>();
 
   // Nested under /api/projects/:id/tasks — see http/server.ts
   app.get('/:projectId/tasks', async (c) => {
@@ -136,85 +134,18 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
-    let task: Task;
+    let launched: TaskLaunchResult;
     try {
-      if (craftbookInvocationKey) {
-        const existing = (await ctx.tasks.list({ projectId })).find(
-          (candidate) =>
-            candidate.origin?.kind === 'craftbook-invocation' &&
-            candidate.origin.key === craftbookInvocationKey &&
-            (candidate.status === 'draft' ||
-              candidate.status === 'active' ||
-              candidate.status === 'paused'),
-        );
-        if (existing) return c.json(existing);
-
-        const inflightKey = `${projectId}:${craftbookInvocationKey}`;
-        const pending = inflightCraftbookInvocations.get(inflightKey);
-        if (pending) return c.json(await pending);
-
-        const create = ctx.tasks.create(projectId, body, {
-          origin: { kind: 'craftbook-invocation', key: craftbookInvocationKey },
-        });
-        inflightCraftbookInvocations.set(inflightKey, create);
-        try {
-          task = await create;
-        } finally {
-          inflightCraftbookInvocations.delete(inflightKey);
-        }
-      } else {
-        task = await ctx.tasks.create(projectId, body);
-      }
+      launched = await ctx.taskLauncher.launch(projectId, body, {
+        ...(craftbookInvocationKey ? { craftbookInvocationKey } : {}),
+        ...(dispatchEntry ? { dispatchEntry: true } : {}),
+      });
     } catch (err) {
-      // A launch that fails its own preconditions is a 409 the caller
-      // renders, never a 500 — the catch-all handler scrubs the body, and
-      // these messages ARE the fix instructions.
-      if (err instanceof CraftbookSetupRequiredError) {
-        return c.json(
-          {
-            error: err.message,
-            code: err.code,
-            craftbookId: err.craftbookId,
-            missingToolsets: err.missingToolsets,
-          },
-          409,
-        );
-      }
-      if (err instanceof ConnectorSetupRequiredError) {
-        return c.json(
-          {
-            error: err.message,
-            code: err.code,
-            craftbookId: err.craftbookId,
-            missingConnectors: err.missingConnectors,
-          },
-          409,
-        );
-      }
-      if (err instanceof ConnectorPrepError) {
-        return c.json(
-          {
-            error: err.message,
-            code: err.code,
-            craftbookId: err.craftbookId,
-            connectorTypeId: err.typeId,
-            reason: err.reason,
-          },
-          409,
-        );
-      }
+      const rejection = launchErrorResponse(err);
+      if (rejection) return c.json(rejection.body, rejection.status);
       throw err;
     }
-    if (dispatchEntry) {
-      // Single-channel kickoff: hand the entry step to its gezel as a
-      // task-scoped handoff. Best-effort — guard trips are logged +
-      // visible as an absent task.entry.dispatched history event.
-      await dispatchTaskEntry(
-        { store: ctx.store, taskRunner: ctx.taskRunner, history: ctx.history },
-        task,
-      );
-    }
-    return c.json(task, 201);
+    return c.json(launched.task, launched.reused ? 200 : 201);
   });
 
   app.get('/:projectId/tasks/:num', async (c) => {
@@ -332,7 +263,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
-    let outcome: Awaited<ReturnType<typeof ctx.tasks.completeStepChecked>>;
+    let outcome: CompleteStepOutcome;
     try {
       outcome = await ctx.tasks.completeStepChecked(
         projectId,
@@ -342,6 +273,18 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         body.force ? { force: true, cause: 'user' } : { cause: 'model' },
       );
     } catch (err) {
+      if (err instanceof TaskNotActiveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.responseCode,
+            taskRef: err.taskRef,
+            stepId: err.stepId,
+            effectiveStatus: err.effectiveStatus,
+          },
+          409,
+        );
+      }
       // A completion the task's state refuses is a 409 the caller renders,
       // never a 500 — the catch-all scrubs the body, and the message IS
       // the instruction.

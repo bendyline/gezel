@@ -1,6 +1,11 @@
 import type { GezelClient } from '@bendyline/gezel-client/node';
-import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
+import {
+  type MissingDeliverableFeedbackOptions,
+  postMissingDeliverableFeedback,
+  postSniffFeedback,
+} from '../sniff-feedback.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
+import { findWorkspaceDeliverableNearMiss } from './helpers.ts';
 
 const PROJECT_NAME = 'Large PR Review Eval';
 const REVIEWER_NAME = 'Rina';
@@ -166,6 +171,67 @@ async function readWorkspace(client: GezelClient, projectId: string, path: strin
   }
 }
 
+/**
+ * The gezel doing the review: the most recently active, non-archived session
+ * in the project whose owner holds a reviewer role. `undefined` leaves the
+ * feedback posters' ordinary picker in charge.
+ *
+ * Without this pin a missing `.json` ledger scored the Reviewer 0 as an
+ * "implementation specialist", so after 24 polls the harness recruited a
+ * brand-new Developer 97 minutes into the run and nudged THEM — while the
+ * reviewer who owned the work was never told where its ledger belonged.
+ */
+async function findReviewOwner(ctx: EvalContext, projectId: string): Promise<string | undefined> {
+  try {
+    const [{ sessions }, { gezels }] = await Promise.all([
+      ctx.client.listChatSessions({ projectId }),
+      ctx.client.listGezels(),
+    ]);
+    const roles = new Map(gezels.map((gezel) => [gezel.id, gezel.role ?? '']));
+    return sessions
+      .filter(
+        (session) =>
+          !session.archived &&
+          session.gezelId !== ctx.meesterId &&
+          /review/i.test(roles.get(session.gezelId) ?? ''),
+      )
+      .sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''))[0]?.gezelId;
+  } catch {
+    return undefined;
+  }
+}
+
+function basenameOf(path: string): string {
+  return (path.replace(/\\/g, '/').split('/').pop() ?? path).toLowerCase();
+}
+
+/**
+ * Missing-file routing for a graded workspace file. The near-miss is passed
+ * only when it IS the file, somewhere else — the reviewer's 16.5 KB ledger
+ * sat at `artifacts/pr-review-coverage.json` while the trial failed it
+ * "absent 102 polls", and a named near-miss is what arms the nudge's
+ * `copy_artifact_to_workspace` fast path. A loosely similar file (any corpus
+ * `.md` record scores as a near-miss for `pr-review.md`) would only be noise.
+ * The grader still reads the workspace; the artifacts copy never counts.
+ */
+async function missingFileFeedback(
+  ctx: EvalContext,
+  projectId: string,
+  path: string,
+  reviewer: string | undefined,
+): Promise<MissingDeliverableFeedbackOptions> {
+  const nearMiss = await findWorkspaceDeliverableNearMiss(ctx.client, projectId, path).catch(
+    () => undefined,
+  );
+  const sameFile =
+    nearMiss && basenameOf(nearMiss.path) === basenameOf(path) ? nearMiss : undefined;
+  return {
+    projectId,
+    ...(sameFile ? { nearMiss: sameFile } : {}),
+    ...(reviewer ? { targetGezelId: reviewer } : {}),
+  };
+}
+
 async function setup(ctx: EvalContext): Promise<void> {
   const project = await ctx.client.createProject({
     name: PROJECT_NAME,
@@ -255,7 +321,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       deliverableMissing: true,
       failReason: `${REPORT} does not exist yet`,
     });
-    await postMissingDeliverableFeedback(ctx, REPORT, { projectId: project.id });
+    await postMissingDeliverableFeedback(
+      ctx,
+      REPORT,
+      await missingFileFeedback(ctx, project.id, REPORT, await findReviewOwner(ctx, project.id)),
+    );
     return { done: false };
   }
   const coverageText = await readWorkspace(ctx.client, project.id, COVERAGE);
@@ -268,7 +338,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       deliverableMissing: true,
       failReason: `${COVERAGE} does not exist yet`,
     });
-    await postMissingDeliverableFeedback(ctx, COVERAGE, { projectId: project.id });
+    await postMissingDeliverableFeedback(
+      ctx,
+      COVERAGE,
+      await missingFileFeedback(ctx, project.id, COVERAGE, await findReviewOwner(ctx, project.id)),
+    );
     return { done: false };
   }
   let reviewed: string[] = [];
@@ -278,6 +352,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       ? parsed.reviewedFiles.filter((value): value is string => typeof value === 'string')
       : [];
   } catch {
+    const reviewer = await findReviewOwner(ctx, project.id);
     await postSniffFeedback(
       ctx,
       COVERAGE,
@@ -289,7 +364,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
         failReason: 'coverage ledger is not valid JSON',
         missingRequiredSignals: ['valid-json-coverage-ledger'],
       },
-      { projectId: project.id, sourceText: coverageText },
+      {
+        projectId: project.id,
+        sourceText: coverageText,
+        ...(reviewer ? { targetGezelId: reviewer } : {}),
+      },
     );
     return { done: false };
   }
@@ -343,6 +422,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     repairFilePath: REPORT,
     ...(missingRequiredSignals[0] === undefined ? {} : { failReason: missingRequiredSignals[0] }),
   });
+  const reviewer = await findReviewOwner(ctx, project.id);
   ctx.logChanged(
     'large-pr-review',
     `[scenario] large-pr-review bytes=${report.length} score=${score}/6 coverage=${reviewedSet.size}/${TOTAL_FILES} signals=${signals.join(',') || 'none'}`,
@@ -358,7 +438,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       failReason: missingRequiredSignals[0],
       missingRequiredSignals,
     },
-    { projectId: project.id, sourceText: report },
+    { projectId: project.id, sourceText: report, ...(reviewer ? { targetGezelId: reviewer } : {}) },
   );
   return { done: false };
 }

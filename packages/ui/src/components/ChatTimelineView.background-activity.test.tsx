@@ -1,4 +1,8 @@
-import type { ChatEventEnvelope, ListTimelineResponse } from '@bendyline/gezel';
+import {
+  type ChatEventEnvelope,
+  type ListTimelineResponse,
+  OFFLINE_RUNTIME_CAPABILITIES,
+} from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -59,10 +63,12 @@ const { api } = await import('../api.js');
 
 describe('ChatTimelineView — background one-shot activity', () => {
   let boundsSpy: ReturnType<typeof vi.spyOn>;
+  let heightSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     streamState.mode = 'live';
     window.localStorage.clear();
+    heightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
     Element.prototype.scrollTo = vi.fn() as unknown as Element['scrollTo'];
     Element.prototype.scrollIntoView = vi.fn();
     boundsSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -94,7 +100,136 @@ describe('ChatTimelineView — background one-shot activity', () => {
     } as never);
   });
 
-  afterEach(() => boundsSpy.mockRestore());
+  afterEach(() => {
+    boundsSpy.mockRestore();
+    heightSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps task-capable foreground hosts from querying unsupported structured questions', async () => {
+    const previous = window.__GEZEL__;
+    window.__GEZEL__ = {
+      token: 'test',
+      capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, structuredQuestions: false },
+    };
+    try {
+      const view = render(
+        <ChatTimelineView
+          scopeKey="portable"
+          activeSessionId={undefined}
+          loadTimeline={async () => ({ messages: [], hasMore: false }) as ListTimelineResponse}
+          streamUrl={() => 'https://example.invalid/events'}
+        />,
+      );
+      await waitFor(() => expect(api.listGezels).toHaveBeenCalled());
+      expect(api.listQuestions).not.toHaveBeenCalled();
+      view.unmount();
+    } finally {
+      window.__GEZEL__ = previous;
+    }
+  });
+
+  it('keeps conversation space visible on short viewports and restores the desktop reserve on resize', async () => {
+    streamState.mode = 'completed';
+    heightSpy.mockReturnValue(295);
+    const observers = new Set<{ targets: Set<Element>; notify: () => void }>();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        targets = new Set<Element>();
+        notify: () => void;
+        constructor(callback: () => void) {
+          this.notify = callback;
+          observers.add(this);
+        }
+        observe(target: Element) {
+          this.targets.add(target);
+        }
+        unobserve(target: Element) {
+          this.targets.delete(target);
+        }
+        disconnect() {
+          observers.delete(this);
+        }
+      },
+    );
+    render(
+      <ChatTimelineView
+        scopeKey="global"
+        activeSessionId={undefined}
+        loadTimeline={async () => ({ messages: [], hasMore: false }) as ListTimelineResponse}
+        streamUrl={() => 'https://example.invalid/events'}
+        showProjectName
+      />,
+    );
+    await waitFor(() =>
+      expect(document.querySelector('.timeline-session-divider-activity')).not.toBeInTheDocument(),
+    );
+    const runway = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('.timeline-response-runway');
+      expect(node?.style.blockSize).toBe('103px');
+      return node!;
+    });
+    const timeline = document.querySelector('.chat-timeline')!;
+    const observer = [...observers].find((candidate) => candidate.targets.has(timeline));
+    expect(observer).toBeDefined();
+    heightSpy.mockReturnValue(120);
+    observer?.notify();
+    expect(runway.style.blockSize).toBe('0px');
+    heightSpy.mockReturnValue(600);
+    observer?.notify();
+    expect(runway.style.blockSize).toBe('300px');
+  });
+
+  it('does not hide a completed reply under the sticky header to preserve blank space', async () => {
+    streamState.mode = 'completed';
+    heightSpy.mockReturnValue(336);
+    boundsSpy.mockImplementation(function (this: Element) {
+      const height = this.matches('[data-msg-id$=":assistant"]') ? 314 : 0;
+      return {
+        x: 0,
+        y: 0,
+        width: 390,
+        height,
+        top: 0,
+        right: 390,
+        bottom: height,
+        left: 0,
+        toJSON: () => ({}),
+      };
+    });
+    const at = new Date().toISOString();
+    render(
+      <ChatTimelineView
+        scopeKey="project:website"
+        activeSessionId="s1"
+        loadTimeline={async () => ({
+          hasMore: false,
+          messages: [
+            {
+              sessionId: 's1',
+              gezelId: 'mhairi',
+              projectId: 'website',
+              sessionTitle: 'Field notes',
+              sessionCreatedAt: at,
+              sessionLastActivityAt: at,
+              sessionProviderName: 'llama-cpp',
+              role: 'assistant',
+              content: 'The saved reply must remain readable.',
+              at,
+            },
+          ],
+        })}
+        streamUrl={() => 'https://example.invalid/events'}
+      />,
+    );
+    await screen.findByText('The saved reply must remain readable.');
+    await waitFor(() =>
+      expect(
+        document.querySelector<HTMLElement>('.timeline-response-runway')?.style.blockSize,
+      ).toBe('0px'),
+    );
+  });
 
   it('names the activity instead of presenting the one-shot as a new chat thread', async () => {
     render(

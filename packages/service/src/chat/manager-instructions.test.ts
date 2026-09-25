@@ -71,9 +71,9 @@ describe('buildInstructions coordinator routing', () => {
 
   it('uses the advertised grep spelling in retrieval-first guidance', () => {
     const prompt = buildInstructions({
-      name: 'Tomas',
-      role: 'Meester',
-      about: 'Route work to the right specialist.',
+      name: 'Ada',
+      role: 'Developer',
+      about: 'Build the project.',
       generalistKickoff: 'on',
       project: { id: 'default', name: 'Default' } as ProjectDetail,
       workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
@@ -86,9 +86,9 @@ describe('buildInstructions coordinator routing', () => {
 
   it('emits search_files in the legacy naming A/B arm while resolving it canonically', () => {
     const prompt = buildInstructions({
-      name: 'Tomas',
-      role: 'Meester',
-      about: 'Route work to the right specialist.',
+      name: 'Ada',
+      role: 'Developer',
+      about: 'Build the project.',
       generalistKickoff: 'on',
       project: { id: 'default', name: 'Default' } as ProjectDetail,
       workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
@@ -98,6 +98,63 @@ describe('buildInstructions coordinator routing', () => {
 
     expect(prompt).toContain('call `search_files` — do not read files one by one');
     expect(prompt).not.toContain('call `grep_files` — do not read files one by one');
+  });
+});
+
+describe('buildInstructions conditional conduct', () => {
+  it('does not inject task-resumption guidance when no task exists', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      role: 'Meester',
+      about: 'Help the user.',
+      availableTools: [
+        { name: 'read_file', description: 'Read a file.' },
+        { name: 'ask_user_question', description: 'Ask a structured question.' },
+      ],
+    });
+
+    expect(full).toContain("Act, don't narrate intent");
+    expect(full).toContain('When you need a decision from the user');
+    expect(full).not.toContain('A short user message is NOT a vague prompt');
+    expect(full).not.toMatch(/resume (?:this|that) task/i);
+  });
+
+  it('drops tool-action and structured-question rules for an explicitly empty toolset', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      role: 'Meester',
+      about: 'Help the user.',
+      availableTools: [],
+      thirdPartyToolsetIds: [],
+    });
+
+    expect(full).not.toContain("Act, don't narrate intent");
+    expect(full).not.toContain('When you need a decision from the user');
+    expect(full).not.toContain('No structured question tool is wired');
+    expect(full).toContain('Replies render as rich markdown');
+  });
+
+  it('keeps task-specific resumption guidance in the volatile task band', () => {
+    const rendered = buildInstructions({
+      name: 'Wren',
+      role: 'Developer',
+      about: 'Build the project.',
+      availableTools: [{ name: 'read_task_notes', description: 'Read task notes.' }],
+      layeredPrefixCache: true,
+      task: {
+        task: {
+          ref: 'default/7',
+          title: 'Finish the landing page',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'wren' },
+          craftbook: { steps: [], entryStepId: 'build' },
+        },
+      },
+    } as unknown as BuildInstructionsOptions);
+
+    expect(rendered.full).not.toMatch(/resume (?:this|that) task/i);
+    expect(rendered.volatileContext).toContain('RESUME THIS TASK');
+    expect(rendered.volatileContext).toContain('read_task_notes({ ref: "default/7" })');
   });
 });
 
@@ -808,24 +865,79 @@ describe('buildInstructions boring mode (roleBasedNameOnlyMode)', () => {
 });
 
 describe('buildInstructions workspace inventory', () => {
-  it('renders explicit full-path file/dir rows instead of visually nesting root files', () => {
+  it('renders only role-relevant paths and their ancestor directories', () => {
     const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
     const { full } = buildInstructions({
-      name: 'Reviewer',
-      about: 'Review the deck.',
+      name: 'Ada',
+      role: 'Developer',
+      about: 'Build the project.',
       project,
       workspaceFiles: [
+        { name: 'src', path: 'src', isDirectory: true },
         { name: 'assets', path: 'assets', isDirectory: true },
-        { name: 'deck.md', path: 'deck.md', isDirectory: false },
-        { name: 'generated', path: 'assets/generated', isDirectory: true },
-        { name: 'map.png', path: 'assets/generated/map.png', isDirectory: false },
+        { name: 'app.ts', path: 'src/app.ts', isDirectory: false },
+        { name: 'map.png', path: 'assets/map.png', isDirectory: false },
+        { name: 'brief.md', path: 'brief.md', isDirectory: false },
       ],
     });
-    expect(full).toContain('dir  assets/');
-    expect(full).toContain('file deck.md');
-    expect(full).toContain('dir  assets/generated/');
-    expect(full).toContain('file assets/generated/map.png');
+    expect(full).toContain('dir  src/');
+    expect(full).toContain('file src/app.ts');
+    expect(full).not.toContain('assets/map.png');
+    expect(full).not.toContain('brief.md');
     expect(full).not.toContain('📁 assets');
+  });
+
+  it('omits both workspace inventory and workspace map for general/coordinator roles', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    for (const role of ['Meester', 'Voorman', 'Planner', 'Generalist', 'Chief of Staff']) {
+      const { full } = buildInstructions({
+        name: 'Wren',
+        role,
+        about: 'Coordinate the work.',
+        project,
+        workspaceFiles: [{ name: 'app.ts', path: 'src/app.ts', isDirectory: false }],
+        workspaceGestalt: '\n\n---\n\n### Workspace map\n\nA large application.',
+      });
+      expect(full).not.toContain('### Workspace files');
+      expect(full).not.toContain('### Workspace map');
+      expect(full).toContain('Workspace files are not preloaded for this role');
+    }
+  });
+
+  it('gives writers a prose-only inventory and excludes binary documents', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const { full } = buildInstructions({
+      name: 'Maya',
+      role: 'Writer',
+      about: 'Write clearly.',
+      project,
+      workspaceFiles: [
+        { name: 'brief.md', path: 'content/brief.md', isDirectory: false },
+        { name: 'app.ts', path: 'src/app.ts', isDirectory: false },
+        { name: 'source.docx', path: 'content/source.docx', isDirectory: false },
+      ],
+    });
+    expect(full).toContain('file content/brief.md');
+    expect(full).not.toContain('src/app.ts');
+    expect(full).not.toContain('content/source.docx');
+  });
+
+  it('caps a specialist inventory after role and clutter filtering', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const { full } = buildInstructions({
+      name: 'Ada',
+      role: 'Developer',
+      about: 'Build the project.',
+      project,
+      workspaceFiles: Array.from({ length: 105 }, (_, index) => ({
+        name: `file-${index}.ts`,
+        path: `src/file-${index}.ts`,
+        isDirectory: false,
+      })),
+    });
+    expect(full).toContain('file src/file-99.ts');
+    expect(full).not.toContain('file src/file-100.ts');
+    expect(full).toContain('(5 more relevant entries not shown)');
   });
 
   it('teaches incremental persistence only when a persistence tool is wired', () => {

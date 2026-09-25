@@ -16,6 +16,7 @@ import {
   PromptDraftInvalidIdError,
   type PromptDraftListFilter,
   PromptDraftNotFoundError,
+  PromptDraftSentError,
 } from '../../prompt-drafts/manager.js';
 import type { ServiceContext } from '../context.js';
 
@@ -92,6 +93,9 @@ export function promptDraftRoutes(ctx: ServiceContext): Hono {
       if (err instanceof PromptDraftNotFoundError) {
         return c.json({ error: err.message, code: err.code }, 404);
       }
+      if (err instanceof PromptDraftSentError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
       throw err;
     }
   });
@@ -110,6 +114,9 @@ export function promptDraftRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       if (err instanceof PromptDraftNotFoundError) {
         return c.json({ error: err.message, code: err.code }, 404);
+      }
+      if (err instanceof PromptDraftSentError) {
+        return c.json({ error: err.message, code: err.code }, 409);
       }
       throw err;
     }

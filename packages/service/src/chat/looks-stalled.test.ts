@@ -12,6 +12,14 @@ describe('looksStalled', () => {
     expect(looksStalled(stall)).toBe(true);
   });
 
+  it('treats a reply that is only a reasoning-mode indicator as stalled', () => {
+    // gemma4-12b publish step: 8K tokens of reasoning, no call, reply
+    // `_Thinking…_` — read as content, the step sat unworked 8 minutes.
+    expect(looksStalled('_Thinking…_')).toBe(true);
+    expect(looksStalled('_Analyzing…_\n\n_Thinking…_')).toBe(true);
+    expect(looksStalled('_Thinking…_\n\nAll done — the deck is saved.')).toBe(false);
+  });
+
   it('catches "I will now…" as a final paragraph', () => {
     expect(looksStalled('Got it. I will now read the file.')).toBe(true);
   });

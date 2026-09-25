@@ -6,6 +6,15 @@ import {
   ScriptNameSchema,
 } from '@bendyline/gezel';
 import { userScriptFile } from '@bendyline/gezel/paths';
+import {
+  SCRIPT_EXISTS_MESSAGE,
+  notFoundBody,
+  saveConflictResponse,
+  saveConflicts,
+  savedSourceResponse,
+  scriptCreatedResponse,
+  scriptRunResponse,
+} from '@bendyline/gezel/runtime';
 import { Hono } from 'hono';
 import { parseScriptMeta } from '../../scripts/meta.js';
 import {
@@ -47,7 +56,7 @@ export function globalScriptRoutes(ctx: ServiceContext): Hono {
   app.get('/standard/source', async (c) => {
     const name = ScriptNameSchema.parse(c.req.query('name'));
     const result = await readStdlibScriptSource(name);
-    if (!result) return c.json({ error: 'not found' }, 404);
+    if (!result) return c.json(notFoundBody('script'), 404);
     return c.json(result);
   });
 
@@ -61,22 +70,15 @@ export function globalScriptRoutes(ctx: ServiceContext): Hono {
   app.get('/user/source', async (c) => {
     const name = ScriptNameSchema.parse(c.req.query('name'));
     const result = await readUserScriptSource(ctx.home, name);
-    if (!result) return c.json({ error: 'not found' }, 404);
+    if (!result) return c.json(notFoundBody('script'), 404);
     return c.json(result);
   });
 
   app.put('/user/source', async (c) => {
     const body = SaveScriptSourceRequestSchema.parse(await c.req.json());
-    if (body.baseHash) {
+    if (body.baseHash !== undefined) {
       const current = await readUserScriptSource(ctx.home, body.name);
-      if (current && current.hash !== body.baseHash) {
-        const conflict: SaveScriptSourceResponse = {
-          status: 'conflict',
-          currentHash: current.hash,
-          currentSource: current.source,
-        };
-        return c.json(conflict);
-      }
+      if (saveConflicts(body.baseHash, current)) return c.json(saveConflictResponse(current));
     }
     const { hash } = await writeUserScriptSource(ctx.home, body.name, body.source);
     const file = userScriptFile(ctx.home, body.name);
@@ -87,31 +89,24 @@ export function globalScriptRoutes(ctx: ServiceContext): Hono {
     } catch {
       /* surfaced as a meta diagnostic */
     }
-    const saved: SaveScriptSourceResponse = {
-      status: 'saved',
-      hash,
-      metaOk: meta !== undefined,
-      ...(meta ? { meta } : {}),
-      diagnostics,
-    };
-    return c.json(saved);
+    return c.json(savedSourceResponse(hash, { meta, diagnostics }));
   });
 
   app.delete('/user/source', async (c) => {
     const name = ScriptNameSchema.parse(c.req.query('name'));
     const deleted = await deleteUserScriptSource(ctx.home, name);
-    if (!deleted) return c.json({ error: 'not found' }, 404);
+    if (!deleted) return c.json(notFoundBody('script'), 404);
     return c.json({ ok: true });
   });
 
   app.post('/user', async (c) => {
     const body = CreateScriptRequestSchema.parse(await c.req.json());
     if ((await readUserScriptSource(ctx.home, body.name)) !== null) {
-      return c.json({ error: 'exists' }, 409);
+      return c.json({ error: SCRIPT_EXISTS_MESSAGE }, 409);
     }
     const source = body.source ?? scaffoldScript(body.name, body.description, body.template);
     const { hash } = await writeUserScriptSource(ctx.home, body.name, source);
-    return c.json({ name: body.name, source, hash });
+    return c.json(scriptCreatedResponse(body.name, source, hash), 201);
   });
 
   return app;

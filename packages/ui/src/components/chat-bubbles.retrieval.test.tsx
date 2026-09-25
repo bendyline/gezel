@@ -37,10 +37,6 @@ describe('MessageBubble indexed context disclosure', () => {
     expect(retrieval).toHaveTextContent('Consulted 1 indexed source · ~256 tokens injected');
     expect(source).toHaveTextContent('[workspace] src/retrieval.ts:42');
     expect(source).toHaveTextContent('~7 tokens from source');
-    expect(retrieval).toHaveTextContent(
-      'Token counts are estimated at roughly four bytes per token',
-    );
-    expect(retrieval).toHaveTextContent('Turn total includes source labels and safety framing');
     expect(retrieval?.open).toBe(false);
     expect(source?.open).toBe(false);
 

@@ -35,6 +35,7 @@ export interface DeliverableGateSpec {
   minBytes?: number;
   sniff?: StepSniffName;
   requireChange?: boolean;
+  artifact?: boolean;
 }
 
 /** The subset of a turn's `ChatMessageToolCall` the gate reads. */
@@ -42,6 +43,7 @@ export interface DeliverableWrite {
   name: string;
   path?: string;
   success: boolean;
+  resultText?: string;
 }
 
 /**
@@ -66,9 +68,8 @@ export interface DeliverableGateResult {
 
 /**
  * Workspace-mutating tools whose successful call against the deliverable
- * counts as "the assignee edited it this turn". Mirrors the write set in
- * `tool-repeat-tracker.ts`; kept local so the gate has no cross-module
- * coupling.
+ * counts as "the assignee edited it this turn". `write_artifact` is handled
+ * separately because it only sometimes redirects into the workspace.
  */
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'write_file',
@@ -76,10 +77,6 @@ const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'append_to_file',
   'apply_patch',
   'insert_at_marker',
-  // An artifact-drawer deliverable is written with `write_artifact`; without
-  // it here a step that had just saved its report was nudged as if nothing
-  // had been written (Opus, 2026-09-19).
-  'write_artifact',
 ]);
 
 /**
@@ -107,12 +104,56 @@ export function normalizeWorkspacePath(p: string): string {
 export function deliverableWrittenThisTurn(
   writes: readonly DeliverableWrite[],
   file: string,
+  artifact = false,
 ): boolean {
+  if (artifact) {
+    const normalizeArtifact = (value: string) => {
+      let path = value
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/\/{2,}/g, '/')
+        .replace(/^\.?\/+/, '');
+      // The drawer's read/write API strips repeated, case-insensitive prefixes.
+      // The actual path below that prefix remains case-sensitive.
+      while (/^artifacts\//i.test(path)) path = path.replace(/^artifacts\//i, '');
+      return path;
+    };
+    const target = normalizeArtifact(file);
+    // A workspace mutation with the same name is not a drawer write. Artifact
+    // paths are scoped already: another task's matching filename is not enough.
+    return (
+      !!target &&
+      writes.some(
+        (w) =>
+          w.success &&
+          w.name === 'write_artifact' &&
+          !!w.path &&
+          normalizeArtifact(w.path) === target &&
+          // write_artifact can redirect source files into the workspace. Require
+          // its drawer-write acknowledgement, not just the requested tool name.
+          // Missing/changed acknowledgement holds rather than using a stale file.
+          w.resultText?.split(/\r?\n/, 1)[0] === `Wrote ${target}`,
+      )
+    );
+  }
   const target = normalizeWorkspacePath(file);
   if (!target) return false;
   for (const w of writes) {
-    if (!w.success || !w.path || !WRITE_TOOL_NAMES.has(w.name)) continue;
-    const wp = normalizeWorkspacePath(w.path);
+    if (!w.success) continue;
+    let writtenPath: string;
+    if (w.name === 'write_artifact') {
+      // This tool can save to the drawer or redirect into the workspace.
+      // Its result names the actual destination; the requested path alone
+      // cannot prove which surface changed.
+      const firstLine = w.resultText?.split(/\r?\n/, 1)[0] ?? '';
+      const workspaceWrite = /^Wrote (.+?) to the project workspace(?:\.| |$)/.exec(firstLine)?.[1];
+      if (!workspaceWrite) continue;
+      writtenPath = workspaceWrite;
+    } else {
+      if (!w.path || !WRITE_TOOL_NAMES.has(w.name)) continue;
+      writtenPath = w.path;
+    }
+    const wp = normalizeWorkspacePath(writtenPath);
     if (wp === target || wp.endsWith(`/${target}`) || target.endsWith(`/${wp}`)) return true;
   }
   return false;
@@ -142,7 +183,10 @@ export function evaluateDeliverableGate(input: {
   if (spec.sniff && !runStepSniff(spec.sniff, content)) {
     return { satisfied: false, reason: `${spec.file} failed ${spec.sniff} sniff` };
   }
-  if (spec.requireChange && !deliverableWrittenThisTurn(writes, spec.file)) {
+  if (
+    spec.requireChange &&
+    !deliverableWrittenThisTurn(writes, spec.file, spec.artifact === true)
+  ) {
     return {
       satisfied: false,
       reason: `${spec.file} present but not written this turn (requireChange)`,

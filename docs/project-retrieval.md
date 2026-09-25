@@ -59,6 +59,13 @@ it is not an exact-phrase requirement. When embeddings are unavailable, FTS
 and architecture rollups still work, while vector-only memory recall degrades
 honestly to no memory results.
 
+Proactive injection requires at least one substantive query term. Greetings,
+pleasantries, acknowledgements, and other filler-only turns do not run indexed
+retrieval at all. This gate is intentionally stricter than the explicit
+`search` tool: a literal search for a common phrase should still execute when
+the caller asks for it, but ambient retrieval must have a subject before it
+spends prompt budget.
+
 `search_code` and `search_documents` remain compatibility aliases for callers
 that need their narrower response shapes. New model guidance prefers `search`.
 `grep_files` remains the right tool for exact strings and regular expressions.

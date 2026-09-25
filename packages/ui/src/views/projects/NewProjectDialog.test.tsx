@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../../test-utils/mockApi.js';
@@ -251,4 +252,24 @@ describe('NewProjectDialog GitHub repository drafting', () => {
     );
     expect(api.setProjectWorkingDir).not.toHaveBeenCalled();
   });
+});
+
+it('offers the existing general project workflow without unsupported host choices', async () => {
+  const bridge = window.__GEZEL__;
+  window.__GEZEL__ = { token: 'test-token', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+  try {
+    const view = render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+    expect(screen.queryByRole('radio', { name: 'GitHub' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Folder' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Email' })).not.toBeInTheDocument();
+    expect(api.listCatalogItems).not.toHaveBeenCalled();
+    const general = screen.getByRole('radio', { name: 'General' });
+    fireEvent.click(general);
+    expect(screen.getByRole('textbox', { name: /Name/i })).toBeInTheDocument();
+    view.unmount();
+  } finally {
+    window.__GEZEL__ = bridge;
+  }
 });

@@ -149,6 +149,55 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text.indexOf('"type":"reasoning_delta"')).toBeLessThan(text.indexOf('"type":"done"'));
   });
 
+  it('preserves versioned image history and rejects unsupported engines explicitly', async () => {
+    const provider = (await svc.context.chat.getProviderForModel(
+      'copilot',
+      'mock-fast',
+    )) as MockProvider;
+    const priorMessages = [
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'image1', name: 'read_image_as_base64', arguments: '{}' }],
+      },
+      { role: 'tool', content: 'view.png', toolCallId: 'image1' },
+      { role: 'user', content: 'Tool image', images: ['eA=='] },
+    ];
+    const request = (protocolVersion: number) =>
+      httpFetch(`${baseUrl}/v1/remote/infer`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${rootToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocolVersion,
+          model: 'copilot:mock-fast',
+          systemMessage: '',
+          prompt: '',
+          priorMessages,
+          queue: { lane: 'interactive', affinity: false },
+        }),
+      });
+    const legacy = await request(1);
+    expect(legacy.status).toBe(400);
+    expect(await legacy.json()).toMatchObject({ error: 'image_history_requires_protocol_2' });
+    const unsupported = await request(2);
+    expect(unsupported.status).toBe(422);
+    expect(await unsupported.json()).toMatchObject({
+      error: 'image_history_not_supported_by_engine',
+    });
+    Object.defineProperty(provider, 'supportsImageInput', { value: true, configurable: true });
+    try {
+      const result = await request(2);
+      expect(result.status).toBe(200);
+      expect(await result.text()).toContain('"type":"done"');
+      const created = provider.calls.filter((c) => c.kind === 'create').at(-1);
+      expect(created?.opts?.priorMessages).toEqual(priorMessages);
+      const sent = provider.calls.filter((c) => c.kind === 'send').at(-1);
+      expect(sent?.sendOpts?.continueFromToolResult).toBe(true);
+    } finally {
+      Reflect.deleteProperty(provider, 'supportsImageInput');
+    }
+  });
+
   it('returns retryable queue pressure when a model swap reaches a busy engine', async () => {
     const token = await pairDevice('device-infer-engine-busy');
     const resolve = vi

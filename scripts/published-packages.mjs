@@ -36,6 +36,7 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'core', typed: true },
   { dir: 'client', typed: true },
   { dir: 'sdk', typed: true },
+  { dir: 'script-runtime', typed: true },
   { dir: 'app-sdk', typed: true },
   { dir: 'plugin-sdk', typed: true },
   { dir: 'catalog', typed: true },
@@ -69,8 +70,11 @@ export const VERSIONED_NOT_PUBLISHED = ['app', 'vscode'];
  */
 export const RELEASE_IGNORED_PACKAGE_PATHS = [
   'packages/ui',
+  'packages/mobile',
+  'packages/capacitor',
   'packages/eval-viewer',
   'packages/sharp-compat',
+  'packages/phonemizer-compat',
   'packages/ml-runtime',
   'evals',
 ];

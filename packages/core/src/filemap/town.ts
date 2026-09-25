@@ -132,8 +132,18 @@ function assignToColumns(boxes: TownBox[], k: number): TownBox[][] {
  * Column-pack sibling boxes for `nodePath` at `depth`. The container's
  * street tier/gap comes from the depth; strips are re-packed to their
  * column's width so parcel rows fill wall-to-wall.
+ *
+ * `greenScope` names this container in its greens' ids, which are
+ * `map_layout` primary keys. It defaults to the folder, which is unique for
+ * every container except the root: the compass packs each occupied cell as
+ * its own root-level container, so it must pass a cell-qualified scope.
  */
-function packColumns(nodePath: string, boxes: TownBox[], depth: number): TownResult {
+function packColumns(
+  nodePath: string,
+  boxes: TownBox[],
+  depth: number,
+  greenScope = nodePath,
+): TownResult {
   const out = emptyResult();
   if (boxes.length === 0) return out;
   const gap = streetWidth(depth);
@@ -217,7 +227,7 @@ function packColumns(nodePath: string, boxes: TownBox[], depth: number): TownRes
     const leftover = containerH - y;
     if (leftover >= MIN_GREEN_H && colW >= MIN_GREEN_W) {
       out.plazas.push({
-        id: `green:${nodePath}:${i}`,
+        id: `green:${greenScope}:${i}`,
         folder: nodePath,
         rect: {
           x,
@@ -323,7 +333,7 @@ export function packTownRoot(files: LayoutFileInput[], options: TownRootOptions)
   const cellResults = new Map<string, TownResult>();
   for (const [key, list] of cellBoxes) {
     list.sort((a, b) => (a.key < b.key ? -1 : 1));
-    cellResults.set(key, packColumns('', list, 0));
+    cellResults.set(key, packColumns('', list, 0, `@${key}`));
   }
 
   const B = streetWidth(0);

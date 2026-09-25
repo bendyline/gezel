@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
@@ -12,6 +12,7 @@ import {
   buildPoisonedSessionRecoveryMessage,
   buildReEngageNudge,
   canDispatchPoisonedSessionRecovery,
+  captureFinalState,
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
   describeSendFailure,
@@ -50,11 +51,13 @@ import {
   slugifyForDirName,
   sniffArtifactHasScored,
   sniffKeyToWorkspaceFilePath,
+  sniffReportsMissingTarget,
   summarizeInflightTurnsForLog,
   summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  trialMaxDurationMs,
   workspacePathSignature,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
@@ -66,6 +69,33 @@ function terminalHandoffTestClient(): GezelClient {
     listSessionTelemetry: vi.fn().mockResolvedValue({ sessions: [] }),
   } as unknown as GezelClient;
 }
+
+it('captures generated files from an external eval workspace, including hidden asset folders', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gezel-eval-external-capture-'));
+  try {
+    const external = join(root, 'external');
+    await mkdir(join(external, '.artifacts'), { recursive: true });
+    await writeFile(join(external, '.artifacts', 'model.glb'), Buffer.from([1, 2, 3, 4]));
+    const client = {
+      ...terminalHandoffTestClient(),
+      listProjects: async () => ({ projects: [{ id: 'asset-project', workingDir: external }] }),
+      listGezels: async () => ({ gezels: [] }),
+      listTasks: async () => ({ tasks: [] }),
+      getConfig: async () => ({}),
+    } as unknown as GezelClient;
+    await captureFinalState({
+      client,
+      trialHome: join(root, 'home'),
+      runDir: join(root, 'run'),
+      log: () => {},
+    });
+    expect(
+      await readFile(join(root, 'run', 'workspace', 'asset-project', '.artifacts', 'model.glb')),
+    ).toEqual(Buffer.from([1, 2, 3, 4]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 describe('eval run directory resolution', () => {
   it('anchors relative paths to the repository instead of the eval package cwd', () => {
@@ -120,7 +150,7 @@ describe('completed repair-action snapshots', () => {
       false,
     );
 
-    expect(snapshot).toEqual({ completedMutationTurns: 2, inflight: false });
+    expect(snapshot).toEqual({ completedMutationTurns: 2, completedTurns: 4, inflight: false });
   });
 
   // INCIDENT: this counter is the SECOND arm of `advanceEscalationState` —
@@ -144,7 +174,7 @@ describe('completed repair-action snapshots', () => {
           { role: 'assistant', toolCalls: [{ name: 'mcp__gezel__read_file', success: true }] },
         ],
       }),
-    ).toEqual({ completedMutationTurns: 3, inflight: false });
+    ).toEqual({ completedMutationTurns: 3, completedTurns: 5, inflight: false });
   });
 
   it('carries the live in-flight bit separately from committed action count', () => {
@@ -155,7 +185,7 @@ describe('completed repair-action snapshots', () => {
         },
         true,
       ),
-    ).toEqual({ completedMutationTurns: 1, inflight: true });
+    ).toEqual({ completedMutationTurns: 1, completedTurns: 1, inflight: true });
   });
 });
 
@@ -709,6 +739,49 @@ describe('soft watchdog inflight handling', () => {
 });
 
 describe('poisoned-session recovery', () => {
+  it('skips a poisoned session pinned to a task step the task has left', () => {
+    const sessions = [
+      {
+        id: 'finished-sources',
+        gezelId: 'chinelo',
+        projectId: 'default',
+        taskRef: 'default/2',
+        stepId: 'sources',
+        lastTurnError: 'ramble abort',
+        lastActivityAt: '2026-09-24T15:40:00.000Z',
+      },
+      {
+        id: 'active-write',
+        gezelId: 'sunil',
+        projectId: 'default',
+        taskRef: 'default/2',
+        stepId: 'write',
+        lastTurnError: 'abort',
+        lastActivityAt: '2026-09-24T15:39:00.000Z',
+      },
+      {
+        id: 'unlisted-task',
+        gezelId: 'rex',
+        projectId: 'other',
+        taskRef: 'other/1',
+        stepId: 'scope',
+        lastTurnError: 'abort',
+        lastActivityAt: '2026-09-24T15:38:00.000Z',
+      },
+    ];
+    const picked = pickPoisonedSessionsForRecovery(
+      sessions,
+      'meester',
+      new Map([['default/2', 'write']]),
+    );
+    expect(picked.map((s) => s.sessionId)).toEqual(['active-write', 'unlisted-task']);
+    expect(
+      pickPoisonedSessionsForRecovery(sessions, 'meester', new Map([['default/2', null]])).map(
+        (s) => s.sessionId,
+      ),
+    ).toEqual(['unlisted-task']);
+  });
+
   it('picks recent non-meester sessions with a last turn error', () => {
     const picked = pickPoisonedSessionsForRecovery(
       [
@@ -809,6 +882,37 @@ describe('poisoned-session recovery', () => {
     );
     expect(message).toContain('Do not replace the complete file');
     expect(message).not.toContain('`write_file`');
+  });
+
+  it('uses a complete write when the named target is missing despite healthy scenario bytes', () => {
+    // `bytes` is the SCENARIO's total, not this file's. schema-migration had
+    // bytes=3088 from deliverables it HAD written while `tests/migrate.test.ts`
+    // did not exist; the patch branch then sent every repair turn at a file
+    // that could not be read or patched into being.
+    const message = buildPoisonedSessionRecoveryMessage({
+      lastTurnError: '`read_file` failed 5 times in a row',
+      filePath: 'tests/migrate.test.ts',
+      sniff: {
+        key: 'source-repair',
+        score: 4,
+        bytes: 3088,
+        failReason: 'tests/migrate.test.ts not present yet',
+      },
+    });
+
+    expect(message).toContain('use `write_file` to write a complete corrected version');
+    expect(message).not.toContain('smallest targeted repair');
+    expect(message).not.toContain('Do not replace the complete file');
+  });
+
+  it('still prefers a targeted patch when the failure is about content, not absence', () => {
+    expect(sniffReportsMissingTarget('src/machine.ts', "expected 'draft' to be 'pending'")).toBe(
+      false,
+    );
+    // A gate-id list names gates, not files — inferring a path would guess.
+    expect(sniffReportsMissingTarget('src/machine.ts', 'missing=[tests-present, tsc-clean]')).toBe(
+      false,
+    );
   });
 
   it('uses a complete write when the checked file is missing', () => {
@@ -1681,6 +1785,32 @@ describe('defaultSoftProgressTimeoutMsForModel', () => {
     expect(defaultSoftProgressTimeoutMsForModel('claude-sonnet-4-6', 'anthropic')).toBe(
       5 * 60 * 1000,
     );
+  });
+});
+
+describe('trialMaxDurationMs', () => {
+  it('honors an explicit bounded comparison budget on a large-model engine', () => {
+    expect(
+      trialMaxDurationMs({
+        authoredMaxDurationMs: 40 * 60_000,
+        timeoutMs: 20 * 60_000,
+        minTrialTimeoutMs: 120 * 60_000,
+        decodeRateTokensPerSec: 5,
+      }),
+    ).toBe(20 * 60_000);
+  });
+
+  it('retains the engine floor and throughput scaling without an operator override', () => {
+    expect(
+      trialMaxDurationMs({ authoredMaxDurationMs: 40 * 60_000, minTrialTimeoutMs: 120 * 60_000 }),
+    ).toBe(120 * 60_000);
+    expect(
+      trialMaxDurationMs({
+        authoredMaxDurationMs: 40 * 60_000,
+        minTrialTimeoutMs: 120 * 60_000,
+        decodeRateTokensPerSec: 5,
+      }),
+    ).toBe(160 * 60_000);
   });
 });
 

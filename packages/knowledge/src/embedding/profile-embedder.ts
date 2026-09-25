@@ -63,6 +63,40 @@ export interface TokenizerFn {
   encode(text: string): number[];
 }
 
+/** Bytes fetched so far across every file a profile load pulls, summed. */
+export interface ModelDownloadProgress {
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+/**
+ * Sum transformers.js's per-file `progress` callbacks into one running total.
+ * A file whose response carried no length counts what it has read so far, so
+ * the total never trails the bytes done. A cache hit that hands the runtime a
+ * file path reports nothing, so a warm load stays silent.
+ */
+function aggregateDownloadProgress(
+  onProgress: (progress: ModelDownloadProgress) => void,
+): (info: Record<string, unknown>) => void {
+  const files = new Map<string, { loaded: number; total: number }>();
+  return (info) => {
+    if (info.status !== 'progress') return;
+    const loaded = typeof info.loaded === 'number' ? info.loaded : 0;
+    const total = typeof info.total === 'number' ? info.total : 0;
+    files.set(`${String(info.name)}/${String(info.file)}`, {
+      loaded,
+      total: Math.max(total, loaded),
+    });
+    let bytesDone = 0;
+    let bytesTotal = 0;
+    for (const file of files.values()) {
+      bytesDone += file.loaded;
+      bytesTotal += file.total;
+    }
+    onProgress({ bytesDone, bytesTotal });
+  };
+}
+
 /** The load options that make transformers.js fetch exactly the profile's ONNX graph. */
 export interface TransformersModelOptions {
   revision: string;
@@ -141,6 +175,8 @@ export async function createProfileEmbedder(
      * what affects values, and that stays with the caller.
      */
     sessionOptions?: Record<string, unknown>;
+    /** Called as the model and tokenizer files download. */
+    onDownloadProgress?: (progress: ModelDownloadProgress) => void;
     /** Test seam: a stand-in for `@huggingface/transformers`. */
     transformers?: TransformersModule;
   } = {},
@@ -159,13 +195,18 @@ export async function createProfileEmbedder(
     transformers.env.useFSCache = true;
     transformers.env.allowRemoteModels = true;
   }
+  const progress = opts.onDownloadProgress
+    ? { progress_callback: aggregateDownloadProgress(opts.onDownloadProgress) }
+    : {};
   const [pipe, tokenizer] = await Promise.all([
     transformers.pipeline('feature-extraction', profile.model.repo, {
       ...modelOptions,
       ...(opts.sessionOptions ? { session_options: opts.sessionOptions } : {}),
+      ...progress,
     }),
     transformers.AutoTokenizer.from_pretrained(profile.model.repo, {
       revision: modelOptions.revision,
+      ...progress,
     }),
   ]);
 

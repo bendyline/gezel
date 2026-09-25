@@ -44,7 +44,9 @@ import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
+import './GezelDetail.css';
 
 type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories';
 
@@ -78,6 +80,10 @@ export function GezelDetail({
   const [showIterate, setShowIterate] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renaming, setRenaming] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const renameButtonRef = useRef<HTMLButtonElement>(null);
+  const renameActiveRef = useRef(false);
+  const restoreRenameFocusRef = useRef(false);
   const isFixedFunction = selected?.fixedFunction !== undefined;
   const activeDetailTab =
     isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories') ? 'chat' : detailTab;
@@ -150,13 +156,32 @@ export function GezelDetail({
 
   const startRename = useCallback(() => {
     if (!selected) return;
+    renameActiveRef.current = true;
     setRenameDraft(selected.name);
     setRenaming(true);
   }, [selected]);
 
+  useEffect(() => {
+    if (renaming) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    } else if (restoreRenameFocusRef.current) {
+      restoreRenameFocusRef.current = false;
+      renameButtonRef.current?.focus();
+    }
+  }, [renaming]);
+
+  const finishRename = useCallback(() => {
+    renameActiveRef.current = false;
+    restoreRenameFocusRef.current = true;
+    setRenaming(false);
+  }, []);
+
   const commitRename = useCallback(async () => {
+    if (!renameActiveRef.current) return;
+    renameActiveRef.current = false;
     if (!selected || !renameDraft.trim() || renameDraft.trim() === selected.name) {
-      setRenaming(false);
+      finishRename();
       return;
     }
     try {
@@ -169,15 +194,19 @@ export function GezelDetail({
     } catch (err) {
       setStatus(`rename failed: ${(err as Error).message}`);
     }
-    setRenaming(false);
-  }, [selected, renameDraft, aboutAutosave.flush, aboutAutosave.adopt]);
+    finishRename();
+  }, [selected, renameDraft, aboutAutosave.flush, aboutAutosave.adopt, finishRename]);
 
   const handleRenameKey = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') void commitRename();
-      if (e.key === 'Escape') setRenaming(false);
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Enter') void commitRename();
+        else finishRename();
+      }
     },
-    [commitRename],
+    [commitRename, finishRename],
   );
 
   if (error) {
@@ -205,7 +234,11 @@ export function GezelDetail({
             name={selected.name}
             size={80}
             pulsing={generatingIcon && !selected.icon && !selected.poppetje}
-            onClick={() => setShowIterate(true)}
+            onClick={
+              runtimeCapabilities().imageGeneration
+                ? () => setShowIterate(true)
+                : () => setDetailTab('appearance')
+            }
             title={
               selected.iconOverride && selected.icon
                 ? 'Click to iterate on this icon'
@@ -219,22 +252,25 @@ export function GezelDetail({
         <div className="detail-header-text">
           {renaming ? (
             <input
+              ref={renameInputRef}
               className="rename-input"
+              aria-label="Gezel name"
               value={renameDraft}
               onChange={(e) => setRenameDraft(e.target.value)}
               onBlur={() => void commitRename()}
               onKeyDown={handleRenameKey}
             />
           ) : (
-            <h3
-              className="gezel-name-editable"
-              onClick={startRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') startRename();
-              }}
-              title="Click to rename"
-            >
-              {selected.name}
+            <h3>
+              <button
+                ref={renameButtonRef}
+                type="button"
+                className="gezel-name-editable"
+                onClick={startRename}
+                title="Rename gezel"
+              >
+                {selected.name}
+              </button>
             </h3>
           )}
           {selected.role && <span className="gezel-role">{selected.role}</span>}
@@ -256,9 +292,9 @@ export function GezelDetail({
                 </span>
               )}
             </div>
-          ) : (
+          ) : runtimeCapabilities().daemonSettings ? (
             <ProviderOverride gezel={selected} onUpdated={applyUpdate} />
-          )}
+          ) : null}
         </div>
         <output className="status" aria-live="polite">
           {aboutAutosave.phase === 'error' ? (
@@ -284,32 +320,40 @@ export function GezelDetail({
         </output>
         <GezelActionsMenu gezel={selected} onDeleted={onDeleted} boringMode={boringMode} />
       </header>
-      <IterateIconDialog
-        open={showIterate}
-        gezel={selected}
-        isGenerating={generatingIcon}
-        onClose={() => setShowIterate(false)}
-        onUpdated={applyUpdate}
-        setGenerating={setGeneratingIcon}
-      />
+      {runtimeCapabilities().imageGeneration && (
+        <IterateIconDialog
+          open={showIterate}
+          gezel={selected}
+          isGenerating={generatingIcon}
+          onClose={() => setShowIterate(false)}
+          onUpdated={applyUpdate}
+          setGenerating={setGeneratingIcon}
+        />
+      )}
       <div className="entity-tabs-row">
         <Tabs.Root value={activeDetailTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
           <Tabs.List>
             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
             <Tabs.Trigger value="about">About</Tabs.Trigger>
             <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
-            <Tabs.Trigger value="growth">
-              Growth
-              {selected.growth?.pending && (
-                <span
-                  className="growth-tab-dot"
-                  title="A level-up is waiting for your choice"
-                  aria-label="Level-up pending"
-                />
-              )}
-            </Tabs.Trigger>
-            {!isFixedFunction && <Tabs.Trigger value="toolsets">Toolsets</Tabs.Trigger>}
-            {!isFixedFunction && <Tabs.Trigger value="memories">Memories</Tabs.Trigger>}
+            {runtimeCapabilities().background && (
+              <Tabs.Trigger value="growth">
+                Growth
+                {selected.growth?.pending && (
+                  <span
+                    className="growth-tab-dot"
+                    title="A level-up is waiting for your choice"
+                    aria-label="Level-up pending"
+                  />
+                )}
+              </Tabs.Trigger>
+            )}
+            {runtimeCapabilities().catalog && !isFixedFunction && (
+              <Tabs.Trigger value="toolsets">Toolsets</Tabs.Trigger>
+            )}
+            {runtimeCapabilities().memories && !isFixedFunction && (
+              <Tabs.Trigger value="memories">Memories</Tabs.Trigger>
+            )}
           </Tabs.List>
         </Tabs.Root>
       </div>
@@ -360,58 +404,62 @@ export function GezelDetail({
             readOnly={generatingAbout || applyingAbout}
             toolbarSlotAfterActions={
               <>
-                <TransformToolbarButton context="about" />
-                <GezelTemplatePicker
-                  {...(selected.role ? { gezelRole: selected.role } : {})}
-                  {...(selected.templateId ? { gezelTemplateId: selected.templateId } : {})}
-                  onApply={async (_templateId, about) => {
-                    setApplyingAbout(true);
-                    try {
-                      const updated = await aboutAutosave.saveNow(about);
-                      if (!updated) return;
-                      setAboutRev((r) => r + 1);
-                      setStatus('applied template');
-                    } catch (err) {
-                      setStatus(`template apply failed: ${(err as Error).message}`);
-                    } finally {
-                      setApplyingAbout(false);
+                {runtimeCapabilities().tasks && <TransformToolbarButton context="about" />}
+                {runtimeCapabilities().catalog && (
+                  <GezelTemplatePicker
+                    {...(selected.role ? { gezelRole: selected.role } : {})}
+                    {...(selected.templateId ? { gezelTemplateId: selected.templateId } : {})}
+                    onApply={async (_templateId, about) => {
+                      setApplyingAbout(true);
+                      try {
+                        const updated = await aboutAutosave.saveNow(about);
+                        if (!updated) return;
+                        setAboutRev((r) => r + 1);
+                        setStatus('applied template');
+                      } catch (err) {
+                        setStatus(`template apply failed: ${(err as Error).message}`);
+                      } finally {
+                        setApplyingAbout(false);
+                      }
+                    }}
+                  />
+                )}
+                {runtimeCapabilities().imageGeneration && (
+                  <button
+                    type="button"
+                    className="link-btn"
+                    disabled={generatingAbout || !selected.role}
+                    title={
+                      selected.role
+                        ? 'Re-draft about.md from the role'
+                        : 'Set a role first to enable about generation'
                     }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="link-btn"
-                  disabled={generatingAbout || !selected.role}
-                  title={
-                    selected.role
-                      ? 'Re-draft about.md from the role'
-                      : 'Set a role first to enable about generation'
-                  }
-                  onClick={async () => {
-                    if (!selected.role) return;
-                    setGeneratingAbout(true);
-                    try {
-                      // Generation is a different endpoint, so drain the
-                      // about.md lane first. With the editor read-only while
-                      // this runs, no older autosave can land after the
-                      // generated replacement.
-                      await aboutAutosave.flush();
-                      const updated = await api.generateGezelAbout(selected.id, {
-                        role: selected.role,
-                      });
-                      aboutAutosave.adopt(updated.about);
-                      selectedRef.current = updated;
-                      setAboutRev((r) => r + 1);
-                      applyUpdate(updated);
-                    } catch (err) {
-                      setStatus(`about generation failed: ${(err as Error).message}`);
-                    } finally {
-                      setGeneratingAbout(false);
-                    }
-                  }}
-                >
-                  {generatingAbout ? 'Drafting…' : 'Draft from role'}
-                </button>
+                    onClick={async () => {
+                      if (!selected.role) return;
+                      setGeneratingAbout(true);
+                      try {
+                        // Generation is a different endpoint, so drain the
+                        // about.md lane first. With the editor read-only while
+                        // this runs, no older autosave can land after the
+                        // generated replacement.
+                        await aboutAutosave.flush();
+                        const updated = await api.generateGezelAbout(selected.id, {
+                          role: selected.role,
+                        });
+                        aboutAutosave.adopt(updated.about);
+                        selectedRef.current = updated;
+                        setAboutRev((r) => r + 1);
+                        applyUpdate(updated);
+                      } catch (err) {
+                        setStatus(`about generation failed: ${(err as Error).message}`);
+                      } finally {
+                        setGeneratingAbout(false);
+                      }
+                    }}
+                  >
+                    {generatingAbout ? 'Drafting…' : 'Draft from role'}
+                  </button>
+                )}
               </>
             }
           />

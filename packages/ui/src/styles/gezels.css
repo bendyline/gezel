@@ -35,198 +35,6 @@
   max-height: 100%;
 }
 
-/* Appearance section in GezelDetail. */
-.gezel-appearance {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.gezel-appearance-hero {
-  flex-shrink: 0;
-  width: 160px;
-  height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.gezel-appearance-hero svg {
-  width: auto;
-  height: 100%;
-}
-
-.gezel-appearance-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex: 1;
-}
-
-.gezel-appearance-actions button {
-  align-self: flex-start;
-}
-
-.gezel-appearance-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.gezel-appearance-buttons {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.gezel-font-section {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-/* Accessories dialog — toggle worn items (hat / garment / accessory). */
-.accessories-dialog {
-  width: 38rem;
-  max-width: 92vw;
-}
-
-.accessories-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.25rem;
-  margin: 0.5rem 0;
-}
-
-.accessories-preview {
-  flex-shrink: 0;
-  width: 140px;
-  height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg, #141414);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  position: sticky;
-  top: 0;
-}
-
-.accessories-preview svg {
-  width: auto;
-  height: 100%;
-}
-
-/* The slot sections scroll as a column so the whole catalog stays browsable
-   without the dialog growing past the viewport. */
-.accessories-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  flex: 1;
-  min-width: 0;
-  max-height: 60vh;
-  overflow-y: auto;
-  padding-right: 0.25rem;
-}
-
-.accessory-section-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.accessory-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
-  gap: 0.5rem;
-}
-
-.accessory-tile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.25rem 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
-}
-
-.accessory-tile:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--surface);
-}
-
-.accessory-tile.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-  background: var(--surface);
-}
-
-.accessory-tile:disabled {
-  cursor: default;
-}
-
-.accessory-tile.locked {
-  opacity: 0.5;
-}
-
-.accessory-tile-art {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 3.25rem;
-  /* Fixed light card so dark line-art (glasses) and pale cloth both read. */
-  background: #f3ecdc;
-  border-radius: 6px;
-  color: var(--text-muted);
-}
-
-.accessory-tile-label {
-  font-size: 0.7rem;
-  line-height: 1.1;
-  text-align: center;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.accessory-tile-lock {
-  position: absolute;
-  top: 0.2rem;
-  right: 0.2rem;
-  font-size: 0.6rem;
-  padding: 0.05rem 0.2rem;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-}
-
 .gezel-icon-fallback {
   display: flex;
   align-items: center;
@@ -258,81 +66,6 @@
   50% {
     opacity: 0.45;
   }
-}
-
-/* ---------- Sidebar gezel rows ---------- */
-
-.gezel-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* Keep the creation toolbar fixed while a long gezel roster scrolls within
-   the available pane height. */
-.gezels-side {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.gezels-side .gezel-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  /* The roster is the scroll container, so its scrollbar is drawn inside the
-     pane's right padding: every row's trailing actions trigger ended up a
-     scrollbar-width further from the edge than the rows' left inset. Bleed the
-     list into that gutter so the bar rides the pane edge, and keep the gutter
-     reserved so the inset does not shift when the roster is short enough not
-     to scroll. */
-  margin-right: -1rem;
-  scrollbar-gutter: stable;
-}
-
-.side li .gezel-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  text-align: left;
-  padding: 0.4rem 0.5rem;
-  border: none;
-  background: transparent;
-  color: inherit;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.side li .gezel-row:hover {
-  background: rgba(127, 127, 127, 0.08);
-}
-
-.side li .gezel-row.active {
-  background: rgba(176, 114, 76, 0.15);
-}
-
-.gezel-row-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.2;
-}
-
-.gezel-row-name {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gezel-row-role {
-  font-size: 0.75rem;
-  color: #888;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Read-only provenance annotation for grandfathered machine-wide entities.
@@ -367,27 +100,6 @@
   padding-top: 2px;
 }
 
-.gezel-detail .detail-header h3 {
-  margin-bottom: 0;
-}
-
-.gezel-detail > .detail-header > .gezel-actions-trigger {
-  align-self: flex-start;
-}
-
-/* ---------- Iterate dialog ---------- */
-
-.iterate-dialog {
-  min-width: 420px;
-  max-width: 520px;
-}
-
-.iterate-preview {
-  display: flex;
-  justify-content: center;
-  padding: 0.75rem 0 1rem;
-}
-
 .gz-dialog textarea {
   resize: vertical;
 }
@@ -400,22 +112,6 @@
   font-size: 0.85rem;
   cursor: pointer;
   text-decoration: underline;
-}
-
-.icon-history-row {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  overflow-x: auto;
-}
-
-.icon-history-item {
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
 }
 
 .muted {
@@ -463,34 +159,6 @@
   font-size: 0.8rem;
 }
 
-.provider-override {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex-wrap: wrap;
-  margin-top: 0.35rem;
-}
-
-.provider-chip {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.15rem 0.6rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.provider-chip-active {
-  background: rgba(176, 114, 76, 0.15);
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.provider-chip:hover:not(.provider-chip-active):not(:disabled) {
-  border-color: var(--accent);
-}
-
 .model-picker-other {
   display: inline-flex;
   gap: 0.25rem;
@@ -530,24 +198,4 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #888;
-}
-
-/* Hair choices use the accessory tiles, with native radio keyboard behavior. */
-.hair-choice {
-  position: relative;
-  cursor: pointer;
-}
-.hair-choice input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-.hair-choice:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.hair-choice[data-disabled="true"] {
-  opacity: 0.5;
-  cursor: default;
 }

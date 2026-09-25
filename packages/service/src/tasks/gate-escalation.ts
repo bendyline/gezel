@@ -175,7 +175,10 @@ export function deliverableSurface(opts: {
 }): DeliverableSurface {
   const failed = opts.failedChecks ?? [];
   if (failed.length > 0 && failed.every((label) => label.startsWith('script:'))) return 'script';
-  if (failed.length > 0 && failed.every((label) => label.startsWith('corpusReadEvidence '))) {
+  if (
+    failed.length > 0 &&
+    failed.every((label) => /^(?:corpusReadEvidence|artifactReadEvidence) /.test(label))
+  ) {
     return 'evidence';
   }
   if (opts.advanceWhen?.file) return opts.advanceWhen.artifact ? 'artifact' : 'workspace';
@@ -238,7 +241,7 @@ export function buildStageOneNudge(opts: {
     return `GATE_SCRIPT_REPAIR: The gate script still rejects the result. Use its current findings below and the step instructions to identify the actual repair target and the appropriate allowed tools. A script can check an artifact, a task note, or other state; do not assume which one it reads. Preserve work that already passes and repair the named defects before advancing again. If a finding is unclear or impossible, report that specific blocker rather than modifying unrelated files or notes.\n\n${opts.failingBullets}`;
   }
   if (opts.surface === 'evidence') {
-    return `GATE_EVIDENCE_REQUIRED: Continue by performing the missing reads named below. This gate measures tool results delivered by read_artifact/read_artifacts; writing, editing, or merely claiming completion cannot satisfy it. Call the exact read tool now, cover every named record and line range, then call advance_task_step once.\n\n${opts.failingBullets}`;
+    return `GATE_EVIDENCE_REQUIRED: Use the available artifact-reading tools to perform the missing reads named below. This gate measures delivered tool results; writing, editing, or merely claiming completion cannot satisfy it. Cover every named record and line range, then follow the step's completion procedure.\n\n${opts.failingBullets}`;
   }
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
   const missing =

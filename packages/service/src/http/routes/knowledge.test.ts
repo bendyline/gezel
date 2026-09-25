@@ -284,9 +284,15 @@ describe('knowledge routes', () => {
   }, 60_000);
 
   it('answers the gilde-backed browse, update and job surfaces', async () => {
-    // The pinned gilde content ships no knowledge catalogs yet, so the
-    // browser is empty and nothing is updatable — every surface still answers.
-    expect((await client.listAvailableKnowledgeCatalogs()).catalogs).toEqual([]);
+    // Whatever the pinned gilde content offers, this home installed none of
+    // it (test-notes came from a file and a URL), so nothing is updatable —
+    // every surface still answers. Never pin the offered count: it moves
+    // with every gilde release.
+    const offered = (await client.listAvailableKnowledgeCatalogs()).catalogs;
+    for (const catalog of offered) {
+      expect(catalog, catalog.id).toMatchObject({ installing: false, incompleteDownload: false });
+      expect(catalog.installed, catalog.id).toBeUndefined();
+    }
     const updates = await client.knowledgeUpdates();
     expect(updates.source).toBe('gilde');
     expect(updates.updates).toEqual([]);

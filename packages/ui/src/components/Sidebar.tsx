@@ -19,16 +19,24 @@ import {
 import { api } from '../api.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { ContextMenu, Tooltip } from '../primitives/index.js';
+import { runtimeCapabilities, supportsArea } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
-import { AreaIcon } from './AreaIcon.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type FileEntry, FileTree } from './FileTree.js';
 import { GezelActionsMenu } from './GezelActionsMenu.js';
 import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
+import {
+  NavigationArea,
+  NavigationGroup,
+  type NavigationGroupProps,
+  NavigationHome,
+  NavigationItem,
+  PrimaryNavigation,
+} from './PrimaryNavigation.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectIcon } from './ProjectIcon.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
@@ -42,11 +50,11 @@ import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { fileManagerLabel } from './file-manager-label.js';
+import { useFirstRun } from './first-run-context.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
-import { useIsFirstRun } from './useIsFirstRun.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -100,6 +108,8 @@ function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
 }
 
 interface SidebarProps {
+  /** Expand navigation for a small screen without changing desktop preferences. */
+  compact?: boolean;
   /** The current selection. `null` means the Meester home view. */
   selection: RecentTab | null;
   /** Select an entity (or `null` for Meester home). */
@@ -170,21 +180,6 @@ const AREA_LINKS: RecentTabArea[] = [
 // which is its own top-level destination. Listing it as a project too would
 // offer two doors into one room.
 const HIDDEN_PROJECT_IDS = new Set<string>(['default', SHARED_PROJECT_ID]);
-const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
-  projects: 'Projects',
-  gezels: 'Gezellen',
-  documents: 'Documents',
-  tasks: 'Tasks',
-  craftbooks: 'Craftbooks',
-  scripts: 'Scripts',
-  history: 'History',
-  handboek: 'Handboek',
-  // Rendered only once the user registers ≥1 knowledge catalog (WS-I); the
-  // label exists now because the Record is typed against every area.
-  knowledge: 'Knowledge',
-  benchmarks: 'Benchmarks',
-  settings: 'Settings',
-};
 
 function readStoredWidth(): number {
   try {
@@ -222,6 +217,7 @@ function readStoredGroups(): Record<GroupId, boolean> {
 }
 
 export function Sidebar({
+  compact = false,
   selection,
   onSelect,
   onOpenArea,
@@ -259,12 +255,13 @@ export function Sidebar({
   );
   const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
-  const [collapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
+  const [storedCollapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
+  const collapsed = !compact && storedCollapsed;
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const showAdvancedFeatures = useShowAdvancedFeatures();
   const hasKnowledgeCatalogs = useHasKnowledgeCatalogs();
   // Until setup is done, the home tab reads "Get started" instead of "Home".
-  const firstRun = useIsFirstRun();
+  const firstRun = useFirstRun();
   const meester = gezels.find((gezel) => gezel.id === meesterGezelId);
   const meesterName = meester ? displayName(meester, roleBasedNameOnly) : '';
   // "Home" carries the weight; the meester's name rides along muted. The
@@ -281,6 +278,7 @@ export function Sidebar({
   const currentArea = selection?.kind === 'area' ? selection.area : null;
   const areaLinks = useMemo(() => {
     const links = AREA_LINKS.filter((area) => {
+      if (!supportsArea(area)) return false;
       if (area === 'scripts') return showAdvancedFeatures;
       // Knowledge appears the moment the user registers ≥1 catalog — the
       // rail flips exactly at that count, never from machine inventory.
@@ -294,7 +292,12 @@ export function Sidebar({
     // reachable by default through the Home "Save a routine" tip, which routes
     // to Scripts while Scripts is gated off. Group-backed areas are excluded:
     // they light their own Group header instead and would double-render.
-    if (currentArea && !links.includes(currentArea) && !GROUP_BACKED_AREAS.has(currentArea)) {
+    if (
+      currentArea &&
+      supportsArea(currentArea) &&
+      !links.includes(currentArea) &&
+      !GROUP_BACKED_AREAS.has(currentArea)
+    ) {
       const settingsAt = links.indexOf('settings');
       links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
     }
@@ -889,33 +892,27 @@ export function Sidebar({
 
   return (
     <aside
-      className={`app-sidebar${collapsed ? ' collapsed' : ''}`}
-      style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
+      className={`app-sidebar${collapsed ? ' collapsed' : ''}${compact ? ' app-sidebar-compact' : ''}`}
+      style={{ width: compact ? '100%' : collapsed ? COLLAPSED_WIDTH : width }}
       data-testid="app-sidebar"
     >
-      <nav className="app-sidebar-scroll" aria-label="Primary navigation">
+      <PrimaryNavigation touch={compact}>
         {/* Home / dashboard */}
-        <button
-          type="button"
-          className={`app-sidebar-item app-sidebar-item-root app-sidebar-home${selection === null ? ' active' : ''}`}
-          onClick={() => onSelect(null)}
-          {...intentProps(null)}
+        <NavigationHome
+          active={selection === null}
+          onOpen={() => onSelect(null)}
+          onPreload={() => onPreload?.(null)}
           title={homeTitle}
-          data-testid="sidebar-meester"
-        >
-          <span className="app-sidebar-item-icon">
-            <HomeIcon />
-          </span>
-          <span className="app-sidebar-item-label">
-            {firstRun || !meesterName ? (
+          label={
+            firstRun || !meesterName ? (
               homeLabel
             ) : (
               <>
                 Home <span className="app-sidebar-home-meester">· {meesterName}</span>
               </>
-            )}
-          </span>
-        </button>
+            )
+          }
+        />
 
         {/* Projects */}
         <Group
@@ -948,26 +945,25 @@ export function Sidebar({
                   className={`app-sidebar-proj-row${activeKey === key ? ' active' : ''}`}
                   {...intentProps(projectTab)}
                 >
-                  <button
-                    type="button"
-                    className={`app-sidebar-item app-sidebar-subitem${activeKey === key ? ' active' : ''}`}
-                    onClick={select}
+                  <NavigationItem
+                    active={activeKey === key}
+                    onOpen={select}
                     title={p.name}
-                    aria-current={activeKey === key ? 'page' : undefined}
-                  >
-                    <ProjectIcon project={p} size={18} className="app-sidebar-item-icon" />
-                    <span className="app-sidebar-item-label">
-                      {p.name}
-                      {p.storageScope === 'machine-shared' && (
-                        <span
-                          className="machine-shared-badge"
-                          title="Shared with accounts on this machine"
-                        >
-                          Shared
-                        </span>
-                      )}
-                    </span>
-                  </button>
+                    icon={<ProjectIcon project={p} size={18} />}
+                    label={
+                      <>
+                        {p.name}
+                        {p.storageScope === 'machine-shared' && (
+                          <span
+                            className="machine-shared-badge"
+                            title="Shared with accounts on this machine"
+                          >
+                            Shared
+                          </span>
+                        )}
+                      </>
+                    }
+                  />
                   <ProjectActionsMenu
                     project={p}
                     hasError={!!poisoned}
@@ -1044,7 +1040,7 @@ export function Sidebar({
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                       </button>
-                    ) : (
+                    ) : runtimeCapabilities().background ? (
                       <Tooltip.Hint
                         text={PROJECT_STATUS_DESCRIPTIONS[status]}
                         side="left"
@@ -1057,7 +1053,7 @@ export function Sidebar({
                           aria-label={`${p.name}: ${PROJECT_STATUS_DESCRIPTIONS[status]}`}
                         />
                       </Tooltip.Hint>
-                    )}
+                    ) : null}
                   </span>
                 </li>
               );
@@ -1080,12 +1076,14 @@ export function Sidebar({
           addTitle="New document"
           dropTarget={documentDropTarget}
           contextMenu={
-            <ContextMenu.Item
-              className="app-nav-menu-item"
-              onSelect={() => void revealDocumentsFolder()}
-            >
-              {documentsFolderContextLabel(window.__GEZEL__?.platform)}
-            </ContextMenu.Item>
+            runtimeCapabilities().externalFolders ? (
+              <ContextMenu.Item
+                className="app-nav-menu-item"
+                onSelect={() => void revealDocumentsFolder()}
+              >
+                {documentsFolderContextLabel(window.__GEZEL__?.platform)}
+              </ContextMenu.Item>
+            ) : undefined
           }
         >
           {quickDocs.length === 0 ? (
@@ -1173,26 +1171,23 @@ export function Sidebar({
                   className={`app-sidebar-gezel-row${activeKey === key ? ' active' : ''}`}
                   {...intentProps(gezelTab)}
                 >
-                  <button
-                    type="button"
-                    className={`app-sidebar-item app-sidebar-subitem app-sidebar-gezel${activeKey === key ? ' active' : ''}`}
-                    onClick={select}
+                  <NavigationItem
+                    className="app-sidebar-gezel"
+                    active={activeKey === key}
+                    onOpen={select}
                     title={title}
-                  >
-                    <span className="app-sidebar-item-icon">
+                    icon={
                       <GezelIcon
                         poppetje={g.poppetje ?? null}
                         svg={g.icon ?? null}
                         iconOverride={g.iconOverride ?? false}
-                        // Display name, not raw name, so the fallback-letter
-                        // avatar shows the role initial in boring mode.
                         name={name}
                         size={24}
                         variant="icon"
                       />
-                    </span>
-                    <span className="app-sidebar-gezel-text">
-                      <span className="app-sidebar-item-label">
+                    }
+                    label={
+                      <>
                         {name}
                         {g.storageScope === 'machine-shared' && (
                           <span
@@ -1202,10 +1197,10 @@ export function Sidebar({
                             Shared
                           </span>
                         )}
-                      </span>
-                      {subtitle && <span className="app-sidebar-item-role">{subtitle}</span>}
-                    </span>
-                  </button>
+                      </>
+                    }
+                    subtitle={subtitle}
+                  />
                   {isWorking && (
                     <button
                       type="button"
@@ -1232,20 +1227,13 @@ export function Sidebar({
             const areaTab = toRecentTab({ kind: 'area', area });
             const key = tabKey(areaTab);
             return (
-              <button
+              <NavigationArea
                 key={area}
-                type="button"
-                className={`app-sidebar-item app-sidebar-item-root${activeKey === key ? ' active' : ''}`}
-                onClick={() => onOpenArea(area)}
-                {...intentProps(areaTab)}
-                title={AREA_LINK_LABELS[area]}
-                data-testid={`sidebar-area-${area}`}
-              >
-                <span className="app-sidebar-item-icon">
-                  <AreaIcon area={area} size={18} />
-                </span>
-                <span className="app-sidebar-item-label">{AREA_LINK_LABELS[area]}</span>
-              </button>
+                area={area}
+                active={activeKey === key}
+                onOpen={() => onOpenArea(area)}
+                onPreload={() => onPreload?.(areaTab)}
+              />
             );
           })}
           {/* Settings is last in AREA_LINKS, so install-health notices land
@@ -1277,31 +1265,35 @@ export function Sidebar({
             ))}
           </div>
         </div>
-      </nav>
+      </PrimaryNavigation>
 
-      <div className="app-sidebar-footer">
-        <button
-          type="button"
-          className="app-sidebar-collapse-toggle"
-          onClick={() => commitCollapsed(!collapsed)}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-pressed={collapsed}
-        >
-          {collapsed ? '›' : '‹'}
-        </button>
-      </div>
+      {!compact && (
+        <>
+          <div className="app-sidebar-footer">
+            <button
+              type="button"
+              className="app-sidebar-collapse-toggle"
+              onClick={() => commitCollapsed(!collapsed)}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-pressed={collapsed}
+            >
+              {collapsed ? '›' : '‹'}
+            </button>
+          </div>
 
-      {/* Resize grip on the right edge */}
-      <div
-        className="app-sidebar-grip"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        tabIndex={0}
-        onMouseDown={onGripMouseDown}
-        onKeyDown={onGripKeyDown}
-      />
+          {/* Resize grip on the right edge */}
+          <div
+            className="app-sidebar-grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            tabIndex={0}
+            onMouseDown={onGripMouseDown}
+            onKeyDown={onGripKeyDown}
+          />
+        </>
+      )}
 
       <NewPathDialog
         open={showNewDoc}
@@ -1371,27 +1363,10 @@ export function Sidebar({
   );
 }
 
-interface GroupProps {
+interface GroupProps extends Omit<NavigationGroupProps, 'contextMenu'> {
   id: GroupId;
-  label: string;
-  area: RecentTabArea;
-  expanded: boolean;
-  collapsed: boolean;
-  /** Whether the current selection belongs to this group (collapsed-mode highlight). */
-  active: boolean;
-  /** Expand/collapse the inline list (caret click). */
-  onToggle: () => void;
-  /** Open the full area screen for this group (title click). */
-  onOpen: () => void;
-  /** Warm the full-area destination before selection. */
-  onPreload?: () => void;
-  onAdd: (e: ReactMouseEvent) => void;
-  addTitle: string;
-  /** Optional right-click actions for this group's header. */
   contextMenu?: React.ReactNode;
-  /** Optional OS file-drop target spanning this group. */
   dropTarget?: GroupDropTarget;
-  children: React.ReactNode;
 }
 
 interface GroupDropTarget {
@@ -1404,156 +1379,45 @@ interface GroupDropTarget {
   onDrop: (event: ReactDragEvent<HTMLDivElement>) => void;
 }
 
-function Group({
-  id,
-  label,
-  area,
-  expanded,
-  collapsed,
-  active,
-  onToggle,
-  onOpen,
-  onPreload,
-  onAdd,
-  addTitle,
-  contextMenu,
-  dropTarget,
-  children,
-}: GroupProps) {
-  const showList = expanded && !collapsed;
-  const header = (
-    <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
-      {!collapsed && (
-        <button
-          type="button"
-          className="app-sidebar-caret-btn"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
-          data-testid={`sidebar-group-toggle-${id}`}
-        >
-          <span className={`app-sidebar-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
-            <svg
-              width={14}
-              height={14}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              focusable="false"
-              aria-hidden="true"
-            >
-              <polyline points="9 6 15 12 9 18" />
-            </svg>
-          </span>
-        </button>
-      )}
-      <button
-        type="button"
-        className="app-sidebar-group-toggle"
-        // Always opens the full area screen ("all projects/documents/gezels"),
-        // matching a click on the text header in expanded mode. In the
-        // collapsed icon-rail the caret is hidden, but the dedicated
-        // collapse toggle / drag grip still expand the rail, so the icon is
-        // free to navigate rather than toggle the inline list.
-        onClick={onOpen}
-        onPointerEnter={onPreload}
-        onFocus={onPreload}
-        onPointerDown={onPreload}
-        title={label}
-        data-testid={`sidebar-group-${id}`}
-      >
-        <span className="app-sidebar-item-icon">
-          <AreaIcon area={area} size={18} />
-        </span>
-        <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
-      </button>
-      {!collapsed && (
-        <button
-          type="button"
-          className="app-sidebar-add"
-          onClick={onAdd}
-          title={addTitle}
-          aria-label={addTitle}
-        >
-          {/* An SVG plus, not a "+" glyph: flex centering aligns the text
-              line box, and the font's ascender/descender asymmetry then
-              leaves the character sitting visibly low in the 22px key. */}
-          <svg
-            width={12}
-            height={12}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.4}
-            strokeLinecap="round"
-            focusable="false"
-            aria-hidden="true"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
+function Group({ contextMenu, dropTarget, ...props }: GroupProps) {
   return (
-    <div
-      className={`app-sidebar-group${dropTarget?.active ? ' app-sidebar-group-drop-active' : ''}`}
-      data-group={id}
+    <NavigationGroup
+      {...props}
+      className={dropTarget?.active ? 'app-sidebar-group-drop-active' : undefined}
       onDragEnter={dropTarget?.onDragEnter}
       onDragOver={dropTarget?.onDragOver}
       onDragLeave={dropTarget?.onDragLeave}
       onDrop={dropTarget?.onDrop}
-    >
-      {contextMenu ? (
-        <ContextMenu.Root>
-          <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
-          <ContextMenu.Portal>
-            <ContextMenu.Content className="app-nav-menu">{contextMenu}</ContextMenu.Content>
-          </ContextMenu.Portal>
-        </ContextMenu.Root>
-      ) : (
-        header
-      )}
-      {showList && <ul className="app-sidebar-list">{children}</ul>}
-      {dropTarget?.active && (
-        <div className="app-sidebar-document-drop-overlay" aria-hidden="true">
-          <i className="fa-solid fa-file-arrow-down" />
-          <span>{dropTarget.hint}</span>
-        </div>
-      )}
-      {dropTarget?.status && (
-        <output
-          className={`app-sidebar-document-drop-status${collapsed ? ' sr-only' : ''}`}
-          aria-live="polite"
-        >
-          {dropTarget.status}
-        </output>
-      )}
-    </div>
-  );
-}
-
-/** Small house glyph for the Home entry, matching AreaIcon's stroke style. */
-function HomeIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M3 11.5 12 4l9 7.5" />
-      <path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9" />
-      <path d="M9.5 20v-5h5v5" />
-    </svg>
+      decorateHeader={
+        contextMenu
+          ? (header) => (
+              <ContextMenu.Root>
+                <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
+                <ContextMenu.Portal>
+                  <ContextMenu.Content className="app-nav-menu">{contextMenu}</ContextMenu.Content>
+                </ContextMenu.Portal>
+              </ContextMenu.Root>
+            )
+          : undefined
+      }
+      after={
+        <>
+          {dropTarget?.active && (
+            <div className="app-sidebar-document-drop-overlay" aria-hidden="true">
+              <i className="fa-solid fa-file-arrow-down" />
+              <span>{dropTarget.hint}</span>
+            </div>
+          )}
+          {dropTarget?.status && (
+            <output
+              className={`app-sidebar-document-drop-status${props.collapsed ? ' sr-only' : ''}`}
+              aria-live="polite"
+            >
+              {dropTarget.status}
+            </output>
+          )}
+        </>
+      }
+    />
   );
 }

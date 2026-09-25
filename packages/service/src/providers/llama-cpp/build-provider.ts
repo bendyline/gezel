@@ -25,6 +25,7 @@ import {
   pressureIdleGraceMs,
   resolveLlamaCppContextRequirement,
 } from '../native/capacity-broker.js';
+import { measureAvailableGpuBytes } from '../native/device-capacity.js';
 import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
 import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
@@ -1072,6 +1073,13 @@ export async function buildLlamaCppProvider(opts: {
             ladderKvLinearization !== null &&
             exactKvAtReference !== undefined
           ) {
+            const growthBudgetKind = brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind;
+            // Fail open: without a reading, growth keeps the card-sized cap
+            // and admission still has the final word.
+            const measuredFreeVramBytes =
+              growthBudgetKind === 'discrete-gpu'
+                ? await measureAvailableGpuBytes().catch(() => undefined)
+                : undefined;
             const growth = planAdaptiveContextGrowth({
               basePerTurnCtxTokens: effectiveNumCtx,
               targetPerTurnCtxTokens: contextRequirement.growthTargetTokens,
@@ -1081,8 +1089,9 @@ export async function buildLlamaCppProvider(opts: {
               weightsResidentBytes: residentBytes,
               fastBudgetBytes,
               committedOtherBytes,
-              budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
+              budgetKind: growthBudgetKind,
               vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+              ...(measuredFreeVramBytes !== undefined ? { measuredFreeVramBytes } : {}),
               freeSystemRamBytes: availableSystemRamBytes(),
               isMoE,
               // A user-chosen lane count is not growth's to spend.

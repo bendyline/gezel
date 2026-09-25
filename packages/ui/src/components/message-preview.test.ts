@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { humanMessagePreview } from './message-preview.js';
+import { humanMessagePreview, speakableMessageText } from './message-preview.js';
 
 describe('humanMessagePreview', () => {
   // The design-review finding this file exists to prevent: a hand-off card
@@ -90,5 +90,36 @@ describe('humanMessagePreview', () => {
     expect(humanMessagePreview('Ready when you are.')).toBe('Ready when you are.');
     expect(humanMessagePreview('')).toBe('');
     expect(humanMessagePreview('   ')).toBe('');
+  });
+});
+
+describe('speakableMessageText', () => {
+  it('reads prose and drops every trace of tool-call markup', () => {
+    expect(
+      speakableMessageText(
+        "I'll start with the procedure's first action.\n\n<tool_call>\n<function=read_task_notes>\n" +
+          '<parameter=ref>\ndefault/18\n</parameter>\n</function>\n</tool_call>',
+      ),
+    ).toBe("I'll start with the procedure's first action.");
+    expect(speakableMessageText('Done.\n</tool_call>\n<|tool_call>')).toBe('Done.');
+  });
+
+  it('flattens markdown and turns lines into pauses', () => {
+    expect(
+      speakableMessageText('## Plan\n\n- **Research** the [city](https://x.test)\n- Draft slides'),
+    ).toBe('Plan. Research the city. Draft slides.');
+  });
+
+  it('never reads code aloud', () => {
+    expect(speakableMessageText('Here is the fix:\n\n```ts\nconst x = 1;\n```\n\nAll set.')).toBe(
+      'Here is the fix: All set.',
+    );
+    expect(speakableMessageText('Writing it now:\n```ts\nconst x')).toBe('Writing it now:');
+  });
+
+  it('is empty when nothing speakable is left', () => {
+    expect(speakableMessageText('<tool_call><function=list_dir></function></tool_call>')).toBe('');
+    expect(speakableMessageText('<think>planning the next step')).toBe('');
+    expect(speakableMessageText('---\n|---|---|')).toBe('');
   });
 });

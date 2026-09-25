@@ -40,13 +40,13 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 4 | `### Traits` | frontmatter traits present | varies |
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
-| 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large) AND the deep pass has produced summaries | ≤ ~300 tok |
-| 7 | `### Workspace files` listing (cap 200); with `prompt.retrieval-first` on the profile (tier-default tiny/small/medium) a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface | project has files | varies |
+| 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large), the deep pass has produced summaries, AND the role gets specialist workspace orientation | ≤ ~300 tok |
+| 7 | Role-scoped `### Workspace files` listing (cap 100): developer-family roles see code/config, writers see prose sources, researchers see prose/text data, designers see editable design sources, and reviewers see their union. Coordinators, generalists, generators, and unknown roles get no standing inventory. Dependency/build/cache directories, lockfiles, minified/source-map output, and binary formats are removed before the cap. With `prompt.retrieval-first` on the profile (tier-default tiny/small/medium), a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface. | project has relevant files and role is eligible | varies |
 | 8 | Shared documents library listing | documents exist, not executor-trimmed | varies |
 | 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
 | 11 | `### Recalled from prior sessions` legacy compatibility block | only when ChatManager is embedded without the scoped SearchService wiring | ~4–7 bullets |
-| 12 | Conduct core: **act-don't-narrate** (558 ch), **ask_user_question when stuck** incl. "a short message is not vague when task context is above" (1,414 ch), **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated) (~490 ch) | always, every provider | ~2.5K ch / ~620 tok total |
+| 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
 | 15 | **Behavior `promptAppend` walk** (the old "local hints") | per resolved model profile — see next section | 0 to ~9.4K ch |
@@ -140,6 +140,19 @@ the `just-chat` project type, which hides the work-oriented tabs to match. Tests
   one required action, not a suggest/invoke menu. If it nevertheless denies the capability
   without attempting that invocation, the post-turn loop supplies one corrective
   continuation and then stops retrying this detector.
+  A second, lower tier runs when no exact format matched: a craftbook's declared
+  `triggers` found in the text on word boundaries ([`craftbook-trigger-route.ts`](../packages/service/src/chat/craftbook-trigger-route.ts)).
+  It is advisory only — `reason: 'trigger-phrase'`, medium confidence, no `output`, so
+  `renderTurnIntentPrelude` and the exact-craftbook clamp never fire on it — and it
+  proposes only books the message alone can start (toolsets installed, no file input,
+  every required parameter filled from the message or a default).
+  Two things sit outside this channel now. The composer no longer *sends* a routed
+  request: it turns the same plan into an attached task and `POST
+  /api/sessions/:id/launch-task` creates the task deterministically, with the message as
+  the brief and a receipt in the thread — no model turn, so no prelude. And a send that
+  carries `turnIntent: 'off'` (the person dismissed the suggested task for that text)
+  skips the plan, the prelude, and the `invoke_craftbook` clamp for that one turn. The
+  prelude path remains for the CLI, evals, and older clients, which send neither.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, and shared
   library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.

@@ -905,6 +905,12 @@ export const GezelConfigSchema = z.object({
    */
   narrateAssistantReplies: z.boolean().optional(),
   /**
+   * Sub-option of {@link narrateAssistantReplies}: also speak the short
+   * updates a gezel gives between tool calls, not only the reply it ends
+   * its turn with. Defaults to `true`; has no effect while narration is off.
+   */
+  narrateProgressUpdates: z.boolean().optional(),
+  /**
    * Catalog id of the whisper.cpp model transcription runs on. whisper-server
    * binds one model per process, so this is the model the engine launches
    * with. Unset (or naming a model that is no longer installed) falls back to
@@ -1123,6 +1129,8 @@ export const GezelConfigSchema = z.object({
       'codex-cli': z.string().optional(),
       ollama: z.string().optional(),
       'llama-cpp': z.string().optional(),
+      'apple-foundation-models': z.string().optional(),
+      'android-mlkit': z.string().optional(),
       mlx: z.string().optional(),
       ds4: z.string().optional(),
       // A namespaced `remote:<remoteId>/<model>` default. Rarely set — remote
@@ -1141,6 +1149,8 @@ export const GezelConfigSchema = z.object({
       'codex-cli': z.string().optional(),
       ollama: z.string().optional(),
       'llama-cpp': z.string().optional(),
+      'apple-foundation-models': z.string().optional(),
+      'android-mlkit': z.string().optional(),
       mlx: z.string().optional(),
       ds4: z.string().optional(),
       remote: z.string().optional(),
@@ -2868,6 +2878,7 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
  *  reset-to-default signal — the store treats null as "delete the
  *  key" so the on-disk read shape stays narrow. */
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
+  defaultSttModel: z.string().nullable().optional(),
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
   microphoneDeviceId: z.string().max(1024).nullable().optional(),
@@ -4645,6 +4656,31 @@ export const WikipediaSearchRequestSchema = z.object({
 });
 export type WikipediaSearchRequest = z.infer<typeof WikipediaSearchRequestSchema>;
 
+/** Free reference-image discovery; licenses belong to individual Commons files. */
+export const WikimediaImageSearchRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+export type WikimediaImageSearchRequest = z.infer<typeof WikimediaImageSearchRequestSchema>;
+export const WikimediaImageResultSchema = z.object({
+  title: z.string(),
+  sourceUrl: z.string(),
+  imageUrl: z.string(),
+  width: z.number(),
+  height: z.number(),
+  description: z.string(),
+  credit: z.string(),
+  license: z.string(),
+  licenseUrl: z.string(),
+  usageTerms: z.string(),
+});
+export type WikimediaImageResult = z.infer<typeof WikimediaImageResultSchema>;
+export const WikimediaImageSearchResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(WikimediaImageResultSchema),
+});
+export type WikimediaImageSearchResponse = z.infer<typeof WikimediaImageSearchResponseSchema>;
+
 export const WebSearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
   /** Identifier of the provider that actually answered. */
@@ -5221,6 +5257,8 @@ export type SearchDocsResponse = z.infer<typeof SearchDocsResponseSchema>;
 
 export const ReadDocAsMarkdownRequestSchema = z.object({
   path: z.string().min(1),
+  /** Read from the artifacts drawer instead of the project workspace. */
+  artifact: z.boolean().optional(),
 });
 export type ReadDocAsMarkdownRequest = z.infer<typeof ReadDocAsMarkdownRequestSchema>;
 
@@ -5718,69 +5756,12 @@ export type DocumentSearchResult = z.infer<typeof DocumentSearchResultSchema>;
 export const SearchDocumentsResponseSchema = z.object({
   results: z.array(DocumentSearchResultSchema),
   /** `hybrid`/`semantic` once the library carries embeddings. */
-  engine: z.enum(['hybrid', 'semantic', 'fts', 'unavailable']),
+  engine: z.enum(['hybrid', 'semantic', 'fts', 'lexical', 'unavailable']),
+  /** Source scans are bounded, and expose incomplete coverage honestly. */
+  truncated: z.boolean().optional(),
+  sourcesIncomplete: z.boolean().optional(),
 });
 export type SearchDocumentsResponse = z.infer<typeof SearchDocumentsResponseSchema>;
-
-// ── image-intel ─────────────────────────────────────────────────────────────
-
-export const SearchImagesRequestSchema = z.object({
-  query: z.string().min(1),
-  maxResults: z.number().int().positive().max(100).optional(),
-});
-export type SearchImagesRequest = z.infer<typeof SearchImagesRequestSchema>;
-
-export const SearchImagesResponseSchema = z.object({
-  results: z.array(
-    z.object({
-      path: z.string(),
-      width: z.number().int().optional(),
-      height: z.number().int().optional(),
-      format: z.string().optional(),
-      caption: z.string().optional(),
-      score: z.number(),
-    }),
-  ),
-  engine: z.enum(['fts', 'unavailable']),
-  truncated: z.boolean(),
-});
-export type SearchImagesResponse = z.infer<typeof SearchImagesResponseSchema>;
-
-export const FindSimilarImagesRequestSchema = z.object({
-  path: z.string().min(1),
-  maxResults: z.number().int().positive().max(100).optional(),
-});
-export type FindSimilarImagesRequest = z.infer<typeof FindSimilarImagesRequestSchema>;
-
-export const FindSimilarImagesResponseSchema = z.object({
-  results: z.array(z.object({ path: z.string(), score: z.number() })),
-  /** vector = CLIP neighbours; unavailable = no image embeddings yet. */
-  engine: z.enum(['vector', 'unavailable']),
-  truncated: z.boolean(),
-});
-export type FindSimilarImagesResponse = z.infer<typeof FindSimilarImagesResponseSchema>;
-
-export const DescribeFolderRequestSchema = z.object({
-  path: z.string().optional(),
-});
-export type DescribeFolderRequest = z.infer<typeof DescribeFolderRequestSchema>;
-
-export const DescribeFolderResponseSchema = z.object({
-  path: z.string(),
-  imageCount: z.number().int().nonnegative(),
-  formats: z.array(z.object({ format: z.string(), count: z.number().int() })),
-  dimensions: z
-    .object({
-      minWidth: z.number().int(),
-      maxWidth: z.number().int(),
-      minHeight: z.number().int(),
-      maxHeight: z.number().int(),
-    })
-    .nullable(),
-  samples: z.array(z.string()),
-  captioned: z.number().int().nonnegative(),
-});
-export type DescribeFolderResponse = z.infer<typeof DescribeFolderResponseSchema>;
 
 // ── entity-intel (meta-boekwachter) ─────────────────────────────────────────
 
@@ -6812,6 +6793,7 @@ export const SessionDebugSnapshotSchema = z.object({
           'turn-aborted',
           'growth-announcement',
           'keurmeester-notice',
+          'craftbook-launch',
         ])
         .optional(),
       /**

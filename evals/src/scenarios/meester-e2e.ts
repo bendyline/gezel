@@ -428,9 +428,140 @@ export const codeReviewMeesterEndToEndScenario: EvalScenario = {
   },
 };
 
+const DECK_BOOK_RE = /\b(?:powerpoint-deck|content-deck|narrated-slideshow)\b/;
+
+/**
+ * Tools that count as research: the user's own material (`search` covers the
+ * shared library, memories, artifacts and installed knowledge catalogs) and
+ * the live web. The book names every one of these in its research step.
+ */
+const RESEARCH_TOOLS = new Set([
+  'search',
+  'read_document',
+  'web_search',
+  'wikipedia_search',
+  'wikipedia_read',
+  'fetch_url',
+  'browser_navigate',
+  'run_playwright_script',
+]);
+
+async function installFoodKnowledge(ctx: EvalContext): Promise<void> {
+  try {
+    await ctx.client.installKnowledgeCatalogFromCatalog('wikipedia-food-drink', () => {});
+    ctx.log('[scenario:setup] installed the wikipedia-food-drink knowledge catalog');
+  } catch (err) {
+    ctx.log(
+      `[scenario:setup] wikipedia-food-drink unavailable (${err instanceof Error ? err.message : String(err)}) — research falls back to the web`,
+    );
+  }
+}
+
+/**
+ * The front-door PowerPoint ask, exactly as a user types it, against the
+ * setup a real install has: DocBlocks in Default and a food-and-drink
+ * knowledge catalog beside the live web.
+ *
+ * Stricter than `pptx-meester-e2e`, which passes the moment a .pptx exists:
+ * this one waits for the task to finish every phase, and requires that
+ * research actually ran, that the deck is about the topic, and that one ask
+ * started one crew.
+ */
+export const pptxMeesterPizzaScenario: EvalScenario = {
+  id: 'pptx-meester-pizza',
+  description:
+    'Front-door PowerPoint in Default: "Create a PowerPoint about pizza" → Meester routes to the deck craftbook → one crew runs every phase (research with real tool evidence, outline, write, review, publish, evaluate, finish) → a real .pptx about pizza.',
+  prompt: 'Create a PowerPoint about pizza',
+  timeoutMs: 180 * 60_000,
+  // Measure the product, not the harness: a real user gets no "direct kick".
+  // Under the harness policy a kick queued 14 s into the write step landed
+  // after that step had handed off, the finished session failed its forced
+  // write twice, and "repair-aborted" ended a run that was progressing
+  // normally on publish (qwen3.8-27b, 2026-09-23).
+  repairPolicy: 'runtime',
+  setup: async (ctx) => {
+    await installDocblocks(ctx);
+    await installFoodKnowledge(ctx);
+  },
+  successCheck: async ({ client, logChanged, recordSniff }: EvalContext) => {
+    const listed = await client.listTasks().catch(() => ({ tasks: [] }));
+    const decks = (listed.tasks ?? []).filter((t) =>
+      (t.sourceCraftbookIds ?? []).some((s) => DECK_BOOK_RE.test(s.catalogId ?? '')),
+    );
+    if (decks.length === 0) {
+      logChanged('sniff', '[scenario] pptx-meester-pizza: not routed yet');
+      recordSniff?.({ key: 'pptx-meester-pizza', score: 0, bytes: 0 });
+      return { done: false };
+    }
+    if (decks.length > 1) {
+      return {
+        done: true,
+        success: false,
+        reason: `one ask started ${decks.length} deck crews (${decks.map((t) => t.ref).join(', ')})`,
+      };
+    }
+    const task = decks[0]!;
+    const deck = await findBinaryDeliverable(client, /\.pptx$/i, (b) =>
+      isOpenXml(b, 'ppt/presentation.xml'),
+    );
+    logChanged(
+      'sniff',
+      `[scenario] pptx-meester-pizza: ${task.ref} ${task.status} step=${task.activeStepId ?? '-'} pptx=${deck ? `${deck.bytes}B` : 'none'}`,
+    );
+    // Score climbs with every step reached, so a book walking its phases
+    // reads as progress to the deliverable-anchored deadline instead of one
+    // long plateau from research to publish.
+    const steps = task.craftbook?.steps ?? [];
+    const reached =
+      Math.max(
+        0,
+        steps.findIndex((s) => s.id === task.activeStepId),
+      ) + 1;
+    const score = task.status === 'complete' ? steps.length + 1 : reached;
+    recordSniff?.({ key: 'pptx-meester-pizza', score, bytes: deck?.bytes ?? 0 });
+    if (task.status === 'paused' || task.status === 'canceled') {
+      return {
+        done: true,
+        success: false,
+        reason: `${task.ref} ${task.status} at step ${task.activeStepId ?? '?'}${deck ? ` (a ${deck.bytes}-byte .pptx exists)` : ''}`,
+      };
+    }
+    if (task.status !== 'complete') return { done: false };
+
+    const gaps: string[] = [];
+    if (!deck) gaps.push('no real .pptx');
+    const source = await findTextFile(client, /(?:^|\/)deck\.md$/, /pizza/i, 200);
+    if (!source) gaps.push('no Markdown deck source mentions pizza');
+    const history = await client
+      .listHistory({ kind: 'tool.called', limit: 2000 })
+      .catch(() => ({ entries: [] }));
+    const research = (history.entries ?? []).flatMap((e) => {
+      if (e.entryType !== 'event') return [];
+      const d = (e.details ?? {}) as Record<string, unknown>;
+      const hit =
+        d.taskRef === task.ref &&
+        d.stepId === 'research' &&
+        d.success === true &&
+        RESEARCH_TOOLS.has(String(d.name));
+      return hit ? [String(d.name)] : [];
+    });
+    if (research.length === 0) gaps.push('research step made no successful research-tool call');
+    if (gaps.length > 0) {
+      return { done: true, success: false, reason: `${task.ref} complete but ${gaps.join('; ')}` };
+    }
+    const used = [...new Set(research)];
+    return {
+      done: true,
+      success: true,
+      reason: `${task.ref} ran every phase; research used ${used.join(', ')}; ${deck!.bytes}-byte .pptx at ${deck!.surface}:${deck!.path}`,
+    };
+  },
+};
+
 export function meesterEndToEndScenarios(): EvalScenario[] {
   return [
     pptxMeesterEndToEndScenario,
+    pptxMeesterPizzaScenario,
     pdfMeesterEndToEndScenario,
     docxMeesterEndToEndScenario,
     bugfixMeesterEndToEndScenario,

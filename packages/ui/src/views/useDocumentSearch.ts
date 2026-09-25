@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import type { FileEntry } from '../components/FileTree.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Content search over the shared document library.
@@ -38,6 +39,8 @@ export interface DocumentSearchState {
   searching: boolean;
   /** Set when the library has no content index yet — worth saying out loud. */
   unavailable: boolean;
+  error: string | null;
+  partial: boolean;
   clear: () => void;
 }
 
@@ -50,24 +53,31 @@ export function useDocumentSearch(): DocumentSearchState {
   const [matchedQuery, setMatchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [partial, setPartial] = useState(false);
 
   useEffect(() => {
+    if (!runtimeCapabilities().search) return;
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_CHARS) {
       setHits(null);
       setMatchedQuery('');
       setSearching(false);
       setUnavailable(false);
+      setError(null);
+      setPartial(false);
       return;
     }
     let cancelled = false;
     setSearching(true);
+    setError(null);
     const timer = window.setTimeout(() => {
       api
         .searchDocuments({ q: trimmed })
         .then((res) => {
           if (cancelled) return;
           setUnavailable(res.engine === 'unavailable');
+          setPartial(res.sourcesIncomplete === true || res.truncated === true);
           setMatchedQuery(trimmed);
           setHits(
             res.results.map((r) => ({
@@ -82,10 +92,11 @@ export function useDocumentSearch(): DocumentSearchState {
             })),
           );
         })
-        .catch(() => {
+        .catch((cause) => {
           if (cancelled) return;
           setMatchedQuery(trimmed);
           setHits([]);
+          setError(cause instanceof Error ? cause.message : 'Document search failed.');
         })
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -104,6 +115,8 @@ export function useDocumentSearch(): DocumentSearchState {
     matchedQuery,
     searching,
     unavailable,
+    error,
+    partial,
     clear: () => setQuery(''),
   };
 }

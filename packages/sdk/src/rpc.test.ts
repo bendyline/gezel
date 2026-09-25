@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -68,6 +69,36 @@ describe('RpcClient framing', () => {
       engagementMode: 'off',
       engagementFlags: { llmAllowed: false },
     });
+  });
+
+  it('keeps the default Node entry wired to stdin, fd 3, and stderr', async () => {
+    process.env.GEZEL_SCRIPT_RUNTIME = '1';
+    vi.mocked(readFileSync).mockReturnValueOnce(
+      JSON.stringify({
+        input: { title: 'desktop script' },
+        runId: 'run-1',
+        projectId: 'project-1',
+        engagementMode: 'reactive',
+        engagementFlags: { llmAllowed: false },
+      }),
+    );
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const { gezel } = await import('./index.js');
+
+      expect(gezel.input).toEqual({ title: 'desktop script' });
+      gezel.log('saved', { count: 1 });
+      gezel.output({ ok: true });
+
+      expect(stderr).toHaveBeenCalledWith('saved {"count":1}\n');
+      expect(state.writes.join('')).toBe(
+        '{"method":"script.log","params":{"args":["saved",{"count":1}]}}\n' +
+          '{"method":"script.output","params":{"value":{"ok":true}}}\n',
+      );
+      expect(state.sockets).toHaveLength(0);
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it('writes newline-delimited notifications without opening the read socket', () => {

@@ -1,7 +1,8 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
   OUTPUT_PANE_RESTORE_EVENT,
@@ -28,11 +29,19 @@ vi.mock('./components/Sidebar.js', () => ({
   Sidebar: ({
     activeProjectIds,
     activeGezelIds,
+    onSelect,
   }: {
     activeProjectIds?: Set<string>;
     activeGezelIds?: Set<string>;
+    onSelect: (selection: { kind: 'project'; id: string; lastOpenedAt: number }) => void;
   }) => (
     <div data-testid="sidebar-active-turns">
+      <button
+        type="button"
+        onClick={() => onSelect({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 })}
+      >
+        Open mobile project
+      </button>
       <span data-testid="active-project-ids">{[...(activeProjectIds ?? [])].sort().join(',')}</span>
       <span data-testid="active-gezel-ids">{[...(activeGezelIds ?? [])].sort().join(',')}</span>
     </div>
@@ -40,7 +49,10 @@ vi.mock('./components/Sidebar.js', () => ({
 }));
 vi.mock('./components/TabContent.js', () => ({
   TabContent: ({ tab }: { tab: { kind: string; id?: string } }) => (
-    <div>{`${tab.kind}:${tab.id ?? ''}`}</div>
+    <div>
+      {`${tab.kind}:${tab.id ?? ''}`}
+      <input aria-label="Project draft" />
+    </div>
   ),
 }));
 vi.mock('./components/TabErrorBoundary.js', () => ({
@@ -58,6 +70,160 @@ vi.mock('./views/HomeView.js', () => ({ HomeView: () => <div>Home view</div> }))
 
 const { App } = await import('./App.js');
 const { api } = await import('./api.js');
+
+describe('Responsive navigation in the desktop app', () => {
+  let narrow = true;
+  let mediaEvents: EventTarget;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    narrow = true;
+    mediaEvents = new EventTarget();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        get matches() {
+          return narrow;
+        },
+        addEventListener: mediaEvents.addEventListener.bind(mediaEvents),
+        removeEventListener: mediaEvents.removeEventListener.bind(mediaEvents),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.unstubAllGlobals();
+  });
+
+  it('opens navigation on a phone, routes through the same project view, and keeps drafts on resize', async () => {
+    render(<App />);
+    expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
+    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your workshop')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    expect(await screen.findByText('project:mobile-project')).toBeVisible();
+    expect(JSON.parse(window.localStorage.getItem('gezel:nav:selection') ?? '{}').id).toBe(
+      'mobile-project',
+    );
+    const draft = screen.getByRole('textbox', { name: 'Project draft' });
+    fireEvent.change(draft, { target: { value: 'Keep this draft' } });
+    const navigation = screen.getByRole('button', { name: 'Navigation' });
+    expect(navigation.closest('header')).toBe(screen.getByTestId('app-header'));
+    expect(navigation.textContent).toBe('');
+    expect(navigation.querySelector('.app-header-navigation-icon')).toBeInTheDocument();
+    expect(document.querySelector('.app-compact-navigation')).not.toBeInTheDocument();
+    fireEvent.click(navigation);
+    expect(draft).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue('Keep this draft');
+
+    act(() => {
+      narrow = false;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
+    expect(draft).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
+    act(() => {
+      narrow = true;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue('Keep this draft');
+  });
+
+  it('can exit the explicit mobile preview without resetting selection or other URL parameters', async () => {
+    narrow = false;
+    window.history.replaceState(null, '', '/?layout=mobile&filter=mine#project');
+    render(<App />);
+    expect(document.querySelector('.app-mobile-preview')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    const draft = await screen.findByRole('textbox', { name: 'Project draft' });
+    fireEvent.change(draft, { target: { value: 'Preview draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Exit mobile preview' }));
+    expect(document.querySelector('.app-mobile-preview')).not.toBeInTheDocument();
+    expect(draft).toHaveValue('Preview draft');
+    expect(window.location.search).toBe('?filter=mine');
+    expect(window.location.hash).toBe('#project');
+    expect(document.documentElement.dataset.layout).toBeUndefined();
+  });
+
+  it.each(['desktop', 'mobile', 'preview'])(
+    'opens first-run setup over navigation and a restored project in %s mode',
+    async (mode) => {
+      const bridge = window.__GEZEL__;
+      if (mode === 'mobile')
+        window.__GEZEL__ = { ...bridge!, capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+      if (mode === 'preview') {
+        narrow = false;
+        window.history.replaceState(null, '', '/?layout=mobile');
+      }
+      const getConfig = vi.mocked(api.getConfig).getMockImplementation();
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as never);
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+      window.localStorage.setItem(
+        'gezel:nav:selection',
+        JSON.stringify({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 }),
+      );
+      try {
+        render(<App />);
+        await waitFor(() => expect(screen.getByText('Home view')).toBeVisible());
+        expect(window.localStorage.getItem('gezel:nav:selection')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+        expect(await screen.findByText('project:mobile-project')).toBeVisible();
+        fireEvent.change(screen.getByRole('textbox', { name: 'Project draft' }), {
+          target: { value: 'Keep my offline work' },
+        });
+        await act(async () =>
+          window.dispatchEvent(new CustomEvent('gezel:first-run', { detail: { firstRun: true } })),
+        );
+        expect(screen.getByRole('textbox', { name: 'Project draft' })).toHaveValue(
+          'Keep my offline work',
+        );
+      } finally {
+        window.__GEZEL__ = bridge;
+        vi.mocked(api.getConfig).mockImplementation(getConfig!);
+      }
+    },
+  );
+
+  it('keeps the user in place when a later config save re-reads as first run', async () => {
+    const getConfig = vi.mocked(api.getConfig).getMockImplementation();
+    // A configured install with work already open: setup must not appear.
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'copilot' } as never);
+    window.localStorage.setItem(
+      'gezel:nav:selection',
+      JSON.stringify({ kind: 'project', id: 'mobile-project', lastOpenedAt: 1 }),
+    );
+    try {
+      render(<App />);
+      // Compact layout mounts the restored project behind the navigation pane.
+      expect(await screen.findByText('project:mobile-project')).toBeInTheDocument();
+
+      // Switching provider before pasting its key reads as "not set up", and
+      // every Settings save re-runs that estimate.
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'openai' } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: false, modelCount: 0 } as never);
+      await act(async () => window.dispatchEvent(new CustomEvent('gezel:config-updated')));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // The stored selection survives. Being thrown to Home clears it, which
+      // is the part that loses the user's place across a restart too.
+      expect(window.localStorage.getItem('gezel:nav:selection')).toContain('mobile-project');
+      expect(screen.queryByText('project:mobile-project')).toBeInTheDocument();
+    } finally {
+      vi.mocked(api.getConfig).mockImplementation(getConfig!);
+    }
+  });
+});
 
 describe('Output pane titlebar restore', () => {
   beforeEach(() => {

@@ -430,4 +430,37 @@ describe('stripVisibleToolCallMarkup — streaming mode (hideMidStreamOpener)', 
     expect(out).not.toContain('<tool_call>');
     expect(out).not.toContain('<function=');
   });
+
+  it('never flashes a partial tag while a model loops on orphan closers', () => {
+    // qwen3.8-27b MLX, 2026-09-23: after a JSON-envelope call the model
+    // wrote `</function>` 1300+ times, streamed as `</`, `function`, `>`,
+    // `\n`. Every render between `</` and `>` showed the partial tag.
+    const stream = `\n\n<tool_call>\n{"name": "invoke_craftbook", "arguments": {"craftbookId": "powerpoint-deck"}}\n</tool_call>\n</parameter>\n</invoke>\n</parameter>\n</function>\n${'</function>\n'.repeat(6)}`;
+    for (let end = 1; end <= stream.length; end++) {
+      const out = stripVisibleToolCallMarkup(stream.slice(0, end), { hideMidStreamOpener: true });
+      expect(out, `prefix of ${end} chars`).not.toContain('<');
+    }
+  });
+
+  it('hides a half-streamed closer or opener at the tail, keeping the prose', () => {
+    const opts = { hideMidStreamOpener: true };
+    expect(stripVisibleToolCallMarkup('Done.\n</func', opts)).not.toContain('<');
+    expect(stripVisibleToolCallMarkup('Done.\n<tool_ca', opts)).not.toContain('<');
+    expect(stripVisibleToolCallMarkup('Done.\n<function=write_fi', opts)).not.toContain('<');
+    expect(stripVisibleToolCallMarkup('Done.\n<invoke name="rea', opts)).not.toContain('<');
+    expect(stripVisibleToolCallMarkup('Done.\n</func', opts)).toContain('Done.');
+  });
+
+  it('leaves a trailing partial tag alone when it cannot be tool markup', () => {
+    const opts = { hideMidStreamOpener: true };
+    expect(stripVisibleToolCallMarkup('Use a <b', opts)).toBe('Use a <b');
+    expect(stripVisibleToolCallMarkup('Wrap it in <div', opts)).toBe('Wrap it in <div');
+  });
+});
+
+describe('stripVisibleToolCallMarkup — stray closers', () => {
+  it('strips orphan </invoke>, </tool_call>, and </function_calls> from a persisted bubble', () => {
+    const input = 'Started the deck.\n</invoke>\n</tool_call>\n</function_calls>\n</function>';
+    expect(stripVisibleToolCallMarkup(input).trim()).toBe('Started the deck.');
+  });
 });

@@ -513,6 +513,20 @@ describe('read-evidence escalation nudges', () => {
         failedChecks: ['corpusReadEvidence batches.json batch=1'],
       }),
     ).toBe('evidence');
+    expect(
+      deliverableSurface({
+        checks: [{ kind: 'artifactReadEvidence', paths: '["source.json"]' }],
+        failedChecks: ['artifactReadEvidence ["source.json"]'],
+      }),
+    ).toBe('evidence');
+    expect(
+      deliverableSurface({
+        failedChecks: [
+          'artifactReadEvidence ["source.json"]',
+          'corpusReadEvidence batches.json batch=1',
+        ],
+      }),
+    ).toBe('evidence');
   });
 
   it('asks for the exact read without triggering edit or rewrite clamps', () => {
@@ -522,8 +536,9 @@ describe('read-evidence escalation nudges', () => {
       surface: 'evidence',
     });
     expect(nudge).toContain('GATE_EVIDENCE_REQUIRED:');
-    expect(nudge).toContain('read_artifact/read_artifacts');
-    expect(nudge).toContain('advance_task_step once');
+    expect(nudge).toContain('available artifact-reading tools');
+    expect(nudge).toContain("step's completion procedure");
+    expect(nudge).not.toContain('advance_task_step');
     expect(nudge).not.toContain('GATE_TARGETED_EDIT:');
     expect(nudge).not.toContain('replace_in_file');
     expect(nudge).not.toContain('write_artifact');

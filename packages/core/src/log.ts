@@ -67,8 +67,9 @@ function parseNamespaceAllowList(raw: string | undefined): Set<string> | '*' | n
   );
 }
 
-let currentLevel: LogLevel = parseLevel(process.env.GEZEL_LOG_LEVEL) ?? 'info';
-let debugAllow: Set<string> | '*' | null = parseNamespaceAllowList(process.env.GEZEL_LOG_DEBUG);
+const environment = typeof process === 'undefined' ? undefined : process.env;
+let currentLevel: LogLevel = parseLevel(environment?.GEZEL_LOG_LEVEL) ?? 'info';
+let debugAllow: Set<string> | '*' | null = parseNamespaceAllowList(environment?.GEZEL_LOG_DEBUG);
 let currentOutput: LogOutput = 'split';
 
 export function getLogLevel(): LogLevel {
@@ -169,6 +170,13 @@ function emit(
   if (!shouldEmit(level, name)) return;
   const line = format(level, name, message);
   const useStderr = currentOutput === 'stderr' || level === 'warn' || level === 'error';
+  if (typeof process === 'undefined' || !process.stdout || !process.stderr) {
+    // Browser and native webview hosts share the same logger and level gate.
+    // Keep Node's structured stream writes unchanged when those streams exist.
+    const sink = useStderr ? console.error : console.log;
+    sink(line, ...rest);
+    return;
+  }
   const stream = useStderr ? process.stderr : process.stdout;
   if (rest.length === 0) {
     writeProcessOutput(stream, `${line}\n`);

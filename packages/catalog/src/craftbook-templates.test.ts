@@ -16,7 +16,13 @@
 
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CraftbookSchema, type StepGateUnion, normalizeStepGate } from '@bendyline/gezel';
+import {
+  CraftbookSchema,
+  type StepGateUnion,
+  craftbookInputParams,
+  normalizeStepGate,
+  paramInputSpec,
+} from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { gildeDataDir } from './gilde-data.js';
 
@@ -76,6 +82,28 @@ describe('bundled craftbook templates', () => {
         throw new Error(`craftbook "${m.id}" failed CraftbookSchema:\n${result.error.message}`);
       }
     }
+  });
+
+  it('every input annotation parses, on a string param the launcher can render', async () => {
+    // An annotation the runtime cannot parse is silently not an input: the
+    // launcher shows a bare text field and `create()` never resolves it,
+    // so the book's `{{param}}` would carry whatever string was typed.
+    const offenders: string[] = [];
+    for (const m of await loadManifests()) {
+      const properties = ((m.paramSchema as { properties?: Record<string, unknown> } | undefined)
+        ?.properties ?? {}) as Record<string, { type?: unknown; input?: unknown }>;
+      for (const [key, property] of Object.entries(properties)) {
+        if (!property || typeof property !== 'object' || !('input' in property)) continue;
+        if (!paramInputSpec(property)) offenders.push(`${m.id}.${key}: unparseable input`);
+        if (property.type !== 'string')
+          offenders.push(`${m.id}.${key}: input on a non-string param`);
+      }
+      const declared = craftbookInputParams(m.paramSchema as Record<string, unknown> | undefined);
+      for (const input of declared) {
+        if (input.key === 'workPath') offenders.push(`${m.id}: workPath cannot be an input`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('build-loop ships the gated build → evaluate → (loop) → finish shape', async () => {

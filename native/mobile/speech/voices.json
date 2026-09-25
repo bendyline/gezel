@@ -1,0 +1,290 @@
+[
+  {
+    "id": "af_alloy",
+    "index": 0,
+    "name": "Alloy",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_aoede",
+    "index": 1,
+    "name": "Aoede",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_bella",
+    "index": 2,
+    "name": "Bella",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_heart",
+    "index": 3,
+    "name": "Heart",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_jessica",
+    "index": 4,
+    "name": "Jessica",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_kore",
+    "index": 5,
+    "name": "Kore",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_nicole",
+    "index": 6,
+    "name": "Nicole",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_nova",
+    "index": 7,
+    "name": "Nova",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_river",
+    "index": 8,
+    "name": "River",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_sarah",
+    "index": 9,
+    "name": "Sarah",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "af_sky",
+    "index": 10,
+    "name": "Sky",
+    "language": "en-US",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_adam",
+    "index": 11,
+    "name": "Adam",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_echo",
+    "index": 12,
+    "name": "Echo",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_eric",
+    "index": 13,
+    "name": "Eric",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_fenrir",
+    "index": 14,
+    "name": "Fenrir",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_liam",
+    "index": 15,
+    "name": "Liam",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_michael",
+    "index": 16,
+    "name": "Michael",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_onyx",
+    "index": 17,
+    "name": "Onyx",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_puck",
+    "index": 18,
+    "name": "Puck",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "am_santa",
+    "index": 19,
+    "name": "Santa",
+    "language": "en-US",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bf_alice",
+    "index": 20,
+    "name": "Alice",
+    "language": "en-GB",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bf_emma",
+    "index": 21,
+    "name": "Emma",
+    "language": "en-GB",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bf_isabella",
+    "index": 22,
+    "name": "Isabella",
+    "language": "en-GB",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bf_lily",
+    "index": 23,
+    "name": "Lily",
+    "language": "en-GB",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bm_daniel",
+    "index": 24,
+    "name": "Daniel",
+    "language": "en-GB",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bm_fable",
+    "index": 25,
+    "name": "Fable",
+    "language": "en-GB",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bm_george",
+    "index": 26,
+    "name": "George",
+    "language": "en-GB",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "bm_lewis",
+    "index": 27,
+    "name": "Lewis",
+    "language": "en-GB",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zf_xiaobei",
+    "index": 45,
+    "name": "Xiaobei",
+    "language": "zh-CN",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zf_xiaoni",
+    "index": 46,
+    "name": "Xiaoni",
+    "language": "zh-CN",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zf_xiaoxiao",
+    "index": 47,
+    "name": "Xiaoxiao",
+    "language": "zh-CN",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zf_xiaoyi",
+    "index": 48,
+    "name": "Xiaoyi",
+    "language": "zh-CN",
+    "gender": "female",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zm_yunjian",
+    "index": 49,
+    "name": "Yunjian",
+    "language": "zh-CN",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zm_yunxi",
+    "index": 50,
+    "name": "Yunxi",
+    "language": "zh-CN",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zm_yunxia",
+    "index": 51,
+    "name": "Yunxia",
+    "language": "zh-CN",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  },
+  {
+    "id": "zm_yunyang",
+    "index": 52,
+    "name": "Yunyang",
+    "language": "zh-CN",
+    "gender": "male",
+    "modelId": "kokoro-82m-v1.0"
+  }
+]

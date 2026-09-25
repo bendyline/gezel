@@ -16,9 +16,25 @@
  * `SMALL_TIER_PROMPT_HINTS`.
  */
 
-import type { Behavior } from '../types.js';
+import {
+  type ToolCallIdiom,
+  decorativeMarkupShapes,
+  realCallSentence,
+  toolCallIdiomFor,
+} from '../tool-call-idiom.js';
+import type { Behavior, PromptCtx } from '../types.js';
 
-const COOKBOOK_CONDENSED = `
+/**
+ * Rule 4. A model with a known call format is never told its own call block
+ * is decoration — on a local engine that block IS the call.
+ */
+function markupRule(idiom: ToolCallIdiom | null): string {
+  const shapes = decorativeMarkupShapes(idiom).join(', ');
+  const heading = idiom ? 'Other markup is not a tool call.' : 'Markup is not a tool call.';
+  return `4. **${heading}** "I will call \`X\`", ${shapes}, or a \`{tool, args}\` JSON blob in your reply — none of these run the tool. ${realCallSentence(idiom)}`;
+}
+
+const cookbookCondensed = (idiom: ToolCallIdiom | null): string => `
 
 ---
 
@@ -27,7 +43,7 @@ const COOKBOOK_CONDENSED = `
 1. **Never claim past-tense action without a tool call this turn.** "I have created", "I have navigated" — only true if a tool ran. The runtime detects fabrication.
 2. **Never write placeholder content** like \`[Region X]\`, \`[Topic Y]\`. If you don't have real data, say so or call a tool.
 3. **When the user agrees, call the tool the same turn.** "I'll create it!" without the call is not the same as creating it.
-4. **Markup is not a tool call.** "I will call \`X\`", \`<|tool_call|>\`, \`<browser_navigate url="..." />\`, \`<function_calls><invoke name="...">...</invoke></function_calls>\`, \`<function=name><parameter=key>val</parameter></function>\`, \`<tool_call>name key="value"\` shell-style lines, or a \`{tool, args}\` JSON blob in your reply — none of these run the tool. Real calls go through the function-calling channel.
+${markupRule(idiom)}
 5. **If a previous call errored, acknowledge it.** Don't pretend it succeeded.
 6. **If a previous call SUCCEEDED, don't invent a failure.** Inverse of #5. The user sees the real tool result; claiming a 200 was a 404, or that a parseable response was "malformed", is detected as fabrication. If you couldn't make sense of the response, say so — don't promote that into a service error.
 7. **End every turn with words.** After tool calls return, write one sentence about what happened. Never end on a \`tool_use\`.
@@ -41,7 +57,7 @@ export const PromptToolCookbookCondensed: Behavior = {
   description:
     'Condensed anti-fabrication cookbook appended to the system prompt. For tier:small models and verbose-family large-tier models that need the past-tense + markup-not-tool-call reminders (plus exact write_file path discipline) without the full table.',
 
-  promptAppend(): string {
-    return COOKBOOK_CONDENSED;
+  promptAppend(ctx: PromptCtx): string {
+    return cookbookCondensed(toolCallIdiomFor(ctx));
   },
 };

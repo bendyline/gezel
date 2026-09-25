@@ -11,6 +11,26 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import selfsigned from 'selfsigned';
 import { z } from 'zod';
 import { zipStored } from '../fixtures/office-documents.ts';
+import {
+  MOCK_CONVERSION_TOOLS,
+  type MockConversionRecord,
+  type MockFixtureSource,
+  conversionSourceForSave,
+  recordMockConversion,
+} from './conversion-source.ts';
+import {
+  type SourceFaithfulFormat,
+  buildDocumentFromMarkdown,
+  pptxSlideCount,
+} from './markdown-office.ts';
+import {
+  type MockDocumentLedger,
+  type MockMaterialization,
+  type ReconciledFields,
+  createMockDocumentLedger,
+  reconcileMockResponse,
+  sha256Hex,
+} from './response-reconciliation.ts';
 
 /**
  * Live per-trial mock services for the craftbook eval rail.
@@ -52,6 +72,19 @@ export interface MockRequestLogEntry {
   requestBodyTruncated?: boolean;
   /** Validated arguments from an MCP tools/call request. */
   toolArgs?: Record<string, unknown>;
+  /**
+   * For a file-effect call: what the written bytes were built from — the
+   * converted source (`workspace/<path>`, `inline markdown`, …) or the fixed
+   * fixture when no source resolved. Lets a postmortem tell "the reviewer
+   * read the placeholder deck" apart from "the conversion was wrong".
+   */
+  materializedFrom?: string;
+  /**
+   * Declared response fields replaced with what the trial actually produced
+   * (the saved file's real bytes/sha256, a deck's real slide count), keyed by
+   * field path. Absent when the template was served as declared.
+   */
+  reconciled?: ReconciledFields;
 }
 
 export interface StartedMockService {
@@ -173,11 +206,15 @@ export async function startMockServices(
       requests: [],
     };
     if (mock.kind === 'mcp') {
+      // Outlives the per-request MCP server: a save arrives on a different
+      // request from the conversion it materializes.
+      const ledger = createMockDocumentLedger();
       const server = createServer({ key: pems.private, cert: pems.cert }, (req, res) => {
         void handleMcpMockRequest(mock, started, req, res, {
           trialHome: opts.trialHome,
           projectId: boundProjectId,
           toolArgumentSchemas: opts.mcpToolArgumentSchemas?.[mock.id],
+          ledger,
         });
       });
       await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -591,6 +628,8 @@ async function handleMcpMockRequest(
     trialHome?: string;
     projectId: string | null;
     toolArgumentSchemas?: MockMcpToolArgumentSchemas[string];
+    /** What this service has converted and written; shared across requests. */
+    ledger: MockDocumentLedger;
   },
 ): Promise<void> {
   try {
@@ -642,7 +681,7 @@ async function handleMcpMockRequest(
       server.registerTool(tool.name, config, async (args) => {
         const callPath = `tools/call:${tool.name}`;
         const callIndex = started.requests.filter((entry) => entry.path === callPath).length;
-        started.requests.push({
+        const entry: MockRequestLogEntry = {
           at: new Date().toISOString(),
           method: 'POST',
           path: callPath,
@@ -650,19 +689,41 @@ async function handleMcpMockRequest(
           status: 200,
           authorized: true,
           toolArgs: { ...args },
-        });
-        if (tool.writeFixture) {
-          await materializeMockToolFixture(tool.writeFixture, args, fixtureContext);
-        }
+        };
+        started.requests.push(entry);
         const sequenced =
           tool.resultSequence?.[Math.min(callIndex, Math.max(0, tool.resultSequence.length - 1))];
+        const served = sequenced ?? tool.resultTemplate ?? { ok: true };
+        const { ledger } = fixtureContext;
+        let conversion: MockConversionRecord | null = null;
+        if (MOCK_CONVERSION_TOOLS.has(tool.name)) {
+          conversion = await recordMockConversion(args, served, fixtureContext, ledger.conversions);
+          ledger.conversions.push(conversion);
+        }
+        let materialized: MockMaterialization | null = null;
+        if (tool.writeFixture) {
+          const source = conversion
+            ? conversion.source
+            : conversionSourceForSave(args, ledger.conversions);
+          const { materializedFrom, ...written } = await materializeMockToolFixture(
+            tool.writeFixture,
+            args,
+            { ...fixtureContext, source },
+          );
+          entry.materializedFrom = materializedFrom;
+          materialized = written;
+          ledger.materializations.set(written.sha256, written);
+        }
+        const { response, reconciled } = await reconcileMockResponse(tool.name, served, {
+          args,
+          conversion,
+          materialized,
+          ledger,
+          context: fixtureContext,
+        });
+        if (reconciled) entry.reconciled = reconciled;
         return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(sequenced ?? tool.resultTemplate ?? { ok: true }),
-            },
-          ],
+          content: [{ type: 'text', text: JSON.stringify(response) }],
         };
       });
     }
@@ -868,6 +929,26 @@ const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = 
 export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf' | 'minimal-png';
 
 /**
+ * Build the fixture from the Markdown the conversion was asked to convert.
+ * PDF and PNG stay fixed: nothing reads their content back, and a PDF would
+ * need real pagination to carry a whole document.
+ */
+function sourceFaithfulFixture(
+  fixture: MockToolFixture,
+  source: MockFixtureSource,
+): Uint8Array | null {
+  const format = SOURCE_FAITHFUL_FIXTURE_FORMAT[fixture];
+  return format
+    ? buildDocumentFromMarkdown(format, source.markdown, { slideBreak: source.slideBreak })
+    : null;
+}
+
+const SOURCE_FAITHFUL_FIXTURE_FORMAT: Partial<Record<MockToolFixture, SourceFaithfulFormat>> = {
+  'minimal-pptx': 'pptx',
+  'minimal-docx': 'docx',
+};
+
+/**
  * Materialize a deterministic fixture through the trial project's real file
  * surfaces.
  *
@@ -875,6 +956,16 @@ export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf' | 
  * effect wrote a PPTX regardless. That was invisible while `minimal-pptx`
  * was the only value, and would have silently written a presentation to a
  * `.docx` path the moment a second fixture existed. Dispatch on it.
+ *
+ * With a `source` (the Markdown an earlier conversion was asked to convert),
+ * PPTX and DOCX fixtures are built FROM it. The fixed one-slide deck they
+ * replace was a lie the moment anything read the file back: powerpoint-deck's
+ * `evaluate` step reads the saved deck with the real `read_doc_as_markdown`,
+ * correctly found "Deterministic DocBlocks eval deck" instead of the approved
+ * slides, and routed evaluate → publish until the retry-loop verdict
+ * (2026-09-24, 18 minutes at 13/14 checks). Without a resolvable source the
+ * fixed fixture is still written, so a save that skipped conversion keeps
+ * producing the same bytes it always did.
  */
 export async function materializeMockToolFixture(
   effect: {
@@ -883,8 +974,8 @@ export async function materializeMockToolFixture(
     fixture: MockToolFixture;
   },
   args: unknown,
-  context: { trialHome?: string; projectId: string | null },
-): Promise<void> {
+  context: { trialHome?: string; projectId: string | null; source?: MockFixtureSource | null },
+): Promise<MockMaterialization & { materializedFrom: string }> {
   if (!context.trialHome || !context.projectId) {
     throw new Error('mock MCP file effect has no bound trial project');
   }
@@ -899,12 +990,24 @@ export async function materializeMockToolFixture(
   if (normalized.split('/').includes('..')) {
     throw new Error('mock MCP file effect path must stay inside the project');
   }
-  const bytes = MOCK_FIXTURE_BYTES[effect.fixture];
-  if (!bytes) throw new Error(`unknown mock MCP fixture "${effect.fixture}"`);
+  const fixedBytes = MOCK_FIXTURE_BYTES[effect.fixture];
+  if (!fixedBytes) throw new Error(`unknown mock MCP fixture "${effect.fixture}"`);
+  const faithful = context.source ? sourceFaithfulFixture(effect.fixture, context.source) : null;
   const drawer = effect.surface === 'artifact' ? 'artifacts' : 'workspace';
   const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, bytes());
+  const bytes = faithful ?? fixedBytes();
+  await writeFile(target, bytes);
+  const source = faithful ? context.source : null;
+  return {
+    materializedFrom: source ? source.origin : `fixed ${effect.fixture} fixture`,
+    sha256: sha256Hex(bytes),
+    bytes: bytes.length,
+    slideCount:
+      source && effect.fixture === 'minimal-pptx'
+        ? pptxSlideCount(source.markdown, { slideBreak: source.slideBreak })
+        : null,
+  };
 }
 
 /** Deterministic valid 1×1 PNG padded beyond the image-gate byte floor. */

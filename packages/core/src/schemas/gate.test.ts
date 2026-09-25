@@ -13,6 +13,32 @@ import {
 } from './index.js';
 
 describe('GateCheckSchema — connector coverage', () => {
+  it('parses image evidence manifests with a workspace-only base directory', () => {
+    expect(
+      GateCheckSchema.parse({
+        kind: 'imageEvidence',
+        file: 'build.json',
+        baseDir: 'asset',
+        artifact: true,
+      }),
+    ).toEqual({ kind: 'imageEvidence', file: 'build.json', imagesKey: 'images', baseDir: 'asset' });
+    expect(GateCheckSchema.safeParse({ kind: 'imageEvidence', file: 'build.json' }).success).toBe(
+      false,
+    );
+  });
+
+  it('preserves the task-bound JSON path list for observable artifact reads', () => {
+    expect(
+      GateCheckSchema.parse({ kind: 'artifactReadEvidence', paths: '{{sourcePaths}}' }),
+    ).toEqual({ kind: 'artifactReadEvidence', paths: '{{sourcePaths}}' });
+    expect(GateCheckSchema.safeParse({ kind: 'artifactReadEvidence', paths: '' }).success).toBe(
+      false,
+    );
+    expect(
+      GateCheckSchema.safeParse({ kind: 'artifactReadEvidence', paths: ['a.json'] }).success,
+    ).toBe(false);
+  });
+
   it('parses a workspace ledger against an artifact corpus', () => {
     expect(
       GateCheckSchema.parse({

@@ -413,7 +413,36 @@
 /* --- Back up / restore dialog ---------------------------------------- */
 
 .gz-backup-dialog {
-  max-width: 44rem;
+  width: min(44rem, calc(100vw - 1.5rem));
+  min-width: 0;
+  max-width: calc(100vw - 1.5rem);
+  max-height: calc(100dvh - 2rem);
+}
+
+:root[data-layout="mobile"] .gz-backup-dialog {
+  width: min(366px, calc(100vw - 1.5rem));
+}
+
+.gz-backup-dialog > :not(.gz-backup-body) {
+  flex-shrink: 0;
+}
+
+.gz-backup-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.gz-backup-body .storage-list {
+  max-height: none;
+}
+
+.gz-backup-dialog .gz-dialog-actions {
+  flex-wrap: wrap;
+}
+
+.gz-backup-dialog button {
+  min-height: 44px;
 }
 
 .gz-backup-tabs {

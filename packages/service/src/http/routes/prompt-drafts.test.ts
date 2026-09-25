@@ -118,6 +118,20 @@ describe('the draft lifecycle', () => {
     expect((await api('GET', `${DRAFTS}/${draft.id}`)).status).toBe(200);
   });
 
+  it('answers a late edit to a sent draft with 409, not a server fault', async () => {
+    // The composer's last autosave, or its adoption of the thread a send just
+    // created, can land after the send retired the draft.
+    const draft = (await (
+      await api('POST', DRAFTS, { gezelId: 'tomas', content: 'already on its way' })
+    ).json()) as { id: string };
+    await svc.context.promptDrafts.markSent('default', draft.id, { sessionId: 's1' });
+    const patched = await api('PATCH', `${DRAFTS}/${draft.id}`, { sessionId: 's2' });
+    expect(patched.status).toBe(409);
+    expect(await patched.json()).toMatchObject({ code: 'prompt-draft-sent' });
+    const saved = await api('PUT', `${DRAFTS}/${draft.id}/content`, { content: 'too late' });
+    expect(saved.status).toBe(409);
+  });
+
   it('rejects a malformed id before it can touch the disk', async () => {
     expect((await api('GET', `${DRAFTS}/..%2F..%2Fetc`)).status).toBe(400);
     expect((await api('DELETE', `${DRAFTS}/not-an-id`)).status).toBe(400);

@@ -42,10 +42,10 @@ for (const relativePath of packagePaths) {
   assertVersion(relativePath, pkg.version, expected);
 }
 
-const coreSourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
+const coreSourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
 const coreSource = await readFile(coreSourcePath, 'utf8');
 const sourceMatch = /export const GEZEL_VERSION = '([^']*)';/.exec(coreSource);
-assertVersion('packages/core/src/index.ts GEZEL_VERSION', sourceMatch?.[1], expected);
+assertVersion('packages/core/src/browser.ts GEZEL_VERSION', sourceMatch?.[1], expected);
 
 const builtCorePath = resolve(repoRoot, 'packages/core/dist/index.js');
 if (existsSync(builtCorePath)) {

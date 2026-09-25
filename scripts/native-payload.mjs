@@ -45,6 +45,20 @@
  *     `packages/core/src/native/duckdb-pin.ts`) rather than an artifact of
  *     this pipeline. Building it here would have meant re-signing it on macOS,
  *     replacing the vendor's attestation with ours.
+ *   - `gezel-sd-server` appears TWICE per Linux arch, and that is the point:
+ *     the bare key holds the portable build (Vulkan on x64, CPU on arm64) and
+ *     the `-cuda` key holds a CUDA build for hosts that can run it. Unlike
+ *     llama-server, sd-cpp is not variant-keyed per backend, so before this
+ *     there was exactly one slot per platform and it had to be spent on the
+ *     build that runs everywhere. That left image generation on CPU on the
+ *     ARM boxes with the most capable GPUs (DGX Spark, Jetson): SDXL there is
+ *     slow enough that the petshop eval's bounded repair allowance expires
+ *     before a render lands, and — because the allowance is attempt-based —
+ *     it fails FAST models while slow ones idle long enough to survive.
+ *     The CUDA build rides the `-cuda` key rather than a key of its own for
+ *     the same reason ds4 does: one copy of the NVIDIA redistributables.
+ *     Picking between the two is a genuine host capability choice, so it is
+ *     NOT in `impliedEngineVariant` — the caller probes and decides.
  *   - `gezel-ds4-server` is GPU-only: darwin-arm64 Metal + Linux CUDA. On
  *     Linux it lives in the `-cuda` key, NOT the bare one, because it and
  *     llama-server's CUDA build need the same NVIDIA redistributables.
@@ -81,10 +95,10 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
-  'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
+  'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
   'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-arm64-cpu': ['gezel-llama-server'],
-  'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
+  'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
 });
 
 /**

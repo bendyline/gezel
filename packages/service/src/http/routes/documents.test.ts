@@ -90,6 +90,29 @@ describe('PUT /api/documents/write + GET /read', () => {
     expect(got.kind).toBe('artifact');
     expect(got.content).toContain('Night Shift Report');
   });
+
+  // ask_user_question hands the UI a bare project-relative path. The Default
+  // project used to skip the project fallback, so every approval preview of a
+  // Default task's checkpoint 404ed.
+  it('resolves a bare path against ?project= only after the shared library misses', async () => {
+    await svc.context.store.writeProjectArtifact('default', 'tasks/11/sources.md', '# Sources\n');
+    const artifactRes = await api(
+      'GET',
+      `/api/documents/read?path=${encodeURIComponent('tasks/11/sources.md')}&project=default`,
+    );
+    expect(artifactRes.status).toBe(200);
+    const artifact = (await artifactRes.json()) as { kind: string; content: string };
+    expect(artifact.kind).toBe('artifact');
+    expect(artifact.content).toContain('# Sources');
+
+    await api('PUT', '/api/documents/write', { path: 'tasks/12/brief.md', content: '# Brief\n' });
+    await svc.context.store.writeProjectArtifact('default', 'tasks/12/brief.md', '# Shadowed\n');
+    const libraryRes = await api(
+      'GET',
+      `/api/documents/read?path=${encodeURIComponent('tasks/12/brief.md')}&project=default`,
+    );
+    expect(((await libraryRes.json()) as { kind: string }).kind).toBe('document');
+  });
 });
 
 describe('GET /api/documents — listing', () => {

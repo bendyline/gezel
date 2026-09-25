@@ -35,14 +35,42 @@ function compactDescription(description: string): string {
   return `${clipped}...`;
 }
 
+/**
+ * Keywords whose value maps author-chosen NAMES to subschemas. Their keys
+ * are not schema keywords, so `PROSE_SCHEMA_KEYS` must not apply to them.
+ * Treating them alike deleted every property called `title`, `description`
+ * or `default` while leaving it in `required`: `wikipedia_read`,
+ * `create_task` and `github_pr_create` advertised a required field the
+ * model could not see, and the MLX Hermes grammar, which builds its key set
+ * from `properties`, could not emit it at all. qwen3.8 then looped
+ * `maxChars`/`language` to the token cap, unable to name or close the call
+ * (default/19, 2026-09-23).
+ */
+const NAMED_SUBSCHEMA_KEYS = new Set([
+  'properties',
+  'patternProperties',
+  'dependentSchemas',
+  'definitions',
+  '$defs',
+]);
+
 function compactSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(compactSchema);
   if (!value || typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (PROSE_SCHEMA_KEYS.has(key)) continue;
-    out[key] =
-      key === 'expectedDeliverable'
+    out[key] = NAMED_SUBSCHEMA_KEYS.has(key) ? compactNamedSubschemas(child) : compactSchema(child);
+  }
+  return out;
+}
+
+function compactNamedSubschemas(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return compactSchema(value);
+  const out: Record<string, unknown> = {};
+  for (const [name, child] of Object.entries(value as Record<string, unknown>)) {
+    out[name] =
+      name === 'expectedDeliverable'
         ? compactExpectedDeliverable(compactSchema(child))
         : compactSchema(child);
   }

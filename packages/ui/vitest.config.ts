@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { searchForWorkspaceRoot } from 'vite';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const workspaceRoot = searchForWorkspaceRoot(import.meta.dirname);
 
@@ -34,6 +34,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Host integration tests live outside src so native-shell imports do not
+    // become production UI TypeScript inputs. Preserve all existing tests.
+    include: [...configDefaults.include, 'tests/**/*.test.tsx'],
     // Dedupe only applies to modules vite PROCESSES. Vitest externalizes
     // node_modules by default, and under `pnpm link:squisq` the linked
     // dist chunks then node-resolve `react` from the sibling checkout's

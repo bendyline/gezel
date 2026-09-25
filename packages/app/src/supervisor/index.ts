@@ -1245,12 +1245,37 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
   if (!process.env.GEZEL_SD_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('sd-server', import.meta.url, undefined, {
+    // On Linux, sd-cpp ships a CUDA build in the `-cuda` key beside
+    // llama-server and ds4, plus a portable build (Vulkan on x64, CPU on
+    // arm64) in the bare key. Prefer CUDA only when this host can run it:
+    // the installer stages every variant, so the `-cuda` directory exists
+    // on non-NVIDIA machines too, and a CUDA-linked binary dies at exec
+    // there. `resolveNativeBinaryPath` falls back to the bare key on its
+    // own when the variant directory is absent, which covers a native tree
+    // staged before the CUDA sd leg existed.
+    //
+    // Same probe llama uses below — same question, memoized at
+    // <home>/engines/llama-cpp/backend.json so asking twice is free, and it
+    // honours the user's backend override so pinning `cpu` around a broken
+    // CUDA install downgrades sd-server with it.
+    let sdVariant: string | undefined;
+    if (process.platform === 'linux') {
+      const override = await readBackendOverride(opts.home);
+      const probe = detectLlamaBackend({
+        engineVersion: LLAMA_ENGINE_VERSION,
+        home: opts.home,
+        ...(override ? { override } : {}),
+      });
+      if (probe.backend === 'cuda') sdVariant = 'cuda';
+    }
+    const bin = resolveNativeBinaryPath('sd-server', import.meta.url, sdVariant, {
       preferDevelopmentBuild: !opts.packaged,
     });
     if (bin) {
       process.env.GEZEL_SD_SERVER_BIN = bin;
-      opts.logger?.info?.(`[supervisor] bundled sd-server: ${bin}`);
+      opts.logger?.info?.(
+        `[supervisor] bundled sd-server${sdVariant ? ` (${sdVariant})` : ''}: ${bin}`,
+      );
     }
   }
   if (!process.env.GEZEL_LLAMA_SERVER_BIN) {

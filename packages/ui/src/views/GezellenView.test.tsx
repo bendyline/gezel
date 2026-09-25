@@ -12,6 +12,8 @@ import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 const appShellCss = readFileSync(resolve(import.meta.dirname, '../styles/app-shell.css'), 'utf8');
+const layout = vi.hoisted(() => ({ compact: false }));
+vi.mock('../components/useCompactLayout.js', () => ({ useCompactLayout: () => layout.compact }));
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
@@ -52,6 +54,7 @@ const GEZELS: GezelSummary[] = [
 
 describe('GezellenView', () => {
   beforeEach(() => {
+    layout.compact = false;
     vi.mocked(pickRandomNameWithGender)
       .mockReset()
       .mockReturnValue({ name: 'Ada', gender: 'female' });
@@ -77,6 +80,38 @@ describe('GezellenView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
     });
+  });
+
+  it('uses the same roster and detail one at a time in narrow windows', async () => {
+    layout.compact = true;
+    const { container } = render(<GezellenView />);
+    const roster = () => container.querySelector('aside.gezels-side');
+    const detail = () => container.querySelector('.gezellen-view > section');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Maya.*Researcher/ }));
+    expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
+    // Only one pane shows at a time, but both stay mounted: unmounting the
+    // detail on a resize threw away an in-progress rename and the open tab.
+    expect(roster()).toHaveAttribute('hidden');
+    expect(detail()).not.toHaveAttribute('hidden');
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to gezellen' }));
+    expect(roster()).not.toHaveAttribute('hidden');
+    expect(detail()).toHaveAttribute('hidden');
+    expect(screen.getByTestId('gezel-detail')).toBeInTheDocument();
+  });
+
+  it('keeps both panes mounted so a resize cannot discard the open gezel', async () => {
+    layout.compact = false;
+    const { container, rerender } = render(<GezellenView />);
+    fireEvent.click(await screen.findByRole('button', { name: /Maya.*Researcher/ }));
+    expect(screen.getByTestId('gezel-detail')).toHaveTextContent('gz-1');
+
+    // Narrowing the window used to unmount the detail entirely.
+    layout.compact = true;
+    rerender(<GezellenView />);
+    expect(container.querySelector('[data-testid="gezel-detail"]')).toBeInTheDocument();
   });
 
   it('shows which gezel is working in the full roster', async () => {

@@ -175,8 +175,10 @@ describe('ChatManager.providerForGezel — exhaustiveness', () => {
     expect(known).toEqual(
       (
         [
+          'android-mlkit',
           'anthropic',
           'anthropic-cli',
+          'apple-foundation-models',
           'codex-cli',
           'copilot',
           'ds4',

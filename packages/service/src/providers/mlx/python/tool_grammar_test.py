@@ -256,13 +256,81 @@ def test_json_escape_only_when_a_tool_wants_structure():
         assert '"required":["source","targets"]' in raw, mode
         assert '"const":"totally_fake"' not in raw, mode
         # The Hermes branch survives alongside it, so function names stay
-        # pinned when the model does use the markup shape. Structural tools
-        # themselves are JSON-only: their values cannot survive flat markup.
+        # pinned when the model does use the markup shape.
         assert "<function=" in structural, mode
         assert "create_project" in structural, mode
         assert "totally_fake" not in structural, mode
         if mode == "name-and-params":
-            assert '"convert_document>" params_' not in structural, mode
+            # Structural tools are callable in markup too — their object/array
+            # values as JSON inside the tag, the Qwen template's own idiom.
+            assert '"convert_document>" params_' in structural, mode
+            assert "jv_" not in flat, mode
+
+
+def test_structural_values_are_json_inside_the_parameter_tag():
+    g = tg.build_grammar_string(STRUCTURAL_TOOLS, {"format": "hermes"})
+    _assert_valid(g)
+    # `source` (object) and `targets` (array) take a schema-held JSON value...
+    assert 'POPEN "source>" jv_' in g
+    assert 'POPEN "targets>" jv_' in g
+    assert '%json {"type":"object"}' in g
+    assert '%json {"type":"array"}' in g
+    # ...while the boolean stays ordinary free text.
+    assert "autoTemplates" in g
+    assert 'POPEN "autoTemplates>" jv_' not in g
+
+
+def test_json_value_rules_are_shared_across_a_roster():
+    roster = [
+        _tool(f"t{i}", {"source": {"type": "object"}, "targets": {"type": "array"}}, ("source",))
+        for i in range(20)
+    ]
+    g = tg.build_grammar_string(roster, {"format": "hermes"})
+    _assert_valid(g)
+    assert g.count("%json {\"type\":\"object\"}") == 1
+    assert g.count("%json {\"type\":\"array\"}") == 1
+
+
+def test_union_of_object_shapes_is_json_inside_the_tag():
+    # DocBlocks' `convert_document.source`: markdown | file | artifact, all
+    # objects. None of them can be a plain string, so JSON is safe to require.
+    tools = [
+        _tool(
+            "convert_document",
+            {
+                "source": {
+                    "anyOf": [
+                        {"type": "object", "properties": {"kind": {"const": "file"}}},
+                        {"type": "object", "properties": {"kind": {"const": "artifact"}}},
+                    ]
+                },
+                "targets": {"type": "array"},
+            },
+            ("source", "targets"),
+        )
+    ]
+    g = tg.build_grammar_string(tools, {"format": "hermes"})
+    _assert_valid(g)
+    assert 'POPEN "source>" jv_' in g
+    assert '%json {"type":"object"}' in g
+
+
+def test_string_or_object_param_stays_free_text():
+    # Forcing JSON on a value that may be a plain string would make the model
+    # quote a path, and the qwen3_coder parser would keep the quotes.
+    mixed = [
+        _tool(
+            "open_doc",
+            {"source": {"anyOf": [{"type": "string"}, {"type": "object"}]}},
+            ("source",),
+        ),
+        _tool("put", {"value": {"type": ["string", "object"]}}, ("value",)),
+        _tool("ref", {"spec": {"$ref": "#/$defs/Spec"}}, ("spec",)),
+    ]
+    g = tg.build_grammar_string(mixed, {"format": "hermes"})
+    _assert_valid(g)
+    assert "jv_" not in g
+    assert '"open_doc>" params_' in g
 
 
 def test_gemma_name_only_well_formed():

@@ -3,7 +3,7 @@ import {
   type GrainStyle,
   type Poppetje as PoppetjeStruct,
   seedFromKey,
-} from '@bendyline/gezel';
+} from '@bendyline/gezel/poppetje';
 import { type JSX, useId } from 'react';
 import { feltForSkin, mixHex } from './color.js';
 import { CarvedHair } from './flowing-hair.js';

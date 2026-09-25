@@ -10,8 +10,8 @@ import type {
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
-import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
+import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
@@ -21,12 +21,14 @@ import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
+import { ResponsiveAppShell } from './components/ResponsiveAppShell.js';
 import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
@@ -36,7 +38,11 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { useIsFirstRun } from './components/useIsFirstRun.js';
+import { useBackNavigation } from './hooks/useBackNavigation.js';
+import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { DropdownMenu } from './primitives/index.js';
+import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -141,6 +147,12 @@ export function App() {
 }
 
 function FullApp() {
+  const { compact, preview, exitPreview } = useResponsiveLayout();
+  const firstRun = useIsFirstRun();
+  const setupOpened = useRef(false);
+  const [navigationOpen, setNavigationOpen] = useState(true);
+  const openNavigation = useCallback(() => setNavigationOpen(true), []);
+  useBackNavigation(compact, navigationOpen, openNavigation);
   // Random vertical slice into the wood texture, picked once per app
   // launch so each session shows a different band of grain across the
   // titlebar. The CSS renders the 1024-tall source compressed to
@@ -248,13 +260,39 @@ function FullApp() {
   const [questionsOpen, setQuestionsOpen] = useState(false);
 
   const commitSelection = useCallback((next: RecentTab | null) => {
+    // Any navigation closes the first-run window. The estimate is re-run on
+    // every config save, and a provider switched before its key is pasted
+    // reads as "not set up" — without this, saving in Settings would throw the
+    // user back to Home and clear their stored selection.
+    setupOpened.current = true;
     setSelection(next);
+    setNavigationOpen(false);
     try {
       if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
       else window.localStorage.removeItem(SELECTION_STORAGE_KEY);
     } catch {
       /* private mode / quota — selection still lives in memory */
     }
+  }, []);
+
+  useEffect(() => {
+    if (!firstRun || setupOpened.current) return;
+    // Setup must be visible even when compact navigation or a restored project
+    // would otherwise hide Home. This is a startup affordance only: navigating
+    // or saving settings closes the window below, so a later estimate cannot
+    // reopen it underneath someone mid-task.
+    commitSelection(null);
+  }, [firstRun, commitSelection]);
+
+  useEffect(() => {
+    // Saving settings re-runs the first-run estimate, and a provider switched
+    // before its key is pasted reads as "not set up". A save is by definition
+    // not app startup, so it must never pull the user back to Home.
+    const close = () => {
+      setupOpened.current = true;
+    };
+    window.addEventListener('gezel:config-updated', close);
+    return () => window.removeEventListener('gezel:config-updated', close);
   }, []);
 
   const openArea = useCallback(
@@ -297,10 +335,11 @@ function FullApp() {
         setEngagementMode((cfg.aiEngagementMode ?? 'proactive') as EngagementMode);
       })
       .catch(() => {});
-    api
-      .getNightShiftStatus()
-      .then(setNightShift)
-      .catch(() => {});
+    if (runtimeCapabilities().background)
+      api
+        .getNightShiftStatus()
+        .then(setNightShift)
+        .catch(() => {});
     // Reconcile the local theme cache against the server-side pref —
     // localStorage strands itself across Electron's ephemeral-port
     // shuffle, so the gezel config is the cross-boot source of truth.
@@ -466,6 +505,7 @@ function FullApp() {
   }, []);
 
   const refreshUsage = useCallback(() => {
+    if (!runtimeCapabilities().daemonSettings) return;
     api
       .getUsage()
       .then(setUsage)
@@ -483,6 +523,7 @@ function FullApp() {
   // envelope arrives — same global stream the Home pane subscribes to,
   // so a single source feeds both surfaces.
   const refreshPendingCount = useCallback(() => {
+    if (!runtimeCapabilities().structuredQuestions) return;
     api
       .listQuestions({ pending: true })
       .then((r) => {
@@ -678,19 +719,21 @@ function FullApp() {
   }, [openArea, commitSelection]);
 
   return (
-    <div className="app">
+    <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
       {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
           to navigate to Settings → Connected Apps. */}
-      <GrantConsentDialog />
-      <MacUninstallDialog />
-      <StorageCleanupDialog />
-      <BackupRestoreDialog />
-      <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
-      {/* The top bar is now status-only — it remains the OS title bar (drag
-          region + native window-control reservations via CSS padding). The
-          brand mark routes to the Meester home; navigation lives in the
-          left Sidebar. */}
+      {runtimeCapabilities().connections && <GrantConsentDialog />}
+      {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
+      {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}
+      {runtimeCapabilities().backups && <BackupRestoreDialog />}
+      {runtimeCapabilities().daemonSettings && (
+        <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
+      )}
+      {/* The top bar remains the OS title bar (drag region + native
+          window-control reservations via CSS padding). The brand mark routes
+          to the Meester home; compact layouts also keep their way back to the
+          navigation beside it instead of spending a separate content row. */}
       <HeaderDensityContext.Provider value={headerDensity}>
         <header
           ref={headerRef}
@@ -703,22 +746,18 @@ function FullApp() {
             } as React.CSSProperties
           }
         >
-          <button
-            type="button"
-            className={`app-header-brand${selection === null ? ' active' : ''}`}
-            onClick={() => commitSelection(null)}
-            title="Meester"
-            aria-label="Meester home"
-          >
-            <span
-              className="app-nav-home-logotype"
-              role="img"
-              aria-label="gezel"
-              style={
-                { ['--gezel-logo-url' as string]: `url(${logotypeUrl})` } as React.CSSProperties
-              }
-            />
-          </button>
+          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
+          {compact && !navigationOpen && (
+            <button
+              type="button"
+              className="app-header-navigation"
+              onClick={openNavigation}
+              aria-label="Navigation"
+              title="Navigation"
+            >
+              <NavigationMenuIcon />
+            </button>
+          )}
           {pendingQuestionCount > 0 && (
             <button
               type="button"
@@ -742,23 +781,31 @@ function FullApp() {
             because only its right edge moves when it shrinks, the results
             palette hangs off its left edge (`align="start"`) and holds still
             while the pills breathe. */}
-          <TitlebarSearch />
-          <SearchResultsOverlay />
+          {runtimeCapabilities().search && (
+            <>
+              <TitlebarSearch compact={compact} />
+              <SearchResultsOverlay />
+            </>
+          )}
           {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
-            <QueueMeter />
-            <BoekwachterPill />
-            <EngineStatusPill />
-            <ClaudeCliPoolPill />
-            <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-            <TaskSpeedMenu
-              mode={engagementMode}
-              nightShift={nightShift}
-              onNightShiftChange={setNightShift}
-            />
+            {runtimeCapabilities().daemonSettings && (
+              <>
+                <QueueMeter />
+                <BoekwachterPill />
+                <EngineStatusPill />
+                <ClaudeCliPoolPill />
+                <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
+                <TaskSpeedMenu
+                  mode={engagementMode}
+                  nightShift={nightShift}
+                  onNightShiftChange={setNightShift}
+                />
+              </>
+            )}
             {outputPaneMaximized && (
               <button
                 type="button"
@@ -813,18 +860,42 @@ function FullApp() {
           </dialog>
         </>
       )}
-      <div className="app-body">
-        <Sidebar
-          selection={selection}
-          onSelect={commitSelection}
-          onOpenArea={openArea}
-          onPreload={preloadSelection}
-          activeProjectIds={activeProjectIds}
-          activeGezelIds={activeGezelIds}
-          pendingByProject={pendingByProject}
-          poisonedProjects={poisonedProjects}
-        />
-        <main className="app-main">
+      {compact && (outputPaneMaximized || preview) && (
+        <div className="app-compact-navigation">
+          {outputPaneMaximized && (
+            <button
+              type="button"
+              onClick={requestOutputPaneRestore}
+              aria-label="Restore output pane"
+            >
+              Restore workspace
+            </button>
+          )}
+          {preview && (
+            <button type="button" onClick={exitPreview}>
+              Exit mobile preview
+            </button>
+          )}
+        </div>
+      )}
+      <FirstRunProvider value={firstRun}>
+        <ResponsiveAppShell
+          compact={compact}
+          navigationOpen={navigationOpen}
+          navigation={
+            <Sidebar
+              compact={compact}
+              selection={selection}
+              onSelect={commitSelection}
+              onOpenArea={openArea}
+              onPreload={preloadSelection}
+              activeProjectIds={activeProjectIds}
+              activeGezelIds={activeGezelIds}
+              pendingByProject={pendingByProject}
+              poisonedProjects={poisonedProjects}
+            />
+          }
+        >
           <Suspense fallback={<div className="placeholder">Loading view…</div>}>
             {selection === null ? (
               <HomeView
@@ -844,8 +915,8 @@ function FullApp() {
               </TabErrorBoundary>
             )}
           </Suspense>
-        </main>
-      </div>
+        </ResponsiveAppShell>
+      </FirstRunProvider>
     </div>
   );
 }
@@ -868,6 +939,23 @@ function OutputPaneRestoreIcon() {
       <path d="M9.5 6.5 12.8 3.2" />
       <path d="M3.5 9.5H6.5V12.5" />
       <path d="M6.5 9.5 3.2 12.8" />
+    </svg>
+  );
+}
+
+function NavigationMenuIcon() {
+  return (
+    <svg
+      className="app-header-navigation-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M3 5.25h14M3 10h14M3 14.75h14" />
     </svg>
   );
 }

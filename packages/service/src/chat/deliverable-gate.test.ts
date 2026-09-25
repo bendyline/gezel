@@ -62,17 +62,49 @@ describe('deliverableWrittenThisTurn', () => {
     ).toBe(false);
   });
 
-  it('accepts every write-shaped tool name', () => {
+  it('accepts every workspace write tool name', () => {
     for (const name of [
       'write_file',
       'replace_in_file',
       'append_to_file',
       'apply_patch',
       'insert_at_marker',
-      'write_artifact',
     ]) {
       expect(deliverableWrittenThisTurn([write({ name, path: file })], file)).toBe(true);
     }
+  });
+
+  it('counts an artifact tool only when it reports a workspace redirect', () => {
+    expect(
+      deliverableWrittenThisTurn(
+        [write({ name: 'write_artifact', path: file, resultText: `Wrote ${file}` })],
+        file,
+      ),
+    ).toBe(false);
+    expect(
+      deliverableWrittenThisTurn(
+        [
+          write({
+            name: 'write_artifact',
+            path: file,
+            resultText: `Wrote ${file} to the project workspace. Note: use write_file directly.`,
+          }),
+        ],
+        file,
+      ),
+    ).toBe(true);
+    expect(
+      deliverableWrittenThisTurn(
+        [
+          write({
+            name: 'write_artifact',
+            path: file,
+            resultText: `Wrote ${file} to the project workspace because this session expects it there.`,
+          }),
+        ],
+        file,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -95,6 +127,91 @@ describe('hookOwnedAdvanceHasModelOutput', () => {
 });
 
 describe('evaluateDeliverableGate', () => {
+  it('recognizes a newly written artifact checkpoint without accepting a same-named workspace edit', () => {
+    const spec = {
+      file: 'tasks/7/report.json',
+      artifact: true,
+      requireChange: true,
+      sniff: 'json-valid' as const,
+    };
+    const content = '{"complete":true}';
+    const evaluate = (writes: DeliverableWrite[]) =>
+      evaluateDeliverableGate({
+        content,
+        spec,
+        writes: writes.map((w) => ({
+          resultText:
+            'Wrote tasks/7/report.json\nSaving an artifact does not complete the task step.',
+          ...w,
+        })),
+      }).satisfied;
+    expect(evaluate([write({ name: 'write_artifact', path: spec.file })])).toBe(true);
+    expect(
+      evaluate([write({ name: 'write_artifact', path: './artifacts/tasks\\7\\report.json' })]),
+    ).toBe(true);
+    expect(
+      evaluate([
+        write({ name: 'write_artifact', path: '/ARTIFACTS/artifacts/tasks/7/report.json' }),
+      ]),
+    ).toBe(true);
+    expect(evaluate([write({ name: 'write_artifact', path: 'tasks/7/Report.json' })])).toBe(false);
+    expect(evaluate([write({ name: 'write_file', path: spec.file })])).toBe(false);
+    expect(evaluate([write({ name: 'read_artifact', path: spec.file })])).toBe(false);
+    expect(evaluate([write({ name: 'write_artifact', path: spec.file, success: false })])).toBe(
+      false,
+    );
+    expect(evaluate([])).toBe(false);
+    expect(
+      evaluate([write({ name: 'write_artifact', path: spec.file, resultText: undefined })]),
+    ).toBe(false);
+    expect(
+      evaluate([
+        write({
+          name: 'write_artifact',
+          path: spec.file,
+          resultText: 'Wrote tasks/7/report.json to the project workspace.',
+        }),
+      ]),
+    ).toBe(false);
+    expect(
+      evaluate([
+        write({
+          name: 'write_artifact',
+          path: spec.file,
+          resultText: 'Wrote different/report.json',
+        }),
+      ]),
+    ).toBe(false);
+  });
+
+  it('does not confuse another task artifact, matching suffix, or artifact write with a workspace edit', () => {
+    const call = write({
+      name: 'write_artifact',
+      path: 'tasks/8/report.json',
+      resultText: 'Wrote tasks/8/report.json',
+    });
+    for (const file of ['tasks/7/report.json', 'report.json', 'workspace/tasks/8/report.json']) {
+      expect(deliverableWrittenThisTurn([call], file, true)).toBe(false);
+    }
+    expect(deliverableWrittenThisTurn([call], call.path!)).toBe(false);
+  });
+
+  it('requires a complete artifact even when this turn wrote it', () => {
+    const spec = {
+      file: 'report.json',
+      artifact: true,
+      requireChange: true,
+      sniff: 'json-valid' as const,
+    };
+    const writes = [
+      write({ name: 'write_artifact', path: spec.file, resultText: 'Wrote report.json' }),
+    ];
+    expect(evaluateDeliverableGate({ content: '{"incomplete":', spec, writes }).satisfied).toBe(
+      false,
+    );
+    expect(evaluateDeliverableGate({ content: null, spec, writes }).satisfied).toBe(false);
+  });
+
   it('holds when the deliverable does not exist', () => {
     const r = evaluateDeliverableGate({ content: null, spec: { file: 'index.html' }, writes: [] });
     expect(r.satisfied).toBe(false);

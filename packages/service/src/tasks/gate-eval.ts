@@ -1,4 +1,14 @@
-import type { GateCheck } from '@bendyline/gezel';
+import { posix } from 'node:path';
+import {
+  type GateCheck,
+  type GateWorkspaceReader,
+  evaluateDeclarativeCheck,
+  gateCheckLabel,
+  isSharedGateCheck,
+} from '@bendyline/gezel';
+
+export { gateCheckLabel };
+export type { GateWorkspaceReader };
 import { validateFile } from '@bendyline/gezel-mcp';
 import {
   type WorkspaceLike,
@@ -6,20 +16,12 @@ import {
   citationsResolve,
   containsPattern,
   cssMinBytes,
-  csvShape,
   esmImports,
-  explainSniff,
   extractInlineScripts,
-  fileCountByExt,
-  fileMinBytes,
-  jsonPathEquals,
   markdownHeadingsMatch,
   notContainsPattern,
   parseJudgeVerdict,
   planStructure,
-  recordSchema,
-  tableShape,
-  totalMinBytes,
   unsupportedClaims,
   validateJudgeEvidence,
   validateScriptSyntax,
@@ -28,7 +30,6 @@ import {
   wrapperReturnHint,
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
-import { runStepSniff } from '../chat/step-sniff.js';
 import { parseFrontmatter } from '../index-store/frontmatter.js';
 
 /**
@@ -42,12 +43,6 @@ import { parseFrontmatter } from '../index-store/frontmatter.js';
  * fails an `artifact`-flagged check as "not found" — the gate never silently
  * passes a deliverable it couldn't read.
  */
-export type GateWorkspaceReader = WorkspaceLike & {
-  readArtifact?: (file: string) => Promise<string | null>;
-  listArtifacts?: () => Promise<string[]>;
-  /** Artifact-tree sibling of `WorkspaceLike.readBytes` (image-signature checks). */
-  readArtifactBytes?: (file: string) => Promise<Uint8Array | null>;
-};
 
 /**
  * Structured outcome of one configured check. Preserved through the gate
@@ -242,6 +237,8 @@ export interface GateCheckResult {
  * fail-closes with an explanatory rejection rather than silently passing.
  */
 export interface GateEvalDeps {
+  /** Successful scoped image reads in this task, step and activation. */
+  imageEvidence?: () => Promise<{ observable: boolean; paths: string[] }>;
   sandboxExec?: (
     file: string,
     timeoutMs: number,
@@ -326,6 +323,16 @@ export function taskSuppliedCitationPaths(opts: {
   stepPrompt?: string;
   params?: Record<string, string>;
   artifactDir?: string;
+  /**
+   * The task's own steps. Every file a step declares it will produce or
+   * read is this run's plan, not a source: a powerpoint-deck outline naming
+   * the `deck.md` the next step writes burned a gate attempt as a
+   * "fabricated citation" on every run (qwen3.8-27b, 2026-09-23).
+   */
+  steps?: ReadonlyArray<{
+    advanceWhen?: { file?: string } | null;
+    consumes?: ReadonlyArray<{ file: string }>;
+  }>;
 }): string[] {
   const out = new Set<string>();
   for (const value of Object.values(opts.params ?? {})) {
@@ -333,6 +340,10 @@ export function taskSuppliedCitationPaths(opts: {
     if (v) out.add(v);
   }
   if (opts.artifactDir?.trim()) out.add(opts.artifactDir.trim());
+  for (const step of opts.steps ?? []) {
+    if (step.advanceWhen?.file?.trim()) out.add(step.advanceWhen.file.trim());
+    for (const input of step.consumes ?? []) if (input.file.trim()) out.add(input.file.trim());
+  }
   for (const m of (opts.stepPrompt ?? '').matchAll(/`([^`\s]*\/[^`\s]+)`/g)) {
     if (m[1]) out.add(m[1]);
   }
@@ -411,74 +422,6 @@ function globPathRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-/**
- * Stable identity of the configured check — kind + file + the config
- * discriminator (pattern/path/sniff name). Never includes observed
- * values, so it is hash-stable across attempts.
- */
-export function gateCheckLabel(c: GateCheck): string {
-  switch (c.kind) {
-    case 'minBytes':
-      return `minBytes ${c.file}`;
-    case 'totalMinBytes':
-      return `totalMinBytes ${c.files.join('+')}`;
-    case 'fileCount':
-      return `fileCount ${c.ext.join(',')}${c.dir ? ` ${c.dir}` : ''}`;
-    case 'cssMinBytes':
-      return `cssMinBytes ${c.file ?? 'index.html'}`;
-    case 'sniff':
-      return `sniff ${c.file} ${c.sniff}`;
-    case 'jsonPathEquals':
-      return `jsonPathEquals ${c.file} ${c.path}`;
-    case 'csvShape':
-      return `csvShape ${c.file}`;
-    case 'contains':
-      return `contains ${c.file} /${c.pattern}/`;
-    case 'notContains':
-      return `notContains ${c.file} /${c.pattern}/`;
-    case 'unsupportedClaims':
-      return `unsupportedClaims ${c.file}`;
-    case 'jsParses':
-      return `jsParses ${c.file ?? 'index.html'}`;
-    case 'htmlLint':
-      return `htmlLint ${c.file}`;
-    case 'esmImports':
-      return `esmImports ${c.file}`;
-    case 'sourceParses':
-      return `sourceParses ${c.file}`;
-    case 'tableShape':
-      return `tableShape ${c.file}`;
-    case 'recordSchema':
-      return `recordSchema ${c.file}`;
-    case 'nodeRuns':
-      return `nodeRuns ${c.file}`;
-    case 'citationsResolve':
-      return `citationsResolve ${c.file}`;
-    case 'researchEvidence':
-      return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
-    case 'commandEvidence':
-      return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
-    case 'corpusCoverage':
-      return `corpusCoverage ${c.file} ${c.corpusDir}`;
-    case 'corpusReadEvidence':
-      return `corpusReadEvidence ${c.batchesFile} batch=${c.batchNumber}`;
-    case 'corpusBatchObservations':
-      return `corpusBatchObservations ${c.file} batch=${c.batchNumber}`;
-    case 'corpusBatches':
-      return `corpusBatches ${c.file} ${c.corpusDir}`;
-    case 'markdownHeadingsMatch':
-      return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
-    case 'valueGrounding':
-      return `valueGrounding ${c.file}`;
-    case 'valuesSubsetOf':
-      return `valuesSubsetOf ${c.file}`;
-    case 'judge':
-      return `judge ${c.file}${c.label ? ` ${c.label}` : ''}`;
-    case 'planStructure':
-      return `planStructure ${c.file}`;
-  }
-}
-
 function checkFile(c: GateCheck): string | undefined {
   if ('file' in c && typeof c.file === 'string') return c.file;
   if (c.kind === 'cssMinBytes' || c.kind === 'jsParses') return c.file ?? 'index.html';
@@ -511,11 +454,65 @@ interface InnerOutcome {
   remaining?: number;
 }
 
+async function completeArtifactReads(
+  paths: string[],
+  label: string,
+  deps?: GateEvalDeps,
+): Promise<InnerOutcome> {
+  if (!deps?.corpusReadEvidence) {
+    return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
+  }
+  const observed = await deps.corpusReadEvidence();
+  if (!observed.observable) {
+    return { ok: false, detail: 'Artifact read history is not observable (fail-closed).' };
+  }
+  const missing = paths.filter((path) => {
+    const slices = observed.slices.filter((slice) => slice.path === path);
+    if (slices.length === 0) return true;
+    const total = slices[0]!.totalLines;
+    if (
+      !Number.isSafeInteger(total) ||
+      total < 1 ||
+      slices.some((slice) => slice.totalLines !== total)
+    )
+      return true;
+    const ranges = slices
+      .filter(
+        (slice) =>
+          Number.isSafeInteger(slice.startLine) &&
+          Number.isSafeInteger(slice.endLine) &&
+          slice.startLine >= 1 &&
+          slice.endLine <= total &&
+          slice.endLine >= slice.startLine,
+      )
+      .sort((a, b) => a.startLine - b.startLine);
+    let next = 1;
+    for (const range of ranges) {
+      if (range.startLine > next) break;
+      next = Math.max(next, range.endLine + 1);
+      if (next > total) return false;
+    }
+    return true;
+  });
+  return {
+    ok: missing.length === 0,
+    detail:
+      missing.length === 0
+        ? `${label}: full artifact reads verified for all ${paths.length} records.`
+        : `${label}: ${missing.length}/${paths.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
+    evidence: { expectedRecords: paths.length, missingRecords: missing.slice(0, 10) },
+    remaining: missing.length,
+  };
+}
+
 async function evalCheckInner(
   c: GateCheck,
   ws: GateWorkspaceReader,
   deps?: GateEvalDeps,
 ): Promise<InnerOutcome> {
+  // The kinds every host evaluates run through the shared module; only the
+  // desktop-only kinds are dispatched below.
+  if (isSharedGateCheck(c)) return evaluateDeclarativeCheck(c, ws);
   // Checks flagged `artifact: true` resolve `file` against the project's
   // artifacts drawer instead of the workspace. Build a `WorkspaceLike` view
   // whose `read`/`list` hit the artifact store, then run the EXACT same check
@@ -535,77 +532,6 @@ async function evalCheckInner(
   };
   const reader: WorkspaceLike = usesArtifact ? artifactReader : ws;
   switch (c.kind) {
-    case 'minBytes': {
-      const r = await fileMinBytes(reader, c.file, c.bytes);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'totalMinBytes': {
-      const r = await totalMinBytes(reader, c.files, c.bytes);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'fileCount': {
-      const r = await fileCountByExt(reader, c.ext, c.min, c.dir, {
-        ...(c.verifyImageBytes ? { verifyImageBytes: true } : {}),
-      });
-      const matched = (r as { matched?: string[] }).matched;
-      return {
-        ok: r.ok,
-        detail: r.detail,
-        ...(matched ? { evidence: { matched: capList(matched) } } : {}),
-      };
-    }
-    case 'cssMinBytes': {
-      const r = await cssMinBytes(reader, c.bytes, c.file);
-      return { ok: r.ok, detail: r.detail };
-    }
-    case 'sniff': {
-      const content = await reader.read(c.file);
-      if (content === null) {
-        return {
-          ok: false,
-          detail: `${c.file} not found (needed for the ${c.sniff} check)`,
-          evidence: { sniff: c.sniff },
-        };
-      }
-      if (runStepSniff(c.sniff, content)) {
-        return {
-          ok: true,
-          detail: `${c.file} passes the ${c.sniff} check`,
-          evidence: { sniff: c.sniff },
-        };
-      }
-      // Name the actual gap, not the rule — explainSniff composes the
-      // diagnosis from the same primitives the sniff itself uses.
-      return {
-        ok: false,
-        detail: `${c.file} failed the ${c.sniff} check: ${explainSniff(c.sniff, content)}`,
-        evidence: { sniff: c.sniff },
-      };
-    }
-    case 'jsonPathEquals': {
-      const r = await jsonPathEquals(reader, c.file, c.path, c.value, c.label);
-      const actual = (r as { actual?: unknown }).actual;
-      return {
-        ok: r.ok,
-        detail: r.detail,
-        ...(actual !== undefined ? { evidence: { actual } } : {}),
-      };
-    }
-    case 'csvShape': {
-      const content = await reader.read(c.file);
-      const r = csvShape(content, {
-        ...(c.requiredColumns ? { requiredColumns: c.requiredColumns } : {}),
-        ...(c.exactColumns ? { exactColumns: c.exactColumns } : {}),
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-        ...(c.consistentColumns !== undefined ? { consistentColumns: c.consistentColumns } : {}),
-        ...(c.allowedValues ? { allowedValues: c.allowedValues } : {}),
-      });
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        evidence: shapeEvidence(r),
-      };
-    }
     case 'contains': {
       const r = await containsPattern(reader, c.file, c.pattern, c.flags, c.label);
       return { ok: r.ok, detail: r.detail };
@@ -712,37 +638,6 @@ async function evalCheckInner(
         evidence: { diagnostic: `${message}${at}` },
       };
     }
-    case 'tableShape': {
-      const content = await reader.read(c.file);
-      if (content === null) {
-        return { ok: false, detail: `${c.file} not found (needed for the table-shape check)` };
-      }
-      const r = tableShape(content, {
-        ...(c.requiredColumns ? { requiredColumns: c.requiredColumns } : {}),
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-      });
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        evidence: shapeEvidence(r),
-      };
-    }
-    case 'recordSchema': {
-      const content = await reader.read(c.file);
-      const r = recordSchema(content, {
-        fields: c.fields,
-        ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
-        ...(c.uniqueBy ? { uniqueBy: c.uniqueBy } : {}),
-        ...(c.format ? { format: c.format } : {}),
-        ...(c.allowExtraFields !== undefined ? { allowExtraFields: c.allowExtraFields } : {}),
-      });
-      const rowCount = (r as { rowCount?: number }).rowCount;
-      return {
-        ok: r.ok,
-        detail: r.ok ? r.detail : `${c.file}: ${r.detail}`,
-        ...(rowCount !== undefined ? { evidence: { rowCount } } : {}),
-      };
-    }
     case 'nodeRuns': {
       if (!deps?.sandboxExec) {
         return {
@@ -829,6 +724,44 @@ async function evalCheckInner(
           urls: capList(r.urls),
           ...(r.forgiven && r.forgiven.length > 0 ? { forgiven: capList(r.forgiven) } : {}),
         },
+      };
+    }
+    case 'imageEvidence': {
+      if (!deps?.imageEvidence)
+        return { ok: false, detail: 'Image delivery evidence is unavailable (fail-closed).' };
+      const raw = await reader.read(c.file);
+      if (!raw) return { ok: false, detail: `Image manifest not found: ${c.file}` };
+      let items: unknown;
+      try {
+        items = JSON.parse(raw)[c.imagesKey];
+      } catch {
+        return { ok: false, detail: `Invalid image manifest JSON: ${c.file}` };
+      }
+      if (
+        !Array.isArray(items) ||
+        items.length === 0 ||
+        items.length > 100 ||
+        !items.every((i) => i && typeof i.path === 'string' && i.path.trim().length > 0)
+      )
+        return {
+          ok: false,
+          detail: `${c.file}.${c.imagesKey} must list 1–100 image objects with paths.`,
+        };
+      const normalize = (path: string) =>
+        posix.normalize(path.replaceAll('\\', '/').replace(/^workspace\//, ''));
+      const expected = [...new Set(items.map((i) => normalize(posix.join(c.baseDir, i.path))))];
+      const observed = await deps.imageEvidence();
+      if (!observed.observable)
+        return { ok: false, detail: 'Image delivery telemetry is unavailable (fail-closed).' };
+      const seen = new Set(observed.paths.map(normalize));
+      const missing = expected.filter((path) => !seen.has(path));
+      return {
+        ok: missing.length === 0,
+        detail:
+          missing.length === 0
+            ? `All ${expected.length} manifest images were delivered to this step.`
+            : `Open each missing image with read_image_as_base64 before advancing: ${missing.join(', ')}. Text, hashes and base64 printed in a shell are not image inspection.`,
+        evidence: { expected, missing },
       };
     }
     case 'researchEvidence': {
@@ -1161,6 +1094,30 @@ async function evalCheckInner(
         detail: `Fanout batches complete: ${actual.length} batch(es), ${seen.size} path(s), matching artifacts/${manifestPath}`,
       };
     }
+    case 'artifactReadEvidence': {
+      let paths: unknown;
+      try {
+        paths = JSON.parse(c.paths);
+      } catch {
+        return { ok: false, detail: 'Artifact read paths must be a JSON array (fail-closed).' };
+      }
+      if (
+        !Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.some(
+          (path) =>
+            typeof path !== 'string' || path.trim().length === 0 || /\{\{.*?\}\}/.test(path),
+        ) ||
+        new Set(paths).size !== paths.length
+      ) {
+        return {
+          ok: false,
+          detail:
+            'Artifact read paths must be distinct, nonempty, resolved path strings (fail-closed).',
+        };
+      }
+      return completeArtifactReads(paths as string[], 'Required artifacts', deps);
+    }
     case 'corpusReadEvidence': {
       const raw = await reader.read(c.batchesFile);
       if (raw === null) return { ok: false, detail: `${c.batchesFile} not found (fail-closed).` };
@@ -1195,50 +1152,7 @@ async function evalCheckInner(
           detail: `${c.batchesFile}: batch ${number} has no exact record paths (fail-closed).`,
         };
       }
-      if (!deps?.corpusReadEvidence) {
-        return { ok: false, detail: 'Artifact read history is unavailable (fail-closed).' };
-      }
-      const observed = await deps.corpusReadEvidence();
-      if (!observed.observable) {
-        return { ok: false, detail: 'Artifact read history is not observable (fail-closed).' };
-      }
-      const missing = (records as string[]).filter((path) => {
-        const slices = observed.slices.filter((slice) => slice.path === path);
-        if (slices.length === 0) return true;
-        const total = slices[0]!.totalLines;
-        if (
-          !Number.isSafeInteger(total) ||
-          total < 1 ||
-          slices.some((slice) => slice.totalLines !== total)
-        )
-          return true;
-        const ranges = slices
-          .filter(
-            (slice) =>
-              Number.isSafeInteger(slice.startLine) &&
-              Number.isSafeInteger(slice.endLine) &&
-              slice.startLine >= 1 &&
-              slice.endLine <= total &&
-              slice.endLine >= slice.startLine,
-          )
-          .sort((a, b) => a.startLine - b.startLine);
-        let next = 1;
-        for (const range of ranges) {
-          if (range.startLine > next) break;
-          next = Math.max(next, range.endLine + 1);
-          if (next > total) return false;
-        }
-        return true;
-      });
-      return {
-        ok: missing.length === 0,
-        detail:
-          missing.length === 0
-            ? `Batch ${number}: full artifact reads verified for all ${records.length} records.`
-            : `Batch ${number}: ${missing.length}/${records.length} records lack full read evidence. Read every line of the exact artifact record(s), using read_artifact ranges if needed: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`,
-        evidence: { expectedRecords: records.length, missingRecords: missing.slice(0, 10) },
-        remaining: missing.length,
-      };
+      return completeArtifactReads(records as string[], `Batch ${number}`, deps);
     }
     case 'corpusBatchObservations': {
       const [batchesRaw, observations] = await Promise.all([
@@ -1776,15 +1690,4 @@ async function evalCheckInner(
       };
     }
   }
-}
-
-function shapeEvidence(r: {
-  ok: boolean;
-  headers?: string[];
-  rowCount?: number;
-}): Record<string, unknown> | undefined {
-  const out: Record<string, unknown> = {};
-  if (r.headers) out.headers = capList(r.headers);
-  if (r.rowCount !== undefined) out.rowCount = r.rowCount;
-  return Object.keys(out).length > 0 ? out : undefined;
 }

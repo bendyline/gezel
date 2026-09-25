@@ -579,6 +579,8 @@ export class LocalEngineRuntime {
         // 2026-08-03 — save/restore against the phantom slot 400s
         // silently).
         slotCount: llamaProvider.getLaunchedSlots(),
+        diskCacheRoot: join(this.home, 'engines', 'llama-cpp', 'slots'),
+        diskCacheBudgetMb: config.llamaCppDiskCacheBudgetMb,
         ...(llamaSlotSavePath ? { slotSavePath: llamaSlotSavePath } : {}),
       });
       this.cacheController.registerAdapter(adapter);

@@ -1,4 +1,5 @@
 export type { CheckResult, WorkspaceLike } from './types.js';
+export { type StepSniffName, runSniff } from './sniff.js';
 export { citedPathKey, cleanCitedPath, createCitedPathChecker } from './workspace-exists.js';
 export {
   MIN_INLINE_JS_BYTES,

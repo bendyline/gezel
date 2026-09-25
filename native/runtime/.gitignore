@@ -1,0 +1,5 @@
+**/build/
+**/.gradle/
+**/.build/
+**/.swiftpm/
+**/Fixtures/ios-fixture.gguf

@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -122,6 +123,19 @@ describe('DocumentNarration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  });
+
+  it('does not offer narration or register context actions without host audio support', () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      renderControl('project-1');
+      expect(screen.queryByRole('button', { name: 'Narrate document' })).toBeNull();
+      expect(contextMenu.items).toEqual([]);
+      expect(api.synthesizeSpeechWithProgress).not.toHaveBeenCalled();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
   });
 
   it('narrates the parsed document with the built-in TTS route', async () => {

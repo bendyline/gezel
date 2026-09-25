@@ -19,8 +19,8 @@ endpoint that the supervisor probes. See
 | -------------- | ----------------------- | -------------------------------------------------- |
 | `darwin-arm64` | Metal                   | `-DSD_METAL=ON`. "Just works" on Apple Silicon.    |
 | `darwin-x64`   | CPU (AVX2 / Accelerate) | No GPU path — Metal requires Apple Silicon.        |
-| `linux-x64`    | Vulkan                  | Ships Vulkan (`sd_backend: vulkan` in the build matrix). Local builds autodetect CUDA → Vulkan → CPU. |
-| `linux-arm64`  | CPU                     | Ships CPU (`sd_backend: cpu`) — LunarG publishes no aarch64 SDK tarball. Local builds on Jetson / DGX-style hosts with `nvcc` on PATH pick CUDA automatically. |
+| `linux-x64`    | Vulkan **+ CUDA**       | Bare key ships Vulkan (`sd_backend: vulkan`); the `-cuda` key ships a CUDA build. Local builds autodetect CUDA → Vulkan → CPU. |
+| `linux-arm64`  | CPU **+ CUDA**          | Bare key ships CPU (`sd_backend: cpu`) — LunarG publishes no aarch64 SDK tarball; the `-cuda` key ships a CUDA build for Jetson / DGX-class hosts. |
 | `win32-x64`    | Vulkan                  | Ships Vulkan (`sd_backend: vulkan`).                |
 
 The shipped backend is **pinned per matrix row** in
@@ -31,14 +31,28 @@ step happened to run on that runner — native-v0.1.18 shipped a
 Vulkan-linked `linux-x64` binary that way while this table still claimed
 otherwise. Changing a shipped backend means editing the matrix.
 
-We ship **Vulkan/CPU** binaries rather than CUDA because Vulkan is
-driver-independent and ships with nearly every modern GPU. CUDA gives
-better throughput on NVIDIA but requires the CUDA toolkit at runtime,
-which is a non-starter for a drop-in installer. Local rebuilds on
-hosts with `nvcc` on PATH pick CUDA automatically — this matters: the
-CPU build renders SDXL at ~35 s/step, so even a 4-step distilled
-render takes ~4 minutes and blows through chat-turn latency budgets.
-Override with `SD_BACKEND={metal,vulkan,cuda,cpu}`.
+The **bare** key ships Vulkan/CPU rather than CUDA because it has to run
+everywhere: Vulkan is driver-independent, while a CUDA-linked binary
+needs the CUDA runtime present or it dies at exec. That is why the
+portable build cannot simply be swapped for a CUDA one.
+
+On Linux we additionally ship a **CUDA** sd-server in the `-cuda` key,
+beside llama-server and ds4, so hosts that can run it get an accelerated
+render and everyone else still resolves a binary. Consumers probe and
+pick — see `impliedEngineVariant` in
+`packages/service/src/engines/resolver.ts` for why this is deliberately
+NOT an implied variant, and `scripts/native-payload.mjs` for why it
+shares the `-cuda` key instead of taking one of its own (the NVIDIA
+redistributables are ~800 MB and ship once).
+
+This matters most on `linux-arm64`, where the portable build is plain
+CPU: SDXL renders at ~35 s/step there, so even a 4-step distilled render
+takes ~4 minutes. That is past chat-turn latency budgets, and past the
+petshop eval's bounded repair allowance — which, being attempt-based
+rather than time-based, failed *fast* models while slow ones idled long
+enough for the render to land.
+
+Override the local build with `SD_BACKEND={metal,vulkan,cuda,cpu}`.
 
 ## Runtime requirements
 

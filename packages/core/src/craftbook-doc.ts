@@ -450,11 +450,11 @@ function augmentGraphProblem(problem: string, stepIds: string[]): CraftbookDocEr
       fix: `valid step ids: ${stepIds.join(', ')}${near ? ` — did you mean "${near}"?` : ''}`,
     };
   }
-  if (/is terminal but also has advanceWhen/.test(problem)) {
+  if (/is terminal but also has advanceWhen\.goto/.test(problem)) {
     return {
       where: 'steps',
       message: `${problem}.`,
-      fix: 'a terminal step cannot auto-advance — remove its `advanceWhen`. To hold the final step until its file exists, keep a completion `gate` only (a `deliverable` on a terminal step expands gate-only), or drop `terminal: true` and add a separate final step.',
+      fix: 'remove `advanceWhen.goto` so the observed deliverable completes this terminal step through its completion gate. Remove `terminal: true` if the step should route onward.',
     };
   }
   if (/is terminal but also has next\/branches/.test(problem)) {

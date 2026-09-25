@@ -1,4 +1,4 @@
-import { HAT_FELTS } from '@bendyline/gezel';
+import { HAT_FELTS } from '@bendyline/gezel/poppetje';
 
 export type Felt = (typeof HAT_FELTS)[number];
 

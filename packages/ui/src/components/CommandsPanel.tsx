@@ -7,11 +7,13 @@ import {
   type PendingImportItem,
   type WorkspaceCommandIndex,
   type WorkspaceIndexStatus,
+  paramFormSchema,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { CraftbookParamForm } from './CraftbookParamForm.js';
 import { CraftbookToolsetSetup } from './CraftbookToolsetSetup.js';
 import { craftbookCommandName, renderCraftbookCommand } from './craftbook-command.js';
@@ -73,9 +75,13 @@ function loadTerminalPlatform(): Promise<string | undefined> {
   return platformPromise;
 }
 
-/** A craftbook declares params iff its paramSchema has ≥1 property. */
+/**
+ * A craftbook opens the param form iff it asks a person for at least one
+ * property. Books whose only params the daemon fills stage the bare command.
+ */
 function craftbookHasParams(m: CraftbookTemplateManifest): boolean {
-  const props = (m.paramSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  const props = (paramFormSchema(m.paramSchema) as { properties?: Record<string, unknown> })
+    ?.properties;
   return !!props && Object.keys(props).length > 0;
 }
 
@@ -111,12 +117,13 @@ export function CommandsPanel({
   onStageCommand,
 }: Props) {
   const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
-  const showCommands = section === 'all' || section === 'commands';
-  const showScripts = section === 'all' || section === 'scripts';
-  const showCraftbooks = section === 'all' || section === 'tasks';
+  const showCommands =
+    runtimeCapabilities().terminal && (section === 'all' || section === 'commands');
+  const showScripts = runtimeCapabilities().index && (section === 'all' || section === 'scripts');
+  const showCraftbooks = runtimeCapabilities().tasks && (section === 'all' || section === 'tasks');
   // Skills + their pending imports ride with craftbooks in the `tasks`
   // slice, and stand alone in `skills`.
-  const showSkills = showCraftbooks || section === 'skills';
+  const showSkills = runtimeCapabilities().index && (showCraftbooks || section === 'skills');
   // The workspace index backs both the scripts groups and the machine-tools
   // group; the tasks- and skills-scoped panels skip it entirely.
   const needsIndex = showCommands || showScripts;

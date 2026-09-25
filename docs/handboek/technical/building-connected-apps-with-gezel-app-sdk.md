@@ -182,7 +182,14 @@ crew already on the roster.
 Hosting requires `@bendyline/gezel-service` beside the SDK; it is an optional
 peer dependency, so applications that only connect never download it. Under
 Electron, pass a real Node binary as `host.nodePath`: Gezel runs its tool server
-as a child process, and an Electron binary cannot stand in for Node.
+as a child process, and an Electron binary cannot stand in for Node. Without
+one, the SDK uses the Node that a Gezel install keeps in its home, when there
+is one.
+
+By default the application hosts only when no Gezel is running; a person who
+declines the connection in Gezel is not overridden. An application whose AI is
+optional and switched on by the person inside it may pass
+`hostWhenRefused: true` to host after a refusal too.
 
 ## Tools your application runs
 

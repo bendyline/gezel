@@ -186,7 +186,7 @@ export interface SessionOpts {
    * stateful sessions.
    */
   priorMessages?: Array<
-    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
     | {
         role: 'assistant';
         content: string;
@@ -286,6 +286,15 @@ export interface SessionOpts {
    * turns on or off, so the flag follows the same lifetime as the tools.
    */
   forceDirectFileWork?: boolean;
+  /**
+   * The chat manager clamped this turn to ONE pre-resolved action (the
+   * exact-craftbook route). A local provider may stop generating the moment
+   * that call is complete in the stream: nothing written after it can be
+   * acted on, and a model that keeps going after an unfamiliar call shape
+   * can loop until max_tokens. Same lifetime as the clamp — the manager
+   * rebuilds the session when it flips. See `complete-tool-call.ts`.
+   */
+  singleToolCallTurn?: boolean;
   /**
    * Local bridge-backed providers: a successful call to one of these
    * action tools is the terminal outcome for the turn. The provider
@@ -425,6 +434,12 @@ export interface SessionOpts {
      * warned off it.
      */
     deliverableIsArtifact?: boolean;
+    /**
+     * The step's declared inputs (`consumes`). A local provider holds its
+     * write-only immediate-write mode until each has been read in the send,
+     * so a step that writes FROM an outline can open the outline first.
+     */
+    requiredInputs?: ReadonlyArray<{ path: string; artifact: boolean }>;
   };
   /**
    * Capability tier of the model running this session, derived from
@@ -755,6 +770,8 @@ export interface SendAndWaitOpts {
 }
 
 export interface LLMSession {
+  /** Bound engine capability; absent is unknown, never proof of native vision. */
+  readonly supportsImageInput?: boolean;
   /** The owning engine was retired; rebuild from saved history before the next turn. */
   readonly isDisposed?: boolean;
   /**
@@ -1071,6 +1088,7 @@ export interface BatchCapability {
 }
 
 export interface LLMProvider {
+  readonly supportsImageInput?: boolean;
   readonly name: ProviderName;
   /** Boot the underlying client / authenticate. Called lazily. */
   initialize(signal?: AbortSignal): Promise<void>;

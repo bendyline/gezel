@@ -6,6 +6,9 @@
  * results as function-call outputs.
  */
 
+import { redactObject, redactString } from '@bendyline/gezel';
+
+export { redactObject, redactString };
 import {
   type HookPhase,
   type HookResult,
@@ -90,6 +93,17 @@ export { isHttpSpec, isInMemorySpec, isStdioSpec } from './mcp-spec.js';
  * with it (OpenAI, Copilot) would just silently waste tokens.
  */
 export const MAX_TOOL_OUTPUT_CHARS = 80_000;
+
+export interface ToolOutputBudgetOptions {
+  budgetChars?: number;
+  numCtxTokens?: number;
+  /** Reclaim context for this result before capping it. Receives only its
+   * character count, bounded by the ordinary output ceiling. The returned
+   * budget is still subject to all normal caps. */
+  prepareOutputBudget?: (resultChars: number) => Promise<number>;
+  onImages?: (images: Array<{ base64: string; mimeType: string }>) => void;
+  onApprovalPending?: () => void;
+}
 
 /**
  * Maximum UTF-8 JSON size copied from an MCP result's `structuredContent`
@@ -895,9 +909,11 @@ export class McpBridge {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<string> {
     const rich = await this.callToolRich(name, args, opts);
+    if (!rich.isError && rich.images.length) opts?.onImages?.(rich.images);
+    if (!rich.isError && rich.approvalPending) opts?.onApprovalPending?.();
     return rich.text;
   }
 
@@ -1018,11 +1034,12 @@ export class McpBridge {
   async callToolRich(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<{
     text: string;
     images: Array<{ base64: string; mimeType: string }>;
     isError: boolean;
+    approvalPending?: boolean;
   }> {
     if (!this.client) throw new Error('[mcp-bridge] not started');
     // Resolve renamed/miscased spellings to the advertised name BEFORE
@@ -1271,12 +1288,24 @@ export class McpBridge {
       if (!isError) {
         redactedText = redactString(combined || '(empty)', this.knownSecretValues);
         cap = opts?.budgetChars ?? MAX_TOOL_OUTPUT_CHARS;
+        if (opts?.prepareOutputBudget) {
+          try {
+            const prepared = await opts.prepareOutputBudget(
+              Math.min(redactedText.length, MAX_TOOL_OUTPUT_CHARS),
+            );
+            if (Number.isFinite(prepared) && prepared >= 0) cap = prepared;
+          } catch {
+            // The tool already ran. Deliver its result using the original
+            // conservative budget; never retry a mutation because recovery failed.
+            log.warn('Could not prepare tool-output headroom; retaining the original cap');
+          }
+        }
         capped = capToolOutput(
           redactedText,
           cap,
           opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : undefined,
         );
-        deliveredResultTruncated = capped.length !== redactedText.length;
+        deliveredResultTruncated = capped !== redactedText;
       }
       if (this.onToolCall) {
         try {
@@ -1302,7 +1331,7 @@ export class McpBridge {
             startedAtMs: start,
             durationMs: Date.now() - start,
             success: !isError,
-            ...(deliveredResultTruncated ? { deliveredResultTruncated: true } : {}),
+            ...(!isError ? { deliveredResultTruncated } : {}),
             ...(redactedError ? { errorMessage: redactedError } : {}),
             ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
@@ -1348,7 +1377,18 @@ export class McpBridge {
         `call_tool ${toolName} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
       );
     }
-    return { text: capped, images, isError: false };
+    const approvalPending =
+      (toolName === 'run_package_script' || toolName === 'run_npx') &&
+      structuredContent?.state === 'approval_pending' &&
+      structuredContent.approvalPending === true &&
+      typeof structuredContent.questionId === 'string' &&
+      structuredContent.questionId.length > 0;
+    return {
+      text: capped,
+      images,
+      isError: false,
+      ...(approvalPending ? { approvalPending } : {}),
+    };
   }
 
   async stop(): Promise<void> {
@@ -1364,17 +1404,6 @@ export class McpBridge {
     this.wrappers = [];
     this.wrapperCtx = null;
   }
-}
-
-/** Replace any known secret value in `input` with `[REDACTED]`. */
-export function redactString(input: string, secrets: Set<string>): string {
-  if (!input || secrets.size === 0) return input;
-  let out = input;
-  for (const s of secrets) {
-    if (s.length === 0) continue;
-    out = out.split(s).join('[REDACTED]');
-  }
-  return out;
 }
 
 /**
@@ -1468,23 +1497,6 @@ export function describeBridgeError(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
   const code = (err as NodeJS.ErrnoException).code;
   return `${err.name}: ${err.message}${code ? ` [${code}]` : ''}`;
-}
-
-/** Recursively redact string values inside a plain object/array. */
-export function redactObject<T>(value: T, secrets: Set<string>): T {
-  if (secrets.size === 0) return value;
-  if (typeof value === 'string') return redactString(value, secrets) as T;
-  if (Array.isArray(value)) {
-    return value.map((v) => redactObject(v, secrets)) as T;
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = redactObject(v, secrets);
-    }
-    return out as T;
-  }
-  return value;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { type Task, initialPoppetjeForGezel } from '@bendyline/gezel';
+import { OFFLINE_RUNTIME_CAPABILITIES, type Task, initialPoppetjeForGezel } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -158,6 +158,13 @@ function task(ref: string, title: string): Task {
 }
 
 describe('ChatReferences responsive split', () => {
+  it('does not probe workspace skill indexes just because portable scripts are available', async () => {
+    window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    renderProjectRail();
+    await screen.findByTestId('chat-main');
+    expect(apiMocks.getProjectSkills).not.toHaveBeenCalled();
+    expect(apiMocks.getProjectImportsPending).not.toHaveBeenCalled();
+  });
   it('does not reserve a context pane when the project has no workspace skills or imports', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     apiMocks.getProjectSkills.mockResolvedValue({ skills: [] });

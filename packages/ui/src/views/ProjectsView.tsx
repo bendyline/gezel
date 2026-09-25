@@ -1,3 +1,4 @@
+import './ProjectsView.css';
 import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
@@ -52,6 +53,7 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
+import { ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
@@ -130,6 +132,7 @@ import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
@@ -364,12 +367,6 @@ function forgetLegacyOutputVisible(projectId: string): void {
 }
 
 /**
- * Per-tab glyph for the compact (narrow / mobile) project tab bar, where
- * word labels are swapped for icons + tooltips so all tabs fit without a
- * horizontal scroller. All strokes use `currentColor`, so each icon
- * inherits the trigger's muted → active color treatment for free.
- */
-/**
  * The "Village" tab is for codebases and other file-heavy projects. We gate it
  * on the project's auto-detected type (recomputed each content-index scan from
  * the file mix): shown for code-ish / data types and for as-yet-unclassified
@@ -395,139 +392,6 @@ function isEmailProject(p: {
     resolveProjectTypeId(p) === 'email' ||
     (p.connectors ?? []).some((b) => b.type.startsWith('mail-'))
   );
-}
-
-function ProjectTabIcon({ tab }: { tab: ProjectTab }) {
-  // Decorative — the trigger carries the accessible name via aria-label +
-  // title, so the SVG is aria-hidden. One wrapper, per-tab inner shapes.
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {tabIconShapes(tab)}
-    </svg>
-  );
-}
-
-function tabIconShapes(tab: ProjectTab) {
-  switch (tab) {
-    case 'output':
-      return (
-        <>
-          <rect x="1.8" y="2.8" width="12.4" height="8.4" rx="1.2" />
-          <path d="M6.5 5.6 L9.8 7.5 L6.5 9.4 Z" fill="currentColor" stroke="none" />
-          <line x1="5.5" y1="13.4" x2="10.5" y2="13.4" />
-        </>
-      );
-    case 'chat':
-      return (
-        <path d="M2.6 4.2A1.6 1.6 0 0 1 4.2 2.6h7.6a1.6 1.6 0 0 1 1.6 1.6v4.4a1.6 1.6 0 0 1-1.6 1.6H6.4L3.4 13V8.6A1.6 1.6 0 0 1 2.6 7Z" />
-      );
-    case 'about':
-      return (
-        <>
-          <circle cx="8" cy="8" r="6" />
-          <line x1="8" y1="7.4" x2="8" y2="11" />
-          <circle cx="8" cy="5" r="0.5" fill="currentColor" stroke="none" />
-        </>
-      );
-    case 'tasks':
-      return (
-        <>
-          <rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2" />
-          <path d="M5.4 8 L7.2 9.8 L10.6 6" />
-        </>
-      );
-    case 'packages':
-      return (
-        <>
-          <path d="M8 2.4 L12.6 4 V7.2 C12.6 10 10.6 12 8 13.2 C5.4 12 3.4 10 3.4 7.2 V4 Z" />
-          <path d="M6 7.6 L7.4 9 L10 5.9" />
-        </>
-      );
-    case 'workspace':
-      return (
-        <path d="M2.6 5.4 A1 1 0 0 1 3.6 4.4 H6 L7.3 5.8 H12.4 A1 1 0 0 1 13.4 6.8 V11.6 A1 1 0 0 1 12.4 12.6 H3.6 A1 1 0 0 1 2.6 11.6 Z" />
-      );
-    case 'artifacts':
-      return (
-        <>
-          <path d="M4.4 2.6 H8.6 L11.6 5.6 V13 A0.4 0.4 0 0 1 11.2 13.4 H4.4 A0.4 0.4 0 0 1 4 13 V3 A0.4 0.4 0 0 1 4.4 2.6 Z" />
-          <path d="M8.4 2.6 V5.6 H11.4" />
-        </>
-      );
-    case 'github':
-      return (
-        <>
-          <circle cx="4.6" cy="4.2" r="1.5" />
-          <circle cx="4.6" cy="11.8" r="1.5" />
-          <circle cx="11.4" cy="5.6" r="1.5" />
-          <path d="M4.6 5.7 V10.3" />
-          <path d="M11.4 7.1 C11.4 9.4 9.4 9.6 7.2 9.7 C5.6 9.8 4.6 10 4.6 11" />
-        </>
-      );
-    case 'mail':
-      return (
-        <>
-          <rect x="2.5" y="4" width="11" height="8" rx="0.7" />
-          <path d="M2.8 4.6 L8 8.6 L13.2 4.6" />
-        </>
-      );
-    case 'connections':
-      return (
-        <>
-          <path d="M6 10 L4.2 11.8 A2.2 2.2 0 0 1 4.2 8.6 L5.6 7.2" />
-          <path d="M10 6 L11.8 4.2 A2.2 2.2 0 0 1 11.8 7.4 L10.4 8.8" />
-          <path d="M6.4 9.6 L9.6 6.4" />
-        </>
-      );
-    case 'history':
-      return (
-        <>
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 4.6 V8 L10.4 9.4" />
-        </>
-      );
-    case 'map':
-      return (
-        <>
-          <path d="M1.6 13.4 V7.2 L5.6 3.8 L9.6 7.2 V13.4" />
-          <path d="M9.6 13.4 V9 L12 6.9 L14.4 9 V13.4" />
-          <path d="M4.4 13.4 V10.2 H6.8 V13.4" />
-          <path d="M1.2 13.4 H14.8" />
-        </>
-      );
-    case 'overview':
-      return (
-        <>
-          <circle cx="8" cy="8" r="5.8" />
-          <circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" />
-          <line x1="8" y1="2.2" x2="8" y2="4.4" />
-          <line x1="8" y1="11.6" x2="8" y2="13.8" />
-          <line x1="2.2" y1="8" x2="4.4" y2="8" />
-          <line x1="11.6" y1="8" x2="13.8" y2="8" />
-        </>
-      );
-    default:
-      // settings — sliders read more cleanly than a tiny gear at 16px.
-      return (
-        <>
-          <line x1="3" y1="5" x2="13" y2="5" />
-          <line x1="3" y1="11" x2="13" y2="11" />
-          <circle cx="6" cy="5" r="1.5" fill="var(--panel)" />
-          <circle cx="10" cy="11" r="1.5" fill="var(--panel)" />
-        </>
-      );
-  }
 }
 
 interface AvailableCredential {
@@ -597,6 +461,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const editorTheme = useEffectiveTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [browsingProjects, setBrowsingProjects] = useState(false);
+  const showProjectList = effectiveCompact && !detailOnly && (browsingProjects || !selected);
   const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
   const [createMode, setCreateMode] = useState<'crew' | null>(null);
@@ -618,6 +484,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       return false;
     }
   });
+  const sidebarIsCollapsed = sidebarCollapsed && !effectiveCompact;
   useEffect(() => {
     try {
       window.localStorage.setItem('gezel.projectsSidebarCollapsed', sidebarCollapsed ? '1' : '0');
@@ -967,10 +834,28 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [showWorkspaceHidden, showArtifactsHidden],
   );
 
+  // Saving a reply to the artifacts drawer happens in the chat timeline, which
+  // has no way to reach this view's listing. It announces the write instead,
+  // and until something listened the new file simply did not appear until the
+  // project was reopened.
+  useEffect(() => {
+    const onArtifactUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (!selected || (detail?.projectId && detail.projectId !== selected.id)) return;
+      void refreshFiles(selected.id);
+    };
+    window.addEventListener('gezel:artifact-updated', onArtifactUpdated);
+    return () => window.removeEventListener('gezel:artifact-updated', onArtifactUpdated);
+  }, [selected, refreshFiles]);
+
   // Output discovery has deliberately tighter traversal rules than the full
   // Workspace file tree: no node_modules/dot-folders, and at most four
   // containing folders from the workspace root.
   const refreshOutputFiles = useCallback(async (id: string) => {
+    if (!runtimeCapabilities().htmlPreview) {
+      setWorkspaceHtmlFiles([]);
+      return;
+    }
     const res = await api.listProjectWorkspaceHtmlPages(id);
     setWorkspaceHtmlFiles(res.files.map((file) => file.path));
   }, []);
@@ -996,7 +881,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // the cheap status endpoint and the current review-issue rollup together;
   // both are derived data, so a failed request never blocks file access.
   useEffect(() => {
-    if (fileTab !== 'workspace' || !selectedProjectId) return;
+    if (!runtimeCapabilities().index || fileTab !== 'workspace' || !selectedProjectId) return;
     let cancelled = false;
     setWorkspaceIndexStatus(null);
     setWorkspaceIssues(null);
@@ -1091,7 +976,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const indexScannedAt = workspaceIndexStatus?.meta?.scannedAt;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `indexScannedAt` is a deliberate extra dependency — a finished re-scan must refresh the list.
   useEffect(() => {
-    if (fileTab !== 'workspace' || workspaceViewMode !== 'flat-modified' || !selectedProjectId) {
+    if (
+      !runtimeCapabilities().index ||
+      fileTab !== 'workspace' ||
+      workspaceViewMode !== 'flat-modified' ||
+      !selectedProjectId
+    ) {
       return;
     }
     let cancelled = false;
@@ -1113,7 +1003,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const reviewedFileCount = workspaceIndexStatus?.enrichment?.reviews?.reviewed;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a completed background review should refresh the selected file even when its path is unchanged.
   useEffect(() => {
-    if (!selectedProjectId || !workspaceReviewPath) {
+    if (!runtimeCapabilities().index || !selectedProjectId || !workspaceReviewPath) {
       setWorkspaceReview(null);
       setWorkspaceReviewLoading(false);
       setWorkspaceReviewError(null);
@@ -1205,7 +1095,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // a gezel changed recently?" inline next to the allow-writes toggle so
   // reviewing damage is one glance.
   useEffect(() => {
-    if (tab !== 'about' || !selected) return;
+    if (!runtimeCapabilities().daemonSettings || tab !== 'about' || !selected) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -1309,6 +1199,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (id: string) => {
       const project = await api.getProject(id);
       setSelected(project);
+      setBrowsingProjects(false);
       setOpenFile(null);
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
@@ -1424,6 +1315,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (created: ProjectDetail) => {
       await refresh();
       setSelected(created);
+      setBrowsingProjects(false);
       setOpenFile(null);
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
@@ -1713,7 +1605,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
       const layout = resolveOutsideInLayout(entry.path);
-      if (layout) {
+      const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
+      // Authored HTML remains runnable unless its companion records document-editing intent.
+      const openCompanion =
+        layout &&
+        (layout.format !== 'html' ||
+          chooseOutsideInSource(
+            layout,
+            entries
+              .filter((candidate) => !candidate.isDirectory)
+              .map((candidate) => candidate.path),
+          ));
+      if (openCompanion) {
         try {
           const prepared = await prepareOutsideInDocument(entry, source);
           setOpenFile({
@@ -1749,7 +1652,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setOpenFile({ ...res, content, source });
       }
     },
-    [selected, prepareOutsideInDocument],
+    [selected, workspaceFiles, artifactFiles, prepareOutsideInDocument],
   );
 
   const allowOutsideInMarkdownEditing = useCallback(
@@ -1940,7 +1843,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         : activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
     [activeEntries, showActiveHidden],
   );
-  const activeViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
+  const storedViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
+  const activeViewMode =
+    !runtimeCapabilities().index && ['flat-issues', 'flat-criticality'].includes(storedViewMode)
+      ? 'tree-alpha'
+      : storedViewMode;
   // Flat "by modified": prefer the complete index-backed list for the
   // workspace (not capped by the walker); artifacts — and workspaces with
   // indexing disabled or not yet scanned — fall back to the walked entries,
@@ -2087,7 +1994,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const workspaceIndexToggle: ReactNode = (
     <>
       <WorkspaceSourceLineReveal request={activeWorkspaceSourceReveal} />
-      {workspaceReviewPath ? (
+      {runtimeCapabilities().index && workspaceReviewPath ? (
         <WorkspaceIndexToggle
           open={workspaceIndexPaneOpen}
           issueCount={selectedWorkspaceIssueCount}
@@ -2185,6 +2092,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const pendingOutputChoice =
     outputOverride && outputOverride.projectId === selected?.id ? outputOverride.visible : null;
   const outputVisible =
+    runtimeCapabilities().htmlPreview &&
     Boolean(selected) &&
     (pendingOutputChoice ?? selected?.outputPaneVisible ?? (hasIndexHtml || Boolean(typePage)));
   const toggleOutput = useCallback(() => {
@@ -2272,7 +2180,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // beside the content, so it becomes its own tab. It's offered whenever
   // the workspace has any previewable HTML.
   const compactOutputAvailable = effectiveCompact && workspaceHtmlFiles.length > 0;
-  const diffpackCount = useDiffpackCount(selected?.id ?? '');
+  const diffpackCount = useDiffpackCount(
+    runtimeCapabilities().background ? (selected?.id ?? '') : '',
+  );
   // Keep the active tab valid as the form factor / availability changes:
   // 'output' only exists in compact mode while there's output to show.
   useEffect(() => {
@@ -2292,6 +2202,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // produced from the listing anymore.
   const handleProjectRowClick = useCallback(
     (id: string) => {
+      if (effectiveCompact && selected?.id === id) {
+        setBrowsingProjects(false);
+        return;
+      }
       void openProject(id);
       if (!detailOnly) {
         try {
@@ -2301,7 +2215,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         }
       }
     },
-    [detailOnly, openProject],
+    [detailOnly, effectiveCompact, openProject, selected?.id],
   );
 
   const toggleSelectedArchive = useCallback(async () => {
@@ -2336,10 +2250,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
             onClick={() => handleProjectRowClick(p.id)}
             title={p.name}
-            aria-label={sidebarCollapsed ? p.name : undefined}
+            aria-label={sidebarIsCollapsed ? p.name : undefined}
           >
             <ProjectIcon project={p} size={18} className="project-rail-mark" />
-            {!sidebarCollapsed && (
+            {!sidebarIsCollapsed && (
               <>
                 <span className="project-rail-label">{p.name}</span>
                 {p.storageScope === 'machine-shared' && (
@@ -2353,7 +2267,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               </>
             )}
           </button>
-          {!sidebarCollapsed && (
+          {!sidebarIsCollapsed && (
             <ProjectActionsMenu
               project={p}
               onDeleted={() => void refresh()}
@@ -2385,7 +2299,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   return (
     <div
       ref={containerRef}
-      className={`two-col${sidebarCollapsed && !detailOnly ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
+      className={`two-col project-view${showProjectList ? ' showing-project-list' : ''}${sidebarIsCollapsed && !detailOnly ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
     >
       {!detailOnly && (
         <NewProjectDialog
@@ -2421,9 +2335,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         />
       )}
       {!detailOnly && (
-        <aside className={`side${sidebarCollapsed ? ' collapsed' : ''}`}>
+        <aside className={`side${sidebarIsCollapsed ? ' collapsed' : ''}`}>
           <div className="area-toolbar">
-            {!sidebarCollapsed && (
+            {!sidebarIsCollapsed && (
               <button
                 type="button"
                 className="area-toolbar-btn"
@@ -2436,13 +2350,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               type="button"
               className="area-toolbar-toggle"
               onClick={() => setSidebarCollapsed((v) => !v)}
-              title={sidebarCollapsed ? 'Expand project list' : 'Collapse project list'}
-              aria-label={sidebarCollapsed ? 'Expand project list' : 'Collapse project list'}
+              title={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
+              aria-label={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
             >
-              {sidebarCollapsed ? '›' : '‹'}
+              {sidebarIsCollapsed ? '›' : '‹'}
             </button>
           </div>
-          {sidebarCollapsed && (
+          {sidebarIsCollapsed && (
             <div className="new-row collapsed-create-row" aria-label="Create">
               <button
                 type="button"
@@ -2461,26 +2375,40 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <ul>{renderProjectRailRows(activeProjects, false)}</ul>
           {archivedProjects.length > 0 && (
             <section
-              className={`project-archive-section${sidebarCollapsed ? ' is-collapsed' : ''}`}
+              className={`project-archive-section${sidebarIsCollapsed ? ' is-collapsed' : ''}`}
               aria-labelledby="archived-projects-heading"
             >
               <h3 id="archived-projects-heading">Archived projects</h3>
               <ul>{renderProjectRailRows(archivedProjects, true)}</ul>
             </section>
           )}
-          {error && !sidebarCollapsed && <p className="error">{error}</p>}
+          {error && !sidebarIsCollapsed && <p className="error">{error}</p>}
         </aside>
       )}
-      <section className="main">
+      <section className="main" hidden={showProjectList}>
         {!detailOnly && !selected ? (
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
+            {effectiveCompact && (
+              <div className="project-compact-heading">
+                {!detailOnly && (
+                  <button
+                    type="button"
+                    className="project-list-back"
+                    onClick={() => setBrowsingProjects(true)}
+                  >
+                    Projects
+                  </button>
+                )}
+                <h2>{selected.name}</h2>
+              </div>
+            )}
             <div className="entity-tabs-row project-tabs-row">
               {/* Wide layout: the toggle shows/hides the side-by-side
                   output pane. In compact mode the pane becomes a tab
                   instead (below), so the toggle is suppressed. */}
-              {!effectiveCompact && (
+              {!effectiveCompact && runtimeCapabilities().htmlPreview && (
                 <button
                   type="button"
                   className={`output-toggle${outputVisible ? ' is-active' : ''}`}
@@ -2519,93 +2447,64 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   </svg>
                 </button>
               )}
-              <Tabs.Root value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-                <Tabs.List>
-                  {/* Data-driven so the compact form factor can swap each
-                      word label for an icon + tooltip without duplicating
-                      the trigger markup. 'output' is compact-only (it has
-                      its own pane in the wide layout). */}
-                  {(
-                    [
-                      { value: 'output', label: 'Output', show: compactOutputAvailable },
-                      { value: 'chat', label: 'Chat', show: true },
-                      {
-                        value: 'overview',
-                        label: 'Overview',
-                        show: projectTabIsVisible(selected, 'overview'),
-                      },
-                      {
-                        value: 'tasks',
-                        label: 'Tasks',
-                        show: projectTabIsVisible(selected, 'tasks'),
-                      },
-                      {
-                        value: 'packages',
-                        label: 'Approvals',
-                        show: projectTabIsVisible(selected, 'approvals'),
-                      },
-                      {
-                        value: 'workspace',
-                        label: 'Workspace',
-                        show: projectTabIsVisible(selected, 'workspace'),
-                      },
-                      {
-                        value: 'artifacts',
-                        label: 'Artifacts',
-                        show: projectTabIsVisible(selected, 'artifacts'),
-                      },
-                      // Shown only once the project has proposals: a tab that is
-                      // empty for every project that never ran a fix is noise.
-                      {
-                        value: 'proposals',
-                        label: 'Proposals',
-                        show: diffpackCount > 0,
-                      },
-                      { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
-                      {
-                        value: 'mail',
-                        label: 'Mail',
-                        show: showWorkInProgressFeatures && isEmailProject(selected),
-                      },
-                      {
-                        value: 'map',
-                        label: 'Village',
-                        show: projectTabIsVisible(selected, 'map'),
-                      },
-                      { value: 'about', label: 'Settings', show: true },
-                    ] as Array<{ value: ProjectTab; label: string; show: boolean }>
-                  )
-                    .filter((t) => t.show)
-                    .map((t) =>
-                      effectiveCompact ? (
-                        <Tabs.Trigger
-                          key={t.value}
-                          value={t.value}
-                          data-testid={`project-tab-${t.value}`}
-                          className="gz-tab-icon"
-                          aria-label={t.label}
-                          title={t.label}
-                          onPointerEnter={() => preloadProjectTab(t.value)}
-                          onFocus={() => preloadProjectTab(t.value)}
-                          onPointerDown={() => preloadProjectTab(t.value)}
-                        >
-                          <ProjectTabIcon tab={t.value} />
-                        </Tabs.Trigger>
-                      ) : (
-                        <Tabs.Trigger
-                          key={t.value}
-                          value={t.value}
-                          data-testid={`project-tab-${t.value}`}
-                          onPointerEnter={() => preloadProjectTab(t.value)}
-                          onFocus={() => preloadProjectTab(t.value)}
-                          onPointerDown={() => preloadProjectTab(t.value)}
-                        >
-                          {t.label}
-                        </Tabs.Trigger>
-                      ),
-                    )}
-                </Tabs.List>
-              </Tabs.Root>
+              <ProjectSectionTabs
+                value={tab}
+                onValueChange={(value) => setTab(value as ProjectTab)}
+                onPreload={(value) => preloadProjectTab(value as ProjectTab)}
+                compact={effectiveCompact}
+                items={[
+                  {
+                    value: 'output',
+                    label: 'Output',
+                    show: runtimeCapabilities().htmlPreview && compactOutputAvailable,
+                  },
+                  { value: 'chat', label: 'Chat', show: true },
+                  {
+                    value: 'overview',
+                    label: 'Overview',
+                    show: projectTabIsVisible(selected, 'overview'),
+                  },
+                  {
+                    value: 'tasks',
+                    label: 'Tasks',
+                    show: projectTabIsVisible(selected, 'tasks'),
+                  },
+                  {
+                    value: 'packages',
+                    label: 'Approvals',
+                    show: projectTabIsVisible(selected, 'approvals'),
+                  },
+                  {
+                    value: 'workspace',
+                    label: 'Workspace',
+                    show: projectTabIsVisible(selected, 'workspace'),
+                  },
+                  {
+                    value: 'artifacts',
+                    label: 'Artifacts',
+                    show: projectTabIsVisible(selected, 'artifacts'),
+                  },
+                  // Shown only once the project has proposals: a tab that is
+                  // empty for every project that never ran a fix is noise.
+                  {
+                    value: 'proposals',
+                    label: 'Proposals',
+                    show: diffpackCount > 0,
+                  },
+                  { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
+                  {
+                    value: 'mail',
+                    label: 'Mail',
+                    show: showWorkInProgressFeatures && isEmailProject(selected),
+                  },
+                  {
+                    value: 'map',
+                    label: 'Village',
+                    show: projectTabIsVisible(selected, 'map'),
+                  },
+                  { value: 'about', label: 'Settings', show: true },
+                ].filter((item) => item.show && supportsProjectSection(item.value))}
+              />
               {selected.archived && (
                 <span className="project-archived-badge" title="Hidden from primary navigation">
                   Archived
@@ -2701,13 +2600,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         }}
                       />
 
-                      <ProjectMemoriesEditor
-                        key={`${selected.id}:memories`}
-                        projectId={selected.id}
-                        projectName={selected.name}
-                      />
+                      {runtimeCapabilities().memories && (
+                        <ProjectMemoriesEditor
+                          key={`${selected.id}:memories`}
+                          projectId={selected.id}
+                          projectName={selected.name}
+                        />
+                      )}
 
-                      {showWorkInProgressFeatures && (
+                      {runtimeCapabilities().connections && showWorkInProgressFeatures && (
                         <section
                           id="project-about-connections"
                           className="project-about-section project-about-anchor"
@@ -2727,40 +2628,42 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       >
                         <h3 className="project-about-section-title">Settings</h3>
                         <div className="project-config">
-                          <label className="config-label">
-                            Working directory
-                            <div className="new-row">
-                              <input
-                                placeholder="External path (leave blank for internal)"
-                                value={workingDirDraft}
-                                onChange={(e) => setWorkingDirDraft(e.target.value)}
-                                onBlur={() => void saveWorkingDir(workingDirDraft)}
-                              />
-                              {window.__GEZEL__?.selectDirectory && (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    const picked = await window.__GEZEL__?.selectDirectory?.({
-                                      title: 'Choose working directory',
-                                      defaultPath: workingDirDraft || undefined,
-                                    });
-                                    if (picked) {
-                                      setWorkingDirDraft(picked);
-                                      void saveWorkingDir(picked);
-                                    }
-                                  }}
-                                  title="Browse for folder"
-                                >
-                                  Browse…
-                                </button>
-                              )}
-                            </div>
-                            <small className="muted">
-                              {selected.workingDir
-                                ? `External: ${selected.workingDir}`
-                                : 'Using internal workspace'}
-                            </small>
-                          </label>
+                          {runtimeCapabilities().externalFolders && (
+                            <label className="config-label">
+                              Working directory
+                              <div className="new-row">
+                                <input
+                                  placeholder="External path (leave blank for internal)"
+                                  value={workingDirDraft}
+                                  onChange={(e) => setWorkingDirDraft(e.target.value)}
+                                  onBlur={() => void saveWorkingDir(workingDirDraft)}
+                                />
+                                {window.__GEZEL__?.selectDirectory && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const picked = await window.__GEZEL__?.selectDirectory?.({
+                                        title: 'Choose working directory',
+                                        defaultPath: workingDirDraft || undefined,
+                                      });
+                                      if (picked) {
+                                        setWorkingDirDraft(picked);
+                                        void saveWorkingDir(picked);
+                                      }
+                                    }}
+                                    title="Browse for folder"
+                                  >
+                                    Browse…
+                                  </button>
+                                )}
+                              </div>
+                              <small className="muted">
+                                {selected.workingDir
+                                  ? `External: ${selected.workingDir}`
+                                  : 'Using internal workspace'}
+                              </small>
+                            </label>
+                          )}
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
                             {MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
@@ -2789,42 +2692,48 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </div>
                           </label>
 
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Index this project's workspace
-                            <div className="new-row" style={{ alignItems: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={selected.indexingEnabled !== false}
-                                onChange={(event) => void saveIndexingEnabled(event.target.checked)}
-                              />
-                              <span className="muted small">
-                                Builds file search, commands, the Village map, and AI summaries.
-                                Turn it off for lightweight projects such as games or language
-                                practice.
-                              </span>
-                            </div>
-                          </label>
+                          {runtimeCapabilities().index && (
+                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                              Index this project's workspace
+                              <div className="new-row" style={{ alignItems: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.indexingEnabled !== false}
+                                  onChange={(event) =>
+                                    void saveIndexingEnabled(event.target.checked)
+                                  }
+                                />
+                                <span className="muted small">
+                                  Builds file search, commands, the Village map, and AI summaries.
+                                  Turn it off for lightweight projects such as games or language
+                                  practice.
+                                </span>
+                              </div>
+                            </label>
+                          )}
 
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Fix problems overnight
-                            <div className="new-row" style={{ alignItems: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={selected.nightlyFixesEnabled !== false}
-                                onChange={(event) =>
-                                  void saveNightlyFixesEnabled(event.target.checked)
-                                }
-                              />
-                              <span className="muted small">
-                                When this project has both a Boekwachter and a developer, the
-                                developer works through open issues during the night shift. Your
-                                files aren’t touched — fixes arrive as change proposals in the
-                                Proposals tab for you to review and apply.
-                              </span>
-                            </div>
-                          </label>
+                          {runtimeCapabilities().background && (
+                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                              Fix problems overnight
+                              <div className="new-row" style={{ alignItems: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.nightlyFixesEnabled !== false}
+                                  onChange={(event) =>
+                                    void saveNightlyFixesEnabled(event.target.checked)
+                                  }
+                                />
+                                <span className="muted small">
+                                  When this project has both a Boekwachter and a developer, the
+                                  developer works through open issues during the night shift. Your
+                                  files aren’t touched — fixes arrive as change proposals in the
+                                  Proposals tab for you to review and apply.
+                                </span>
+                              </div>
+                            </label>
+                          )}
 
-                          {!isSharedLibraryProject(selected) && (
+                          {runtimeCapabilities().index && !isSharedLibraryProject(selected) && (
                             <fieldset className="project-tab-settings">
                               <legend>Linked projects</legend>
                               <p className="muted small">
@@ -2881,44 +2790,50 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </fieldset>
                           )}
 
-                          <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
+                          {runtimeCapabilities().knowledge && (
+                            <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
+                          )}
 
-                          <div className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Project properties
-                            <ProjectPropertiesEditor
-                              project={selected}
-                              onProjectChange={setSelected}
-                            />
-                            <small className="muted">
-                              Shared values gezellen and recurring craftbooks draw from — set the
-                              designated language once and every translation run uses it.
-                            </small>
-                          </div>
-
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            GitHub repository
-                            <div className="new-row">
-                              <input
-                                placeholder="https://github.com/owner/repo"
-                                value={githubUrlDraft}
-                                onChange={(e) => setGitHubUrlDraft(e.target.value)}
-                                onBlur={() => void saveGitHubUrl(githubUrlDraft)}
+                          {runtimeCapabilities().catalog && (
+                            <div className="config-label" style={{ marginTop: '0.75rem' }}>
+                              Project properties
+                              <ProjectPropertiesEditor
+                                project={selected}
+                                onProjectChange={setSelected}
                               />
+                              <small className="muted">
+                                Shared values gezellen and recurring craftbooks draw from — set the
+                                designated language once and every translation run uses it.
+                              </small>
                             </div>
-                            <small className="muted">
-                              {selected.github?.url
-                                ? selected.github.checkoutDir
-                                  ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
-                                  : 'Linked. Use the GitHub tab to clone.'
-                                : 'Optional. When set, gezels gain a GitHub-linked checkout and a new GitHub tab.'}
-                              {gitStatus && (
-                                <>
-                                  {' '}
-                                  — <span className="status">{gitStatus}</span>
-                                </>
-                              )}
-                            </small>
-                          </label>
+                          )}
+
+                          {runtimeCapabilities().git && (
+                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                              GitHub repository
+                              <div className="new-row">
+                                <input
+                                  placeholder="https://github.com/owner/repo"
+                                  value={githubUrlDraft}
+                                  onChange={(e) => setGitHubUrlDraft(e.target.value)}
+                                  onBlur={() => void saveGitHubUrl(githubUrlDraft)}
+                                />
+                              </div>
+                              <small className="muted">
+                                {selected.github?.url
+                                  ? selected.github.checkoutDir
+                                    ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
+                                    : 'Linked. Use the GitHub tab to clone.'
+                                  : 'Optional. When set, gezels gain a GitHub-linked checkout and a new GitHub tab.'}
+                                {gitStatus && (
+                                  <>
+                                    {' '}
+                                    — <span className="status">{gitStatus}</span>
+                                  </>
+                                )}
+                              </small>
+                            </label>
+                          )}
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
                             {crewLeadLabel(selected)}
@@ -2943,63 +2858,67 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </small>
                           </label>
 
-                          <div className="config-label" style={{ marginTop: '0.75rem' }}>
-                            <label className="new-row" style={{ alignItems: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={selected.nudgeConfig?.enabled === false}
-                                onChange={(e) =>
-                                  void saveMeesterProgressCheckExemption(e.target.checked)
-                                }
-                              />
-                              <span>Exclude from Meester progress check-ins</span>
-                            </label>
-                            <small className="muted">
-                              For long-running or ambient projects. The Meester won’t ask the
-                              project lead for overall progress; direct chats and the project’s own
-                              work continue.
-                            </small>
-                          </div>
-
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Project type
-                            <div className="new-row">
-                              <Select.Root
-                                value={selected.projectTypeId || '__AUTO__'}
-                                onValueChange={async (v) => {
-                                  const updated = await api.updateProject(selected.id, {
-                                    projectTypeId: v === '__AUTO__' ? null : v,
-                                  });
-                                  setSelected(updated);
-                                }}
-                              >
-                                <Select.Trigger>
-                                  <Select.Value />
-                                </Select.Trigger>
-                                <Select.Content>
-                                  <Select.Item value="__AUTO__">
-                                    {(() => {
-                                      const detected = getProjectType(
-                                        selected.detectedProjectType?.id,
-                                      );
-                                      return detected
-                                        ? `Auto-detect (${detected.label})`
-                                        : 'Auto-detect';
-                                    })()}
-                                  </Select.Item>
-                                  {listProjectTypes().map((t) => (
-                                    <Select.Item key={t.id} value={t.id}>
-                                      {t.label}
-                                    </Select.Item>
-                                  ))}
-                                </Select.Content>
-                              </Select.Root>
+                          {runtimeCapabilities().background && (
+                            <div className="config-label" style={{ marginTop: '0.75rem' }}>
+                              <label className="new-row" style={{ alignItems: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.nudgeConfig?.enabled === false}
+                                  onChange={(e) =>
+                                    void saveMeesterProgressCheckExemption(e.target.checked)
+                                  }
+                                />
+                                <span>Exclude from Meester progress check-ins</span>
+                              </label>
+                              <small className="muted">
+                                For long-running or ambient projects. The Meester won’t ask the
+                                project lead for overall progress; direct chats and the project’s
+                                own work continue.
+                              </small>
                             </div>
-                            <small className="muted">
-                              Tunes which craftbooks the command rail suggests for this project.
-                              Auto-detect classifies the project from its files and About text.
-                            </small>
-                          </label>
+                          )}
+
+                          {runtimeCapabilities().catalog && (
+                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                              Project type
+                              <div className="new-row">
+                                <Select.Root
+                                  value={selected.projectTypeId || '__AUTO__'}
+                                  onValueChange={async (v) => {
+                                    const updated = await api.updateProject(selected.id, {
+                                      projectTypeId: v === '__AUTO__' ? null : v,
+                                    });
+                                    setSelected(updated);
+                                  }}
+                                >
+                                  <Select.Trigger>
+                                    <Select.Value />
+                                  </Select.Trigger>
+                                  <Select.Content>
+                                    <Select.Item value="__AUTO__">
+                                      {(() => {
+                                        const detected = getProjectType(
+                                          selected.detectedProjectType?.id,
+                                        );
+                                        return detected
+                                          ? `Auto-detect (${detected.label})`
+                                          : 'Auto-detect';
+                                      })()}
+                                    </Select.Item>
+                                    {listProjectTypes().map((t) => (
+                                      <Select.Item key={t.id} value={t.id}>
+                                        {t.label}
+                                      </Select.Item>
+                                    ))}
+                                  </Select.Content>
+                                </Select.Root>
+                              </div>
+                              <small className="muted">
+                                Tunes which craftbooks the command rail suggests for this project.
+                                Auto-detect classifies the project from its files and About text.
+                              </small>
+                            </label>
+                          )}
 
                           <fieldset className="project-tab-settings">
                             <legend>Project tabs</legend>
@@ -3007,7 +2926,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               Keep this project focused by hiding work areas it does not use.
                             </p>
                             <div className="project-tab-settings-grid">
-                              {PROJECT_TAB_VISIBILITY_OPTIONS.map((option) => (
+                              {PROJECT_TAB_VISIBILITY_OPTIONS.filter((option) =>
+                                supportsProjectSection(option.key),
+                              ).map((option) => (
                                 <label key={option.key} className="new-row">
                                   <input
                                     type="checkbox"
@@ -3101,86 +3022,98 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </div>
                           )}
 
-                          <div className="project-writes-log">
-                            <h4>Recent workspace changes</h4>
-                            {writesJournal.length === 0 ? (
-                              <p className="muted small">
-                                No workspace mutations recorded yet. Gezels that call{' '}
-                                <code>write_file</code>, <code>delete_path</code>,{' '}
-                                <code>make_dir</code>, or <code>rename</code> will show up here.
-                              </p>
-                            ) : (
-                              <ul>
-                                {writesJournal.map((entry, i) => (
-                                  <li key={`${entry.at}:${i}`}>
-                                    <span className={`writes-op writes-op-${entry.op}`}>
-                                      {entry.op}
-                                    </span>
-                                    <code>
-                                      {entry.op === 'rename'
-                                        ? `${entry.fromPath} → ${entry.path}`
-                                        : entry.path}
-                                    </code>
-                                    {entry.bytes !== undefined && (
-                                      <span className="muted small">
-                                        {' '}
-                                        · {formatBytes(entry.bytes)}
+                          {runtimeCapabilities().daemonSettings && (
+                            <div className="project-writes-log">
+                              <h4>Recent workspace changes</h4>
+                              {writesJournal.length === 0 ? (
+                                <p className="muted small">
+                                  No workspace mutations recorded yet. Gezels that call{' '}
+                                  <code>write_file</code>, <code>delete_path</code>,{' '}
+                                  <code>make_dir</code>, or <code>rename</code> will show up here.
+                                </p>
+                              ) : (
+                                <ul>
+                                  {writesJournal.map((entry, i) => (
+                                    <li key={`${entry.at}:${i}`}>
+                                      <span className={`writes-op writes-op-${entry.op}`}>
+                                        {entry.op}
                                       </span>
-                                    )}
-                                    {entry.gezelId && (
-                                      <span className="muted small"> · by {entry.gezelId}</span>
-                                    )}
-                                    <span
-                                      className="muted small"
-                                      title={formatAbsoluteTime(entry.at)}
-                                    >
-                                      {' '}
-                                      · {formatRelativeTime(entry.at)}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
+                                      <code>
+                                        {entry.op === 'rename'
+                                          ? `${entry.fromPath} → ${entry.path}`
+                                          : entry.path}
+                                      </code>
+                                      {entry.bytes !== undefined && (
+                                        <span className="muted small">
+                                          {' '}
+                                          · {formatBytes(entry.bytes)}
+                                        </span>
+                                      )}
+                                      {entry.gezelId && (
+                                        <span className="muted small"> · by {entry.gezelId}</span>
+                                      )}
+                                      <span
+                                        className="muted small"
+                                        title={formatAbsoluteTime(entry.at)}
+                                      >
+                                        {' '}
+                                        · {formatRelativeTime(entry.at)}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </section>
+
+                      {runtimeCapabilities().catalog && (
+                        <section
+                          id="project-about-toolsets"
+                          className="project-about-section project-about-anchor"
+                        >
+                          <h3 className="project-about-section-title">Toolsets</h3>
+                          <ToolsetsEditor
+                            scope={{ kind: 'project', projectId: selected.id }}
+                            subject={selected.name}
+                            hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                          />
+                        </section>
+                      )}
+
+                      {runtimeCapabilities().background && (
+                        <section
+                          id="project-about-history"
+                          className="project-about-section project-about-anchor"
+                        >
+                          <h3 className="project-about-section-title">History</h3>
+                          <div className="project-about-history">
+                            <ProjectPaneBoundary>
+                              <HistoryView projectId={selected.id} />
+                            </ProjectPaneBoundary>
                           </div>
-                        </div>
-                      </section>
-
-                      <section
-                        id="project-about-toolsets"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <h3 className="project-about-section-title">Toolsets</h3>
-                        <ToolsetsEditor
-                          scope={{ kind: 'project', projectId: selected.id }}
-                          subject={selected.name}
-                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
-                        />
-                      </section>
-
-                      <section
-                        id="project-about-history"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <h3 className="project-about-section-title">History</h3>
-                        <div className="project-about-history">
-                          <ProjectPaneBoundary>
-                            <HistoryView projectId={selected.id} />
-                          </ProjectPaneBoundary>
-                        </div>
-                      </section>
+                        </section>
+                      )}
 
                       <nav className="project-about-toc" aria-label="About sections">
                         <div className="project-about-toc-title">On this page</div>
                         <a href="#project-about-crew">Assigned gezellen</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
-                        <a href="#project-about-memories">Project memories</a>
-                        {showWorkInProgressFeatures && (
+                        {runtimeCapabilities().background && (
+                          <a href="#project-about-memories">Project memories</a>
+                        )}
+                        {runtimeCapabilities().connections && showWorkInProgressFeatures && (
                           <a href="#project-about-connections">Connections</a>
                         )}
                         <a href="#project-about-settings">Settings</a>
-                        <a href="#project-about-toolsets">Toolsets</a>
-                        <a href="#project-about-history">History</a>
+                        {runtimeCapabilities().catalog && (
+                          <a href="#project-about-toolsets">Toolsets</a>
+                        )}
+                        {runtimeCapabilities().background && (
+                          <a href="#project-about-history">History</a>
+                        )}
                       </nav>
                     </div>
                   )}
@@ -3339,7 +3272,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         !indexBackedFlatList
                       }
                       viewMode={activeViewMode}
-                      modes={fileTab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES}
+                      modes={(fileTab === 'workspace'
+                        ? WORKSPACE_VIEW_MODES
+                        : ARTIFACT_VIEW_MODES
+                      ).filter(
+                        (mode) =>
+                          runtimeCapabilities().index ||
+                          !['flat-issues', 'flat-criticality'].includes(mode),
+                      )}
                       onViewModeChange={(mode) => setFileViewMode(fileTab, mode)}
                       showHidden={showActiveHidden}
                       onShowHiddenChange={(next) => setShowHidden(fileTab, next)}
@@ -3347,7 +3287,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       onSelect={(entry) => void openFileEntry(entry, fileTab)}
                       emptyMessage={
                         fileTab === 'workspace'
-                          ? selected.workingDir
+                          ? selected.workingDir || !runtimeCapabilities().externalFolders
                             ? 'Workspace directory is empty.'
                             : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
                           : 'No artifacts yet. Your gezellen will store reports and outputs here.'
@@ -3393,7 +3333,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         ];
                       }}
                       headerExtra={
-                        fileTab === 'workspace' ? (
+                        runtimeCapabilities().index && fileTab === 'workspace' ? (
                           <div
                             className="workspace-tree-index-summary"
                             aria-live="polite"
@@ -3422,7 +3362,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         ) : undefined
                       }
                       notices={
-                        fileTab === 'workspace' ? (
+                        runtimeCapabilities().index && fileTab === 'workspace' ? (
                           <>
                             {activeViewMode === 'flat-modified' &&
                               workspaceIndexStatus &&
@@ -3483,7 +3423,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         ) : undefined
                       }
                       extraPane={
-                        fileTab === 'workspace' && workspaceIndexPaneOpen ? (
+                        runtimeCapabilities().index &&
+                        fileTab === 'workspace' &&
+                        workspaceIndexPaneOpen ? (
                           <WorkspaceIndexPane
                             path={workspaceReviewPath}
                             status={workspaceIndexStatus}
@@ -3637,37 +3579,39 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 status bar along the bottom edge rather than a row of chrome
                 above the tabs — same controls, out of the way of the content
                 they describe. Its menus open upward from here. */}
-            <ProjectGitStatusBar
-              projectId={selected.id}
-              compact={effectiveCompact}
-              managedWorkspaceWritable={workspaceAccess.managedWritable}
-              onManagedWorkspaceWritesChange={(next) => {
-                // Enabling writes on a user-supplied external dir prompts the
-                // same confirmation the Settings checkbox uses; everything
-                // else flips directly.
-                if (next && selected.workingDir) {
-                  setShowAllowWritesConfirm(true);
-                } else {
-                  void saveManagedWorkspaceWrites(next);
+            {(runtimeCapabilities().git || runtimeCapabilities().index) && (
+              <ProjectGitStatusBar
+                projectId={selected.id}
+                compact={effectiveCompact}
+                managedWorkspaceWritable={workspaceAccess.managedWritable}
+                onManagedWorkspaceWritesChange={(next) => {
+                  // Enabling writes on a user-supplied external dir prompts the
+                  // same confirmation the Settings checkbox uses; everything
+                  // else flips directly.
+                  if (next && selected.workingDir) {
+                    setShowAllowWritesConfirm(true);
+                  } else {
+                    void saveManagedWorkspaceWrites(next);
+                  }
+                }}
+                codexMode={workspaceAccess.codexInUse ? effectiveCodexMode : undefined}
+                onCodexModeChange={workspaceAccess.codexInUse ? saveCodexPermissionMode : undefined}
+                claudeMode={workspaceAccess.claudeInUse ? workspaceAccess.claudeMode : undefined}
+                onClaudeModeChange={
+                  workspaceAccess.claudeInUse ? saveClaudePermissionMode : undefined
                 }
-              }}
-              codexMode={workspaceAccess.codexInUse ? effectiveCodexMode : undefined}
-              onCodexModeChange={workspaceAccess.codexInUse ? saveCodexPermissionMode : undefined}
-              claudeMode={workspaceAccess.claudeInUse ? workspaceAccess.claudeMode : undefined}
-              onClaudeModeChange={
-                workspaceAccess.claudeInUse ? saveClaudePermissionMode : undefined
-              }
-              onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
-              onAddBoekwachter={
-                boekwachterGezelId ? () => addProjectGezel(boekwachterGezelId) : undefined
-              }
-              status={selected.status ?? 'active'}
-              statusLocked={selected.archived === true}
-              onStatusChange={async (v) => {
-                const updated = await api.updateProject(selected.id, { status: v });
-                setSelected(updated);
-              }}
-            />
+                onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
+                onAddBoekwachter={
+                  boekwachterGezelId ? () => addProjectGezel(boekwachterGezelId) : undefined
+                }
+                status={selected.status ?? 'active'}
+                statusLocked={selected.archived === true}
+                onStatusChange={async (v) => {
+                  const updated = await api.updateProject(selected.id, { status: v });
+                  setSelected(updated);
+                }}
+              />
+            )}
           </>
         ) : (
           <ProjectPanePlaceholder />
@@ -3905,7 +3849,9 @@ function HtmlFileViewer({
     file: { path: string; source: FileTab },
   ) => void | Promise<void>;
 }) {
-  const [mode, setMode] = useState<'preview' | 'source'>('preview');
+  const [mode, setMode] = useState<'preview' | 'source'>(() =>
+    runtimeCapabilities().htmlPreview ? 'preview' : 'source',
+  );
   const [refreshKey, setRefreshKey] = useState(0);
   const [logs, setLogs] = useState<HtmlPreviewLogEntry[]>([]);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
@@ -3969,7 +3915,9 @@ function HtmlFileViewer({
       <Tabs.Root value={mode} onValueChange={(v) => setMode(v as 'preview' | 'source')}>
         <div className="html-file-viewer-bar">
           <Tabs.List>
-            <Tabs.Trigger value="preview">Preview</Tabs.Trigger>
+            {runtimeCapabilities().htmlPreview && (
+              <Tabs.Trigger value="preview">Preview</Tabs.Trigger>
+            )}
             <Tabs.Trigger value="source">Source</Tabs.Trigger>
           </Tabs.List>
           {mode === 'preview' && (
@@ -3982,15 +3930,17 @@ function HtmlFileViewer({
               >
                 Refresh
               </button>
-              <button
-                type="button"
-                onClick={openInBrowser}
-                disabled={!previewUrl}
-                className="html-file-viewer-refresh"
-                title="Open this page in your default system browser"
-              >
-                Open in browser
-              </button>
+              {!window.__GEZEL__?.createHtmlPreview && (
+                <button
+                  type="button"
+                  onClick={openInBrowser}
+                  disabled={!previewUrl}
+                  className="html-file-viewer-refresh"
+                  title="Open this page in your default system browser"
+                >
+                  Open in browser
+                </button>
+              )}
             </>
           )}
         </div>
@@ -4200,4 +4150,16 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function supportsProjectSection(section: string): boolean {
+  const caps = runtimeCapabilities();
+  if (section === 'output') return caps.htmlPreview;
+  if (section === 'overview' || section === 'tasks') return caps.tasks;
+  if (section === 'packages' || section === 'approvals') return caps.terminal;
+  if (section === 'proposals') return caps.background;
+  if (section === 'github') return caps.git;
+  if (section === 'mail' || section === 'connections') return caps.connections;
+  if (section === 'map') return caps.index;
+  return true;
 }

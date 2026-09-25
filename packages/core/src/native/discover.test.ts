@@ -465,3 +465,63 @@ describe('discoverNativeBinaries — a bundled build that cannot run here', () =
     expect(result.llamaBackend?.backend).toBe('cuda');
   });
 });
+
+describe('discoverNativeBinaries — sd-server CUDA preference', () => {
+  // sd-cpp ships BOTH a portable build in the bare key and a CUDA build in
+  // the `-cuda` key, and installers stage every variant — so the choice is a
+  // host-capability question, not a fact about where the archive lives.
+  it('prefers the CUDA sd-server when this host resolves the CUDA backend', () => {
+    stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-llama-server', 'linux');
+    const cudaSd = stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-sd-server', 'linux');
+    stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
+
+    discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(cudaSd);
+  });
+
+  // The load-bearing negative. A CUDA-linked binary dies at exec on a host
+  // with no CUDA runtime, and the `-cuda` directory is present there because
+  // the installer stages every variant — so "the file exists" must not be
+  // enough to pick it.
+  it('takes the portable sd-server when the host cannot run CUDA', () => {
+    stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
+    stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-sd-server', 'linux');
+    const portableSd = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
+
+    discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: { fileExists: () => false },
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(portableSd);
+  });
+
+  it('falls back to the bare key on a CUDA host whose tree predates the CUDA sd leg', () => {
+    stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-llama-server', 'linux');
+    const portableSd = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
+
+    discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(portableSd);
+  });
+});

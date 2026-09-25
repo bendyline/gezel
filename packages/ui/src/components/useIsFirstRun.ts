@@ -1,5 +1,7 @@
+import { isLocalProvider } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Whether the app is still in first-run onboarding — no working AI provider
@@ -21,6 +23,11 @@ async function estimateFirstRun(): Promise<boolean> {
   try {
     const cfg = await api.getConfig();
     const p = cfg.provider;
+    if (!runtimeCapabilities().daemonSettings) {
+      const provider = p ?? 'llama-cpp';
+      const probe = await api.testProvider(provider);
+      return !probe.ok || (isLocalProvider(provider) && probe.modelCount === 0);
+    }
     if (p === 'copilot') {
       // Copilot's runtime is an opt-in download, so "installed" is the real
       // question — a stored PAT with no SDK on disk still can't chat. Fall
@@ -45,21 +52,34 @@ async function estimateFirstRun(): Promise<boolean> {
   }
 }
 
-export function useIsFirstRun(): boolean {
+/**
+ * Whether this install still needs first-run setup.
+ *
+ * Each call costs a config read and a provider probe, repeated on every
+ * settings save, so a tree with more than one consumer should share a single
+ * result through {@link FirstRunContext} and pass `enabled: false` here.
+ */
+export function useIsFirstRun(enabled = true): boolean {
   const [firstRun, setFirstRun] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
+    let revision = 0;
     const recheck = () => {
+      const current = ++revision;
       void estimateFirstRun().then((v) => {
-        if (!cancelled) setFirstRun(v);
+        if (!cancelled && current === revision) setFirstRun(v);
       });
     };
     recheck();
 
     const onFirstRun = (e: Event) => {
       const detail = (e as CustomEvent<{ firstRun?: boolean }>).detail;
-      if (detail && typeof detail.firstRun === 'boolean') setFirstRun(detail.firstRun);
+      if (detail && typeof detail.firstRun === 'boolean') {
+        revision++;
+        setFirstRun(detail.firstRun);
+      }
     };
     window.addEventListener('gezel:first-run', onFirstRun);
     window.addEventListener('gezel:config-updated', recheck);
@@ -68,7 +88,7 @@ export function useIsFirstRun(): boolean {
       window.removeEventListener('gezel:first-run', onFirstRun);
       window.removeEventListener('gezel:config-updated', recheck);
     };
-  }, []);
+  }, [enabled]);
 
   return firstRun;
 }

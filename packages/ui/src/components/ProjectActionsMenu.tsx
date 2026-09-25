@@ -2,6 +2,7 @@ import type { Project } from '@bendyline/gezel';
 import { type ReactElement, useState } from 'react';
 import { api } from '../api.js';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 interface ProjectActionProps {
@@ -132,22 +133,26 @@ function ProjectMenuItems({
 
   return (
     <>
-      <Item
-        className="app-nav-menu-item"
-        onSelect={() => {
-          void actions.reveal('workspace');
-        }}
-      >
-        Open workspace folder
-      </Item>
-      <Item
-        className="app-nav-menu-item"
-        onSelect={() => {
-          void actions.reveal('artifacts');
-        }}
-      >
-        Open artifacts folder
-      </Item>
+      {runtimeCapabilities().externalFolders && (
+        <>
+          <Item
+            className="app-nav-menu-item"
+            onSelect={() => {
+              void actions.reveal('workspace');
+            }}
+          >
+            Open workspace folder
+          </Item>
+          <Item
+            className="app-nav-menu-item"
+            onSelect={() => {
+              void actions.reveal('artifacts');
+            }}
+          >
+            Open artifacts folder
+          </Item>
+        </>
+      )}
       {hasError && (
         <Item
           className="app-nav-menu-item"

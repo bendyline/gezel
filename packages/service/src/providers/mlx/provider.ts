@@ -36,17 +36,15 @@ import {
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
-import type { ToolsMlxTemplateFixConfig } from '../../model-profile/behaviors/tools-mlx-template-fix.js';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
   profileBehaviorConfig,
   profileHasBehavior,
 } from '../../model-profile/runtime.js';
-import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
-import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
+import { hasCompleteToolCallMarkup } from '../complete-tool-call.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import {
@@ -103,6 +101,11 @@ import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
+  type RequiredInput,
+  requiredInputsRead,
+  unreadRequiredInputs,
+} from '../required-input-reads.js';
+import {
   type EnginePhaseEvent,
   type EngineStatsEvent,
   StreamingSessionBase,
@@ -118,14 +121,12 @@ import type {
   BatchCapability,
   ExternalToolCall,
   ExternalToolSpec,
-  ImageAttachment,
   LLMProvider,
   LLMSession,
   ModelInfo,
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-  TurnUsage,
 } from '../types.js';
 import {
   asyncHandoffClosing,
@@ -133,8 +134,18 @@ import {
   isSuccessfulAsyncHandoff,
 } from './async-file-handoff.js';
 export { isSuccessfulAsyncHandoff };
+import {
+  type ChatCompletionChunk,
+  type ChatMessage,
+  setChatTemplateKwarg,
+} from './chat-protocol.js';
 import { EngineLogRouter } from './engine-log-router.js';
-import { StreamingReasoningSplit } from './reasoning-stream.js';
+import {
+  StreamingReasoningSplit,
+  type TemplateReasoningOpen,
+  requestOpensReasoning,
+} from './reasoning-stream.js';
+import { applyMlxRequestShape } from './request-shape.js';
 import {
   PRE_FIRST_BYTE_BASE_MS,
   buildMidStreamDropMessage,
@@ -155,7 +166,6 @@ import {
   APPEND_TO_FILE_CONTINUATION_TOOL,
   type ChatCompletionTool,
   MlxToolCallAccumulator,
-  type ToolCallDelta,
   chatCompletionToolName,
   hermesRequiredArgGrammarRequested,
   missingTopLevelRequiredToolArgs,
@@ -163,6 +173,8 @@ import {
   validatorReportedMissingRequiredArgs,
 } from './tool-call-protocol.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
+import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
+import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
 
 export {
   buildMidStreamDropMessage,
@@ -251,58 +263,9 @@ const log = createLogger('mlx');
  */
 const MAX_MALFORMED_RETRIES = LOCAL_TURN_LIMITS.malformed;
 
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-  images?: string[];
-}
-
-interface ChatCompletionChunk {
-  choices?: Array<{
-    index: number;
-    delta: { role?: string; content?: string | null; tool_calls?: ToolCallDelta[] };
-    finish_reason?: string | null;
-  }>;
-  /**
-   * mlx_vlm.server emits Responses-API field names (`input_tokens` /
-   * `output_tokens`) while older OpenAI-compatible servers (including
-   * llama.cpp's, ollama's, and the Chat Completions reference shape)
-   * use `prompt_tokens` / `completion_tokens`. We accept both so this
-   * type can flex across engines if we ever point the provider at
-   * a different OpenAI-compatible host. mlx_vlm also ships
-   * `prompt_tps` (prefill speed, set on first chunk) and
-   * `generation_tps` (running decode speed, updated per chunk).
-   */
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-    prompt_tps?: number;
-    generation_tps?: number;
-    /** Prompt tokens actually served from the MLX KV cache. */
-    cached_tokens?: number;
-  };
-}
-
-function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
-  const existing = body.chat_template_kwargs;
-  if (existing && typeof existing === 'object' && existing !== null) {
-    (existing as Record<string, unknown>)[key] = value;
-    return;
-  }
-  body.chat_template_kwargs = { [key]: value };
-}
-
 export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
+  readonly supportsImageInput: boolean;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
   readonly supportsPriorMessages = true;
@@ -350,7 +313,7 @@ export class MlxProvider implements LLMProvider {
    */
   private readonly catalogModelId?: string;
   /** See the constructor option of the same name. */
-  private readonly templateOpensReasoning: boolean = false;
+  private readonly templateOpensReasoning?: TemplateReasoningOpen;
   private readonly activeSessions = new Set<MlxSession>();
   /**
    * Engine stdout → per-session phase events, plus the "is this line fatal?"
@@ -419,6 +382,8 @@ export class MlxProvider implements LLMProvider {
   private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
+    /** True only when the supervised sidecar loads its complete vision tower. */
+    visionEnabled?: boolean;
     supervisor?: NativeEngineSupervisor;
     baseUrl?: string;
     defaultModel?: string;
@@ -445,10 +410,10 @@ export class MlxProvider implements LLMProvider {
     catalogModelId?: string;
     /**
      * Whether this model's chat template opens a reasoning block as the last
-     * thing it emits. Detected once from the model directory at build time —
-     * see {@link templateOpensReasoning}.
+     * thing it emits, and whether `enable_thinking` controls it. Detected once
+     * from the model directory at build time — see {@link templateOpensReasoning}.
      */
-    templateOpensReasoning?: boolean;
+    templateOpensReasoning?: TemplateReasoningOpen;
   }) {
     if (!opts.supervisor && !opts.baseUrl) {
       throw new Error('[mlx] need either a supervisor or baseUrl');
@@ -459,13 +424,14 @@ export class MlxProvider implements LLMProvider {
     if (opts.supervisor) this.supervisor = opts.supervisor;
     if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.defaultModel = opts.defaultModel ?? 'mlx';
+    this.supportsImageInput = opts.visionEnabled === true;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
     this.plannedReservation = opts.plannedReservationBytes;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.modelManager) this.modelManager = opts.modelManager;
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
-    if (opts.templateOpensReasoning) this.templateOpensReasoning = true;
+    if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     // Interactive turns are capped at the memory-safe engine width (`batchMax`);
@@ -717,10 +683,13 @@ export class MlxProvider implements LLMProvider {
       ...(opts.debug ? { debug: opts.debug } : {}),
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
       ...(opts.profile ? { profile: opts.profile } : {}),
-      ...(this.templateOpensReasoning ? { templateOpensReasoning: true } : {}),
+      ...(this.templateOpensReasoning
+        ? { templateOpensReasoning: this.templateOpensReasoning }
+        : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
+      ...(opts.singleToolCallTurn ? { singleToolCallTurn: true } : {}),
       ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
@@ -849,7 +818,7 @@ interface MlxSessionDeps {
   /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
   volatileContext?: string;
   priorMessages: Array<
-    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
     | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
@@ -880,8 +849,10 @@ interface MlxSessionDeps {
    * thing it emits, so the stream starts mid-thought with only a closing tag
    * to come. Read from the model directory at build time — guessing it from
    * the token stream is exactly the ambiguity that made reasoning leak.
+   * Resolve per request with `requestOpensReasoning`: a switch-aware template
+   * opens nothing when the request turns thinking off.
    */
-  templateOpensReasoning?: boolean;
+  templateOpensReasoning?: TemplateReasoningOpen;
   /** Active craftbook step — passed to anti-spin abort messages. */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -894,10 +865,15 @@ interface MlxSessionDeps {
   tuning?: import('../../model-profile/index.js').ResolvedTuning;
   /** Manager-authoritative direct file-work classification. */
   forceDirectFileWork?: boolean;
+  /** See {@link SessionOpts.singleToolCallTurn}. */
+  singleToolCallTurn?: boolean;
   terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
 class MlxSession extends StreamingSessionBase implements LLMSession {
+  get supportsImageInput(): boolean {
+    return this.deps.provider.supportsImageInput;
+  }
   private readonly messages: ChatMessage[];
   /**
    * Direct provider callers and ephemeral one-shot work do not always have a
@@ -1007,7 +983,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         });
         continue;
       }
-      this.messages.push({ role: m.role, content: m.content });
+      if (m.role === 'user' && m.images?.length && !this.supportsImageInput) {
+        throw new Error(
+          '[Mac AI] This MLX engine cannot accept image history. Enable its vision tower.',
+        );
+      }
+      this.messages.push({
+        role: m.role,
+        content: m.content,
+        ...(m.role === 'user' && m.images?.length ? { images: m.images } : {}),
+      });
     }
   }
 
@@ -1023,6 +1008,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     let total = 0;
     for (const m of this.messages) {
       if (typeof m.content === 'string') total += m.content.length;
+      // The sidecar bounds images to 1024px. Reserve patch tokens without
+      // counting base64 bytes as language tokens or treating pixels as free.
+      total += (m.images?.length ?? 0) * 8192;
       if (m.tool_calls) {
         for (const tc of m.tool_calls)
           total += tc.function.arguments.length + tc.function.name.length;
@@ -1042,6 +1030,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
    * after a user daemon prepares `/v1/remote/cache/warm`.
    */
   async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
+    // Vision KV is not eligible for text-prefix warming or persistence.
+    if (this.messages.some((message) => message.images?.length)) return;
     // Focusing a chat must not cold-start MLX. The real turn owns normal lazy
     // startup; warming only accelerates an already-resident server.
     const baseUrl = this.deps.provider.currentBaseUrl();
@@ -1090,22 +1080,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       stream: false,
       max_tokens: 1,
     };
-    if (this.deps.tuning) applyTuning(body, this.deps.tuning, MLX_TUNING_MAP);
+    applyMlxRequestShape(body, this.deps, { hasTools: tools.length > 0 });
     // A warm must remain a one-token prefill even when catalog tuning carries
     // a wider output cap.
     body.max_tokens = 1;
-    if (tools.length > 0) {
-      body.tools = tools;
-      if (profileHasBehavior(this.deps.profile, 'tools.mlx-grammar')) {
-        const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
-        if (grammarHint) body.tool_grammar = grammarHint;
-      }
-    }
-    const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
-      this.deps.profile,
-      'tools.mlx-template-fix',
-    );
-    if (templateFix?.template) body.chat_template_override = templateFix.template;
+    if (tools.length > 0) body.tools = tools;
     if (opts?.sessionId) {
       const adapter = this.deps.provider.getCacheAdapter();
       if (adapter) {
@@ -1278,13 +1257,18 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           '[Mac AI] a tool-result continuation cannot include a new prompt or attachments',
         );
       }
-      if (this.messages.at(-1)?.role !== 'tool') {
+      const last = this.messages.at(-1);
+      if (last?.role !== 'tool' && !(last?.role === 'user' && last.images?.length)) {
         throw new Error('[Mac AI] a tool-result continuation requires a trailing tool result');
       }
     }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (opts?.attachments && opts.attachments.length > 0) {
-      userMsg.images = opts.attachments.map((a: ImageAttachment) => a.base64);
+      if (!this.supportsImageInput)
+        throw new Error(
+          '[Mac AI] This MLX runtime supports text only. Enable native vision for an installed vision checkpoint; no image was delivered to the model.',
+        );
+      userMsg.images = opts.attachments.map((a) => a.base64);
     }
     // Mark this turn's start so mid-loop compaction can split prior
     // history (compactable) from in-flight tool loop (preserve verbatim).
@@ -1394,6 +1378,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // without truncating, or we hit MAX_IMMEDIATE_WRITE_CONTINUATIONS.
     let repairReadCalls = 0;
     const repairReadPaths: string[] = [];
+    const requiredInputReads: RequiredInput[] = [];
+    let requiredInputHoldLogged = false;
     let repairFailedMutations = 0;
     let repairMutationSucceeded = false;
     const requiredReadPaths =
@@ -1454,13 +1440,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     let projectMacroInterceptCount = 0;
     let forceProjectMacroBail: { closingText: string } | null = null;
     let fullText = '';
-    let lastUsage: {
-      prompt_tokens: number;
-      completion_tokens: number;
-      prompt_tps?: number;
-      generation_tps?: number;
-      cached_tokens?: number;
-    } | null = null;
+    let lastUsage: MlxTurnUsageSnapshot | null = null;
     let firstTokenAt: number | null = null;
     let lastIterationStartedAt = start;
     let lastIterationFirstTokenAt: number | null = null;
@@ -1473,49 +1453,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // and one-shot sessions without duplicating subtly different accounting
     // at each return site.
     const emitTerminalTelemetry = (): void => {
-      if (!lastUsage || (lastUsage.prompt_tokens <= 0 && lastUsage.completion_tokens <= 0)) return;
-
-      const finishedAt = Date.now();
-      const durationMs = finishedAt - start;
-      const generationStartedAt = lastIterationFirstTokenAt ?? lastIterationStartedAt;
-      const generationFinishedAt = lastIterationFinishedAt ?? finishedAt;
-      const generationMs = Math.max(1, generationFinishedAt - generationStartedAt);
-      const wallTps =
-        lastUsage.completion_tokens > 0
-          ? lastUsage.completion_tokens / (generationMs / 1000)
-          : undefined;
-      const tokensPerSec =
-        lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-          ? lastUsage.generation_tps
-          : wallTps;
-      const at = new Date(finishedAt).toISOString();
-      const usage: TurnUsage = {
+      const telemetry = buildMlxTerminalTelemetry({
+        lastUsage,
         model: this.deps.model,
-        inputTokens: lastUsage.prompt_tokens,
-        outputTokens: lastUsage.completion_tokens,
-        ...(lastUsage.cached_tokens !== undefined
-          ? { cachedInputTokens: lastUsage.cached_tokens }
-          : {}),
-        ...(tokensPerSec !== undefined ? { outputTokensPerSec: tokensPerSec } : {}),
-        durationMs,
-        at,
-      };
-      this.emitUsage(usage);
-      this.emitTurnStats({
-        provider: 'mlx',
-        promptTokens: lastUsage.prompt_tokens,
-        completionTokens: lastUsage.completion_tokens,
-        durationMs,
-        ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-        ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-          ? { promptTokensPerSec: lastUsage.prompt_tps }
-          : {}),
-        ...(lastUsage.cached_tokens !== undefined
-          ? { cachedPromptTokens: lastUsage.cached_tokens }
-          : {}),
-        ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
+        start,
+        lastIterationStartedAt,
+        lastIterationFirstTokenAt,
+        lastIterationFinishedAt,
+        firstTokenAt,
       });
+      if (!telemetry) return;
+      this.emitUsage(telemetry.usage);
+      this.emitTurnStats(telemetry.stats);
     };
+
     this.deps.provider._registerActiveSession(this);
 
     // Status heartbeat. The pre-first-token window — cache warm (prepareForSend)
@@ -1580,7 +1531,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const baseUrl = await this.deps.resolveBaseUrl();
         const body: Record<string, unknown> = {
           model: this.deps.model,
-          messages: this.messages,
+          messages: retireInspectedToolImages(this.messages),
           stream: true,
           // Per-turn output cap. mlx-vlm's stream_generate defaults to
           // a small built-in cap (256 in some versions) — verbose
@@ -1590,17 +1541,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // catalog `tuning.sampling.maxTokens`.
           max_tokens: 16_384,
         };
-        // Per-model tuning. Replaces the Gemma-family-hardcoded sampling
-        // values (temperature=1.0/top_p=0.95/top_k=64/repetition_penalty=1.1)
-        // that used to live in this method. Catalog manifests own these
-        // values now — see `tuning.sampling` on each chat-model identity.
-        // When no catalog tuning is set, mlx-vlm falls back to its own
-        // defaults (effectively greedy on older versions) — every
-        // shipped manifest now declares sampling explicitly to avoid
-        // that.
-        if (this.deps.tuning) {
-          applyTuning(body, this.deps.tuning, MLX_TUNING_MAP);
-        }
+        applyMlxRequestShape(body, this.deps, { hasTools: Boolean(tools?.length) });
         // Continuation-iteration output cap — see SendAndWaitOpts.
         // Iteration 0 keeps the catalog cap so a tool call is never cut
         // off before it starts; wrap-up iterations get the tight cap.
@@ -1609,39 +1550,29 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
-        // Decode-time tool-call grammar (opt-in via the `tools.mlx-grammar`
-        // behavior). Constrains the tool-call function name to the known
-        // tools at sampling time so a quantized model can't hallucinate a
-        // name — the gezel MLX server builds the llguidance grammar from
-        // this hint plus the advertised `tools`. Family-derived because
-        // Qwen's catalog toolCallFormat is the coarse `function-call`. The
-        // TS salvage cascade below stays as the post-hoc safety net.
-        if (
-          tools &&
-          tools.length > 0 &&
-          profileHasBehavior(this.deps.profile, 'tools.mlx-grammar')
-        ) {
-          const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
-          if (grammarHint) body.tool_grammar = grammarHint;
-        }
         if (this.forceSequentialToolGrammar && hermesRequiredArgGrammarRequested(body)) {
           body.disable_speculation = true;
         }
-        // Per-family chat-template fix (opt-in via `tools.mlx-template-fix`).
-        // Swaps the model's stored Jinja template for a curated one at
-        // request time (no reinstall); the server applies it via
-        // `apply_chat_template(..., chat_template=...)`. No config (e.g.
-        // env-forced in an A/B without a manifest template) → no override.
-        const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
-          this.deps.profile,
-          'tools.mlx-template-fix',
-        );
-        if (templateFix?.template) body.chat_template_override = templateFix.template;
         // Tool surface actually sent this turn. Defaults to the full roster;
         // constrained turns narrow it below.
         let requestTools = tools;
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
+        const unreadInputs = unreadRequiredInputs(
+          this.deps.activeCraftbookStep?.requiredInputs,
+          requiredInputReads,
+        );
+        const immediateFileWriteTurn =
+          fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
+        if (
+          fileTurnPlan.kind === 'create-file' &&
+          unreadInputs.length > 0 &&
+          !requiredInputHoldLogged
+        ) {
+          requiredInputHoldLogged = true;
+          log.info(
+            `turn#${seq}.${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+          );
+        }
         const fileRepairTurn = fileTurnPlan.kind === 'repair-file';
         const remainingReadPaths = fileRepairTurn
           ? remainingPrerequisiteRepairReadPaths(requiredReadPaths, repairReadPaths)
@@ -2084,6 +2015,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // waited 90+ seconds. Gated on profile opt-in via
         // `turn.ramble-detection`; per-model thresholds come from
         // the validated config. Absent → detector disabled.
+        //
+        // Read from the request, not only the template: a thinking-off
+        // request renders the block already closed, and seeding from the
+        // template streamed a whole `write_file` call into the reasoning pane.
+        const opensInReasoning = requestOpensReasoning(this.deps.templateOpensReasoning, body);
         const rambleConfig = profileBehaviorConfig<TurnRambleDetectionConfig>(
           this.deps.profile,
           'turn.ramble-detection',
@@ -2107,7 +2043,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // detector an open marker — so without this the whole
               // reasoning block is scored as cold prose. Same flag the
               // StreamingReasoningSplit below is seeded with.
-              opensInReasoning: this.deps.templateOpensReasoning === true,
+              opensInReasoning,
             })
           : // Repetition guard is safe on any local model (fires only on
             // degenerate low-novelty loops); arm it even without the
@@ -2118,9 +2054,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               threshold: 6000,
               enabled: false,
               repetitionGuardEnabled: true,
-              opensInReasoning: this.deps.templateOpensReasoning === true,
+              opensInReasoning,
             });
         let rambleAborted = false;
+        // Single-call turn: stop the stream once the one usable call is
+        // complete in the VISIBLE text. Reasoning is excluded so a call the
+        // model drafts while thinking can't end the turn early.
+        let singleCallComplete = false;
+        let singleCallVisible = '';
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.
         let liveToolArgsName = '';
@@ -2138,7 +2079,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // otherwise render thinking as the answer. This is the dedicated
         // reasoning channel llama.cpp and ds4 get from their engines.
         const reasoningSplit = new StreamingReasoningSplit({
-          opensInReasoning: this.deps.templateOpensReasoning === true,
+          opensInReasoning,
           enabled: this.deps.profile?.style.reasoningFormat !== 'none',
         });
         // Throttle live phase emissions during generation so we don't
@@ -2266,8 +2207,23 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 const live = reasoningSplit.push(safeContent);
                 if (live.visible.length > 0) this.emitDelta(live.visible);
                 if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+                if (
+                  this.deps.singleToolCallTurn &&
+                  !singleCallComplete &&
+                  live.visible.length > 0
+                ) {
+                  singleCallVisible += live.visible;
+                  if (hasCompleteToolCallMarkup(singleCallVisible)) {
+                    singleCallComplete = true;
+                    log.info(
+                      `turn#${seq}.${turn} ABORT-FIRED reason=single-call-complete ` +
+                        `afterMs=${Date.now() - start}`,
+                    );
+                    ctrl.abort();
+                  }
+                }
               }
-              if (!rambleAborted && ramble.observeContent(turnContent)) {
+              if (!singleCallComplete && !rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;
                 abortReason ??= 'idle';
                 log.error(
@@ -2317,25 +2273,39 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           sseExitReason = 'error';
           cleanupTurn();
           this.deps.markUsed();
-          log.error(
-            `turn#${seq}.${turn} SSE-EXIT reason=error chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start} ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}${abortReason ? ` (abort=${abortReason})` : ''}`,
-          );
+          const stoppedAfterSingleCall =
+            singleCallComplete && (err as Error).name === 'AbortError' && !externalSignal?.aborted;
+          if (stoppedAfterSingleCall) {
+            log.info(
+              `turn#${seq}.${turn} SSE-EXIT reason=single-call-complete chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start}`,
+            );
+          } else {
+            log.error(
+              `turn#${seq}.${turn} SSE-EXIT reason=error chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start} ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}${abortReason ? ` (abort=${abortReason})` : ''}`,
+            );
+          }
           // Recovery path: a `ramble` abort that has salvageable
           // tool-call markup falls through to the salvage block
           // below instead of throwing — keeps the model's queued
           // tools alive so the next iteration sees results. Set
           // by the ramble branch when we want the catch to NOT
-          // re-throw `err` at the end.
+          // re-throw `err` at the end. A single-call stop is the same
+          // fall-through with nothing to warn about.
           let recoveredFromRamble = false;
           if ((err as Error).name === 'AbortError') {
             if (externalSignal?.aborted) {
               throw new Error(turnCancelledMessage());
             }
-            if (rambleAborted) {
+            if (stoppedAfterSingleCall) {
+              finishReason ??= 'single-call-complete';
+              recoveredFromRamble = true;
+            } else if (rambleAborted) {
               const hasSalvageableMarkup = /<tool_call>|<function=/i.test(turnContent);
               if (hasSalvageableMarkup) {
                 this.emitWarning(
-                  `Stopped the planning monologue (${turnContent.length} chars without follow-through) — firing the tool calls you queued. Take a smaller next step.`,
+                  ramble.firedOnRepetition
+                    ? 'Stopped a repeating output loop — firing the tool calls you queued.'
+                    : `Stopped the planning monologue (${turnContent.length} chars without follow-through) — firing the tool calls you queued. Take a smaller next step.`,
                 );
                 finishReason ??= 'ramble-recovered';
                 recoveredFromRamble = true;
@@ -3547,6 +3517,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let asyncHandoffCount = 0;
         let terminalActionClosing: string | null = null;
+        const toolImages: string[] = [];
         const immediateFileWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
         // EOS-flushed (truncated mid-content) — drives the bail-vs-loop
@@ -3589,6 +3560,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
             args = {};
             output = `ERROR: ${call.function.name} was not executed because its arguments are not a valid JSON object. Retry with the declared fields.`;
+          } else if (
+            !this.supportsImageInput &&
+            call.function.name.replaceAll('-', '_') === 'read_image_as_base64'
+          ) {
+            // Do not execute the bridge: that would emit a successful image-read
+            // receipt even though callTool() drops images and this sidecar has
+            // no vision path. A craftbook must not approve fabricated inspection.
+            output =
+              'ERROR: Image inspection is unavailable in this text-only MLX runtime. No image was delivered. Use a provider with image input support; do not claim visual observations or approve a visual review.';
           } else if (
             opts?.fileTurnIntent &&
             FILE_REPAIR_MUTATION_TOOLS.has(call.function.name) &&
@@ -3665,6 +3645,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 output = await this.deps.bridges.callTool(call.function.name, args, {
                   budgetChars,
                   numCtxTokens: this.deps.numCtx,
+                  onApprovalPending: () => {
+                    askedQuestionThisTurn = true;
+                  },
+                  onImages: (images) => {
+                    if (!this.supportsImageInput)
+                      throw new Error(
+                        'This MLX model cannot receive tool images. No visual inspection occurred.',
+                      );
+                    toolImages.push(...images.map((image) => image.base64));
+                  },
                 });
               } catch (err) {
                 output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
@@ -3741,6 +3731,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           this.turnPolicy.checkpoint();
+          requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           if (fileRepairTurn) {
             if (FILE_REPAIR_READ_TOOLS.has(call.function.name)) repairReadCalls++;
             repairReadPaths.push(...completeWorkspaceReadPaths(call.function.name, args, output));
@@ -3804,6 +3795,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             });
           }
         }
+        // Keep tool-call/result pairs adjacent, then deliver the actual pixels
+        // as one vision message. Base64 must never be tokenized as tool text.
+        if (toolImages.length)
+          this.messages.push({
+            role: 'user',
+            content: TOOL_IMAGES_MESSAGE,
+            images: toolImages,
+          });
         if (abortDueToFailureLoop) {
           const { tool: failedTool, count: failCount } = abortDueToFailureLoop;
           log.error(

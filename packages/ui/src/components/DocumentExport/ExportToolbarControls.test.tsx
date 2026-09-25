@@ -1,3 +1,4 @@
+import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,6 +79,24 @@ describe('ExportToolbarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Export…' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Export video…' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Export animated GIF…' })).toBeInTheDocument();
+  });
+
+  it('keeps document export without offering unavailable media rendering', async () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      const user = userEvent.setup();
+      render(
+        <ExportToolbarControls selectedFile="notes/brief.md" mediaSource={{ kind: 'documents' }} />,
+      );
+      await user.click(screen.getByRole('button', { name: 'Export document' }));
+      expect(await screen.findByRole('menuitem', { name: 'Export…' })).toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Export video…' })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: 'Export animated GIF…' })).toBeNull();
+      expect(apiMock.exportDocumentMedia).not.toHaveBeenCalled();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
   });
 
   it('routes GIF export through the daemon native renderer', async () => {

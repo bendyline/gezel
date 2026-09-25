@@ -360,6 +360,96 @@ ledger paused it. The fallback now splits at the last run of plain quotes
 that is followed by another argument or the closing brace; a genuinely
 truncated string still takes the whole remainder.
 
+**Found by the e4b run's generalist `codemod-sweep` cell (fixed 2026-09-20
+in source; not in the dist until after the run):** the owner wrote a
+122-byte `sites.md` against a 500-byte checkpoint, the runtime ended the
+turn on that write, and the bounded recovery told it that the step advances
+"once the file is written and passes its check" without saying what the
+check wanted. It wrote the same 122 bytes twice more and the step paused
+after fifty seconds. The recovery message now reads the checkpoint and
+states the gap: the file does not exist yet, is N bytes against a floor of
+M, or fails its named sniff. Small models act on a number where they do not
+act on "passes its check".
+
+**Found by the e4b run's stepwise `invoice-run` cell (content fix 2026-09-20
+in the gilde checkout as `invoice-run` 1.1.4, uncommitted; rerun in
+progress):** all three stepwise trials failed exactly one check, "the
+skipped client is named", while the generalist arm passed 3/3. The `scope`
+step had recorded the fact — `scope.md` said "Ondaatje Books was excluded"
+— but `collect`'s input contract named only `billables.json`, which by
+construction lists billable clients only, and its prompt asked the
+copywriter to "name any client skipped this month" from a file that cannot
+contain one. The copywriter, a fresh session that knows only what its prompt
+tells it to open, read `billables.json` and `invoices/` and wrote "No
+clients were skipped this month." The generalist owner passed the same step
+because it had written `scope.md` itself two steps earlier. The `evaluate`
+step, which does consume `scope.md`, then routed to `finish` with the note
+"Evaluation Complete" — no PASS/FAIL list — so the loop meant to catch the
+miss had no verdict to act on. Two structural lessons follow. First, in a
+stepwise book a step's `consumes` list is the whole of its working memory:
+a fact an earlier step wrote but the current step does not consume does not
+exist for a fresh session, and the deficit is invisible in generalist mode,
+which remembers. A scan of the checkout's 296 latest craftbook versions
+found 206 whose first step writes a scope/plan/brief file and 187 of those
+where no later step consumes it (313 of 343 deliverable-writing middle
+steps do not). Second, a review step whose verdict is a free-text note is
+ungated, so a small model can rubber-stamp, and a bytes-only gate
+(`minBytes 800` on `report.md`) invites padding — the copywriter answered
+its rejection with a note titled "Gate fulfillment - Report Length Met".
+Version 1.1.4 makes `scope` end with a `## Skipped clients` section (gated
+with `contains`), adds `scope.md` to `collect`'s `consumes` with the section
+copied into `report.md` (gated with `contains`), and gates `evaluate` on a
+PASS/FAIL verdict in its task notes via `checkTaskNoteContains`. The eval
+spec is unchanged: naming the roster clients that got no invoice is the
+class bar for a monthly run, not an eval-specific signal.
+Run 12 then showed the second half of the lesson (§7): the added sentence
+about writing the verdict note made gemma-12b drop `next` from its
+`evaluate` advances, and because that step's default edge is the revise
+loop, all-PASS verdicts cycled for an hour. A routing decision must not
+live in a tool argument the model has to remember; 1.1.5 routes on the
+written verdict through the gate.
+
+**Found by the run 13 gemma-12b stepwise `invoice-run` cell (fixed
+2026-09-21 in source; not in the dist):** the Kestrel invoice child closed a
+multi-line HTML `content` with a JavaScript template-literal backtick and
+then wrote `, path: "invoices/2026-043.html"}`. The native parser's
+misclosed-string recovery (above) knew only plain quotes, so the tail
+became content, `path` went missing, and the validator rejected eight
+identical calls in a row while the fanout barrier held the host for forty
+minutes; the trial ended at the 50-minute ceiling with no report. The
+boundary finder now accepts a run of backticks as a closer; a genuinely
+truncated string still takes the whole remainder.
+
+**Found by the run 13 gemma-e4b generalist `invoice-run` cell (fixed
+2026-09-21 in source; not in the dist):** the owner wrote `billables.json`
+before `scope.md`. The artifact checkpoint on `billables.json` ended the
+turn and advanced the step, the gate rejected it for the missing
+`scope.md`, and the owner then wrote `scope.md` three times, hearing
+"scope.md is 0 bytes, not found" after each, until the plateau ladder
+paused the task four minutes in. The repeat-reject damper hashed one input,
+the `advanceWhen` file, and replayed the cached verdict while the checkpoint
+bytes were unchanged: the defect the scripted-gate carve-out had fixed one
+layer down. `gate-damping.ts` now hashes every file the gate reads,
+distinguishes a missing file from an empty one, and never damps a gate with
+a check that reads beyond one file (receipts, history, directories, corpora,
+an LLM). The book side of the same incident: 1.1.6's scope prompt names the
+write that ends the step.
+
+**Found by the run 14 gemma-12b generalist `invoice-run` cells (fixed
+2026-09-21 in source; not in the dist):** the third shape of the same
+family. The Bluestem child closed its HTML `content` with Python's `"""`
+and then wrote `,path:<|"|>invoices/2026-044.html<|"|>}` with the native
+quote token, so the path value's opener read as the content's closer, the
+content swallowed `""",path:`, and the call lost its `path` fifteen times
+in a row while the barrier held the host; both trials ended at the ceiling
+with the report never written. `readGemmaString` now recognises a closer
+run followed by `,key:` at the end of a terminated value and resumes at the
+comma. Three variants in five days from one 12b model, all on the same
+multi-line HTML argument: the native string grammar and the model's habits
+from JSON, Python and JavaScript are going to keep colliding here, and the
+shared fix shape is "find the last closer run that leaves a parseable
+remainder".
+
 - **Anthropic SDK replays without compaction.** `checkContextPressure` returns
   early for non-local providers while the `anthropic` provider replays the
   whole transcript. A long generalist run on that provider can overflow. The
@@ -626,7 +716,141 @@ failing on a frontier model. The n=3 rates run of the same suite waits for
 the account's weekly reset, and the local-model rates run (runbook step 4)
 is still to come.
 
+### Rates, qwen3.8-27b-q4 and gemma4-12b-q4 on MLX, 2026-09-19/20 (run 10, root `evals/runs/ab-generalist-2026-09-19T15-58-45-120Z`)
+
+Runbook step 4: the smoke suite at n=3 per cell, both arms, both local
+models, 36 cells from 15:58Z to 01:09Z. Same dist as run 9 plus the
+stepwise-barrier, review-reroute and night-shift fixes; the gemma
+quote-closure parser fix landed after this run. Compaction never triggered
+anywhere (maximum context fill 8%).
+
+| Model | Scenario | Stepwise | Generalist | Read-out |
+|---|---|---|---|---|
+| qwen3.8-27b-q4 | `fanout-stories` | 3/3, 6.7 to 11m | 3/3, 8 to 13.5m | Twelve of twelve fanout trials across both models; the stepwise host no longer waits for the sweep. |
+| qwen3.8-27b-q4 | `craftbook-invoice-run` | 0/3 | 0/3 | The qwen3.8 shape from runs 3 to 5 in both arms: `write_artifact` payloads cut off mid-JSON, the salvage layer promoting `write_task_note` instead, three loop-breaker aborts, paused at `scope`. |
+| qwen3.8-27b-q4 | `craftbook-codemod-sweep` | 0/3 | 0/3 | Same first-step wall in both arms: `validate` or `stat` loops on the artifact it never wrote, or four `advance_task_step` calls with nothing written. |
+| gemma4-12b-q4 | `fanout-stories` | 3/3, 6 to 8m | 3/3, 6.5 to 7m | Clean. |
+| gemma4-12b-q4 | `craftbook-invoice-run` | 0/3, 17 to 52m | 3/3, 12m43s, 22m40s, 70m | The mode split of the campaign. Stepwise: three crews drafted their invoices and every host stalled on a `report.md` under the 800-byte gate. Generalist: one session per run carried scope, collect, evaluate and finish. The 70-minute pass lost about 28 minutes to the quote-closure parser defect on one child (§5, fixed after the run) and then cycled evaluate, draft and collect six times because the owner kept advancing `evaluate` without naming `finish`, which is the book's REVISE route. |
+| gemma4-12b-q4 | `craftbook-codemod-sweep` | 0/3, 17 to 33m | 0/3 as booked, 12 to 14m | Stepwise reached `apply` or `verify` and stopped. All three generalist runs completed the book in one session with two receipted suite runs and a passing review, 30 of 32 checks each, and booked as failures on the DONE-note regex (§5) and on seeded files the owner grepped and edited by line range without ever opening. |
+
+Totals as booked: qwen3.8-27b-q4 3/9 in both arms; gemma4-12b-q4 stepwise
+3/9, generalist 6/9. On gemma the generalist arm is the first local-model
+configuration to finish a craftbook in this campaign, and it finished both
+books it faced; the stepwise arm finished neither. On qwen3.8-27b-q4 the
+mode does not move the outcome, because the model fails at the first
+artifact step regardless of who owns the task. This is the first evidence
+on the `auto` question for local `medium`: one model, two books, n=3, all
+pointing the same way. It is a lead, not a decision; the rule stays
+stepwise for on-device models until the next round covers more books.
+
+### Rates, gemma4-e4b-q4 on MLX, 2026-09-20 (run 11, root `evals/runs/ab-generalist-2026-09-20T01-28-24-864Z`)
+
+Run at the user's request after run 10, to test the hypothesis that a
+lower-end model does better stepwise. Smoke suite, n=3 per cell, both arms,
+18 cells from 01:28Z to 04:00Z. Note that the runtime classifies E4B as
+`small` (its 8B total parameters), not `tiny`: both arms saw the same
+58-tool surface, so the tier cap that narrows a stepwise kit was not in
+play. Compaction never triggered (peak fill 12%).
+
+| Scenario | Stepwise | Generalist | Read-out |
+|---|---|---|---|
+| `fanout-stories` | 3/3, 2.5 to 3.8m | 3/3, 4.1 to 4.5m | Clean in both arms; the smallest model in the campaign runs the fanout cleanly. |
+| `craftbook-invoice-run` | 0/3, 7.7 to 10.5m | 3/3, 5.6 to 9.2m | Every stepwise crew produced the three invoices and a two-kilobyte report and failed exactly one check: the client skipped at `scope` was never named in the report, because the copywriter who wrote it had never seen the scope step. Every generalist run named it: the same session had written `scope`. |
+| `craftbook-codemod-sweep` | 0/3, 4.5 to 25m | 0/3 as booked, 1 to 24m | Stepwise reached `verify` twice and `finish` once; the finish-step project lead claimed it could not read the review, the Meester's check-in tried to rewrite the task's artifacts (refused by the task-scope guard), and the trial idled out. Generalist: one run paused in fifty seconds on a 122-byte `sites.md` (§5, fixed), the other two completed the whole book and booked as failures on the DONE-note regex, the seeded-read rule, and a 22-byte finish note. |
+
+Totals as booked: stepwise 3/9, generalist 6/9, the same split as
+gemma4-12b-q4. The invoice-run pair is the cleanest evidence in the campaign
+of what the split is: not capability, but working memory across the
+handoff. The stepwise crews did everything except carry one fact from the
+first step to the last.
+
 ---
+
+### Invoice-run rerun on craftbook 1.1.4, gemma4-e4b-q4 and gemma4-12b-q4 on MLX, 2026-09-20 (run 12, root `evals/runs/ab-generalist-2026-09-20T16-28-30-385Z`)
+
+The `invoice-run` cell only, n=3 per cell, both arms, both gemma models,
+against the restructured book (§5, the scope-to-collect handoff), 16:28Z
+to 22:19Z. Dist = the 03:43Z rebuild (fix 26 added since run 11); content
+root = the gilde checkout with `invoice-run` 1.1.4. The eval spec was
+unchanged.
+
+| Model | Arm | Result | Read-out |
+|---|---|---|---|
+| gemma4-e4b-q4 | stepwise | 1/3 (was 0/3), 8 to 12m | All three reports carry the Skipped clients section with Ondaatje named; the structural gap is closed. The two failures are model errors the book cannot catch: one copywriter spelled it "Ondeatje", and one scope step numbered the invoices 2026-051 to 053 after a ledger that ends at 041, which the reviewer passed. |
+| gemma4-e4b-q4 | generalist | 3/3, 6 to 8m | Unchanged. Every `evaluate` advance named `finish`. |
+| gemma4-12b-q4 | stepwise | 1/3 (was 0/3), 18 to 42m | The section arrived in every report. The two failures: the reviewer advanced `evaluate` without `next` (once and twice), the default edge is `draft`, and the copywriter's rewritten summary (489 and 552 bytes, complete and correct) sat under the 800-byte floor until the trial ended. |
+| gemma4-12b-q4 | generalist | 0/3 (was 3/3), 47 to 100m | A regression this run's prompt caused. Every `evaluate` advance but the last omitted `next` (7 of 8 in the longest trial), so all-PASS verdicts routed back through draft and collect, seven cycles in 65 minutes. In run 10 the same model named `next` in 9 of 10 evaluate advances; 1.1.4 added "write PASS or FAIL per criterion to task notes — the step cannot complete without that verdict list" and the model's attention moved from routing to note-writing. |
+
+Read-out. The handoff fix did what it targeted: the skipped client reached
+the report in 12 of 12 trials, and both stepwise cells moved from 0/3 to
+1/3 with the remaining failures elsewhere. It also exposed the book's second
+structural defect, which both arms share on gemma-12b: `evaluate`'s default
+edge is the revise loop, and the routing decision lives in a tool argument
+the model has to remember, unbounded. A prompt sentence that stresses one
+required action suppresses the adjacent one. Version 1.1.5 (authored after
+this run; run 13 in progress) routes on a written artifact instead:
+`evaluate` writes `verdict.md`, one line per criterion ending PASS or FAIL,
+the runtime auto-advances on that write, and a `contains PASS` plus
+`notContains FAIL` gate sends all-PASS to `finish` (now the default edge)
+and any FAIL back to `draft` with `maxAttempts 3`, so the loop is bounded
+and there is no `next` argument to forget. The collect floor drops from 800
+to 400 bytes in both the book gate and the eval spec: a 550-byte summary
+with every required section is a good summary, and 800 forced padding on
+gemma-12b in both arms.
+
+### Invoice-run rerun on craftbook 1.1.5, gemma4-e4b-q4 and gemma4-12b-q4 on MLX, 2026-09-20/21 (run 13, root `evals/runs/ab-generalist-2026-09-20T22-25-44-306Z`)
+
+The same twelve trials against 1.1.5 (verdict-file routing, 400-byte
+floor), 22:25Z to 01:43Z, same dist as run 12.
+
+| Model | Arm | Result | Read-out |
+|---|---|---|---|
+| gemma4-e4b-q4 | stepwise | 2/3, 8 to 9m | The one failure summed both ledger lines for Harbor & Pine into $3,040 in the report while the invoice itself was right; the eval's grounding check caught it and the reviewer did not. |
+| gemma4-e4b-q4 | generalist | 2/3, 7 to 8m | The one failure is the damper defect (§5): paused at `scope` after four minutes with both files written. |
+| gemma4-12b-q4 | stepwise | 1/3, 11m; two at the 50m ceiling | One ceiling was the backtick parser defect (§5): a child never delivered its invoice and the barrier held the host. The other was my verdict gate: the reviewer copied the instruction sentence, which contains the word FAIL, into `verdict.md` as a header, `notContains FAIL` rejected an all-PASS verdict, and the book ran draft and collect again until the ceiling. Neither is a capability result. |
+| gemma4-12b-q4 | generalist | 3/3, 12 to 16m | Back from 0/3. The routing decision lives in the file now, not in `next`; faster than run 10's 13, 23 and 70 minutes. |
+
+Read-out. Across the three book versions gemma stepwise went 0/6, 2/6,
+3/6, and two of run 13's three remaining stepwise failures were runtime
+defects rather than the book or the model; gemma generalist went 6/6, 3/6,
+5/6, and both losses were mine (the routing prompt, then the damper).
+Version 1.1.6 anchors the verdict checks to line ends (`\bPASS\s*$` and
+`\bFAIL\s*$` with the `m` flag), forbids a preamble in `verdict.md`, and
+tells the scope step which write ends it. Run 14 (1.1.6, same twelve
+trials) is in progress.
+
+### Invoice-run rerun on craftbook 1.1.6, gemma4-e4b-q4 and gemma4-12b-q4 on MLX, 2026-09-21 (run 14, root `evals/runs/ab-generalist-2026-09-21T01-48-11-482Z`)
+
+The same twelve trials against 1.1.6 (line-anchored verdict checks, no
+preamble, explicit scope write order), 01:48Z to 04:54Z, same dist as
+runs 12 and 13 (so neither the backtick fix nor the damper fix was live).
+
+| Model | Arm | Result | Read-out |
+|---|---|---|---|
+| gemma4-e4b-q4 | stepwise | 3/3, 7 to 13m | First clean stepwise cell for this model, from 0/3 on 1.1.3. |
+| gemma4-e4b-q4 | generalist | 3/3, 7 to 8m | Clean. |
+| gemma4-12b-q4 | stepwise | 3/3, 9 to 10m | From 0/3 on 1.1.3, and faster than any earlier stepwise pass on this model (17 to 52 minutes in run 10). |
+| gemma4-12b-q4 | generalist | 1/3, 7.5m; two at the 50m ceiling | Both ceilings are the third parser variant (§5): child /4 lost its `path` fifteen times and the host waited at the barrier. Not a capability result and not the book. |
+
+Read-out. With the two structural defects out of the book, the stepwise
+arm is 6/6 on gemma at 7 to 13 minutes a trial, and every remaining loss in
+the campaign's invoice cells since run 12 is a runtime defect found and
+fixed along the way (three Gemma string-closure variants and the gate
+damper) or a model error the eval catches and the reviewer does not. The
+stepwise-versus-generalist split that runs 10 and 11 showed on this book
+was a book-structure artefact: once each step's inputs are declared and
+the routing decision lives in a gated file, the mode makes no measurable
+difference on this scenario at n=3. That does not generalise to the
+catalog by itself; 187 of the 206 scope-first books still carry the first
+defect, and the evaluate-routing shape recurs wherever a review step's
+default edge is its revise loop.
+
+| Book | gemma4-e4b-q4 stepwise | gemma4-e4b-q4 generalist | gemma4-12b-q4 stepwise | gemma4-12b-q4 generalist |
+|---|---|---|---|---|
+| 1.1.3 (runs 10, 11) | 0/3 | 3/3 | 0/3 | 3/3 |
+| 1.1.4 (run 12) | 1/3 | 3/3 | 1/3 | 0/3 |
+| 1.1.5 (run 13) | 2/3 | 2/3 | 1/3 | 3/3 |
+| 1.1.6 (run 14) | 3/3 | 3/3 | 3/3 | 1/3 |
 
 ## Appendix — original spec: frontier-adaptive execution (2026-07)
 

@@ -32,7 +32,7 @@ const packagePaths = [
   resolve(repoRoot, 'packages/core/package.json'),
   resolve(repoRoot, 'packages/service/package.json'),
 ];
-const coreVersionPath = resolve(repoRoot, 'packages/core/src/index.ts');
+const coreVersionPath = resolve(repoRoot, 'packages/core/src/browser.ts');
 
 function arg(name) {
   const idx = process.argv.indexOf(name);

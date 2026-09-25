@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MIN_TASK_DESCRIPTION_LENGTH } from '../craftbook-launch.js';
 import { TASK_EXECUTION_MODES } from '../generalist-mode.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
@@ -24,6 +25,7 @@ import {
 import { HookSpecSchema } from './hook.js';
 import { RetrievalPolicySchema } from './retrieval.js';
 import { ScriptRefListSchema } from './script.js';
+import { TaskInputRecordSchema, TaskInputSourceSchema } from './task-inputs.js';
 
 // Re-export so existing consumers of `TaskAssignee` from this module keep working.
 export { TaskAssigneeSchema };
@@ -442,6 +444,13 @@ export const TaskSchema = z.object({
    * an invocation path did not also stamp an entry-step note.
    */
   craftbookParams: z.record(z.string(), z.string()).optional(),
+  /**
+   * The resolved craftbook inputs — the files this run works on — keyed by
+   * param. Stamped by the service at create and inherited verbatim by fanout
+   * children; each param's resolved path is also in `craftbookParams`. See
+   * docs/craftbook-inputs.md.
+   */
+  inputs: z.record(z.string(), TaskInputRecordSchema).optional(),
   /** Exact script sources trusted by an explicit CLI launch; immutable through task edits. */
   cliTrustedScriptHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
   /**
@@ -616,7 +625,7 @@ export function withEffectiveTaskStatuses(tasks: readonly Task[]): Task[] {
 export const CreateTaskRequestSchema = z
   .object({
     title: z.string().min(1),
-    description: z.string().min(40),
+    description: z.string().min(MIN_TASK_DESCRIPTION_LENGTH),
     plan: z.string().optional(),
     outcomes: z.array(OutcomeSchema).optional(),
     /**
@@ -645,6 +654,12 @@ export const CreateTaskRequestSchema = z
     entryStepId: z.string().optional(),
     /** Invocation-time param values for the main craftbook (launcher). */
     craftbookParams: z.record(z.string(), z.string()).optional(),
+    /**
+     * Sources for the main craftbook's input params, keyed by param. An input
+     * param absent here falls back to its `craftbookParams` string, read as a
+     * workspace path (or an artifacts path when prefixed `artifacts:`).
+     */
+    inputs: z.record(z.string(), TaskInputSourceSchema).optional(),
     /** Owner/CLI opt-in to best-effort network isolation for this recipe's script snapshot. */
     trustScripts: z.boolean().optional(),
     /** Invocation-time param values copied to each spawned child. */

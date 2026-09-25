@@ -239,6 +239,25 @@ export function HomeView({
 
   useEffect(() => () => cancelOllamaRetries(), [cancelOllamaRetries]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void api
+        .getConfig()
+        .then((next) => {
+          if (cancelled) return;
+          setConfig(next);
+          void runProbe(next.provider ?? UI_FALLBACK_PROVIDER);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('gezel:config-updated', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('gezel:config-updated', refresh);
+    };
+  }, [runProbe]);
+
   // A healthy local engine is not yet usable without a model on disk. Keep
   // every local provider in onboarding until its inventory is non-empty so
   // the first-run download affordance remains visible. Cloud/frontier
@@ -351,6 +370,8 @@ export function HomeView({
     );
   }
 
+  const hostModels = window.__GEZEL__?.renderModelSettings;
+
   return (
     <div className="home-view">
       {banner}
@@ -363,8 +384,9 @@ export function HomeView({
         <div className="home-firstrun-main">
           <h1 className="home-firstrun-heading">First run setup</h1>
           <p className="home-firstrun-lede muted">
-            Gezel chats through a local AI model that runs privately on this device — download the
-            recommended one to get started.
+            {hostModels
+              ? 'Download or import a chat model to get started, or choose an available on-device model. Your conversations stay on this device.'
+              : 'Gezel chats through a local AI model that runs privately on this device — download the recommended one to get started.'}
           </p>
           <div className="home-firstrun-body">
             {/* First-run on-device install banner — the page's ONE primary action.
@@ -373,17 +395,19 @@ export function HomeView({
           the installed list. Everything after it is deliberately quiet links:
           the 2026-09-02 UX review found the old stack of terracotta media
           buttons out-shouting this required step. */}
-            {config && (
-              <FirstRunInstallBanner
-                config={config}
-                onConfigChanged={setConfig}
-                onModelInstalled={reprobeCurrentProvider}
-              />
-            )}
+            {hostModels
+              ? hostModels({ setup: true })
+              : config && (
+                  <FirstRunInstallBanner
+                    config={config}
+                    onConfigChanged={setConfig}
+                    onModelInstalled={reprobeCurrentProvider}
+                  />
+                )}
 
             {/* Optional media sidecars — one desaturated link into a review
           dialog; recommended picks that fit this device. */}
-            <RecommendedMediaDownloads />
+            {!hostModels && <RecommendedMediaDownloads />}
 
             {/* The one Settings link: the full on-device chat-engine page — MLX
           on Mac, llama.cpp elsewhere. Cloud providers (Copilot, OpenAI, …)
@@ -393,8 +417,11 @@ export function HomeView({
                 type="button"
                 className="gz-link-button"
                 onClick={() => {
-                  const section =
-                    onDeviceProviderForPlatform(health?.platform) === 'mlx' ? 'mlx' : 'llamaCpp';
+                  const section = hostModels
+                    ? 'defaults'
+                    : onDeviceProviderForPlatform(health?.platform) === 'mlx'
+                      ? 'mlx'
+                      : 'llamaCpp';
                   requestSettingsSection(section);
                   window.dispatchEvent(
                     new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
@@ -403,9 +430,12 @@ export function HomeView({
               >
                 Manage AI models in Settings →
               </button>
-              <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
-                Browse other local models, or connect a cloud provider (GitHub Copilot, OpenAI, …).
-              </p>
+              {!hostModels && (
+                <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                  Browse other local models, or connect a cloud provider (GitHub Copilot, OpenAI,
+                  …).
+                </p>
+              )}
             </section>
 
             {/* ── 2. Security level ────────────────────────────────────── */}
@@ -413,19 +443,21 @@ export function HomeView({
           Compliance. Super Lockdown keeps everything local-only. Ordered
           above the display toggle on purpose: this is the one first-run
           choice with real consequences (2026-09-02 UX review). */}
-            <SecurityLevelSection
-              level={config?.securityPolicy?.level}
-              onChange={async (next) => {
-                try {
-                  const res = await api.updateConfig({
-                    securityPolicy: securityPolicyForLevel(next),
-                  });
-                  setConfig(res);
-                } catch {
-                  /* non-fatal — the user can set this later in Settings */
-                }
-              }}
-            />
+            {!hostModels && (
+              <SecurityLevelSection
+                level={config?.securityPolicy?.level}
+                onChange={async (next) => {
+                  try {
+                    const res = await api.updateConfig({
+                      securityPolicy: securityPolicyForLevel(next),
+                    });
+                    setConfig(res);
+                  } catch {
+                    /* non-fatal — the user can set this later in Settings */
+                  }
+                }}
+              />
+            )}
 
             {/* ── 3. Preferences ───────────────────────────────────────── */}
             {/* One positive toggle over the two display flags: unchecking shows
@@ -494,13 +526,15 @@ export function HomeView({
             on top and the readable page beneath, scrolling on its own
             beside setup. Keeps the download banner's "read what gezel is"
             scroll anchor. */}
-        <aside
-          className="home-firstrun-tutorial"
-          id={FIRST_RUN_INTRO_ANCHOR_ID}
-          aria-label="What is gezel?"
-        >
-          <IntroHandboekArticle variant="stacked" />
-        </aside>
+        {!hostModels && (
+          <aside
+            className="home-firstrun-tutorial"
+            id={FIRST_RUN_INTRO_ANCHOR_ID}
+            aria-label="What is gezel?"
+          >
+            <IntroHandboekArticle variant="stacked" />
+          </aside>
+        )}
       </div>
     </div>
   );

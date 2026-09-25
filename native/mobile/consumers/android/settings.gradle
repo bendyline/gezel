@@ -1,0 +1,12 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri(providers.gradleProperty('gezelMavenRepository').get())
+            content { includeGroup 'com.bendyline.gezel' }
+        }
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'GezelConsumerSmoke'

@@ -2730,19 +2730,6 @@ button.machine-memory-unload-button {
   background: linear-gradient(to left, var(--sidebar-seam-shadow), transparent);
 }
 
-/* Single scrollbar over the whole hierarchy. The footer (collapse
-   toggle) and the resize grip live outside this region. */
-.app-sidebar-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 0.5rem 0.4rem 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
 /* Keep the native scrollbar on the sidebar's outside edge. Chromium follows
    the scroll container's inline direction when placing a vertical scrollbar;
    restore LTR on its children so only the scrollbar moves. */
@@ -2752,97 +2739,6 @@ button.machine-memory-unload-button {
 
 :root:not([data-sidebar-side="right"]) .app-sidebar-scroll > * {
   direction: ltr;
-}
-
-.app-sidebar-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.45rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.app-sidebar-item:hover {
-  background: rgba(176, 114, 76, 0.08);
-}
-
-.app-sidebar-item-icon {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-
-/* Home sits above the collapsible groups, so its house occupies the same
-   narrow leading column as the group chevrons directly beneath it. */
-.app-sidebar-home {
-  padding-left: 0;
-}
-
-.app-sidebar-home .app-sidebar-item-icon {
-  width: 1.1rem;
-  margin-left: -1px;
-  transform: translateX(1px);
-}
-
-.app-sidebar-home .app-sidebar-item-label {
-  transform: translateX(-2px);
-}
-
-/* The meester's name rides along the Home label, muted so "Home" keeps
-   the weight and a long name truncates as prose, not punctuation. */
-.app-sidebar-home-meester {
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.app-sidebar-item-label {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 0.9rem;
-}
-
-.app-sidebar-item-role {
-  display: block;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.app-sidebar-gezel-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-
-.app-sidebar-subitem {
-  padding-left: 0.6rem;
-}
-
-/* Gezel rows align their poppetje under the GEZELS header icon. The base
-   `.app-sidebar-subitem` 0.6rem indent lands the 24px avatar box at
-   `list 0.9rem + 0.6rem = 1.5rem` — ~2-3px right of where the header math
-   puts its icon (caret 1.1rem + toggle 0.25rem = 1.35rem). Restore the
-   documented 0.45rem item indent so the icon columns line up. */
-.app-sidebar-gezel {
-  padding-left: 0.45rem;
 }
 
 /* Project maker's mark — a small tool stamp inherited from the project type.
@@ -3323,13 +3219,6 @@ button.machine-memory-unload-button {
   border: 0;
 }
 
-/* Groups (Projects / Documents / Gezels) */
-.app-sidebar-group {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
 .app-sidebar-group-drop-active {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 72%, transparent);
   border-radius: var(--radius-lg);
@@ -3367,120 +3256,6 @@ button.machine-memory-unload-button {
   line-height: 1.25;
 }
 
-.app-sidebar-group-header {
-  display: flex;
-  align-items: center;
-}
-
-.app-sidebar-group-toggle {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  /* The caret button (1.1rem) plus this left padding land the header icon
-     at the same x as the child-item icons (list 0.9rem + item 0.45rem). */
-  padding: 0.35rem 0.45rem 0.35rem 0.25rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.app-sidebar-group-toggle:hover {
-  background: rgba(176, 114, 76, 0.08);
-}
-
-.app-sidebar-group-label {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-/* The caret is its own button: it toggles expand/collapse, while the
-   title button opens the full area screen. */
-.app-sidebar-caret-btn {
-  flex: 0 0 auto;
-  width: 1.1rem;
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.app-sidebar-caret-btn:hover {
-  background: rgba(176, 114, 76, 0.08);
-  color: var(--text);
-}
-
-.app-sidebar-caret {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  /* Rotate the single right-pointing chevron rather than swapping glyphs,
-     so collapsed (▸) and expanded (▾) are perfectly symmetric. */
-  transform: rotate(0deg);
-  transition: transform 0.15s ease;
-}
-
-.app-sidebar-caret.expanded {
-  transform: rotate(90deg);
-}
-
-/* Stretched, not a fixed 22px square: the header's height is set by the taller
-   title button, so a fixed height left the key's top/bottom gaps emergent
-   (~4.6px) and wider than its own margin. Stretching makes the margin the
-   literal gap on all three sides of the tab, the way the caret button does. */
-.app-sidebar-add {
-  flex: 0 0 auto;
-  align-self: stretch;
-  width: 22px;
-  margin: 0.2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 0;
-  color: var(--text-muted);
-  line-height: 0;
-  cursor: pointer;
-}
-
-.app-sidebar-add:hover {
-  background: rgba(176, 114, 76, 0.12);
-  color: var(--accent);
-}
-
-.app-sidebar-list {
-  list-style: none;
-  margin: 0;
-  /* Indent group children so they read as nested under the
-     Projects / Documents / Gezels section header. */
-  padding: 0 0 0.2rem 0.9rem;
-}
-
-.app-sidebar-empty {
-  /* Left padding nudged +~5px (0.45rem → 0.75rem) so the empty-state text
-     lines up with the section header labels above it, not the section icon. */
-  padding: 0.2rem 0.6rem 0.4rem 0.75rem;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
 /* Pull the Documents tree's row boxes through the group indent so selected
    rows still connect to the main pane. The tree carries its own caret spacer;
    offset that content back to align root file/folder icons with the Documents
@@ -3494,15 +3269,6 @@ button.machine-memory-unload-button {
 .app-sidebar-tree .tree-row > .tree-toggle,
 .app-sidebar-tree .tree-row > .tree-toggle-spacer {
   margin-left: 0.7rem;
-}
-
-.app-sidebar-links {
-  margin-top: 0.4rem;
-  padding-top: 0.4rem;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
 }
 
 /* Install-health pointer, directly beneath Settings. Deliberately the
@@ -4010,20 +3776,6 @@ body.app-resizing webview {
   gap: 1rem;
   height: 100%;
   min-height: 0;
-}
-
-/* The Gezellen roster needs to remain full-bleed, while each gezel's page
-   should sit inside the same canvas inset as standalone app pages. Replace
-   the generic split-view gutter with padding on the detail column so all
-   four edges get equal breathing room. A slightly narrower roster returns
-   that space to the detail page when the global navigation rail is open. */
-.two-col.gezellen-view {
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 0;
-}
-
-.gezellen-view > section {
-  padding: 1rem 1.25rem;
 }
 
 /* Make the main column a flex column so its tab panels can fill the

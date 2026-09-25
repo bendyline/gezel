@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { queryTerms, searchTokens, textMatchesAnyTerm, tokenizeText } from './query-terms.js';
+import {
+  proactiveRetrievalTerms,
+  queryTerms,
+  searchTokens,
+  textMatchesAnyTerm,
+  tokenizeText,
+} from './query-terms.js';
 
 describe('queryTerms', () => {
   it('keeps only the distinctive words of an ordinary request', () => {
@@ -47,6 +53,35 @@ describe('queryTerms', () => {
 
   it('returns nothing for a query with no word characters', () => {
     expect(queryTerms('   ***   ')).toEqual([]);
+  });
+});
+
+describe('proactiveRetrievalTerms', () => {
+  it('returns no signal for greetings, pleasantries, and acknowledgements', () => {
+    expect(proactiveRetrievalTerms("Hey, how's it going?")).toEqual([]);
+    expect(proactiveRetrievalTerms('Good morning!')).toEqual([]);
+    expect(proactiveRetrievalTerms('Okay, sounds great — thanks!')).toEqual([]);
+  });
+
+  it('keeps the subject when conversational filler surrounds a real request', () => {
+    expect(proactiveRetrievalTerms('Hey, how is the invoice reconciliation going?')).toEqual([
+      'invoice',
+      'reconciliation',
+    ]);
+    expect(proactiveRetrievalTerms('Can you create a PowerPoint about France?')).toEqual([
+      'powerpoint',
+      'france',
+    ]);
+  });
+
+  it('does not inherit explicit search fallback behavior', () => {
+    expect(queryTerms('how to')).toEqual(['how', 'to']);
+    expect(queryTerms('hello')).toEqual(['hello']);
+    expect(proactiveRetrievalTerms('how to')).toEqual([]);
+  });
+
+  it('keeps conversational filler out of a mixed explicit query', () => {
+    expect(queryTerms("Hey, how's the invoice going?")).toEqual(['invoice']);
   });
 });
 

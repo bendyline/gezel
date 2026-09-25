@@ -2,9 +2,10 @@ import { GezelSdkError, errorFromResponse } from './errors.js';
 import { readSseDataChunks } from './sse.js';
 import type {
   ChatCompletionChunk,
-  ChatCompletionResponse,
   ChatRequest,
-  ChatStream,
+  ChatResponseFor,
+  ChatResponseFormat,
+  ChatStreamFor,
   EmbeddingsRequest,
   EmbeddingsResponse,
   EnsureModelEvent,
@@ -14,7 +15,9 @@ import type {
   RequestOptions,
 } from './types.js';
 
-export interface GezelAppOptions {
+export interface GezelAppOptions<F extends ChatResponseFormat = 'openai'> {
+  /** Opt into replies with optional usage and portable finish reasons. */
+  responseFormat?: F;
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
@@ -31,14 +34,14 @@ export interface GezelAppOptions {
  * Call `close()` when finished, after consuming or cancelling response streams.
  * Only an SDK-owned transport is closed; an injected fetch remains caller-owned.
  */
-export class GezelApp {
+export class GezelApp<F extends ChatResponseFormat = 'openai'> {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchFn: typeof fetch;
   private readonly closeTransport?: () => Promise<void>;
   private closing?: Promise<void>;
 
-  constructor(opts: GezelAppOptions) {
+  constructor(opts: GezelAppOptions<F>) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.token = opts.token;
     this.fetchFn = opts.fetch;
@@ -66,16 +69,19 @@ export class GezelApp {
    *     process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
    *   }
    */
-  async chat(req: ChatRequest & { stream: true }, opts?: RequestOptions): Promise<ChatStream>;
+  async chat(req: ChatRequest & { stream: true }, opts?: RequestOptions): Promise<ChatStreamFor<F>>;
   async chat(
     req: ChatRequest & { stream?: false | undefined },
     opts?: RequestOptions,
-  ): Promise<ChatCompletionResponse>;
-  async chat(req: ChatRequest, opts?: RequestOptions): Promise<ChatCompletionResponse | ChatStream>;
+  ): Promise<ChatResponseFor<F>>;
+  async chat(
+    req: ChatRequest,
+    opts?: RequestOptions,
+  ): Promise<ChatResponseFor<F> | ChatStreamFor<F>>;
   async chat(
     req: ChatRequest,
     opts: RequestOptions = {},
-  ): Promise<ChatCompletionResponse | ChatStream> {
+  ): Promise<ChatResponseFor<F> | ChatStreamFor<F>> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -99,10 +105,10 @@ export class GezelApp {
           code: 'no_stream_body',
         });
       }
-      return parseChatStream(res.body);
+      return parseChatStream(res.body) as ChatStreamFor<F>;
     }
 
-    return (await res.json()) as ChatCompletionResponse;
+    return (await res.json()) as ChatResponseFor<F>;
   }
 
   /**

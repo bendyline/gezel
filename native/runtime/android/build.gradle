@@ -1,0 +1,33 @@
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'com.android.tools.build:gradle:8.13.0' }
+}
+apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+group = 'com.bendyline.gezel'
+version = providers.gradleProperty('gezelVersion').get()
+repositories {
+    google()
+    mavenCentral()
+    maven { url = uri(providers.gradleProperty('gezelMavenRepository').get()) }
+}
+android {
+    namespace 'com.bendyline.gezel.runtime'
+    compileSdk 36
+    defaultConfig { minSdk 28 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    publishing { singleVariant('release') { withSourcesJar() } }
+}
+dependencies {
+    api "com.bendyline.gezel:gezel-llama:${version}"
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
+}
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) { from components.release; artifactId = 'gezel-runtime' }
+        }
+        repositories { maven { url = uri(providers.gradleProperty('gezelMavenRepository').get()) } }
+    }
+}

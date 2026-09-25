@@ -247,3 +247,39 @@ describe('wikipedia routes under a no-external-services posture', () => {
     expect(json.error).toMatch(/external services are disabled/i);
   });
 });
+
+describe('wikimedia-image-search boundary', () => {
+  const search = (body: Record<string, unknown>) =>
+    httpFetch(`${baseUrl}/api/projects/default/tools/wikimedia-image-search`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${svc.context.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  it('supports a deterministic no-network mock and validates limits', async () => {
+    const response = await search({ query: 'school building' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ query: 'school building', results: [] });
+    expect((await search({ query: 'school', limit: 50 })).status).toBe(422);
+  });
+  it('blocks outbound image search under a no-services policy', async () => {
+    delete process.env.GEZEL_MOCK_PROVIDER;
+    await svc.context.store.writeConfig({
+      securityPolicy: securityPolicyForLevel('super-lockdown'),
+    });
+    expect((await search({ query: 'school' })).status).toBe(403);
+  });
+  it('applies query policy before making an outbound request', async () => {
+    await svc.context.store.writeConfig({ webSearch: { deny: ['*private*'] } });
+    expect((await search({ query: 'private school request' })).status).toBe(403);
+  });
+  it('does not transmit or echo stored credentials in image queries', async () => {
+    const sentinel = 'commons-query-secret-sentinel-123';
+    await svc.context.secrets.set(
+      { kind: 'providerCredential', name: 'braveSearchApiKey' },
+      sentinel,
+    );
+    const response = await search({ query: `building ${sentinel}` });
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain(sentinel);
+  });
+});

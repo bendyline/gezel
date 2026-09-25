@@ -15,29 +15,41 @@ import { scopeNeedsVerificationCode } from './scopes.js';
  *   2. the user's own running Gezel, through the ordinary consent handshake;
  *   3. a daemon hosted in this process, when the app opted into `host`.
  *
- * Only "nothing is running" falls from 2 to 3. A denied consent, an expired
- * approval, or a daemon that is alive but unwell all stay loud: an app that
- * quietly started its own daemon after the user declined would be doing the
- * thing they declined.
+ * By default only "nothing is running" falls from 2 to 3. A denied consent, an
+ * expired approval, or a daemon that is alive but unwell all stay loud: an app
+ * that quietly started its own daemon after the user declined would be doing
+ * the thing they declined. An app that obtains its own consent — its AI is
+ * optional and the person switched it on inside the app — may opt refusals
+ * into hosting too with `hostWhenRefused`; a daemon that is alive but unwell
+ * stays loud even then.
  */
 export async function resolveDaemon(input: ConnectOrHostInput): Promise<DaemonConnection> {
   const scopes = input.scopes ?? ['product', 'openai'];
-  const { host, adoptUserDaemon, ...connectInput } = input;
+  const { host, adoptUserDaemon, hostWhenRefused, ...connectInput } = input;
 
   if (connectInput.baseUrl) {
     return fromAuthorization(await authorizeLocal({ ...connectInput, scopes }));
   }
 
   let notRunning: unknown;
-  const wantsAdoption = adoptUserDaemon !== false && canRequestConsent(scopes, input, host);
-  if (wantsAdoption) {
+  const adoption = adoptUserDaemon === false ? 'none' : adoptionMode(scopes, input, host);
+  if (adoption !== 'none') {
     try {
       return fromAuthorization(await authorizeLocal({ ...connectInput, scopes }));
     } catch (err) {
-      // Only absence falls through. Everything else — a refusal, a timeout, a
-      // daemon that is alive but unwell — stays exactly as it was raised.
-      const noDaemon = err instanceof GezelSdkError && err.code === 'daemon_not_running';
-      if (!noDaemon) throw err;
+      const code = err instanceof GezelSdkError ? err.code : undefined;
+      const absent = code === 'daemon_not_running';
+      // A reuse-only attempt that found no reusable grant: without a code
+      // handler there is nothing more to ask the Gezel the user runs.
+      const reuseExhausted =
+        adoption === 'reuse-only' && code === 'verification_code_handler_required';
+      const refused = hostWhenRefused === true && code !== undefined && REFUSAL_CODES.has(code);
+      if (!absent && !(host && (reuseExhausted || refused))) throw err;
+      if (!absent) {
+        host?.logger?.info?.(
+          `[gezel] the running Gezel did not connect this app (${code}); hosting a private daemon instead`,
+        );
+      }
       notRunning = err;
     }
   }
@@ -52,22 +64,42 @@ export async function resolveDaemon(input: ConnectOrHostInput): Promise<DaemonCo
 }
 
 /**
- * Stateful scopes need a code the user can read in this app. An app that did
- * not supply `onVerificationCode` but can host its own daemon should go there
- * rather than fail on a handshake it cannot complete.
+ * Consent outcomes that `hostWhenRefused` answers by hosting. Deliberately
+ * only answers from the user or their Gezel's policy — never a transport or
+ * server failure, which would hide a broken daemon behind a private one.
  */
-function canRequestConsent(
+const REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'user_denied',
+  'approval_timeout',
+  'grant_expired',
+  'already_connected',
+  'openai_endpoints_disabled',
+  'verification_code_handler_required',
+]);
+
+/**
+ * How to approach the Gezel the user runs, if at all.
+ *
+ * Stateful scopes need a code the user can read in this app. An app that did
+ * not supply `onVerificationCode` cannot complete a new handshake — but a grant
+ * from an earlier session may still be valid, and using it keeps the app on
+ * the Gezel the person already runs instead of a private second daemon that
+ * would load its models again. `authorize` never registers a new grant without
+ * a code handler, so a reuse-only attempt cannot raise a prompt.
+ */
+function adoptionMode(
   scopes: string[],
   input: ConnectOrHostInput,
   host: ConnectOrHostInput['host'],
-): boolean {
+): 'consent' | 'reuse-only' | 'none' {
   const needsCode = scopeNeedsVerificationCode(scopes, input.requireVerificationCode);
-  if (!needsCode || input.onVerificationCode) return true;
-  if (!host) return true; // let authorizeLocal raise the actionable error
+  if (!needsCode || input.onVerificationCode) return 'consent';
+  if (!host) return 'consent'; // let authorizeLocal raise the actionable error
+  if (input.existingToken || input.tokenStorage?.load) return 'reuse-only';
   host.logger?.info?.(
     '[gezel] no onVerificationCode handler; hosting a private daemon instead of asking the user to approve a connection',
   );
-  return false;
+  return 'none';
 }
 
 function fromAuthorization(

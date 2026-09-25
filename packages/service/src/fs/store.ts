@@ -1,3 +1,10 @@
+import { pendingQuestions, sortQuestionsNewestFirst } from '@bendyline/gezel';
+import {
+  pickRoleBasedName,
+  sessionSummary,
+  slugifyEntityName as slugify,
+} from '@bendyline/gezel/runtime';
+export { pickRoleBasedName } from '@bendyline/gezel/runtime';
 import { ConfigStore } from './config-store.js';
 import {
   readProjectCraftbookDocument,
@@ -5537,81 +5544,7 @@ export class Store {
         const session = await this.readSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!session) continue;
         if (opts?.projectId && session.projectId !== opts.projectId) continue;
-        // Latest human message — `role: 'user'` without `from` (gezel-
-        // injected messages like meester nudges carry `from`). The nudge
-        // scheduler keys its backoff reset off this; see the field's doc
-        // on ChatSessionSummarySchema.
-        let lastHumanActivityAt: string | undefined;
-        const involvedGezelIds = new Set<string>([session.gezelId]);
-        // Running tally of what the transcript costs, mirroring the
-        // providers' `estimatePromptChars` accounting so the two numbers are
-        // in the same units. The standing prefix (system prompt + tool
-        // schemas) is not on disk, so this is a floor — see
-        // `ChatSessionSummary.transcriptTokens`.
-        let transcriptChars = 0;
-        for (let i = session.messages.length - 1; i >= 0; i--) {
-          const m = session.messages[i];
-          if (!m) continue;
-          transcriptChars += m.content.length;
-          for (const call of m.toolCalls ?? []) {
-            transcriptChars +=
-              call.name.length +
-              (call.argsFull ?? call.argsSummary ?? '').length +
-              (call.resultText ?? '').length;
-          }
-          if (m.from) involvedGezelIds.add(m.from.gezelId);
-          if (!lastHumanActivityAt && m.role === 'user' && !m.from) {
-            lastHumanActivityAt = m.at;
-          }
-        }
-        const lastMessage = session.messages.at(-1);
-        const normalizedLastMessage = lastMessage?.content.replace(/\s+/g, ' ').trim() ?? '';
-        let lastMessagePreview = '';
-        for (const character of normalizedLastMessage) {
-          if (lastMessagePreview.length + character.length > 200) break;
-          lastMessagePreview += character;
-        }
-        // Older project-page reaction threads kept the sentinel forever
-        // because their machine-authored starter is hidden. Derive the list
-        // label once a real reply proves a turn happened, but do not rewrite
-        // from this read path: a list refresh can overlap an active turn and
-        // must never race its full-record session write.
-        const displayTitle =
-          session.title === NEW_THREAD_TITLE
-            ? (deriveThreadTitleFromMessages(session.messages, {
-                requireCompletedTurn: true,
-              }) ?? session.title)
-            : session.title;
-        summaries.push({
-          id: session.id,
-          gezelId: session.gezelId,
-          projectId: session.projectId,
-          providerName: session.providerName,
-          model: session.model,
-          title: displayTitle,
-          createdAt: session.createdAt,
-          lastActivityAt: session.lastActivityAt,
-          archived: session.archived,
-          ...(session.source ? { source: session.source } : {}),
-          ...(session.lastTurnError ? { lastTurnError: session.lastTurnError } : {}),
-          ...(session.turnStartedAt ? { turnStartedAt: session.turnStartedAt } : {}),
-          ...(session.taskRef ? { taskRef: session.taskRef } : {}),
-          ...(session.stepId ? { stepId: session.stepId } : {}),
-          ...(session.parentSession ? { parentSession: session.parentSession } : {}),
-          ...(session.handoffFrom ? { handoffFrom: session.handoffFrom } : {}),
-          ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
-          ...(lastMessagePreview ? { lastMessagePreview } : {}),
-          ...(session.contextWindow ? { contextWindow: session.contextWindow } : {}),
-          ...(session.contextAutoCompactRatio
-            ? { contextAutoCompactRatio: session.contextAutoCompactRatio }
-            : {}),
-          ...(session.contextEstimatedTokens !== undefined
-            ? { contextEstimatedTokens: session.contextEstimatedTokens }
-            : {}),
-          ...(session.compactionCount ? { compactionCount: session.compactionCount } : {}),
-          transcriptTokens: Math.ceil(transcriptChars / 4),
-          involvedGezelIds: [...involvedGezelIds],
-        });
+        summaries.push(sessionSummary(session));
       }
     }
     summaries.sort((a, b) =>
@@ -6446,7 +6379,7 @@ export class Store {
       const raw = await readFile(file, 'utf8');
       const parsed = JSON.parse(raw) as Question[];
       if (!Array.isArray(parsed)) return [];
-      return parsed.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return sortQuestionsNewestFirst(parsed);
     } catch {
       return [];
     }
@@ -6468,14 +6401,9 @@ export class Store {
     const projectIds = (await safeReaddir(p.projects)).filter(isSafeEntityId);
     const all: Question[] = [];
     for (const id of projectIds) {
-      const qs = await this.listProjectQuestions(id);
-      for (const q of qs) {
-        if (q.answer) continue;
-        all.push(q);
-      }
+      all.push(...pendingQuestions(await this.listProjectQuestions(id)));
     }
-    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return all;
+    return sortQuestionsNewestFirst(all);
   }
 
   /**
@@ -7260,14 +7188,6 @@ function mergeGitHubPatch(
   };
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -7275,33 +7195,6 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Choose a `roleBasedName` for a gezel given its role and the set of
- * names already in use on this install. Exported for tests; the
- * stateful wrapper lives on `Store.computeRoleBasedName`.
- *
- *   - With role: base = `slugify(role)`. If unused, return it. Else
- *     append `-2`, `-3`, … until free.
- *   - Without role (or role slugifies to empty): return the first
- *     unused `gezel-N` starting from `gezel-1`.
- */
-export function pickRoleBasedName(role: string | undefined, taken: ReadonlySet<string>): string {
-  const base = role ? slugify(role) : '';
-  if (base) {
-    if (!taken.has(base)) return base;
-    for (let i = 2; i < 10000; i++) {
-      const candidate = `${base}-${i}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-    throw new Error(`roleBasedName collision overflow for role "${role}"`);
-  }
-  for (let i = 1; i < 10000; i++) {
-    const candidate = `gezel-${i}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  throw new Error('roleBasedName collision overflow for roleless gezel');
 }
 
 function defaultAboutMarkdown(role?: string): string {

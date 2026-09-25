@@ -8,7 +8,7 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,12 +27,22 @@ import {
   systemServiceHome,
 } from '@bendyline/gezel-client/node';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { connectForTui } from './connection.js';
 
 let gezelHome: string;
+/**
+ * The working directory every CLI child runs in. Commands that act on "the
+ * current project" register it, and `env indexing on` indexes it. When this
+ * was the checkout itself, the daemon indexed the whole monorepo (~5k files)
+ * mid-suite; under V8 coverage that exhausted the runner and the daemon died
+ * with a Zone OOM, failing every later case (2026-09-25).
+ */
+let workspaceCwd: string;
 let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
+/** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
+const daemonLog: string[] = [];
 const execFileAsync = promisify(execFile);
 const cliEntry = fileURLToPath(new URL('../dist/bin/gezel.js', import.meta.url));
 
@@ -63,7 +73,7 @@ async function runCliAtHome(
   ...args: string[]
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
-    cwd: process.cwd(),
+    cwd: workspaceCwd,
     env: childEnv({ GEZEL_HOME: home, GEZEL_MOCK_PROVIDER: '1' }),
     // connectOwned gives a cold daemon up to 20s to start. Keep the outer
     // process budget larger than that contract so execFile cannot kill the
@@ -74,14 +84,19 @@ async function runCliAtHome(
 
 beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-'));
+  // Resolved to match what a child's process.cwd() reports (macOS /var → /private/var).
+  workspaceCwd = await realpath(await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-cwd-')));
   const daemonEntry = resolveDaemonEntry(import.meta.url);
   spawned = await discoverOrSpawn({
     daemonEntry,
     detached: false,
     stdio: 'pipe',
     home: gezelHome,
-    env: {
-      ...process.env,
+    // Stripped of VITEST like every CLI child: inheriting it put this daemon's
+    // indexing and embedding on its event loop, and about a minute after the
+    // suite first touched the cwd project that stalled health checks past
+    // the CLI's 5s probe.
+    env: childEnv({
       GEZEL_HOME: gezelHome,
       // Skip the heavy LLM provider boot — mock is deterministic and has
       // no network dependency, which keeps this test CI-friendly.
@@ -92,15 +107,27 @@ beforeAll(async () => {
       // race a real local daemon or another spawning suite.
       GEZEL_PORT: '0',
       GEZEL_SERVICE_ROLE: 'user',
-    },
+    }),
     timeoutMs: 15_000,
   });
   client = spawned.client;
+  // Drained here or nowhere: a daemon whose pipe fills blocks on its next log line.
+  for (const stream of [spawned.child?.stdout, spawned.child?.stderr])
+    stream?.on('data', (chunk: Buffer) => {
+      daemonLog.push(...chunk.toString().split('\n').filter(Boolean));
+      daemonLog.splice(0, daemonLog.length - 200);
+    });
 }, 20_000);
+
+afterEach(({ task }) => {
+  if (task.result?.state === 'fail')
+    console.error(`gezeld output before this failure:\n${daemonLog.join('\n')}`);
+});
 
 afterAll(async () => {
   await stopOwnedDaemon(spawned?.child);
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
+  if (workspaceCwd) await rm(workspaceCwd, { recursive: true, force: true });
 });
 
 // Every case here crosses a process boundary, and the CLI-entry cases shell
@@ -380,12 +407,23 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       expect(hardStopped.stderr).toBe('');
       expect(hardStopped.stdout).toContain('Hard stop complete:');
       expect(hardStopped.stdout).toContain('Local engines unloaded; Gezel is Reactive.');
+      expect(hardStopped.stdout).toContain(
+        `gezeld is still running (pid ${runtime?.pid}); run \`gezel stop --daemon\``,
+      );
       expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
 
       const stopped = await runCliAtHome(headlessHome, 'stop', '--daemon');
       expect(stopped.stderr).toBe('');
       expect(stopped.stdout).toContain('stopped gezeld pid=');
       expect(runtime ? isProcessAlive(runtime.pid) : true).toBe(false);
+
+      // With the daemon gone, status reports it AND fails, so scripts can gate on it.
+      const down = await runCliAtHome(headlessHome, 'status').then(
+        () => null,
+        (err: { code?: number; stdout?: string }) => err,
+      );
+      expect(down?.code).toBe(1);
+      expect(down?.stdout).toMatch(/gezeld is not running|alive=false/);
     } finally {
       const runtime = await readRuntime(headlessHome).catch(() => null);
       if (runtime && isProcessAlive(runtime.pid)) {
@@ -698,7 +736,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
 
     const { projects } = await client.listProjects();
     const project = projects.find(
-      (candidate) => candidate.workingDir?.toLowerCase() === process.cwd().toLowerCase(),
+      (candidate) => candidate.workingDir?.toLowerCase() === workspaceCwd.toLowerCase(),
     );
     expect(project).toBeDefined();
     const { tasks } = await client.listProjectTasks(project!.id);

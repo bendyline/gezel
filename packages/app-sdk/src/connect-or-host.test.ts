@@ -106,6 +106,54 @@ describe('resolveDaemon', () => {
     expect(info).toHaveBeenCalledWith(expect.stringContaining('hosting a private daemon'));
   });
 
+  it("reuses a stored grant with the user's running Gezel before hosting", async () => {
+    // No code handler, but an earlier session's grant: joining the Gezel the
+    // person runs beats loading every model a second time in a private one.
+    authorizeLocalMock.mockResolvedValue(authorized('adopted'));
+    const tokenStorage = { save: vi.fn(), load: vi.fn(() => 'stored-token') };
+    const connection = await resolveDaemon({ ...APP, tokenStorage, host: {} });
+
+    expect(connection.mode).toBe('adopted');
+    expect(authorizeLocalMock.mock.calls[0]?.[0]).not.toHaveProperty('onVerificationCode');
+    expect(hostInProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('hosts when a stored grant can no longer be reused', async () => {
+    // authorize refuses to register without a code handler; that refusal is
+    // the reuse-only attempt running out, not the user declining.
+    authorizeLocalMock.mockRejectedValue(
+      new GezelSdkError('needs a code', { code: 'verification_code_handler_required' }),
+    );
+    const tokenStorage = { save: vi.fn(), load: vi.fn(() => 'stale-token') };
+    const connection = await resolveDaemon({ ...APP, tokenStorage, host: {} });
+    expect(connection.mode).toBe('hosted');
+  });
+
+  it('hosts after a refusal only when the app opted in', async () => {
+    for (const code of ['user_denied', 'approval_timeout', 'grant_expired']) {
+      authorizeLocalMock.mockRejectedValueOnce(new GezelSdkError('refused', { code }));
+      hostInProcessMock.mockClear();
+      const connection = await resolveDaemon({
+        ...APP,
+        onVerificationCode: () => {},
+        host: {},
+        hostWhenRefused: true,
+      });
+      expect(connection.mode, code).toBe('hosted');
+      expect(hostInProcessMock, code).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('keeps an alive-but-unwell daemon loud even for an app that hosts on refusal', async () => {
+    authorizeLocalMock.mockRejectedValue(
+      new GezelSdkError('server exploded', { code: 'server_error', status: 500 }),
+    );
+    await expect(
+      resolveDaemon({ ...APP, onVerificationCode: () => {}, host: {}, hostWhenRefused: true }),
+    ).rejects.toMatchObject({ code: 'server_error' });
+    expect(hostInProcessMock).not.toHaveBeenCalled();
+  });
+
   it('stays in its own home when adoption is turned off', async () => {
     const connection = await resolveDaemon({ ...APP, adoptUserDaemon: false, host: {} });
     expect(authorizeLocalMock).not.toHaveBeenCalled();

@@ -8,7 +8,7 @@ import type {
   Task,
 } from '@bendyline/gezel';
 import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab } from './nav-actions.js';
@@ -1095,6 +1095,7 @@ function PendingForm({
   choiceDescriptions?: (string | undefined)[];
   skipHint?: string;
 }) {
+  const promptId = useId();
   const allowWriteIn = question.allowWriteIn ?? true;
   const multi = question.multiSelect ?? false;
   const choices = question.choices ?? [];
@@ -1179,13 +1180,13 @@ function PendingForm({
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
       {kicker && <span className="pending-question-label muted">{kicker}</span>}
-      <div className="pending-question-prompt">
+      <div className="pending-question-prompt" id={promptId}>
         <RenderedMarkdown markdown={question.prompt} />
       </div>
       {choices.length > 0 && (
-        <div
+        <fieldset
           className={`pending-question-choices${multi ? ' is-multi' : ''}`}
-          role={multi ? 'group' : 'radiogroup'}
+          aria-labelledby={promptId}
         >
           {choices.map((choice, i) =>
             autoSubmit ? (
@@ -1218,11 +1219,13 @@ function PendingForm({
               </button>
             ),
           )}
-        </div>
+        </fieldset>
       )}
       {allowWriteIn && (
         <textarea
           className="pending-question-write-in"
+          aria-label={choices.length > 0 ? 'Add a note (optional)' : 'Your answer'}
+          aria-describedby={promptId}
           placeholder={choices.length > 0 ? 'Add a note (optional)…' : 'Type your answer…'}
           rows={2}
           value={writeIn}
@@ -1230,7 +1233,11 @@ function PendingForm({
           disabled={submitting}
         />
       )}
-      {error && <p className="pending-question-error">{error}</p>}
+      {error && (
+        <p className="pending-question-error" role="alert">
+          {error}
+        </p>
+      )}
       <div className="pending-question-actions">
         {!autoSubmit && (
           <>
@@ -1551,22 +1558,15 @@ function DocumentContext({
   >(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Project-relative paths get the project prefix; bare paths are
-  // treated as global library (matches readDocument's contract).
-  const fullPath = useMemo(
-    () =>
-      projectId && projectId !== 'default' && !documentPath.startsWith('projects/')
-        ? `projects/${projectId}/${documentPath}`
-        : documentPath,
-    [projectId, documentPath],
-  );
   useEffect(() => {
     let cancelled = false;
     setContent(null);
     setResolvedKind(null);
     setError(null);
+    // The server resolves library → project docs → artifacts, which is
+    // the order the ask_user_question contract promises the model.
     api
-      .readDocument(fullPath)
+      .readDocument(documentPath, projectId ? { project: projectId } : undefined)
       .then((res) => {
         if (cancelled) return;
         setContent(res.content);
@@ -1588,7 +1588,7 @@ function DocumentContext({
     return () => {
       cancelled = true;
     };
-  }, [fullPath, documentPath]);
+  }, [projectId, documentPath]);
 
   const previewLines = useMemo(() => {
     if (!content) return '';
@@ -1607,6 +1607,12 @@ function DocumentContext({
       : resolvedKind === 'project-document'
         ? 'Project doc'
         : 'Document';
+  // The document tab reads without project context, so a project hit opens
+  // by its qualified path and a library hit by its own.
+  const openPath =
+    resolvedKind && resolvedKind !== 'document' && !documentPath.startsWith('projects/')
+      ? `projects/${projectId}/${documentPath}`
+      : documentPath;
 
   return (
     <div className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}`}>
@@ -1616,7 +1622,7 @@ function DocumentContext({
         <button
           type="button"
           className="pending-question-context-link"
-          onClick={() => navigateToTab({ kind: 'document', path: fullPath })}
+          onClick={() => navigateToTab({ kind: 'document', path: openPath })}
         >
           Open {kindLabel.toLowerCase()}
         </button>

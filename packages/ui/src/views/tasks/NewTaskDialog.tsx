@@ -3,10 +3,16 @@ import {
   type GezelSummary,
   type NewCraftbookStep,
   type Project,
+  type PromptDraftTaskLaunch,
   type Task,
   type TaskAssignee,
   type TaskCronOverlap,
+  type TaskInputSource,
+  craftbookInputParams,
+  launchFormParamSchema,
+  mainContentParamKey,
   prioritizePullsForCurrentBranch,
+  unmetParamAlternatives,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
@@ -16,8 +22,21 @@ import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
+import { MarkdownField } from '../../components/MarkdownField.js';
+import {
+  inputValuesFromLaunch,
+  paramAlternativesMessage,
+  taskLaunchFromDialog,
+  uploadStagingIds,
+} from '../../components/composer-task-launch.js';
+import {
+  CraftbookInputField,
+  type CraftbookInputValue,
+  EMPTY_INPUT_VALUE,
+} from '../../components/craftbook-input/CraftbookInputField.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, Select } from '../../primitives/index.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { ProjectGlyph } from '../projects/new-project-meta.js';
 import {
   type BookItem,
@@ -99,10 +118,21 @@ const MODE_COPY: Record<
  * inert drafts ("ready to fire"). Scheduled mode creates an active host that
  * clones a fresh child on each tick; Night Shift creates active work whose
  * dispatch is gated to the configured shift.
+ *
+ * In `compose` launch mode nothing is created here at all: the configured
+ * craftbook is handed back to the chat composer as its attached task, and
+ * the message the person sends becomes the brief. Reopened from the
+ * composer's strip, the dialog lands straight on that book's configuration
+ * with every value restored.
  */
 export function NewTaskDialog({
   open,
   creationMode = 'one-time',
+  launchMode = 'immediate',
+  initialLaunch,
+  composerText,
+  onComposerTextChange,
+  onUseInChat,
   defaultProjectId,
   projects,
   gezels,
@@ -112,15 +142,28 @@ export function NewTaskDialog({
 }: {
   open: boolean;
   creationMode?: TaskCreationMode;
+  /** `compose`: hand the configuration to a chat composer instead of creating. */
+  launchMode?: 'immediate' | 'compose';
+  /** Compose mode: the attached task to reopen on, values restored. */
+  initialLaunch?: PromptDraftTaskLaunch | null;
+  /** Compose mode: the message so far, shown as the task's brief. */
+  composerText?: string;
+  /**
+   * Compose mode: an edit to the brief, written straight back to the chat
+   * box so the two stay one text. Without it the brief is read-only.
+   */
+  onComposerTextChange?: (text: string) => void;
+  onUseInChat?: (launch: PromptDraftTaskLaunch) => void;
   defaultProjectId: string;
   projects: Project[];
   gezels: GezelSummary[];
   /** When true, the view is pinned to one project — hide the project picker. */
   projectLocked: boolean;
   onClose: () => void;
-  onCreated: (created: Task) => Promise<void> | void;
+  onCreated?: (created: Task) => Promise<void> | void;
 }) {
   const modeCopy = MODE_COPY[creationMode];
+  const composeMode = launchMode === 'compose';
   const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   const [projectId, setProjectId] = useState(defaultProjectId);
   // Gallery data — re-fetched per project (applicability + suggestions
@@ -163,6 +206,11 @@ export function NewTaskDialog({
   const [assigneeSel, setAssigneeSel] = useState('');
   const [assigneeTouched, setAssigneeTouched] = useState(false);
   const [params, setParams] = useState<Record<string, unknown>>({});
+  // Craftbook inputs — the files the run works on — keyed by param. Kept out
+  // of `params` because a pick is a source (and maybe an upload), not a string.
+  const [inputValues, setInputValues] = useState<Record<string, CraftbookInputValue>>({});
+  const stagedRef = useRef({ projectId: defaultProjectId, inputValues });
+  stagedRef.current = { projectId, inputValues };
   const [cron, setCron] = useState('');
   const [cronOverlap, setCronOverlap] = useState<TaskCronOverlap>('skip');
   const [busy, setBusy] = useState(false);
@@ -172,8 +220,20 @@ export function NewTaskDialog({
   // PR for this branch" is knowable now rather than as a 409 later.
   const [pullHint, setPullHint] = useState<string | null>(null);
   const pullHintSequence = useRef(0);
+  // Compose mode: the book to finish seeding once the catalog listing lands
+  // (declared defaults go underneath the restored values), and whether the
+  // configuration left through "Use in chat" — its uploads then belong to
+  // the composer's strip, not to a launch that never happened.
+  const seedPendingRef = useRef<string | null>(null);
+  const handedOffRef = useRef(false);
+  const initialLaunchRef = useRef(initialLaunch ?? null);
+  initialLaunchRef.current = initialLaunch ?? null;
 
-  // Reset per open so the dialog never reopens half-filled.
+  // Reset per open so the dialog never reopens half-filled. The compose-mode
+  // restore lives in the same effect, after the reset: a second effect would
+  // race it and lose. `initialLaunch` is read through a ref on purpose — it
+  // changes while the dialog is open (a PATCH echo) and must not reset the
+  // form.
   useEffect(() => {
     if (!open) return;
     setProjectId(defaultProjectId);
@@ -190,12 +250,46 @@ export function NewTaskDialog({
     setAssigneeSel('');
     setAssigneeTouched(false);
     setParams({});
+    setInputValues({});
     setCron('');
     setCronOverlap('skip');
     setBusy(false);
     setError('');
     setPullHint(null);
-  }, [open, defaultProjectId]);
+    handedOffRef.current = false;
+    seedPendingRef.current = null;
+    const restore = launchMode === 'compose' ? initialLaunchRef.current : null;
+    if (restore) {
+      setSelectedBookId(restore.craftbookId);
+      setStep('configure');
+      setParams(restore.params);
+      setInputValues(inputValuesFromLaunch(restore));
+      setTitle(restore.title ?? '');
+      setTitleTouched(Boolean(restore.title));
+      const assignee = restore.assignee;
+      setAssigneeSel(assignee ? (assignee.kind === 'user' ? '__user' : assignee.gezelId) : '');
+      setAssigneeTouched(Boolean(assignee));
+      seedPendingRef.current = restore.craftbookId;
+    }
+  }, [open, defaultProjectId, launchMode]);
+
+  // Files uploaded for a launch that never happened would otherwise sit in
+  // staging until the daemon's sweep. After a successful launch the upload
+  // was already adopted, so the delete is a harmless no-op. In compose mode
+  // the uploads that rode in on the strip, or left on it, are still wanted.
+  useEffect(() => {
+    if (open) return;
+    const keep = new Set<string>(
+      launchMode !== 'compose'
+        ? []
+        : handedOffRef.current
+          ? Object.values(stagedRef.current.inputValues).flatMap((value) =>
+              value.source?.from === 'upload' ? [value.source.stagingId] : [],
+            )
+          : uploadStagingIds(initialLaunchRef.current),
+    );
+    discardStagedInputs(stagedRef.current.projectId, stagedRef.current.inputValues, keep);
+  }, [open, launchMode]);
 
   const loadCraftbooks = useCallback(async () => {
     const sequence = ++craftbookLoadSequence.current;
@@ -232,6 +326,24 @@ export function NewTaskDialog({
     setBooksLoaded(false);
     void loadCraftbooks();
   }, [open, loadCraftbooks]);
+
+  // Finish a compose-mode restore once the listing answers: declared
+  // defaults underneath the restored values, or back to the gallery with a
+  // reason when the book is no longer offered here.
+  useEffect(() => {
+    if (!open || !booksLoaded) return;
+    const pending = seedPendingRef.current;
+    if (!pending) return;
+    seedPendingRef.current = null;
+    const book = books.find((candidate) => candidate.manifest.id === pending);
+    if (!book) {
+      setSelectedBookId(null);
+      setStep('pick');
+      setError('That craftbook is no longer available in this project.');
+      return;
+    }
+    setParams((prev) => ({ ...seedParamDefaults(book.manifest.paramSchema), ...prev }));
+  }, [open, booksLoaded, books]);
 
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
@@ -276,7 +388,7 @@ export function NewTaskDialog({
   useEffect(() => {
     const sequence = ++pullHintSequence.current;
     setPullHint(null);
-    if (!open || !resolvesPullAtLaunch || !projectId) return;
+    if (!runtimeCapabilities().git || !open || !resolvesPullAtLaunch || !projectId) return;
     void (async () => {
       try {
         const [status, openPulls] = await Promise.all([
@@ -324,10 +436,12 @@ export function NewTaskDialog({
    * the picker step, because it decides what the gallery even holds.
    */
   const changeProject = useCallback((next: string) => {
+    discardStagedInputs(stagedRef.current.projectId, stagedRef.current.inputValues);
     setProjectId(next);
     setSelectedBookId(null);
     setGeneralChosen(false);
     setParams({});
+    setInputValues({});
     setActiveRail('all');
     setRailInitialized(false);
     setError('');
@@ -335,6 +449,12 @@ export function NewTaskDialog({
 
   const selectBook = useCallback(
     (b: BookItem) => {
+      // Re-selecting the same book (back to the gallery and in again) keeps
+      // its picks; a different book's inputs mean different files.
+      if (selectedBookId !== b.manifest.id) {
+        discardStagedInputs(stagedRef.current.projectId, stagedRef.current.inputValues);
+        setInputValues({});
+      }
       setSelectedBookId(b.manifest.id);
       setGeneralChosen(false);
       setParams(seedParamDefaults(b.manifest.paramSchema));
@@ -348,7 +468,7 @@ export function NewTaskDialog({
         }
       }
     },
-    [titleTouched, assigneeTouched, gezels],
+    [titleTouched, assigneeTouched, gezels, selectedBookId],
   );
 
   // An explicit pick always wins. Otherwise a role-annotated craftbook
@@ -494,7 +614,25 @@ export function NewTaskDialog({
           setError('This craftbook needs its toolsets installed first — see the setup list.');
           return;
         }
-        const schema = m.paramSchema as SquisqAnnotatedSchema | undefined;
+        const inputParams = craftbookInputParams(m.paramSchema);
+        if (inputParams.some((input) => inputValues[input.key]?.busy)) {
+          setError('Wait for the files to finish uploading.');
+          return;
+        }
+        const missingInput = inputParams.find(
+          (input) => input.required && !inputValues[input.key]?.source,
+        );
+        if (missingInput) {
+          setError(`Choose the ${missingInput.title.toLowerCase()} this craftbook works on.`);
+          return;
+        }
+        // In compose mode the chat message is the brief, and the brief is the
+        // book's main content: it is never a field here and never missing.
+        const briefKey = launchMode === 'compose' ? mainContentParamKey(m.paramSchema) : null;
+        const briefFills = briefKey ? [briefKey] : [];
+        const schema = launchFormParamSchema(m.paramSchema, briefFills) as
+          | SquisqAnnotatedSchema
+          | undefined;
         const required = Array.isArray(schema?.required) ? (schema.required as string[]) : [];
         const missingKey = required.find((k) => {
           const v = params[k];
@@ -504,14 +642,60 @@ export function NewTaskDialog({
           setError(`"${missingKey}" is required.`);
           return;
         }
+        const unmet = unmetParamAlternatives(m.paramSchema, params, [
+          ...briefFills,
+          ...inputParams.filter((input) => inputValues[input.key]?.source).map((i) => i.key),
+        ]);
+        if (unmet) {
+          setError(paramAlternativesMessage(m.paramSchema, unmet));
+          return;
+        }
+        // Compose mode stops here: the configuration goes to the composer's
+        // strip and the task is created when the message is sent.
+        if (launchMode === 'compose') {
+          handedOffRef.current = true;
+          onUseInChat?.(
+            taskLaunchFromDialog({
+              manifest: m,
+              item: selectedBook.item,
+              params: briefKey
+                ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== briefKey))
+                : params,
+              inputValues,
+              title,
+              assignee,
+              origin: 'user',
+            }),
+          );
+          onClose();
+          return;
+        }
         const stringified = stringifyParamValues(params);
+        const inputSources: Record<string, TaskInputSource> = {};
+        const inputLabels: Record<string, string> = {};
+        for (const input of inputParams) {
+          const value = inputValues[input.key];
+          if (!value?.source) continue;
+          inputSources[input.key] = value.source;
+          inputLabels[input.key] =
+            value.fileCount !== undefined
+              ? `${value.label ?? input.key} (${value.fileCount} file${value.fileCount === 1 ? '' : 's'})`
+              : (value.label ?? input.key);
+        }
+        // A schedule re-runs from the project each tick, so its spawned book
+        // gets the workspace path as the plain string every launcher accepts.
+        const scheduledInputParams = Object.fromEntries(
+          Object.entries(inputSources).flatMap(([key, source]) =>
+            source.from === 'workspace' ? [[key, source.path]] : [],
+          ),
+        );
         setBusy(true);
         try {
           const created =
             creationMode === 'scheduled'
               ? await api.createTask(projectId, {
                   title: title.trim() || m.name,
-                  description: `Recurring scheduled task. ${composeCraftbookDescription(m, stringified)} Each scheduled run creates a fresh task from this recipe.`,
+                  description: `Recurring scheduled task. ${composeCraftbookDescription(m, { ...stringified, ...inputLabels })} Each scheduled run creates a fresh task from this recipe.`,
                   steps: [
                     {
                       name: 'Wait for schedule',
@@ -525,13 +709,14 @@ export function NewTaskDialog({
                     : {}),
                   ...(assignee ? { assignee } : {}),
                   cron: { expression: cronExpr, overlap: cronOverlap },
-                  ...(Object.keys(stringified).length > 0
-                    ? { spawnsCraftbookParams: stringified }
+                  ...(Object.keys(stringified).length + Object.keys(scheduledInputParams).length > 0
+                    ? { spawnsCraftbookParams: { ...stringified, ...scheduledInputParams } }
                     : {}),
                 })
               : await api.createTask(projectId, {
                   title: title.trim() || m.name,
-                  description: composeCraftbookDescription(m, stringified),
+                  description: composeCraftbookDescription(m, { ...stringified, ...inputLabels }),
+                  ...(Object.keys(inputSources).length > 0 ? { inputs: inputSources } : {}),
                   craftbookId: m.id,
                   ...(selectedBook.item.sourceId
                     ? { craftbookSourceId: selectedBook.item.sourceId }
@@ -559,7 +744,7 @@ export function NewTaskDialog({
               })
               .catch(() => {});
           }
-          await onCreated(created);
+          await onCreated?.(created);
           onClose();
         } catch (err) {
           setError(apiErrorMessage(err));
@@ -614,7 +799,7 @@ export function NewTaskDialog({
                   ? { status: 'draft' as const }
                   : { nightShift: { enabled: true }, dispatchEntry: true }),
               });
-        await onCreated(created);
+        await onCreated?.(created);
         onClose();
       } catch (err) {
         setError(apiErrorMessage(err));
@@ -626,10 +811,12 @@ export function NewTaskDialog({
       busy,
       step,
       creationMode,
+      launchMode,
       projectId,
       selectedBook,
       missingToolsets,
       params,
+      inputValues,
       title,
       assignee,
       description,
@@ -637,15 +824,37 @@ export function NewTaskDialog({
       cron,
       cronOverlap,
       onCreated,
+      onUseInChat,
       onClose,
     ],
   );
 
+  // Inputs render as source pickers of their own, params the daemon or
+  // another screen fills are never asked, and in compose mode the brief box
+  // stands in for the book's main content param. The generic form gets the
+  // rest of the schema, and disappears when nothing is left to ask.
+  const selectedInputs = selectedBook
+    ? craftbookInputParams(selectedBook.manifest.paramSchema)
+    : [];
+  const composeBriefKey =
+    composeMode && selectedBook ? mainContentParamKey(selectedBook.manifest.paramSchema) : null;
+  const nonInputParamSchema = selectedBook
+    ? launchFormParamSchema(
+        selectedBook.manifest.paramSchema,
+        composeBriefKey ? [composeBriefKey] : [],
+      )
+    : undefined;
   const selectedSchema =
-    selectedBook && craftbookHasParams(selectedBook.manifest)
-      ? (selectedBook.manifest.paramSchema as SquisqAnnotatedSchema)
+    selectedBook &&
+    craftbookHasParams({ ...selectedBook.manifest, paramSchema: nonInputParamSchema })
+      ? (nonInputParamSchema as SquisqAnnotatedSchema)
       : null;
-  const createDisabled = busy || (selectedBook !== null && selectedNeeds.length > 0);
+  const inputBusy = selectedInputs.some((input) => inputValues[input.key]?.busy);
+  // A restored selection whose book the listing has not delivered yet. The
+  // configure pane must not flash the blank-task form in the meantime.
+  const pendingBook = Boolean(selectedBookId && !selectedBook);
+  const createDisabled =
+    busy || inputBusy || pendingBook || (selectedBook !== null && selectedNeeds.length > 0);
 
   const heroEyebrow = selectedBook
     ? `Craftbook${
@@ -680,9 +889,13 @@ export function NewTaskDialog({
                 <header className="gz-npd-header">
                   <div className="gz-npd-header-copy">
                     <Dialog.Title asChild>
-                      <h3>{modeCopy.title}</h3>
+                      <h3>{composeMode ? 'Task for this message' : modeCopy.title}</h3>
                     </Dialog.Title>
-                    <p className="gz-npd-header-sub">{modeCopy.subtitle}</p>
+                    <p className="gz-npd-header-sub">
+                      {composeMode
+                        ? 'Pick a craftbook to attach to your message.'
+                        : modeCopy.subtitle}
+                    </p>
                   </div>
                   <div className="gz-ntd-header-controls">
                     {!projectLocked && (
@@ -757,7 +970,7 @@ export function NewTaskDialog({
                     })}
                   </nav>
                   <div className="gz-npd-gallery" role="radiogroup" aria-label="Task type">
-                    {generalMatches && (
+                    {generalMatches && !composeMode && (
                       <section className="gz-npd-section">
                         <div className="gz-npd-section-head">
                           <span className="gz-npd-section-title">Start fresh</span>
@@ -862,7 +1075,11 @@ export function NewTaskDialog({
                       <p className="gz-npd-hero-eyebrow">{heroEyebrow}</p>
                       <Dialog.Title asChild>
                         <h3 className="gz-npd-hero-name">
-                          {selectedBook ? selectedBook.manifest.name : modeCopy.generalLabel}
+                          {selectedBook
+                            ? selectedBook.manifest.name
+                            : pendingBook
+                              ? 'Loading craftbook…'
+                              : modeCopy.generalLabel}
                         </h3>
                       </Dialog.Title>
                     </div>
@@ -875,9 +1092,10 @@ export function NewTaskDialog({
                 </header>
                 <div
                   className="gz-npd-detail"
-                  data-blank={selectedBook ? undefined : 'true'}
+                  data-blank={selectedBook || pendingBook ? undefined : 'true'}
                   key={selectedBookId ?? '__general'}
                 >
+                  {pendingBook && <p className="gz-npd-empty">Loading craftbook…</p>}
                   {selectedBook && (
                     <div className="gz-npd-brief">
                       <p className="gz-npd-brief-lede">{selectedBook.manifest.description}</p>
@@ -916,8 +1134,8 @@ export function NewTaskDialog({
                       </div>
                     </div>
                   )}
-                  <div className="gz-npd-setup">
-                    {!selectedBook && (
+                  <div className="gz-npd-setup" hidden={pendingBook}>
+                    {!selectedBook && !pendingBook && (
                       <p className="gz-npd-brief-lede">{modeCopy.generalDescription}</p>
                     )}
                     <div className="gz-npd-pane-form">
@@ -934,6 +1152,28 @@ export function NewTaskDialog({
                           }
                         />
                       </label>
+                      {composeMode && selectedBook && (
+                        <div className="gz-ntd-brief-from-message">
+                          <p className="gz-npd-give-eyebrow">Brief · your chat message</p>
+                          {onComposerTextChange ? (
+                            <MarkdownField
+                              key={selectedBook.manifest.id}
+                              value={composerText ?? ''}
+                              placeholder="What should this be about? Edits here change your chat message too."
+                              minHeight="96px"
+                              maxHeight="30vh"
+                              onChange={onComposerTextChange}
+                              onCommit={onComposerTextChange}
+                            />
+                          ) : composerText?.trim() ? (
+                            <p className="gz-ntd-brief-text">{composerText}</p>
+                          ) : (
+                            <p className="gz-ntd-brief-empty muted">
+                              Write the brief in the chat box. It becomes this task's description.
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {selectedNeeds.length > 0 && selectedBook && (
                         <div className="gz-ntd-needs">
                           <p className="gz-npd-give-eyebrow">Needs setup</p>
@@ -942,6 +1182,25 @@ export function NewTaskDialog({
                             onAllInstalled={() => void loadCraftbooks()}
                             onCancel={backToPicker}
                           />
+                        </div>
+                      )}
+                      {selectedBook && selectedInputs.length > 0 && selectedNeeds.length === 0 && (
+                        <div className="gz-npd-params">
+                          <p className="gz-npd-give-eyebrow">Works on</p>
+                          {selectedInputs.map((input) => (
+                            <CraftbookInputField
+                              key={`${projectId}:${selectedBook.manifest.id}:${input.key}`}
+                              projectId={projectId}
+                              craftbookId={selectedBook.manifest.id}
+                              input={input}
+                              allowUpload={creationMode !== 'scheduled'}
+                              value={inputValues[input.key] ?? EMPTY_INPUT_VALUE}
+                              onChange={(next) => {
+                                setInputValues((prev) => ({ ...prev, [input.key]: next }));
+                                setError('');
+                              }}
+                            />
+                          ))}
                         </div>
                       )}
                       {selectedSchema && selectedNeeds.length === 0 && (
@@ -1076,9 +1335,11 @@ export function NewTaskDialog({
                     <p className="gz-npd-footnote gz-ntd-launch-hint">{pullHint}</p>
                   ) : (
                     <p className="gz-npd-footnote">
-                      {creationMode === 'one-time' && selectedBook
-                        ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
-                        : modeCopy.footnote}
+                      {composeMode
+                        ? 'Nothing runs yet. It attaches to your message and starts when you send.'
+                        : creationMode === 'one-time' && selectedBook
+                          ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
+                          : modeCopy.footnote}
                     </p>
                   )}
                   <Dialog.Actions>
@@ -1086,13 +1347,15 @@ export function NewTaskDialog({
                       Cancel
                     </button>
                     <button type="submit" className="primary" disabled={createDisabled}>
-                      {busy
-                        ? creationMode === 'one-time' && selectedBook
-                          ? 'Starting…'
-                          : 'Creating…'
-                        : creationMode === 'one-time' && selectedBook
-                          ? 'Create & start'
-                          : modeCopy.submitLabel}
+                      {composeMode
+                        ? 'Use in chat'
+                        : busy
+                          ? creationMode === 'one-time' && selectedBook
+                            ? 'Starting…'
+                            : 'Creating…'
+                          : creationMode === 'one-time' && selectedBook
+                            ? 'Create & start'
+                            : modeCopy.submitLabel}
                     </button>
                   </Dialog.Actions>
                 </div>
@@ -1103,6 +1366,23 @@ export function NewTaskDialog({
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+/**
+ * Drop any upload staged for inputs that will not be launched. Fire-and-
+ * forget. `keep` names the staging ids that still belong to something (the
+ * composer's attached task) and must survive.
+ */
+function discardStagedInputs(
+  projectId: string,
+  values: Record<string, CraftbookInputValue>,
+  keep: ReadonlySet<string> = new Set(),
+): void {
+  for (const value of Object.values(values)) {
+    if (value.source?.from === 'upload' && !keep.has(value.source.stagingId)) {
+      void api.taskInputs.deleteInputStaging(projectId, value.source.stagingId).catch(() => {});
+    }
+  }
 }
 
 function craftbookSearchRank(book: BookItem, query: string): number {

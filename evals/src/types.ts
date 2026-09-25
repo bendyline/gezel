@@ -38,6 +38,12 @@ export interface EvalTerminalFailure {
 export interface EvalRepairActionSnapshot {
   /** Number of assistant turns that completed at least one successful file mutation. */
   completedMutationTurns: number;
+  /**
+   * Number of committed assistant turns of any kind. Virtual-target ladders
+   * (`task-graph.md`) count an attempt only after the target finished a turn
+   * following the nudge; optional for snapshots built by older helpers.
+   */
+  completedTurns?: number;
   /** True when this session currently has an uncommitted turn in flight. */
   inflight: boolean;
 }

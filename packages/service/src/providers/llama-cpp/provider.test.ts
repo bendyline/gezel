@@ -9931,6 +9931,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       currentTurnStartIdx: number;
       messages: Array<{ role: string; content: string; tool_call_id?: string }>;
       condenseInTurnToolResults: () => number;
+      submittedToolResults: WeakSet<object>;
     };
     internal.currentTurnStartIdx = internal.messages.length;
     internal.messages.push({ role: 'user', content: 'do the thing' });
@@ -9944,6 +9945,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       });
     }
     const before = internal.messages.length;
+    for (const message of internal.messages) internal.submittedToolResults.add(message);
     const reclaimed = internal.condenseInTurnToolResults();
 
     expect(reclaimed).toBeGreaterThan(0);

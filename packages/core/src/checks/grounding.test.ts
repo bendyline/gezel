@@ -116,6 +116,19 @@ describe('citationsResolve — knownPaths (task-supplied metadata)', () => {
     expect(r.forgiven).toBeUndefined();
   });
 
+  it('forgives a cited glob only when it matches a task-supplied path', async () => {
+    // qwen3.8-27b recorded its deck folder as `powerpoint/task-*` in the
+    // invocation-inputs section and burned a research gate attempt on it.
+    const packet = 'Deck folder `powerpoint/task-*`; stray pattern `data/*.csv`.';
+    const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md', {
+      minCitations: 0,
+      knownPaths: ['tasks/2', 'powerpoint/task-2'],
+    });
+    expect(r.forgiven).toEqual(['powerpoint/task-*']);
+    expect(r.unresolved).toEqual(['data/*.csv']);
+    expect(r.ok).toBe(false);
+  });
+
   it('genuinely fabricated citations are still caught alongside forgiven ones', async () => {
     const packet = 'Metadata `tasks/8/`; evidence from `data/market-sizes.csv`.';
     const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md', {

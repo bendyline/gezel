@@ -18,6 +18,32 @@ const USER_REQUEST_RE =
   /\b(?:can\s+you|could\s+you|please|i\s+(?:need|want|would\s+like)|we\s+(?:need|want|would\s+like))\b/i;
 const INFORMATIONAL_OPEN_RE =
   /^\s*(?:(?:how|what|why|when|where|who)\b|(?:are|can|could|did|do|does|is|will|would)(?!\s+you\b)\b)/i;
+// Acting on, or asking after, a deliverable that already exists — "cancel the
+// PowerPoint task", "how the deck is going", "update my presentation". An
+// exact route leaves `invoke_craftbook` as the only tool, so each of these
+// used to start a second, unrelated run instead of reaching the first.
+const EXISTING_WORK_RE =
+  /\b(?:cancel|stop|pause|resume|retry|restart|abort|delete|remove|update|edit|revise|fix|change|tweak|shorten|extend|finish|check\s+on|status\s+of|progress\s+on|how(?:'s|\s+is|\s+are)?|where(?:'s|\s+is|\s+are)?)\s+(?:the|that|this|my|our|your)\s+(?:[\w-]+\s+){0,2}?(?:power\s*point|pptx?|deck|presentation|slides?|slide\s*show|docx?|document|report|pdf|task)\b/i;
+
+/**
+ * Is this text asking for work at all — rather than asking a question, or
+ * asking after work already under way? Shared by the exact-format routes
+ * and the catalog trigger tier so neither proposes a launch for "how do I
+ * write meeting minutes?" or "cancel the deck".
+ */
+export function looksLikeWorkRequest(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  if (INFORMATIONAL_OPEN_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return false;
+  if (EXISTING_WORK_RE.test(normalized)) return false;
+  return true;
+}
+
+/** Meester or voorman: the roles a person asks for work through. */
+export function isCoordinatorRole(input: { isMeester: boolean; role?: string }): boolean {
+  const roleId = resolveRoleId(input.role);
+  return input.isMeester || roleId === 'meester' || roleId === 'voorman';
+}
 
 /**
  * Deterministic, high-precision artifact routing. This is intentionally much
@@ -26,8 +52,7 @@ const INFORMATIONAL_OPEN_RE =
  */
 export function detectExactArtifactRoute(text: string): ExactArtifactRoute | null {
   const normalized = text.trim();
-  if (!normalized) return null;
-  if (INFORMATIONAL_OPEN_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
+  if (!looksLikeWorkRequest(normalized)) return null;
   if (!PRODUCTION_ACTION_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
 
   if (/\b(?:power\s*point|pptx?|slide\s+deck|presentation\s+deck)\b/i.test(normalized)) {
@@ -85,6 +110,21 @@ export function looksLikeImplementationRequest(text: string): boolean {
   return IMPLEMENTATION_ACTION_RE.test(text) && IMPLEMENTATION_NOUN_RE.test(text);
 }
 
+const DECK_SUBJECT_RE =
+  /\b(?:about|on|covering|regarding|explaining|introducing)\s+(.+?)\s*(?:,?\s*please)?\s*[.?!]*\s*$/i;
+
+/**
+ * The subject of a deck request — "pizza" from "Create a PowerPoint about
+ * pizza". The whole sentence used to become `topic`, which the research
+ * step then searched for verbatim and the copywriter could title slides
+ * with. Falls back to the full text when no subject clause is present;
+ * the invocation's `description` always keeps the user's own words.
+ */
+export function deckTopicFromRequest(text: string): string {
+  const subject = DECK_SUBJECT_RE.exec(text)?.[1]?.trim();
+  return subject && subject.length > 0 ? subject : text;
+}
+
 export interface ResolveTurnIntentPlanInput {
   text: string;
   isMeester: boolean;
@@ -98,8 +138,7 @@ export interface ResolveTurnIntentPlanInput {
  */
 export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIntentPlan {
   const text = input.text.trim();
-  const roleId = resolveRoleId(input.role);
-  const isCoordinator = input.isMeester || roleId === 'meester' || roleId === 'voorman';
+  const isCoordinator = isCoordinatorRole(input);
   const artifact = detectExactArtifactRoute(text);
   if (artifact && isCoordinator) {
     return {
@@ -120,7 +159,7 @@ export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIn
         name: artifact.craftbookName,
         invocation: {
           description: text,
-          ...(artifact.format === 'pptx' ? { params: { topic: text } } : {}),
+          ...(artifact.format === 'pptx' ? { params: { topic: deckTopicFromRequest(text) } } : {}),
         },
       },
       requiredTools: ['invoke_craftbook'],

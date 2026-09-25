@@ -1,5 +1,6 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import type { ReactNode } from 'react';
+import { appCollisionBoundary } from './appCollisionBoundary.js';
 
 /**
  * Radix-backed tooltip wrapper. The native `title` attribute has a 1–2s
@@ -19,6 +20,7 @@ export function Content(props: {
     <RadixTooltip.Portal>
       <RadixTooltip.Content
         className="gz-tooltip-content"
+        collisionBoundary={appCollisionBoundary()}
         side={props.side ?? 'top'}
         sideOffset={6}
       >

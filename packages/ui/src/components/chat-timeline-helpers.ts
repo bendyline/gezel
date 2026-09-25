@@ -143,6 +143,10 @@ export function formatProviderLabel(p: ProviderName): string {
       return 'Codex CLI';
     case 'ollama':
       return 'Ollama';
+    case 'apple-foundation-models':
+      return 'Apple Intelligence';
+    case 'android-mlkit':
+      return 'Android system AI';
     case 'llama-cpp':
       return 'On-device';
     case 'mlx':

@@ -1,4 +1,4 @@
-import type { AccessoryOption } from '@bendyline/gezel';
+import type { AccessoryOption } from '@bendyline/gezel/poppetje';
 import type { JSX } from 'react';
 
 /** The subset of the full item context used by accessory-only geometry. */

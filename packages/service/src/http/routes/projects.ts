@@ -34,11 +34,7 @@ import { Hono } from 'hono';
 import { previewFolder } from '../../about/folder-preview.js';
 import { generateProjectAboutFromRepo } from '../../about/project-generator.js';
 import {
-  craftbookContextForProject,
-  listApplicableCraftbooks,
-  missingToolsetsForCraftbooks,
-  projectCraftbookSummaries,
-  projectHasEstablishedCodebase,
+  listProjectCraftbookOffer,
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
@@ -48,6 +44,7 @@ import {
   ConnectorCorpusWriteDeniedError,
   PromptDraftPathWriteDeniedError,
   ShadowPathWriteDeniedError,
+  TaskInputPathWriteDeniedError,
   normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
 import {
@@ -96,6 +93,9 @@ import type { ServiceContext } from '../context.js';
 import { buildTimeline } from './timeline.js';
 
 const log = createLogger('http');
+
+const SCRIPT_EXECUTION_DISABLED =
+  'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to run scripts.';
 
 /**
  * Translate the two class-of errors workspace mutations can throw into
@@ -415,21 +415,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   // — it stays listed so the user can install it inline.
   app.get('/:id/craftbooks', async (c) => {
     const id = c.req.param('id');
-    const establishedCodebase = await projectHasEstablishedCodebase(ctx.store, id);
-    const requirementContext = await craftbookContextForProject(ctx.store, id, ctx.git);
-    const catalogItems = await listApplicableCraftbooks(ctx.catalog, ctx.store, id, {
-      establishedCodebase,
-      requirementContext,
-    });
     // Project-local books (including project-type installs) shadow same-id
     // catalog entries — mirroring the task resolver's precedence.
-    const projectItems = await projectCraftbookSummaries(ctx.store, id, { requirementContext });
-    const projectIds = new Set(projectItems.map((it) => it.manifest.id));
-    const items = [
-      ...projectItems,
-      ...catalogItems.filter((it) => !projectIds.has(it.manifest.id)),
-    ];
-    const missingToolsets = await missingToolsetsForCraftbooks(ctx.store, items, id);
+    const { items, missingToolsets, establishedCodebase } = await listProjectCraftbookOffer(
+      ctx.catalog,
+      ctx.store,
+      id,
+      { git: ctx.git },
+    );
+    const projectItems = items.filter((it) => it.sourceId === 'project');
     // Resolve the project's type (user override → auto-detected → none) and
     // compute the curated suggested subset. Additive fields: older clients
     // ignore them and keep showing the full list.
@@ -1208,7 +1202,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       if (
         err instanceof ConnectorCorpusWriteDeniedError ||
         err instanceof ShadowPathWriteDeniedError ||
-        err instanceof PromptDraftPathWriteDeniedError
+        err instanceof PromptDraftPathWriteDeniedError ||
+        err instanceof TaskInputPathWriteDeniedError
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
@@ -1234,7 +1229,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       if (
         err instanceof ShadowPathWriteDeniedError ||
-        err instanceof PromptDraftPathWriteDeniedError
+        err instanceof PromptDraftPathWriteDeniedError ||
+        err instanceof TaskInputPathWriteDeniedError
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
@@ -1254,7 +1250,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         initiatedByGezel: initiatedByGezel(c),
       });
     } catch (err) {
-      if (err instanceof PromptDraftPathWriteDeniedError) {
+      if (
+        err instanceof PromptDraftPathWriteDeniedError ||
+        err instanceof TaskInputPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       throw err;
@@ -1272,7 +1271,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path });
     } catch (err) {
-      if (err instanceof PromptDraftPathWriteDeniedError) {
+      if (
+        err instanceof PromptDraftPathWriteDeniedError ||
+        err instanceof TaskInputPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
@@ -1294,7 +1296,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, ...moved });
     } catch (err) {
-      if (err instanceof PromptDraftPathWriteDeniedError) {
+      if (
+        err instanceof PromptDraftPathWriteDeniedError ||
+        err instanceof TaskInputPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       const status =
@@ -2378,6 +2383,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       timeoutMs?: number;
     };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
+    // Defense in depth, as for run-playwright: a hidden tool is not an
+    // execution boundary, and where the host has no deny-net fence the
+    // sandbox no longer refuses on its own.
+    if (!resolveSecurityPolicy(await ctx.store.readConfig()).allowScriptExecution) {
+      return c.json({ ok: false, error: SCRIPT_EXECUTION_DISABLED }, 403);
+    }
     try {
       const project = await ctx.store.getProject(id);
       const effectiveTimeout = body.timeoutMs ?? project?.workspaceScriptTimeoutMs;
@@ -2403,6 +2414,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     };
     if (!body.script) return c.json({ error: 'missing script' }, 400);
     if (!body.outputPath) return c.json({ error: 'missing outputPath' }, 400);
+    if (!resolveSecurityPolicy(await ctx.store.readConfig()).allowScriptExecution) {
+      return c.json({ ok: false, error: SCRIPT_EXECUTION_DISABLED }, 403);
+    }
     try {
       const project = await ctx.store.getProject(id);
       const effectiveTimeout = body.timeoutMs ?? project?.workspaceScriptTimeoutMs;

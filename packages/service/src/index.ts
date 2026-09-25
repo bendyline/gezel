@@ -19,6 +19,9 @@ export { embedModelId } from './memory/embed-core.js';
 export { evaluateGate, gateCheckLabel, taskSuppliedCitationPaths } from './tasks/gate-eval.js';
 export type { GateCheckOutcome, GateCheckResult, GateEvalDeps } from './tasks/gate-eval.js';
 export { parseScriptMeta } from './scripts/meta.js';
+export { ScriptRunner } from './scripts/runner.js';
+export type { ScriptRunnerOptions, RunScriptOptions } from './scripts/runner.js';
+export { QuickJSWorkerExecutor } from './scripts/quickjs-executor.js';
 export {
   reuseVerifiedElectronNativeBinaries,
   type ElectronNativeReuseOptions,

@@ -2217,3 +2217,132 @@ describe('TaskRunner.hasHandoffFor', () => {
     expect(runner.hasHandoffFor('p1/2', 'work')).toBe(false);
   });
 });
+
+describe('TaskRunner — provider-busy starvation bound', () => {
+  async function writePlanTask(num: number): Promise<void> {
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num,
+      ref: `p1/${num}`,
+      title: `t${num}`,
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([
+        { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
+      ]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+  }
+
+  it('admits a handoff held behind other chat work once it passes the bound', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writePlanTask(1);
+    await writePlanTask(2);
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'ollama']]));
+    const queue = new ProviderQueue({ concurrency: 1 });
+    dispatcher.setProvider('ollama', queue);
+    // Another gezel's chat owns the only slot for the whole test.
+    await queue.acquire({ lane: 'interactive' });
+
+    let clock = 1_000_000;
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      now: () => clock,
+      providerBusyStarvationMs: 60_000,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    runner.enqueueHandoff({ taskRef: 'p1/2', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+    expect(runner.snapshot().holdReason).toBe('provider-busy');
+
+    clock += 59_000;
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+
+    clock += 2_000;
+    await runner.tick();
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/1']);
+    expect(dispatcher.dispatches[0]?.lane).toBe('background');
+
+    // The bound guarantees one turn in the provider queue, not a flood: the
+    // second handoff stays held while the first is still in flight.
+    clock += 120_000;
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(runner.snapshot().pendingCount).toBe(1);
+  });
+
+  it('admits a pooled local handoff when queued chat never leaves the engine idle', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writePlanTask(1);
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'llama-cpp']]));
+    dispatcher.ensureProvider = async () => {
+      throw new Error('pooled local admission must not initialize a singleton provider');
+    };
+    dispatcher.getPooledProviderQueueSummary = () => ({
+      running: 1,
+      runningBackground: 0,
+      queuedInteractive: 2,
+      queuedBackground: 0,
+      backgroundConcurrency: 1,
+      maxConcurrency: 1,
+      active: [{ sessionId: 'chat-a' }],
+      pending: [{ sessionId: 'chat-b' }, { sessionId: 'chat-c' }],
+    });
+
+    let clock = 1_000_000;
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      now: () => clock,
+      providerBusyStarvationMs: 60_000,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+
+    clock += 60_000;
+    await runner.tick();
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/1']);
+    expect(runner.snapshot().pendingCount).toBe(0);
+  });
+
+  it('admits normally when a slot frees before the bound', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writePlanTask(1);
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'ollama']]));
+    const queue = new ProviderQueue({ concurrency: 1 });
+    dispatcher.setProvider('ollama', queue);
+    const release = await queue.acquire({ lane: 'interactive' });
+
+    let clock = 1_000_000;
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      now: () => clock,
+      providerBusyStarvationMs: 60_000,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+
+    clock += 10_000;
+    release();
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+  });
+});

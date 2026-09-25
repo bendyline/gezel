@@ -1,5 +1,6 @@
 import { readFileSync, writeSync } from 'node:fs';
 import { Socket } from 'node:net';
+import type { ScriptInit as InitMessage, ScriptTransport } from './transport.js';
 
 /**
  * Wire format for the fd-3 channel between ScriptRunner (parent) and a
@@ -13,15 +14,7 @@ import { Socket } from 'node:net';
  * script.
  */
 
-export interface InitMessage {
-  input: unknown;
-  runId: string;
-  projectId: string;
-  engagementMode: 'proactive' | 'scheduled' | 'reactive' | 'off';
-  engagementFlags: {
-    llmAllowed: boolean;
-  };
-}
+export type { ScriptInit as InitMessage } from './transport.js';
 
 interface RpcRequest {
   id: number;
@@ -78,7 +71,7 @@ function readInitSync(): InitMessage {
   }
 }
 
-export class RpcClient {
+export class RpcClient implements ScriptTransport {
   readonly init: InitMessage;
 
   private nextId = 0;

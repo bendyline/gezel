@@ -409,10 +409,27 @@ export function resolveSdBinary(): ResolvedBinary | null {
     if (existsSync(envBin)) return { path: envBin, variant: 'env', build: null, warnings: [] };
     throw new Error(`GEZEL_SD_SERVER_BIN is set to "${envBin}" but no file exists there.`);
   }
-  for (const root of lookupRoots()) {
-    for (const exe of exeCandidates('sd-server')) {
-      const path = join(root, platformKey(), exe);
-      if (existsSync(path)) return { path, variant: null, build: null, warnings: [] };
+  // Prefer the CUDA build where one is staged. sd-cpp ships a CUDA binary in
+  // the `-cuda` key on Linux (beside llama-server and ds4) and a portable one
+  // in the bare key; on a GPU box the portable build is the CPU/Vulkan build,
+  // and CPU SDXL is slow enough to change eval OUTCOMES, not just timings —
+  // petshop's repair allowance is attempt-based, so a CPU render that never
+  // lands inside it fails FAST models while slow ones idle long enough to
+  // survive. That reads as a capability difference and is not one.
+  //
+  // Unlike the product resolvers this does not probe the driver: a dev box
+  // with a `-cuda` tree staged is a box that fetched CUDA archives, and
+  // `shouldProbeLlamaBackend` already guards the one case (Windows without
+  // the NVIDIA driver) where launching a CUDA binary is worse than not
+  // finding one. A CUDA binary that cannot load simply fails to launch here,
+  // which a trial log shows plainly.
+  for (const variant of ['cuda', null] as const) {
+    for (const root of lookupRoots()) {
+      for (const exe of exeCandidates('sd-server')) {
+        const dir = variant ? `${platformKey()}-${variant}` : platformKey();
+        const path = join(root, dir, exe);
+        if (existsSync(path)) return { path, variant, build: null, warnings: [] };
+      }
     }
   }
   return null;

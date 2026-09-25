@@ -26,6 +26,78 @@ const verificationChannel = `
 `;
 
 describe('evaluateGate', () => {
+  it('holds a valid report until every task-bound artifact has observed read coverage', async () => {
+    const paths = ['brief.json', 'sources-1.json', 'sources-2.json'];
+    const checks = [
+      { kind: 'sniff' as const, file: 'report.json', artifact: true, sniff: 'json-valid' as const },
+      { kind: 'artifactReadEvidence' as const, paths: JSON.stringify(paths) },
+    ];
+    const files = splitReader({}, { 'report.json': '{"approved":true}', 'manifest.json': '[]' });
+    const slices = paths
+      .slice(0, 2)
+      .map((path) => ({ path, startLine: 1, endLine: 5, totalLines: 5 }));
+    const deps = { corpusReadEvidence: async () => ({ observable: true, slices }) };
+    const held = await evaluateGate(checks, files, deps);
+    expect(held.pass).toBe(false);
+    expect(held.checks[0]?.ok).toBe(true);
+    expect(held.checks[1]?.remaining).toBe(1);
+    expect(held.checks[1]?.evidence).toEqual({
+      expectedRecords: 3,
+      missingRecords: ['sources-2.json'],
+    });
+    // The model's report and an empty manifest cannot substitute for a read.
+    slices.push({ path: 'sources-2.json', startLine: 1, endLine: 5, totalLines: 5 });
+    expect((await evaluateGate(checks, files, deps)).pass).toBe(true);
+  });
+
+  it('accepts overlapping out-of-order slices only when their union covers the exact artifact', async () => {
+    const check = { kind: 'artifactReadEvidence' as const, paths: '["source.json"]' };
+    const slices = [
+      { path: 'source.json', startLine: 6, endLine: 10, totalLines: 10 },
+      { path: 'source.json', startLine: 1, endLine: 4, totalLines: 10 },
+      { path: 'other/source.json', startLine: 1, endLine: 10, totalLines: 10 },
+    ];
+    const deps = { corpusReadEvidence: async () => ({ observable: true, slices }) };
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(false);
+    slices.push({ path: 'source.json', startLine: 4, endLine: 7, totalLines: 10 });
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(true);
+    slices.push({ path: 'source.json', startLine: 1, endLine: 11, totalLines: 11 });
+    expect((await evaluateGate([check], reader({}), deps)).pass).toBe(false);
+  });
+
+  it.each([
+    '{{paths}}',
+    'null',
+    '[]',
+    '{}',
+    '[3]',
+    '[""]',
+    '["  "]',
+    '["a","a"]',
+    '["{{unresolved}}"]',
+  ])('fails closed on malformed artifact read paths %s', async (paths) => {
+    const result = await evaluateGate([{ kind: 'artifactReadEvidence', paths }], reader({}), {
+      corpusReadEvidence: async () => ({ observable: true, slices: [] }),
+    });
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toContain('fail-closed');
+  });
+
+  it('fails closed when artifact read history is unavailable or unobservable', async () => {
+    const check = { kind: 'artifactReadEvidence' as const, paths: '["a.json"]' };
+    expect((await evaluateGate([check], reader({}))).pass).toBe(false);
+    expect(
+      (
+        await evaluateGate([check], reader({}), {
+          corpusReadEvidence: async () => ({
+            observable: false,
+            slices: [{ path: 'a.json', startLine: 1, endLine: 1, totalLines: 1 }],
+          }),
+        })
+      ).pass,
+    ).toBe(false);
+  });
+
   it('corpusBatchObservations accepts equivalent heading levels and requires every assigned path', async () => {
     const batchesFile = 'pr-review/batches.json';
     const file = 'pr-review/observations-1.md';
@@ -1238,6 +1310,22 @@ describe('evaluateGate — hardened kinds', () => {
     expect(stillCaught.failures.join('\n')).toContain('data/market.csv');
   });
 
+  it("taskSuppliedCitationPaths includes files the task's own steps declare", () => {
+    // The outline names the deck.md the next step writes; that is the plan,
+    // not a fabricated source (qwen3.8-27b powerpoint-deck, 2026-09-23).
+    const paths = taskSuppliedCitationPaths({
+      artifactDir: 'tasks/2',
+      steps: [
+        { advanceWhen: { file: 'tasks/2/outline.md' }, consumes: [{ file: 'tasks/2/sources.md' }] },
+        { advanceWhen: { file: 'powerpoint/task-2/deck.md' } },
+        { advanceWhen: null },
+      ],
+    });
+    expect(paths).toContain('powerpoint/task-2/deck.md');
+    expect(paths).toContain('tasks/2/outline.md');
+    expect(paths).toContain('tasks/2/sources.md');
+  });
+
   it('taskSuppliedCitationPaths collects param values and prompt path tokens', () => {
     const paths = taskSuppliedCitationPaths({
       stepPrompt:
@@ -1310,6 +1398,60 @@ describe('evaluateGate — hardened kinds', () => {
     );
     expect(localSourceStillRequired.pass).toBe(false);
     expect(localSourceStillRequired.failures.join('\n')).toContain('source/brief.md');
+  });
+
+  it('imageEvidence requires every current manifest image and fails closed on missing telemetry', async () => {
+    const check = {
+      kind: 'imageEvidence' as const,
+      file: 'asset/build.json',
+      imagesKey: 'images',
+      baseDir: 'asset',
+    };
+    const ws = reader({
+      'asset/build.json': JSON.stringify({
+        images: [{ path: 'revisions/2/front.png' }, { path: 'revisions/2/back.png' }],
+      }),
+    });
+    expect((await evaluateGate([check], ws)).pass).toBe(false);
+    const stale = await evaluateGate([check], ws, {
+      imageEvidence: async () => ({
+        observable: true,
+        paths: [
+          'asset/revisions/1/front.png',
+          'asset/revisions/2/front.png',
+          'asset/revisions/2/front.png',
+        ],
+      }),
+    });
+    expect(stale.pass).toBe(false);
+    expect(stale.failures.join('\n')).toContain('asset/revisions/2/back.png');
+    expect(
+      (
+        await evaluateGate([check], ws, {
+          imageEvidence: async () => ({
+            observable: false,
+            paths: ['asset/revisions/2/front.png', 'asset/revisions/2/back.png'],
+          }),
+        })
+      ).pass,
+    ).toBe(false);
+    expect(
+      (
+        await evaluateGate([check], ws, {
+          imageEvidence: async () => ({
+            observable: true,
+            paths: ['./asset/revisions/2/front.png', 'asset\\revisions\\2\\back.png'],
+          }),
+        })
+      ).pass,
+    ).toBe(true);
+    expect(
+      (
+        await evaluateGate([check], reader({ 'asset/build.json': '{"images":[]}' }), {
+          imageEvidence: async () => ({ observable: true, paths: [] }),
+        })
+      ).pass,
+    ).toBe(false);
   });
 
   it('markdownHeadingsMatch rejects a deck that drops a locked outline slide', async () => {

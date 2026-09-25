@@ -12,6 +12,11 @@ import {
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
+import {
+  type TaskStepRoute,
+  resolveTaskStepDelivery,
+  taskStepRouteFor,
+} from '../task-step-routing.ts';
 import { bareToolName } from '../tool-names.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import {
@@ -938,6 +943,32 @@ function taskSummary(task: Task): string {
     `steps:\n${steps || '(none)'}`,
     `craftbookParams: ${JSON.stringify(task.craftbookParams ?? {})}`,
   ].join('\n');
+}
+
+/**
+ * Where harness feedback about this spec's craftbook task must land: the
+ * active step of the first matching task a step session can act on (active
+ * before paused). `undefined` when no such task exists yet, or it finished —
+ * the caller then keeps ordinary routing.
+ */
+async function craftbookTaskStepRoute(
+  client: GezelClient,
+  projectId: string,
+  spec: CraftbookEvalSpec,
+): Promise<TaskStepRoute | undefined> {
+  try {
+    const listed = await client.listProjectTasks(projectId);
+    const matching = listed.tasks
+      .filter((task) => taskMatchesCraftbook(task, spec))
+      .sort((a, b) => Number(b.status === 'active') - Number(a.status === 'active'));
+    for (const task of matching) {
+      const route = taskStepRouteFor(task, projectId, listed.waiting ?? []);
+      if (route) return route;
+    }
+  } catch {
+    // Routing is advisory: with no task listing the ordinary path applies.
+  }
+  return undefined;
 }
 
 function taskAssigneeGezelId(task: Task): string | undefined {
@@ -2164,6 +2195,13 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           : { done: true, success: false, reason: repairFailures.join(' | ') };
       }
 
+      // Once this craftbook's task is live, every nudge below concerns its
+      // work: it goes INTO the active step's own session or waits. A
+      // free-standing message opens a task-less chat that cannot see the
+      // step and whose writes into the task folder the MCP server refuses.
+      const taskStep = await craftbookTaskStepRoute(ctx.client, projectId, spec);
+      const taskStepOpts = taskStep ? { taskStep } : {};
+
       const hasConcreteDeliverableFailures = failures.some(
         (failure) =>
           !failure.startsWith('seeded workspace input') &&
@@ -2186,6 +2224,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           },
           {
             projectId,
+            ...taskStepOpts,
             expectedDeliverable: null,
             repairDirective: craftbookSourceReadRepairDirective(unreadSeededPaths),
           },
@@ -2233,7 +2272,15 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             );
             return { done: false };
           }
-          const owner = taskGraph?.authoringGezelId;
+          // The owner of the WORK is the active step's session, not the
+          // task's assignee: those differ whenever a step suggests another
+          // role (codemod-sweep's `enumerate` ran as a codebase analyst
+          // while the hold watched the runner).
+          const stepDelivery = taskStep
+            ? await resolveTaskStepDelivery(ctx.client, taskStep)
+            : undefined;
+          const owner =
+            stepDelivery?.kind === 'deliver' ? stepDelivery.gezelId : taskGraph?.authoringGezelId;
           const ownerTurn = owner ? await gezelTurnInflight(ctx, owner, projectId) : null;
           if (ownerTurn) {
             noWriteRepairState = null;
@@ -2258,6 +2305,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           },
           {
             projectId,
+            ...taskStepOpts,
             targetGezelId:
               virtualRepairTarget.path === 'task-graph.md'
                 ? taskGraph?.authoringGezelId
@@ -2316,6 +2364,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           );
           await postMissingDeliverableFeedback(ctx, repairDeliverable.path, {
             projectId,
+            ...taskStepOpts,
             ...(taskGraph?.authoringGezelId ? { targetGezelId: taskGraph.authoringGezelId } : {}),
             nearMiss,
             expectedSurface: repairDeliverable.artifact ? 'artifact' : 'workspace',
@@ -2338,6 +2387,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         },
         {
           projectId,
+          ...taskStepOpts,
           repairDirective: repairDeliverable
             ? await craftbookExistingDeliverableRepairDirective(
                 ctx.client,

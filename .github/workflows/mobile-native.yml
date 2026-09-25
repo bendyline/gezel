@@ -1,0 +1,396 @@
+name: Mobile native contracts
+
+on:
+  pull_request:
+    paths:
+      - 'native/mobile/**'
+      - 'native/runtime/**'
+      - 'native/engines/llama-cpp/VERSION'
+      - 'native/scripts/fetch-upstream.sh'
+      - 'packages/mobile/**'
+      - 'packages/capacitor/**'
+      - 'packages/app-sdk/**'
+      - 'packages/core/**'
+      - 'packages/client/**'
+      - 'packages/gezk/**'
+      - 'packages/sdk/**'
+      - 'packages/script-runtime/**'
+      - 'packages/script-stdlib/**'
+      - 'packages/ui/**'
+      - 'evals/src/mobile/**'
+      - 'evals/src/bin/mobile-run.ts'
+      - 'evals/src/scenarios/**'
+      - 'evals/src/fixed-rubric.ts'
+      - 'scripts/production-dependency-inventory.mjs'
+      - 'scripts/stage-third-party-licenses.mjs'
+      - 'scripts/dependency-lease.mjs'
+      - 'scripts/run-with-dependency-lease.mjs'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - '.github/actions/setup-workspace/**'
+      - '.github/workflows/mobile-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: Pinned llama.cpp host contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve the exact pinned upstream source
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('native/scripts/fetch-upstream.sh', ['llama-cpp'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Upstream resolution exited with ${result.status}`);
+          }, { command: 'Resolve the pinned mobile engine source' });
+          JS
+      - name: Verify driver and build the pinned native bridge
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+            for (const [command, ...args] of [
+              ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs', 'packages/capacitor/scripts/stage-native.test.mjs'],
+              ['python3', '-m', 'unittest', 'discover', '-s', 'native/mobile', '-p', 'test_*.py'],
+              ['python3', '-m', 'unittest', 'discover', '-s', 'packages/mobile/scripts', '-p', 'test_*.py'],
+              ['python3', 'native/mobile/build-llama.py', 'host', '--jobs', '2'],
+              ['native/mobile/.build/host/build/gezel-llama-tests', '--write-fixture', 'native/mobile/.build/ios-fixture.gguf'],
+            ]) {
+              const result = spawnSync(command, args, { env: { ...process.env, ...leaseEnv }, stdio: 'inherit' });
+              if (result.error) throw result.error;
+              if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
+            }
+          }, { command: 'Pinned native bridge CI contracts' });
+          JS
+      - name: Share the generated contract fixture
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mobile-contract-fixture
+          path: native/mobile/.build/ios-fixture.gguf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  android-build:
+    name: Android arm64 release archives and instrumentation compilation
+    needs: bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24'
+          pnpm-version: '11.15.1'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mobile-contract-fixture
+          path: native/mobile/.build
+      - name: Select Java 21 and the Android toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$JAVA_HOME_21_X64"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const sdkmanager = path.join(process.env.ANDROID_HOME, 'cmdline-tools/latest/bin/sdkmanager');
+            const result = spawnSync(sdkmanager, ['platforms;android-36', 'build-tools;36.0.0', 'cmake;3.31.6', 'ndk;28.2.13676358'], {
+              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Android toolchain resolution exited with ${result.status}`);
+          }, { command: 'Resolve pinned Android CI toolchains' });
+          JS
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Resolve the exact pinned upstream source
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('native/scripts/fetch-upstream.sh', ['llama-cpp'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Upstream resolution exited with ${result.status}`);
+          }, { command: 'Resolve the pinned mobile engine source' });
+          JS
+      - name: Build the pinned arm64 engine and shared product
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            for (const [command, ...args] of [
+              ['python3', 'native/mobile/build-llama.py', 'android', '--abi', 'arm64-v8a', '--jobs', '2'],
+              // mobile:sync:android stages the offline speech pack and fails
+              // without it; --models pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--models'],
+              ['python3', 'native/mobile/stage-sdk.py', 'android', '--build', 'native/mobile/.build/android', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`, '--ndk', process.env.ANDROID_NDK_HOME, '--javac', `${process.env.JAVA_HOME}/bin/javac`],
+              ['python3', 'native/runtime/stage-sdk.py', 'android', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'android', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['pnpm', 'mobile:sync:android'],
+              ['node', 'packages/mobile/scripts/stage-android-test-fixture.mjs', 'native/mobile/.build/ios-fixture.gguf'],
+            ]) {
+              const result = spawnSync(command, args, { env: { ...process.env, ...leaseEnv }, stdio: 'inherit' });
+              if (result.error) throw result.error;
+              if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
+            }
+          }, { command: 'Android native CI engine and shared product build' });
+          JS
+      - name: Resolve Android dependencies for debug, tests, and release
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          const version = JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version;
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            // Warming the actual variants also resolves AGP's detached tool configurations.
+            const result = spawnSync('./gradlew', [':app:assembleDebug', ':app:assembleDebugAndroidTest',
+              ':app:assembleRelease', ':app:bundleRelease', '--console=plain',
+              `-PgezelVersionName=${version}`, '-PgezelVersionCode=1'], {
+              cwd: 'packages/mobile/android', env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Android dependency resolution exited with ${result.status}`);
+          }, { command: 'Resolve Android native CI dependencies' });
+          JS
+      - name: Verify cached APK, AAB, and native WebView test compilation
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          import path from 'node:path';
+          const version = JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version;
+          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('./gradlew', [':app:assembleDebug', ':app:assembleDebugAndroidTest',
+              ':app:assembleRelease', ':app:bundleRelease', '--offline', '--console=plain',
+              `-PgezelVersionName=${version}`, '-PgezelVersionCode=1'], {
+              cwd: 'packages/mobile/android', env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            process.exitCode = result.status ?? 1;
+            if (result.status !== 0) throw new Error(`Offline Android compilation exited with ${result.status}`);
+            const readelf = path.join(process.env.ANDROID_NDK_HOME, 'toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf');
+            for (const artifact of ['apk/release/app-release-unsigned.apk', 'bundle/release/app-release.aab']) {
+              const check = spawnSync('python3', ['packages/mobile/scripts/verify-android-package.py',
+                `packages/mobile/android/app/build/outputs/${artifact}`, '--readelf', readelf,
+                '--web-dir', 'packages/mobile/dist'], {
+                env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+              });
+              if (check.error) throw check.error;
+              if (check.status !== 0) throw new Error(`Android archive verification exited with ${check.status}`);
+            }
+            const alignment = spawnSync(path.join(process.env.ANDROID_HOME, 'build-tools/36.0.0/zipalign'),
+              ['-c', '-P', '16', '4', 'packages/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk'], {
+                env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+              });
+            if (alignment.error) throw alignment.error;
+            if (alignment.status !== 0) throw new Error(`APK alignment verification exited with ${alignment.status}`);
+          }, { command: 'Android native CI offline compilation and archive verification' });
+          JS
+      # The production Android payload is arm64. Standard Linux hosted runners
+      # cannot run its arm64 emulator with hardware acceleration. This job is
+      # deliberately build-only; pnpm mobile:test:android runs the same tests
+      # on the dedicated local arm64 AVD, never a translated x86 engine.
+
+  ios-simulator:
+    name: iOS simulator product and native bridge tests
+    needs: bridge
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24'
+          pnpm-version: '11.15.1'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mobile-contract-fixture
+          path: native/mobile/.build
+      - name: Resolve the exact pinned upstream source
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('native/scripts/fetch-upstream.sh', ['llama-cpp'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Upstream resolution exited with ${result.status}`);
+          }, { command: 'Resolve the pinned mobile engine source' });
+          JS
+      - name: Build the pinned iOS engine and shared product
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Foundation Models stream usage is compiled against the iOS 27 SDK;
+          # a runtime availability check does not make that symbol compile in SDK 26.
+          if test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" -lt 27; then
+            for candidate in /Applications/Xcode_27*.app; do
+              if test -d "$candidate/Contents/Developer"; then
+                export DEVELOPER_DIR="$candidate/Contents/Developer"
+                break
+              fi
+            done
+          fi
+          if test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" -lt 27; then
+            echo 'Mobile native CI requires installed Xcode 27+ and the iOS 27+ SDK.' >&2
+            exit 1
+          fi
+          if test -n "${DEVELOPER_DIR:-}"; then echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"; fi
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            for (const [command, ...args] of [
+              ['python3', 'native/mobile/build-llama.py', 'ios', '--output', 'native/mobile/.build/ios-bridge', '--simulator-arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', '--jobs', '3'],
+              // mobile:sync:ios stages the offline speech pack and fails
+              // without it; --models pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--models'],
+              ['python3', 'native/mobile/stage-sdk.py', 'ios', '--build', 'native/mobile/.build/ios-bridge', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`],
+              ['python3', 'native/runtime/stage-sdk.py', 'ios', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'ios', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              ['pnpm', 'mobile:sync:ios'],
+              ['swift', 'test', '--package-path', 'packages/mobile/native/ios', '--scratch-path', path.join(process.env.RUNNER_TEMP, 'mobile-storage-tests')],
+            ]) {
+              const result = spawnSync(command, args, { env: { ...process.env, ...leaseEnv }, stdio: 'inherit' });
+              if (result.error) throw result.error;
+              if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
+            }
+          }, { command: 'iOS native CI engine, shared product, and storage tests' });
+          JS
+      - name: Resolve exact pinned Swift packages
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('xcodebuild', ['-resolvePackageDependencies',
+              '-project', 'packages/mobile/ios/App/App.xcodeproj', '-scheme', 'AppSmoke',
+              '-clonedSourcePackagesDirPath', path.join(process.env.RUNNER_TEMP, 'mobile-spm'),
+              '-onlyUsePackageVersionsFromResolvedFile', '-skipPackageUpdates'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`Swift package resolution exited with ${result.status}`);
+          }, { command: 'Resolve pinned iOS native CI packages' });
+          JS
+      - name: Create a dedicated iOS 26 or newer simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime=$(xcrun simctl list runtimes --json | python3 -c 'import json,sys; items=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-") and int(r["version"].split(".")[0]) >= 26]; assert items, "An installed iOS 26+ simulator runtime is required"; print(sorted(items,key=lambda r:tuple(map(int,r["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create 'Gezel Mobile CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")
+          echo "GEZEL_CI_SIMULATOR=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Test shared product, QuickJS, persistence, and native inference in WKWebView
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
+          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('xcodebuild', [
+              '-project', 'packages/mobile/ios/App/App.xcodeproj', '-scheme', 'AppSmoke',
+              '-configuration', 'Debug', '-destination', `platform=iOS Simulator,id=${process.env.GEZEL_CI_SIMULATOR}`,
+              '-derivedDataPath', path.join(process.env.RUNNER_TEMP, 'mobile-ios-build'),
+              '-clonedSourcePackagesDirPath', path.join(process.env.RUNNER_TEMP, 'mobile-spm'),
+              '-resultBundlePath', path.join(process.env.RUNNER_TEMP, 'mobile-native.xcresult'),
+              '-disableAutomaticPackageResolution', '-onlyUsePackageVersionsFromResolvedFile', '-skipPackageUpdates',
+              '-collect-test-diagnostics', 'never', 'CODE_SIGNING_ALLOWED=NO',
+              `ARCHS=${process.arch === 'arm64' ? 'arm64' : 'x86_64'}`, 'ONLY_ACTIVE_ARCH=YES', 'test',
+            ], { env: { ...process.env, ...leaseEnv }, stdio: 'inherit' });
+            if (result.error) throw result.error;
+            process.exitCode = result.status ?? 1;
+          }, { command: 'iOS native CI simulator tests' });
+          JS
+      - name: Verify packaged offline authoring and recovery contracts
+        env:
+          GEZEL_MOBILE_SPM_DIR: ${{ runner.temp }}/mobile-spm
+        run: >-
+          pnpm mobile:eval --platform ios --device "$GEZEL_CI_SIMULATOR"
+          --contracts-only --native-build-dir "$RUNNER_TEMP/mobile-ios-build"
+          --run-id ci-ios-contracts --out "$RUNNER_TEMP/mobile-product-contracts"
+      - name: Verify the unsigned iOS device release archive
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import path from 'node:path';
+          const version = JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version;
+          await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
+            const archive = path.join(process.env.RUNNER_TEMP, 'Gezel.xcarchive');
+            const result = spawnSync('xcodebuild', ['-project', 'packages/mobile/ios/App/App.xcodeproj',
+              '-scheme', 'App', '-configuration', 'Release', '-destination', 'generic/platform=iOS',
+              '-archivePath', archive, '-derivedDataPath', path.join(process.env.RUNNER_TEMP, 'mobile-ios-release'),
+              '-clonedSourcePackagesDirPath', path.join(process.env.RUNNER_TEMP, 'mobile-spm'),
+              '-disableAutomaticPackageResolution', '-onlyUsePackageVersionsFromResolvedFile', '-skipPackageUpdates',
+              'CODE_SIGNING_ALLOWED=NO', `MARKETING_VERSION=${version}`, 'CURRENT_PROJECT_VERSION=1', 'archive'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw new Error(`iOS release archive exited with ${result.status}`);
+            const check = spawnSync('python3', ['packages/mobile/scripts/verify-ios-archive.py', archive,
+              '--version', version, '--build-number', '1', '--web-dir', 'packages/mobile/dist'], {
+              env: { ...process.env, ...leaseEnv }, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8',
+            });
+            if (check.error) throw check.error;
+            if (check.status !== 0) throw new Error(`iOS release verification exited with ${check.status}`);
+            JSON.parse(check.stdout);
+            process.stdout.write(check.stdout);
+            writeFileSync(path.join(process.env.RUNNER_TEMP, 'ios-archive-verification.json'), check.stdout);
+          }, { command: 'iOS native CI cached device archive verification' });
+          JS
+      - name: Preserve simulator and release verification results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-native-results
+          path: |
+            ${{ runner.temp }}/mobile-native.xcresult
+            ${{ runner.temp }}/mobile-product-contracts
+            ${{ runner.temp }}/ios-archive-verification.json
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Remove the dedicated test simulator
+        if: always() && env.GEZEL_CI_SIMULATOR != ''
+        shell: bash
+        run: |
+          xcrun simctl shutdown "$GEZEL_CI_SIMULATOR" || true
+          xcrun simctl delete "$GEZEL_CI_SIMULATOR"

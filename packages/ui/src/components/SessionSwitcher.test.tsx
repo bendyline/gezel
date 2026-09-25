@@ -100,7 +100,7 @@ describe('SessionSwitcher', () => {
     await screen.findByRole('option', { name: /Landing page plan/ });
     expect(screen.getByRole('combobox')).toHaveDisplayValue('New thread');
     expect(screen.getByRole('combobox')).toBeEnabled();
-    expect(screen.getByRole('button', { name: '+ New thread' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeDisabled();
     expect(screen.getAllByRole('option', { name: 'New thread' })).toHaveLength(1);
     expect(screen.getByRole('option', { name: 'New thread' })).toHaveValue('');
   });
@@ -499,8 +499,8 @@ describe('SessionSwitcher', () => {
     );
 
     await screen.findByRole('option', { name: /Landing page plan/ });
-    expect(screen.getByRole('button', { name: '+ New thread' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '+ New thread' }));
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onDraftSelect).toHaveBeenCalledWith(undefined);
     expect(onSessionIdChange).toHaveBeenCalledWith(undefined);
@@ -982,7 +982,7 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(values.indexOf('draft:2026-09-03-0031')).toBeLessThan(values.indexOf('s-sent'));
   });
 
-  it('files "+ Draft" under the open thread, not as a new thread starter', async () => {
+  it('files "Draft" under the open thread, not as a new thread starter', async () => {
     mockSessions([
       {
         id: 's-1',
@@ -1013,7 +1013,7 @@ describe('SessionSwitcher prompt drafts', () => {
         onDraftSelect={onDraftSelect}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '+ Draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New draft' }));
 
     // A second message in the conversation you are already in. Filing it as a
     // thread starter loses the address the user chose.
@@ -1031,7 +1031,7 @@ describe('SessionSwitcher prompt drafts', () => {
     );
   });
 
-  it('offers "+ Draft" only on a thread, where it means something different', async () => {
+  it('offers "Draft" only on a thread, where it means something different', async () => {
     mockSessions([]);
     mockDrafts({});
     const { rerender } = render(
@@ -1044,7 +1044,7 @@ describe('SessionSwitcher prompt drafts', () => {
       />,
     );
     // Off a thread it would mean what the picker's fresh-thread row means.
-    expect(screen.queryByRole('button', { name: '+ Draft' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New draft' })).toBeNull();
 
     mockSessions([
       {
@@ -1065,7 +1065,7 @@ describe('SessionSwitcher prompt drafts', () => {
         onDraftSelect={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: '+ Draft' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New draft' })).toBeInTheDocument();
   });
 
   it('removes a draft from its own row, wherever that row sits', async () => {

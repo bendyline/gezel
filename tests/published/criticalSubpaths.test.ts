@@ -103,6 +103,19 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
     usedBy:
       'the published Output Pane API v1 typing contract — gilde page authors and the UI relay import type { GezelPageApi } against the daemon-injected window.gezel shim (src/http/routes/page-api-shim.ts)',
   },
+  {
+    specifier: '@bendyline/gezel-sdk/portable',
+    from: 'script-runtime',
+    mode: 'import',
+    usedBy:
+      'src/index.ts ScriptInit contract and the SDK module embedded by portable runtime hosts',
+  },
+  {
+    specifier: '@bendyline/gezel-script-runtime/quickjs',
+    from: 'service',
+    mode: 'import',
+    usedBy: 'src/scripts/quickjs-worker.ts — the isolated portable script worker',
+  },
 ];
 
 /**

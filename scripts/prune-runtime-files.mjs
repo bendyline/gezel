@@ -47,9 +47,24 @@ export function isRuntimeDeclaration(relativePath) {
   );
 }
 
-/** Return `source-map`, `type-declaration`, or null for a deployed file. */
+/**
+ * Builds a deployed runtime never loads and must not carry.
+ *
+ * `kokoro-js` ships a browser bundle with eSpeak NG inlined. Node never
+ * resolves it: the package's exports map offers only the Node entry, and that
+ * one takes `phonemizer` as an ordinary dependency, which Gezel replaces with
+ * the stub in packages/phonemizer-compat. But an unpacked dependency tree
+ * copies every file in a package, and distributing the bytes is what GPL-3
+ * turns on, not loading them. Gezel is MIT and ships through app stores.
+ */
+export function isUndistributableBundlerBuild(relativePath) {
+  return /(?:^|\/)node_modules\/kokoro-js\/dist\/kokoro\.web\.js$/.test(slash(relativePath));
+}
+
+/** Return `source-map`, `type-declaration`, `bundler-only`, or null. */
 export function runtimePruneReason(relativePath) {
   const path = slash(relativePath).toLowerCase();
+  if (isUndistributableBundlerBuild(relativePath)) return 'bundler-only';
   if (SOURCE_MAP_SUFFIXES.some((suffix) => path.endsWith(suffix))) return 'source-map';
   if (
     DECLARATION_SUFFIXES.some((suffix) => path.endsWith(suffix)) &&
@@ -68,7 +83,7 @@ export function runtimePruneReason(relativePath) {
 export async function pruneRuntimeFiles(root, options = {}) {
   const dryRun = options.dryRun ?? false;
   const removed = [];
-  const byReason = { 'source-map': 0, 'type-declaration': 0 };
+  const byReason = { 'source-map': 0, 'type-declaration': 0, 'bundler-only': 0 };
   let bytes = 0;
   let emptyDirectories = 0;
 
@@ -123,7 +138,8 @@ export async function pruneRuntimeFilesWithReport(root, options = {}) {
   console.log(
     `[prune-runtime] removed ${result.removed.length} files ` +
       `(${result.byReason['source-map']} source maps, ` +
-      `${result.byReason['type-declaration']} declarations; ` +
+      `${result.byReason['type-declaration']} declarations, ` +
+      `${result.byReason['bundler-only']} undistributable bundler builds; ` +
       `${(result.bytes / 1048576).toFixed(1)} MB) and ` +
       `${result.emptyDirectories} empty directories`,
   );

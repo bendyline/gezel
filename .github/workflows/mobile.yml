@@ -1,0 +1,76 @@
+name: Mobile contracts
+
+on:
+  pull_request:
+    paths:
+      - 'packages/mobile/**'
+      - 'packages/capacitor/**'
+      - 'packages/app-sdk/**'
+      - 'packages/core/**'
+      - 'packages/gezk/**'
+      - 'packages/client/**'
+      - 'packages/sdk/**'
+      - 'packages/script-runtime/**'
+      - 'packages/script-stdlib/**'
+      - 'packages/ui/**'
+      - 'evals/src/mobile/**'
+      - 'evals/src/bin/mobile-run.ts'
+      - 'evals/src/scenarios/**'
+      - 'evals/src/fixed-rubric.ts'
+      - 'scripts/production-dependency-inventory.mjs'
+      - 'scripts/stage-third-party-licenses.mjs'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - '.github/actions/setup-workspace/**'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24'
+          pnpm-version: '11.15.1'
+      - name: Build portable app and check contracts
+        run: |
+          pnpm mobile:build
+          pnpm mobile:check
+      - name: Install browser test runtime
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const result = spawnSync('pnpm', ['--filter', '@bendyline/gezel-ui', 'exec', 'playwright', 'install', '--with-deps', 'chromium'], {
+              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
+            });
+            if (result.error) throw result.error;
+            process.exitCode = result.status ?? 1;
+          }, { command: 'Install the CI mobile browser test runtime' });
+          JS
+      - name: Check phone and tablet persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 4178 --bind 127.0.0.1 --directory packages/mobile/dist &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4178/ > /dev/null; then break; fi
+            sleep 1
+          done
+          pnpm mobile:smoke http://127.0.0.1:4178
+          pnpm mobile:test:files
+          pnpm mobile:test:scripts

@@ -1,14 +1,17 @@
 import type { GezelDetail, GezelGender, GezelSummary } from '@bendyline/gezel';
 import { pickRandomNameWithGender, pronounsForGender } from '@bendyline/gezel';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from '../components/CatalogBrowser.js';
 import { GezelActionsMenu } from '../components/GezelActionsMenu.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { LevelBadge } from '../components/LevelBadge.js';
 import { consumeCreate } from '../components/nav-intents.js';
+import { useCompactLayout } from '../components/useCompactLayout.js';
 import { Dialog, Tabs } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelDetail as GezelDetailView } from './GezelDetail.js';
+import './GezellenView.css';
 
 type NewGezelTab = 'scratch' | 'template';
 
@@ -19,6 +22,9 @@ export function GezellenView({
   activeProjectsByGezel?: ReadonlyMap<string, ReadonlySet<string>>;
   activeTurnsReady?: boolean;
 }) {
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const compact = useCompactLayout(layoutRef, 640);
+  const [showCompactDetail, setShowCompactDetail] = useState(false);
   const [agents, setAgents] = useState<GezelSummary[]>([]);
   const [meesterId, setMeesterId] = useState<string | undefined>(undefined);
   const [boringMode, setBoringMode] = useState(false);
@@ -137,6 +143,7 @@ export function GezellenView({
 
   const selectGezel = useCallback((id: string) => {
     setSelectedGezelId(id);
+    setShowCompactDetail(true);
   }, []);
 
   const openGezel = useCallback(
@@ -153,6 +160,7 @@ export function GezellenView({
 
   const kickOffBackgroundGeneration = useCallback(
     (gezel: GezelDetail, iconPrompt: string) => {
+      if (!runtimeCapabilities().imageGeneration) return;
       // Icon generation runs in the background; the detail tab (and the
       // sidebar row) pick up the new icon via `gezel:gezel-updated`.
       markGenerating(gezel.id, true);
@@ -205,7 +213,11 @@ export function GezellenView({
   );
 
   return (
-    <div className="two-col gezellen-view" data-testid="gezels-view">
+    <div
+      ref={layoutRef}
+      className={`two-col gezellen-view${compact ? ' gezellen-view-compact' : ''}`}
+      data-testid="gezels-view"
+    >
       <NewGezelDialog
         open={showCreate}
         onClose={() => setShowCreate(false)}
@@ -219,7 +231,7 @@ export function GezellenView({
           window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail: gezel }));
         }}
       />
-      <aside className="side gezels-side">
+      <aside className="side gezels-side" hidden={compact && showCompactDetail}>
         <div className="area-toolbar">
           <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
             + New Gezel
@@ -314,7 +326,16 @@ export function GezellenView({
         </ul>
         {error && <p className="error">{error}</p>}
       </aside>
-      <section>
+      <section hidden={compact && !showCompactDetail}>
+        {compact && (
+          <button
+            type="button"
+            className="gezellen-back"
+            onClick={() => setShowCompactDetail(false)}
+          >
+            Back to gezellen
+          </button>
+        )}
         {selectedGezelId ? (
           <GezelDetailView
             key={selectedGezelId}
@@ -367,19 +388,23 @@ function NewGezelDialog({
           <Tabs.Root value={tab} onValueChange={(v) => setTab(v as NewGezelTab)}>
             <Tabs.List>
               <Tabs.Trigger value="scratch">From scratch</Tabs.Trigger>
-              <Tabs.Trigger value="template">From template</Tabs.Trigger>
+              {runtimeCapabilities().catalog && (
+                <Tabs.Trigger value="template">From template</Tabs.Trigger>
+              )}
             </Tabs.List>
             <Tabs.Content value="scratch">
               <ScratchTab onCancel={onClose} onCreate={onCreate} />
             </Tabs.Content>
-            <Tabs.Content value="template">
-              <TemplateTab
-                busy={templateBusy}
-                setBusy={setTemplateBusy}
-                onCancel={onClose}
-                onCreated={onTemplateCreated}
-              />
-            </Tabs.Content>
+            {runtimeCapabilities().catalog && (
+              <Tabs.Content value="template">
+                <TemplateTab
+                  busy={templateBusy}
+                  setBusy={setTemplateBusy}
+                  onCancel={onClose}
+                  onCreated={onTemplateCreated}
+                />
+              </Tabs.Content>
+            )}
           </Tabs.Root>
         </Dialog.Content>
       </Dialog.Portal>
@@ -448,15 +473,17 @@ function ScratchTab({
           placeholder="e.g. Developer, Marketing"
         />
       </label>
-      <label>
-        Describe the icon <span className="muted">(optional)</span>
-        <textarea
-          value={iconPrompt}
-          onChange={(e) => setIconPrompt(e.target.value)}
-          placeholder="e.g. a playful owl wearing glasses, warm colors"
-          rows={3}
-        />
-      </label>
+      {runtimeCapabilities().imageGeneration && (
+        <label>
+          Describe the icon <span className="muted">(optional)</span>
+          <textarea
+            value={iconPrompt}
+            onChange={(e) => setIconPrompt(e.target.value)}
+            placeholder="e.g. a playful owl wearing glasses, warm colors"
+            rows={3}
+          />
+        </label>
+      )}
       <Dialog.Actions>
         <button type="button" onClick={onCancel}>
           Cancel

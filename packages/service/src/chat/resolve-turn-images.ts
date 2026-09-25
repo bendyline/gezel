@@ -67,6 +67,7 @@ export interface ResolveTurnImagesInput {
   mmprojPath?: string;
   visionEncoderPath?: string;
   nativeVisionEnabled?: boolean;
+  mlxVisionAvailable?: boolean;
   recognition?: RecognitionManager;
   mode: RecognitionMode;
   limits?: Partial<TurnImageLimits>;
@@ -122,6 +123,7 @@ export async function resolveTurnImages(
       ...(input.mmprojPath ? { mmprojPath: input.mmprojPath } : {}),
       ...(input.visionEncoderPath ? { visionEncoderPath: input.visionEncoderPath } : {}),
       ...(input.nativeVisionEnabled ? { nativeVisionEnabled: true } : {}),
+      ...(input.mlxVisionAvailable ? { mlxVisionAvailable: true } : {}),
     },
     { mode: input.mode, recognitionAvailable },
   );

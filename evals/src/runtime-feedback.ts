@@ -124,14 +124,17 @@ export async function postRuntimeFeedback(
     nudgeMemory.set(ctx, posted);
   }
   const fingerprint = fileContent !== undefined ? fingerprintContent(fileContent) : 'no-content';
-  const key = hashFailureSet(filePath, report, fingerprint);
+  // Same relative path in two projects is two files; they must not count
+  // each other's content as a fresh rewrite of one file.
+  const fileKey = options.projectId ? `${options.projectId}::${filePath}` : filePath;
+  const key = hashFailureSet(fileKey, report, fingerprint);
   if (posted.has(key)) return;
 
   // Count how many DISTINCT rewrites we've nudged about for the same
   // (filePath, failed-names) prefix. Escalation language kicks in
   // after 2 — "still failing after N rewrites; try a fundamentally
   // different approach" — to help the model break out of a loop.
-  const prefix = `${filePath}::${report.failed
+  const prefix = `${fileKey}::${report.failed
     .map((f) => f.name)
     .sort()
     .join(',')}::`;

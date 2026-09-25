@@ -1,5 +1,6 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { type ComponentPropsWithoutRef, type ElementRef, type ReactNode, forwardRef } from 'react';
+import { useDialogReturnFocus } from './useDialogReturnFocus.js';
 
 export const Root = RadixDialog.Root;
 export const Trigger = RadixDialog.Trigger;
@@ -25,11 +26,13 @@ Overlay.displayName = RadixDialog.Overlay.displayName;
 export const Content = forwardRef<
   ElementRef<typeof RadixDialog.Content>,
   ComponentPropsWithoutRef<typeof RadixDialog.Content>
->(function Content({ className, ...rest }, ref) {
+>(function Content({ className, onOpenAutoFocus, onCloseAutoFocus, ...rest }, ref) {
+  const focusHandlers = useDialogReturnFocus(onOpenAutoFocus, onCloseAutoFocus);
   return (
     <RadixDialog.Content
       {...rest}
       ref={ref}
+      {...focusHandlers}
       className={className ? `gz-dialog ${className}` : 'gz-dialog'}
     />
   );

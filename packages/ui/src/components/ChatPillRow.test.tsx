@@ -110,7 +110,6 @@ function renderRow(props: Partial<Parameters<typeof ChatPillRow>[0]> = {}) {
   const onFocusThread = vi.fn();
   const onFocusTask = vi.fn();
   const onFocusTerminal = vi.fn();
-  const onNewTask = vi.fn();
   const utils = render(
     <ChatPillRow
       projectId="p1"
@@ -118,11 +117,10 @@ function renderRow(props: Partial<Parameters<typeof ChatPillRow>[0]> = {}) {
       onFocusThread={onFocusThread}
       onFocusTask={onFocusTask}
       onFocusTerminal={onFocusTerminal}
-      onNewTask={onNewTask}
       {...props}
     />,
   );
-  return { ...utils, onFocusThread, onFocusTask, onFocusTerminal, onNewTask };
+  return { ...utils, onFocusThread, onFocusTask, onFocusTerminal };
 }
 
 beforeEach(() => {
@@ -134,15 +132,9 @@ beforeEach(() => {
 });
 
 describe('ChatPillRow', () => {
-  it('shows an empty state and still offers the Do + button', async () => {
+  it('shows an empty state and no task-creation key — that lives in the composer', async () => {
     renderRow();
     expect(await screen.findByText('No recent threads')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'New task' })).toHaveTextContent('Do +');
-  });
-
-  it('hides the Do + button when the surface cannot create tasks', async () => {
-    renderRow({ onNewTask: undefined });
-    await screen.findByText('No recent threads');
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
   });
 
@@ -289,7 +281,6 @@ describe('ChatPillRow', () => {
         activeSessionId="s-new"
         onFocusThread={row.onFocusThread}
         onFocusTask={row.onFocusTask}
-        onNewTask={row.onNewTask}
       />,
     );
 

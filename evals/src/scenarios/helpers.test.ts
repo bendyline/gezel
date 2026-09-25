@@ -4,6 +4,7 @@ import type { EvalContext } from '../types.ts';
 import {
   findNearMissDeliverable,
   findWorkspaceDeliverableNearMiss,
+  isScenarioWorkProject,
   pollHtmlSniff,
   provisionScenarioGezel,
   runtimeReportForGate,
@@ -327,6 +328,124 @@ describe('pollHtmlSniff', () => {
     expect(client.messageGezel.mock.calls[0]![1].text).not.toContain(
       'There is still **no `index.html`**',
     );
+  });
+});
+
+describe('shared documents library is never a scenario jobsite', () => {
+  const sharedLibrary = {
+    id: 'shared',
+    name: 'Shared',
+    properties: { 'gezel.sharedLibrary': '1' },
+  };
+
+  it('identifies the library by its marker, not its id', () => {
+    expect(isScenarioWorkProject(sharedLibrary)).toBe(false);
+    expect(isScenarioWorkProject({ ...sharedLibrary, id: 'shared-library' })).toBe(false);
+    // A user's own project that happens to slugify to `shared`.
+    expect(isScenarioWorkProject({ id: 'shared' })).toBe(true);
+    expect(isScenarioWorkProject({ id: 'default' })).toBe(false);
+    expect(isScenarioWorkProject({ id: 'pet-shop-website' })).toBe(true);
+  });
+
+  // INCIDENT (2026-09-23 smoke): with no HTML anywhere yet, the petshop scan
+  // nudged EVERY non-default project, the library included. The library's
+  // seeded `About this library.md` became a "wrong deliverable" near-miss,
+  // and every trial's developer then wrote index.html into the library.
+  it('does not scan or nudge the library when the deliverable is missing', async () => {
+    const listProjectWorkspace = vi.fn().mockImplementation((projectId: string) =>
+      Promise.resolve({
+        files:
+          projectId === 'shared'
+            ? [{ name: 'About this library.md', path: 'About this library.md', isDirectory: false }]
+            : [],
+      }),
+    );
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'default' }, sharedLibrary, { id: 'pet-shop-website' }],
+      }),
+      listProjectWorkspace,
+      listProjectArtifacts: vi.fn().mockResolvedValue({ files: [] }),
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [
+          {
+            id: 's1',
+            gezelId: 'dev-1',
+            projectId: 'pet-shop-website',
+            lastActivityAt: '2026-09-23T15:40:00Z',
+          },
+        ],
+      }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+    } as unknown as GezelClient & { messageGezel: ReturnType<typeof vi.fn> };
+    const ctx: EvalContext = {
+      client,
+      meesterId: 'meester-1',
+      log: () => {},
+      logChanged: () => {},
+    };
+
+    for (let poll = 0; poll < 3; poll++) {
+      await pollHtmlSniff({
+        ctx,
+        sniff: () => ({ ok: false, signals: [], score: 0 }),
+        getExtraContext: async () => undefined,
+        missingDeliverablePath: 'index.html',
+        missingDeliverableFeedback: { minPolls: 1 },
+      });
+    }
+
+    expect(listProjectWorkspace.mock.calls.map((call) => call[0])).not.toContain('shared');
+    expect(client.messageGezel).toHaveBeenCalled();
+    for (const call of client.messageGezel.mock.calls) {
+      expect(call[1].projectId).toBe('pet-shop-website');
+      expect(call[1].text).not.toContain('About this library.md');
+    }
+  });
+
+  it('neither grades nor repairs an index.html that landed in the library', async () => {
+    const sniff = vi.fn().mockReturnValue({
+      ok: false,
+      signals: ['structured-page'],
+      score: 1,
+      missingRequiredSignals: ['working-image'],
+    });
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'default' }, sharedLibrary, { id: 'pet-shop-website' }],
+      }),
+      listProjectWorkspace: vi.fn().mockResolvedValue({
+        files: [{ name: 'index.html', path: 'index.html', isDirectory: false }],
+      }),
+      listProjectArtifacts: vi.fn().mockResolvedValue({ files: [] }),
+      fetchProjectWorkspaceBlob: vi
+        .fn()
+        .mockImplementation((projectId: string) =>
+          Promise.resolve(new Blob([`<html><body>${projectId}</body></html>`])),
+        ),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+    } as unknown as GezelClient & { fetchProjectWorkspaceBlob: ReturnType<typeof vi.fn> };
+    const lines: string[] = [];
+    const ctx: EvalContext = {
+      client,
+      meesterId: 'meester-1',
+      log: () => {},
+      logChanged: (_key, line) => lines.push(line),
+    };
+
+    await pollHtmlSniff({
+      ctx,
+      sniff,
+      getExtraContext: async () => undefined,
+      missingDeliverablePath: 'index.html',
+    });
+
+    expect(sniff).toHaveBeenCalledTimes(1);
+    expect(client.fetchProjectWorkspaceBlob.mock.calls.map((call) => call[0])).toEqual([
+      'pet-shop-website',
+    ]);
+    expect(lines.join('\n')).not.toContain('shared/');
   });
 });
 

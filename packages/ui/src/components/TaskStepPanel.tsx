@@ -11,6 +11,7 @@ import { normalizeScriptRefs } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { MarkdownField } from './MarkdownField.js';
 import { StepAutomationRow, StepGateRow } from './StepAutomationRow.js';
 
@@ -70,6 +71,7 @@ export function TaskStepPanel({
 
   useEffect(() => {
     let cancelled = false;
+    if (!runtimeCapabilities().scripts || !runtimeCapabilities().taskStructureEditing) return;
     api
       .listProjectScripts(task.projectId)
       .then((res) => {
@@ -148,19 +150,21 @@ export function TaskStepPanel({
           </span>
         </div>
         <div className="task-step-panel-actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => void onActivate(phase.id)}
-            disabled={busy || isActive || isDone}
-            title={isActive ? 'This step is already active' : 'Make this the active step'}
-          >
-            Activate
-          </button>
+          {runtimeCapabilities().taskStructureEditing && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void onActivate(phase.id)}
+              disabled={busy || isActive || isDone}
+              title={isActive ? 'This step is already active' : 'Make this the active step'}
+            >
+              Activate
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void onComplete(phase.id)}
-            disabled={busy || isDone}
+            disabled={busy || isDone || (!runtimeCapabilities().taskStructureEditing && !isActive)}
             title={isDone ? 'Step already complete' : 'Mark this step complete'}
           >
             Complete
@@ -195,6 +199,7 @@ export function TaskStepPanel({
           <MarkdownField
             key={`desc-${phaseKey}`}
             value={phase.description ?? ''}
+            readOnly={!runtimeCapabilities().taskStructureEditing}
             placeholder="What this step produces, who it's for, what 'done' looks like."
             onCommit={(md) => {
               descDraft.current = md;
@@ -205,8 +210,12 @@ export function TaskStepPanel({
 
         <label className="task-step-field">
           <span className="task-step-field-label">Assignee</span>
-          <Select.Root value={assigneeValue} disabled={busy} onValueChange={onAssigneeChange}>
-            <Select.Trigger>
+          <Select.Root
+            value={assigneeValue}
+            disabled={busy || !runtimeCapabilities().taskStructureEditing}
+            onValueChange={onAssigneeChange}
+          >
+            <Select.Trigger aria-label="Step assignee">
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -229,6 +238,7 @@ export function TaskStepPanel({
           <MarkdownField
             key={`prompt-${phaseKey}`}
             value={phase.prompt ?? ''}
+            readOnly={!runtimeCapabilities().taskStructureEditing}
             placeholder="Step-specific guidance the team can lean on."
             onCommit={(md) => {
               promptDraft.current = md;
@@ -249,7 +259,7 @@ export function TaskStepPanel({
                 standard: standardScripts,
                 shared: sharedScripts,
               }}
-              busy={busy}
+              busy={busy || !runtimeCapabilities().taskStructureEditing}
               onChange={(refs) => onPatch(phase.id, { onEnter: refs })}
             />
             <StepGateRow
@@ -260,7 +270,7 @@ export function TaskStepPanel({
                 standard: standardScripts,
                 shared: sharedScripts,
               }}
-              busy={busy}
+              busy={busy || !runtimeCapabilities().taskStructureEditing}
               stepOptions={task.craftbook.steps.map((s) => ({ id: s.id, name: s.name }))}
               onChange={(gate) => onPatch(phase.id, { gate })}
             />
@@ -273,7 +283,7 @@ export function TaskStepPanel({
                 standard: standardScripts,
                 shared: sharedScripts,
               }}
-              busy={busy}
+              busy={busy || !runtimeCapabilities().taskStructureEditing}
               onChange={(refs) => onPatch(phase.id, { onExit: refs })}
             />
           </div>

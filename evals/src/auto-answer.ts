@@ -227,7 +227,7 @@ export function permissionToProceedAutoAnswerText(prompt: string): string | null
  * The auto-answerer addresses BOTH. Returns a stop function — call it on
  * trial teardown so the loop exits cleanly.
  */
-export function startAutoAnswerer(opts: {
+export type AutoAnswerOptions = {
   client: GezelClient;
   /** Meester id — needed to watch the front-door chat for inline questions. */
   meesterId: string;
@@ -235,19 +235,22 @@ export function startAutoAnswerer(opts: {
   pollIntervalMs?: number;
   /** Idle window before treating a meester `?`-ending message as a stuck question. */
   inlineIdleMs?: number;
+  /** Clock for the transcript host; packaged device timestamps may differ from this process. */
+  now?: () => number;
   /** Override the canned generic answer. */
   defaultAnswer?: string;
   /** Abort signal — stops the loop without needing the returned fn. */
   signal?: AbortSignal;
-}): () => Promise<void> {
-  const interval = opts.pollIntervalMs ?? 5_000;
+};
+
+/** One stateful poll, shared by daemon and packaged-native eval transports. */
+export function createAutoAnswerPoller(opts: AutoAnswerOptions): () => Promise<void> {
   const inlineIdleMs = opts.inlineIdleMs ?? 30_000;
   const defaultAnswer =
     opts.defaultAnswer ??
     'Use your best judgment — make the call you think fits this project best, document it in your reply, and proceed. Treat any open question as your call. No need to wait for further input.';
   const seenStructured = new Set<string>();
   let lastInlineRepliedToMessageAt: string | null = null;
-  let stopped = false;
 
   function messageText(content: unknown): string {
     if (typeof content === 'string') return content;
@@ -371,7 +374,7 @@ export function startAutoAnswerer(opts: {
 
     // Idle gate: only respond if the meester has been quiet long enough
     // that we're confident she's actually waiting (not still streaming).
-    const idleFor = Date.now() - new Date(last.at).getTime();
+    const idleFor = (opts.now?.() ?? Date.now()) - new Date(last.at).getTime();
     if (idleFor < inlineIdleMs) return;
 
     const repoSourceAnswer = repoSourceAutoAnswerText(text);
@@ -395,11 +398,20 @@ export function startAutoAnswerer(opts: {
     );
   }
 
+  return async () => {
+    await answerStructured();
+    await answerInline();
+  };
+}
+
+export function startAutoAnswerer(opts: AutoAnswerOptions): () => Promise<void> {
+  const interval = opts.pollIntervalMs ?? 5_000;
+  const poll = createAutoAnswerPoller(opts);
+  let stopped = false;
   async function run() {
     while (!stopped && !opts.signal?.aborted) {
       try {
-        await answerStructured();
-        await answerInline();
+        await poll();
       } catch (err) {
         opts.log(`[auto-answer] poll error: ${err instanceof Error ? err.message : String(err)}`);
       }

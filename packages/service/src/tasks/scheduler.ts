@@ -364,7 +364,16 @@ export class TaskScheduler {
     // can remain visible for days, and must not freeze every unrelated task
     // in the project. A long PR-review tuning run wild-caught this: old
     // paused-child cards suppressed re-drive for every child in the fresh run.
-    const unanswered = pendingQuestions.filter((q) => !q.answer && q.sessionId !== '').length;
+    // A question about ANOTHER task, or from another gezel's chat, parks
+    // nothing here. Counting every question in the project froze every
+    // Default task whenever the Meester's front-door chat asked the user
+    // something, and questions never expire.
+    const unanswered = pendingQuestions.filter(
+      (q) =>
+        !q.answer &&
+        q.sessionId !== '' &&
+        (q.taskRef ? q.taskRef === task.ref : q.gezelId === assignee),
+    ).length;
     if (unanswered > 0) {
       log.info(
         `[scheduler] ${task.ref}: skip re-drive — ${unanswered} unanswered user question(s) pending`,
@@ -379,7 +388,11 @@ export class TaskScheduler {
     // quiet. `landingPoisoned` mirrors the voorman-nudge guard: if the
     // session a re-nudge would land on aborted last turn, re-poking just
     // re-loops, so leave it for a user-driven turn.
-    const { taskSessionLastMs, landingPoisoned } = await this.assigneeSessionState(task, assignee);
+    const { taskSessionLastMs, landingPoisoned } = await this.assigneeSessionState(
+      task,
+      assignee,
+      step.id,
+    );
     const idleSinceMs = Math.max(stepActivityMs(step), taskSessionLastMs);
     if (idleSinceMs === 0) return; // nothing to measure against — don't act blind
     if (opts.nowMs - idleSinceMs < opts.stallMs) return; // not stale yet
@@ -481,12 +494,14 @@ export class TaskScheduler {
     // is transient, so the sweep retried it every tick forever.
     const project = await this.store.getProject(task.projectId);
     const sender = project?.voormanGezelId ?? opts.meesterGezelId;
-    if (!sender) return;
     const [senderId, assigneeId] = await Promise.all([
-      this.chat.resolveGezelIdRef(sender, task.projectId).catch(() => null),
+      sender ? this.chat.resolveGezelIdRef(sender, task.projectId).catch(() => null) : null,
       this.chat.resolveGezelIdRef(assignee, task.projectId).catch(() => null),
     ]);
-    if ((senderId ?? sender) === (assigneeId ?? assignee)) return;
+    // No one else to speak (the Meester owns a Default step, or a voorman
+    // owns their own): the runtime nudges the step itself. Returning here
+    // instead never counted the re-drive, so the step never escalated.
+    const selfOwned = (senderId ?? sender) === (assigneeId ?? assignee);
 
     // `requireChange` deliberately prevents the idle auto-advance above:
     // only a write observed during a model turn can clear that gate. The
@@ -503,28 +518,41 @@ export class TaskScheduler {
           .catch(() => false)
       : undefined;
 
-    await this.chat.messageGezel({
-      fromGezelId: sender,
-      toGezelIdOrName: assignee,
-      projectId: task.projectId,
-      text: terminalStep
-        ? stuckStepTerminalNudgeText(task, step)
-        : gateFrozen
-          ? stuckStepGateNudgeText(task, step)
-          : stuckStepNudgeText(task, step, deliverableExists),
-      // Resume the exact task-step thread. Without these fields the nudge
-      // falls into lobby chat and task tools lose their step-scoped env.
-      taskRef: task.ref,
-      stepId: step.id,
-      // This is runtime recovery, not a new delegation by the voorman.
-      // Keep success/failure in task history instead of starting a lobby
-      // conversation that can mistake another article for the stalled one.
-      suppressReply: true,
-      // Ambient re-drive — must yield to any user-driven turn on the same
-      // provider, like the voorman nudge.
-      lane: 'background',
-      ambient: true,
-    });
+    const text = terminalStep
+      ? stuckStepTerminalNudgeText(task, step)
+      : gateFrozen
+        ? stuckStepGateNudgeText(task, step)
+        : stuckStepNudgeText(task, step, deliverableExists);
+    if (selfOwned || !sender) {
+      await this.chat.nudgeTaskStep({
+        gezelId: assigneeId ?? assignee,
+        projectId: task.projectId,
+        taskRef: task.ref,
+        stepId: step.id,
+        text,
+        lane: 'background',
+        ambient: true,
+      });
+    } else {
+      await this.chat.messageGezel({
+        fromGezelId: sender,
+        toGezelIdOrName: assignee,
+        projectId: task.projectId,
+        text,
+        // Resume the exact task-step thread. Without these fields the nudge
+        // falls into lobby chat and task tools lose their step-scoped env.
+        taskRef: task.ref,
+        stepId: step.id,
+        // This is runtime recovery, not a new delegation by the voorman.
+        // Keep success/failure in task history instead of starting a lobby
+        // conversation that can mistake another article for the stalled one.
+        suppressReply: true,
+        // Ambient re-drive — must yield to any user-driven turn on the same
+        // provider, like the voorman nudge.
+        lane: 'background',
+        ambient: true,
+      });
+    }
     const newCount = await this.manager.recordStepRedrive(task.projectId, task.num, step.id);
     await this.store.historyManager?.log({
       kind: 'task.step.redriven',
@@ -618,13 +646,16 @@ export class TaskScheduler {
    * Inspect the assignee's sessions to decide staleness + poison:
    *   - `taskSessionLastMs` — latest activity across their non-archived
    *     sessions scoped to THIS task (0 if none exist yet).
-   *   - `landingPoisoned`   — whether the most-recent non-archived session
-   *     in this project (the one a re-nudge lands on via
-   *     `ensureOrCreateSession`) aborted its last turn.
+   *   - `landingPoisoned`   — whether the session a re-nudge lands on (this
+   *     task step's own thread, via `ensureOrCreateTaskSession`) aborted its
+   *     last turn. It used to be the assignee's latest session anywhere in
+   *     the project, so in Default an unrelated failed consultation paused a
+   *     healthy task.
    */
   private async assigneeSessionState(
     task: Task,
     assignee: string,
+    stepId: string,
   ): Promise<{ taskSessionLastMs: number; landingPoisoned: boolean }> {
     if (!this.store) return { taskSessionLastMs: 0, landingPoisoned: false };
     let sessions: ChatSessionSummary[] = [];
@@ -641,7 +672,7 @@ export class TaskScheduler {
       const t = Date.parse(s.lastActivityAt);
       const tm = Number.isFinite(t) ? t : 0;
       if (s.taskRef === task.ref && tm > taskSessionLastMs) taskSessionLastMs = tm;
-      if (s.projectId === task.projectId && tm > landingMs) {
+      if (s.taskRef === task.ref && s.stepId === stepId && tm > landingMs) {
         landingMs = tm;
         landingPoisoned = Boolean(s.lastTurnError);
       }

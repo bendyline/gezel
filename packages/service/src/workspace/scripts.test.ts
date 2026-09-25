@@ -52,6 +52,37 @@ async function seedBin(workspaceDir: string, name: string, body: string): Promis
 }
 
 describe('runPackageScript', () => {
+  it('forwards positional arguments, flags and an explicit separator exactly once through pnpm', async () => {
+    const p = await store.createProject({ name: 'p' });
+    const workspace = await seedWorkspace(p.id, { scripts: { argv: 'node argv.mjs' } });
+    await writeFile(
+      join(workspace, 'argv.mjs'),
+      'console.log(JSON.stringify(process.argv.slice(2)));\n',
+    );
+    const args = ['build', 'sample', '--size', 'large room', '--', '--literal'];
+    const input = {
+      store,
+      home,
+      projectId: p.id,
+      script: 'argv',
+      args,
+      gezelId: 'g',
+      sessionId: 's',
+    };
+    const pending = await runPackageScript(input);
+    const q = (await store.listProjectQuestions(p.id)).find((q) => q.id === pending.questionId);
+    if (q?.intent?.kind !== 'command-approval') throw new Error('Missing approval');
+    await applyCommandApprovalAnswer({
+      home,
+      projectId: p.id,
+      intent: q.intent,
+      answer: { selectedChoices: [0], at: new Date().toISOString() },
+    });
+    const result = await runPackageScript(input);
+    expect(result.ok, result.stderr).toBe(true);
+    expect(result.stdout).toContain(JSON.stringify(args));
+  });
+
   it('rejects scripts not in package.json with a helpful error', async () => {
     const p = await store.createProject({ name: 'p' });
     await seedWorkspace(p.id, { scripts: { build: 'echo ok' } });

@@ -48,7 +48,7 @@ if (existsSync(outputDir) && readdirSync(outputDir).some((file) => file.endsWith
 }
 mkdirSync(outputDir, { recursive: true });
 
-const sourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
+const sourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
 
 /**
  * The development values of the two constants `prepare-package.mjs` stamps.
@@ -93,9 +93,9 @@ const originalStamp = readStamp(originalSource);
 if (!isDevelopmentStamp(originalStamp)) {
   throw new Error(
     [
-      `packages/core/src/index.ts is not at its development baseline (${describeStamp(originalStamp)}).`,
+      `packages/core/src/browser.ts is not at its development baseline (${describeStamp(originalStamp)}).`,
       'A previous release or rehearsal left it stamped. Restore it before rehearsing:',
-      '  git checkout -- packages/core/src/index.ts && pnpm --filter @bendyline/gezel run build',
+      '  git checkout -- packages/core/src/browser.ts && pnpm --filter @bendyline/gezel run build',
     ].join('\n'),
   );
 }
@@ -175,7 +175,7 @@ try {
   if (!isDevelopmentStamp(restoredStamp)) {
     failed = true;
     console.error(
-      `rehearsal: packages/core/src/index.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/index.ts\` before committing`,
+      `rehearsal: packages/core/src/browser.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/browser.ts\` before committing`,
     );
   }
   let restore;

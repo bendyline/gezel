@@ -1,4 +1,4 @@
-import type { CraftbookTemplateManifest } from '@bendyline/gezel';
+import { type CraftbookTemplateManifest, isRuntimeTemplateDefault } from '@bendyline/gezel';
 
 /**
  * The bits of a craftbook manifest the launcher needs to render its
@@ -40,9 +40,7 @@ export function craftbookCommandName(m: CraftbookCommandManifest): string {
  */
 export function seedableParamDefault(def: { default?: unknown } | undefined): unknown {
   if (!def || def.default === undefined) return undefined;
-  if (typeof def.default === 'string' && /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/.test(def.default)) {
-    return undefined;
-  }
+  if (isRuntimeTemplateDefault(def.default)) return undefined;
   return def.default;
 }
 

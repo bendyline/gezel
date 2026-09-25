@@ -251,7 +251,7 @@ export function GezelChatTab({
             setSelectedProjectId(value);
           }}
         >
-          <Select.Trigger className="gezel-chat-project-select">
+          <Select.Trigger className="gezel-chat-project-select" aria-label="Project">
             <Select.Value />
           </Select.Trigger>
           <Select.Content>

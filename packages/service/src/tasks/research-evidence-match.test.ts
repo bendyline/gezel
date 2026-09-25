@@ -68,8 +68,28 @@ describe('isExactLocalSourceRead', () => {
     ).toBe(true);
   });
 
-  it('keeps the reader set to the two tools that actually open a source', () => {
-    expect([...EXACT_SOURCE_READ_TOOLS].sort()).toEqual(['read_doc_as_markdown', 'read_file']);
+  it('keeps the reader set to the tools that actually open a source', () => {
+    expect([...EXACT_SOURCE_READ_TOOLS].sort()).toEqual([
+      'read_artifact',
+      'read_doc_as_markdown',
+      'read_file',
+    ]);
+  });
+
+  it('counts a read of any file inside a source folder — a craftbook input', () => {
+    expect(
+      isExactLocalSourceRead(
+        { tool: 'read_artifact', path: 'tasks/7/inputs/source/ch1.md' },
+        'tasks/7/inputs/source',
+      ),
+    ).toBe(true);
+    expect(
+      isExactLocalSourceRead({ tool: 'read_files', paths: ['notes/part/ch2.md'] }, 'notes'),
+    ).toBe(true);
+    // A sibling whose name merely starts the same is not inside the folder.
+    expect(isExactLocalSourceRead({ tool: 'read_file', path: 'notes-old/ch1.md' }, 'notes')).toBe(
+      false,
+    );
   });
 });
 

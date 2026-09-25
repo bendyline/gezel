@@ -1,5 +1,5 @@
 import type { SuggestedWorkItem } from '@bendyline/gezel';
-import { paramProjectProperty } from '@bendyline/gezel';
+import { paramFormSchema, paramProjectProperty } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -257,10 +257,16 @@ function SuggestedWorkParamForm({
   onSubmit: (params: Record<string, string>) => void;
   onCancel: () => void;
 }) {
-  const schema = item.paramSchema as SquisqAnnotatedSchema | undefined;
+  const schema = useMemo(
+    () => paramFormSchema(item.paramSchema) as SquisqAnnotatedSchema | undefined,
+    [item.paramSchema],
+  );
   const [value, setValue] = useState<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
-    const props = (schema?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
+    const props = (item.paramSchema?.properties ?? {}) as Record<
+      string,
+      { default?: unknown } | undefined
+    >;
     for (const [key, def] of Object.entries(props)) {
       const propertyId = paramProjectProperty(def);
       const fromProperty = propertyId ? projectProperties?.[propertyId] : undefined;
@@ -312,8 +318,9 @@ function SuggestedWorkParamForm({
 }
 
 function hasParamFields(item: SuggestedWorkItem): boolean {
-  const props = (item.paramSchema as { properties?: Record<string, unknown> } | undefined)
-    ?.properties;
+  const props = (
+    paramFormSchema(item.paramSchema) as { properties?: Record<string, unknown> } | undefined
+  )?.properties;
   return Boolean(props && Object.keys(props).length > 0);
 }
 

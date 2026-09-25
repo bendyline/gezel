@@ -1,3 +1,4 @@
+import { errorToResponse } from '@bendyline/gezel/runtime';
 import {
   type UnexpectedHttpErrorHandler,
   notifyUnexpectedHttpError,
@@ -104,6 +105,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
+import { taskInputRoutes } from './routes/task-inputs.js';
 
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
@@ -281,6 +283,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   const scopedSessionRoutes = sessionRouteGuard({
     log: (m) => sessionRouteLog.warn(m),
     isProjectLinked,
+    isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
@@ -345,33 +348,29 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // exceptions are logged with a correlation id; their internal details are
   // never reflected to HTTP clients.
   app.onError((err, c) => {
-    if (err instanceof ZodError) {
-      const issues = err.issues
-        .map((iss) => {
-          const path = iss.path.length > 0 ? iss.path.join('.') : '(body)';
-          return `${path}: ${iss.message}`;
-        })
-        .join('; ');
-      return c.json({ error: issues }, 422);
-    }
     const requestId = randomUUID();
-    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    httpLog.error(
-      `[http] unhandled request error id=${requestId} method=${c.req.method} path=${c.req.path}: ${detail}`,
-    );
-    notifyUnexpectedHttpError(
-      options.onUnexpectedHttpError,
-      {
-        kind: 'unhandled_exception',
-        requestId,
-        method: c.req.method,
-        path: c.req.path,
-        status: 500,
-        detail,
-      },
-      httpLog,
-    );
-    return c.json({ error: 'internal_error', requestId }, 500);
+    // The shared mapper gives validation failures and typed errors their
+    // status on both hosts; on the network nothing else is reflected.
+    const reply = errorToResponse(err, { exposeUnknown: false, requestId });
+    if (reply.status === 500) {
+      const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      httpLog.error(
+        `[http] unhandled request error id=${requestId} method=${c.req.method} path=${c.req.path}: ${detail}`,
+      );
+      notifyUnexpectedHttpError(
+        options.onUnexpectedHttpError,
+        {
+          kind: 'unhandled_exception',
+          requestId,
+          method: c.req.method,
+          path: c.req.path,
+          status: 500,
+          detail,
+        },
+        httpLog,
+      );
+    }
+    return c.json(reply.body, reply.status as 422);
   });
 
   app.get('/api/health', (c) => {
@@ -485,6 +484,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*
+  // Before the task routes: `/tasks/input-preview` must not read as a task number.
+  app.route('/api/projects', taskInputRoutes(ctx));
   app.route('/api/projects', projectTaskRoutes(ctx));
   app.route('/api/projects', projectContinuationRoutes(ctx));
   app.route('/api/projects', scriptRoutes(ctx));

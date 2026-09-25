@@ -874,6 +874,18 @@
   gap: 0.5rem;
 }
 
+/* Knowledge catalog cards put the spec line above the license + Download row
+   so it spans the card instead of wrapping beside the button. */
+.catalog-knowledge-action {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.catalog-knowledge-action > .catalog-ollama-action {
+  align-items: center;
+}
+
 .catalog-ollama-meta {
   flex: 1;
   min-width: 0;

@@ -740,6 +740,10 @@ export function tuningMapFor(provider: ProviderName): TuningMap {
       return OPENAI_TUNING_MAP;
     case 'copilot':
       return COPILOT_TUNING_MAP;
+    case 'apple-foundation-models':
+    case 'android-mlkit':
+      // Native system providers expose no daemon sampling surface.
+      return {};
     case 'remote':
       // Remote inference applies its engine-specific tuning map on the SERVER
       // (Device B); A ships the ResolvedTuning verbatim on the wire and maps

@@ -2,7 +2,7 @@
 /**
  * Prepare one package after multi-semantic-release has computed its next
  * version: restore local dependency declarations to `workspace:*`, then stamp
- * the product version into `packages/core/src/index.ts` when preparing core.
+ * the product version into `packages/core/src/browser.ts` when preparing core.
  *
  * WHY THIS EXISTS: `GEZEL_VERSION` is a source constant, not a read of
  * `package.json`, because core is bundled for the browser too and cannot reach
@@ -101,7 +101,7 @@ if (!dryRun && dependencyChanges.length > 0)
 
 if (basename(packageDir) !== 'core') process.exit(0);
 
-const sourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
+const sourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
 const source = readFileSync(sourcePath, 'utf8');
 const pattern = /export const GEZEL_VERSION = '[^']*';/;
 const compatPattern = /export const GEZEL_CONTENT_COMPAT = '[^']*';/;
@@ -114,7 +114,7 @@ if (!pattern.test(source)) {
 // npm versions are semver and carry no date, but gilde's `minGezelVersion`
 // floors are authored as `1.YYDDD`. Stamp today's calendar line alongside the
 // published version so floors are compared on the axis they were written for;
-// see GEZEL_CONTENT_COMPAT in packages/core/src/index.ts.
+// see GEZEL_CONTENT_COMPAT in packages/core/src/browser.ts.
 if (!compatPattern.test(source)) {
   console.error(
     `prepare-package: could not find GEZEL_CONTENT_COMPAT declaration in ${sourcePath}`,

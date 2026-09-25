@@ -363,6 +363,18 @@
   cursor: not-allowed;
 }
 
+/* The Thread and Draft keys carry the same circled plus as the picker's New
+   thread row, so all three read as one kind of act. */
+.gezel-chat-session-btn-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.gezel-chat-session-btn-new svg {
+  flex-shrink: 0;
+}
+
 /* Count of open drafts on the active thread, appended to the Drafts key.
    Tabular so the key does not shift width as the count changes. */
 .gezel-chat-session-btn-count {
@@ -401,6 +413,10 @@
    only true circle in the menu, and the accent ink is what carries it —
    nothing here is a key or a chip, so it must not read as one. */
 .session-row-action {
+  /* Baseline alignment seats an SVG's bottom edge on the text baseline, which
+     leaves the circle riding above the label. Nothing else in this row needs
+     a shared baseline. */
+  align-items: center;
   gap: 0.4rem;
   color: var(--accent);
   font-weight: 500;

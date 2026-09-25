@@ -16,12 +16,9 @@ import {
   ChatManager,
   buildChatCodedFileNudge,
   buildContinuationNudge,
-  buildDeriveRepairClampNudge,
   buildFailedToolRecoveryNudge,
   buildProseDeliverableNudge,
   consultationIdleTimeoutMsForModel,
-  deriveRepairClampEnabled,
-  deriveRepairClampNudge,
   describeDelegateFailureForAsker,
   detectChatCodedFileWithoutWrite,
   detectProseDeliverableWithoutWrite,
@@ -201,7 +198,10 @@ describe('ChatManager — clamped first-turn context', () => {
       expect(admissionCalls).toBeGreaterThan(0);
       expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
       expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
-      expect(recalled?.toolAllowlist?.size).toBeLessThan(60);
+      // The diet caps at the curated Meester list (60 once the task-oversight
+      // kit joined it), well under the ~71-tool surface the floor sheds.
+      expect(recalled?.toolAllowlist?.size).toBeLessThan(64);
+      expect(recalled?.toolAllowlist?.has('manage_task')).toBe(true);
 
       const persisted = await testStore.getSession('imara', session.id);
       expect(persisted?.messages.map((message) => [message.role, message.content])).toEqual([
@@ -816,6 +816,34 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.warnings?.[0]).not.toMatch(/caller/i);
   }, 20_000);
 
+  // The scope guard asks this before letting a coordinator restart a task
+  // that paused for help: the user may, a model on its own may not.
+  it.each([
+    ['a typed message', undefined, true],
+    ['an answer to a question', { messageOrigin: 'question-answer' as const }, true],
+    ['a background nudge', { lane: 'background' as const, ambient: true }, false],
+    ['a system handoff', { messageOrigin: 'system' as const }, false],
+  ])(
+    'reports whether the in-flight turn is user-directed: %s',
+    async (_label, opts, expected) => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      expect(manager.isUserDirectedTurn(session.id)).toBe(false);
+      mock.scriptStreamThenHang('working on it');
+      const pending = manager.send(session.id, 'go', opts).catch(() => {});
+      await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+        timeout: 5000,
+        interval: 10,
+      });
+
+      expect(manager.isUserDirectedTurn(session.id)).toBe(expected);
+
+      await manager.cancelInflight(session.id);
+      await pending;
+      expect(manager.isUserDirectedTurn(session.id)).toBe(false);
+    },
+    20_000,
+  );
+
   it('scrubs reasoning markup off the turn-aborted message instead of baking it into content', async () => {
     // The salvaged buffer is RAW — the turn died before the provider's
     // end-of-turn reasoning extraction ran. Persisting it verbatim put
@@ -1349,8 +1377,6 @@ describe('ChatManager — task context', () => {
     // Regression: a gezel chatting in a project where they have
     // open tasks should see those tasks in the system prompt
     // instead of having to call `list_tasks` to discover them.
-    // The default project is excluded (no real work tracked
-    // there), so use a real project.
     const proj = await store.createProject({ name: 'Shop' });
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);
@@ -1413,13 +1439,23 @@ describe('ChatManager — task context', () => {
     expect(sys).not.toContain('### Tasks assigned to you in this project');
   });
 
-  it('does not inject assigned tasks for the default project', async () => {
+  // Craftbook work run through the Meester lands in Default, so its tasks
+  // are as real as any project's.
+  it('injects assigned tasks for the default project too', async () => {
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);
-    await taskMgr.create('default', {
-      title: 'Default-project busywork',
+    const task = await taskMgr.create('default', {
+      title: 'Pasta deck',
       assignee: { kind: 'gezel', gezelId: 'ada' },
       steps: [{ name: 'p1' }],
+    });
+    // Scheduled runs (the Meester's perpetual Night Shift oversight task
+    // lives in Default) are the scheduler's to start, not chat's.
+    await taskMgr.create('default', {
+      title: 'Night review',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [{ name: 'review' }],
+      nightShift: { enabled: true, onceADay: true },
     });
 
     const session = await manager.createSession({ gezelId: 'ada' });
@@ -1428,7 +1464,9 @@ describe('ChatManager — task context', () => {
 
     const create = mock.calls.find((c) => c.kind === 'create');
     const sys = create!.opts!.systemMessage;
-    expect(sys).not.toContain('### Tasks assigned to you in this project');
+    expect(sys).toContain('### Tasks assigned to you in this project (1)');
+    expect(sys).toContain(task.ref);
+    expect(sys).not.toContain('Night review');
   });
 
   it('injects lessons.md into the stable prefix, after the about body and before project context', async () => {
@@ -3676,6 +3714,52 @@ describe('ChatManager — sendWithMentions (@-mention fan-out)', () => {
       );
     });
 
+    it.each(['pending', 'answered', 'old', 'other-session'] as const)(
+      "yields recovery only for this turn's command approval: %s",
+      async (kind) => {
+        const session = await manager.createSession({ gezelId: 'ada' });
+        mock.scriptSendDelay(200);
+        mock.script('', 'The command returned successfully.', 'NONE', 'NONE');
+        const sending = manager.send(session.id, 'Run the project build.');
+        await vi.waitFor(
+          () => expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1),
+          { timeout: 5000, interval: 10 },
+        );
+        const internals = manager as unknown as {
+          currentTurnTools: Map<
+            string,
+            Array<{ name: string; durationMs: number; success: boolean }>
+          >;
+        };
+        internals.currentTurnTools.set(session.id, [
+          { name: 'run_package_script', durationMs: 1, success: true },
+        ]);
+        await store.writeQuestion({
+          id: 'build-approval',
+          projectId: 'default',
+          gezelId: 'ada',
+          sessionId: kind === 'other-session' ? 'another-session' : session.id,
+          prompt: 'Approve the build?',
+          choices: ['Approve', 'Decline'],
+          multiSelect: false,
+          createdAt: kind === 'old' ? '2020-01-01T00:00:00.000Z' : new Date().toISOString(),
+          intent: {
+            kind: 'command-approval',
+            scope: 'script',
+            name: 'build',
+            body: 'node build.mjs',
+          },
+          ...(kind === 'answered'
+            ? { answer: { selectedChoices: [0], at: new Date().toISOString() } }
+            : {}),
+        });
+        await sending;
+        expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(
+          kind === 'pending' || kind === 'answered' ? 1 : 2,
+        );
+      },
+    );
+
     it('drops session affinity on continuation re-acquires so queued siblings win FIFO', async () => {
       // Fix C: when the stall detector fires a continuation nudge,
       // the re-acquire should set `affinity: false` on the queue
@@ -5723,7 +5807,14 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const sys = create!.opts!.systemMessage!;
       expect(sys).toContain('`read_file`');
       expect(sys).toContain('`read_artifact`');
-      expect(sys).toContain('never invent refs from the project name');
+      // This used to assert the "never invent refs from the project name"
+      // clause. The prompt rework removed the sentence that carried it,
+      // deliberately: telling every session to call `read_task_notes({ ref })`
+      // sent medium models into a re-read loop hunting for a procedure that
+      // was never in the notes. The real ref is now stated directly in the
+      // prompt ("### Current task: <ref>"), so there is nothing to invent.
+      // What must still hold is that the curated task tool is named.
+      expect(sys).toContain('`read_task_notes`');
 
       // The uncurated tail IS trimmed now (161 → curated list) and under
       // `debugMode` the trim surfaces as a warning — the transparency half
@@ -7206,56 +7297,6 @@ describe('detectProseDeliverableWithoutWrite (L3)', () => {
     expect(nudge).toContain('report.md');
     expect(nudge).toContain('write_file');
     expect(nudge).toContain('write tool');
-  });
-});
-
-describe('deriveRepairClampNudge (L2, gated behind GEZEL_DERIVE_REPAIR_CLAMP)', () => {
-  const on = { GEZEL_DERIVE_REPAIR_CLAMP: '1' } as NodeJS.ProcessEnv;
-  const off = {} as NodeJS.ProcessEnv;
-  const verdict = 'The 3rd record has a total that does not match its line items.';
-
-  it('reads the enable flag (default OFF)', () => {
-    expect(deriveRepairClampEnabled(on)).toBe(true);
-    expect(deriveRepairClampEnabled(off)).toBe(false);
-  });
-
-  it('fires for a derived-data output path when the flag is ON', () => {
-    const nudge = deriveRepairClampNudge({ filePath: 'data/out.csv', failingVerdict: verdict }, on);
-    expect(nudge).not.toBeNull();
-    expect(nudge).toContain('derive_file');
-    expect(nudge).toContain('`data/out.csv`');
-    expect(nudge).toContain(verdict);
-    expect(nudge).toContain('hand-typing');
-  });
-
-  it('fires for a .json deliverable too', () => {
-    expect(
-      deriveRepairClampNudge({ filePath: 'result.json', failingVerdict: verdict }, on),
-    ).not.toBeNull();
-  });
-
-  it('does NOT fire when the flag is OFF (shipped behavior unchanged)', () => {
-    expect(
-      deriveRepairClampNudge({ filePath: 'data/out.csv', failingVerdict: verdict }, off),
-    ).toBeNull();
-  });
-
-  it('does NOT fire for a non-derived-data output path (e.g. a markdown report)', () => {
-    expect(
-      deriveRepairClampNudge({ filePath: 'report.md', failingVerdict: verdict }, on),
-    ).toBeNull();
-  });
-
-  it('does NOT fire when no output path is known', () => {
-    expect(deriveRepairClampNudge({ failingVerdict: verdict }, on)).toBeNull();
-  });
-
-  it('nudge leads with the failing verdict and points at the compute channel', () => {
-    const nudge = buildDeriveRepairClampNudge('x.ndjson', verdict);
-    expect(nudge.startsWith(verdict)).toBe(true);
-    expect(nudge).toContain('derive_file');
-    expect(nudge).toContain('`x.ndjson`');
-    expect(nudge).toContain('fs.readFileSync');
   });
 });
 

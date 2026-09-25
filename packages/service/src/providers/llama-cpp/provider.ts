@@ -86,7 +86,7 @@ import {
   stripXmlTagToolCallsFromText,
 } from '../local-tool-call-salvage.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
-import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
+import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type {
   NativeEngineExitSnapshot,
   NativeEngineLaunch,
@@ -98,6 +98,7 @@ import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { condensePresentedToolOutput } from './condense-presented-output.js';
 import { applyLlamaCppReasoningBudgetOverride } from './reasoning-launch.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
@@ -109,6 +110,11 @@ export {
 import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
 import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
+import {
+  type RequiredInput,
+  requiredInputsRead,
+  unreadRequiredInputs,
+} from '../required-input-reads.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import {
   TERMINAL_ACTION_SKIPPED_OUTPUT,
@@ -170,6 +176,7 @@ import {
   LOCAL_TURN_LIMITS,
   LocalTurnPolicy,
   compactLocalTurn,
+  isMissingRepairTargetOutput,
   mutationOnlyRepairTools as mutationOnlyScenarioRepairTools,
   patchOnlyRepairTools as patchOnlyExistingSourceEditTools,
   planFileTurn,
@@ -783,7 +790,16 @@ function appendDirectFileWorkRejectedWriteHint(output: string, path: string): st
   return `${output}\n\n[runtime] This \`write_file\` was rejected atomically: THE FILE WAS NOT WRITTEN by this call, and the rejected draft does not exist on disk. Retry \`${path}\` with one complete corrected \`write_file\` call. Do not read, append to, or patch the rejected draft.`;
 }
 
-function missingFileEditRecoveryPath(
+// The MCP edit tools read their target before patching it, and a 404 on that
+// read surfaces as the service's bare `not found` body, never the edit
+// endpoint's "file does not exist … use write_file" wording. schema-migration
+// (gemma4-31b, 2026-09-23) answered `replace_lines` on the missing test file
+// with exactly that, so the write_file create path never opened. Whole-output
+// match only: replace_in_file's anchor miss ("`find` string was not found in
+// …") names a file that exists and must stay a patch retry.
+const BARE_NOT_FOUND_EDIT_OUTPUT_RE = /^\s*(?:ERROR:\s*)?not found\.?\s*$/i;
+
+export function missingFileEditRecoveryPath(
   toolName: string,
   args: Record<string, unknown>,
   output: string,
@@ -792,7 +808,8 @@ function missingFileEditRecoveryPath(
   if (
     !/(?:\bENOENT\b|\bfile[- ]not[- ]found\b|\bfile does not exist\b|\bno such file\b)/i.test(
       output,
-    )
+    ) &&
+    !BARE_NOT_FOUND_EDIT_OUTPUT_RE.test(output)
   ) {
     return null;
   }
@@ -2474,6 +2491,18 @@ interface LlamaCppSessionDeps {
  */
 const MID_LOOP_COMPACT_RATIO = LOCAL_TURN_LIMITS.compactRatio;
 /**
+ * Tool-output headroom one in-turn condensation buys, as a share of the
+ * context window. Reclaiming only what the next result needed made every read
+ * in a long loop condense again, and each condensation rewrites an older
+ * message — which invalidates llama.cpp's cached prefix from that point and
+ * re-prefills the rest. Wild-caught on large-pr-review (2026-09-23): 16
+ * condensations in one turn, each followed by a 35–58k-token re-prefill, 28 of
+ * the turn's 39 prompt-processing minutes spent re-reading its own prompt. One
+ * condensation costs one re-prefill however much it reclaims, so reclaim room
+ * for several more results at once.
+ */
+const IN_TURN_CONDENSE_HEADROOM_RATIO = 0.3;
+/**
  * Minimum prior-message count required to bother running a one-shot
  * compaction. Below this the synthesis cost (a full LLM call on the
  * same model) outweighs the freed tokens. Aligned with the manager-
@@ -2520,6 +2549,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * outside an active turn.
    */
   private currentTurnStartIdx = 0;
+  /** Tool results may be condensed only after a successful model request
+   * has carried them. Several calls in one response must not erase an
+   * earlier result before the model has received it even once. */
+  private submittedToolResults = new WeakSet<ChatMessage>();
   /**
    * Per-turn guard: at most one mid-loop compaction per `sendAndWait`.
    * Prevents a runaway double-compaction loop if the synthesis itself
@@ -2673,6 +2706,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let total = 0;
     for (const m of this.messages) {
       if (typeof m.content === 'string') total += m.content.length;
+      total += (m.attachments?.length ?? 0) * 8192;
       if (m.tool_calls) {
         for (const tc of m.tool_calls)
           total += tc.function.arguments.length + tc.function.name.length;
@@ -2863,13 +2897,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * Returns the number of chars reclaimed (0 when there was nothing to
    * shrink, which is the honest "this layer can't help" signal).
    */
-  private condenseInTurnToolResults(): number {
+  private condenseInTurnToolResults(toolHeadroomChars?: number): number {
     const KEEP_INTACT = 2;
     const MIN_SHRINKABLE = 400;
     const FLOOR_CHARS = 200;
     const targetChars = Math.floor(this.deps.numCtx * MID_LOOP_COMPACT_RATIO * 4);
     let estimated = this.estimatePromptChars();
-    if (estimated <= targetChars) return 0;
+    const hasRoom = () =>
+      toolHeadroomChars === undefined
+        ? estimated <= targetChars
+        : computeToolBudgetChars(this.deps.numCtx, estimated) >= toolHeadroomChars;
+    if (hasRoom()) return 0;
 
     const shrinkable: number[] = [];
     for (let i = this.currentTurnStartIdx; i < this.messages.length; i++) {
@@ -2879,18 +2917,20 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       shrinkable.push(i);
     }
     // Newest results are load-bearing; drop them from the candidate set.
-    const candidates = shrinkable.slice(0, Math.max(0, shrinkable.length - KEEP_INTACT));
+    const candidates = shrinkable
+      .slice(0, Math.max(0, shrinkable.length - KEEP_INTACT))
+      .filter((idx) => this.submittedToolResults.has(this.messages[idx]!));
     if (candidates.length === 0) return 0;
 
     let reclaimed = 0;
     for (const idx of candidates) {
-      if (estimated <= targetChars) break;
+      if (hasRoom()) break;
       const m = this.messages[idx]!;
       const before = (m.content as string).length;
-      // capToolOutput keeps head+tail and stamps a visible truncation
-      // footer, so the model can tell "this was long" from "this was
-      // empty" — the same contract the bridge applies on the way in.
-      const condensed = capToolOutput(m.content as string, FLOOR_CHARS);
+      // This response was already presented. A delivery-cutoff footer would
+      // tell the model to reread it, creating a read/condense/reread loop.
+      // Keep context shortening distinct from an initially incomplete read.
+      const condensed = condensePresentedToolOutput(m.content as string, FLOOR_CHARS);
       if (condensed.length >= before) continue;
       m.content = condensed;
       const saved = before - condensed.length;
@@ -2906,6 +2946,27 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       );
     }
     return reclaimed;
+  }
+
+  /** The adaptive tool cap can run out well before the engine overflows.
+   * Waiting for an HTTP overflow leaves every subsequent read at the 500-char
+   * floor. Reclaim older observations before the next request, preserving the
+   * newest two and all user/assistant messages as in overflow recovery. */
+  private async makeRoomForToolResults(resultChars?: number): Promise<void> {
+    const minimum =
+      resultChars ?? Math.min(8_000, Math.max(500, Math.floor(this.deps.numCtx * 0.1 * 2.8)));
+    if (computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()) >= minimum) return;
+    await this.maybeCompactMidLoop({ force: true });
+    if (computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()) >= minimum) return;
+    const needed = resultChars === undefined ? minimum * 2 : minimum;
+    this.condenseInTurnToolResults(
+      Math.max(needed, Math.floor(this.deps.numCtx * IN_TURN_CONDENSE_HEADROOM_RATIO * 2.8)),
+    );
+  }
+
+  private async prepareToolOutputBudget(resultChars: number): Promise<number> {
+    await this.makeRoomForToolResults(resultChars);
+    return computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars());
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
@@ -3074,12 +3135,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let directFileWorkMutationSucceeded = false;
     let scenarioRepairNoMutationNudges = 0;
     let scenarioRepairReadOnlyCalls = 0;
+    const requiredInputReads: RequiredInput[] = [];
+    let requiredInputHoldLogged = false;
     const prerequisiteRepairReadPaths =
       opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
         ? opts.fileTurnIntent.readPaths.map(normalizeWorkspacePathForCompare)
         : extractPrerequisiteRepairReadPaths(prompt);
     let prerequisiteRepairNoProgressNudges = 0;
     let scenarioRepairFailedMutationCalls = 0;
+    let scenarioRepairMissingTargetCalls = 0;
     let scenarioRepairDiagnosticReadRetryPending = false;
     const scenarioRepairReadFilePaths: string[] = [];
     let existingSourceEditNoMutationNudges = 0;
@@ -3101,6 +3165,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let directFileWorkScriptHelperFailedContent: string | null = null;
     let directFileWorkRejectedWritePath: string | null = null;
     let missingFileCreatePath: string | null = null;
+    // One widened resend per send after llama-server discards a whole
+    // generation that named a roster tool the narrowed wire surface left out.
+    // See `isLlamaServerOutputFormatRejection`.
+    let wireSurfaceWidenedAfterRejection = false;
+    let widenNextWireSurface = false;
     const directFileWorkReadFilePaths: string[] = [];
     // Whether any earlier iteration of THIS turn fired an action tool —
     // drives `foldPostActionRumination` on later reply-only iterations
@@ -3134,6 +3203,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // the session's exact post-clamp roster is more accurate here than
         // the manager's earlier boundary estimate.
         await this.maybeCompactMidLoop();
+        if (tools?.length) await this.makeRoomForToolResults();
 
         const engineRequestLabel = `${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)}#${turn}`;
         if (budget.expired()) throw turnTimeoutError();
@@ -3243,7 +3313,22 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const immediateFileWriteTurn = fileTurnPlan.kind === 'create-file';
+        const unreadInputs = unreadRequiredInputs(
+          this.deps.activeCraftbookStep?.requiredInputs,
+          requiredInputReads,
+        );
+        const immediateFileWriteTurn =
+          fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
+        if (
+          fileTurnPlan.kind === 'create-file' &&
+          unreadInputs.length > 0 &&
+          !requiredInputHoldLogged
+        ) {
+          requiredInputHoldLogged = true;
+          log.info(
+            `[llama-cpp] turn ${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+          );
+        }
         const immediateFileWriteTarget = immediateFileWriteTurn
           ? (opts?.fileTurnIntent?.path ?? extractDirectFileWorkTargetPath(prompt))
           : null;
@@ -3343,10 +3428,16 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             : hasExplicitFullFileRewriteWording(prompt));
         const fullRewriteScenarioRepairTurn =
           sourceFileScenarioRepairTurn && explicitFullRewriteScenarioRepairTurn;
+        // A confirmed-missing target flips to the rewrite surface on the FIRST
+        // sighting, not the second: the patch surface cannot create a file, so
+        // a second read of a path that is not there teaches nothing the first
+        // did not. See `isMissingRepairTargetOutput`.
         const sourceRewriteFallback =
           sourceFileScenarioRepairTurn &&
           !fullRewriteScenarioRepairTurn &&
-          (scenarioRepairNoMutationNudges >= 2 || scenarioRepairFailedMutationCalls >= 2);
+          (scenarioRepairNoMutationNudges >= 2 ||
+            scenarioRepairFailedMutationCalls >= 2 ||
+            scenarioRepairMissingTargetCalls >= 1);
         const existingSourceRewriteFallback =
           existingSourceEditTurn &&
           (existingSourceEditNoMutationNudges >= 2 || existingSourceEditFailedMutationCalls >= 2);
@@ -3367,8 +3458,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 scenarioRepairReadFilePaths.at(-1) ??
                 null)
               : null;
+        // Never demand a refresh read of a target we already know is absent:
+        // this branch pins a read_file-ONLY surface and orders the model to
+        // emit exactly that call, so on a missing path it re-enters the same
+        // dead end with fewer tools than before.
         const sourceRewriteRefreshReadPending =
           sourceRewriteFallback &&
+          scenarioRepairMissingTargetCalls === 0 &&
+          missingFileCreatePath === null &&
           scenarioRepairWriteTarget !== null &&
           !scenarioRepairReadFilePaths.some(
             (path) =>
@@ -3913,6 +4010,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   ? [scenarioRepairWriteTarget]
                   : null,
           });
+        }
+        if (widenNextWireSurface) {
+          widenNextWireSurface = false;
+          const widened = widenWireToolSurface(requestTools, tools);
+          if (widened) {
+            requestTools = widened;
+            log.debug(
+              `[llama-cpp] engine-rejection resend wire surface: ${widened
+                .map((tool) => chatCompletionToolName(tool))
+                .join(',')}`,
+            );
+          }
         }
         if (requestTools && requestTools.length > 0) body.tools = requestTools;
         // Write-continuation: surface append_to_file so the model can
@@ -4591,6 +4700,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           );
         }
 
+        for (const message of this.messages) {
+          if (message.role === 'tool') this.submittedToolResults.add(message);
+        }
+
         // Engine is up — the /v1/chat/completions response is open, so
         // we're past model-load and waiting for the first token. Only
         // emit `prefill` on the first tool-loop iteration; subsequent
@@ -4614,6 +4727,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // max_tokens rather than accidentally reusing a prior iteration.
         let iterationUsage: { prompt_tokens: number; completion_tokens: number } | null = null;
         let finishReason: string | null = null;
+        let engineStreamError: string | null = null;
         const toolCallAccumulator = new ToolCallAccumulator();
         // Code-block salvage accumulator. When the ramble detector
         // aborts with NO recognizable tool-call markup but the buffered
@@ -4693,6 +4807,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             if (isSseComment(event)) {
               this.emitWirePulse();
               continue;
+            }
+            const streamError = llamaServerStreamErrorMessage(event);
+            if (streamError !== null) {
+              engineStreamError = streamError;
+              break;
             }
             const chunk = event as ChatCompletionChunk;
             const choice = chunk.choices?.[0];
@@ -5228,6 +5347,39 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           this.deps.markUsed();
         }
 
+        if (engineStreamError !== null) {
+          // When nothing reached us, no salvage layer has bytes to work on:
+          // the only recovery is to regenerate on a surface the engine's
+          // parser accepts. Wild-caught on gemma4-31b / schema-migration: a
+          // read_file-only refresh surface, a complete, correct `write_file`
+          // for the missing test file, and all 4096 tokens discarded three
+          // turns running while the provider reported "no mutation".
+          const wholeGenerationDropped =
+            turnContent.trim().length === 0 && !sawStructuredToolSignal;
+          const widened =
+            wholeGenerationDropped &&
+            !wireSurfaceWidenedAfterRejection &&
+            isLlamaServerOutputFormatRejection(engineStreamError)
+              ? widenWireToolSurface(requestTools, tools)
+              : null;
+          if (widened && this.turnPolicy.retry('malformed', 'engine-output-format-rejected')) {
+            wireSurfaceWidenedAfterRejection = true;
+            widenNextWireSurface = true;
+            log.warn(
+              `[llama-cpp] llama-server discarded the whole generation (${engineStreamError}) on a narrowed tool surface [${
+                requestTools?.map((tool) => chatCompletionToolName(tool)).join(',') ?? ''
+              }]; resending once with the turn's full tool surface`,
+            );
+            continue;
+          }
+          log.warn(`[llama-cpp] llama-server stream error: ${engineStreamError}`);
+          if (wholeGenerationDropped) {
+            this.emitWarning(
+              "The on-device engine rejected the model's output as unparseable and discarded it, so nothing from that attempt could be used.",
+            );
+          }
+        }
+
         let toolCalls = toolCallAccumulator.finalize();
         // Merge any code-block salvage synthesized in the ramble-abort
         // path above. It only populates when no structured calls fired,
@@ -5552,6 +5704,21 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               envelopeSalvaged,
               envelopeTruncated?.matchStart,
             );
+          }
+          // Repair and immediate-write surfaces ask for exactly one call and
+          // end the turn once a mutation lands so validation can run. A
+          // second recovered call was composed after the model had already
+          // finished — gemma4-31b wrote the test file, then "**Wait**, I
+          // still need MIGRATION.md" — so it would skip that validation and
+          // is the likeliest to be cut off.
+          if (toolCalls.length > 1 && (scenarioFileRepairTurn || immediateFileWriteTurn)) {
+            log.info(
+              `[llama-cpp] single-call surface: executing the first of ${toolCalls.length} salvaged calls; dropped ${toolCalls
+                .slice(1)
+                .map((call) => call.function.name)
+                .join(', ')}`,
+            );
+            toolCalls = toolCalls.slice(0, 1);
           }
           // Hide unrecognized-name JSON envelopes from the bubble too
           // — the next loop iteration (when the corrective nudge is
@@ -5965,6 +6132,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         });
         let abortDueToFailureLoop: ToolFailureLoop | null = null;
         let terminalActionClosing: string | null = null;
+        const toolImages: ImageAttachment[] = [];
         const immediateFileWritePaths: string[] = [];
         const immediatePartialWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
@@ -6065,6 +6233,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 .callTool(call.function.name, args, {
                   budgetChars: computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()),
                   numCtxTokens: this.deps.numCtx,
+                  prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
                 })
                 .catch((err) => `ERROR: ${err instanceof Error ? err.message : String(err)}`));
           } else if (constrainedRunNodeScriptTarget) {
@@ -6074,8 +6243,13 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 .callTool(call.function.name, args, {
                   budgetChars: computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()),
                   numCtxTokens: this.deps.numCtx,
+                  prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
                 })
                 .catch((err) => `ERROR: ${err instanceof Error ? err.message : String(err)}`));
+          } else if (call.function.name === 'read_image_as_base64' && !this.deps.visionEnabled) {
+            // Do not record a successful image read when pixels cannot reach the model.
+            output =
+              'ERROR: Image inspection requires a loaded vision projector. No image was delivered; do not claim visual observations.';
           } else if (this.deps.bridges.hasTool(call.function.name)) {
             try {
               // Adaptive cap: compute how many chars of tool output
@@ -6094,6 +6268,19 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               output = await this.deps.bridges.callTool(call.function.name, args, {
                 budgetChars,
                 numCtxTokens: this.deps.numCtx,
+                prepareOutputBudget: (chars) => this.prepareToolOutputBudget(chars),
+                onApprovalPending: () => {
+                  askedQuestionThisTurn = true;
+                },
+                onImages: (images) => {
+                  if (this.deps.visionEnabled)
+                    toolImages.push(
+                      ...images.map((image, index) => ({
+                        ...image,
+                        filename: `${call.id}-${index}`,
+                      })),
+                    );
+                },
               });
             } catch (err) {
               output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
@@ -6245,6 +6432,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             log.warn(
               `[llama-cpp] direct-file-work helper execution failed; forcing helper rewrite path=${DIRECT_FILE_WORK_SCRIPT_HELPER_PATH}`,
             );
+          }
+          if (scenarioFileRepairTurn && isMissingRepairTargetOutput(call.function.name, output)) {
+            scenarioRepairMissingTargetCalls += 1;
           }
           if (
             scenarioFileRepairTurn &&
@@ -6401,6 +6591,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               );
             }
           }
+          requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           const tracked = failureTracker.recordResult(call.function.name, output);
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,
@@ -6476,7 +6667,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             });
           }
         }
-        // Terminal: the model asked the user a question. The card is now in
+        if (toolImages.length)
+          this.messages.push({
+            role: 'user',
+            content:
+              'Images returned by the preceding tools. Inspect the pixels before judging them.',
+            attachments: toolImages,
+          });
+        // Terminal: a tool posted a question or command approval. Its card is in
         // front of the user, the question is registered, and its answer
         // arrives as the NEXT user message (the questions-route contract).
         // End the turn HERE rather than issue another generation request —
@@ -6488,7 +6686,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // mutation-landed early-returns below.
         if (askedQuestionThisTurn) {
           log.info(
-            '[llama-cpp] ask_user_question posted; ending turn (answer arrives as the next message)',
+            '[llama-cpp] question or command approval posted; ending turn (answer arrives as the next message)',
           );
           if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
             const durationMs = Date.now() - start;
@@ -7010,6 +7208,54 @@ export function tryParseToolCallParseError(body: string): { partial: string } | 
   }
 }
 
+/**
+ * llama-server reports a failure that happens after the SSE headers went out
+ * as one final `data: {"error":{…}}` frame and then closes the stream — no
+ * `choices`, no `[DONE]`. Returns that frame's message, else null.
+ *
+ * The frame that matters is the chat-format parser rejecting a FINISHED
+ * generation (see {@link isLlamaServerOutputFormatRejection}). The stream
+ * pump used to skip it as a chunk with no `choices`, so a turn whose output
+ * the engine threw away looked exactly like a model that said nothing.
+ */
+export function llamaServerStreamErrorMessage(event: unknown): string | null {
+  if (typeof event !== 'object' || event === null || !('error' in event)) return null;
+  const error = (event as { error?: unknown }).error;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' && message.length > 0 ? message : 'unknown stream error';
+  }
+  return null;
+}
+
+/**
+ * llama-server's final (non-partial) chat parse THROWS when the generation
+ * does not fit the format's PEG grammar — "The model produced output that
+ * does not match the expected peg-gemma4 format" — and the generated text is
+ * never sent: partial parses of the same prefix produced no deltas, so the
+ * client receives nothing but this error. The peg-gemma4 grammar's tool-name
+ * alternation is built from the request's `tools`, so a well-formed call to a
+ * roster tool the turn left off the wire is rejected wholesale.
+ */
+export function isLlamaServerOutputFormatRejection(message: string): boolean {
+  return /does not match the expected \S+ format/i.test(message);
+}
+
+/**
+ * The wire surface plus every tool of the turn's full surface it withheld, or
+ * null when it withheld nothing (widening would resend the same request).
+ */
+export function widenWireToolSurface<T extends { function: { name: string } }>(
+  wire: readonly T[] | undefined,
+  full: readonly T[] | undefined,
+): T[] | null {
+  if (!wire || !full) return null;
+  const onWire = new Set(wire.map((tool) => tool.function.name));
+  const withheld = full.filter((tool) => !onWire.has(tool.function.name));
+  return withheld.length > 0 ? [...wire, ...withheld] : null;
+}
+
 export function tryParseStrictAlternationTemplateError(body: string): boolean {
   if (body.includes('Conversation roles must alternate user/assistant')) return true;
   try {
@@ -7077,6 +7323,8 @@ export function tryParseContextOverflow(
 }
 
 interface ChatCompletionChunk {
+  /** In-stream failure frame; see {@link llamaServerStreamErrorMessage}. */
+  error?: { message?: string; code?: number; type?: string } | string;
   choices?: Array<{
     index: number;
     delta: {

@@ -1,6 +1,11 @@
 import { createLogger } from '@bendyline/gezel';
 import { TOOL_REGISTRY, canonicalToolName } from '@bendyline/gezel-mcp';
-import { type AnthropicTool, McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
+import {
+  type AnthropicTool,
+  McpBridge,
+  type OpenAIFunctionTool,
+  type ToolOutputBudgetOptions,
+} from './mcp-bridge.js';
 import type { SessionOpts } from './types.js';
 import { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
@@ -250,7 +255,7 @@ export class McpBridgePool {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<string> {
     const resolved = this.resolveBridgeTool(name);
     if (resolved && !this.isCallableByModel(resolved.name)) {
@@ -263,11 +268,12 @@ export class McpBridgePool {
   async callToolRich(
     name: string,
     args: Record<string, unknown>,
-    opts?: { budgetChars?: number; numCtxTokens?: number },
+    opts?: ToolOutputBudgetOptions,
   ): Promise<{
     text: string;
     images: Array<{ base64: string; mimeType: string }>;
     isError: boolean;
+    approvalPending?: boolean;
   }> {
     const resolved = this.resolveBridgeTool(name);
     if (resolved && !this.isCallableByModel(resolved.name)) {
