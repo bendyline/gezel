@@ -44,6 +44,37 @@ export function requiredInputsRead(
   return [];
 }
 
+const READ_VERB = /\b(?:read|open)\b/i;
+const WRITE_VERB = /\b(?:write|create|produce|save|update|generate|draft|build)\b/i;
+const NEGATED_READ = /\b(?:do not|don't|never|no need to)\s+(?:read|open)\b/i;
+const QUOTED_FILE = /`([^`\s]+\.[A-Za-z0-9]+)`/g;
+
+/**
+ * Files a prompt explicitly asks to read ("Read `a.md`, `b.md`, and the
+ * stale `c.md`."), held like a step's declared inputs: "read these, then
+ * write it now" means now AFTER reading. Only the stretch between a read verb
+ * and the next write verb in a sentence counts, so the write target is never
+ * mistaken for an input. Wild-caught 2026-09-25: meeting-followup's kickoff
+ * ends "Write both files now.", the urgent-write pattern fired on turn 0, and
+ * qwen3.8-27b wrote the brief without opening the transcript (4/13, then a
+ * repair plateau); the same prompt passed 3/3 first-shot on 2026-08-27.
+ */
+export function promptReadInputs(prompt: string): RequiredInput[] {
+  const inputs = new Map<string, RequiredInput>();
+  for (const sentence of prompt.split(/(?<=[.!?])\s+/)) {
+    const readAt = sentence.search(READ_VERB);
+    if (readAt < 0 || NEGATED_READ.test(sentence)) continue;
+    const rest = sentence.slice(readAt + 1);
+    const writeAt = rest.search(WRITE_VERB);
+    const span = writeAt < 0 ? rest : rest.slice(0, writeAt);
+    for (const match of span.matchAll(QUOTED_FILE)) {
+      const path = normalizeWorkspacePathForCompare(match[1]!);
+      inputs.set(path, { path, artifact: false });
+    }
+  }
+  return [...inputs.values()];
+}
+
 export function unreadRequiredInputs(
   required: ReadonlyArray<RequiredInput> | undefined,
   read: ReadonlyArray<RequiredInput>,

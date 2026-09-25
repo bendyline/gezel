@@ -102,6 +102,7 @@ import { RambleDetector } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
   type RequiredInput,
+  promptReadInputs,
   requiredInputsRead,
   unreadRequiredInputs,
 } from '../required-input-reads.js';
@@ -1379,6 +1380,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     let repairReadCalls = 0;
     const repairReadPaths: string[] = [];
     const requiredInputReads: RequiredInput[] = [];
+    const requiredInputs = [
+      ...(this.deps.activeCraftbookStep?.requiredInputs ?? []),
+      ...promptReadInputs(prompt),
+    ];
     let requiredInputHoldLogged = false;
     let repairFailedMutations = 0;
     let repairMutationSucceeded = false;
@@ -1557,10 +1562,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // constrained turns narrow it below.
         let requestTools = tools;
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const unreadInputs = unreadRequiredInputs(
-          this.deps.activeCraftbookStep?.requiredInputs,
-          requiredInputReads,
-        );
+        const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
         const immediateFileWriteTurn =
           fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
         if (
@@ -1570,7 +1572,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           requiredInputHoldLogged = true;
           log.info(
-            `turn#${seq}.${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+            `turn#${seq}.${turn} immediate-write held: input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
           );
         }
         const fileRepairTurn = fileTurnPlan.kind === 'repair-file';

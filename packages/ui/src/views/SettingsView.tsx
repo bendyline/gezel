@@ -4,8 +4,10 @@ import {
   type HealthResponse,
   type ProviderName,
   displayName,
+  isLocalProvider,
   isOllamaReasoningModel,
   normalizeCodexPermissionMode,
+  resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import type {
   ConfigResponse,
@@ -35,7 +37,13 @@ import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
+import {
+  type EngagementMode,
+  EngagementModePanel,
+  type WorkshopTempo,
+} from './EngagementModePanel.js';
 import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
@@ -294,6 +302,21 @@ function clampPercent(value: string, fallback: number): number {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(100, Math.max(0, n));
 }
+
+/**
+ * The provider tabs that only exist to configure an *external* chat provider.
+ * Hidden wholesale when the security posture forbids external chat — the
+ * daemon refuses to construct these providers, so their sign-in flows and
+ * permission modes configure nothing. Local engines (llama.cpp / MLX / ds4 /
+ * Ollama) are always permitted and never appear here.
+ */
+const EXTERNAL_CHAT_SECTIONS: ReadonlySet<SectionId> = new Set<SectionId>([
+  'copilot',
+  'openai',
+  'codexCli',
+  'anthropic',
+  'anthropicCli',
+]);
 
 function buildSections(platform: string | undefined): SettingsSection[] {
   return [
@@ -1282,35 +1305,29 @@ function DaemonSettingsView() {
     }
   }, []);
 
-  const saveEngagementMode = useCallback(
-    async (mode: 'proactive' | 'scheduled' | 'reactive' | 'off') => {
-      setStatus('saving…');
-      try {
-        const res = await api.updateConfig({ aiEngagementMode: mode });
-        setConfig(res);
-        setStatus(`AI engagement: ${mode}`);
-        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      } catch (err) {
-        setStatus(`save failed: ${(err as Error).message}`);
-      }
-    },
-    [],
-  );
+  const saveEngagementMode = useCallback(async (mode: EngagementMode) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ aiEngagementMode: mode });
+      setConfig(res);
+      setStatus(`AI engagement: ${mode}`);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
 
-  const saveWorkshopTempo = useCallback(
-    async (tempo: 'gezellig' | 'bedrijvig' | 'druk' | 'dolle-boel') => {
-      setStatus('saving…');
-      try {
-        const res = await api.updateConfig({ workshopTempo: tempo });
-        setConfig(res);
-        setStatus(`tempo: ${tempo}`);
-        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      } catch (err) {
-        setStatus(`save failed: ${(err as Error).message}`);
-      }
-    },
-    [],
-  );
+  const saveWorkshopTempo = useCallback(async (tempo: WorkshopTempo) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ workshopTempo: tempo });
+      setConfig(res);
+      setStatus(`tempo: ${tempo}`);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
 
   const setRetrieval = useCallback(
     async (
@@ -1414,6 +1431,27 @@ function DaemonSettingsView() {
   const showAnthropicProvider =
     provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
+  // Super Lockdown — and any custom posture with external chat switched off —
+  // refuses to build a non-local provider at all: `ChatManager.ensureProvider`
+  // throws before the SDK or CLI is touched. Offering those as live choices
+  // produced a configured-but-unusable install, and the failure landed far
+  // from the cause: a stored `codex-cli` default whose probe came back
+  // policy-blocked sent the whole app back through first-run onboarding.
+  //
+  // The capability is the gate, not the level name, so a custom posture that
+  // turns external chat off behaves identically. A config that hasn't loaded
+  // yet resolves fail-safe to Lockdown (external chat allowed), which keeps
+  // the pills from blinking out on every mount.
+  const externalChatPolicy = resolveSecurityPolicy({ securityPolicy: config?.securityPolicy });
+  const externalChatBlocked = !externalChatPolicy.allowExternalChat;
+  const securityLevelLabel =
+    SECURITY_LEVEL_PRESETS.find((p) => p.id === externalChatPolicy.level)?.label ??
+    'your current security level';
+  const blockedProviderTitle = (name: ProviderName) =>
+    `${providerLabel(name, uiPlatform)} sends chat off this device, which ${securityLevelLabel} does not allow. Change the level in Security & Compliance to use it.`;
+  /** Blocked *and* on offer — the pill stays, greyed, so the state is legible. */
+  const providerBlocked = (name: ProviderName) => externalChatBlocked && !isLocalProvider(name);
+
   // Subline under the "Artificial Intelligence" nav header: which engine and
   // model a new chat gets by default. Answering that used to mean opening the
   // tab and reading two controls.
@@ -1509,6 +1547,11 @@ function DaemonSettingsView() {
       if (s.id === 'ds4' && !showDs4Provider) return false;
       if (s.id === 'openai' && !showOpenaiProvider) return false;
       if (s.id === 'anthropic' && !showAnthropicProvider) return false;
+      // A posture with external chat off can't run these at all, so their
+      // setup tabs are dead ends — sign-in flows and CLI permission modes for
+      // a provider the daemon refuses to construct. The greyed pill on the
+      // Artificial Intelligence tab carries the explanation.
+      if (EXTERNAL_CHAT_SECTIONS.has(s.id) && externalChatBlocked) return false;
       // Benchmarks is a debug-only surface — hidden until the user turns on
       // Debug mode under the About tab.
       if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
@@ -1523,9 +1566,20 @@ function DaemonSettingsView() {
     showDs4Provider,
     showOpenaiProvider,
     showAnthropicProvider,
+    externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
   ]);
+
+  // Landing on a hidden tab is reachable two ways: the posture drops to Super
+  // Lockdown while one is open, or a deep link (`takePendingSettingsSection`)
+  // points at one. Send those to the Artificial Intelligence tab, where the
+  // greyed pill explains why the provider is gone. Deliberately narrower than
+  // "any section missing from `sections`" — config loads async, and a blanket
+  // rule would bounce every deep link before its gate had an answer.
+  useEffect(() => {
+    if (externalChatBlocked && EXTERNAL_CHAT_SECTIONS.has(section)) setSection('defaults');
+  }, [externalChatBlocked, section]);
 
   const activeSectionGroup = useMemo(
     () => sections.find((s) => s.id === section)?.group,
@@ -2611,6 +2665,10 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('copilot')}
+                      disabled={providerBlocked('copilot')}
+                      title={
+                        providerBlocked('copilot') ? blockedProviderTitle('copilot') : undefined
+                      }
                     >
                       GitHub Copilot
                     </button>
@@ -2620,6 +2678,8 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('openai')}
+                      disabled={providerBlocked('openai')}
+                      title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
                     >
                       OpenAI
                     </button>
@@ -2628,7 +2688,12 @@ function DaemonSettingsView() {
                     type="button"
                     className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
                     onClick={() => void setProvider('codex-cli')}
-                    title="Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                    disabled={providerBlocked('codex-cli')}
+                    title={
+                      providerBlocked('codex-cli')
+                        ? blockedProviderTitle('codex-cli')
+                        : 'Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here.'
+                    }
                   >
                     OpenAI Codex CLI
                   </button>
@@ -2637,6 +2702,10 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('anthropic')}
+                      disabled={providerBlocked('anthropic')}
+                      title={
+                        providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
+                      }
                     >
                       Anthropic Claude
                     </button>
@@ -2645,7 +2714,12 @@ function DaemonSettingsView() {
                     type="button"
                     className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
                     onClick={() => void setProvider('anthropic-cli')}
-                    title="Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                    disabled={providerBlocked('anthropic-cli')}
+                    title={
+                      providerBlocked('anthropic-cli')
+                        ? blockedProviderTitle('anthropic-cli')
+                        : 'Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here.'
+                    }
                   >
                     Anthropic Claude CLI
                   </button>
@@ -2658,7 +2732,34 @@ function DaemonSettingsView() {
                   </button>
                 </div>
 
-                {provider === 'copilot' && (
+                {externalChatBlocked && (
+                  <p className="muted small" style={{ marginTop: '0.6rem' }}>
+                    {providerBlocked(provider) ? (
+                      <>
+                        <strong>{providerLabel(provider, uiPlatform)}</strong> is your default
+                        provider, but {securityLevelLabel} keeps every chat on this device — no
+                        gezel can use it until you pick an on-device engine above.{' '}
+                      </>
+                    ) : (
+                      <>
+                        Cloud and CLI providers are greyed out because {securityLevelLabel} keeps
+                        every chat on this device.{' '}
+                      </>
+                    )}
+                    Change the level in{' '}
+                    <button
+                      type="button"
+                      className="gz-link-button"
+                      onClick={() => setSection('securityCompliance')}
+                      style={{ padding: 0 }}
+                    >
+                      Security &amp; Compliance
+                    </button>{' '}
+                    to use them.
+                  </p>
+                )}
+
+                {provider === 'copilot' && !externalChatBlocked && (
                   <div
                     className="new-row"
                     style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
@@ -2680,7 +2781,7 @@ function DaemonSettingsView() {
                   </div>
                 )}
 
-                {provider === 'codex-cli' && (
+                {provider === 'codex-cli' && !externalChatBlocked && (
                   <>
                     {codexCliProbe.kind === 'ok' && (
                       <>
@@ -2741,7 +2842,7 @@ function DaemonSettingsView() {
                   </>
                 )}
 
-                {provider === 'anthropic-cli' && (
+                {provider === 'anthropic-cli' && !externalChatBlocked && (
                   <>
                     {anthropicCliProbe.kind === 'ok' && (
                       <>
@@ -2937,6 +3038,7 @@ function DaemonSettingsView() {
                             className={`gz-key${
                               nightShiftProvider === choice.id ? ' gz-key-active' : ''
                             }`}
+                            disabled={providerBlocked(choice.id)}
                             onClick={() =>
                               void saveNightShiftModelOverride({
                                 enabled: true,
@@ -2944,7 +3046,11 @@ function DaemonSettingsView() {
                                 model: config?.defaultModel?.[choice.id],
                               })
                             }
-                            title={choice.title}
+                            title={
+                              providerBlocked(choice.id)
+                                ? blockedProviderTitle(choice.id)
+                                : choice.title
+                            }
                           >
                             {choice.label}
                           </button>
@@ -4512,162 +4618,6 @@ function MemorySection({ config, onRetrievalChange, onSummarizationChange }: Mem
           />
         </div>
       </div>
-    </section>
-  );
-}
-
-type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
-type WorkshopTempo = 'gezellig' | 'bedrijvig' | 'druk' | 'dolle-boel';
-
-const TEMPOS: {
-  id: WorkshopTempo;
-  label: string;
-  hint: string;
-  description: string;
-}[] = [
-  {
-    id: 'gezellig',
-    label: 'Gezellig',
-    hint: 'cozy',
-    description:
-      'Meester checks in rarely and warmly. 2-hour rapid cadence, 12-hour slow. Nudges sound like "no rush, let me know."',
-  },
-  {
-    id: 'bedrijvig',
-    label: 'Bedrijvig',
-    hint: 'busy (default)',
-    description:
-      'The standard pace. 20-minute rapid cadence, 6-hour slow. Nudges are neutral and structured.',
-  },
-  {
-    id: 'druk',
-    label: 'Druk',
-    hint: 'pressured',
-    description:
-      'Short gaps, direct tone. 8-minute rapid cadence, 1-hour slow. Meester expects a blocker-or-status answer.',
-  },
-  {
-    id: 'dolle-boel',
-    label: 'Dolle boel',
-    hint: 'madhouse',
-    description:
-      "3-minute rapid cadence, 20-minute slow. Nudges arrive IN CAPS and end with 'this is fine 🔥'.",
-  },
-];
-
-const ENGAGEMENT_MODES: {
-  id: EngagementMode;
-  label: string;
-  description: string;
-}[] = [
-  {
-    id: 'proactive',
-    label: 'Proactive',
-    description:
-      'Default. All task work, scheduled triggers, proactive prompts, anti-stall nudges, voorman health checks, and cross-gezel messaging run.',
-  },
-  {
-    id: 'scheduled',
-    label: 'Tasks + Reactive',
-    description:
-      'Chat works, all active task work continues, and scheduled tasks still fire. No proactive nudges or cross-gezel messaging between gezellen.',
-  },
-  {
-    id: 'reactive',
-    label: 'Reactive only',
-    description:
-      'AI only responds to your direct chat messages. New task steps and scheduled jobs are paused; an in-flight turn can finish. No proactive nudges or cross-gezel messages.',
-  },
-  {
-    id: 'off',
-    label: 'Off',
-    description:
-      'AI is disabled. Chat is inactive and all background activity is paused. The current in-flight turn finishes; queued messages are canceled.',
-  },
-];
-
-function EngagementModePanel({
-  mode,
-  tempo,
-  onChange,
-  onTempoChange,
-}: {
-  mode: EngagementMode;
-  tempo: WorkshopTempo;
-  onChange: (mode: EngagementMode) => void | Promise<void>;
-  onTempoChange: (tempo: WorkshopTempo) => void | Promise<void>;
-}) {
-  const current =
-    ENGAGEMENT_MODES.find((m) => m.id === mode) ??
-    (ENGAGEMENT_MODES[0] as (typeof ENGAGEMENT_MODES)[number]);
-  const currentTempo = TEMPOS.find((t) => t.id === tempo) ?? (TEMPOS[1] as (typeof TEMPOS)[number]);
-  return (
-    <section className={`engagement-mode-panel engagement-mode-${mode}`}>
-      <h3>AI engagement</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Global control over how much AI activity is allowed. Use this as a panic button when you
-        want to conserve tokens or step away from the app.
-      </p>
-      <div
-        className="engagement-mode-switch gz-tray gz-tray--described"
-        role="radiogroup"
-        aria-label="AI engagement"
-      >
-        {ENGAGEMENT_MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={mode === m.id}
-            className={`gz-key${mode === m.id ? ' gz-key-active' : ''}`}
-            onClick={() => void onChange(m.id)}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-      <p className="engagement-mode-description gz-tray-description">
-        <strong>{current.label}</strong> — {current.description}
-      </p>
-      {mode === 'off' && (
-        <div className="engagement-mode-banner" role="alert">
-          AI is disabled. The chat composer is inactive and all background activity is paused.
-        </div>
-      )}
-      {mode === 'proactive' && (
-        <div className="workshop-tempo">
-          <h4 className="workshop-tempo-heading">Tempo</h4>
-          <p className="muted small" style={{ margin: '0 0 0.5rem' }}>
-            How frenetic the meester and voormannen feel. Adjusts check-in intervals and the tone of
-            the meester's nudges.
-          </p>
-          <div
-            className="workshop-tempo-switch gz-tray gz-tray--described"
-            role="radiogroup"
-            aria-label="Tempo"
-          >
-            {TEMPOS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-                role="radio"
-                aria-checked={tempo === t.id}
-                className={`gz-key gz-key--stacked${tempo === t.id ? ' gz-key-active' : ''}`}
-                onClick={() => void onTempoChange(t.id)}
-                title={t.hint}
-              >
-                <span className="workshop-tempo-pill-label">{t.label}</span>
-                <span className="workshop-tempo-pill-hint">{t.hint}</span>
-              </button>
-            ))}
-          </div>
-          <p className="engagement-mode-description gz-tray-description">
-            <strong>{currentTempo.label}</strong> — {currentTempo.description}
-          </p>
-        </div>
-      )}
     </section>
   );
 }

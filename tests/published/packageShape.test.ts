@@ -68,8 +68,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // harper's two WASM binaries under `dist/ui/harper/` — a pinned, fixed
   // floor the proofing feature cannot ship without (both binaries are
   // load-bearing; see the proofing gotcha in CLAUDE.md), so the headroom
-  // here covers the ~21 MB that actually grows with feature work.
-  '@bendyline/gezel-service': 45_000_000, //          36.7 MB
+  // here covers the ~21 MB that actually grows with feature work. Raised from
+  // 45 MB for Squisq 2.11.8, whose media-edit audio cleanup ships RNNoise
+  // (~3.1 MB gzipped, base64-embedded WASM) twice — once in the worker and
+  // once in the main-thread fallback. Deduplicating that upstream is the
+  // follow-up and would win back ~3 MB.
+  '@bendyline/gezel-service': 55_000_000, //          47.5 MB
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');

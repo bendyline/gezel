@@ -10,9 +10,9 @@ import type { WorkspaceIndexManager } from './index-manager.js';
  * into a near-immediate `WorkspaceIndexManager.refresh` — which is lock-safe,
  * idempotent, and hash-gated, so over-triggering costs almost nothing.
  *
- * `fs.watch({recursive})` isn't supported on Linux on our pinned Node; the
- * first failed watch flips a `supported` latch and the platform silently
- * stays on polling. No chokidar — one less native-adjacent dependency.
+ * Where `fs.watch({recursive})` is unsupported, the first failed watch flips
+ * a `supported` latch and the platform silently stays on polling. No
+ * chokidar — one less native-adjacent dependency.
  */
 
 const log = createLogger('workspace-watch');
@@ -41,6 +41,23 @@ export interface WorkspaceWatchManagerOptions {
    * device changed — and it has no tab activity to earn an MRU slot.
    */
   pinnedProjects?: () => string[];
+  watchImpl?: typeof watch;
+}
+
+/**
+ * True when the host has no inotify watch left to give. Node's recursive
+ * watcher on Linux swallows ENOSPC — no throw, no 'error' event, just a
+ * watcher that never fires — while a plain watch of the root reports it.
+ * One app holding the whole per-user budget (fs.inotify.max_user_watches)
+ * is enough, and a terminal or editor watching a large tree does.
+ */
+export function watchLimitReached(dir: string, watchImpl: typeof watch = watch): boolean {
+  try {
+    watchImpl(dir, { persistent: false }).close();
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOSPC';
+  }
 }
 
 export class WorkspaceWatchManager {
@@ -51,10 +68,13 @@ export class WorkspaceWatchManager {
   private readonly debounceMs: number;
   private readonly reconcileIntervalMs: number;
   private readonly pinnedProjects: () => string[];
+  private readonly watchImpl: typeof watch;
 
   private readonly watchers = new Map<string, { dir: string; watcher: FSWatcher }>();
   private readonly debounces = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly mcpDebounces = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Projects already warned about a spent watch budget; reconcile retries every tick. */
+  private readonly starved = new Set<string>();
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private supported = true;
@@ -68,6 +88,7 @@ export class WorkspaceWatchManager {
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.reconcileIntervalMs = opts.reconcileIntervalMs ?? RECONCILE_INTERVAL_MS;
     this.pinnedProjects = opts.pinnedProjects ?? (() => []);
+    this.watchImpl = opts.watchImpl ?? watch;
   }
 
   start(): void {
@@ -122,9 +143,21 @@ export class WorkspaceWatchManager {
       if (this.watchers.has(projectId)) continue;
       const dir = await this.store.projectWorkspaceDir(projectId).catch(() => null);
       if (!dir) continue;
+      if (watchLimitReached(dir, this.watchImpl)) {
+        if (!this.starved.has(projectId)) {
+          this.starved.add(projectId);
+          log.warn(
+            `cannot watch ${projectId}: the host's inotify watch limit is spent (fs.inotify.max_user_watches) — outside changes wait for the polling tick`,
+          );
+        }
+        continue;
+      }
+      this.starved.delete(projectId);
       try {
-        const watcher = watch(dir, { recursive: true, persistent: false }, (_event, filename) =>
-          this.onEvent(projectId, filename),
+        const watcher = this.watchImpl(
+          dir,
+          { recursive: true, persistent: false },
+          (_event, filename) => this.onEvent(projectId, filename),
         );
         watcher.on('error', (err) => {
           log.warn(`watcher for ${projectId} errored: ${describe(err)}`);

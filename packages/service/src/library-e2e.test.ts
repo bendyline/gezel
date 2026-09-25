@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from './service.js';
+import { watchLimitReached } from './workspace/watch-manager.js';
 
 /**
  * The shared library end-to-end, through the real daemon: a document filed by
@@ -76,7 +77,11 @@ describe('shared document library, end to end', () => {
     expect(found.results.map((r) => r.path)).toContain('policies/refunds.md');
   }, 60_000);
 
-  it('picks up a file dropped into the folder from outside the app', async () => {
+  it('picks up a file dropped into the folder from outside the app', async (ctx) => {
+    ctx.skip(
+      watchLimitReached(join(home, 'documents')),
+      'host inotify watch limit is spent (fs.inotify.max_user_watches); no watcher can attach',
+    );
     // The watcher attaches on a startup-delayed reconcile, so wait for it
     // rather than racing it — a file written before any watcher exists is
     // the poll's job, on a cadence no test should sit through.

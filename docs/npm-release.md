@@ -354,10 +354,12 @@ the release if the pin is still the all-zeros placeholder, because a
 placeholder makes `isEnginePinned()` false and silently disables engine
 download for everyone who installed from npm.
 
-The Electron release workflow requires its `nativeTag` to match both pinned
-source files and refuses a native release without `NATIVE_FILE_MANIFESTS.json`.
-This makes the order explicit: publish the native release, run the pin command,
-review and commit the pins, then cut the Electron release.
+The Electron release workflow takes its native release from these pins rather
+than from an input, so the installers and the npm packages always ship the same
+engines. It refuses a native release without `NATIVE_FILE_MANIFESTS.json`, and
+refuses to run when the two pinned source files disagree. The order is:
+publish the native release, run the pin command, review and commit the pins,
+then cut the Electron release.
 
 A GitHub token is **optional** for engine download. `bendyline/gezel` is
 public; a token, when present, only lifts GitHub's 60-request/hour

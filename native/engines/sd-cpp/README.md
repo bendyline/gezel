@@ -20,7 +20,7 @@ endpoint that the supervisor probes. See
 | `darwin-arm64` | Metal                   | `-DSD_METAL=ON`. "Just works" on Apple Silicon.    |
 | `darwin-x64`   | CPU (AVX2 / Accelerate) | No GPU path — Metal requires Apple Silicon.        |
 | `linux-x64`    | Vulkan **+ CUDA**       | Bare key ships Vulkan (`sd_backend: vulkan`); the `-cuda` key ships a CUDA build. Local builds autodetect CUDA → Vulkan → CPU. |
-| `linux-arm64`  | CPU **+ CUDA**          | Bare key ships CPU (`sd_backend: cpu`) — LunarG publishes no aarch64 SDK tarball; the `-cuda` key ships a CUDA build for Jetson / DGX-class hosts. |
+| `linux-arm64`  | CPU **+ CUDA**          | Bare key ships CPU (`sd_backend: cpu`) — LunarG publishes no aarch64 SDK tarball; the `-cuda` key ships a CUDA build for GB10 / DGX Spark (`121a-real`, the same coverage as llama-server's arm64 CUDA leg). |
 | `win32-x64`    | Vulkan                  | Ships Vulkan (`sd_backend: vulkan`).                |
 
 The shipped backend is **pinned per matrix row** in
@@ -53,6 +53,11 @@ rather than time-based, failed *fast* models while slow ones idled long
 enough for the render to land.
 
 Override the local build with `SD_BACKEND={metal,vulkan,cuda,cpu}`.
+CUDA builds also read `SD_CUDA_ARCH` (a CMake architecture list, passed as
+`-DCMAKE_CUDA_ARCHITECTURES`; CI pins it per row to match the llama-cpp
+CUDA leg sharing the key) and cap Linux compile parallelism at `-j2` —
+an uncapped `-j` under nvcc ran both hosted runners out of memory. Raise
+it on a bigger machine with `SD_BUILD_JOBS=N`.
 
 ## Runtime requirements
 
