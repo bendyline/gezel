@@ -131,7 +131,10 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
   assert.deepEqual(sdCuda.map((entry) => entry.platform).sort(), ['linux-arm64', 'linux-x64']);
   for (const entry of sdCuda) {
     const llama = llamaCuda.get(entry.platform);
-    assert.ok(llama, `no llama-cpp CUDA leg on ${entry.platform} stages the libraries sd-server links`);
+    assert.ok(
+      llama,
+      `no llama-cpp CUDA leg on ${entry.platform} stages the libraries sd-server links`,
+    );
     assert.equal(
       entry.cuda_pkg,
       llama.cuda_pkg,
