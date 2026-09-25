@@ -4,11 +4,7 @@
     "ds4": {
       "tag": "main-2026-09-16",
       "commit": "8db1d1d155cb0400a86a86b9c62d0defb3a6148b",
-      "files": [
-        "LICENSE-ds4-MIT.txt",
-        "LICENSE-ds4-rax-BSD-3-Clause.txt",
-        "LICENSE-yarn-MIT.txt"
-      ]
+      "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
       "tag": "v0.4.1",
