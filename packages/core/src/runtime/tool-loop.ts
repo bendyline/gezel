@@ -4,7 +4,7 @@ import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { isContextOverflowError } from '../task-execution.js';
-import { parseExactToolEnvelope } from '../tools/envelope.js';
+import { parseToolEnvelopeReply } from '../tools/envelope.js';
 import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
@@ -173,7 +173,7 @@ export async function runPortableToolLoop(options: {
           (event) => {
             if (options.cancelled() || event.requestId !== options.requestId) return;
             buffered += event.delta;
-            if (!prose && buffered.trimStart() && !buffered.trimStart().startsWith('{')) {
+            if (!prose && buffered.trimStart() && !/^[{`]/.test(buffered.trimStart())) {
               prose = true;
               options.delta(buffered);
             } else if (prose) options.delta(event.delta);
@@ -199,7 +199,7 @@ export async function runPortableToolLoop(options: {
     }
     if (options.cancelled() || result.stopReason === 'cancelled')
       return { ...result, stopReason: 'cancelled', message, streamed: prose };
-    const envelope = result.stopReason === 'stop' ? parseExactToolEnvelope(result.text) : null;
+    const envelope = result.stopReason === 'stop' ? parseToolEnvelopeReply(result.text) : null;
     if (!envelope) return { ...result, message, streamed: prose };
     await check();
     const started = Date.now();

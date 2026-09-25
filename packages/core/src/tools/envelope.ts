@@ -25,3 +25,18 @@ export function parseExactToolEnvelope(text: string): ToolEnvelope | null {
     return null;
   return { name: record.name, arguments: record.arguments as Record<string, unknown> };
 }
+
+const WHOLE_REPLY_FENCE = /^```[A-Za-z]*[ \t]*\r?\n([\s\S]*?)\r?\n?```$/;
+
+/**
+ * A completion that is nothing but one code fence around the exact envelope is
+ * the same call as the bare object: with no surrounding prose it cannot be a
+ * quoted example. Apple's system model fenced every call in its first native
+ * eval (2026-09-24), so no tool ever ran. A fence inside prose still never executes.
+ */
+export function parseToolEnvelopeReply(text: string): ToolEnvelope | null {
+  const exact = parseExactToolEnvelope(text);
+  if (exact) return exact;
+  const fenced = WHOLE_REPLY_FENCE.exec(text.trim());
+  return fenced ? parseExactToolEnvelope(fenced[1]!) : null;
+}

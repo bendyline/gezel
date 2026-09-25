@@ -432,6 +432,9 @@ describe('portable tool authority and durable effects', () => {
     for (const result of [
       { text: `Example: ${envelope}`, stopReason: 'stop' as const },
       { text: envelope, stopReason: 'length' as const },
+      { text: `Here is the call:\n\`\`\`json\n${envelope}\n\`\`\``, stopReason: 'stop' as const },
+      { text: `\`\`\`json\n${envelope}\n\`\`\`\nThat writes it.`, stopReason: 'stop' as const },
+      { text: `\`\`\`json\n${envelope}\n\`\`\``, stopReason: 'length' as const },
     ]) {
       const checkpoint = vi.fn();
       await runPortableToolLoop({
@@ -457,6 +460,44 @@ describe('portable tool authority and durable effects', () => {
       expect(checkpoint).not.toHaveBeenCalled();
     }
     expect(await store.readFile('artifacts', 'default', 'bad.md')).toBeNull();
+  });
+
+  it('executes a reply that is only a fenced envelope, without streaming it as prose', async () => {
+    const { store, session } = await fixture();
+    const envelope = JSON.stringify(
+      { name: 'write_artifact', arguments: { path: 'fenced.md', content: 'Noor opens at 09:30.' } },
+      null,
+      2,
+    );
+    const replies = [`\`\`\`json\n${envelope}\n\`\`\``, 'Saved fenced.md.'];
+    const delta = vi.fn();
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: {
+        providers: async () => [],
+        generate: async (request, onDelta) => {
+          const text = replies.shift()!;
+          onDelta({ requestId: request.requestId, delta: text });
+          return { text, stopReason: 'stop' };
+        },
+        cancel: async () => {},
+      },
+      requestId: 'req',
+      providerId: 'apple-foundation-models',
+      modelId: 'test',
+      contextSize: 4096,
+      maxTokens: 500,
+      messages: [],
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta,
+    });
+    expect(result.message?.toolCalls?.[0]).toMatchObject({ name: 'write_artifact', success: true });
+    expect(await store.readFile('artifacts', 'default', 'fenced.md')).toBe('Noor opens at 09:30.');
+    expect(delta.mock.calls.map(([text]) => text).join('')).toBe('Saved fenced.md.');
   });
 
   for (const outcome of [
