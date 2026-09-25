@@ -1,5 +1,12 @@
+import { expandToolsetGroups } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { craftbookPinFloor, policyForDeliverable, retargetGateLayers } from './solo-loop-policy.js';
+import {
+  craftbookPinFloor,
+  policyForDeliverable,
+  producerToolsFor,
+  retargetEntryToolPolicy,
+  retargetGateLayers,
+} from './solo-loop-policy.js';
 
 const sniff = (deliverable: string, brief: string) =>
   policyForDeliverable(deliverable, brief).sniff;
@@ -163,5 +170,93 @@ describe('retargetGateLayers', () => {
     const extra = [{ kind: 'contains', file: 'index.html', pattern: 'game over' }];
     const layers = retargetGateLayers(policy, 'index.html', bookGate, extra);
     expect(layers.checks.some((c) => c.kind === 'contains')).toBe(true);
+  });
+});
+
+describe('retargetEntryToolPolicy', () => {
+  // build-loop 1.1.1's authored Build-step policy: an HTML build with the
+  // image and code-execution toolsets banned.
+  const bookPolicy = {
+    disallowBuiltinToolsets: [
+      'ai-apps',
+      'archives',
+      'artifacts',
+      'audio',
+      'browser-automation',
+      'code-execution',
+      'craftbooks',
+      'data-tables',
+      'entity-intel',
+      'git',
+      'image-intel',
+      'images',
+      'role-delegation',
+      'role-delegation-escalation',
+      'security-intel',
+      'team-management',
+      'videos',
+      'web',
+    ],
+    outputMedium: 'workspace',
+    additionalOutputMedia: ['task-note'],
+  };
+
+  /** Tools the retargeted policy still bans, the way core's step policy expands groups. */
+  const bannedBy = (toolPolicy: typeof bookPolicy | undefined) =>
+    new Set([
+      ...expandToolsetGroups(toolPolicy?.disallowBuiltinToolsets ?? []),
+      ...((toolPolicy as { disallowTools?: string[] } | undefined)?.disallowTools ?? []),
+    ]);
+
+  it('keeps generate_image callable on a raster deliverable (tool-routing-image)', () => {
+    const policy = policyForDeliverable('sunset.png', 'render a stylized sunset');
+    expect(bannedBy(bookPolicy).has('generate_image')).toBe(true);
+    const next = retargetEntryToolPolicy(policy, bookPolicy);
+    expect(bannedBy(next).has('generate_image')).toBe(false);
+    expect(next?.disallowBuiltinToolsets).not.toContain('images');
+    expect(next?.disallowBuiltinToolsets).toContain('web');
+    expect(next?.outputMedium).toBe('workspace');
+  });
+
+  it('keeps derive_file and run_nodejs_script callable on a data deliverable', () => {
+    const policy = policyForDeliverable('out/customers.csv', 'normalize customer data');
+    const next = retargetEntryToolPolicy(policy, bookPolicy);
+    for (const tool of ['derive_file', 'run_nodejs_script']) {
+      expect(bannedBy(next).has(tool)).toBe(false);
+    }
+    expect(next?.disallowBuiltinToolsets).toContain('images');
+  });
+
+  it('leaves html and other deliverables exactly as authored', () => {
+    for (const path of ['index.html', 'review.md', 'src/types.ts']) {
+      const policy = policyForDeliverable(path, 'build it');
+      expect(retargetEntryToolPolicy(policy, bookPolicy)).toBe(bookPolicy);
+    }
+  });
+
+  it('lifts a per-tool ban and extends an exact allowlist', () => {
+    const policy = policyForDeliverable('hero.webp', 'hero image');
+    const next = retargetEntryToolPolicy(policy, {
+      allowTools: ['read_file', 'write_task_note'],
+      disallowTools: ['generate_image'],
+      outputMedium: 'task-note',
+    });
+    expect(next?.allowTools).toEqual(['read_file', 'write_task_note', 'generate_image']);
+    expect(next && 'disallowTools' in next).toBe(false);
+  });
+
+  it('drops an emptied group list rather than leaving an empty array the schema rejects', () => {
+    const policy = policyForDeliverable('logo.png', 'logo');
+    const next = retargetEntryToolPolicy(policy, { disallowBuiltinToolsets: ['images'] });
+    expect(next).toEqual({});
+  });
+
+  it('names producer tools that really live in the group it re-opens', () => {
+    for (const path of ['logo.png', 'data.json']) {
+      const producer = producerToolsFor(policyForDeliverable(path, 'x'));
+      expect(producer).toBeDefined();
+      const groupTools = new Set(expandToolsetGroups([producer!.group]));
+      for (const tool of producer!.tools) expect(groupTools.has(tool)).toBe(true);
+    }
   });
 });

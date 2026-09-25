@@ -524,8 +524,8 @@ components are redistributed:
 
 - **NVIDIA CUDA runtime** (`libcudart`, `libcublas`, `libcublasLt` on Linux;
   `cudart`/`cublas` DLLs on Windows) is bundled beside the **CUDA variants** of
-  the `llama-server` and `ds4-server` engines so they run without a local CUDA
-  Toolkit install. These are NVIDIA-proprietary libraries, redistributed under
+  the `llama-server`, `ds4-server`, and (on Linux) `sd-server` engines so they
+  run without a local CUDA Toolkit install. These are NVIDIA-proprietary libraries, redistributed under
   the **NVIDIA CUDA Toolkit EULA** (`cudart`/`cublas` are on NVIDIA's
   redistributable list). The NVIDIA GPU **driver** itself (`libcuda.so.1` /
   `nvcuda.dll`) is *not* bundled — it must already be present on the user's

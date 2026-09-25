@@ -178,6 +178,7 @@ import {
   type RetargetableGateCheck,
   craftbookPinFloor,
   policyForDeliverable,
+  retargetEntryToolPolicy,
   retargetGateLayers,
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
@@ -7364,6 +7365,9 @@ async function buildRetargetedBuildLoop(
       }
       if (isRasterImage && step.id === craftbook.entryStepId && step.prompt) {
         step.prompt = `${step.prompt}\n\n**This deliverable is a raster image — render it with the image tool.** Call \`generate_image({ prompt, saveAs: "${deliverablePath}" })\` with a prompt faithful to the task brief. Do not call \`write_file\` for this path, encode image bytes as text/base64, install an image package, or substitute SVG/canvas code. The gate holds this step until a real image exists at \`${deliverablePath}\`.`;
+      }
+      if (step.id === craftbook.entryStepId && step.toolPolicy) {
+        step.toolPolicy = retargetEntryToolPolicy(policy, step.toolPolicy);
       }
       if (step.advanceWhen) {
         step.advanceWhen = { ...step.advanceWhen, file: deliverablePath, sniff };

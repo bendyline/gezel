@@ -36,6 +36,7 @@ import {
 } from '../../models/storage-roots.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
+import type { NativeCapacityOptions } from '../native/device-capacity.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
@@ -76,6 +77,20 @@ export interface ImageProviderFactoryOptions {
    * (`GEZEL_SD_SERVER_URL`) path don't manage VRAM tenancy.
    */
   arbiter?: GpuArbiter;
+}
+
+/**
+ * How sd-server is admitted to the device memory ledger: by bytes, like any
+ * other engine, never exclusively. The ledger already refuses co-residency
+ * where the byte or GPU budget cannot hold both, and `detectGpuPolicy` states
+ * the rule: automatic heuristics must not serialize models that fit.
+ * Exclusive admission did exactly that. On a DGX Spark with gemma4-31b
+ * resident (95 GB of a 128 GB machine), a 4-second SDXL render waited up to
+ * 89 s for the chat engine to go idle, then was evicted as soon as the next
+ * chat turn asked for memory, so every render paid a fresh load.
+ */
+export function sdServerCapacity(home: string): NativeCapacityOptions {
+  return { home };
 }
 
 export async function createImageProvider(
@@ -134,7 +149,7 @@ export async function createImageProvider(
     // when it changes; resolveLaunch reads it on the next start.
     const launchState: { modelId: string | undefined } = { modelId: undefined };
     const supervisor = new NativeEngineSupervisor({
-      capacity: { home: opts.home, exclusive: true },
+      capacity: sdServerCapacity(opts.home),
       logPrefix: '[sd-server]',
       // sd-server doesn't expose `/health`; the master-587 build serves
       // either an HTML file (when --serve-html-path is set) or a 404 at

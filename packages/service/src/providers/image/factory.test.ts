@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SecretKey, SecretStore } from '../../secrets/types.js';
-import { type ResolvedInstalledModel, buildSdServerArgs, createImageProvider } from './factory.js';
+import {
+  type ResolvedInstalledModel,
+  buildSdServerArgs,
+  createImageProvider,
+  sdServerCapacity,
+} from './factory.js';
 import { GoogleAiImageProvider } from './google-ai.js';
 import { MockImageProvider } from './mock.js';
 import { OpenAIImageProvider } from './openai-image.js';
@@ -77,6 +82,10 @@ describe('createImageProvider selection rules', () => {
       env: { GEZEL_SD_SERVER_BIN: '/path/to/sd-server' },
     });
     expect(provider).toBeInstanceOf(StableDiffusionCppProvider);
+  });
+
+  it('admits sd-server by bytes, not exclusively, so it can sit beside a chat engine that fits', () => {
+    expect(sdServerCapacity(home).exclusive).toBeFalsy();
   });
 
   it('returns SD.cpp adaptor pointing at the default loopback URL by default', async () => {

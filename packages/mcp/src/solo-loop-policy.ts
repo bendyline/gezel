@@ -122,6 +122,56 @@ export function craftbookPinFloor(topSemantic: number | undefined): number {
   return typeof topSemantic === 'number' ? 0.3 : 0.07;
 }
 
+/** Structural shape of a step tool policy, typed loosely to keep this module import-free. */
+export interface RetargetableToolPolicy {
+  disallowBuiltinToolsets?: string[];
+  allowTools?: string[];
+  disallowTools?: string[];
+  [key: string]: unknown;
+}
+
+/**
+ * The built-in toolset, and the tools in it, that the retargeted entry step's
+ * prompt tells the producer to call for each non-HTML deliverable class.
+ * Undefined when the step needs nothing beyond the book's own surface.
+ */
+export function producerToolsFor(
+  policy: DeliverablePolicy,
+): { group: string; tools: string[] } | undefined {
+  if (policy.isRasterImage) return { group: 'images', tools: ['generate_image'] };
+  if (policy.isData)
+    return { group: 'code-execution', tools: ['derive_file', 'run_nodejs_script'] };
+  return undefined;
+}
+
+/**
+ * Re-open the producer's tools on the retargeted entry step's authored tool
+ * policy. build-loop is authored for an HTML build and its step policy bans
+ * `images` and `code-execution`; retargeting it onto a PNG or a derived CSV
+ * rewrites the prompt to name `generate_image` / `derive_file`, so the ceiling
+ * has to follow or the step demands a tool it cannot call. The step ceiling is
+ * applied after every other grant, including a fixed-function gezel's one
+ * tool, so the image-generator failed its first action with "not registered"
+ * (wild-caught: tool-routing-image, 2026-09-25). Everything else in the
+ * authored policy stays as written.
+ */
+export function retargetEntryToolPolicy<T extends RetargetableToolPolicy>(
+  policy: DeliverablePolicy,
+  toolPolicy: T | undefined,
+): T | undefined {
+  const producer = producerToolsFor(policy);
+  if (!producer || !toolPolicy) return toolPolicy;
+  const next: T = { ...toolPolicy };
+  const groups = next.disallowBuiltinToolsets?.filter((g) => g !== producer.group);
+  if (groups?.length) next.disallowBuiltinToolsets = groups;
+  else delete next.disallowBuiltinToolsets;
+  const deniedTools = next.disallowTools?.filter((t) => !producer.tools.includes(t));
+  if (deniedTools?.length) next.disallowTools = deniedTools;
+  else delete next.disallowTools;
+  if (next.allowTools) next.allowTools = [...new Set([...next.allowTools, ...producer.tools])];
+  return next;
+}
+
 /** Structural shape of a gate script ref, typed loosely to keep this module import-free. */
 export interface RetargetableGateScript {
   name: string;

@@ -378,6 +378,7 @@ import {
 import { SessionTelemetryTracker } from './session-telemetry.js';
 import {
   SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
+  applyActiveStepToolPolicy,
   availableBuiltinToolsForAllowlist,
   buildToolCapWarning,
   projectOrchestrationConstraintActive as resolveProjectOrchestrationConstraintActive,
@@ -9917,8 +9918,11 @@ export class ChatManager extends LocalEngineRuntime {
     }
 
     if (!pool.hasTool(ff.tool)) {
+      const stepBlock = await this.stepPolicyExcludingTool(record, ff.tool);
       const knownErrr = new Error(
-        `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`,
+        stepBlock
+          ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and this gezel can only call ${ff.tool}`
+          : `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`,
       );
       // Persist a visible assistant bubble carrying the error so the
       // user understands why nothing happened, rather than leaving an
@@ -10209,6 +10213,28 @@ export class ChatManager extends LocalEngineRuntime {
         ...(explicitPath ? { saveAs: explicitPath } : {}),
       };
     }
+  }
+
+  /**
+   * The active task step whose authored tool policy strips `tool`, if any.
+   * A fixed-function gezel pinned to such a step can never act, and "not
+   * registered, check the install" sent the diagnosis to the wrong layer.
+   */
+  private async stepPolicyExcludingTool(
+    record: ChatSession,
+    tool: string,
+  ): Promise<{ taskRef: string; stepId: string } | null> {
+    if (!record.taskRef) return null;
+    const parsed = parseTaskRef(record.taskRef);
+    if (!parsed) return null;
+    const task = await this.readEffectiveTask(parsed.projectId, parsed.num).catch(() => null);
+    if (!task) return null;
+    const step =
+      (record.stepId && task.craftbook.steps.find((s) => s.id === record.stepId)) ||
+      task.craftbook.steps.find((s) => s.id === task.activeStepId);
+    if (!step) return null;
+    const allowed = applyActiveStepToolPolicy(new Set([tool]), step);
+    return allowed && !allowed.has(tool) ? { taskRef: record.taskRef, stepId: step.id } : null;
   }
 
   /**

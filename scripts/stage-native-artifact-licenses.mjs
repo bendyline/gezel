@@ -13,7 +13,7 @@ import { verifyNativeNoticeInventory } from './check-notice.mjs';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const supportedCudaEulas = new Map(
-  ['12.4', '12.8', '12.9'].map((version) => [
+  ['12.4', '12.8', '12.9', '13.0'].map((version) => [
     version,
     join(repoRoot, 'native', 'cuda-eulas', `NVIDIA-CUDA-EULA-${version}.txt`),
   ]),
