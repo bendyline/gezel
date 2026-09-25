@@ -87,6 +87,46 @@ describe('WorkspaceWatchManager', () => {
     expect(manager.watched()).toEqual([]);
   });
 
+  it('does not claim a watcher when the host watch budget is spent, and attaches once it frees', async () => {
+    const project = await store.createProject({ name: 'Starved' });
+    const dir = await store.projectWorkspaceDir(project.id);
+    await mkdir(dir, { recursive: true });
+    await store.writeConfig({
+      recentTabs: [{ kind: 'project', id: project.id, at: Date.now(), order: 0 }],
+    });
+
+    // Mirrors Node on Linux: the plain probe throws ENOSPC, the recursive
+    // watch "succeeds" and would never fire.
+    let spent = true;
+    const recursiveCalls: string[] = [];
+    const watchImpl = ((path: string, opts: { recursive?: boolean }) => {
+      if (opts.recursive) {
+        recursiveCalls.push(path);
+        return { on: () => undefined, close: () => undefined };
+      }
+      if (spent) {
+        throw Object.assign(new Error('ENOSPC: System limit for number of file watchers reached'), {
+          code: 'ENOSPC',
+        });
+      }
+      return { close: () => undefined };
+    }) as unknown as typeof import('node:fs').watch;
+
+    manager = new WorkspaceWatchManager({
+      store,
+      indexManager: { refresh: vi.fn(async () => ({}) as never) },
+      watchImpl,
+    });
+    await manager.reconcile();
+    expect(manager.watched()).toEqual([]);
+    expect(recursiveCalls).toEqual([]);
+
+    spent = false;
+    await manager.reconcile();
+    expect(manager.watched()).toEqual([project.id]);
+    expect(recursiveCalls).toEqual([dir]);
+  });
+
   it('treats canonical MCP config changes specially without suppressing index refreshes', async () => {
     const refresh = vi.fn(async () => ({}) as never);
     const onProjectMcpConfigChanged = vi.fn(async () => undefined);
