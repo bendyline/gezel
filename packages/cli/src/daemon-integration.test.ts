@@ -8,7 +8,7 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { connectForTui } from './connection.js';
 
 let gezelHome: string;
+/**
+ * The working directory every CLI child runs in. Commands that act on "the
+ * current project" register it, and `env indexing on` indexes it. When this
+ * was the checkout itself, the daemon indexed the whole monorepo (~5k files)
+ * mid-suite; under V8 coverage that exhausted the runner and the daemon died
+ * with a Zone OOM, failing every later case (2026-09-25).
+ */
+let workspaceCwd: string;
 let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
 /** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
@@ -65,7 +73,7 @@ async function runCliAtHome(
   ...args: string[]
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
-    cwd: process.cwd(),
+    cwd: workspaceCwd,
     env: childEnv({ GEZEL_HOME: home, GEZEL_MOCK_PROVIDER: '1' }),
     // connectOwned gives a cold daemon up to 20s to start. Keep the outer
     // process budget larger than that contract so execFile cannot kill the
@@ -76,6 +84,8 @@ async function runCliAtHome(
 
 beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-'));
+  // Resolved to match what a child's process.cwd() reports (macOS /var → /private/var).
+  workspaceCwd = await realpath(await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-cwd-')));
   const daemonEntry = resolveDaemonEntry(import.meta.url);
   spawned = await discoverOrSpawn({
     daemonEntry,
@@ -117,6 +127,7 @@ afterEach(({ task }) => {
 afterAll(async () => {
   await stopOwnedDaemon(spawned?.child);
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
+  if (workspaceCwd) await rm(workspaceCwd, { recursive: true, force: true });
 });
 
 // Every case here crosses a process boundary, and the CLI-entry cases shell
@@ -725,7 +736,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
 
     const { projects } = await client.listProjects();
     const project = projects.find(
-      (candidate) => candidate.workingDir?.toLowerCase() === process.cwd().toLowerCase(),
+      (candidate) => candidate.workingDir?.toLowerCase() === workspaceCwd.toLowerCase(),
     );
     expect(project).toBeDefined();
     const { tasks } = await client.listProjectTasks(project!.id);

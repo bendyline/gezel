@@ -3,6 +3,12 @@ import { spawnSync } from 'node:child_process';
 /** MCP tools whose service implementation requires a real deny-net boundary. */
 const DENY_NET_TOOLS = ['run_nodejs_script', 'derive_file'] as const;
 
+/**
+ * Set to `1` on the MCP child when the security policy's External services
+ * switch is on. See {@link unavailableToolsForPlatform}.
+ */
+export const SCRIPT_NETWORK_ALLOWED_ENV = 'GEZEL_SCRIPT_NETWORK_ALLOWED';
+
 let linuxSystemdProbe: boolean | undefined;
 
 /**
@@ -42,13 +48,22 @@ export function canUseLinuxSystemdDenyNet(): boolean {
   return linuxSystemdProbe;
 }
 
+/**
+ * The deny-net tools this host cannot offer. Without an enforceable network
+ * boundary (Windows; Linux without the probed systemd manager) they are
+ * withheld — unless `networkAllowed`: when the policy already lets gezellen
+ * reach the network, the boundary has nothing left to protect, and the
+ * service runs these scripts without it. Where a boundary exists it is always
+ * applied, so script egress stays behind the mediated web tools there.
+ */
 export function unavailableToolsForPlatform(
   platform: NodeJS.Platform,
-  options: { linuxSystemdAvailable?: boolean } = {},
+  options: { linuxSystemdAvailable?: boolean; networkAllowed?: boolean } = {},
 ): readonly string[] {
   if (platform === 'darwin') return [];
   if (platform === 'linux' && (options.linuxSystemdAvailable ?? canUseLinuxSystemdDenyNet())) {
     return [];
   }
+  if (options.networkAllowed) return [];
   return DENY_NET_TOOLS;
 }

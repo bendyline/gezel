@@ -451,7 +451,9 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
           gezelId: address.gezelId,
           sessionId: sessionId ?? null,
         })
-        .then((updated) => setMeta(updated))
+        .then((updated) => {
+          if (draftIdRef.current === live) setMeta(updated);
+        })
         .catch(() => {});
       return;
     }
@@ -470,9 +472,14 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       bornWithoutSessionRef.current = false;
       writeActiveDraftId(previousSlot, undefined);
       writeActiveDraftId(slotKey, live);
+      // A send that created this thread races this adoption and adopts the
+      // thread itself; if it wins, the daemon refuses the edit (409) and the
+      // draft is already retired, so neither answer may repaint the composer.
       void api
         .patchPromptDraft(address.projectId, live, { sessionId: sessionId ?? null })
-        .then((updated) => setMeta(updated))
+        .then((updated) => {
+          if (draftIdRef.current === live) setMeta(updated);
+        })
         .catch(() => {});
       return;
     }

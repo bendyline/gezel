@@ -1,7 +1,8 @@
+import { resolveSecurityPolicy } from '@bendyline/gezel';
 import { OutputRingBuffer } from '../fs/ring.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { runInSandbox } from '../sandbox/runner.js';
+import { denyNetBoundaryAvailable, runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
 
 /**
@@ -40,9 +41,11 @@ export interface RunWorkspaceScriptResult {
  *     resolve).
  *   - Write access to: workspace + artifacts.
  *   - No child_process / worker / addons (Node `--permission` denies).
- *   - No outbound network when an enforceable OS boundary is available.
- *     Today that is macOS Seatbelt. Windows/Linux fail closed instead of
- *     presenting Node's Permission Model as malicious-code containment.
+ *   - No outbound network wherever an OS boundary can enforce that (macOS
+ *     Seatbelt, a probed Linux systemd user service). Elsewhere it fails
+ *     closed rather than presenting Node's Permission Model as malicious-code
+ *     containment — unless External services is on (see
+ *     {@link workspaceScriptDeniesNetwork}).
  *   - A wall-clock timeout (default 5 min, configurable per-project).
  *   - Env scrubbed to an allowlist — no tokens leak in.
  *
@@ -90,7 +93,7 @@ export async function runWorkspaceScript(
     timeoutMs: timeout,
     extraReadPaths: [artifactsDir],
     stripTypes: true,
-    denyNet: true,
+    denyNet: await workspaceScriptDeniesNetwork(store),
     scriptArgs: opts.args ?? [],
     onStdout: (line) => stdoutRing.append(`${line}\n`),
     onStderr: (line) => stderrRing.append(`${line}\n`),
@@ -109,6 +112,18 @@ export async function runWorkspaceScript(
     timedOut: res.timedOut,
     ...(res.timedOut ? { error: `Script exceeded ${timeout}ms timeout and was killed.` } : {}),
   };
+}
+
+/**
+ * Whether a gezel-written script (`run_nodejs_script`, `derive_file`) runs
+ * behind the deny-network boundary. Always where the OS can enforce one.
+ * Where it cannot, a denyNet run fails closed, so the script gets the network
+ * only when the policy already lets gezellen reach it (External services) —
+ * the same condition under which gezel-mcp registers these tools there.
+ */
+export async function workspaceScriptDeniesNetwork(store: Store): Promise<boolean> {
+  if (await denyNetBoundaryAvailable()) return true;
+  return !resolveSecurityPolicy(await store.readConfig()).allowExternalServices;
 }
 
 function clampTimeout(raw?: number): number {

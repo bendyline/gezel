@@ -236,26 +236,36 @@ export function applyActiveStepToolPolicy(
   return applyStepToolPolicy(allowlist, step, allModelFacingBuiltinTools);
 }
 
-let platformUnavailableToolNames: ReadonlySet<string> | undefined;
+/** Keyed by `networkAllowed`: the platform probe runs once, the policy varies. */
+const platformUnavailableToolNames = new Map<boolean, ReadonlySet<string>>();
 
-function unavailableBuiltinNamesOnThisPlatform(): ReadonlySet<string> {
-  platformUnavailableToolNames ??= new Set(unavailableToolsForPlatform(process.platform));
-  return platformUnavailableToolNames;
+function unavailableBuiltinNamesOnThisPlatform(networkAllowed: boolean): ReadonlySet<string> {
+  let names = platformUnavailableToolNames.get(networkAllowed);
+  if (!names) {
+    names = new Set(unavailableToolsForPlatform(process.platform, { networkAllowed }));
+    platformUnavailableToolNames.set(networkAllowed, names);
+  }
+  return names;
 }
 
 /**
  * Materialize the built-in portion of a resolved allowlist exactly as the
  * cold-session prompt predictor does. Shared with the prompt-contract matrix
  * so CI exercises the production inventory and first-group-wins dedupe rules.
+ * `networkAllowed` must match what the session's gezel-mcp child was told
+ * (the External services switch), or the prompt lists tools it lacks.
  */
 export function availableBuiltinToolsForAllowlist(
   allowlist: ReadonlySet<string> | null,
   contextualBuiltinTools: readonly string[] = [],
   registeredToolNames?: ReadonlySet<string>,
+  options: { networkAllowed?: boolean } = {},
 ): AvailableToolInfo[] {
   const predicted: AvailableToolInfo[] = [];
   const seenNames = new Set<string>();
-  const platformUnavailable = unavailableBuiltinNamesOnThisPlatform();
+  const platformUnavailable = unavailableBuiltinNamesOnThisPlatform(
+    options.networkAllowed ?? false,
+  );
   for (const group of BUILTIN_TOOLSETS) {
     for (const toolName of group.tools) {
       if (allowlist && !allowlist.has(toolName)) continue;

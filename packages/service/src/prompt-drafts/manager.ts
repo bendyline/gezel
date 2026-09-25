@@ -15,6 +15,7 @@ import { PROJECT_PROMPTS_DIR_NAME } from '@bendyline/gezel/paths';
 import {
   PromptDraftInvalidIdError,
   PromptDraftNotFoundError,
+  PromptDraftSentError,
   createPromptDraft,
   deletePromptDraft,
   duplicatePromptDraft,
@@ -42,7 +43,7 @@ import { nodePromptDraftFiles } from './node-files.js';
  * by construction — the shared module cannot reach the project record.
  */
 
-export { PromptDraftInvalidIdError, PromptDraftNotFoundError };
+export { PromptDraftInvalidIdError, PromptDraftNotFoundError, PromptDraftSentError };
 
 const log = createLogger('prompt-drafts');
 

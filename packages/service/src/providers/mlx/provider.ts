@@ -141,9 +141,9 @@ import {
 } from './chat-protocol.js';
 import { EngineLogRouter } from './engine-log-router.js';
 import {
-  requestOpensReasoning,
   StreamingReasoningSplit,
   type TemplateReasoningOpen,
+  requestOpensReasoning,
 } from './reasoning-stream.js';
 import { applyMlxRequestShape } from './request-shape.js';
 import {

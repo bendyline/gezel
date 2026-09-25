@@ -20,4 +20,11 @@ describe('unavailableToolsForPlatform', () => {
   it('keeps deny-net script tools on macOS where Seatbelt supplies the boundary', () => {
     expect(unavailableToolsForPlatform('darwin')).toEqual([]);
   });
+
+  it('offers them without a boundary when the policy already allows the network', () => {
+    expect(unavailableToolsForPlatform('win32', { networkAllowed: true })).toEqual([]);
+    expect(
+      unavailableToolsForPlatform('linux', { linuxSystemdAvailable: false, networkAllowed: true }),
+    ).toEqual([]);
+  });
 });

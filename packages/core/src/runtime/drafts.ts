@@ -101,6 +101,19 @@ export class PromptDraftNotFoundError extends Error {
   }
 }
 
+/**
+ * An edit that reached a draft after it was sent. A client conflict, not a
+ * fault: a composer's last autosave or thread adoption can lose the race
+ * against the send that retired the draft.
+ */
+export class PromptDraftSentError extends Error {
+  readonly code = 'prompt-draft-sent' as const;
+  constructor(draftId: string) {
+    super(`A sent draft cannot be edited: ${draftId}`);
+    this.name = 'PromptDraftSentError';
+  }
+}
+
 export class PromptDraftInvalidIdError extends Error {
   readonly code = 'prompt-draft-invalid-id' as const;
   constructor(draftId: string) {
@@ -308,7 +321,7 @@ export async function writePromptDraftContent(
   content: string,
 ): Promise<WritePromptDraftContentResponse & { meta: PromptDraftMeta }> {
   const draft = await requireDraft(files, host, projectId, id);
-  if (draft.status !== 'draft') throw new Error('A sent draft cannot be edited');
+  if (draft.status !== 'draft') throw new PromptDraftSentError(id);
   const { content: _content, title: _t, hasFiles: _h, fileCount: _f, ...meta } = draft;
   // An attached task is as much "something in it" as a file: a person who
   // configured a craftbook and has not typed yet still owns a draft.
@@ -335,7 +348,7 @@ export async function patchPromptDraft(
   raw: PatchPromptDraftRequest,
 ): Promise<PromptDraft> {
   const before = await requireDraft(files, host, projectId, id);
-  if (before.status !== 'draft') throw new Error('A sent draft cannot be edited');
+  if (before.status !== 'draft') throw new PromptDraftSentError(id);
   const patch = PatchPromptDraftRequestSchema.parse(raw);
   const { content: _content, title: _t, hasFiles: _h, fileCount: _f, ...meta } = before;
   const next: PromptDraftMeta = { ...meta, updatedAt: host.now() };

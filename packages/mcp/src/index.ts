@@ -38,6 +38,7 @@ export {
   type ValidateResult,
 } from './validate.js';
 export {
+  SCRIPT_NETWORK_ALLOWED_ENV,
   canUseLinuxSystemdDenyNet,
   unavailableToolsForPlatform,
 } from './platform-tool-availability.js';

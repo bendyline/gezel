@@ -389,6 +389,17 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     ).toEqual(['draft_connector_action']);
   });
 
+  it('predicts the deny-net script tools on any host once the policy allows the network', () => {
+    // Must agree with gezel-mcp registration, which gets the same answer
+    // through GEZEL_SCRIPT_NETWORK_ALLOWED.
+    const allowlist = new Set(['run_nodejs_script', 'derive_file']);
+    expect(
+      availableBuiltinToolsForAllowlist(allowlist, [], undefined, { networkAllowed: true })
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual(['derive_file', 'run_nodejs_script']);
+  });
+
   it('admits the social post trio only when granted, and strips it under a no-services posture', async () => {
     const granted = await resolveSessionToolSurface({
       ...baseOpts,

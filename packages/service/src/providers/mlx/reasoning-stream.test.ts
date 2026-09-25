@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  requestOpensReasoning,
   StreamingReasoningSplit,
+  requestOpensReasoning,
   templateTextOpensReasoning,
 } from './reasoning-stream.js';
 
@@ -37,7 +37,7 @@ describe('templateTextOpensReasoning', () => {
     // Qwen 3.8's shipped generation branch, verbatim.
     expect(
       templateTextOpensReasoning(
-        "{%- if add_generation_prompt %}\n" +
+        '{%- if add_generation_prompt %}\n' +
           "    {{- '<|im_start|>assistant\\n' }}\n" +
           '    {%- if enable_thinking is defined and enable_thinking is false %}\n' +
           "        {{- '<think>\\n\\n</think>\\n\\n' }}\n" +

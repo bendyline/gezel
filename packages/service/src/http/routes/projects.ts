@@ -94,6 +94,9 @@ import { buildTimeline } from './timeline.js';
 
 const log = createLogger('http');
 
+const SCRIPT_EXECUTION_DISABLED =
+  'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to run scripts.';
+
 /**
  * Translate the two class-of errors workspace mutations can throw into
  * response envelopes a client / MCP tool can act on. Keeps the route
@@ -2380,6 +2383,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       timeoutMs?: number;
     };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
+    // Defense in depth, as for run-playwright: a hidden tool is not an
+    // execution boundary, and where the host has no deny-net fence the
+    // sandbox no longer refuses on its own.
+    if (!resolveSecurityPolicy(await ctx.store.readConfig()).allowScriptExecution) {
+      return c.json({ ok: false, error: SCRIPT_EXECUTION_DISABLED }, 403);
+    }
     try {
       const project = await ctx.store.getProject(id);
       const effectiveTimeout = body.timeoutMs ?? project?.workspaceScriptTimeoutMs;
@@ -2405,6 +2414,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     };
     if (!body.script) return c.json({ error: 'missing script' }, 400);
     if (!body.outputPath) return c.json({ error: 'missing outputPath' }, 400);
+    if (!resolveSecurityPolicy(await ctx.store.readConfig()).allowScriptExecution) {
+      return c.json({ ok: false, error: SCRIPT_EXECUTION_DISABLED }, 403);
+    }
     try {
       const project = await ctx.store.getProject(id);
       const effectiveTimeout = body.timeoutMs ?? project?.workspaceScriptTimeoutMs;

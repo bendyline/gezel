@@ -7,6 +7,7 @@ import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+import { workspaceScriptDeniesNetwork } from './runner.js';
 
 /**
  * Backs the `derive_file` MCP tool: produce a data file by EXECUTING a
@@ -105,7 +106,7 @@ export async function deriveWorkspaceFile(
       timeoutMs: timeout,
       extraReadPaths: [scratchDir, artifactsDir],
       stripTypes: true,
-      denyNet: true,
+      denyNet: await workspaceScriptDeniesNetwork(store),
       scriptArgs: [],
       onStdout: (line) => stdoutRing.append(`${line}\n`),
       onStderr: (line) => stderrRing.append(`${line}\n`),

@@ -49,6 +49,8 @@ export function errorToResponse(
     if (error.name === 'ScriptMetaError') return { status: 422, body: { error: error.message } };
     if (error.name === 'PromptDraftNotFoundError')
       return { status: 404, body: { error: error.message } };
+    if (error.name === 'PromptDraftSentError')
+      return { status: 409, body: { error: error.message } };
   }
   if (options.exposeUnknown)
     return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };

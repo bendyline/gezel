@@ -333,7 +333,7 @@ final class MobileBridgeTests: XCTestCase {
             const local = inventory.providers.find(item => item.id === 'llama-cpp');
             const apple = inventory.providers.find(item => item.id === 'apple-foundation-models');
             if (local?.availability !== 'available') throw new Error('Selected fixture should be available');
-            if (!apple || apple.locality !== 'on-device' || apple.capabilities.tools !== false) throw new Error('Invalid Apple descriptor');
+            if (!apple || apple.locality !== 'on-device' || apple.capabilities.tools !== true) throw new Error('Invalid Apple descriptor');
             if (apple.availability === 'available') {
                 let appleStreamed = '';
                 const appleListener = await plugin.addListener('chatDelta', event => {

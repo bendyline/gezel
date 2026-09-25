@@ -545,6 +545,17 @@ export function sandboxEnv(src: NodeJS.ProcessEnv): Record<string, string> {
 
 export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'unavailable';
 
+/** Whether this host can enforce `denyNet` for ordinary (non-RPC) script work. */
+export async function denyNetBoundaryAvailable(): Promise<boolean> {
+  return (
+    selectDenyNetBoundary({
+      platform: process.platform,
+      macSandboxAvailable: process.platform === 'darwin' && (await canApplyMacSandbox()),
+      linuxSystemdSandboxAvailable: await canApplyLinuxSystemdSandbox(),
+    }) !== 'unavailable'
+  );
+}
+
 /** Pure policy selector kept separate from the executable probes for tests. */
 export function selectDenyNetBoundary(input: {
   platform: NodeJS.Platform;

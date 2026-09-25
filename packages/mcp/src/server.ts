@@ -162,7 +162,10 @@ import {
 } from './linked-workspace.js';
 import { normalizeMarkdown } from './normalize.js';
 import { CAP, PartialEditRegistry } from './partial-edits.js';
-import { unavailableToolsForPlatform } from './platform-tool-availability.js';
+import {
+  SCRIPT_NETWORK_ALLOWED_ENV,
+  unavailableToolsForPlatform,
+} from './platform-tool-availability.js';
 import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
 import { reanchorAfterEdit } from './reanchor.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
@@ -642,7 +645,9 @@ const excludedToolNames = new Set(
     // tests see the same tools everywhere.
     ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
       ? []
-      : unavailableToolsForPlatform(process.platform)),
+      : unavailableToolsForPlatform(process.platform, {
+          networkAllowed: process.env[SCRIPT_NETWORK_ALLOWED_ENV] === '1',
+        })),
     ...distributionWithheldTools(),
   ].map(canonicalToolName),
 );

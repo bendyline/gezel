@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnPnpm } from './pnpm-cli.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const reportRoot = join(root, 'artifacts', 'coverage');
@@ -147,9 +148,12 @@ export function parseArgs(args) {
   return options;
 }
 
+// pnpm goes through spawnPnpm: a bare `spawn('pnpm')` cannot resolve
+// pnpm.cmd on Windows, so `pnpm all` died at its coverage step there.
 function run(command, args) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd: root, env: process.env, stdio: 'inherit' });
+    const options = { cwd: root, env: process.env, stdio: 'inherit' };
+    const child = command === 'pnpm' ? spawnPnpm(args, options) : spawn(command, args, options);
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (signal) reject(new Error(`${command} terminated by ${signal}`));
