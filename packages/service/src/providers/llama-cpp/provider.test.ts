@@ -6456,6 +6456,84 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(1);
   });
 
+  it('holds an urgent write until the files the prompt says to read have been read', async () => {
+    const surfaces: string[][] = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        tools?: Array<{ function: { name: string } }>;
+      };
+      surfaces.push((body.tools ?? []).map((entry) => entry.function.name));
+      const call =
+        surfaces.length === 1
+          ? { name: 'read_file', arguments: '{"path":"meeting/transcript.md"}' }
+          : surfaces.length === 2
+            ? {
+                name: 'write_file',
+                arguments: '{"path":"meeting-brief.md","content":"# Brief\\n"}',
+              }
+            : null;
+      if (!call) {
+        return sseResponse([
+          { choices: [{ index: 0, delta: { content: 'Wrote meeting-brief.md.' } }] },
+          { choices: [{ index: 0, finish_reason: 'stop' }] },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  { index: 0, id: `call_${surfaces.length}`, type: 'function', function: call },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
+      ],
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
+      callTool: async (name: string) =>
+        name === 'read_file' ? 'Launch moves to September 14, EU only.' : 'Wrote meeting-brief.md',
+    };
+
+    await session.sendAndWait(
+      'Read `meeting/transcript.md` for the decisions. Write `meeting-brief.md` now.',
+    );
+
+    // "Write … now" is urgent, but it is urgent AFTER the named read: the
+    // first request keeps read_file, and only then does the turn narrow.
+    expect(surfaces[0]).toContain('read_file');
+    expect(surfaces[1]).toEqual(['write_file']);
+  });
+
   it('clamps urgent missing-file turns to write_file even when the session bridge is wider', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;

@@ -112,6 +112,7 @@ import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.j
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
   type RequiredInput,
+  promptReadInputs,
   requiredInputsRead,
   unreadRequiredInputs,
 } from '../required-input-reads.js';
@@ -3136,6 +3137,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     let scenarioRepairNoMutationNudges = 0;
     let scenarioRepairReadOnlyCalls = 0;
     const requiredInputReads: RequiredInput[] = [];
+    const requiredInputs = [
+      ...(this.deps.activeCraftbookStep?.requiredInputs ?? []),
+      ...promptReadInputs(prompt),
+    ];
     let requiredInputHoldLogged = false;
     const prerequisiteRepairReadPaths =
       opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
@@ -3313,10 +3318,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
-        const unreadInputs = unreadRequiredInputs(
-          this.deps.activeCraftbookStep?.requiredInputs,
-          requiredInputReads,
-        );
+        const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
         const immediateFileWriteTurn =
           fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
         if (
@@ -3326,7 +3328,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         ) {
           requiredInputHoldLogged = true;
           log.info(
-            `[llama-cpp] turn ${turn} immediate-write held: step input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+            `[llama-cpp] turn ${turn} immediate-write held: input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
           );
         }
         const immediateFileWriteTarget = immediateFileWriteTurn
