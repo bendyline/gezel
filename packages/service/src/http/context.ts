@@ -111,6 +111,8 @@ export interface ServiceContext extends EngineContext {
    * and the SearchService knowledge arm. Absent on the machine-engine role.
    */
   knowledge?: KnowledgeManager;
+  /** The on-device relevance model (cross-encoder): lifecycle, status, scoring. */
+  relevance: import('../relevance/manager.js').RelevanceModelManager;
   /**
    * App-serve sites: per-site visitor listeners serving an applied AI App
    * as a shareable mini-site. Absent on the machine-engine role.

@@ -1,4 +1,9 @@
-import { type GateCheck, type Task, completionGate } from '@bendyline/gezel';
+import {
+  type GateCheck,
+  type Task,
+  completionGate,
+  composeCraftbookTaskDescription,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { isBinaryDocumentDeliverablePath } from '../handoff.ts';
 import {
@@ -731,6 +736,12 @@ async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<
 
 /** `createTask` requires a description of at least 40 chars. */
 function craftbookTaskDescription(spec: CraftbookEvalSpec): string {
+  if (spec.launchDescription === 'product') {
+    return composeCraftbookTaskDescription({
+      ...(spec.prompt ? { message: spec.prompt } : {}),
+      craftbookName: spec.title,
+    });
+  }
   const base = (spec.objective ?? '').trim() || spec.title;
   const request = spec.prompt?.trim();
   return `${base} Run this craftbook end to end in this project until the deterministic eval deliverables exist.${request ? ` User request: ${request}` : ''}`;

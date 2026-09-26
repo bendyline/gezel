@@ -1335,6 +1335,19 @@ export class KnowledgeManager {
   }
 
   /**
+   * Load every mounted catalog's own query model now. A search waits for
+   * these only briefly, so a caller that needs the semantic path measured
+   * (the retrieval preview's `warm`) loads them first.
+   */
+  async warmQueryModels(): Promise<void> {
+    const profiles = new Map<string, KnowledgeEmbeddingProfile>();
+    for (const info of this.mountedByKey.values()) {
+      if (info.semanticSearch === 'profile') profiles.set(info.embedding.id, info.embedding);
+    }
+    for (const profile of profiles.values()) await this.embedForProfile('warm', profile);
+  }
+
+  /**
    * A profile's query vector, or undefined when its model is unavailable or
    * not ready within `budgetMs` (that group searches FTS). A load that misses
    * the budget keeps running — loads are single-flight per profile — so the

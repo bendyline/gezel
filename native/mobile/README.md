@@ -138,7 +138,17 @@ safe point. Native timeouts use the platform's steady clock.
 
 Every generation writes status, finish reason, and partial prompt/generated-token
 and output-byte counts. Errors have a bounded message and numeric status. After
-failure or cancellation, the context is cleared before it can be reused. A failed
+failure or cancellation, the context is cleared before it can be reused.
+
+A request whose transcript starts the way the previous one did keeps that prefix
+instead of decoding it again, which is what makes a multi-step tool loop usable
+on a phone. Plain attention models drop the rest of their KV cache and continue.
+Recurrent and hybrid models (Qwen 3.5, LFM2, Granite 4) cannot drop a suffix, so
+the engine keeps one checkpoint of their non-attention state, taken one token
+before the end of each prompt, and resumes from it when the next transcript
+extends that prompt. It is 19 MiB for Qwen 3.5 2B whatever the prompt length.
+Reused output can differ from a fresh prefill only where two tokens are nearly
+tied, because single-token and batched kernels round differently. A failed
 load releases the previously loaded model once admitted; validation/BUSY errors
 preserve it. Unload is idempotent. Destroy requires
 exclusive lifetime ownership: first finish loading/generation and stop concurrent

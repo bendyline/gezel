@@ -23,3 +23,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0014](0014-craftbook-inputs.md) | Accepted | Craftbook inputs: declared source files, read in place or uploaded |
 | [0015](0015-project-inference.md) | Accepted | Document path → project folder inference (well-known folders, forbidden roots, the climb) |
 | [0016](0016-office-host.md) | Accepted | Office host: a per-user local CA, a stable HTTPS listener, and same-origin consent |
+| [0017](0017-relevance-model.md) | Accepted | A relevance model: an on-device cross-encoder, calibrated or reorder-only |

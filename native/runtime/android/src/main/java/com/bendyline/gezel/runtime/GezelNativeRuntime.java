@@ -67,14 +67,27 @@ public final class GezelNativeRuntime {
     private boolean modelMutation;
     private boolean destroyed;
     private boolean backgrounded;
+    /** One runtime serves every activity in the process, and a finishing
+     * activity's onStop arrives after its replacement is already on screen.
+     * Only the last started activity to stop backgrounds the runtime; a stale
+     * stop cancelled the new activity's reply mid-stream (Galaxy S20 FE eval,
+     * 2026-09-26). */
+    private int startedActivities;
     private String loadedId;
     private int loadedContext;
 
+    /** Loading a model is itself what pushes a 6 GB phone into memory pressure:
+     * lmkd kills background apps and every process hears RUNNING_CRITICAL.
+     * Releasing then cancelled the load that caused it, so the user's first
+     * reply died "interrupted" with no error (Galaxy S20 FE, 2026-09-26). A
+     * foreground request rides out running-level pressure; an idle model or a
+     * backgrounded app still gives its memory back. */
     private final ComponentCallbacks2 memory = new ComponentCallbacks2() {
         @Override public void onConfigurationChanged(Configuration configuration) {}
-        @Override public void onLowMemory() { releaseForMemory(); }
+        @Override public void onLowMemory() { releaseIdleForMemory(); }
         @Override public void onTrimMemory(int level) {
-            if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) releaseForMemory();
+            if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) releaseForMemory();
+            else if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) releaseIdleForMemory();
         }
     };
 
@@ -448,6 +461,11 @@ public final class GezelNativeRuntime {
 
     private void releaseForMemory() { requestRelease(null); }
 
+    private void releaseIdleForMemory() {
+        synchronized (this) { if (activeId != null || modelMutation) return; }
+        requestRelease(null);
+    }
+
     private void requestRelease(NativeCall call) {
         synchronized (this) {
             if (destroyed) { if (call != null) call.resolve(); return; }
@@ -473,7 +491,11 @@ public final class GezelNativeRuntime {
     }
 
     public void onBackground() {
-        synchronized (this) { if (backgrounded || destroyed) return; backgrounded = true; }
+        synchronized (this) {
+            if (startedActivities > 0) startedActivities--;
+            if (startedActivities > 0 || backgrounded || destroyed) return;
+            backgrounded = true;
+        }
         if(downloads!=null)downloads.requestPause();
         downloadControl.execute(()->{if(downloads!=null)downloads.suspend();});
         releaseForMemory();
@@ -481,7 +503,7 @@ public final class GezelNativeRuntime {
     }
 
     public void onForeground() {
-        synchronized (this) { backgrounded = false; }
+        synchronized (this) { startedActivities++; backgrounded = false; }
     }
 
     public void importModel(NativeCall call, Uri uri) {

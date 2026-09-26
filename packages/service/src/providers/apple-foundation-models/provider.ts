@@ -3,11 +3,13 @@ import {
   NATIVE_TOOL_LISTINGS,
   type NativeTool,
   type NativeToolListing,
+  PROMPT_FOOTPRINT_POLICY,
   createAwakeTimeout,
   createLogger,
   decodeNativeToolArguments,
   narrowerNativeListing,
   nativeToolSpecs,
+  resolvePromptFootprint,
 } from '@bendyline/gezel';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
@@ -82,6 +84,7 @@ function stableJson(value: unknown): string {
  */
 export class AppleFoundationModelsProvider implements LLMProvider {
   readonly name = 'apple-foundation-models' as const;
+  readonly nativeTools = true;
   readonly supportsPriorMessages = true;
   readonly queue = new ProviderQueue({ concurrency: 1 });
   private readonly helper: AppleFmHelper | null;
@@ -166,6 +169,10 @@ export class AppleFoundationModelsProvider implements LLMProvider {
       systemMessage: opts.systemMessage,
       history,
       contextTokens: this.hello!.contextTokens,
+      startListing:
+        PROMPT_FOOTPRINT_POLICY[
+          resolvePromptFootprint({ contextWindow: this.hello!.contextTokens })
+        ].nativeToolListing,
       maxTokens: Math.min(
         this.hello!.maxOutputTokens,
         opts.tuning?.sampling?.maxTokens ?? this.hello!.maxOutputTokens,
@@ -184,6 +191,8 @@ export interface AppleFoundationSessionDeps {
   history: Message[];
   contextTokens: number;
   maxTokens: number;
+  /** Where the tool ladder starts, from the shared prompt footprint. */
+  startListing?: NativeToolListing;
   terminalToolPolicy?: SessionOpts['terminalToolPolicy'];
 }
 
@@ -201,6 +210,7 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
     this.numCtx = deps.contextTokens;
     this.systemMessage = deps.systemMessage;
     this.history = [...deps.history];
+    this.listing = deps.startListing ?? 'full';
   }
 
   setSystemMessage(message: string): void {

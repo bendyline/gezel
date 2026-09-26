@@ -1,8 +1,3 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { compileKnowledgeCatalog } from '@bendyline/gezel-knowledge';
-import { embedBatch, embedModelId } from '@bendyline/gezel-service';
 import {
   GOLDEN_QUERIES,
   KNOWLEDGE_BENCH_TOPICS,
@@ -10,6 +5,7 @@ import {
   knowledgeBenchDocuments,
   scoreKnowledgeOutcomes,
 } from '../knowledge-bench/corpus.ts';
+import { compileAndInstallCatalog } from '../retrieval-corpora/catalog.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 
 /**
@@ -51,82 +47,20 @@ async function setup(ctx: EvalContext): Promise<void> {
   const { client, log } = ctx;
   lastReport = null;
 
-  const work = await mkdtemp(join(tmpdir(), 'knowledge-bench-'));
-  const archivePath = join(work, 'workshop-reference-1.0.0.gezk');
   const documents = knowledgeBenchDocuments();
-  const modelId = embedModelId();
-  log(`[knowledge-bench] compiling ${documents.length} articles with ${modelId}`);
-
-  await compileKnowledgeCatalog({
-    catalog: {
-      id: 'workshop-reference',
+  const { embedModel: modelId } = await compileAndInstallCatalog(
+    client,
+    {
+      publisherId: 'gezel-bench',
+      catalogId: 'workshop-reference',
       version: '1.0.0',
       name: 'Workshop Reference',
       description: 'Knowledge-bench fixture catalog.',
-      language: 'en',
-      publisher: { id: 'gezel-bench', name: 'Gezel Bench' },
-      createdAt: '2026-01-01T00:00:00.000Z',
-      license: { name: 'MIT', attributionRequired: false },
+      topics: KNOWLEDGE_BENCH_TOPICS,
+      documents,
     },
-    topics: KNOWLEDGE_BENCH_TOPICS,
-    documents: (async function* () {
-      for (const doc of documents) yield doc;
-    })(),
-    outputPath: archivePath,
-    embeddingProfile: {
-      // The profile IS the daemon's embedder: repo = embedModelId() makes
-      // the mount vector-compatible, and passage vectors are produced by
-      // the daemon-side embedBatch (which applies its own passage prefix),
-      // so query and passage share one space exactly as project search does.
-      id: `gezel-bench-${modelId.replace(/[^a-zA-Z0-9]+/g, '-')}@1`,
-      model: { repo: modelId, revision: 'daemon' },
-      tokenizer: { kind: 'daemon' },
-      pooling: 'mean',
-      normalized: true,
-      dimensions: 384,
-      maxTokens: 512,
-      queryInstruction: '',
-      passageInstruction: '',
-      vectorEncoding: 'bit+int8',
-      distance: { stage1: 'hamming', stage2: 'cosine' },
-      quantization: {
-        int8: { method: 'symmetric-linear', scale: 127 },
-        binary: { method: 'sign', threshold: 0, packing: 'lsb-first' },
-      },
-    },
-    chunkingProfile: {
-      id: 'markdown-chunks@2',
-      unit: 'tokens',
-      tokenizer: 'profile',
-      target: 420,
-      overlap: 64,
-      contextHeader: { max: 64 },
-    },
-    embed: (texts) => embedBatch(texts),
-    countTokens: (text) => (text.trim() ? text.trim().split(/\s+/).length : 0),
-    workDir: join(work, 'staging'),
-  });
-
-  const { jobId } = await client.installKnowledgeCatalog({
-    source: { kind: 'file', path: archivePath },
-  });
-  for (let i = 0; i < 200; i++) {
-    const job = await client.getKnowledgeJob(jobId);
-    if (job.finished) {
-      if (job.error) throw new Error(`catalog install failed: ${job.error}`);
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  const { catalogs } = await client.listKnowledgeCatalogs();
-  const status = catalogs.find((c) => c.ref.catalogId === 'workshop-reference');
-  if (!status?.mounted) throw new Error('catalog did not mount');
-  if (status.vectorCompatible === false) {
-    throw new Error(
-      `catalog profile did not match the daemon embedder (${modelId}) — the bench would measure FTS, not the two-stage path`,
-    );
-  }
-  log('[knowledge-bench] installed and mounted (vector-compatible)');
+    (line) => log(`[knowledge-bench] ${line}`),
+  );
 
   // Warm-up pass (model load + first shard read), then measured rounds.
   await client.searchKnowledge({ query: GOLDEN_QUERIES[0]?.query ?? 'warm' });
@@ -157,7 +91,6 @@ async function setup(ctx: EvalContext): Promise<void> {
   log(
     `[knowledge-bench] R@1=${score.recallAt1.toFixed(2)} R@5=${score.recallAt5.toFixed(2)} MRR=${score.mrr.toFixed(2)} p50=${Math.round(score.p50Ms)}ms p95=${Math.round(score.p95Ms)}ms`,
   );
-  await rm(work, { recursive: true, force: true }).catch(() => {});
 }
 
 export const knowledgeBenchScenario: EvalScenario = {

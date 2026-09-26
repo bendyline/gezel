@@ -2,14 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
+  MINIMAL_FOOTPRINT_MAX_WINDOW,
   buildToolReceipt,
   findAskCycleOrDepth,
   inferTargetProject,
+  resolvePromptFootprint,
   taskTranscriptCompatible,
 } from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  RetrievalDecisionTrace,
   SendToSessionRequest,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
@@ -112,7 +115,6 @@ import {
   renderTranscript,
   summarizeSessionForMemory,
 } from '../memory/summarizer.js';
-import { MINIMAL_CONTEXT_MAX_WINDOW } from '../model-profile/behaviors/prompt-minimal-context.js';
 import { resolveProfileForCatalogId } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
 import {
@@ -214,7 +216,11 @@ import { artifactPathsOf, extractReferencedFiles } from '../references/file-refe
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
-import { retrieveProjectContext } from '../search/project-retrieval.js';
+import {
+  resolveSessionRetrievalPolicy,
+  retrieveProjectContext,
+} from '../search/project-retrieval.js';
+import { retrievalTraceEnabled, traceHistoryDetails } from '../search/retrieval-trace.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
@@ -12882,6 +12888,21 @@ export class ChatManager extends LocalEngineRuntime {
     if (!this.contentIndexRef?.searchLibrary) return [];
     const text = userText.trim();
     if (text.length < TURN_LIBRARY_RECALL_MIN_CHARS) return [];
+    // Library recall is indexed context by another road: with retrieval Off
+    // (or the shared library outside the policy's sources) it must stay
+    // silent, or "Off" still puts library snippets in front of the model.
+    const [gezel, config] = await Promise.all([
+      this.store.getGezel(state.record.gezelId).catch(() => null),
+      this.store.readConfig().catch(() => null),
+    ]);
+    if (!gezel || !config) return [];
+    const policy = await resolveSessionRetrievalPolicy({
+      store: this.store,
+      record: state.record,
+      gezel,
+      config,
+    });
+    if (policy.mode === 'off' || !policy.sources.includes('shared')) return [];
     const libraryId = await this.store.sharedProjectId().catch(() => null);
     if (!libraryId) return [];
     // A session scoped to the library already lists these files as its
@@ -12944,6 +12965,7 @@ export class ChatManager extends LocalEngineRuntime {
         rawResults: number;
         arms?: unknown[];
       } | null = null;
+      let trace: RetrievalDecisionTrace | null = null;
       const result = await retrieveProjectContext({
         store: this.store,
         search,
@@ -12958,7 +12980,14 @@ export class ChatManager extends LocalEngineRuntime {
         onSearchProbe: (p) => {
           probe = p;
         },
+        onDecisionTrace: (t) => {
+          trace = t;
+        },
       });
+      const traceDetails = (() => {
+        const captured = trace as RetrievalDecisionTrace | null;
+        return captured ? traceHistoryDetails(captured, retrievalTraceEnabled(config)) : {};
+      })();
       if (!result) {
         // Zero-injection telemetry (per query hash, once per session): the
         // arms ran; nothing cleared the floor or survived hydration.
@@ -12990,6 +13019,7 @@ export class ChatManager extends LocalEngineRuntime {
                   rawResults: zero.rawResults,
                   hits: [],
                   ...(zero.arms ? { arms: zero.arms } : {}),
+                  ...traceDetails,
                 },
               })
               .catch(() => {});
@@ -13018,11 +13048,16 @@ export class ChatManager extends LocalEngineRuntime {
             truncated: result.truncated,
             hits: result.hits.map((hit) => ({
               source: hit.source,
+              docKey: hit.docKey,
+              kind: hit.kind,
+              ...(hit.arm ? { arm: hit.arm } : {}),
               projectId: hit.projectId,
               path: hit.path,
               line: hit.line,
               lineEnd: hit.lineEnd,
               score: hit.score,
+              ...(hit.relevance !== undefined ? { relevance: hit.relevance } : {}),
+              ...(hit.modelScore !== undefined ? { modelScore: hit.modelScore } : {}),
               // Knowledge provenance (citation coordinates only, never text).
               ...(hit.uri ? { uri: hit.uri } : {}),
               ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
@@ -13030,6 +13065,7 @@ export class ChatManager extends LocalEngineRuntime {
             })),
             // Per-arm timing/outcome telemetry (non-content — never snippets).
             ...(probeArms ? { arms: probeArms } : {}),
+            ...traceDetails,
           },
         })
         .catch(() => {});
@@ -14209,15 +14245,23 @@ export class ChatManager extends LocalEngineRuntime {
     // contextWindow is at/below MINIMAL_CONTEXT_MAX_WINDOW (talkie-1930 at
     // 2048), or when the manifest opts in via the behavior.
     const modelContextWindow = await resolveCatalogContextWindow(this.catalog, resolvedCatalogId);
-    // Apple's on-device model calls tools natively inside a 4K window: it
-    // always gets the minimal prompt, with its tool conduct and task step kept.
-    const nativeToolsMinimal = record.providerName === 'apple-foundation-models';
-    const minimalContextActive =
-      nativeToolsMinimal ||
-      profileHasBehavior(modelProfile, 'prompt.minimal-context') ||
-      (typeof modelContextWindow === 'number' &&
-        modelContextWindow > 0 &&
-        modelContextWindow <= MINIMAL_CONTEXT_MAX_WINDOW);
+    // The shared prompt footprint (core/prompt-footprint.ts). A native-tool
+    // provider has no catalog window, so its own (Apple's reports 4096 before
+    // OS 27) decides; until it has reported, assume the small floor.
+    const footprintProvider = this.providers.get(record.providerName);
+    const nativeToolsProvider = footprintProvider?.nativeTools === true;
+    const promptFootprint = resolvePromptFootprint({
+      contextWindow:
+        modelContextWindow ??
+        (nativeToolsProvider
+          ? (footprintProvider?.getContextWindow?.() ?? MINIMAL_FOOTPRINT_MAX_WINDOW)
+          : undefined),
+      ...(profileHasBehavior(modelProfile, 'prompt.minimal-context')
+        ? { requested: 'minimal' as const }
+        : {}),
+    });
+    const minimalContextActive = promptFootprint === 'minimal';
+    const nativeToolsMinimal = minimalContextActive && nativeToolsProvider;
     // Index-derived prompt features (Tier 3): the gestalt block and the
     // retrieval-first steer, both marker behaviors resolved here and
     // rendered/gated inside buildInstructions.

@@ -45,7 +45,12 @@ authorized project ids + current gezel + shared library
         +-- rollups: relevant folder and architecture summaries
         |
         v
-hybrid rank fusion + weighted corpus merge -> dedupe -> path/source diversity
+hybrid rank fusion + weighted corpus merge -> dedupe
+        |
+        +-- relevance model (optional): re-judge the top of the fused order
+        |
+        v
+path/source diversity
         |
         +-- generic `search` tool results with provenance and citations
         |      `-- strong applicable craftbook options + invocation recipes
@@ -119,14 +124,21 @@ A craftbook started from the get-go — the composer's attached task or
 `invoke_craftbook` — searches the reference corpora (installed knowledge
 catalogs and the shared library) once for its subject, before the entry step
 is dispatched ([tasks/references.ts](../packages/service/src/tasks/references.ts),
-called from `TaskLauncher`). What it keeps is frozen on the task as
-`Task.references`, service-stamped at create and inherited by fanout children:
+called from `TaskLauncher`). The subject is the book's main content param
+(`fromMessage`, else `topic`); most books declare none, so it falls back to
+the opening of the task description — the person's words, never the padding
+a short request is given, cut at a sentence within 300 characters. Code books
+(the `code-*` shelves) take no description fallback: their material is the
+repository, and their descriptions find namesakes in the reference catalogs.
+What it keeps is frozen on the task as `Task.references`, service-stamped at
+create and inherited by fanout children:
 
 - at most five entries, each a citation (`knowledge://` URI or library path),
   a title, and a snippet — never a document body;
 - only entries whose title, path, or snippet names a subject term, so a
   vector-only neighbour cannot ride every step of the run; words from the
-  book's own name are not subject terms;
+  book's own name are not subject terms. An entry a calibrated relevance
+  model scored is kept or dropped on that score instead;
 - skipped when the launch supplies its own source (`sourcePath`, `content`,
   or an input picker), for drafts, and for scheduled hosts;
 - bounded to 1.5 s and never waiting on a cold embedder, so it cannot hold up
@@ -142,6 +154,51 @@ It is not written into the task's `about.md`: that file is the person's
 request, rendered unlabeled in every step's prompt beside the authoritative
 invocation parameters, where catalog text would read as instructions.
 
+## Relevance model
+
+Every relevance the search arms report is derived from rank: the top of any
+arm that returned anything looks strong, so no floor can tell an answer from
+noise, and a query with nothing relevant still injects its best-ranked rows.
+The optional **relevance model** (Settings → Relevance check) is a small
+cross-encoder: it reads the query and each passage together and scores the
+pair on its own, which gives an absolute cut.
+
+- **Where it runs.** `SearchService.searchProject` re-judges the top of the
+  fused order ([search/relevance-stage.ts](../packages/service/src/search/relevance-stage.ts))
+  for three surfaces: per-turn injection (`filter`, 250 ms), the launch
+  reference list (`filter`, 700 ms added to its budget), and the model's
+  `search` tool (`reorder`, 400 ms). Keyword hits are judged on their whole
+  indexed chunk, read for the scored window only.
+- **Never holds a turn.** A cold model answers `cold`, starts warming, and the
+  results pass through untouched. Only a loaded model makes a turn over-fetch
+  (3× its depth, at most 24) for the model to choose from. Off or cold behaves
+  exactly as without it.
+- **Judged candidates.** A candidate a *calibrated* model scored is kept or
+  dropped on that score alone: the rank floor, keyword grounding, and the
+  reference list's lexical rule do not apply to it. Everything else — past the
+  window, or scored by an uncalibrated model — goes through those rules as
+  before.
+- **Calibration.** Scores map onto fixed relevance anchors (drop 0.1, keep
+  0.3, strong 0.6) through the model's thresholds, which come from the
+  retrieval bench, never from guesswork. A model with no thresholds may
+  reorder but never drop. `search` drops only below *drop* and reports the
+  rest as `hiddenBelowRelevanceFloor` ("No closely relevant results (N weak
+  matches hidden)").
+- **Models.** Pinned by sha256 at an exact revision in
+  [relevance/registry.ts](../packages/service/src/relevance/registry.ts),
+  stored under `~/.gezel/engines/relevance-models/<id>/`, downloaded only on
+  opt-in and only when the security policy allows app network, and loaded
+  with `local_files_only`. Each model proves itself at load (a canned answer
+  must outscore a canned non-answer); failing that, it is disabled. It runs in
+  its own worker and never imports provider or chat code — a classifier cannot
+  be talked into anything.
+- **Eval levers.** `GEZEL_RELEVANCE_MODEL` (`off` | `on` | id),
+  `GEZEL_RELEVANCE_SURFACES`, `GEZEL_RELEVANCE_THRESHOLDS`,
+  `GEZEL_RELEVANCE_BUDGET_MS`, `GEZEL_RELEVANCE_ORDER`,
+  `GEZEL_RELEVANCE_MODELS_DIR`, and the kill switch
+  `GEZEL_DISABLE_RELEVANCE_MODEL`. The retrieval preview takes a
+  `relevanceModel` override per request.
+
 ## Trust, privacy, and audit
 
 - The HTTP route binds model search to the session's active project. The caller
@@ -154,8 +211,11 @@ invocation parameters, where catalog text would read as instructions.
 - Exact surrounding content should be verified with `read_file`,
   `read_artifact`, or `read_document` before a consequential edit or claim.
 - `retrieval.context-injected` history events record the query hash, policy,
-  estimated token use, result scores, provenance, and citations. Raw queries
-  and retrieved text are not duplicated into telemetry.
+  estimated token use, result scores (with the relevance model's score when
+  it judged a hit), provenance, citations, and rejected counts per decision
+  reason. With `GEZEL_RETRIEVAL_TRACE=1` or debug mode they also carry one
+  row per candidate. Raw queries and retrieved text are not duplicated into
+  telemetry.
 
 ## Linked projects
 
@@ -177,13 +237,22 @@ are described in [Project linking](project-linking.md).
 
 ## Evaluation
 
-Retrieval quality should be measured at two levels:
+Two harnesses, at two levels:
 
-- retrieval: relevant-source recall, reciprocal rank, citation diversity,
-  latency, and injected-token count; and
-- outcome: task success and grounded citations with Off/Lean/Balanced/Deep held
-  as the experimental variable.
+- **Retrieval quality** — `pnpm --filter @bendyline/gezel-evals run
+  retrieval-bench`. No agent: a labeled corpus of fictional entity families
+  with graded labels and deliberate decoys, every query run through
+  `POST /api/projects/:id/retrieval/preview` — the surfaces' real decision
+  code, with no side effects. Reports nDCG, MRR, strict recall, set
+  precision, false-injection and distractor rates, tokens, and latency.
+  `--relevance-model <id>` adds arms (off, uncalibrated, and each
+  `--thresholds` triple) plus an offline threshold sweep. Labels and levers:
+  [evals/src/retrieval-bench/](../evals/src/retrieval-bench/).
+- **Outcome** — `pnpm --filter @bendyline/gezel-evals run ab-retrieval`. Paired
+  A/B trials (control, annotated, references-only, turn-only) on scenarios
+  whose deliverables are graded against known facts and decoys, with an arm
+  proof that re-runs any trial whose arm did not actually take effect.
 
-The history event above supplies non-content telemetry for those comparisons.
-A mode should not be promoted merely because it retrieves more text: the win is
-better task completion without unacceptable context pressure or latency.
+A mode or model should not be promoted merely because it retrieves more text:
+the win is better task completion without unacceptable context pressure or
+latency.

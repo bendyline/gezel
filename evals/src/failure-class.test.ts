@@ -19,6 +19,14 @@ describe('classifyTrial — terminal classes', () => {
     expect(c.failureClass).toBe('operator');
   });
 
+  it('a withheld tool that was wired anyway is the harness, not the model', () => {
+    const c = classifyTrial({
+      success: false,
+      reason: 'closed worker still had lookup tools: search',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'tool-roster-leak' });
+  });
+
   it('capacity denial in the reason', () => {
     const c = classifyTrial({
       success: false,

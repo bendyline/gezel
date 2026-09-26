@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { UnifiedSearchResult } from './schemas/api.js';
 import {
   MERGE_WEIGHTS,
+  MODEL_RELEVANCE_ANCHORS,
   STRONG_TIER_MIN_RELEVANCE,
   dedupeSearchResults,
   ftsRankRelevance,
   lexicalRelevance,
   pageSearchResults,
+  relevanceFromModelScore,
   scoreResult,
 } from './search-ranking.js';
 
@@ -74,5 +76,25 @@ describe('pageSearchResults', () => {
     const offset = pageSearchResults(rows, { offset: 2, limit: 5 });
     expect(offset.results.map((r) => r.id)).toEqual(['b']);
     expect(offset.hasMore).toBe(false);
+  });
+});
+
+describe('relevanceFromModelScore', () => {
+  const thresholds = { drop: 0.2, keep: 0.5, strong: 0.8 };
+
+  it('puts each calibrated threshold on its anchor, monotonically', () => {
+    expect(relevanceFromModelScore(0.2, thresholds)).toBeCloseTo(MODEL_RELEVANCE_ANCHORS.drop);
+    expect(relevanceFromModelScore(0.5, thresholds)).toBeCloseTo(MODEL_RELEVANCE_ANCHORS.keep);
+    expect(relevanceFromModelScore(0.8, thresholds)).toBeCloseTo(MODEL_RELEVANCE_ANCHORS.strong);
+    expect(relevanceFromModelScore(0, thresholds)).toBe(0);
+    expect(relevanceFromModelScore(1, thresholds)).toBe(1);
+    const samples = [0, 0.1, 0.3, 0.45, 0.6, 0.9, 1].map((s) =>
+      relevanceFromModelScore(s, thresholds),
+    );
+    expect([...samples].sort((a, b) => a - b)).toEqual(samples);
+  });
+
+  it('passes an uncalibrated score through', () => {
+    expect(relevanceFromModelScore(0.42, null)).toBeCloseTo(0.42);
   });
 });

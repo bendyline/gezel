@@ -4,7 +4,7 @@ import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { isContextOverflowError } from '../task-execution.js';
-import { parseExactToolEnvelope } from '../tools/envelope.js';
+import { parseToolEnvelopeReply } from '../tools/envelope.js';
 import {
   NATIVE_TOOL_LISTINGS,
   NATIVE_TOOL_NOTE,
@@ -17,6 +17,7 @@ import {
   nativeToolSpecs,
 } from '../tools/native-tools.js';
 import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
+import { extractReasoning } from '../transform/reasoning.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
 import type { PortableInference } from './product-service.js';
@@ -110,6 +111,26 @@ function withToolListing(
   return first?.role === 'system'
     ? [{ role: 'system', content: first.content ? `${first.content}\n\n${block}` : block }, ...rest]
     : [{ role: 'system', content: block }, ...messages];
+}
+
+/**
+ * Qwen-family models wrap even an empty chain of thought in `<think></think>`
+ * before a tool call (S20 FE, Qwen 3.5 2B, 2026-09-26), which hid the call from
+ * the exact-envelope parser and showed the tags to the user. Text still able to
+ * open one of these is held back from the stream until it resolves.
+ */
+const REASONING_BLOCKS = [
+  ['<think>', '</think>'],
+  ['<reasoning>', '</reasoning>'],
+  ['[think]', '[/think]'],
+] as const;
+
+/** An opener still arriving, or a block not yet closed: nothing here is visible yet. */
+function inOpenReasoning(buffered: string): boolean {
+  const lead = buffered.trimStart().toLowerCase();
+  return REASONING_BLOCKS.some(
+    ([open, close]) => open.startsWith(lead) || (lead.startsWith(open) && !lead.includes(close)),
+  );
 }
 
 const ACTION_LIMIT =
@@ -344,6 +365,7 @@ export async function runPortableToolLoop(options: {
     await check();
     await assertPortableTaskSessionActive(options.store, session);
     let buffered = '';
+    let emitted = '';
     let prose = false;
     let result!: Awaited<ReturnType<PortableInference['generate']>>;
     let ended: Omit<LoopResult, 'message'> | undefined;
@@ -374,10 +396,16 @@ export async function runPortableToolLoop(options: {
           (event) => {
             if (options.cancelled() || event.requestId !== options.requestId) return;
             buffered += event.delta;
-            if (!prose && buffered.trimStart() && !buffered.trimStart().startsWith('{')) {
+            if (inOpenReasoning(buffered)) return;
+            const visible = extractReasoning(buffered).visible;
+            if (!prose) {
+              const lead = visible.trimStart();
+              // A possible tool call (bare or fenced) stays off screen until parsed.
+              if (!lead || /^[{`]/.test(lead)) return;
               prose = true;
-              options.delta(buffered);
-            } else if (prose) options.delta(event.delta);
+            } else if (!visible.startsWith(emitted)) return;
+            if (visible.length > emitted.length) options.delta(visible.slice(emitted.length));
+            emitted = visible;
           },
           nativeSpecs.length
             ? async (event) => {
@@ -439,13 +467,14 @@ export async function runPortableToolLoop(options: {
     if (ended) return { ...ended, message, streamed: prose };
     if (options.cancelled() || result.stopReason === 'cancelled')
       return { ...result, stopReason: 'cancelled', message, streamed: prose };
-    const envelope = result.stopReason === 'stop' ? parseExactToolEnvelope(result.text) : null;
-    if (!envelope) return { ...result, message, streamed: prose };
+    const visibleText = extractReasoning(result.text).visible;
+    const envelope = result.stopReason === 'stop' ? parseToolEnvelopeReply(visibleText) : null;
+    if (!envelope) return { ...result, text: visibleText, message, streamed: prose };
     if (++actionCount > 8) break;
     const outcome = await perform(envelope.name, envelope.arguments);
     if ('end' in outcome) return { ...outcome.end, message };
     messages.push(
-      { role: 'assistant', content: result.text },
+      { role: 'assistant', content: visibleText.trim() },
       { role: 'user', content: outcome.output },
     );
   }

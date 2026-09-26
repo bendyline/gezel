@@ -2129,6 +2129,28 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * The launch reference list (`Task.references`): when a craftbook is
+   * started with a subject, search knowledge catalogs and the shared library
+   * for it and name what matched in every step's prompt. Default on.
+   */
+  taskReferences: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * The relevance model: a small on-device cross-encoder that checks each
+   * indexed passage against the request before it reaches a prompt. Default
+   * off; enabling downloads the selected model (pinned in the service's
+   * relevance registry) when app network access is allowed.
+   */
+  relevanceModel: z
+    .object({
+      enabled: z.boolean().optional(),
+      modelId: z.string().min(1).optional(),
+    })
+    .optional(),
+  /**
    * Knowledge catalogs (.gezk) — user-global defaults. The authoritative
    * per-catalog state (exact refs, enablement) lives in
    * `~/.gezel/knowledge/registry.json`; this holds only the preferences the
@@ -5688,6 +5710,8 @@ export type ProjectSearchCraftbookSuggestion = z.infer<
 export const ProjectSearchResponseSchema = UnifiedSearchResponseSchema.extend({
   /** Strong, applicable Gilde or local procedures that may help execute the query. */
   craftbooks: z.array(ProjectSearchCraftbookSuggestionSchema),
+  /** Results the relevance model scored as off-topic and left out of this page. */
+  hiddenBelowRelevanceFloor: z.number().int().positive().optional(),
 });
 export type ProjectSearchResponse = z.infer<typeof ProjectSearchResponseSchema>;
 

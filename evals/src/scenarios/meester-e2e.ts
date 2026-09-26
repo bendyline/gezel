@@ -30,6 +30,7 @@
  * suite (`meester-e2e`) rather than riding in a fast one.
  */
 
+import type { Task } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 
@@ -467,6 +468,92 @@ async function installFoodKnowledge(ctx: EvalContext): Promise<void> {
  * research actually ran, that the deck is about the topic, and that one ask
  * started one crew.
  */
+/**
+ * The completion check shared by the front-door deck runs: one crew, every
+ * phase finished, a real .pptx, a Markdown source about the topic, and
+ * research that actually ran. `extraGaps` adds a scenario's own conditions.
+ */
+function frontDoorDeckCheck(opts: {
+  key: string;
+  topic: RegExp;
+  extraGaps?: (task: Task, client: GezelClient) => Promise<string[]>;
+}): EvalScenario['successCheck'] {
+  return async ({ client, logChanged, recordSniff }: EvalContext) => {
+    const listed = await client.listTasks().catch(() => ({ tasks: [] }));
+    const decks = (listed.tasks ?? []).filter((t) =>
+      (t.sourceCraftbookIds ?? []).some((s) => DECK_BOOK_RE.test(s.catalogId ?? '')),
+    );
+    if (decks.length === 0) {
+      logChanged('sniff', `[scenario] ${opts.key}: not routed yet`);
+      recordSniff?.({ key: opts.key, score: 0, bytes: 0 });
+      return { done: false };
+    }
+    if (decks.length > 1) {
+      return {
+        done: true,
+        success: false,
+        reason: `one ask started ${decks.length} deck crews (${decks.map((t) => t.ref).join(', ')})`,
+      };
+    }
+    const task = decks[0]!;
+    const deck = await findBinaryDeliverable(client, /\.pptx$/i, (b) =>
+      isOpenXml(b, 'ppt/presentation.xml'),
+    );
+    logChanged(
+      'sniff',
+      `[scenario] ${opts.key}: ${task.ref} ${task.status} step=${task.activeStepId ?? '-'} pptx=${deck ? `${deck.bytes}B` : 'none'}`,
+    );
+    // Score climbs with every step reached, so a book walking its phases
+    // reads as progress to the deliverable-anchored deadline instead of one
+    // long plateau from research to publish.
+    const steps = task.craftbook?.steps ?? [];
+    const reached =
+      Math.max(
+        0,
+        steps.findIndex((s) => s.id === task.activeStepId),
+      ) + 1;
+    const score = task.status === 'complete' ? steps.length + 1 : reached;
+    recordSniff?.({ key: opts.key, score, bytes: deck?.bytes ?? 0 });
+    if (task.status === 'paused' || task.status === 'canceled') {
+      return {
+        done: true,
+        success: false,
+        reason: `${task.ref} ${task.status} at step ${task.activeStepId ?? '?'}${deck ? ` (a ${deck.bytes}-byte .pptx exists)` : ''}`,
+      };
+    }
+    if (task.status !== 'complete') return { done: false };
+
+    const gaps: string[] = [];
+    if (!deck) gaps.push('no real .pptx');
+    const source = await findTextFile(client, /(?:^|\/)deck\.md$/, opts.topic, 200);
+    if (!source) gaps.push(`no Markdown deck source mentions ${opts.topic.source}`);
+    const history = await client
+      .listHistory({ kind: 'tool.called', limit: 2000 })
+      .catch(() => ({ entries: [] }));
+    const research = (history.entries ?? []).flatMap((e) => {
+      if (e.entryType !== 'event') return [];
+      const d = (e.details ?? {}) as Record<string, unknown>;
+      const hit =
+        d.taskRef === task.ref &&
+        d.stepId === 'research' &&
+        d.success === true &&
+        RESEARCH_TOOLS.has(String(d.name));
+      return hit ? [String(d.name)] : [];
+    });
+    if (research.length === 0) gaps.push('research step made no successful research-tool call');
+    if (opts.extraGaps) gaps.push(...(await opts.extraGaps(task, client)));
+    if (gaps.length > 0) {
+      return { done: true, success: false, reason: `${task.ref} complete but ${gaps.join('; ')}` };
+    }
+    const used = [...new Set(research)];
+    return {
+      done: true,
+      success: true,
+      reason: `${task.ref} ran every phase; research used ${used.join(', ')}; ${deck!.bytes}-byte .pptx at ${deck!.surface}:${deck!.path}`,
+    };
+  };
+}
+
 export const pptxMeesterPizzaScenario: EvalScenario = {
   id: 'pptx-meester-pizza',
   description:
@@ -483,85 +570,99 @@ export const pptxMeesterPizzaScenario: EvalScenario = {
     await installDocblocks(ctx);
     await installFoodKnowledge(ctx);
   },
-  successCheck: async ({ client, logChanged, recordSniff }: EvalContext) => {
-    const listed = await client.listTasks().catch(() => ({ tasks: [] }));
-    const decks = (listed.tasks ?? []).filter((t) =>
-      (t.sourceCraftbookIds ?? []).some((s) => DECK_BOOK_RE.test(s.catalogId ?? '')),
-    );
-    if (decks.length === 0) {
-      logChanged('sniff', '[scenario] pptx-meester-pizza: not routed yet');
-      recordSniff?.({ key: 'pptx-meester-pizza', score: 0, bytes: 0 });
-      return { done: false };
-    }
-    if (decks.length > 1) {
-      return {
-        done: true,
-        success: false,
-        reason: `one ask started ${decks.length} deck crews (${decks.map((t) => t.ref).join(', ')})`,
-      };
-    }
-    const task = decks[0]!;
-    const deck = await findBinaryDeliverable(client, /\.pptx$/i, (b) =>
-      isOpenXml(b, 'ppt/presentation.xml'),
-    );
-    logChanged(
-      'sniff',
-      `[scenario] pptx-meester-pizza: ${task.ref} ${task.status} step=${task.activeStepId ?? '-'} pptx=${deck ? `${deck.bytes}B` : 'none'}`,
-    );
-    // Score climbs with every step reached, so a book walking its phases
-    // reads as progress to the deliverable-anchored deadline instead of one
-    // long plateau from research to publish.
-    const steps = task.craftbook?.steps ?? [];
-    const reached =
-      Math.max(
-        0,
-        steps.findIndex((s) => s.id === task.activeStepId),
-      ) + 1;
-    const score = task.status === 'complete' ? steps.length + 1 : reached;
-    recordSniff?.({ key: 'pptx-meester-pizza', score, bytes: deck?.bytes ?? 0 });
-    if (task.status === 'paused' || task.status === 'canceled') {
-      return {
-        done: true,
-        success: false,
-        reason: `${task.ref} ${task.status} at step ${task.activeStepId ?? '?'}${deck ? ` (a ${deck.bytes}-byte .pptx exists)` : ''}`,
-      };
-    }
-    if (task.status !== 'complete') return { done: false };
+  successCheck: frontDoorDeckCheck({ key: 'pptx-meester-pizza', topic: /pizza/i }),
+};
 
-    const gaps: string[] = [];
-    if (!deck) gaps.push('no real .pptx');
-    const source = await findTextFile(client, /(?:^|\/)deck\.md$/, /pizza/i, 200);
-    if (!source) gaps.push('no Markdown deck source mentions pizza');
-    const history = await client
-      .listHistory({ kind: 'tool.called', limit: 2000 })
-      .catch(() => ({ entries: [] }));
-    const research = (history.entries ?? []).flatMap((e) => {
-      if (e.entryType !== 'event') return [];
-      const d = (e.details ?? {}) as Record<string, unknown>;
-      const hit =
-        d.taskRef === task.ref &&
-        d.stepId === 'research' &&
-        d.success === true &&
-        RESEARCH_TOOLS.has(String(d.name));
-      return hit ? [String(d.name)] : [];
-    });
-    if (research.length === 0) gaps.push('research step made no successful research-tool call');
-    if (gaps.length > 0) {
-      return { done: true, success: false, reason: `${task.ref} complete but ${gaps.join('; ')}` };
+/**
+ * What the quiche incident surfaced for "quiche": rank-derived relevance
+ * made a pesticide-residue method, a drink, and a regulatory term look
+ * strong, and a France deck once injected a DocBlocks heading.
+ */
+const QUICHE_DECOYS = /quechers|top[\s_-]deck|priority[\s_-]review|all[\s_-]about[\s_-]docblocks/i;
+
+/**
+ * A pinned food catalog for the quiche check, from `GEZEL_EVAL_FOOD_CATALOG`
+ * (a local `.gezk`), so a run measures the catalog it names rather than
+ * whatever the gilde feed serves today. Falls back to the published one.
+ */
+async function installFoodCatalogForQuiche(ctx: EvalContext): Promise<void> {
+  const path = process.env.GEZEL_EVAL_FOOD_CATALOG?.trim();
+  if (!path) {
+    await installFoodKnowledge(ctx);
+    return;
+  }
+  const { jobId } = await ctx.client.installKnowledgeCatalog({ source: { kind: 'file', path } });
+  for (let i = 0; i < 6_000; i++) {
+    const job = await ctx.client.getKnowledgeJob(jobId);
+    if (job.finished) {
+      if (job.error) throw new Error(`food catalog install failed: ${job.error}`);
+      ctx.log(`[scenario:setup] installed the food catalog from ${path}`);
+      return;
     }
-    const used = [...new Set(research)];
-    return {
-      done: true,
-      success: true,
-      reason: `${task.ref} ran every phase; research used ${used.join(', ')}; ${deck!.bytes}-byte .pptx at ${deck!.surface}:${deck!.path}`,
-    };
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`food catalog install from ${path} did not finish`);
+}
+
+async function quicheRetrievalGaps(task: Task, client: GezelClient): Promise<string[]> {
+  const gaps: string[] = [];
+  const titles = (task.references?.items ?? []).map((item) => item.title);
+  const quiche = titles.findIndex((title) => /^quiche(?: lorraine)?\b/i.test(title));
+  if (quiche < 0)
+    gaps.push(`reference list holds no Quiche article (${titles.join(' | ') || 'empty'})`);
+  const decoys = titles.filter((title) => QUICHE_DECOYS.test(title));
+  if (decoys.length > 0) gaps.push(`reference list holds decoys: ${decoys.join(', ')}`);
+  const coronation = titles.findIndex((title) => /coronation quiche/i.test(title));
+  if (coronation >= 0 && quiche >= 0 && coronation < quiche) {
+    gaps.push('Coronation quiche ranks above Quiche');
+  }
+  const injected = await client
+    .listHistory({ kind: 'retrieval.context-injected', limit: 500 })
+    .catch(() => ({ entries: [] }));
+  const injectedDecoys = (injected.entries ?? []).flatMap((entry) => {
+    if (entry.entryType !== 'event') return [];
+    const hits = ((entry.details ?? {}) as { hits?: Array<{ docKey?: string }> }).hits ?? [];
+    return hits.map((hit) => hit.docKey ?? '').filter((key) => QUICHE_DECOYS.test(key));
+  });
+  if (injectedDecoys.length > 0) {
+    gaps.push(`turns injected decoys: ${[...new Set(injectedDecoys)].join(', ')}`);
+  }
+  if (await findTextFile(client, /(?:^|\/)deck\.md$/, /quechers|pesticide/i, 0)) {
+    gaps.push('the deck source mentions a decoy');
+  }
+  return gaps;
+}
+
+/**
+ * The quiche incident as a regression check: the same front-door ask as the
+ * pizza run, plus what went wrong the first time — the launch reference list
+ * must hold the Quiche article and no decoy, "Coronation quiche" must not
+ * outrank it, no turn may inject a decoy, and the deck must not repeat one.
+ * Run after the food catalog rebuild, pinned via `GEZEL_EVAL_FOOD_CATALOG`.
+ */
+export const pptxMeesterQuicheScenario: EvalScenario = {
+  id: 'pptx-meester-quiche',
+  description:
+    'Front-door PowerPoint about quiche with the food catalog installed: every phase finishes, and retrieval keeps the Quiche article on the reference list with no decoys (QuEChERS, Top Deck, Priority review) in the list, the injected turns, or the deck.',
+  prompt: 'Create a PowerPoint about quiche',
+  timeoutMs: 180 * 60_000,
+  repairPolicy: 'runtime',
+  setup: async (ctx) => {
+    await installDocblocks(ctx);
+    await installFoodCatalogForQuiche(ctx);
   },
+  successCheck: frontDoorDeckCheck({
+    key: 'pptx-meester-quiche',
+    topic: /quiche/i,
+    extraGaps: quicheRetrievalGaps,
+  }),
 };
 
 export function meesterEndToEndScenarios(): EvalScenario[] {
   return [
     pptxMeesterEndToEndScenario,
     pptxMeesterPizzaScenario,
+    pptxMeesterQuicheScenario,
     pdfMeesterEndToEndScenario,
     docxMeesterEndToEndScenario,
     bugfixMeesterEndToEndScenario,

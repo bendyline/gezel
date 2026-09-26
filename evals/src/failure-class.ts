@@ -132,6 +132,8 @@ const CAPACITY_DENIAL =
   /capacity broker denied [^\n]*budget exhausted|Not enough memory became available for this model\. Current engine work is still protected/;
 const CONTEXT_OVERFLOW =
   /On-device model ran out of working memory|context overflow: [\d,]+ tokens|exceeds the available context size/;
+const TOOL_ROSTER_LEAK_REASON =
+  /\b(?:still had lookup tools|could not read the closed worker's tool roster)/;
 const ENGINE_HUNG_REASON = /engine appears hung|no daemon activity for|image render wedged/;
 /**
  * Hosted-provider overflow phrasings. The local `CONTEXT_OVERFLOW` shapes
@@ -254,6 +256,11 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
   if (input.failureMode === 'spawn-error') {
     return { failureClass: 'infra', rule: 'spawn-error', evidence: reason.slice(0, 140) };
+  }
+  // A scenario that withholds tools found them wired anyway: the treatment
+  // never happened, so the trial says nothing about the model.
+  if (TOOL_ROSTER_LEAK_REASON.test(reason)) {
+    return { failureClass: 'infra', rule: 'tool-roster-leak', evidence: reason.slice(0, 140) };
   }
   const preProvider =
     (isStallish(input) && describePreProviderStall(input.sessionTelemetry)) ||

@@ -194,6 +194,13 @@ export interface CraftbookEvalSpec {
   mode: CraftbookEvalMode;
   /** Observe the production step gates without injecting final-output repair turns. */
   repairPolicy?: 'harness' | 'runtime';
+  /**
+   * `product`: describe the workflow task exactly as a chat launch would
+   * (`composeCraftbookTaskDescription`) instead of the harness's own
+   * wording. Retrieval scenarios need it: a task step's per-turn query
+   * includes the description, so eval-only words would become search terms.
+   */
+  launchDescription?: 'harness' | 'product';
 
   /**
    * Backticked slash-containing path tokens from the book's own step

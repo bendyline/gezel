@@ -3,6 +3,7 @@ import {
   assertKnownFlags,
   parseArgs,
   resolveGeneralistFlag,
+  resolveRetrievalFlags,
   resolveRepairPolicyFlag,
 } from './args.ts';
 
@@ -118,6 +119,36 @@ describe('resolveGeneralistFlag', () => {
     });
     expect(exited).toBe(2);
     expect(errors.join('\n')).toContain('--render-mode was renamed to --generalist');
+  });
+});
+
+describe('resolveRetrievalFlags', () => {
+  it('leaves the eval default alone when --retrieval is absent', () => {
+    expect(resolveRetrievalFlags(parseArgs(['--model', 'x']).flags)).toBeUndefined();
+  });
+
+  it('builds an arm with references on and library recall off by default', () => {
+    expect(resolveRetrievalFlags(parseArgs(['--retrieval', 'balanced']).flags)).toEqual({
+      mode: 'balanced',
+      references: true,
+      embeddings: true,
+      libraryRecall: false,
+    });
+    expect(resolveRetrievalFlags(parseArgs(['--retrieval', 'off']).flags)).toMatchObject({
+      mode: 'off',
+      references: false,
+    });
+    expect(
+      resolveRetrievalFlags(parseArgs(['--retrieval', 'deep', '--references', 'off']).flags),
+    ).toMatchObject({ mode: 'deep', references: false });
+  });
+
+  it('rejects a typo instead of silently running another arm', () => {
+    const { errors, exited } = capture(() => {
+      resolveRetrievalFlags(parseArgs(['--retrieval', 'balnced']).flags);
+    });
+    expect(exited).toBe(2);
+    expect(errors.join('\n')).toContain('Unknown --retrieval "balnced"');
   });
 });
 

@@ -13,7 +13,19 @@ const REFERENCES: TaskReferences = {
   items: [{ source: 'knowledge', title: 'Quiche', uri: 'knowledge://bendyline/food/290627' }],
 };
 
-function harness(gather?: TaskLaunchDeps['gatherReferences']) {
+interface BookStub {
+  name: string;
+  paramSchema: unknown;
+  category?: string;
+}
+
+const DECK_BOOK: BookStub = { name: 'PowerPoint from Content', paramSchema: deckSchema };
+
+function harness(
+  gather?: TaskLaunchDeps['gatherReferences'],
+  config: Record<string, unknown> = {},
+  book: BookStub = DECK_BOOK,
+) {
   const creates: Array<{ body: TaskLaunchRequest; extras?: { references?: TaskReferences } }> = [];
   const gathered: Array<{ projectId: string; subject: string; craftbookName: string }> = [];
   const deps = {
@@ -28,9 +40,13 @@ function harness(gather?: TaskLaunchDeps['gatherReferences']) {
         return { ref: 'p1/1', num: 1, projectId: 'p1', status: 'paused' } as unknown as Task;
       },
       list: async () => [],
-      describeCraftbook: async () => ({ name: 'PowerPoint from Content', paramSchema: deckSchema }),
+      describeCraftbook: async () => book,
     },
-    store: { getProject: async () => null, getGezel: async () => null },
+    store: {
+      getProject: async () => null,
+      getGezel: async () => null,
+      readConfig: async () => config,
+    },
     taskRunner: { enqueueHandoff: async () => {} },
     gatherReferences:
       gather ??
@@ -93,6 +109,59 @@ describe('TaskLauncher reference list', () => {
     ]);
     expect(gathered).toHaveLength(1);
     expect(creates).toHaveLength(1);
+  });
+
+  it('does not search when the person turned the reference list off', async () => {
+    const { launcher, creates, gathered } = harness(undefined, {
+      taskReferences: { enabled: false },
+    });
+    await launcher.launch('p1', deck({ topic: 'quiche' }), { dispatchEntry: true });
+    expect(gathered).toEqual([]);
+    expect(creates[0]?.extras?.references).toBeUndefined();
+  });
+
+  it('searches for the description when the book declares no subject of its own', async () => {
+    const pressRelease: BookStub = {
+      name: 'Press Release',
+      paramSchema: { properties: { workPath: { type: 'string', default: '{{task.dir}}' } } },
+      category: 'marketing',
+    };
+    const { launcher, gathered } = harness(undefined, {}, pressRelease);
+    await launcher.launch(
+      'p1',
+      {
+        title: 'Press Release',
+        description: 'Announce the Pellow kettle launch to trade press',
+        craftbookId: 'press-release',
+      },
+      { dispatchEntry: true },
+    );
+    expect(gathered).toEqual([
+      {
+        projectId: 'p1',
+        subject: 'Announce the Pellow kettle launch to trade press',
+        craftbookName: 'Press Release',
+      },
+    ]);
+  });
+
+  it("does not search the reference catalogs for a code book's description", async () => {
+    const bugFix: BookStub = {
+      name: 'Bug Fix (TDD)',
+      paramSchema: { properties: { workPath: { type: 'string' } } },
+      category: 'code-build',
+    };
+    const { launcher, gathered } = harness(undefined, {}, bugFix);
+    await launcher.launch(
+      'p1',
+      {
+        title: 'Bug Fix',
+        description: 'Fix the cart quantity bug in pricing.js',
+        craftbookId: 'bug-fix-tdd',
+      },
+      { dispatchEntry: true },
+    );
+    expect(gathered).toEqual([]);
   });
 
   it('still launches when the search fails', async () => {

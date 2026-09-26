@@ -131,21 +131,34 @@ export function resolveTransformersModelOptions(
       `profile ${profile.id} pins tokenizer file ${tokenizerFile}; this runtime loads tokenizer.json only`,
     );
   }
-  if (!onnxFile.endsWith('.onnx')) {
+  const graph = transformersGraphOptions(onnxFile);
+  if (!graph) {
     throw new EmbedderUnavailableError(
-      `profile ${profile.id} pins ${onnxFile}; this runtime loads ONNX graphs only`,
+      `profile ${profile.id} pins ${onnxFile}; this runtime loads named ONNX graphs only`,
     );
   }
+  return { revision: profile.model.revision, ...graph };
+}
+
+/**
+ * The transformers.js options that select exactly one pinned ONNX graph:
+ * its folder, its base name, and the dtype whose suffix transformers.js
+ * appends to that name. A file with no recognized suffix loads as fp32 under
+ * its full name, which selects the same file. Null for a path that is not a
+ * named `.onnx` graph.
+ */
+export function transformersGraphOptions(
+  onnxFile: string,
+): { dtype: string; subfolder: string; model_file_name: string } | null {
+  if (!onnxFile.endsWith('.onnx')) return null;
   const slash = onnxFile.lastIndexOf('/');
   const subfolder = slash === -1 ? '' : onnxFile.slice(0, slash);
   const base = onnxFile.slice(slash + 1, -'.onnx'.length);
   const variant = ONNX_DTYPE_BY_SUFFIX.find(([suffix]) => base.endsWith(suffix));
   const [suffix, dtype] = variant ?? ['', 'fp32'];
   const modelFileName = base.slice(0, base.length - suffix.length);
-  if (modelFileName === '') {
-    throw new EmbedderUnavailableError(`profile ${profile.id} pins an unnamed graph ${onnxFile}`);
-  }
-  return { revision: profile.model.revision, dtype, subfolder, model_file_name: modelFileName };
+  if (modelFileName === '') return null;
+  return { dtype, subfolder, model_file_name: modelFileName };
 }
 
 async function loadTransformers(): Promise<TransformersModule> {

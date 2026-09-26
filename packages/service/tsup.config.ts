@@ -33,6 +33,10 @@ export default defineConfig({
     // synchronous (node:sqlite), so shard scans must run off the daemon
     // loop (docs/gezk-format.md).
     'knowledge/search-worker': 'src/knowledge/search-worker.ts',
+    // Relevance-model (cross-encoder) inference. Its own worker so ONNX runs
+    // never stall text embedding and its crashes never count against the
+    // embed worker's limit.
+    'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
     // Portable guest execution must never occupy the daemon/Electron event loop.
     'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's

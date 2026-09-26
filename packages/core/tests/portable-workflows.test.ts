@@ -264,15 +264,30 @@ describe('offline product workflows through the ordinary client', () => {
     },
   );
 
-  it('never executes fenced examples', async () => {
+  it('never executes a fenced example inside an explanation', async () => {
     const f = await setup(async () => ({
-      text: '```json\n{"name":"write_document","arguments":{"path":"example.md","content":"no"}}\n```',
+      text: 'Here is an example:\n```json\n{"name":"write_document","arguments":{"path":"example.md","content":"no"}}\n```',
       stopReason: 'stop',
     }));
     const session = await f.client.createChatSession({ gezelId: f.meester });
     await f.client.sendToChatSession(session.id, { message: 'Show an example' });
     await idle(f.service);
     expect(await f.store.readFile('documents', undefined, 'example.md')).toBeNull();
+  });
+  it('runs a reply that is only a fenced tool call', async () => {
+    let calls = 0;
+    const f = await setup(async () =>
+      ++calls === 1
+        ? {
+            text: '```json\n{"name":"write_document","arguments":{"path":"fenced.md","content":"Kept."}}\n```',
+            stopReason: 'stop' as const,
+          }
+        : { text: 'Saved fenced.md.', stopReason: 'stop' as const },
+    );
+    const session = await f.client.createChatSession({ gezelId: f.meester });
+    await f.client.sendToChatSession(session.id, { message: 'Save the note' });
+    await idle(f.service);
+    expect(await f.store.readFile('documents', undefined, 'fenced.md')).toBe('Kept.');
   });
   it('runs a manually created task through the client, gates its deliverable and saves its task session', async () => {
     let calls = 0;

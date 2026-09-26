@@ -133,6 +133,51 @@ describe('craftbookReferenceSubject', () => {
       }),
     ).toBeNull();
   });
+
+  it('falls back to the description when the book has no main parameter', () => {
+    const workPathOnly = { properties: { workPath: { type: 'string' } } };
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: workPathOnly,
+        description: 'Write a press release about the Pellow kettle launch',
+      }),
+    ).toBe('Write a press release about the Pellow kettle launch');
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: '' },
+        description: 'A deck about quiche for the bakery team',
+      }),
+    ).toBe('A deck about quiche for the bakery team');
+  });
+
+  it('never takes the padding a short request is given as its subject', () => {
+    const description = composeCraftbookTaskDescription({
+      message: 'Quiche',
+      craftbookName: 'Press Release',
+    });
+    expect(craftbookReferenceSubject({ paramSchema: {}, description })).toBe('Quiche');
+    const bare = composeCraftbookTaskDescription({ craftbookName: 'Press Release' });
+    expect(craftbookReferenceSubject({ paramSchema: {}, description: bare })).toBeNull();
+  });
+
+  it('keeps only the opening of a long brief, cut at a sentence', () => {
+    const description = `Research the history of quiche in Lorraine. ${'Cover every regional variant in depth. '.repeat(12)}`;
+    const subject = craftbookReferenceSubject({ paramSchema: {}, description });
+    expect(subject!.length).toBeLessThanOrEqual(300);
+    expect(subject).toMatch(/^Research the history of quiche in Lorraine\./);
+    expect(subject).toMatch(/\.$/);
+  });
+
+  it('prefers its own source over the description', () => {
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { sourcePath: 'brief.docx' },
+        description: 'Turn the brief into a deck',
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('composeCraftbookTaskDescription', () => {
@@ -194,16 +239,16 @@ describe('paramAsksUser', () => {
     expect(
       paramAsksUser({ type: 'string', default: 'pdf/task-{{ task.num }}/report.md' }, 'outputPath'),
     ).toBe(true);
-    expect(paramAsksUser({ type: 'string', default: '{{outputDir}}/deck.pptx' }, 'outputPath')).toBe(
-      true,
-    );
+    expect(
+      paramAsksUser({ type: 'string', default: '{{outputDir}}/deck.pptx' }, 'outputPath'),
+    ).toBe(true);
   });
 
   it('lets the askUser annotation win either way', () => {
     expect(paramAsksUser({ type: 'string', default: '', askUser: false })).toBe(false);
-    expect(paramAsksUser({ type: 'string', default: '{{task.dir}}', askUser: true }, 'workPath')).toBe(
-      true,
-    );
+    expect(
+      paramAsksUser({ type: 'string', default: '{{task.dir}}', askUser: true }, 'workPath'),
+    ).toBe(true);
   });
 
   it('ignores a non-boolean annotation and malformed properties', () => {

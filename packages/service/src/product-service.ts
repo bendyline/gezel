@@ -167,6 +167,7 @@ import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
 import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
 import { UvRuntime } from './python/uv-runtime.js';
+import { RelevanceModelManager } from './relevance/manager.js';
 import { loadOrCreateDeviceIdentity, signCertFingerprint } from './remotes/identity.js';
 import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
@@ -1926,6 +1927,10 @@ export async function startProductService(
       return project?.knowledgeCatalogs ?? null;
     },
   });
+  // The on-device relevance model (cross-encoder). Off by default; a turn
+  // never waits for its load, so construction is free.
+  const relevance = new RelevanceModelManager({ home, readConfig: () => store.readConfig() });
+  search.setRelevanceProvider(relevance);
   if (knowledge) {
     await knowledge.start();
     search.setKnowledgeSearch({
@@ -2593,6 +2598,7 @@ export async function startProductService(
     globalIndex,
     indexingJob,
     search,
+    relevance,
     systemIdle,
     terminals,
     terminalEvents,
@@ -3045,6 +3051,7 @@ export async function startProductService(
     void warmEmbeddings().then((warmed) => {
       if (warmed) log.debug('[memory] embedding pipeline warmed');
     });
+    void relevance.bootWarm().catch(() => {});
   }, 20_000).unref();
 
   return {

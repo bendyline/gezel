@@ -80,6 +80,7 @@ import type {
   TrialFinalSniff,
   TrialOptions,
   TrialResult,
+  TrialRetrievalArm,
   TrialStatus,
 } from './types.ts';
 
@@ -380,6 +381,12 @@ export async function runTrial(
   let imageModelHome: string | undefined;
 
   await mkdir(runDir, { recursive: true });
+  if (scenario.retrievalOracle) {
+    await writeFile(
+      join(runDir, 'retrieval-oracle.json'),
+      `${JSON.stringify(scenario.retrievalOracle, null, 2)}\n`,
+    );
+  }
   const trialHome = await mkdtemp(join(tmpdir(), `gezel-eval-${scenario.id}-`));
 
   const startedAt = new Date();
@@ -418,6 +425,7 @@ export async function runTrial(
   if (!authProbe.ok) {
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -470,6 +478,7 @@ export async function runTrial(
   } catch (err) {
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -595,6 +604,7 @@ export async function runTrial(
     const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -698,17 +708,28 @@ export async function runTrial(
     ...(opts.forceBehaviors ?? []),
     ...(opts.keurmeester ? ['supervision.keurmeester'] : []),
   ];
+  // A retrieval arm owns what reaches the prompt from the indexes: the
+  // shared-library recall prelude is a second road in, so it is removed in
+  // every arm unless the arm says otherwise.
+  const removeBehaviors = [
+    ...(opts.removeBehaviors ?? []),
+    ...(opts.retrieval && !opts.retrieval.libraryRecall ? ['prompt.library-recall-prelude'] : []),
+  ];
   const mergedExtraEnv = evalDaemonEnvForTrial({
     ...(llamaEvalLaunch ? { launch: llamaEvalLaunch } : {}),
     providerLock: engine,
     ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
-    ...(opts.removeBehaviors ? { removeBehaviors: opts.removeBehaviors } : {}),
+    ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
     ...(opts.craftbookDocFormat ? { craftbookDocFormat: opts.craftbookDocFormat } : {}),
     ...(opts.toolNaming ? { toolNaming: opts.toolNaming } : {}),
     ...(opts.disableBackgroundEnrich ? { disableBackgroundEnrich: true } : {}),
     ...(opts.enrichModelId ? { enrichModelId: opts.enrichModelId } : {}),
     ...(opts.enableModelRouting ? { enableModelRouting: true } : {}),
-    ...(scenario.requiresEmbeddings ? { enableEmbeddings: true } : {}),
+    ...(scenario.requiresEmbeddings || opts.retrieval?.embeddings
+      ? { enableEmbeddings: true }
+      : {}),
+    ...(opts.retrieval ? { retrievalTrace: true } : {}),
+    ...(opts.retrieval ? { relevanceModel: opts.retrieval.relevanceModel ?? null } : {}),
   });
   // Live mock services (craftbook test.json `mocks[]`): boot BEFORE the
   // daemon so its env can carry the trial CA + credential seed file. The
@@ -729,6 +750,7 @@ export async function runTrial(
     } catch (err) {
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -786,6 +808,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -812,6 +835,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -856,6 +880,7 @@ export async function runTrial(
     await mockRuntime?.close().catch(() => {});
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -978,6 +1003,17 @@ export async function runTrial(
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
+      // A retrieval arm's policy outranks the `autoRecall: false` above:
+      // config.retrieval is read before the legacy switch.
+      ...(opts.retrieval
+        ? {
+            retrieval: {
+              mode: opts.retrieval.mode,
+              ...(opts.retrieval.maxTokens ? { maxTokens: opts.retrieval.maxTokens } : {}),
+            },
+            taskReferences: { enabled: opts.retrieval.references },
+          }
+        : {}),
       // The daemon installs a bundled Meester oversight task at boot and the
       // night shift dispatches it within a minute whenever the wall clock is
       // inside the night window. Every trial run at night then spends one or
@@ -1019,6 +1055,13 @@ export async function runTrial(
     // Phase 5: ensure Meester exists.
     const meesterId = await ensureMeester(client);
     log(`[trial] meester=${meesterId}`);
+
+    // A relevance arm installs (once, into the shared cache) and loads its
+    // model before any work starts: a cold model passes every result
+    // through, so the first turns would silently run as the model-off arm.
+    if (opts.retrieval?.relevanceModel) {
+      await prepareRelevanceModel(client, opts.retrieval.relevanceModel.modelId, log);
+    }
 
     // Phase 5.5: optional scenario setup hook. Runs after daemon boot
     // and before the kickoff prompt — gives scenarios like
@@ -1235,6 +1278,7 @@ export async function runTrial(
 
   return finalize({
     generalistMode: opts.generalistMode,
+    retrievalArm: opts.retrieval,
     repairPolicy: scenario.repairPolicy,
     engine,
     trialId,
@@ -1398,6 +1442,39 @@ export function runawaySessionFailure(
 const HARD_FAIL_IDLE_SOFT_THRESHOLD_MS = 60_000;
 
 /**
+ * Install a relevance model into the shared cache and load it, so a
+ * relevance arm's first turn is scored rather than passed through cold.
+ */
+async function prepareRelevanceModel(
+  client: GezelClient,
+  modelId: string,
+  log: (line: string) => void,
+): Promise<void> {
+  const started = await client.installRelevanceModel(modelId);
+  if (!started.installed && !started.started) {
+    throw new Error(`relevance model ${modelId} did not start installing: ${started.reason ?? ''}`);
+  }
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    const status = await client.relevanceModelStatus();
+    if (status.models.find((model) => model.id === modelId)?.installed) break;
+    if (status.error) throw new Error(`relevance model ${modelId} install failed: ${status.error}`);
+    if (Date.now() > deadline) throw new Error(`relevance model ${modelId} install timed out`);
+    await wait(2_000);
+  }
+  const probe = await client.scoreRelevance({
+    modelId,
+    query: 'warm up',
+    passages: ['warm up'],
+    waitForLoad: true,
+  });
+  if (probe.status !== 'scored') {
+    throw new Error(`relevance model ${modelId} did not load (status ${probe.status})`);
+  }
+  log(`[trial] relevance model ${modelId} installed and loaded`);
+}
+
+/**
  * Build the daemon env fragment carrying per-run behavior overrides
  * (the A/B toggle). `forceBehaviors` → `GEZEL_FORCE_BEHAVIORS`,
  * `removeBehaviors` → `GEZEL_REMOVE_BEHAVIORS` (comma-joined). Exported
@@ -1435,10 +1512,33 @@ export function evalDaemonEnvForTrial(opts: {
   providerLock?: ChatProvider;
   /** Opt into embeddings only for dedicated semantic-retrieval scenarios. */
   enableEmbeddings?: boolean;
+  /** Per-candidate retrieval decision rows in history (`GEZEL_RETRIEVAL_TRACE`). */
+  retrievalTrace?: boolean;
+  /** A retrieval arm's relevance model; `null` pins it off. Absent leaves the daemon default. */
+  relevanceModel?: TrialRetrievalArm['relevanceModel'] | null;
 }): NodeJS.ProcessEnv {
   return {
     GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
     ...(opts.enableEmbeddings ? {} : { GEZEL_DISABLE_EMBEDDINGS: '1' }),
+    ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),
+    ...(opts.relevanceModel === null ? { GEZEL_RELEVANCE_MODEL: 'off' } : {}),
+    ...(opts.relevanceModel
+      ? {
+          GEZEL_RELEVANCE_MODEL: opts.relevanceModel.modelId,
+          // One verified copy across trials, like the embedder cache.
+          GEZEL_RELEVANCE_MODELS_DIR:
+            process.env.GEZEL_RELEVANCE_MODELS_DIR ?? join(defaultCacheRoot(), 'relevance-models'),
+          ...(opts.relevanceModel.thresholds
+            ? {
+                GEZEL_RELEVANCE_THRESHOLDS: [
+                  opts.relevanceModel.thresholds.drop,
+                  opts.relevanceModel.thresholds.keep,
+                  opts.relevanceModel.thresholds.strong,
+                ].join(','),
+              }
+            : {}),
+        }
+      : {}),
     // Capability-floor model routing is default-ON in the product but
     // MUST be off in trials: a trial home links up to three models
     // (chat + image + enrich/keurmeester), so routing would swap
@@ -4267,6 +4367,7 @@ async function finalize(args: {
   modelId: string;
   modelTier: import('@bendyline/gezel').ModelTier;
   generalistMode?: TrialOptions['generalistMode'];
+  retrievalArm?: TrialOptions['retrieval'];
   repairPolicy?: TrialOptions['repairPolicy'];
   engine?: TrialOptions['engine'];
   startedAt: Date;
@@ -4338,6 +4439,7 @@ async function finalize(args: {
     modelId: args.modelId,
     modelTier: args.modelTier,
     ...(args.generalistMode ? { generalistMode: args.generalistMode } : {}),
+    ...(args.retrievalArm ? { retrievalArm: args.retrievalArm } : {}),
     ...(args.repairPolicy ? { repairPolicy: args.repairPolicy } : {}),
     ...(args.engine ? { engine: args.engine } : {}),
     startedAt: args.startedAt.toISOString(),

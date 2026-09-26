@@ -1090,6 +1090,12 @@ export interface BatchCapability {
 export interface LLMProvider {
   readonly supportsImageInput?: boolean;
   readonly name: ProviderName;
+  /**
+   * The model calls tools through its own API (Apple's on-device model):
+   * tool definitions travel outside the prompt, so a minimal-footprint prompt
+   * keeps the tool conduct and task step instead of saying "no tools".
+   */
+  readonly nativeTools?: boolean;
   /** Boot the underlying client / authenticate. Called lazily. */
   initialize(signal?: AbortSignal): Promise<void>;
   /** Tear down everything owned by this provider. */

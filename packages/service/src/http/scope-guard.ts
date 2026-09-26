@@ -222,6 +222,11 @@ async function isSessionRouteAllowed(
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }
+    // A retrieval preview judges as any gezel and can return injected text,
+    // so from a session token it would read another gezel's private memory.
+    if (rest === '/retrieval/preview' || rest === '/retrieval/preview/') {
+      return sessionDeny('retrieval previews require a first-party client');
+    }
     // An upload is labelled "from your computer" in every prompt that names
     // it; a gezel staging files would forge that provenance.
     if (/^\/input-staging(?:\/|$)/.test(rest)) {

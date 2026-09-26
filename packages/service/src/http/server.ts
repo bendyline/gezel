@@ -136,6 +136,8 @@ import {
   officeStaticRoutes,
 } from '../office-host/static-routes.js';
 import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
+import { relevanceModelRoutes } from './routes/relevance-model.js';
+import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
@@ -483,6 +485,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // The read half of the same bridge at /api/projects/:id/page-read.
   app.route('/api/projects', pageReadRoutes(ctx));
   app.route('/api/projects', referencePreviewRoutes(ctx));
+  app.route('/api/projects', retrievalPreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*
   app.route('/api/projects', projectGezelRoutes(ctx));
@@ -570,6 +573,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
+  app.route('/api/relevance-model', relevanceModelRoutes(ctx));
   app.route('/api/ai-apps', aiAppRoutes(ctx));
   app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));

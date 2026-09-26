@@ -321,6 +321,8 @@ import type {
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
   ReferencePreviewResponse,
+  RelevanceModelStatusResponse,
+  RelevanceScoreRequest,
   RemoveAiAppResponse,
   RenameGezelRequest,
   RenderImageRequest,
@@ -340,6 +342,8 @@ import type {
   RestoreReview,
   RestoreScanRequest,
   RetrievalPolicy,
+  RetrievalPreviewRequest,
+  RetrievalPreviewResponse,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -1484,16 +1488,8 @@ export interface ConfigResponse {
     error?: string;
   };
   /** Passive presence for the `codex` binary. Mirrors `anthropicCliStatus`. */
-  codexCliStatus?: {
-    installed: boolean;
-    path?: string;
-    version?: string;
-    error?: string;
-  };
-  /**
-   * An Apple silicon Mac with the gezel-apple-fm helper installed. Whether
-   * Apple Intelligence is enabled is reported when the provider starts.
-   */
+  codexCliStatus?: ConfigResponse['anthropicCliStatus'];
+  /** Apple silicon with the gezel-apple-fm helper; availability is known once it starts. */
   appleFoundationModelsStatus?: { installed: boolean };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
@@ -1561,6 +1557,21 @@ export interface ConfigResponse {
    */
   faceRecognition?: {
     enabled?: boolean;
+  };
+  /**
+   * The launch reference list for craftbooks started with a subject.
+   * Default on. See `GezelConfig.taskReferences` in core schemas.
+   */
+  taskReferences?: {
+    enabled?: boolean;
+  };
+  /**
+   * The on-device relevance check. Default off. See
+   * `GezelConfig.relevanceModel` in core schemas.
+   */
+  relevanceModel?: {
+    enabled?: boolean;
+    modelId?: string;
   };
   /**
    * Opt-in ambient dashboard (Settings → Ambient display). Default off.
@@ -6652,6 +6663,38 @@ export class GezelClient {
   /** Unified indexed search across project content, artifacts, memory, and shared documents. */
   toolSearch(id: string, body: ProjectSearchRequest): Promise<ProjectSearchResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search`, body);
+  }
+
+  /**
+   * Run a retrieval surface's real decision code without side effects and
+   * get back what it would keep, with one decision per candidate. First-party
+   * clients only (session tokens are refused).
+   */
+  previewRetrieval(id: string, body: RetrievalPreviewRequest): Promise<RetrievalPreviewResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/retrieval/preview`, body);
+  }
+
+  /** The relevance check: selected model, install state, and the catalog. */
+  relevanceModelStatus(): Promise<RelevanceModelStatusResponse> {
+    return this.request('GET', '/api/relevance-model');
+  }
+
+  /** Download a relevance model in the background; poll `relevanceModelStatus` for progress. */
+  installRelevanceModel(
+    modelId?: string,
+  ): Promise<{ started: boolean; installed?: boolean; reason?: string }> {
+    return this.request('POST', '/api/relevance-model/install', modelId ? { modelId } : {});
+  }
+
+  /** Raw relevance-model scores for (query, passage) pairs — the calibration path. */
+  scoreRelevance(body: RelevanceScoreRequest): Promise<{
+    modelId: string;
+    status: string;
+    ms: number;
+    scores: Array<number | null>;
+    relevances: Array<number | null>;
+  }> {
+    return this.request('POST', '/api/relevance-model/score', body);
   }
 
   toolSecurityScan(id: string, body: SecurityScanRequest = {}): Promise<SecurityScanResponse> {
