@@ -1486,6 +1486,11 @@ export interface ConfigResponse {
     version?: string;
     error?: string;
   };
+  /**
+   * An Apple silicon Mac with the gezel-apple-fm helper installed. Whether
+   * Apple Intelligence is enabled is reported when the provider starts.
+   */
+  appleFoundationModelsStatus?: { installed: boolean };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
   /** Per-provider default image model id. `'sd-cpp'` names a locally installed model. */

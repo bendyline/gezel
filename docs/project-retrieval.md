@@ -102,9 +102,45 @@ Policy precedence is:
 4. Balanced default.
 
 The legacy `autoRecall: false` setting maps to Off when no new retrieval policy
-has been set. Craftbook background turns build their retrieval query from the
-task title, task description, current phase, phase prompt, and declared inputs,
-not from generic handoff boilerplate.
+has been set. A craftbook step's retrieval query is the task's subject — the
+book's main content param (`fromMessage`, else `topic`) plus the task
+description — whenever the task has one. A book's step prose is identical on
+every run, so as a query it matches the book's earlier runs rather than this
+run's subject. Only a task without a subject falls back to the task title,
+current phase, phase prompt, and declared inputs; generic handoff boilerplate
+is never the query.
+
+The follow-up hint under the injected rows names `search` and `read_document`
+only when the turn wired them.
+
+## Launch reference list
+
+A craftbook started from the get-go — the composer's attached task or
+`invoke_craftbook` — searches the reference corpora (installed knowledge
+catalogs and the shared library) once for its subject, before the entry step
+is dispatched ([tasks/references.ts](../packages/service/src/tasks/references.ts),
+called from `TaskLauncher`). What it keeps is frozen on the task as
+`Task.references`, service-stamped at create and inherited by fanout children:
+
+- at most five entries, each a citation (`knowledge://` URI or library path),
+  a title, and a snippet — never a document body;
+- only entries whose title, path, or snippet names a subject term, so a
+  vector-only neighbour cannot ride every step of the run; words from the
+  book's own name are not subject terms;
+- skipped when the launch supplies its own source (`sourcePath`, `content`,
+  or an input picker), for drafts, and for scheduled hosts;
+- bounded to 1.5 s and never waiting on a cold embedder, so it cannot hold up
+  the launch; a failed or empty search launches without a list.
+
+Every step's task block renders it as **Reference material found at launch**
+under the untrusted-evidence framing, naming `read_document` only when wired.
+Per-turn retrieval skips any document already on the list. The launch's user
+message carries the same list as its `retrieval` stamp, so the thread the
+person started from shows what the task began with.
+
+It is not written into the task's `about.md`: that file is the person's
+request, rendered unlabeled in every step's prompt beside the authoritative
+invocation parameters, where catalog text would read as instructions.
 
 ## Trust, privacy, and audit
 

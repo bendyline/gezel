@@ -1428,6 +1428,11 @@ function DaemonSettingsView() {
   // so a configured user is never stranded without a way to change it.
   const showOpenaiProvider =
     provider === 'openai' || nightShiftProvider === 'openai' || hasOpenaiKey;
+  // Apple's own on-device model needs no download, only an Apple silicon Mac
+  // with the helper installed; a chosen provider stays on offer regardless.
+  const showAppleProvider =
+    provider === 'apple-foundation-models' ||
+    config?.appleFoundationModelsStatus?.installed === true;
   const showAnthropicProvider =
     provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
@@ -2658,6 +2663,16 @@ function DaemonSettingsView() {
                       title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2/5.3). Streams the experts from disk so a frontier-class model runs on this device."
                     >
                       {ds4TabLabel}
+                    </button>
+                  )}
+                  {showAppleProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'apple-foundation-models' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('apple-foundation-models')}
+                      title="Apple's own on-device model (Apple Intelligence). Nothing to download and very little memory; a small model with a short context, best for chat, notes and short tasks."
+                    >
+                      {providerLabel('apple-foundation-models', uiPlatform)}
                     </button>
                   )}
                   {showCopilotProvider && (

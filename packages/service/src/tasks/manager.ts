@@ -25,6 +25,7 @@ import {
   type TaskFanout,
   type TaskNote,
   type TaskNoteAuthor,
+  type TaskReferences,
   type TaskStatus,
   type TaskVariation,
   type UpdateTaskRequest,
@@ -816,6 +817,12 @@ export class TaskManager {
        * capability boundary, not something a prompt should be able to set.
        */
       draftsDiffpack?: boolean;
+      /**
+       * The reference list gathered for a book started from the get-go (see
+       * `TaskLauncher`). Service-only: a caller that could set it could put
+       * arbitrary text into every step's prompt.
+       */
+      references?: TaskReferences;
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1208,6 +1215,7 @@ export class TaskManager {
         ? { craftbookParams: effectiveCraftbookParams }
         : {}),
       ...(inputsPlan ? { inputs: inputsPlan.records } : {}),
+      ...(extras?.references ? { references: extras.references } : {}),
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
@@ -4417,6 +4425,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
       // A shard works on its host's input; its template already carries those paths.
       ...(parent.inputs ? { inputs: parent.inputs } : {}),
+      ...(parent.references ? { references: parent.references } : {}),
       // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
       // a shard that carries one drafts into that change proposal, so its
       // workspace-write tools re-root at the pack instead of the workspace.

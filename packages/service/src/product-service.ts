@@ -200,6 +200,7 @@ import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
+import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
 import { extractSpawnItems } from './tasks/spawn-items.js';
@@ -2509,7 +2510,14 @@ export async function startProductService(
     history,
     growth,
     tasks,
-    taskLauncher: new TaskLauncher({ tasks, store, taskRunner, history }),
+    taskLauncher: new TaskLauncher({
+      tasks,
+      store,
+      taskRunner,
+      history,
+      gatherReferences: ({ projectId, subject, craftbookName }) =>
+        gatherTaskReferences({ search, projectId, subject, craftbookName }),
+    }),
     taskRunner,
     taskScheduler: scheduler,
     nightShift,

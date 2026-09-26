@@ -97,6 +97,8 @@ function providerLabelFor(provider: ProviderName): string {
       // separate engine with its own narrow model set, so its models get their
       // own row.
       return 'DwarfStar (ds4)';
+    case 'apple-foundation-models':
+      return 'Apple Intelligence';
     default:
       return provider;
   }
@@ -190,6 +192,9 @@ export function ProviderModelSelect({
       // chat attempt; gating up front turns it into a non-option.
       if (cfg.anthropicCliStatus?.installed) candidates.push('anthropic-cli');
       if (cfg.codexCliStatus?.installed) candidates.push('codex-cli');
+      // Apple's own model lists itself only once the helper reports Apple
+      // Intelligence ready; a failed probe drops the entry below.
+      if (cfg.appleFoundationModelsStatus?.installed) candidates.push('apple-foundation-models');
       candidates.push('ollama');
       // On-device — listProviderModels returns only DOWNLOADED
       // models for these, so an empty list means "nothing to show"
@@ -235,6 +240,7 @@ export function ProviderModelSelect({
         'mlx',
         'llama-cpp',
         'ds4',
+        'apple-foundation-models',
         'ollama',
         'copilot',
         'openai',

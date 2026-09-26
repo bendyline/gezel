@@ -371,6 +371,48 @@ export const OutcomeSchema = z.object({
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
+/* ─── Reference list ──────────────────────────────────────────────────── */
+
+/** Size limits on a reference list: it is rendered into every step's system prompt. */
+export const TASK_REFERENCE_LIMITS = {
+  items: 5,
+  titleChars: 160,
+  snippetChars: 240,
+} as const;
+
+/**
+ * One indexed reference entry that matched a craftbook task's subject at
+ * launch: a knowledge-catalog document (cited by its `knowledge://` URI) or
+ * a shared-library document (by path). Citation plus a short snippet — never
+ * the document body.
+ */
+export const TaskReferenceSchema = z.object({
+  source: z.enum(['knowledge', 'shared']),
+  title: z.string().min(1).max(TASK_REFERENCE_LIMITS.titleChars),
+  /** `knowledge://` citation URI; opens with `read_document`. */
+  uri: z.string().optional(),
+  /** Shared-library path; opens with `read_document`. */
+  path: z.string().optional(),
+  catalogId: z.string().optional(),
+  catalogVersion: z.string().optional(),
+  snippet: z.string().max(TASK_REFERENCE_LIMITS.snippetChars).optional(),
+});
+export type TaskReference = z.infer<typeof TaskReferenceSchema>;
+
+/**
+ * The reference list a craftbook task was launched with. Searched once for
+ * the task's subject when a person or the Meester starts a book from the
+ * get-go, frozen on the task, and named in every step's prompt as untrusted
+ * evidence. Service-stamped only — never part of a create request.
+ */
+export const TaskReferencesSchema = z.object({
+  /** The subject that was searched (the book's main content param). */
+  subject: z.string(),
+  gatheredAt: z.string(),
+  items: z.array(TaskReferenceSchema).max(TASK_REFERENCE_LIMITS.items),
+});
+export type TaskReferences = z.infer<typeof TaskReferencesSchema>;
+
 /* ─── Task ────────────────────────────────────────────────────────────── */
 
 /**
@@ -451,6 +493,12 @@ export const TaskSchema = z.object({
    * docs/craftbook-inputs.md.
    */
   inputs: z.record(z.string(), TaskInputRecordSchema).optional(),
+  /**
+   * Indexed reference material that matched this task's subject at launch.
+   * Stamped by the service at create and inherited verbatim by fanout
+   * children, like `inputs`.
+   */
+  references: TaskReferencesSchema.optional(),
   /** Exact script sources trusted by an explicit CLI launch; immutable through task edits. */
   cliTrustedScriptHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
   /**

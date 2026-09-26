@@ -544,6 +544,50 @@ describe('knowledge injection ceilings', () => {
       expect(queries).toEqual(['quiche']);
     });
 
+    it('does not re-inject a document already on the launch reference list', async () => {
+      const listed = knowledgeHit(1);
+      const search = {
+        searchProject: async () => ({
+          results: [
+            { ...listed, uri: listed.uri!.replace(/#.*$/, '#chunk=another-passage') },
+            {
+              ...knowledgeHit(2),
+              documentId: 'mortise',
+              uri: 'knowledge://gezel-tests/shop-notes/mortise#chunk=x',
+            },
+          ],
+          truncated: false,
+        }),
+      } as unknown as SearchService;
+      const result = await retrieveProjectContext({
+        store: {
+          ...STORE,
+          readTask: async () => ({
+            ref: 'p1/20',
+            craftbookParams: { topic: 'joinery' },
+            references: {
+              subject: 'joinery',
+              gatheredAt: 't',
+              items: [{ source: 'knowledge', title: 'Dovetail Joints', uri: listed.uri }],
+            },
+            craftbook: {
+              paramSchema: { type: 'object', properties: { topic: { type: 'string' } } },
+              steps: [outlineStep],
+            },
+          }),
+        } as unknown as Store,
+        search,
+        record: { ...RECORD, taskRef: 'p1/20', stepId: 'outline' } as unknown as ChatSession,
+        gezel: GEZEL,
+        config: CONFIG,
+        userText: 'Anita has handed step `outline` of task p1/20 to you.',
+        messageOrigin: 'cross-gezel',
+      });
+      expect(result?.hits.map((hit) => hit.uri)).toEqual([
+        'knowledge://gezel-tests/shop-notes/mortise#chunk=x',
+      ]);
+    });
+
     it('falls back to the step prose when the task names no subject', async () => {
       const queries = await stepQuery({ topic: '', outputDir: 'powerpoint/task-20' });
       expect(queries).toHaveLength(1);

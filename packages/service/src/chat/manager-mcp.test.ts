@@ -287,6 +287,49 @@ describe('ChatManager turn intent routing', () => {
     expect(stored?.title).not.toBe('New session');
     expect(stored?.title).toContain('Delft');
   }, 30_000);
+
+  it('shows the launch reference list under the message that started the task', async () => {
+    const meester = await store.createGezel({ name: 'Ilse', role: 'Meester' });
+    const session = await manager.createSession({ gezelId: meester.id, projectId: 'default' });
+    const task = await svc.context.tasks.create(
+      'default',
+      {
+        title: 'Deck',
+        description: 'Can you create a PowerPoint about quiche for the Sunday brunch crew?',
+        steps: [{ name: 'Write' }],
+      },
+      {
+        references: {
+          subject: 'quiche',
+          gatheredAt: '2026-09-26T00:10:53.000Z',
+          items: [
+            {
+              source: 'knowledge',
+              title: 'Quiche',
+              uri: 'knowledge://bendyline/wikipedia-food-drink/290627',
+              snippet: 'A French tart.',
+            },
+          ],
+        },
+      },
+    );
+    expect((await svc.context.tasks.getByRef(task.ref))?.references?.items).toHaveLength(1);
+
+    const { userMessage } = await manager.recordCraftbookLaunch(session.id, {
+      userText: 'Can you create a PowerPoint about quiche',
+      task,
+    });
+
+    expect(userMessage.retrieval?.hits).toEqual([
+      expect.objectContaining({
+        source: 'knowledge',
+        title: 'Quiche',
+        injectedText: 'A French tart.',
+      }),
+    ]);
+    const stored = await manager.getSessionRecord(session.id);
+    expect(stored?.messages[0]?.retrieval?.hits).toHaveLength(1);
+  }, 30_000);
 });
 
 describe.runIf(process.platform === 'darwin')(

@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { GezelConfig } from '@bendyline/gezel';
 
 /**
@@ -56,6 +57,7 @@ export const CHAT_PROVIDERS = [
   'copilot',
   'anthropic',
   'openai',
+  'apple-foundation-models',
 ] as const;
 export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
 
@@ -73,8 +75,11 @@ export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
  *  - `cloud-sdk` — pure HTTP. Nothing local to probe or sample. Auth
  *    is one API key in env (plus an optional org id for OpenAI), or
  *    the user's `gh copilot` login state for Copilot.
+ *  - `system-model` — a model the OS runs (Apple's on-device model).
+ *    It shares this machine's accelerator, so it takes the device lock,
+ *    but there are no weights to link or engine process to sample.
  */
-export type ProviderCategory = 'local-engine' | 'cli-wrapper' | 'cloud-sdk';
+export type ProviderCategory = 'local-engine' | 'cli-wrapper' | 'cloud-sdk' | 'system-model';
 
 export function isChatProvider(value: string): value is ChatProvider {
   return (CHAT_PROVIDERS as readonly string[]).includes(value);
@@ -100,7 +105,26 @@ export function defaultProvider(): ChatProvider {
 export function categorizeProvider(p: ChatProvider): ProviderCategory {
   if (p === 'llama-cpp' || p === 'mlx' || p === 'ds4') return 'local-engine';
   if (p === 'codex-cli' || p === 'anthropic-cli') return 'cli-wrapper';
+  if (p === 'apple-foundation-models') return 'system-model';
   return 'cloud-sdk';
+}
+
+/** Runs on this machine's hardware, whether as our engine or the OS's model. */
+export function runsOnThisDevice(p: ChatProvider): boolean {
+  const category = categorizeProvider(p);
+  return category === 'local-engine' || category === 'system-model';
+}
+
+/**
+ * The gezel-apple-fm helper a trial daemon should use: an explicit
+ * `GEZEL_APPLE_FM_BIN`, else the one `native/helpers/apple-fm/build.sh` wrote.
+ */
+export function appleFmHelperPath(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.GEZEL_APPLE_FM_BIN) return env.GEZEL_APPLE_FM_BIN;
+  const built = fileURLToPath(
+    new URL('../../native/build/darwin-arm64/gezel-apple-fm', import.meta.url),
+  );
+  return existsSync(built) ? built : null;
 }
 
 export function isLocalEngine(p: ChatProvider): boolean {
@@ -167,6 +191,8 @@ export function defaultModelFor(p: ChatProvider): string {
       return 'claude-sonnet-4-6';
     case 'openai':
       return 'gpt-5';
+    case 'apple-foundation-models':
+      return 'apple-foundation-models';
   }
 }
 
@@ -258,6 +284,17 @@ export function probeProviderAuth(
     case 'ds4':
       // Local engines have no auth — model weights are it.
       return { ok: true, message: '' };
+
+    case 'apple-foundation-models': {
+      if (process.platform !== 'darwin' || process.arch !== 'arm64')
+        return { ok: false, message: 'Apple on-device AI needs an Apple silicon Mac.' };
+      if (appleFmHelperPath(env)) return { ok: true, message: '' };
+      return {
+        ok: false,
+        message:
+          'Apple on-device AI needs the gezel-apple-fm helper: run native/helpers/apple-fm/build.sh or set GEZEL_APPLE_FM_BIN.',
+      };
+    }
 
     case 'openai': {
       if (env.OPENAI_API_KEY && env.OPENAI_API_KEY.trim().length > 0) {

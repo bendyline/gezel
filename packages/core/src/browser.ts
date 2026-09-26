@@ -148,6 +148,7 @@ export * from './tasks/step-activation.js';
 export * from './tasks/step-routing.js';
 export * from './tools/access.js';
 export * from './tools/envelope.js';
+export * from './tools/native-tools.js';
 export * from './tools/inputs.js';
 
 export * from './craftbook-output-media.js';

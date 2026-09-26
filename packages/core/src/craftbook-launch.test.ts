@@ -3,6 +3,7 @@ import {
   MIN_TASK_DESCRIPTION_LENGTH,
   composeCraftbookLaunch,
   composeCraftbookTaskDescription,
+  craftbookReferenceSubject,
   fillMainContentParam,
   isRuntimeTemplateDefault,
   launchFormParamSchema,
@@ -89,6 +90,48 @@ describe('fillMainContentParam', () => {
         message: 'Compile the notes',
       }),
     ).toEqual({ workPath: '.' });
+  });
+});
+
+describe('craftbookReferenceSubject', () => {
+  it('is the main parameter when the launch brings no source of its own', () => {
+    expect(
+      craftbookReferenceSubject({ paramSchema: deckSchema, params: { topic: ' quiche ' } }),
+    ).toBe('quiche');
+  });
+
+  it('stands down when the launch supplies its own source', () => {
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche', sourcePath: 'brief.docx' },
+      }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche', content: 'Eggs, cream, lardons.' },
+      }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche' },
+        inputs: { notes: { from: 'workspace', path: 'notes' } },
+      }),
+    ).toBeNull();
+  });
+
+  it('is null with no main parameter or an empty one', () => {
+    expect(
+      craftbookReferenceSubject({ paramSchema: deckSchema, params: { topic: '' } }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: { properties: { workPath: { type: 'string' } } },
+        params: { workPath: '.' },
+      }),
+    ).toBeNull();
   });
 });
 

@@ -44,6 +44,7 @@ import {
 import { captureFingerprint, digestFingerprint } from './progress-fingerprint.ts';
 import {
   type ChatProvider,
+  appleFmHelperPath,
   buildProviderConfig,
   categorizeProvider,
   isLocalEngine,
@@ -429,6 +430,8 @@ export async function runTrial(
       client: null,
     });
   }
+  // The trial daemon inherits this env; point it at the helper the probe found.
+  if (engine === 'apple-foundation-models') process.env.GEZEL_APPLE_FM_BIN = appleFmHelperPath()!;
 
   let llamaBin: string | undefined;
   let sdBin: string | undefined;

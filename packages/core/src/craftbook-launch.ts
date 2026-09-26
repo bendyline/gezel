@@ -82,6 +82,28 @@ export function fillMainContentParam(args: {
 }
 
 /**
+ * What a launch is ABOUT, for the reference list searched at launch: the
+ * value of the book's main content param. Null when that is empty, or when
+ * the launch also supplies its own source (`sourcePath`, `content`, or an
+ * `input` picker) — supplied sources are authoritative, and a list of other
+ * material would compete with them.
+ */
+export function craftbookReferenceSubject(args: {
+  paramSchema: unknown;
+  params?: Record<string, string>;
+  inputs?: Record<string, unknown>;
+}): string | null {
+  const key = mainContentParamKey(args.paramSchema);
+  const subject = key ? args.params?.[key]?.trim() : undefined;
+  if (!key || !subject) return null;
+  if (args.inputs && Object.keys(args.inputs).length > 0) return null;
+  const otherSource = SOURCE_FORM_KEYS.some(
+    (candidate) => candidate !== key && (args.params?.[candidate]?.trim().length ?? 0) > 0,
+  );
+  return otherSource ? null : subject;
+}
+
+/**
  * The task description for a launch: the person's own words, verbatim,
  * padded with one imperative sentence only when they are too short to meet
  * the create request's minimum. No standing provenance line — the task

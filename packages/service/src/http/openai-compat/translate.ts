@@ -202,6 +202,7 @@ const KNOWN_PROVIDERS: readonly ProviderName[] = [
   'llama-cpp',
   'mlx',
   'ds4',
+  'apple-foundation-models',
 ];
 
 /**

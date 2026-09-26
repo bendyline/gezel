@@ -5,6 +5,7 @@ export * from './recording/spec-hash.js';
 export * from './tools/builtin-groups.js';
 export * from './tools/access.js';
 export * from './tools/envelope.js';
+export * from './tools/native-tools.js';
 export * from './tools/inputs.js';
 
 export {

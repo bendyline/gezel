@@ -4,6 +4,7 @@ import {
   type GeneralistMode,
   type GezelGender,
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
+  NATIVE_TOOL_NOTE,
   type ProjectFileEntry,
   type PromptTaskContext,
   type Task,
@@ -335,6 +336,13 @@ export interface BuildInstructionsOptions {
    */
   minimalContext?: boolean;
   /**
+   * With `minimalContext`, the model calls tools through its own API (Apple's
+   * on-device model): tool definitions travel outside the prompt, so the tools
+   * block stays stripped, but the conduct says when to use tools instead of
+   * "you have no tools", and the active task step is kept.
+   */
+  minimalContextNativeTools?: boolean;
+  /**
    * The active craftbook step is a bounded procedure whose prompt contains
    * all required inputs. Keep identity, task procedure, truthful tools, and
    * action discipline; omit project/workspace/recall layers it cannot use.
@@ -432,6 +440,9 @@ function truncateDescription(text: string): string {
  * short steer suited to a no-tools chat/writing model. Keeps the
  * anti-fabrication note (small models invent tool calls) but nothing else.
  */
+/** Minimal-context conduct for a model that calls tools natively. */
+const MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT = `\n\n---\n\nThis is a lightweight session on a small on-device model. ${NATIVE_TOOL_NOTE}`;
+
 const MINIMAL_CONTEXT_CONDUCT =
   '\n\n---\n\nThis is a lightweight chat. You have no tools and no workspace this turn — reply directly to the user in plain prose. Do not narrate a process, list steps, or claim to run tools or save files; just converse and write.';
 
@@ -583,6 +594,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     voormanGender,
     trimExecutorContext,
     minimalContext,
+    minimalContextNativeTools,
     focusedTaskContext,
     workspaceGestalt,
     retrievalFirstHint,
@@ -1700,7 +1712,9 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // cache modes get the same string. See prompt-minimal-context.ts.
   if (minimalContext) {
     const cappedBody = capAboutForMinimalContext(body, MINIMAL_CONTEXT_ABOUT_MAX_CHARS);
-    const minimalFull = `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
+    const minimalFull = minimalContextNativeTools
+      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${taskContext}${activeTaskAnchor}`
+      : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
     return {
       full: minimalFull,
       ...(layeredPrefixCache ? { layers: { gezel: minimalFull, project: minimalFull } } : {}),

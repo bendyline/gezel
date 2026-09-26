@@ -12,6 +12,7 @@ import {
   transferBoekwachterMembership,
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
+import { appleFoundationModelsInstalled } from '../../providers/apple-foundation-models/provider.js';
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
@@ -273,6 +274,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       codexCli: config.codexCli,
       anthropicCliStatus: cliDetections.anthropicCli,
       codexCliStatus: cliDetections.codexCli,
+      appleFoundationModelsStatus: { installed: appleFoundationModelsInstalled() },
       imageProvider: config.imageProvider,
       defaultImageModel: config.defaultImageModel,
       imageGenerationConfirmation: config.imageGenerationConfirmation,

@@ -387,6 +387,15 @@ so a book with nothing left to ask opens no form at all; the terminal still
 accepts every param. Never ask a person for an artifacts-drawer path — default
 it, derive it, or give it an `input` picker.
 
+A book launched with a subject gets a **reference list**: `TaskLauncher`
+searches knowledge catalogs and the shared library for it before dispatch
+([tasks/references.ts](packages/service/src/tasks/references.ts)), keeps at
+most five subject-grounded citations as the service-stamped
+`Task.references`, and every step's task block renders them as untrusted
+evidence. Never write retrieved text into the task's `about.md` — it is the
+person's request, rendered unlabeled beside the authoritative parameters.
+Contract in [docs/project-retrieval.md](docs/project-retrieval.md).
+
 ### Diffpack (change proposal)
 
 A bundle of file edits a gezel drafted **without touching the project**. The

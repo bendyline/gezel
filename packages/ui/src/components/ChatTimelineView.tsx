@@ -100,7 +100,13 @@ const PAGE_SIZE = 100;
 // long, opaque, and uninteresting at a glance, so we never surface them
 // as a drift pill in the bubble header — the model is available on hover
 // via the author-name tooltip instead. Cloud providers still show drift.
-const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set(['ollama', 'llama-cpp', 'mlx', 'ds4']);
+const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set([
+  'ollama',
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+]);
 /**
  * Gap past which a reply inside a thread is "late": it keeps its
  * author header and gains a relative timestamp instead of merging into

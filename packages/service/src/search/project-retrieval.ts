@@ -7,6 +7,7 @@ import {
   type RetrievalPolicy,
   type RetrievalSource,
   type TaskOwnedPrefix,
+  type TaskReferences,
   type UnifiedSearchResult,
   contextBudgetCeiling,
   estimateTokens,
@@ -276,7 +277,8 @@ export async function retrieveProjectContext(args: {
       : [];
   const diverse = diversify(found.results)
     .filter(clearsInjectionFloor)
-    .filter((result) => !insideOtherTask(result, foreign, args.record.projectId));
+    .filter((result) => !insideOtherTask(result, foreign, args.record.projectId))
+    .filter((result) => !onReferenceList(result, taskContext?.task.references));
   if (diverse.length === 0) return null;
   const terms = queryTerms(query);
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
@@ -348,6 +350,27 @@ export async function retrieveProjectContext(args: {
  * research turn in Default was handed an earlier AI-startup deck's
  * `powerpoint/task-8/` files as evidence. Explicit reads are unaffected.
  */
+/**
+ * A task's launch reference list is already in every step's system prompt,
+ * so a per-turn hit on the same document would spend the turn's budget on
+ * something the model has. Matched per document: a knowledge URI's
+ * `#chunk=` fragment names a passage, not a different source.
+ */
+function onReferenceList(
+  result: UnifiedSearchResult,
+  references: TaskReferences | undefined,
+): boolean {
+  if (!references) return false;
+  if (result.retrievalSource === 'knowledge' && result.uri) {
+    const document = result.uri.replace(/#.*$/, '');
+    return references.items.some((item) => item.uri?.replace(/#.*$/, '') === document);
+  }
+  if (result.retrievalSource === 'shared' && result.path) {
+    return references.items.some((item) => item.path === result.path);
+  }
+  return false;
+}
+
 async function otherTasksFolders(
   store: Store,
   projectId: string,

@@ -1387,6 +1387,15 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
       opts.logger?.info?.(`[supervisor] bundled whisper-server: ${bin}`);
     }
   }
+  if (!process.env.GEZEL_APPLE_FM_BIN && process.platform === 'darwin') {
+    const bin = resolveNativeBinaryPath('apple-fm', import.meta.url, undefined, {
+      preferDevelopmentBuild: !opts.packaged,
+    });
+    if (bin) {
+      process.env.GEZEL_APPLE_FM_BIN = bin;
+      opts.logger?.info?.(`[supervisor] bundled apple-fm: ${bin}`);
+    }
+  }
   if (!process.env.GEZEL_UV_BIN) {
     // uv is the shared Python bootstrap used by MLX (and any future
     // Python-based feature). The service's UvRuntime prefers this

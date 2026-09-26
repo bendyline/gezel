@@ -35,7 +35,8 @@ type ProviderName =
   | 'ollama'
   | 'llama-cpp'
   | 'mlx'
-  | 'ds4';
+  | 'ds4'
+  | 'apple-foundation-models';
 
 export function queueRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -50,6 +51,7 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     'llama-cpp',
     'mlx',
     'ds4',
+    'apple-foundation-models',
   ];
 
   app.get('/', async (c) => {

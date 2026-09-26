@@ -823,6 +823,26 @@ describe('SettingsView', () => {
     await waitFor(() => expect(pills.queryByRole('button', { name: 'GitHub Copilot' })).toBeNull());
   });
 
+  // Apple's own model needs no download, only the helper on an Apple silicon
+  // Mac; the service reports that passively, without running the helper.
+  it('offers Apple Intelligence as a provider only when its helper is installed', async () => {
+    const hidden = render(<SettingsView />);
+    let pills = await defaultProviderSwitch();
+    expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
+    expect(pills.queryByRole('button', { name: 'Apple Intelligence' })).toBeNull();
+    hidden.unmount();
+
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      appleFoundationModelsStatus: { installed: true },
+    } as never);
+    render(<SettingsView />);
+    pills = await defaultProviderSwitch();
+    expect(await pills.findByRole('button', { name: 'Apple Intelligence' })).toBeInTheDocument();
+  });
+
   // The API-key OpenAI and Anthropic surfaces are hidden until they've been
   // tested; the CLI-driven variants are untouched.
   it('hides the API-key OpenAI and Anthropic pills but keeps the CLI ones', async () => {

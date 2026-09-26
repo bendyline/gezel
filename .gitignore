@@ -210,6 +210,7 @@ __pycache__/
 /runs
 packages/catalog/scripts/harvested-auth/
 /native/helpers/service-host/.build
+/native/helpers/apple-fm/.build
 /.tmp-game-peers
 /ship-audit
 /.tmp-docblocks-2.3.2
