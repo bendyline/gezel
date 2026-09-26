@@ -104,7 +104,10 @@ dylibs, and AppleClang links no OpenMP runtime.
   layer.
 - **CUDA toolkit** — the CUDA runtime libraries travel in the `-cuda`
   bundles. Only the NVIDIA *driver* (`libcuda.so.1` / `nvcuda.dll`) must
-  be present, and it is never redistributable.
+  be present, and it is never redistributable. It must be new enough for
+  the bundled runtime's major version: R525+ for the CUDA 12.x bundles
+  (`linux-x64-cuda`, `win32-x64-cuda`) and R580+ for the CUDA 13.0
+  `linux-arm64-cuda` bundle. Every DGX OS image ships R580.
 
 Each of those is enforced by a guard in `build-native.yml` so it cannot
 silently come back.

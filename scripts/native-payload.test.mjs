@@ -342,7 +342,7 @@ test('DS4 CUDA builds retain upstream architecture feature promotion', () => {
     (entry) => entry.engine === 'ds4' && entry.platform === 'linux-arm64',
   );
   assert.equal(spark?.ds4_cuda_arch, 'sm_121');
-  assert.equal(spark?.cuda_pkg, '12-9');
+  assert.equal(spark?.cuda_pkg, '13-0');
 });
 
 test('Windows native wrappers avoid experimental path remapping', () => {

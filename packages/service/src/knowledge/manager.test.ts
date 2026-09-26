@@ -172,6 +172,8 @@ describe('KnowledgeManager — per-profile query embedding', () => {
   const embedded: string[] = [];
   /** A test may steer the vector arm at a chosen text while the query text says something else. */
   let embedOverride: ((text: string) => number[]) | null = null;
+  /** While set, the query model is still loading: every embed waits on it. */
+  let embedGate: Promise<void> | null = null;
 
   beforeAll(async () => {
     profileDir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-profile-'));
@@ -189,6 +191,7 @@ describe('KnowledgeManager — per-profile query embedding', () => {
       host: await createInProcessCatalogHost(),
       embedQueryForProfile: async (text, profile) => {
         embedded.push(`${profile.id}:${text}`);
+        if (embedGate) await embedGate;
         return embedOverride ? embedOverride(text) : testHashVector(text);
       },
     });
@@ -279,6 +282,24 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     });
     expect(results[0]?.documentId).toBe('dovetails');
     expect(new Set(results.map((r) => r.documentId)).size).toBe(results.length);
+  });
+
+  it('answers keyword-only when the query model misses the embed budget', async () => {
+    let release = (): void => {};
+    embedGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const results = await profileManager.searchUnified('dovetail', {
+        vector: null,
+        maxResults: 5,
+        queryEmbedBudgetMs: 20,
+      });
+      expect(results.some((r) => r.documentId === 'dovetails')).toBe(true);
+    } finally {
+      embedGate = null;
+      release();
+    }
   });
 });
 

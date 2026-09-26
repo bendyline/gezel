@@ -13,6 +13,19 @@ attributions at the new commit, replace the relevant text when necessary, and
 update the manifest in the same change. A version bump is deliberately blocked
 until someone performs that review.
 
+That review covers what is compiled into the shipped binaries, not just the
+engine's own `LICENSE`: vendored headers (`vendor/`, `thirdparty/`), code ported
+into the engine or into ggml (search for "adapted from", "ported from",
+"borrowed from", and copyright lines), embedded data such as tokenizer
+vocabularies, and backend-only pieces such as CUDA's CUB or the Vulkan headers.
+Texts shared by several engines use an engine-neutral name
+(`LICENSE-yarn-MIT.txt`, `LICENSE-cpp-httplib-MIT.txt`) and are listed under
+each engine that ships them; engine-specific texts carry the engine prefix.
+Public-domain, MIT-0, and CC0 components carry no notice requirement and get
+a mention in `NOTICE.md` instead of a text here. The whole directory ships with
+every native artifact, so a text for one backend variant is harmless in the
+others.
+
 Every helper carrying a `THIRD_PARTY_NOTICES.md` file must have a matching
 `helpers` entry. The gate verifies that each referenced license text is present
 verbatim in that helper notice and that every declared platform actually ships

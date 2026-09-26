@@ -463,6 +463,37 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(manager.inflightInfo(session.id)).toBeNull();
   }, 30_000);
 
+  it('names the step tool policy when it strips the fixed tool', async () => {
+    const project = await store.createProject({ name: 'Sunset', mode: 'solo' });
+    const gezel = await store.createGezel({
+      name: 'Picasso',
+      role: 'Image generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const task = await new TaskManager(store).create(project.id, {
+      title: 'Render the sunset',
+      description: 'Render a stylized sunset over mountains and save it as sunset.png.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [
+        {
+          name: 'Build',
+          suggestedRole: 'image-generator',
+          toolPolicy: { disallowBuiltinToolsets: ['images'] },
+        },
+      ],
+    });
+    const session = await manager.createSession({
+      gezelId: gezel.id,
+      projectId: project.id,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+
+    const reply = await manager.send(session.id, 'Render it.');
+    expect(reply.content).toContain(`of task ${task.ref} does not allow generate_image`);
+    expect(reply.content).not.toMatch(/check the install/);
+  }, 30_000);
+
   it('updateGezelFixedFunctionDefaults persists new defaults to disk', async () => {
     const gezel = await store.createGezel(makeWriteDocFf());
 

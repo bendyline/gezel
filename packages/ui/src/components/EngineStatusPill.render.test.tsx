@@ -121,11 +121,10 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       expect(container.querySelectorAll('.engine-pill')).toHaveLength(2);
     });
 
-    const dwarfStar = await screen.findByRole('button', {
-      name: /DwarfStar.*DeepSeek V4 Flash/i,
-    });
-    const talkie = await screen.findByRole('button', { name: /Talkie 1930 13B/i });
+    const dwarfStar = await screen.findByRole('button', { description: /deepseek-v4-flash/ });
+    const talkie = await screen.findByRole('button', { description: /talkie-1930-13b-q4/ });
 
+    expect(dwarfStar).toHaveTextContent('DwarfStar');
     expect(dwarfStar).not.toHaveClass('engine-pill-busy');
     expect(talkie).toHaveClass('engine-pill-busy');
     expect(talkie).toHaveTextContent(providerLabel('llama-cpp', window.__GEZEL__?.platform));
@@ -163,7 +162,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
 
     render(<EngineStatusPill />);
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     expect(await screen.findByText('Last turn')).toBeInTheDocument();
     expect(screen.getByText(/1,234 in/)).toHaveTextContent('1,234 in · 56 out · 28 tok/s');
@@ -207,7 +206,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     } as QueueStatusResponse);
 
     render(<EngineStatusPill />);
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     expect(await screen.findByText(/2 chat caches \+ 2 shared prefixes/)).toBeInTheDocument();
     expect(screen.queryByText(/4 threads/)).not.toBeInTheDocument();
@@ -233,7 +232,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     try {
       render(<EngineStatusPill />);
 
-      const talkie = await screen.findByRole('button', { name: /Talkie 1930 13B/i });
+      const talkie = await screen.findByRole('button', { description: /talkie-1930-13b-q4/ });
       expect(talkie.querySelector('.engine-pill-elapsed')).toHaveTextContent('· 1:04');
       expect(talkie.getAttribute('title')).toContain('· 1:04');
       expect(talkie).not.toHaveTextContent('64s');
@@ -391,11 +390,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     } as ConfigResponse);
     const { container } = render(<EngineStatusPill />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: /DwarfStar.*DeepSeek V4 Flash/i,
-      }),
-    );
+    await user.click(await screen.findByRole('button', { description: /deepseek-v4-flash/ }));
     expect(container.querySelector('.engine-pill-popover')).toHaveStyle({ position: 'fixed' });
     const policy = screen.getByRole('group', { name: 'Machine health policy' });
     expect(within(policy).getByRole('button', { name: 'Observe' })).toHaveAttribute(
@@ -422,11 +417,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     vi.mocked(api.updateEngineRetention).mockResolvedValue({ idleTimeoutMs: 60_000 });
     render(<EngineStatusPill />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: /DwarfStar.*DeepSeek V4 Flash/i,
-      }),
-    );
+    await user.click(await screen.findByRole('button', { description: /deepseek-v4-flash/ }));
     const retention = screen.getByRole('group', { name: 'Idle model retention' });
     expect(within(retention).getByRole('radio', { name: 'Balanced' })).toBeChecked();
 
@@ -452,11 +443,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     try {
       render(<EngineStatusPill />);
-      await user.click(
-        await screen.findByRole('button', {
-          name: /DwarfStar.*DeepSeek V4 Flash/i,
-        }),
-      );
+      await user.click(await screen.findByRole('button', { description: /deepseek-v4-flash/ }));
       await user.click(screen.getByRole('button', { name: 'Hard Stop' }));
 
       const dialog = screen.getByRole('alertdialog');
@@ -503,11 +490,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: /DwarfStar.*DeepSeek V4 Flash/i,
-      }),
-    );
+    await user.click(await screen.findByRole('button', { description: /deepseek-v4-flash/ }));
 
     const strip = await screen.findByRole('img', {
       name: /Current video memory use: 9\.0 GB of 24\.0 GB used, Gezel estimated 5\.0 GB/i,
@@ -615,7 +598,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     vi.mocked(api.unloadIdleEngine).mockResolvedValue({ ok: true });
     render(<EngineStatusPill />);
 
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     expect(await screen.findByText(/Gezel machine engine · gezel-llama-server/i)).toBeVisible();
     expect(screen.queryByText(/gezel-llama-server\.exe/i)).not.toBeInTheDocument();
@@ -695,7 +678,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     // The pool is unmeasured, so its unactionable meter is omitted — the old
     // behaviour clamped the reservation to the card and drew a full bar.
@@ -763,7 +746,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     const capacityMeter = screen.getByRole('img', {
       name: /Model capacity: about 98\.0 GB of 112\.0 GB reserved/i,
@@ -832,7 +815,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+    await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
     const capacityMeter = screen.getByRole('img', {
       name: /On-card model capacity: about 29\.3 GB of 30\.4 GB reserved/i,
@@ -873,11 +856,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: /DwarfStar.*DeepSeek V4 Flash/i,
-      }),
-    );
+    await user.click(await screen.findByRole('button', { description: /deepseek-v4-flash/ }));
 
     const strip = await screen.findByRole('img', {
       name: /Gezel observed footprint 76\.0 GB/i,
@@ -1001,7 +980,7 @@ describe('EngineStatusPill — crowded titlebar', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const { dwarfStar, talkie } = await pillsAt('full');
-      expect(dwarfStar).toHaveTextContent('DwarfStar · DeepSeek V4 Flash');
+      expect(dwarfStar).toHaveTextContent('DwarfStar');
       expect(talkie).toHaveTextContent(device);
       expect(talkie).toHaveTextContent('Liesel');
       expect(
@@ -1020,8 +999,8 @@ describe('EngineStatusPill — crowded titlebar', () => {
     // once a second pill is up; "DwarfStar" still does.
     expect(talkie).not.toHaveTextContent(device);
     expect(dwarfStar).toHaveTextContent('DwarfStar');
-    // The model name carried the separator when the machine name preceded it.
-    expect(dwarfStar.textContent).not.toMatch(/^\s*·/);
+    // The machine name no longer precedes the gezel, so nothing dangles.
+    expect(talkie.textContent).not.toMatch(/^\s*·/);
     expect(talkie).toHaveTextContent('Liesel');
     // Nothing is actually lost — the tooltip still names the machine.
     expect(talkie.getAttribute('title')).toContain(device);
@@ -1031,20 +1010,43 @@ describe('EngineStatusPill — crowded titlebar', () => {
     const { talkie } = await pillsAt('tight');
     expect(talkie).not.toHaveTextContent('Liesel');
     expect(talkie).toHaveTextContent('Generating');
-    expect(talkie).toHaveTextContent('Talkie 1930');
     expect(talkie.getAttribute('title')).toContain('Liesel');
   });
 
-  it('drops the model name when minimal, but only where the phase remains', async () => {
-    const { dwarfStar, talkie } = await pillsAt('minimal');
-    // Busy: the phase still names the pill, so the model can go.
-    expect(talkie).toHaveTextContent('Generating');
+  it('never names the model on the pill, only in the tooltip and popover', async () => {
+    const user = userEvent.setup();
+    const { dwarfStar, talkie } = await pillsAt('full');
+    expect(dwarfStar).not.toHaveTextContent('DeepSeek');
     expect(talkie).not.toHaveTextContent('Talkie 1930');
     expect(talkie.getAttribute('title')).toContain('talkie-1930-13b-q4');
-    // Idle and named by an engine rather than the machine — "DwarfStar"
-    // survives, so its model may go too.
-    expect(dwarfStar).toHaveTextContent('DwarfStar');
-    expect(dwarfStar).not.toHaveTextContent('DeepSeek V4 Flash');
-    expect(dwarfStar.getAttribute('title')).toContain('deepseek-v4-flash');
+
+    await user.click(talkie);
+    expect(await screen.findByText('Talkie 1930 13B')).toBeInTheDocument();
+  });
+
+  it('keeps the machine name on an idle pill, its only word', async () => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'talkie-1930-13b-q4' },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: { 'llama-cpp': queueState(0) },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    } as QueueStatusResponse);
+    vi.mocked(api.listInflightTurns).mockResolvedValue({ inflight: [] } as never);
+
+    render(
+      <HeaderDensityContext.Provider value="tight">
+        <EngineStatusPill />
+      </HeaderDensityContext.Provider>,
+    );
+    const pill = await screen.findByRole('button', { description: /talkie-1930-13b-q4/ });
+    expect(pill).toHaveTextContent(device);
+    expect(pill).not.toHaveClass('engine-pill-busy');
   });
 });

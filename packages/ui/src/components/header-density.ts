@@ -18,11 +18,8 @@
  *   compact  the machine name ("This Mac" — every local engine wears it,
  *            so it says nothing once a second pill is on screen) and the
  *            queue chip's activity phrase go
- *   tight    the gezel name in an engine pill goes too; the pill keeps
- *            the engine, the phase and the model
- *   minimal  the model name goes as well, leaving the phase and the clock
- *            — but only where something else remains to name the pill, so
- *            an idle pill never shrinks to a bare dot
+ *   tight    the gezel name in an engine pill goes too, leaving the
+ *            phase and the clock
  *
  * Nothing is lost outright — every dropped string stays in the pill's
  * `title` and in its popover.
@@ -38,15 +35,10 @@
 
 import { type RefObject, createContext, useContext, useEffect, useRef, useState } from 'react';
 
-export type HeaderDensity = 'full' | 'compact' | 'tight' | 'minimal';
+export type HeaderDensity = 'full' | 'compact' | 'tight';
 
 /** Loosest to densest. Steps are taken one at a time, never skipped. */
-export const HEADER_DENSITY_ORDER: readonly HeaderDensity[] = [
-  'full',
-  'compact',
-  'tight',
-  'minimal',
-];
+export const HEADER_DENSITY_ORDER: readonly HeaderDensity[] = ['full', 'compact', 'tight'];
 
 /**
  * Width the search well is entitled to keep no matter how busy the right

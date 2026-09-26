@@ -670,23 +670,40 @@ export interface NvidiaMemoryProbe {
   deviceNames: string[];
 }
 
-/** Parse the stable `name,memory.total` CSV emitted by nvidia-smi. */
-export function parseNvidiaMemoryProbe(stdout: string): NvidiaMemoryProbe | null {
-  const devices: Array<{ name: string; memoryMiB: number }> = [];
+/**
+ * Parse the stable `name,memory.total` CSV emitted by nvidia-smi.
+ *
+ * A unified-memory device has no framebuffer of its own, and the GB10 / DGX
+ * Spark reports its memory as `[N/A]`. Its pool IS system RAM, so
+ * `systemRamBytes` stands in for it. Rejecting that line used to drop the
+ * Spark through to the Vulkan probe, which calls it discrete: the capacity
+ * budget then counted the same 128 GB twice (RAM share + "VRAM", 211 GiB) and
+ * held back only ~3 GiB for the OS, so a 95 GB chat model and a 10 GB image
+ * model were co-admitted and the image engine died with a CUDA OOM at init.
+ */
+export function parseNvidiaMemoryProbe(
+  stdout: string,
+  systemRamBytes: number = totalmem(),
+): NvidiaMemoryProbe | null {
+  const devices: Array<{ name: string; bytes: number }> = [];
   for (const rawLine of stdout.split(/\r?\n/)) {
     // GPU names can theoretically contain commas. Split on the final field,
-    // whose nounits form is always an integer MiB value.
-    const match = /^(.*),\s*(\d+)\s*$/.exec(rawLine.trim());
+    // whose nounits form is an integer MiB value or a bracketed placeholder.
+    const match = /^(.*),\s*(\d+|\[[^\]]*\])\s*$/.exec(rawLine.trim());
     if (!match) continue;
     const name = match[1]?.trim() ?? '';
+    if (!name) continue;
     const memoryMiB = Number.parseInt(match[2] ?? '', 10);
-    if (!name || !Number.isFinite(memoryMiB) || memoryMiB <= 0) continue;
-    devices.push({ name, memoryMiB });
+    if (Number.isFinite(memoryMiB) && memoryMiB > 0) {
+      devices.push({ name, bytes: memoryMiB * 1024 * 1024 });
+    } else if (isKnownUnifiedNvidiaDevice(name) && systemRamBytes > 0) {
+      devices.push({ name, bytes: systemRamBytes });
+    }
   }
   if (devices.length === 0) return null;
   const unified = devices.every((device) => isKnownUnifiedNvidiaDevice(device.name));
   return {
-    vramBytes: devices.reduce((sum, device) => sum + device.memoryMiB, 0) * 1024 * 1024,
+    vramBytes: devices.reduce((sum, device) => sum + device.bytes, 0),
     memoryKind: unified ? 'unified' : 'discrete',
     deviceNames: devices.map((device) => device.name),
   };

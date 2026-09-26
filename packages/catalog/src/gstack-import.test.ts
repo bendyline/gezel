@@ -156,9 +156,28 @@ function freshCommittedConversion(book: (typeof WAVE)[number]): CraftbookDoc {
   const committed = CraftbookDocSchema.parse(
     JSON.parse(committedBytes(book.id, VERSION)) as unknown,
   );
-  return committed.steps.some((step) => step.toolPolicy !== undefined)
-    ? applyDefaultCraftbookStepPolicies(converted)
-    : converted;
+  if (!committed.steps.some((step) => step.toolPolicy !== undefined)) return converted;
+  // Waves written before the writer stopped denying `artifacts` still carry
+  // that denial. The writer preserves an existing denial, so seed it the way
+  // the published step holds it; the step-policy floor keeps it read-inert,
+  // and the next regenerated wave drops it.
+  return applyDefaultCraftbookStepPolicies({
+    ...converted,
+    steps: converted.steps.map((step, index) =>
+      committed.steps[index]?.toolPolicy?.disallowBuiltinToolsets?.includes('artifacts')
+        ? {
+            ...step,
+            toolPolicy: {
+              ...step.toolPolicy,
+              disallowBuiltinToolsets: [
+                ...(step.toolPolicy?.disallowBuiltinToolsets ?? []),
+                'artifacts',
+              ],
+            },
+          }
+        : step,
+    ),
+  });
 }
 
 /** Resolve the authored workflow artifact through the eval's stable workPath. */

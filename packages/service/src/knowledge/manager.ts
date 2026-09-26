@@ -1174,7 +1174,13 @@ export class KnowledgeManager {
    */
   async searchUnified(
     query: string,
-    opts: { vector: number[] | null; maxResults: number; projectId?: string },
+    opts: {
+      vector: number[] | null;
+      maxResults: number;
+      projectId?: string;
+      /** Search a profile group keyword-only when its query model is not ready by then. */
+      queryEmbedBudgetMs?: number;
+    },
   ): Promise<UnifiedSearchResult[]> {
     const active = await this.activeCatalogKeys(opts.projectId);
     if (active.length === 0) return [];
@@ -1200,7 +1206,7 @@ export class KnowledgeManager {
       });
     }
     for (const group of byProfile.values()) {
-      const vector = await this.embedForProfile(query, group.profile);
+      const vector = await this.embedForProfile(query, group.profile, opts.queryEmbedBudgetMs);
       groups.push({ keys: group.keys, ...(vector ? { vector } : {}) });
     }
     if (keyword.length > 0) groups.push({ keys: keyword });
@@ -1328,19 +1334,43 @@ export class KnowledgeManager {
     };
   }
 
-  /** A profile's query vector, or undefined when its model is unavailable (that group searches FTS). */
+  /**
+   * A profile's query vector, or undefined when its model is unavailable or
+   * not ready within `budgetMs` (that group searches FTS). A load that misses
+   * the budget keeps running — loads are single-flight per profile — so the
+   * next query gets vectors.
+   */
   private async embedForProfile(
     query: string,
     profile: KnowledgeEmbeddingProfile,
+    budgetMs?: number,
   ): Promise<Float32Array | undefined> {
+    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const vector = await (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile);
+      const vector =
+        budgetMs === undefined
+          ? await pending
+          : await Promise.race([
+              pending,
+              new Promise<null>((resolveBudget) => {
+                timer = setTimeout(() => resolveBudget(null), budgetMs);
+              }),
+            ]);
+      if (vector === null) {
+        log.debug(
+          `knowledge query model for profile ${profile.id} not ready within ${budgetMs}ms; searching FTS only`,
+        );
+        return undefined;
+      }
       return vector.length > 0 ? Float32Array.from(vector) : undefined;
     } catch (err) {
       log.debug(
         `knowledge query embedding unavailable for profile ${profile.id}; searching FTS only: ${errorMessage(err)}`,
       );
       return undefined;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

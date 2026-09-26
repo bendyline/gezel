@@ -271,10 +271,10 @@ jobs:
             sd_backend: cuda
             needs_cuda: true
             needs_vulkan: false
-            # GB10 / DGX Spark only, like llama's and ds4's arm64 legs;
-            # 121a-real needs CUDA 12.9.
+            # GB10 / DGX Spark only, like llama's and ds4's arm64 legs.
+            # Toolkit moves with them: see the llama-cpp linux-arm64 CUDA leg.
             sd_cuda_arch: '121a-real'
-            cuda_pkg: '12-9'
+            cuda_pkg: '13-0'
           - engine: sd-cpp
             platform: win32-x64
             variant: ''
@@ -374,9 +374,19 @@ jobs:
             # fallback before llama.cpp gets a chance to install its portable
             # defaults. native-v0.1.26 shipped exactly that malformed payload.
             # `121a-real` is the architecture-specific GB10 target supported by
-            # CUDA 12.9; the post-build cuobjdump audit below proves it landed.
+            # CUDA 12.9+; the post-build cuobjdump audit below proves it landed.
+            #
+            # CUDA 13.0, not 12.9. This leg is the single writer of the
+            # libcudart/libcublas that ds4 and sd-server load from the shared
+            # linux-arm64-cuda key, so all three legs pin the same toolkit
+            # (native-payload.test.mjs enforces it). On a GB10, sd.cpp
+            # master-919 rendered 10-28% slower against cuBLAS 12.9 than the
+            # same source against CUDA 13.0 / cuBLAS 13.1 (VAE decode ~30%),
+            # measured on native-v0.1.45. CUDA 13 needs driver R580+, which
+            # every DGX OS image already ships. x64 stays on 12.8: consumer
+            # GeForce installs lag on drivers.
             llama_cuda_arch: '121a-real'
-            cuda_pkg: '12-9'
+            cuda_pkg: '13-0'
           - engine: llama-cpp
             platform: win32-x64
             variant: cpu
@@ -483,10 +493,11 @@ jobs:
             # sm_121 explicitly. The pinned Makefile promotes that base target
             # to sm_121a and enables DS4_CUDA_HAVE_MXF4; keeping the base value
             # here lets future upstream pin bumps remain authoritative. sm_121
-            # first shipped in CUDA 12.9, so this leg overrides the toolkit to
-            # 12.9 (others stay 12.8).
+            # first shipped in CUDA 12.9; this leg follows the llama-cpp
+            # linux-arm64 CUDA leg's toolkit (13.0), whose libcudart/libcublas
+            # it loads from the shared key.
             ds4_cuda_arch: 'sm_121'
-            cuda_pkg: '12-9'
+            cuda_pkg: '13-0'
 
           # ── whisper-cpp (single CPU variant per platform for the
           #    narration MVP — Metal is implicit on darwin-arm64 via
@@ -721,10 +732,10 @@ jobs:
         if: steps.preflight.outputs.pinned == 'true' && matrix.needs_cuda && startsWith(matrix.platform, 'linux-')
         run: |
           set -euxo pipefail
-          # CUDA toolkit version is per-leg. Default 12.8; the ds4 DGX-Spark
-          # (linux-arm64) leg sets matrix.cuda_pkg=12-9 because sm_121 (GB10)
-          # support first shipped in CUDA 12.9 (12.8 stops at sm_120). `12-9`
-          # is the apt package suffix; `12.9` is the install-path form.
+          # CUDA toolkit version is per-leg. Default 12.8; the linux-arm64
+          # (DGX Spark) legs set matrix.cuda_pkg=13-0. sm_121 (GB10) needs
+          # 12.9+ (12.8 stops at sm_120), and 13.0 is measurably faster there.
+          # `13-0` is the apt package suffix; `13.0` is the install-path form.
           cuda_pkg="${{ matrix.cuda_pkg }}"
           cuda_pkg="${cuda_pkg:-12-8}"
           cuda_ver="${cuda_pkg//-/.}"
@@ -797,7 +808,7 @@ jobs:
       # CPU_ALL_VARIANTS; sd-cpp / whisper-cpp / ds4 build fine on GCC 13
       # and moving them would churn their GLIBCXX floor for no reason. If
       # one of them adopts CPU_ALL_VARIANTS, widen this condition in the
-      # same change. Safe on the CUDA leg: it pins toolkit 12.9, which
+      # same change. Safe on the CUDA leg: it pins toolkit 13.0, which
       # accepts GCC 14 as a host compiler (12.4 on linux-x64 does not —
       # x64 needs none of this, its variant list is GCC 13-clean).
       - name: Install GCC 14 (Linux ARM llama-cpp)

@@ -1,5 +1,6 @@
 import { outputMediaForStep } from '../craftbook-output-media.js';
 import { expandToolsetGroups } from './access.js';
+import { ARTIFACT_READ_TOOLS } from './step-kit.js';
 const SHARED_DOCUMENT_MUTATION_TOOLS: readonly string[] = ['write_document', 'delete_document'];
 
 /**
@@ -27,6 +28,20 @@ export function applyStepToolPolicy(
 
   const next = allowlist ? new Set(allowlist) : unrestrictedTools();
   for (const name of expandToolsetGroups([...disabledGroups])) next.delete(name);
+  // A group-level `artifacts` denial withdraws only the drawer's WRITER. The
+  // policy generator once denied the whole group on every step that did not
+  // write to the drawer, and never withdraws a denial it made, so 648 of
+  // 1474 published gilde steps lost their reads — including 76 evaluate
+  // steps told to "verify every criterion from {{workPath}}/scope.md" and
+  // powerpoint-deck's publish step, whose procedure names `read_artifact`.
+  // `read_file` falls back to the drawer only when `read_artifact` is
+  // authorized, so those steps could not open their own inputs. An exact
+  // `disallowTools` or `allowTools` below still governs these names.
+  if (disabledGroups.has('artifacts')) {
+    for (const name of ARTIFACT_READ_TOOLS) {
+      if (allowlist === null || allowlist.has(name)) next.add(name);
+    }
+  }
   for (const name of disabledTools) next.delete(name);
   if (exactAllowedTools) {
     const ceiling = new Set(exactAllowedTools);

@@ -24,6 +24,19 @@ describe('parseNvidiaMemoryProbe', () => {
       deviceNames: ['NVIDIA GB10'],
     });
   });
+
+  // What a real DGX Spark prints: the GB10 has no framebuffer of its own.
+  it('sizes a GB10 that reports [N/A] from system RAM and keeps it unified', () => {
+    expect(parseNvidiaMemoryProbe('NVIDIA GB10, [N/A]\n', 128 * GiB)).toEqual({
+      vramBytes: 128 * GiB,
+      memoryKind: 'unified',
+      deviceNames: ['NVIDIA GB10'],
+    });
+  });
+
+  it('still ignores a discrete card whose memory is unreadable', () => {
+    expect(parseNvidiaMemoryProbe('NVIDIA GeForce RTX 4090, [N/A]\n', 128 * GiB)).toBeNull();
+  });
 });
 
 function profile(overrides: Partial<MemoryProfile> = {}): MemoryProfile {

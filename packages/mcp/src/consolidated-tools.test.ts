@@ -803,6 +803,20 @@ describe('consolidated MCP tools', () => {
     });
   });
 
+  it('does not report a timed-out source as an empty corpus', async () => {
+    handler = () => ({ results: [], truncated: true, sourcesIncomplete: true, craftbooks: [] });
+
+    const result = await client.callTool({ name: 'search', arguments: { query: 'quiche' } });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(text).not.toContain('No indexed project knowledge matched');
+    expect(text).toContain('some sources did not answer in time');
+    expect(text).toContain('not evidence the topic is absent');
+    expect(result.structuredContent).toMatchObject({ count: 0, truncationReason: 'incomplete' });
+  });
+
   it('calls grep_files with the hardened search contract and renders grep-style context', async () => {
     let requestBody: Record<string, unknown> | undefined;
     handler = (url, method, body) => {

@@ -4,24 +4,53 @@
     "ds4": {
       "tag": "main-2026-09-16",
       "commit": "8db1d1d155cb0400a86a86b9c62d0defb3a6148b",
-      "files": [
-        "LICENSE-ds4-MIT.txt",
-        "LICENSE-ds4-rax-BSD-3-Clause.txt",
-        "LICENSE-ds4-yarn-MIT.txt"
-      ]
+      "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
       "tag": "v0.4.1",
       "commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
-      "files": ["LICENSE-ggml-MIT.txt"]
+      "files": [
+        "LICENSE-ggml-MIT.txt",
+        "LICENSE-yarn-MIT.txt",
+        "LICENSE-fp16-MIT.txt",
+        "LICENSE-arm-optimized-routines-MIT-OR-Apache-2.0.txt",
+        "LICENSE-cpp-httplib-MIT.txt",
+        "LICENSE-nlohmann-json-MIT.txt",
+        "LICENSE-llama-cpp-llamafile-sgemm-MIT.txt",
+        "LICENSE-llama-cpp-pillow-MIT-CMU.txt",
+        "LICENSE-llama-cpp-rotate-bits-MIT.txt",
+        "LICENSE-llama-cpp-unicode-data-Unicode-3.0.txt",
+        "LICENSE-llama-cpp-openvino-APACHE.txt",
+        "LICENSE-nvidia-cub-BSD-3-Clause.txt",
+        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt"
+      ]
     },
     "sd-cpp": {
       "tag": "master-919-19bbbca",
       "commit": "19bbbca1c736bbb9538679fc0ae690cb2b46b492",
       "files": [
         "LICENSE-stable-diffusion-cpp-MIT.txt",
+        "LICENSE-ggml-MIT.txt",
+        "LICENSE-yarn-MIT.txt",
+        "LICENSE-fp16-MIT.txt",
+        "LICENSE-arm-optimized-routines-MIT-OR-Apache-2.0.txt",
+        "LICENSE-cpp-httplib-MIT.txt",
+        "LICENSE-nlohmann-json-MIT.txt",
         "LICENSE-stable-diffusion-cpp-oniguruma-BSD-2-Clause.txt",
         "LICENSE-stable-diffusion-cpp-utf8proc-MIT-Unicode.txt",
+        "LICENSE-stable-diffusion-cpp-libwebp-BSD-3-Clause.txt",
+        "LICENSE-stable-diffusion-cpp-libwebp-PATENTS.txt",
+        "LICENSE-stable-diffusion-cpp-libwebm-BSD-3-Clause.txt",
+        "LICENSE-stable-diffusion-cpp-libwebm-PATENTS.txt",
+        "LICENSE-stable-diffusion-cpp-darts-clone-BSD-2-Clause.txt",
+        "LICENSE-stable-diffusion-cpp-kuba-zip-MIT.txt",
+        "LICENSE-stable-diffusion-cpp-miniz-MIT.txt",
+        "LICENSE-stable-diffusion-cpp-APACHE-2.0.txt",
+        "LICENSE-stable-diffusion-cpp-numcpp-MIT.txt",
+        "LICENSE-stable-diffusion-cpp-openai-clip-MIT.txt",
+        "LICENSE-stable-diffusion-cpp-sageattention-APACHE.txt",
+        "LICENSE-nvidia-cub-BSD-3-Clause.txt",
+        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
         "LICENSE-vulkan-loader-APACHE.txt"
       ]
     },
@@ -33,7 +62,14 @@
     "whisper-cpp": {
       "tag": "v1.9.1",
       "commit": "f049fff95a089aa9969deb009cdd4892b3e74916",
-      "files": ["LICENSE-ggml-MIT.txt"]
+      "files": [
+        "LICENSE-ggml-MIT.txt",
+        "LICENSE-yarn-MIT.txt",
+        "LICENSE-fp16-MIT.txt",
+        "LICENSE-arm-optimized-routines-MIT-OR-Apache-2.0.txt",
+        "LICENSE-cpp-httplib-MIT.txt",
+        "LICENSE-nlohmann-json-MIT.txt"
+      ]
     }
   },
   "helpers": {

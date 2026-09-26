@@ -151,6 +151,14 @@ cmake_flags=(
   # does its own model management, so turn it off to drop a runtime
   # dep and shrink the binary.
   -DLLAMA_CURL=OFF
+  # No embedded web UI. LLAMA_USE_PREBUILT_UI (upstream default ON) downloads
+  # a prebuilt bundle from ggml-org's Hugging Face bucket at build time and
+  # compiles it into llama-server: an unpinned network build input carrying
+  # ~160 npm packages we would have to license-inventory, for a page gezel
+  # never serves (every launch passes `--no-webui`). LLAMA_BUILD_UI is already
+  # OFF upstream; pinned here so a default flip can't bring back the npm build.
+  -DLLAMA_BUILD_UI=OFF
+  -DLLAMA_USE_PREBUILT_UI=OFF
 )
 if [[ "$os" == "Darwin" ]]; then
   macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
