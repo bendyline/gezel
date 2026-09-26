@@ -101,6 +101,12 @@ jobs:
         # runs several package suites at once, each with its own worker pool.
         # Serialising the packages keeps fixed test timeouts meaningful.
         run: pnpm test:ci
+      - name: Run the LibreOffice extension's Python tests
+        # Stdlib-only unittest suites for the extension's pure modules
+        # (discovery, HTTP/SSE, consent, relay, tool definitions). The UNO
+        # layer needs LibreOffice and is covered by the manual smoke recipe
+        # in packages/libreoffice-extension/README.md.
+        run: pnpm --filter @bendyline/gezel-libreoffice-extension run test:py
       - name: Enforce direct-import test-surface floors
         run: pnpm test:surface
       - name: Preserve direct-import test-surface inventory

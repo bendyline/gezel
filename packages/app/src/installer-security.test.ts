@@ -233,6 +233,24 @@ describe('Windows machine-service installer security', () => {
     }
   });
 
+  it("removes only Gezel's own Office registrations, and never on upgrade", () => {
+    const uninstallStart = position('!macro customUnInstall');
+    const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));
+    const guard = uninstall.indexOf('${ifNot} ${isUpdated}');
+    const office = uninstall.indexOf("'HKCU:\\Software\\Microsoft\\Office\\16.0\\WEF\\Developer'");
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(office).toBeGreaterThan(guard);
+    const block = uninstall.slice(guard, uninstall.indexOf('${EndIf}\n  ${EndIf}', guard));
+    // Values are removed only when they point into Gezel's manifests folder,
+    // and only the Gezel CA leaves the user's (not the machine's) Root store.
+    expect(block).toContain("-like '*\\.gezel\\integrations\\office\\manifests\\*'");
+    expect(block).toContain('Cert:\\CurrentUser\\Root');
+    expect(block).toContain("-like 'CN=Gezel Office Local CA*'");
+    expect(block).not.toContain('LocalMachine');
+    // NSIS needs `$$` for a literal PowerShell `$`.
+    expect(block).not.toMatch(/[^$]\$k\b/);
+  });
+
   it('re-publishes preserved shared models for standalone use during uninstall', () => {
     const uninstallStart = position('!macro customUnInstall');
     const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));

@@ -5,6 +5,7 @@ import {
   LOCAL_BRIDGE_PORT_RANGE_END,
   LOCAL_BRIDGE_PORT_RANGE_START,
   codexBridgePortForHome,
+  officeHostPortForHome,
   opencodeBridgePortForHome,
   piBridgePortForHome,
   vscodeBridgePortForHome,
@@ -143,6 +144,34 @@ describe('vscodeBridgePortForHome', () => {
       }
     }
 
+    expect(collisions).toEqual([]);
+  }, 30_000);
+});
+
+describe('officeHostPortForHome', () => {
+  it('is deterministic, in range, and stable across equivalent home spellings', () => {
+    const home = resolve('test-homes', 'alice', '.gezel');
+    expect(officeHostPortForHome(home)).toBe(officeHostPortForHome(join(home, 'x', '..')));
+    for (let index = 0; index < 1_000; index += 1) {
+      const port = officeHostPortForHome(resolve('test-homes', `user-${index}`, '.gezel'));
+      expect(port).toBeGreaterThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_START);
+      expect(port).toBeLessThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_END);
+    }
+  });
+
+  it('never collides with any bridge for the same home', () => {
+    const collisions: string[] = [];
+    for (let index = 0; index < 5_000; index += 1) {
+      const home = resolve('test-homes', `user-${index}`, '.gezel');
+      const ports = [
+        codexBridgePortForHome(home),
+        opencodeBridgePortForHome(home),
+        piBridgePortForHome(home),
+        vscodeBridgePortForHome(home),
+        officeHostPortForHome(home),
+      ];
+      if (new Set(ports).size !== ports.length) collisions.push(`${home}: ${ports.join(', ')}`);
+    }
     expect(collisions).toEqual([]);
   }, 30_000);
 });

@@ -10,13 +10,14 @@ export function listenLoopback(
   fetch: Parameters<typeof serve>[0]['fetch'],
   cert: LoopbackCert | null,
   port: number,
+  opts: { hostname?: '127.0.0.1' | '::1' } = {},
 ): Promise<{ server: ServerType; port: number }> {
   return new Promise((resolve, reject) => {
     const server = serve(
       {
         fetch,
         port,
-        hostname: '127.0.0.1',
+        hostname: opts.hostname ?? '127.0.0.1',
         ...(cert
           ? {
               createServer: createSecureServer,

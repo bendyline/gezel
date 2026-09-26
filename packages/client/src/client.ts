@@ -215,6 +215,8 @@ import type {
   ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
+  InferProjectForPathRequest,
+  InferProjectForPathResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
   InstallOpenCodePluginRequest,
   InstallPackageRequest,
@@ -426,6 +428,7 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WellKnownFoldersResponse,
   WikimediaImageSearchRequest,
   WikimediaImageSearchResponse,
   WikipediaReadRequest,
@@ -467,6 +470,7 @@ import type {
   FoldersStatusResponse,
 } from './folders.js';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
+import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
 import {
   type ConsumeSseJsonOptions,
@@ -2186,6 +2190,7 @@ export class GezelClient {
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
   readonly taskInputs: TaskInputsClient;
+  readonly officeIntegrations: OfficeIntegrationsClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2197,6 +2202,9 @@ export class GezelClient {
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
     this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
+    this.officeIntegrations = new OfficeIntegrationsClient(<T>(m: string, p: string, b?: unknown) =>
+      this.request<T>(m, p, b),
+    );
   }
 
   private async request<T>(
@@ -5528,6 +5536,20 @@ export class GezelClient {
 
   getProject(id: string): Promise<ProjectResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Resolve a document (or folder) path to a project: the project that owns
+   * the folder, a new read-only folder project, or the Default project.
+   * Omit `path` for an unsaved document. See `project-inference/` in core.
+   */
+  inferProjectForPath(body: InferProjectForPathRequest): Promise<InferProjectForPathResponse> {
+    return this.request('POST', '/api/projects/infer-for-path', body);
+  }
+
+  /** The user's Documents / Pictures / cloud folders, with any project that owns each. */
+  listWellKnownFolders(): Promise<WellKnownFoldersResponse> {
+    return this.request('GET', '/api/projects/well-known-folders');
   }
 
   setProjectWorkingDir(id: string, workingDir?: string): Promise<ProjectResponse> {

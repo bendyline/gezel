@@ -34,6 +34,12 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
   documents/          the shared library
   ambient/            ambient dashboard images (dated PNGs + latest.png),
                       made to be shown as wallpaper or lock screen
+  integrations/
+    office/           Word/Excel/PowerPoint: the add-in manifests, and the
+                      certificate the Office pane is served with (its private
+                      keys stay here, readable only by you)
+    libreoffice/      the LibreOffice extension's connection token
+    vscode/, codex/…  the other Connected Apps setups
   history.jsonl       the audit log
   logs/               service logs (rolling)
 ```

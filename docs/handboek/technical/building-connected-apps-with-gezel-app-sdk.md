@@ -230,6 +230,8 @@ The local daemon uses a per-launch self-signed certificate. The Node SDK reads t
 
 A browser cannot read `~/.gezel/runtime/` and cannot perform this local trust setup itself. Use a desktop helper to complete discovery and consent, then pass the resolved address and scoped token to a renderer that imports `GezelApp` from `@bendyline/gezel-app-sdk/browser`. Pure websites should not attempt to bypass the browser's loopback TLS protections.
 
+`registerAppTools` is exported from `./browser` too: it needs only `fetch` and streams, so a renderer that already holds a `product` token can offer tools of its own. Gezel's Office task pane is the worked example. The daemon serves that pane itself, on a stable HTTPS origin with a certificate the user trusts once, which is the one browser origin allowed to request a grant directly. It registers `doc_*`, `sheet_*`, and `slide_*` tools that run Office.js, and withdraws the write tools when the user turns edits off. The LibreOffice extension does the same from native Python, and the source of both lives in the Gezel repository (`packages/ui/src/office/`, `packages/libreoffice-extension/`).
+
 Catch `GezelSdkError` and branch on its `code`. Common cases include `daemon_not_running`, `user_denied`, `approval_timeout`, `verification_code_handler_required`, `model_not_found`, `embeddings_not_supported`, `missing_scope:<scope>`, and `provider_error`. Treat denial as a normal user choice, and give timeouts and missing-daemon errors an obvious retry path.
 
 The daemon publishes the current public OpenAPI document at unauthenticated `GET /v1/openapi.json`. Use it for route inspection or code generation; use the SDK types for ordinary application code.

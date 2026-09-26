@@ -46,6 +46,11 @@ silently repoint their workspace at the library — so the library claims a free
 id instead and records it in `config.sharedProjectId`. Branch on
 `isSharedLibraryProject(project)`, never on the id.
 
+Folder inference ([ADR 0015](decisions/0015-project-inference.md)) treats the
+library as an ordinary existing project: a document opened from inside the
+library folder maps to the library, and inference never creates a project
+inside it.
+
 ## Ownership: the folder is the user's
 
 Everything in the library folder belongs to the user. Gezel adds nothing of its

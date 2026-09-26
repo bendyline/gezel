@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import type { GezelClient } from '@bendyline/gezel-client/node';
+import {
+  type GezelClient,
+  ensureProjectForFolder as ensureClientProjectForFolder,
+} from '@bendyline/gezel-client/node';
 import { GezelSdkError } from './errors.js';
 import type { EnsureModelResult, EnsureProjectOptions, EnsureProjectResult } from './host-types.js';
 
@@ -106,36 +109,18 @@ async function bareProject(client: GezelClient, folder: string): Promise<EnsureP
 }
 
 /**
- * Find or create the project bound to a folder. Mirrors what the CLI does for
- * a working directory: an exact match wins, an unbound project of the same
- * name is adopted, otherwise a new one is created and bound.
+ * Find or create the project bound to a folder, through the shared
+ * `ensureProjectForFolder` used by the CLI and VS Code: an exact match wins,
+ * an unbound project of the same name is adopted, otherwise a new one is
+ * created and bound.
  */
 export async function ensureProjectForFolder(client: GezelClient, folder: string): Promise<string> {
-  const workingDir = resolve(folder);
-  const same = (candidate: string | undefined): boolean =>
-    !!candidate &&
-    (process.platform === 'win32'
-      ? candidate.toLowerCase() === workingDir.toLowerCase()
-      : candidate === workingDir);
-
-  const { projects } = await client.listProjects();
-  const exact = projects.find((project) => same(project.workingDir));
-  if (exact) return exact.id;
-
-  const name = basename(workingDir) || 'workspace';
-  const orphan = projects.find((project) => !project.workingDir && project.name === name);
-  if (orphan) {
-    await client.setProjectWorkingDir(orphan.id, workingDir);
-    return orphan.id;
-  }
-
-  const created = await client.createProject({
-    name,
-    description: `Workspace at ${workingDir}`,
+  const result = await ensureClientProjectForFolder(client, folder, {
     mode: 'solo',
-    workingDir,
+    source: 'app-sdk',
+    description: `Workspace at ${resolve(folder)}`,
   });
-  return created.id;
+  return result.projectId;
 }
 
 /**

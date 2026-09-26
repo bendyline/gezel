@@ -67,6 +67,10 @@ import { createLoopbackCertificatePin } from './loopback-certificate-pin.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
+import {
+  createOfficeVerifyScheduler,
+  registerOfficeIntegrationIpc,
+} from './office-integration/ipc.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
@@ -1218,6 +1222,11 @@ ipcMain.handle('gezel:autostart:uninstall', async () => {
     return { ok: false as const, error: (err as Error).message };
   }
 });
+
+registerOfficeIntegrationIpc(ipcMain, () => apiClient?.officeIntegrations ?? null);
+const scheduleOfficeIntegrationVerify = createOfficeVerifyScheduler(
+  () => apiClient?.officeIntegrations ?? null,
+);
 
 // macOS PKG installs own a machine LaunchDaemon, service account, and shared
 // storage, so moving the .app to Trash is not a complete uninstall. The
@@ -3171,6 +3180,7 @@ app.whenReady().then(async () => {
   apiClient = buildApiClient();
   invalidateRendererNetworkPermission();
   startAmbientMonitoring();
+  scheduleOfficeIntegrationVerify();
 
   // Reload the BrowserWindow when the supervisor swaps the child or falls
   // back to embedded. The preload re-runs on reload, re-reads the token via
@@ -3185,6 +3195,7 @@ app.whenReady().then(async () => {
     invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     startAmbientMonitoring();
+    scheduleOfficeIntegrationVerify();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
     // Load the (possibly rotated) baseUrl rather than `reload()`: an embedded
