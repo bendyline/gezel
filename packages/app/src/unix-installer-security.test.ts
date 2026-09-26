@@ -201,6 +201,23 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('/usr/bin/sudo -H -u "$target_username" /bin/rm -rf --');
   });
 
+  it('removes Office add-in registrations for every account, as that account', () => {
+    expect(macUninstall).toContain(
+      'remove_all_user_office_addins\nremove_target_user_office_certificate',
+    );
+    expect(macUninstall).toContain(
+      'for container in com.microsoft.Word com.microsoft.Excel com.microsoft.Powerpoint',
+    );
+    expect(macUninstall).toContain(
+      `/usr/bin/sudo -H -u "$username" /usr/bin/find "$wef" -maxdepth 1 -type f`,
+    );
+    expect(macUninstall).toContain(`-name 'gezel-*.xml' -delete`);
+    // The certificate authority leaves the uninstalling user's Keychain by
+    // exact fingerprint, inside that user's session, and never blocks the uninstall.
+    expect(macUninstall).toContain('/usr/bin/security delete-certificate -Z "$sha1" "$keychain"');
+    expect(macUninstall).toContain('[[ "$sha1" =~ ^[0-9A-Fa-f]{40}$ ]] || return 0');
+  });
+
   it('removes all user startup items, detaches safely, and forgets the PKG receipt', () => {
     expect(macUninstall).toContain('USER_AGENT_LABEL="com.bendyline.gezel"');
     expect(macUninstall).toContain('/usr/bin/dscl . -list /Users UniqueID');

@@ -35,6 +35,12 @@ export interface EngineContext {
   serviceRole: ServiceRole;
   distribution: ResolvedDistributionPolicy;
   home: string;
+  /**
+   * The Office listener's live origin (`https://localhost:<port>`), or null
+   * when it is not listening. The one browser origin allowed to register an
+   * app grant; see `routes/v1-apps.ts`. Unset on the machine engine.
+   */
+  officeHostOrigin?: () => string | null;
   catalog: CatalogService;
   imageProvider: ImageProviderManager;
   imagePulls: ImageModelPullRegistry;

@@ -11,10 +11,20 @@
  * have the helper do the discovery + consent (using the Node entry)
  * and pass the resolved `baseUrl + token` into the browser via
  * postMessage / config.
+ *
+ * `registerAppTools` is here too: it needs only fetch and streams, so a
+ * renderer that holds a `product` token can offer tools of its own (the
+ * Office task pane registers its document tools this way).
  */
+export { registerAppTools } from './app-tools.js';
 export { GezelApp } from './client.js';
 export { GezelSdkError } from './errors.js';
 export type {
+  AppToolCallContext,
+  AppToolDefinition,
+  AppToolHandlerResult,
+  AppToolsRegistration,
+  RegisterAppToolsInput,
   AuthorizedConnection,
   ChatCompletionChunk,
   ChatCompletionResponse,

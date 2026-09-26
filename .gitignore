@@ -87,6 +87,9 @@ dist
 # packages/vscode's @vscode/test-electron runner (tsup.e2e.config.ts →
 # dist-e2e/). Both are regenerable build outputs, same status as `dist/`.
 dist-embedded
+# Office task pane (vite.office.config.ts → dist-office/), staged into the
+# service's dist/office/ at build time.
+dist-office
 dist-e2e
 
 # Node-only distributable produced by scripts/build-node-bundle.mjs

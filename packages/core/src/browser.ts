@@ -17,6 +17,7 @@ export * from './project-properties.js';
 export * from './project-icons.js';
 export * from './search-ranking.js';
 export * from './shared-project.js';
+export * from './inferred-project.js';
 export * from './growth-cosmetics.js';
 export * from './security/policy.js';
 export * from './gezel-display.js';

@@ -60,6 +60,8 @@ import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 
+import type { LibreOfficeSetupManager } from '../libreoffice-setup/manager.js';
+import type { OfficeSetupManager } from '../office-setup/manager.js';
 import type { EngineContext } from './engine-context.js';
 
 export interface ServiceContext extends EngineContext {
@@ -170,7 +172,13 @@ export interface ServiceContext extends EngineContext {
   piSetup: PiSetupManager;
   /** VS Code custom endpoint, scoped credential, profile merge, and bridge lifecycle. */
   vscodeSetup: VSCodeSetupManager;
+  /** Word / Excel / PowerPoint: per-user CA, stable HTTPS listener, add-in manifests. */
+  officeSetup: OfficeSetupManager;
+  /** LibreOffice: the shipped `.oxt` and the desktop app's install report. */
+  libreofficeSetup: LibreOfficeSetupManager;
   uiDir?: string;
+  /** Office task-pane pages (`dist/office`), served at `/office/*` when present. */
+  officeDir?: string;
   /** In-memory job tracker for folder externalization moves. Lives only
    *  for the current service process — moves don't survive a restart
    *  (the worker writes a sentinel file so the next boot can detect a

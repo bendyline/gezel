@@ -1,0 +1,24 @@
+{
+  "name": "@bendyline/gezel-libreoffice-extension",
+  "version": "0.0.0",
+  "private": true,
+  "description": "LibreOffice extension (.oxt) that connects Writer, Calc and Impress to gezel. Ships inside the gezel service bundle; installed per user by the desktop app.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-oxt.mjs",
+    "test": "vitest run",
+    "test:py": "python3 -m unittest discover -s tests/python -p 'test_*.py'",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
+  }
+}

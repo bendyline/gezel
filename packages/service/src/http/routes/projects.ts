@@ -5,11 +5,13 @@ import {
   ApplyPatchToProjectWorkspaceFileRequestSchema,
   ApplyProjectTypeRequestSchema,
   CopyArtifactToWorkspaceRequestSchema,
+  type CreateProjectRequest,
   CreateProjectRequestSchema,
   CreateTypedProjectRequestSchema,
   DriveIndexEnrichmentRequestSchema,
   FetchDiffRequestSchema,
   FetchRepoRequestSchema,
+  InferProjectForPathRequestSchema,
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
   NpmInstallRequestSchema,
@@ -70,16 +72,17 @@ import {
   projectTypeStatus,
 } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
-import { detectAndPersistProjectType } from '../../project-type/detect.js';
 import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../project-type/gezapp.js';
+import { createProjectWithLead } from '../../projects/create-project.js';
+import {
+  InferProjectError,
+  inferProjectForPath,
+  listWellKnownFolders,
+} from '../../projects/infer-project.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
-import {
-  type EnsureProjectLeadResult,
-  ensureFolderProjectBuilder,
-  ensureProjectVoorman,
-} from '../../workspace/import-sync.js';
+import { type EnsureProjectLeadResult, ensureProjectVoorman } from '../../workspace/import-sync.js';
 import { readJournalTail } from '../../workspace/journal.js';
 import {
   type NpmInstallPackageRequest,
@@ -140,65 +143,44 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = CreateProjectRequestSchema.parse(await c.req.json());
-    const created = await ctx.store.createProject(body);
-    // Give the project its lead up front so Chat never opens on an arbitrary
-    // alphabetical gezel. Folder-backed solo projects get a hands-on Builder;
-    // crew projects retain their Voorman. Runs synchronously because both the
-    // CLI and desktop open Chat immediately. Best-effort; never blocks creation.
-    const ensureLead =
-      body.workingDir && body.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
-    const ensured = await ensureLead(
-      { store: ctx.store, chat: ctx.chat, home: ctx.home, catalog: ctx.catalog },
-      created.id,
-    ).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`[projects] ensure-lead failed for ${created.id}: ${message}`);
-      return {} as EnsureProjectLeadResult;
-    });
-    if (ensured.createdGezel) {
-      ctx.chatEvents.publishGlobalEvent({
-        type: 'gezel_created',
-        gezelId: ensured.createdGezel.id,
-        name: ensured.createdGezel.name,
-      });
-    }
-    // Classify a folder-backed project up front, off a bounded static scan of
-    // the directory. The index tick would get here eventually, but not for the
-    // first session: opening a folder and immediately asking "what should I
-    // build?" is exactly when the craftbook shortlist and the gezel-role
-    // suggestions need to know whether this is code, prose, data, or assets.
-    if (body.workingDir) {
-      await detectAndPersistProjectType({ store: ctx.store }, created.id);
-    }
-    // Re-read so the response carries the freshly-set voormanGezelId and
-    // detected type; the UI selects the project from this payload and opens
-    // Chat on the lead.
-    const project = (await ctx.store.getProject(created.id)) ?? created;
-    // Announce the new project on the project + global SSE streams so
-    // always-mounted surfaces (the left sidebar PROJECTS list) fold it
-    // in immediately. Covers every creation path — the New Project
-    // dialog and the `start_project` macro both land here. History-free
-    // so it isn't replayed to late subscribers.
-    ctx.chatEvents.publishProjectEvent(project.id, {
-      type: 'project_created',
-      projectId: project.id,
-      name: project.name,
-    });
-    // If the new project is linked to a GitHub repo, kick off a clone
-    // immediately. We deliberately don't await — cloning a sizeable
-    // repo can take a minute, and the New Project dialog has already
-    // closed. Failures land in the service log and the status of the
-    // checkout can be observed via the existing
-    // GET /api/projects/:id/git/status endpoint that the GitHub
-    // tab already polls.
-    if (project.github?.url) {
-      void ctx.git.ensureClone(project).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`[projects] background clone failed for ${project.id}: ${message}`);
-      });
-    }
+    const project = await createProjectWithLead(ctx, body);
     return c.json(project, 201);
   });
+
+  const inferDeps = () => ({
+    store: ctx.store,
+    home: ctx.home,
+    history: ctx.history,
+    createProject: (body: CreateProjectRequest) => createProjectWithLead(ctx, body),
+  });
+
+  /**
+   * Document (or folder) path → project. Reuses the project that already
+   * owns the folder, otherwise creates a read-only folder project for the
+   * folder gezel infers, otherwise answers with the Default project. Used by
+   * the Office and LibreOffice integrations, VS Code, the CLI, and first run.
+   * Registered before `/:id`, which would otherwise read it as a project id.
+   */
+  app.post('/infer-for-path', async (c) => {
+    const parsed = InferProjectForPathRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_request', issues: parsed.error.issues }, 400);
+    }
+    try {
+      return c.json(await inferProjectForPath(inferDeps(), parsed.data));
+    } catch (err) {
+      if (err instanceof InferProjectError) {
+        return c.json(
+          { error: err.message, code: err.code, ...(err.reason ? { reason: err.reason } : {}) },
+          err.status,
+        );
+      }
+      throw err;
+    }
+  });
+
+  /** The user's Documents / Pictures / cloud folders, for a first-run offer. */
+  app.get('/well-known-folders', async (c) => c.json(await listWellKnownFolders(inferDeps())));
 
   /**
    * Create + apply a catalog project type as one server-owned operation.

@@ -20,5 +20,8 @@ export * from './gezels/templates.js';
 
 export * from './deliverable-paths.js';
 
+// Document → project-folder inference. Node-side: uses `node:path`.
+export * from './project-inference/index.js';
+
 export * from './workspace-edits.js';
 export * from './workspace-edit-error.js';

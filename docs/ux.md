@@ -1242,6 +1242,20 @@ markdown carries block attributes on headings only, so a macro cannot
 class the list it expands into — which means any figure-first article
 list gets this treatment, and should.
 
+**Surfaces inside another app are guests.** The Office task pane and the
+LibreOffice panel live in someone else's window, about 320px wide. They carry
+one slim header row (project name, a read-only annotation when the folder is
+read-only, the gezel picker, an "Allow edits" checkbox, and a status dot)
+over the embedded chat, and nothing else: no navigation, no titlebar pills.
+Everything wraps rather than truncates. The read-only annotation is the
+sanctioned non-interactive capsule; the status dot is a true circle; the
+app picker in the Office setup card is a plain group of checkboxes, not a
+tray, because the choices are independent rather than mutually exclusive.
+Before the chat loads, every stopping state (connecting, the one-time
+connection code, declined, expired, Gezel not running) is a short title, one
+sentence, and the next step as a button. The connection code is set large,
+selectable, and beside a Copy button.
+
 ## Poppetjes: painted wooden crew
 
 Poppetjes are the app's character system, not generic avatars. Their visual

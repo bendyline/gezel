@@ -111,6 +111,12 @@ import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './laun
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import {
+  buildSpawnedChildTask,
+  inheritedChildAssignee,
+  instanceContextNoteText,
+  snapshotSpawnCraftbook,
+} from './spawn-child.js';
+import {
   StepCompletionBlockedError,
   formatGateScriptDiagnostics,
 } from './step-completion-errors.js';
@@ -4319,62 +4325,15 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const now = nowIso();
     const num = await this.store.nextProjectTaskNum(parent.projectId);
 
-    // Re-snapshot the spawn craftbook so child step lifecycle fields are
-    // fresh and the child can mutate without rippling back to the host.
-    const childCraftbook = snapshotCraftbookForTask(
-      {
-        ...parent.spawnsCraftbook,
-        steps: parent.spawnsCraftbook.steps.map((s) => {
-          // Strip per-instance lifecycle off the host's spawn snapshot
-          // so the child gets a clean recipe view.
-          const {
-            createdAt: _ca,
-            completedAt: _co,
-            attemptCount: _ac,
-            lastActivatedAt: _la,
-            onEnterCompletedAt: _entered,
-            ...recipe
-          } = s;
-          void _ca;
-          void _co;
-          void _ac;
-          void _la;
-          void _entered;
-          return recipe;
-        }),
-      },
+    const { craftbook: childCraftbook, entryStep: firstStep } = snapshotSpawnCraftbook(
+      parent,
+      parent.spawnsCraftbook,
+      num,
+      variation,
       now,
     );
-    // Land the per-child context in the recipe itself: {{client}} etc. in
-    // step prompts and gate/advanceWhen file paths become the concrete
-    // values BEFORE the child is written + dispatched, so the child's turn
-    // and its gate both see the resolved per-item data.
-    // A shard of a proposal-drafting host writes into its OWN proposal, whose
-    // id is this child's task number. `{{task.num}}` cannot express that:
-    // `create()` already interpolated the spawn template with the HOST's
-    // context, so every shard would silently target the host's pack. Hence a
-    // dedicated token resolved here, where the child's number is known.
-    const shardContext: Record<string, string> = {
-      ...(variation?.context ?? {}),
-      ...(parent.diffpackId
-        ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` }
-        : {}),
-    };
-    if (Object.keys(shardContext).length > 0) {
-      interpolateStepsContext(childCraftbook.steps, shardContext);
-    }
     const activeStepId = childCraftbook.entryStepId;
-    // First activation of the child's entry step → attemptCount 1.
-    childCraftbook.steps = bumpStepActivation(childCraftbook.steps, activeStepId, now);
-    const firstStep = childCraftbook.steps.find((s) => s.id === activeStepId)!;
-
-    // Inherited assignee: explicit step assignee → suggestedGezelId →
-    // craftbook default → parent's assignee.
-    const inheritedAssignee: TaskAssignee =
-      firstStep.assignee ??
-      (firstStep.suggestedGezelId
-        ? { kind: 'gezel', gezelId: firstStep.suggestedGezelId }
-        : (childCraftbook.defaultAssignee ?? parent.assignee));
+    const inheritedAssignee = inheritedChildAssignee(firstStep, childCraftbook, parent);
 
     // A child dispatches off its ENTRY STEP's binding — `onStepActivated`
     // reads the step's assignee/suggestedGezelId, never the task assignee.
@@ -4389,85 +4348,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       firstStep.suggestedGezelId = inheritedAssignee.gezelId;
     }
 
-    const title = variation?.title ?? parent.title;
-    const description = variation?.description ?? childCraftbook.description ?? parent.description;
-    const plan = variation?.plan ?? childCraftbook.plan ?? parent.plan;
-
-    // Carry the spawn-source provenance forward as the child's main role.
-    const parentSpawnSource = parent.sourceCraftbookIds?.find((s) => s.role === 'spawn');
-    const childSources: TaskCraftbookSource[] = parentSpawnSource
-      ? [
-          {
-            role: 'main',
-            catalogId: parentSpawnSource.catalogId,
-            ...(parentSpawnSource.version ? { version: parentSpawnSource.version } : {}),
-            ...(parentSpawnSource.sourceId ? { sourceId: parentSpawnSource.sourceId } : {}),
-          },
-        ]
-      : [];
-
-    const child: Task = {
-      projectId: parent.projectId,
+    const child = buildSpawnedChildTask({
+      parent,
       num,
-      ref: buildTaskRef(parent.projectId, num),
-      title,
-      ...(description ? { description } : {}),
-      ...(plan ? { plan } : {}),
-      status: 'active',
-      assignee: inheritedAssignee,
-      // Same run, same mode — never re-resolved for a child.
-      ...(parent.executionMode ? { executionMode: parent.executionMode } : {}),
       craftbook: childCraftbook,
-      ...(parent.cliTrustedScriptHashes
-        ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }
-        : {}),
-      ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
-      ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
-      // A shard works on its host's input; its template already carries those paths.
-      ...(parent.inputs ? { inputs: parent.inputs } : {}),
-      ...(parent.references ? { references: parent.references } : {}),
-      // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
-      // a shard that carries one drafts into that change proposal, so its
-      // workspace-write tools re-root at the pack instead of the workspace.
-      // Per-child, because a fanout exists precisely to give each cluster of
-      // issues its own reviewable proposal.
-      // A shard of a proposal-drafting host drafts its OWN proposal — one per
-      // cluster, which is why the fanout exists. Derived from the child's task
-      // number rather than passed in: if this were model-supplied, a mangled
-      // value would silently unbind the child and send its edits to the real
-      // workspace, which is the one outcome this whole feature exists to
-      // prevent. Fail-safe, not fail-open.
-      ...(parent.diffpackId ? { diffpackId: String(num) } : {}),
-      // A child of a night-shift host is itself night-shift work — the
-      // runner gates its dispatch to an active shift. The child is a plain
-      // task (no cron/spawn), so `onceADay` doesn't carry over.
-      ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
-      activeStepId,
-      parentTaskRef: parent.ref,
-      // Shards share the HOST's folder: the host's collect-barrier gates
-      // were interpolated with the host's number, and per-child files are
-      // already namespaced by the variation context ({{batchNumber}}, …).
-      artifactDir: parent.artifactDir ?? `tasks/${parent.num}`,
-      ...(parent.roleBasedNameOnlyMode !== undefined
-        ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
-        : {}),
-      createdAt: now,
-      updatedAt: now,
-      createdBy: parent.createdBy,
-    };
+      assignee: inheritedAssignee,
+      variation,
+      now,
+    });
     await this.store.writeTask(child);
 
-    // If the variation includes context, append it as a step-0 note so
-    // the gezel receiving the handoff can see per-child parameters.
-    if (variation?.context && Object.keys(variation.context).length > 0) {
-      const lines = ['# Instance context', ''];
-      for (const [k, v] of Object.entries(variation.context)) {
-        lines.push(`- **${k}**: ${v}`);
-      }
-      lines.push('');
+    const contextNote = instanceContextNoteText(variation);
+    if (contextNote) {
       try {
         await this.appendNote(child.projectId, child.num, {
-          text: lines.join('\n'),
+          text: contextNote,
           author: { kind: 'user' },
           stepId: activeStepId,
         });

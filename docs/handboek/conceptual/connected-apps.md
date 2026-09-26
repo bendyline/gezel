@@ -20,7 +20,7 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 
 ## Codex and other agent harnesses
 
-The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. VS Code, OpenCode, and [pi](https://pi.dev) connect the same way through the chat endpoint — see [VS Code](#vs-code), [OpenCode](#opencode), and [pi](#pi) below.
+The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. VS Code, OpenCode, and [pi](https://pi.dev) connect the same way through the chat endpoint — see [VS Code](#vs-code), [OpenCode](#opencode), and [pi](#pi) below. Word, Excel, PowerPoint, and LibreOffice connect differently: they open real conversations in a project rather than borrowing a model — see [Word, Excel, and PowerPoint](#word-excel-and-powerpoint) and [LibreOffice](#libreoffice).
 
 For Codex, use **Use Gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
 
@@ -97,6 +97,36 @@ To check it took effect, run `pi --list-models` — the crew appears under `geze
 Unlike the Codex profile, nothing here pins pi's own default model. The extension loads in every project, so which model pi starts with stays your choice in its model picker. If you point pi somewhere else with `PI_CODING_AGENT_DIR` in your shell, note that the gezel service cannot see a variable set only in your login shell — the card shows the folder it actually resolved.
 
 As with the others, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while pi uses the model.
+
+## Word, Excel, and PowerPoint
+
+**Use Gezel in Word, Excel, and PowerPoint** adds a **Gezel** button to the Home tab of the desktop Office apps on Windows and macOS. It opens a pane beside your document where you chat with your gezels about it. While the pane is open, the gezels in that project can read the document and, when you allow it, edit it: insert and replace text in Word, read and write cells in Excel, and add slides in PowerPoint.
+
+No store is involved. Gezel serves the pane itself, from this computer, and registers it with each Office app for your account only.
+
+Office only opens add-ins over a secure connection that your computer trusts. So during setup Gezel creates its own security certificate for this computer and asks your system to trust it. That certificate:
+
+- works only for this computer's own address (`localhost`), so it cannot vouch for any website;
+- is trusted for your account only, not every account on the machine;
+- is removed when you remove the setup.
+
+Your system asks you to confirm once. On a Mac that means your password, and macOS may also ask whether Gezel may access data from other apps; allow it so Gezel can add itself to Office.
+
+After setup, restart any Office app that was open and choose **Gezel** on the Home tab. The first time, the pane shows a connection code: approve **Microsoft Office** in Gezel and type the code. After that the pane connects on its own.
+
+The pane works in the project that owns the document's folder. If there isn't one yet, Gezel creates one for that folder. It picks the folder sensibly: your Documents folder for a loose document there, a folder like `engineeringdocs` when the document sits in one of several work folders inside it, or the Default project for a document saved directly in your home folder. Projects created this way are **read-only**: gezels cannot change files in the folder, only the document you have open, through the pane. You can allow file changes later in the project's settings.
+
+The **Allow edits** switch in the pane controls whether gezels may change the open document at all. Turn it off and they can still read it.
+
+If the Gezel button does not appear, check that **optional connected experiences** are turned on in Office's privacy settings, then use **Clear Office cache** on the card with Office closed. Office on the web and Outlook are not supported.
+
+## LibreOffice
+
+**Use Gezel in LibreOffice** installs Gezel's extension into LibreOffice Writer, Calc, and Impress for your account, using LibreOffice's own installer. Close LibreOffice before installing. Afterwards choose **Tools > Gezel**, or open the Gezel panel in the sidebar.
+
+The first time, the panel shows a connection code: approve **LibreOffice** in Gezel and type it. The panel then works like the Office pane: it finds the project for the document's folder, lets you pick which gezel to talk to, and offers the same document tools, with an **Allow edits** switch.
+
+LibreOffice needs no certificate setup, because the extension runs inside LibreOffice and connects to Gezel directly. On Linux, some distributions ship LibreOffice's Python support separately; install it if the panel does not appear.
 
 ## Who answers: gezel choices and the fallback
 

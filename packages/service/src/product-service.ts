@@ -158,6 +158,7 @@ import { InputStagingManager } from './tasks/inputs/staging.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
@@ -2392,6 +2393,8 @@ export async function startProductService(
     },
     port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
   });
+  // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
+  const officeIntegrations = createOfficeIntegrations(home, opts);
   const vscodeSetup = createVSCodeSetupManager({
     home,
     ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
@@ -2576,6 +2579,7 @@ export async function startProductService(
     opencodeSetup,
     piSetup,
     vscodeSetup,
+    ...officeIntegrations.contextFields(),
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2619,6 +2623,7 @@ export async function startProductService(
   piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
   const vscodeBridgeApp = buildVSCodeBridgeApp(context);
   vscodeBridgeFetchRef.value = vscodeBridgeApp.fetch.bind(vscodeBridgeApp);
+  officeIntegrations.bindFetch(app.fetch.bind(app));
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2862,6 +2867,7 @@ export async function startProductService(
       `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
     );
   });
+  await officeIntegrations.reconcile();
   scheduler.start();
   nightShift.start();
   await ensureNightShiftOversightTask(store, tasks).catch((err) => {
@@ -3105,6 +3111,7 @@ export async function startProductService(
       await shutdownStep('OpenCode setup', () => opencodeSetup.stop());
       await shutdownStep('pi setup', () => piSetup.stop());
       await shutdownStep('VS Code setup', () => vscodeSetup.stop());
+      await shutdownStep('Office host', () => officeIntegrations.stop());
       await shutdownStep('machine engine', async () => machineEngine?.stop());
       await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       if (previewServer) {
