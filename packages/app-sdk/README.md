@@ -184,7 +184,7 @@ const gezel = await connectOrHost({
   appId: 'acme.travel',
   appName: 'Acme Travel',
   // Hosting is opt-in. Without `host`, a missing gezel is still an error.
-  host: { nodePath: process.execPath },
+  host: { mode: 'in-process', inferenceOnly: true },
 });
 
 // Engine binary, weights, and the default-model pin, in one call.
@@ -215,10 +215,16 @@ await gezel.close();
 - **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
 - **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
 - **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
+- **An inference-only profile.** `host: { mode: 'in-process', inferenceOnly: true }` keeps on-device model listing, installation, and OpenAI-compatible inference, but does not start the standalone product's schedulers, channels, editor bridges, machine-service discovery, indexing, or maintenance jobs. The SDK calls the service through its direct in-process Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
 
 Install `@bendyline/gezel-service` alongside this SDK to host — it is an optional peer dependency, so apps that only connect never download it.
+Keep the SDK and service on compatible releases. Inference-only hosting verifies
+that the service actually started the embedded profile and supplied its direct
+Fetch transport; an older service fails immediately with
+`service_inference_only_unsupported` instead of silently starting the full
+product or falling back to loopback networking.
 
-**Under Electron**, `process.execPath` is your app binary, not Node, and gezel runs its tool server as a child process. Ship a Node binary and pass `host: { nodePath }`. Without one, the SDK uses the Node a Gezel install keeps at `<Gezel home>/bin/node` when there is one; otherwise it fails immediately with `node_binary_required` rather than coming up with no tools.
+**Under Electron**, `process.execPath` is your app binary, not Node. Full-product hosting runs a tool server as a child process, so ship a Node binary and pass `host: { nodePath }`; without one, the SDK uses the Node a Gezel install keeps at `<Gezel home>/bin/node` when available. Inference-only in-process hosting starts no child-process features and needs no Node path.
 
 ### When hosting happens
 
@@ -226,6 +232,27 @@ By default only a Gezel that is not running falls through to hosting. A person w
 
 - **A saved grant is reused first.** An app with no `onVerificationCode` handler cannot complete a new handshake, but if `tokenStorage` or `existingToken` holds a grant from an earlier session, the SDK joins the running Gezel with it before hosting. It cannot prompt: without a code handler the SDK refuses to register a new grant, and that refusal is what falls through.
 - **`hostWhenRefused: true`** also hosts after a refusal, an expired or unanswered approval, or a connected-app surface switched off in Gezel. It is for apps that obtain their own consent — the AI is optional and the person switched it on inside the app. A daemon that is alive but unwell still fails loudly.
+
+For an app whose own **Use AI** switch is the consent boundary, the silent
+startup policy is therefore:
+
+```ts
+const gezel = await connectOrHost({
+  appId: 'acme.editor',
+  appName: 'Acme Editor',
+  scopes: ['openai'],
+  requireVerificationCode: true,
+  tokenStorage,
+  // No onVerificationCode at startup: reuse a saved grant or host, never prompt.
+  host: { mode: 'in-process', inferenceOnly: true },
+  hostWhenRefused: true,
+});
+```
+
+Connecting the standalone Gezel later is an optional user action: close the
+private connection and repeat the call from that action with an
+`onVerificationCode` handler. Omitting that handler during startup is what
+makes the initial path incapable of raising a connection prompt.
 
 ### Shipping the engines with your app
 
@@ -252,6 +279,18 @@ Engines from another release may not accept the flags the daemon passes them. On
 
 ```ts
 await gezel.ensureModel({ model: 'gemma4-e2b-q4', bundle: '/opt/acme/gemma4-e2b-q4.gezmodel' });
+```
+
+An app that may prepare an engine automatically but requires a separate user
+gesture before downloading model weights uses `allowWeightDownload: false`.
+If the model is absent, Gezel prepares the engine and then throws
+`model_download_required` before any weight download starts:
+
+```ts
+await gezel.ensureModel({
+  model: 'gemma4-e2b-q4',
+  allowWeightDownload: false,
+});
 ```
 
 `ensureProject` does the same for a `.gezapp`'s declared chat-model dependencies — pass `bundles: { 'gemma4-e2b-q4': '/opt/acme/gemma4-e2b-q4.gezmodel' }`.

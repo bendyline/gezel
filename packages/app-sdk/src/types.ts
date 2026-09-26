@@ -380,6 +380,8 @@ export interface ModelListEntry {
   availability?: 'available' | 'unavailable' | 'download-required' | 'downloading';
   unavailable_reason?: string;
   locality?: 'on-device';
+  /** Expected weight download size for a `download-required` entry. */
+  download_bytes?: number;
   capabilities?: {
     text: boolean;
     tools: boolean;

@@ -694,6 +694,23 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                   name: { type: 'string' },
                   role: { type: 'string' },
                   is_fallback: { type: 'boolean' },
+                  availability: {
+                    type: 'string',
+                    enum: ['available', 'unavailable', 'download-required', 'downloading'],
+                  },
+                  unavailable_reason: { type: 'string' },
+                  locality: { type: 'string', enum: ['on-device'] },
+                  download_bytes: { type: 'integer', minimum: 1 },
+                  capabilities: {
+                    type: 'object',
+                    properties: {
+                      text: { type: 'boolean' },
+                      tools: { type: 'boolean' },
+                      structuredOutput: { type: 'boolean' },
+                      images: { type: 'boolean' },
+                      foregroundOnly: { type: 'boolean' },
+                    },
+                  },
                 },
               },
             },

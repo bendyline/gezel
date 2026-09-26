@@ -86,6 +86,14 @@ the Gezel the person already runs beats loading every model again in a private
 daemon. This cannot raise a prompt — `authorize` refuses to register a new
 grant without a code handler, and that refusal is what falls through.
 
+For an app-owned AI opt-in, the intended composition is `scopes: ['openai']`,
+`requireVerificationCode: true`, a token store, `host`, and
+`hostWhenRefused: true`, with no `onVerificationCode` handler during startup.
+That silently reuses a prior standalone grant or hosts privately. A separate
+Connect action may close the private connection and repeat the call with an
+`onVerificationCode` handler; standalone connection is therefore a provider
+choice, not an availability prerequisite.
+
 A hosted daemon always listens on an ephemeral port. The canonical 6228 belongs
 to the machine broker on a machine install and is the stable address the
 user's own Gezel wants; a private daemon that happened to start first must not
@@ -99,6 +107,27 @@ take it.
   hosting works on a machine with Gezel installed without shipping one.
 - **`in-process`** imports the service into the caller. Faster, no second
   process, but every native dependency must match this process's ABI.
+
+`HostOptions.inferenceOnly` is the embedding profile for apps that need
+on-device model listing, model installation, and OpenAI-compatible inference
+without running a second copy of the Gezel product. It skips schedulers,
+channels, editor bridges, machine-service discovery, indexing, and background
+maintenance. With `mode: 'in-process'`, the SDK uses the service's direct Fetch
+handler, so it needs neither a separate Node executable nor a loopback client
+connection under Electron.
+
+The service reports the profile it actually started. An inference-only SDK
+request requires both `profile: 'embedded-inference'` and the direct Fetch
+handler; otherwise it stops the incompatible service and throws
+`service_inference_only_unsupported`. This makes SDK/service version skew loud
+instead of accidentally starting a full product daemon.
+
+`Gezel.ensureModel({ allowWeightDownload: false })` is the non-interactive
+preparation path. It may install the required native engine, but if weights are
+not already present it throws `model_download_required` before starting a
+download. Apps can therefore keep multi-gigabyte data downloads behind their
+own explicit user gesture without racing an abort against the first progress
+event.
 
 The default is `child` under Electron and `in-process` elsewhere. Electron gets
 the child by default because importing the service into its main process would

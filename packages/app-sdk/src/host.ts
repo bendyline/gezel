@@ -17,7 +17,7 @@
  *   appId: 'qualla',
  *   appName: 'Qualla',
  *   // Hosting is opt-in; without it, a missing Gezel is an error.
- *   host: { nodePath: bundledNodePath },
+ *   host: { mode: 'in-process', inferenceOnly: true },
  * });
  *
  * await gezel.ensureModel({ model: 'gemma4-e2b-q4', bundle: shippedGezmodel });

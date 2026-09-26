@@ -1,0 +1,88 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { ServiceContext } from '../context.js';
+import { v1ModelsRoutes } from './v1-models.js';
+
+function modelContext(): ServiceContext {
+  return {
+    store: {
+      readConfig: async () => ({}),
+      listGezels: async () => [],
+      getGezel: async () => null,
+    },
+    chat: {
+      listModelsForProvider: async (provider: string) =>
+        provider === 'llama-cpp'
+          ? [{ id: 'installed-model', contextWindow: 16_384, supportsReasoning: false }]
+          : [],
+    },
+    catalog: {
+      list: async () => [
+        {
+          manifest: {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'small-writer',
+            name: 'Small Writer',
+            description: 'A compact writing model.',
+            tags: [],
+            maintainer: { name: 'Gezel' },
+            licenseClass: 'open',
+            recoScore: 10,
+            version: '1',
+            releasedAt: '2026-01-01',
+            parameterSize: '4B',
+            approxSizeBytes: 2 * 1024 ** 3,
+            supportsTools: true,
+            contextWindow: 32_768,
+            availableVersions: [],
+            llamaCpp: {},
+          },
+        },
+      ],
+    },
+  } as unknown as ServiceContext;
+}
+
+describe('GET /v1/models catalog metadata', () => {
+  it('keeps installed models selectable and advertises downloadable on-device models', async () => {
+    const response = await v1ModelsRoutes(modelContext()).request('http://localhost/');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(body.data).toContainEqual(
+      expect.objectContaining({
+        id: 'llama-cpp:installed-model',
+        availability: 'available',
+        locality: 'on-device',
+      }),
+    );
+    expect(body.data).toContainEqual(
+      expect.objectContaining({
+        id: 'llama-cpp:small-writer',
+        name: 'Small Writer',
+        availability: 'download-required',
+        locality: 'on-device',
+        download_bytes: 2 * 1024 ** 3,
+        context_window: 32_768,
+      }),
+    );
+  });
+
+  it('keeps the embedded profile local and does not enumerate gezels or cloud providers', async () => {
+    const ctx = modelContext();
+    const providers: string[] = [];
+    ctx.store.listGezels = vi.fn(async () => {
+      throw new Error('the embedded profile must not enumerate product gezels');
+    });
+    ctx.chat.listModelsForProvider = vi.fn(async (provider: string) => {
+      providers.push(provider);
+      return [];
+    });
+
+    const response = await v1ModelsRoutes(ctx, { localOnly: true }).request('http://localhost/');
+    expect(response.status).toBe(200);
+    expect(providers).toEqual(['llama-cpp', 'mlx', 'ds4']);
+    expect(ctx.store.listGezels).not.toHaveBeenCalled();
+  });
+});

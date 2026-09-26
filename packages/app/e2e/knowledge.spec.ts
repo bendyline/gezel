@@ -286,9 +286,8 @@ test.describe('Knowledge catalogs', () => {
     await page.getByRole('button', { name: 'Install', exact: true }).click();
 
     await expect(page.getByText('Shop Notes')).toBeVisible({ timeout: 30_000 });
-    // The fixture's hash-embed profile is not the daemon's embedder, so the
-    // honest state is keyword-only — still active.
-    await expect(page.getByText(/^active/)).toBeVisible({ timeout: 10_000 });
+    const installedRow = page.getByTestId('knowledge-catalog-shop-notes');
+    await expect(installedRow.getByRole('checkbox')).toBeChecked({ timeout: 10_000 });
     await captureScreenshot(page, {
       path: join(screenshotDir, 'knowledge-settings.png'),
       fullPage: true,
@@ -327,8 +326,7 @@ test.describe('Knowledge catalogs', () => {
     });
 
     // Disable: the catalog stays REGISTERED, so the area stays in the rail
-    // (visibility flips at registered-count ≥ 1, not enabled-count) — the
-    // state line just reads disabled.
+    // (visibility flips at registered-count ≥ 1, not enabled-count).
     await page.getByTestId('sidebar-area-settings').click();
     await page.getByTestId('settings-nav-knowledge').click();
     // The checkbox is controlled: its state lands after the daemon round
@@ -337,7 +335,6 @@ test.describe('Knowledge catalogs', () => {
     const enabledToggle = page.getByTestId('knowledge-catalog-shop-notes').getByRole('checkbox');
     await enabledToggle.click();
     await expect(enabledToggle).not.toBeChecked({ timeout: 10_000 });
-    await expect(page.getByText('disabled', { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible();
 
     // Remove: the registration goes away, and with it the sidebar area.
@@ -364,11 +361,13 @@ test.describe('Knowledge catalogs', () => {
     );
     await card.getByRole('button', { name: 'Download', exact: true }).click();
 
-    // The download lands in the installed table, active and private.
+    // The download lands in the installed table, enabled and private. Private
+    // catalogs leave the Shared column blank; only machine-shared installs
+    // receive the Shared marker.
     const row = page.getByTestId('knowledge-catalog-shop-notes');
     await expect(row).toBeVisible({ timeout: 30_000 });
-    await expect(row.getByText(/^active/)).toBeVisible({ timeout: 10_000 });
-    await expect(row.getByText('Only for you')).toBeVisible();
+    await expect(row.getByRole('checkbox')).toBeChecked({ timeout: 10_000 });
+    await expect(row.getByText('Shared', { exact: true })).toHaveCount(0);
     await expect(card.getByRole('button', { name: 'Installed' })).toBeDisabled({ timeout: 10_000 });
     await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible({ timeout: 10_000 });
     await captureScreenshot(page, screenshotDir, 'knowledge-catalog-downloaded');
