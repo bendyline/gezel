@@ -622,8 +622,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
         status: 'not-configured',
         baseUrl: this.baseUrl,
         error:
-          'No image engine wired up. Build or bundle stable-diffusion.cpp, or set ' +
-          'GEZEL_SD_SERVER_URL to point at a running sd-server.',
+          'The image engine is not installed yet. Install it with `gezel native install` ' +
+          '(or from the desktop app), or set GEZEL_SD_SERVER_URL to a running sd-server.',
       };
     }
 

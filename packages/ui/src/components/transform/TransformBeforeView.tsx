@@ -26,7 +26,13 @@ export function TransformBeforeView({ markdown }: { markdown: string }) {
   return (
     <div className="gz-transform-before-text">
       {doc ? (
-        <LinearDocView doc={doc} theme={gezelChatTheme} surface={surface} thinMargins />
+        <LinearDocView
+          doc={doc}
+          theme={gezelChatTheme}
+          surface={surface}
+          thinMargins
+          variant="document"
+        />
       ) : (
         <pre className="gz-transform-before-raw">{markdown}</pre>
       )}

@@ -100,6 +100,9 @@ describe('credential commands', () => {
     await expect(run('set', 'openaiApiKey', '--stdin', '--use-for-search')).rejects.toThrow(
       'requires braveSearchApiKey',
     );
+    await expect(run('set', 'tavilyApiKey', '--stdin', '--use-for-search')).rejects.toThrow(
+      'Tavily search is not available yet',
+    );
     expect(connect).not.toHaveBeenCalled();
     await run('remove', 'openaiApiKey');
     expect(client.updateConfig).toHaveBeenCalledWith({ openaiApiKey: '' });

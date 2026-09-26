@@ -1185,6 +1185,7 @@ function TaskRailCard({
                     markdown={note.text}
                     projectId={task.projectId}
                     articleId={`task-note-${note.id}`}
+                    compact
                   />
                 </li>
               );
@@ -1770,6 +1771,7 @@ function RenderedMarkdownPreview({
   reportPath,
   articleId = 'ref-preview',
   displayMode = 'linear',
+  compact = false,
 }: {
   markdown: string;
   projectId: string;
@@ -1779,6 +1781,8 @@ function RenderedMarkdownPreview({
   articleId?: string;
   /** Imported presentations navigate one slide at a time; other documents scroll. */
   displayMode?: 'linear' | 'slideshow';
+  /** Hug the host (a task note's list item) instead of carrying page insets. */
+  compact?: boolean;
 }) {
   const doc = useMemo(() => {
     try {
@@ -1817,6 +1821,9 @@ function RenderedMarkdownPreview({
       </div>
     );
   }
+  // Files in the rail are working documents — reports, plans, notes — so they
+  // read as one: a left-aligned title, a compact heading scale, and the
+  // markdown's own lists and tables rather than Squisq's page art direction.
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
@@ -1824,6 +1831,8 @@ function RenderedMarkdownPreview({
         theme={gezelChatTheme}
         surface={surface}
         fenceRenderers={fenceRenderers}
+        thinMargins={compact}
+        variant="document"
       />
     </div>
   );

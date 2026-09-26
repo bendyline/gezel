@@ -1632,7 +1632,7 @@ function DocumentContext({
       {content !== null && (
         <>
           <div className="pending-question-document-preview">
-            <RenderedMarkdown markdown={previewLines} />
+            <RenderedMarkdown markdown={previewLines} variant="document" />
           </div>
           {!panel && content.split('\n').length > 10 && (
             <button

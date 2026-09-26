@@ -13,7 +13,7 @@ subcategory:
 
 The desktop app is the simplest way to use gezel, but the same system is also available as a family of npm packages. You can install the `gezel` command, write a repeatable script, connect another app to local models, embed the daemon, or reuse the schemas and clients that Gezel itself uses.
 
-All eleven packages published from the Gezel repository require Node.js 24 or newer and expose public, semver-versioned contracts. You normally install only the package at the top of your use case; npm brings in its required Gezel dependencies for you.
+Every package published from the Gezel repository exposes a public, semver-versioned contract and, on Node.js, needs version 24 or newer. You normally install only the package at the top of your use case; npm brings in its required Gezel dependencies for you.
 
 ## Choose your starting point
 
@@ -25,6 +25,7 @@ All eleven packages published from the Gezel repository require Node.js 24 or ne
 | Call the full daemon API from TypeScript | `@bendyline/gezel-client` |
 | Run or embed a daemon yourself | `@bendyline/gezel-service` together with `@bendyline/gezel-client` |
 | Give an MCP client Gezel's tools | `@bendyline/gezel-mcp` |
+| Build, check, or search `.gezk` knowledge catalogs in code | `@bendyline/gezel-knowledge` |
 | Share Gezel's schemas or parse its files | `@bendyline/gezel` |
 
 For example, the command-line install is:
@@ -44,12 +45,15 @@ npm install @bendyline/gezel-app-sdk
 
 | Package | What it does | Who normally installs it directly |
 | --- | --- | --- |
+| `@bendyline/gezk` | The `.gezk` knowledge-catalog format on its own: manifest and registry schemas, id grammars, `knowledge://` references, vector quantization, the SQLite table definitions, canonical JSON, and Ed25519 manifest signatures. It has no dependency on the rest of Gezel. | Tools that read or write `.gezk` catalogs without Gezel itself; the other Gezel packages build on it. |
 | `@bendyline/gezel` | Core TypeScript types, Zod schemas, path helpers, the `gezel.md` parser, native-platform helpers, and reusable gate checks. It is the shared wire-contract source of truth. | Library authors who need Gezel's data contracts or on-disk formats. |
 | `@bendyline/gezel-client` | Typed HTTP and event-stream client for the complete `gezeld` product API: projects, gezels, chats, tasks, scripts, models, memories, usage, and more. Its `/node` entry also contains local daemon discovery helpers. | Integrations that already have an authorized connection and need more than the OpenAI-compatible app surface. |
 | `@bendyline/gezel-sdk` | The small, typed API available to TypeScript scripts inside Gezel's sandbox: `defineScript`, `gezel.fs`, `gezel.task`, `gezel.llm`, and the other capability-gated namespaces. | Script and craftbook authors. See [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md). |
+| `@bendyline/gezel-script-runtime` | Portable, capability-mediated script execution: a host-neutral executor contract and a QuickJS (WebAssembly) implementation that runs Gezel scripts against the real SDK. The daemon still uses its Node sandbox by default. | Embedders and other hosts that need to run Gezel scripts themselves. Script authors use `@bendyline/gezel-sdk` instead. |
 | `@bendyline/gezel-app-sdk` | Local discovery, pinned TLS, user consent, scoped token storage, model setup, chat, embeddings, and model listing for third-party applications. | Desktop and Node application developers. See [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md). |
 | `@bendyline/gezel-plugin-sdk` | The historical plugin helper surface. It remains supported for compatibility, but new extensions should use `@bendyline/gezel-sdk`. | Maintainers of existing Gezel plugins. |
 | `@bendyline/gezel-catalog` | Loads model definitions, toolsets, connector types, project types, gezel roles, and craftbooks from the separately released Gilde content. | Catalog tooling, tests, and embedders that need to resolve catalog items outside the daemon. |
+| `@bendyline/gezel-knowledge` | The `.gezk` toolchain: a deterministic catalog compiler, verified archive extraction, and a read-only catalog reader with full-text and vector search. The `gezel knowledge` commands are built on it. | Anyone building or reading knowledge catalogs from code. |
 | `@bendyline/gezel-connectors-spectral` | An isolated subprocess host for compatible Prismatic components. Keeping it out of the daemon process isolates its SDK and vendored connectors. | Usually nobody directly; `@bendyline/gezel-service` resolves and spawns it. |
 | `@bendyline/gezel-script-stdlib` | The trusted, read-only standard library of gate scripts that ships with Gezel. Its plain TypeScript sources run in place under the `standard` script scope. | Usually the daemon; craftbook authors may inspect it for reusable standard checks. |
 | `@bendyline/gezel-mcp` | The stdio Model Context Protocol server that exposes workspace, memory, artifact, document, task, team, execution, history, and media tools. It calls back into a running daemon. | MCP hosts and custom agent harnesses that need Gezel's tool surface. |

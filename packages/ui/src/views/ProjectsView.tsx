@@ -11,7 +11,6 @@ import type {
   GezelSummary,
   ListFileIssuesResponse,
   Project,
-  ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
   WorkspaceIndexFile,
@@ -146,6 +145,7 @@ const loadFileMapModule = () => import('./FileMapView.js');
 const loadHistoryModule = () => import('./HistoryView.js');
 const loadProjectGitHubModule = () => import('./ProjectGithubView.js');
 const loadProjectOverviewModule = () => import('./ProjectOverviewView.js');
+const loadProjectToolsModule = () => import('./ProjectToolsTab.js');
 const loadTasksModule = () => import('./TasksView.js');
 
 const ProjectChat = lazy(() =>
@@ -173,6 +173,9 @@ const ProjectGitHubView = lazy(() =>
 );
 const ProjectOverviewView = lazy(() =>
   loadProjectOverviewModule().then(({ ProjectOverviewView }) => ({ default: ProjectOverviewView })),
+);
+const ProjectToolsTab = lazy(() =>
+  loadProjectToolsModule().then(({ ProjectToolsTab }) => ({ default: ProjectToolsTab })),
 );
 const TasksView = lazy(() => loadTasksModule().then(({ TasksView }) => ({ default: TasksView })));
 
@@ -266,6 +269,9 @@ function preloadProjectTab(tab: ProjectTab): void {
     case 'overview':
       loading = loadProjectOverviewModule();
       break;
+    case 'packages':
+      loading = loadProjectToolsModule();
+      break;
     case 'about':
       loading = Promise.all([loadProjectConnectionsModule(), loadHistoryModule()]);
       break;
@@ -291,7 +297,7 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
 }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'tasks', label: 'Tasks' },
-  { key: 'approvals', label: 'Approvals' },
+  { key: 'approvals', label: 'Tools' },
   { key: 'workspace', label: 'Workspace' },
   { key: 'artifacts', label: 'Artifacts' },
   { key: 'map', label: 'Village' },
@@ -466,11 +472,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
   const [createMode, setCreateMode] = useState<'crew' | null>(null);
-  const [pkgName, setPkgName] = useState('');
-  const [log, setLog] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [packageScripts, setPackageScripts] = useState<Record<string, string>>({});
-  const [approvals, setApprovals] = useState<ProjectApprovalsResponse | null>(null);
 
   const [tab, setTab] = useState<ProjectTab>('chat');
   useEffect(() => {
@@ -1059,28 +1061,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [refreshWorkspaceIssueSurfaces, selectedProjectId],
   );
 
-  useEffect(() => {
-    if (tab !== 'packages' || !selected) {
-      setPackageScripts({});
-      setApprovals(null);
-      return;
-    }
-    api
-      .listPackageScripts(selected.id)
-      .then((res) => setPackageScripts(res.scripts))
-      .catch((err) => {
-        console.warn('[ProjectsView] listPackageScripts failed', err);
-        setPackageScripts({});
-      });
-    api
-      .getProjectApprovals(selected.id)
-      .then(setApprovals)
-      .catch((err) => {
-        console.warn('[ProjectsView] getProjectApprovals failed', err);
-        setApprovals(null);
-      });
-  }, [tab, selected]);
-
   // Switching between the Workspace and Artifacts tabs should clear the
   // viewer — otherwise the user would see a workspace file after
   // jumping to Artifacts and get confused about what source it came
@@ -1329,19 +1309,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [refresh, refreshOutputFiles],
   );
-
-  const install = useCallback(async () => {
-    if (!selected || !pkgName.trim()) return;
-    setLog('installing…');
-    try {
-      const res = await api.installPackage(selected.id, { name: pkgName.trim() });
-      setLog(res.log);
-      setSelected(res.project);
-      setPkgName('');
-    } catch (err) {
-      setLog((err as Error).message);
-    }
-  }, [pkgName, selected]);
 
   const saveGitHubUrl = useCallback(
     async (nextRaw: string) => {
@@ -2471,7 +2438,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   },
                   {
                     value: 'packages',
-                    label: 'Approvals',
+                    label: 'Tools',
                     show: projectTabIsVisible(selected, 'approvals'),
                   },
                   {
@@ -3140,126 +3107,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   />
 
                   {tab === 'packages' && (
-                    <div className="project-config">
-                      <p className="muted small" style={{ marginTop: 0 }}>
-                        Each gezel asks the runtime before installing a package or running a script.
-                        Decisions persist per project — once approved, future calls run
-                        automatically.
-                      </p>
-
-                      <h4 className="project-section-heading">Approved npm packages</h4>
-                      <ul>
-                        {approvals?.npmApproved.map((p) => (
-                          <li key={`${p.package}@${p.version}`}>
-                            <strong>{p.package}</strong> <code>{p.version}</code>{' '}
-                            <span className="muted small">
-                              (
-                              {p.approvedBy === 'shipped' ? 'shipped allowlist' : 'approved by you'}
-                              )
-                            </span>
-                          </li>
-                        ))}
-                        {(!approvals || approvals.npmApproved.length === 0) && (
-                          <li className="muted">No project-specific npm approvals yet.</li>
-                        )}
-                      </ul>
-
-                      {approvals && approvals.npmDeclined.length > 0 && (
-                        <>
-                          <h4 className="project-section-heading">Declined npm packages</h4>
-                          <ul>
-                            {approvals.npmDeclined.map((p) => (
-                              <li key={`${p.package}@${p.version}`}>
-                                <strong>{p.package}</strong> <code>{p.version}</code>
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-
-                      <h4 className="project-section-heading">
-                        Approved scripts (run via package.json)
-                      </h4>
-                      <ul>
-                        {approvals &&
-                          Object.entries(approvals.scriptApprovals).map(([name, decision]) => (
-                            <li key={`script-${name}`}>
-                              <strong>{name}</strong>{' '}
-                              <span
-                                className={`muted small${decision === 'declined' ? ' error' : ''}`}
-                              >
-                                ({decision})
-                              </span>
-                            </li>
-                          ))}
-                        {(!approvals || Object.keys(approvals.scriptApprovals).length === 0) && (
-                          <li className="muted">No script approvals on file yet.</li>
-                        )}
-                      </ul>
-
-                      {approvals && Object.keys(approvals.npxApprovals).length > 0 && (
-                        <>
-                          <h4 className="project-section-heading">Approved npx binaries</h4>
-                          <ul>
-                            {Object.entries(approvals.npxApprovals).map(([name, decision]) => (
-                              <li key={`npx-${name}`}>
-                                <strong>{name}</strong>{' '}
-                                <span
-                                  className={`muted small${decision === 'declined' ? ' error' : ''}`}
-                                >
-                                  ({decision})
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-
-                      <h4 className="project-section-heading">Install a package</h4>
-                      <div className="new-row">
-                        <input
-                          placeholder="npm package name"
-                          value={pkgName}
-                          onChange={(e) => setPkgName(e.target.value)}
-                        />
-                        <button type="button" onClick={install}>
-                          Install
-                        </button>
-                      </div>
-                      <ul>
-                        {selected.packages.map((p) => (
-                          <li key={p.name}>
-                            {p.name} <code>{p.version}</code>
-                          </li>
-                        ))}
-                        {selected.packages.length === 0 && (
-                          <li className="muted">
-                            No packages installed in this project's workspace.
-                          </li>
-                        )}
-                      </ul>
-
-                      <h4 className="project-section-heading">
-                        Available scripts (from <code>package.json</code>)
-                      </h4>
-                      <p className="muted small" style={{ marginTop: '-0.25rem' }}>
-                        Listed scripts are eligible for first-use approval when a gezel calls{' '}
-                        <code>run_package_script</code>.
-                      </p>
-                      <ul>
-                        {Object.entries(packageScripts).map(([name, body]) => (
-                          <li key={name}>
-                            <strong>{name}</strong>
-                            {': '}
-                            <code>{body}</code>
-                          </li>
-                        ))}
-                        {Object.keys(packageScripts).length === 0 && (
-                          <li className="muted">no scripts defined in package.json</li>
-                        )}
-                      </ul>
-                      {log && <pre className="log">{log}</pre>}
-                    </div>
+                    <ProjectPaneBoundary>
+                      <ProjectToolsTab project={selected} onProjectChange={setSelected} />
+                    </ProjectPaneBoundary>
                   )}
 
                   {fileTab !== null && (

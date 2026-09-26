@@ -30,7 +30,7 @@ import { formatContextWindow } from './model-context.js';
 const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
-import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
+import type { FontFamily, PageVariant, Theme } from '@bendyline/squisq/schemas';
 import {
   type CSSProperties,
   Fragment,
@@ -3857,9 +3857,16 @@ export function RenderedMarkdown({
   markdown,
   mediaProvider,
   fontFamily,
+  variant = 'page',
 }: {
   markdown: string;
   mediaProvider?: MediaProvider | null;
+  /**
+   * `'document'` for a report or plan shown beside a question, where Squisq's
+   * page register (centered hero, display headings) would out-shout it. Chat
+   * replies keep `'page'`.
+   */
+  variant?: PageVariant;
   /**
    * Per-gezel chat-bubble font (a CSS `font-family` value). Squisq's
    * LinearDocView sets its own `bodyFont` from the theme's typography and
@@ -3923,6 +3930,7 @@ export function RenderedMarkdown({
       surface={surface}
       thinMargins
       imageDisplayMode="thumbnail"
+      variant={variant}
     />
   );
   if (!mediaProvider) return view;

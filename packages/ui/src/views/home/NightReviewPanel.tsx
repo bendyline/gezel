@@ -110,6 +110,7 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
               thinMargins
               imageDisplayMode="thumbnail"
               fenceRenderers={fenceRenderers}
+              variant="document"
             />
           ) : primaryError ? (
             <p className="error small">{primaryError}</p>

@@ -1,7 +1,8 @@
-import type {
-  NativeEngineName,
-  NativeEngineResolveEvent,
-  NativeEngineStatusResponse,
+import {
+  type NativeEngineName,
+  NativeEngineNameSchema,
+  type NativeEngineResolveEvent,
+  type NativeEngineStatusResponse,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { CliError } from './connection.js';
@@ -23,6 +24,20 @@ export function parseNativeVariant(value: string | undefined): NativeVariant | u
   throw new CliError(`--variant must be one of ${NATIVE_VARIANTS.join(', ')} (got "${value}")`);
 }
 
+/**
+ * `--engine` narrows `native install` to one engine. DuckDB is outside the
+ * first-run toolkit, and service errors that need it had no CLI command to
+ * name (they pointed at a `gezel engines install` that never existed).
+ */
+export function parseNativeEngine(value: string | undefined): NativeEngineName | undefined {
+  if (value === undefined) return undefined;
+  const parsed = NativeEngineNameSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw new CliError(
+    `--engine must be one of ${NativeEngineNameSchema.options.join(', ')} (got "${value}")`,
+  );
+}
+
 /** A concise diagnostic summary for `gezel native status`. */
 export function formatNativeStatus(status: NativeEngineStatusResponse): string {
   const installed = new Set(
@@ -33,7 +48,9 @@ export function formatNativeStatus(status: NativeEngineStatusResponse): string {
     `release: native-v${status.release} (${status.pinned ? 'verified pin' : 'unpinned — downloads disabled'})`,
     `platform: ${status.platformKey ?? 'unsupported — downloads unavailable'}`,
     `llama backend: ${status.llamaBackend ?? 'automatic'}`,
-    `toolkit: ${toolkitInstalled}/${NATIVE_TOOLKIT.length} installed`,
+    // Name the members: `native list` shows every engine the release carries
+    // (ds4, duckdb too), so a bare "0/4" read as a miscount beside it.
+    `toolkit: ${toolkitInstalled}/${NATIVE_TOOLKIT.length} installed (${NATIVE_TOOLKIT.join(', ')}; see \`gezel native list\` for every engine)`,
   ].join('\n');
 }
 
@@ -59,6 +76,8 @@ export async function installNativeToolkit(
   client: NativeCommandClient,
   options: {
     variant?: NativeVariant;
+    /** Defaults to the first-run toolkit. */
+    engines?: readonly NativeEngineName[];
     output: NativeInstallOutput;
   },
 ): Promise<NativeEngineStatusResponse> {
@@ -75,7 +94,7 @@ export async function installNativeToolkit(
   }
 
   const llamaVariant = options.variant ?? status.llamaBackend;
-  for (const engine of NATIVE_TOOLKIT) {
+  for (const engine of options.engines ?? NATIVE_TOOLKIT) {
     await ensureOneEngine(client, engine, llamaVariant, options.output);
   }
   return client.getNativeEngineStatus();

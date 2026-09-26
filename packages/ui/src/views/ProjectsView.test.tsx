@@ -1930,7 +1930,7 @@ describe('ProjectsView', () => {
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
-    for (const name of ['Overview', 'Tasks', 'Approvals', 'Workspace', 'Artifacts', 'Village']) {
+    for (const name of ['Overview', 'Tasks', 'Tools', 'Workspace', 'Artifacts', 'Village']) {
       expect(screen.queryByRole('tab', { name })).not.toBeInTheDocument();
     }
 

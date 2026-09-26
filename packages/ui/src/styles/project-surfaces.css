@@ -544,16 +544,16 @@
   padding: 1rem 1.15rem;
 }
 
-/* The document is a preview, not this surface's own heading hierarchy —
-   a report's `# Title` set at page scale dwarfs the question it belongs
-   to. Pull the top two levels back toward panel scale. */
-.pending-question-document-panel .pending-question-document-preview :is(h1, h2) {
+/* The document is a preview, not this surface's own heading hierarchy.
+   It renders in Squisq's document register, whose masthead is still the
+   biggest type on the card — pull the title and top level back to panel
+   scale so a report never out-shouts the question it belongs to. The
+   `.squisq-page` step outranks the register's own title rules. */
+.pending-question-document-panel
+  .pending-question-document-preview
+  .squisq-page
+  :is(.squisq-page-hero-title, h1, h2) {
   font-size: var(--text-xl);
-  margin-top: 0.4rem;
-}
-
-.pending-question-document-panel .pending-question-document-preview :is(h3, h4, h5, h6) {
-  font-size: var(--text-lg);
 }
 
 .pending-question-prompt {

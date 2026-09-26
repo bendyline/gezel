@@ -574,10 +574,18 @@
    sub-cards (Copilot CLI / PAT / Timeouts / Sandbox; Webhook + future
    channels) stay readable. */
 .settings-panel-flat .provider-card {
+  margin-bottom: 2.5rem;
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
+}
+
+/* A section that opens with its own heading is a new subject, so it gets a
+   full section gap rather than the tight spacing that keeps a notice or
+   progress box beside the section it belongs to. */
+.settings-panel .ollama-section:has(> h4:first-child):not(:first-child) {
+  margin-top: 2rem;
 }
 
 .provider-card > h3:first-child {
@@ -610,10 +618,6 @@
   border: none;
   background: transparent;
   margin-top: 1rem;
-}
-
-.provider-card .ollama-settings > .ollama-section--download {
-  padding-top: 10px;
 }
 
 /* Section headings match the sibling provider tabs' register — title

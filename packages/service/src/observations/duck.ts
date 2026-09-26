@@ -202,9 +202,9 @@ export class DuckRunner {
     const resolved = this.resolve();
     if (!resolved) {
       throw new DuckUnavailableError(
-        'The data query engine (DuckDB) is not installed yet. Run `gezel engines install duckdb` to ' +
-          'download the pinned build, install DuckDB yourself (https://install.duckdb.org, `brew install duckdb`, ' +
-          'or your package manager), or set GEZEL_DUCKDB_BIN to an existing duckdb binary. ' +
+        'The data query engine (DuckDB) is not installed yet. Run `gezel native install --engine duckdb` to ' +
+          'download the verified build, or install DuckDB yourself (https://install.duckdb.org, `brew install duckdb`, ' +
+          'or your package manager) and set GEZEL_DUCKDB_BIN to its path. ' +
           'The mirrored data is safe on disk either way.',
       );
     }

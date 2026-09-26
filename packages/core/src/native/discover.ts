@@ -298,9 +298,12 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
         );
       } else {
         binaries.push({ name: 'llama-server', source: 'not-found', variant: probe.backend });
-        log?.warn?.(
-          `[native] no llama-server binary bundled for ${probe.backend} under ${dir} (probe: ${probe.reason})`,
-        );
+        // A missing native tree is the normal state of a fresh npm/CLI install
+        // (engines download on demand), so it is not worth a warning on every
+        // boot. A tree that exists but lacks the binary is a packaging fault.
+        const message = `[native] no llama-server binary bundled for ${probe.backend} under ${dir} (probe: ${probe.reason})`;
+        if (fileExists(dir)) log?.warn?.(message);
+        else log?.info?.(message);
       }
     }
   }

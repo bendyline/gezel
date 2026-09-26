@@ -2,7 +2,7 @@
 id: model-scorecard
 title: "Model scorecard"
 order: 13
-summary: Measured results for every model we have tested, on both task sets.
+summary: Measured results for every model we have tested, on each task set.
 subcategory:
   id: models-and-testing
   title: Models and Testing
@@ -20,13 +20,17 @@ machine trouble are set aside rather than blamed on the model.
 
 ## Results by test round
 
-Each round has two tables measured on the same machine and build. **General
-capability** covers writing a small working program, fixing a bug from its
-symptoms, following a procedure and stopping at a problem, and turning several
-documents into one reconciled summary. **Office and knowledge work** covers a
-customer notice under a hard word limit, a meeting turned into an action
-register, a cited research brief, an experiment read-out, a spreadsheet model,
-a slide deck, and a Word document.
+Each round has one table for each task set it ran, all measured on the same
+machine and build. Most rounds ran two sets. **General capability** covers
+writing a small working program, fixing a bug from its symptoms, following a
+procedure and stopping at a problem, and turning several documents into one
+reconciled summary. **Office and knowledge work** covers a customer notice
+under a hard word limit, a meeting turned into an action register, a
+cited research brief, an experiment read-out, a spreadsheet model, a slide
+deck, and a Word document. Some rounds add the two harder sets: **Engineering
+work**, which is developer work such as reviewing a change and proving a fix
+with tests, and **Complex workflows**, which asks a model to write and repair
+reusable recipes of its own.
 
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
@@ -58,8 +62,8 @@ engine actually occupied, which is the number to check against your own
 machine. When the engine reported its KV-cache precision, it appears beside
 the model name — for example, `(kv: q8_0)`.
 
-Each **test round** keeps its General capability and Office and knowledge work
-tables together under one provenance stamp. Earlier rounds stay separate from
+Each **test round** keeps all of its tables together under one provenance
+stamp. Earlier rounds stay separate from
 the latest because a change to gezel or to the task set can move a score
 without any model changing.
 
@@ -71,7 +75,8 @@ larger ones, and a model family's habits matter more than its size.
 
 A high score on the office set is the better guide for everyday document,
 planning, and analysis work. A high score on the general set matters more if
-you want a gezel writing or fixing code.
+you want a gezel writing or fixing code, and the engineering set, where a round
+has it, is the stricter test of that.
 
 If a model you're considering isn't listed, it hasn't been measured here yet
 — which is not a verdict on it either way. The Models catalogue in the app

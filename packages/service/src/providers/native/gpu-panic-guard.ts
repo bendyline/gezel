@@ -85,5 +85,5 @@ export class GpuPanicGuard implements GpuSpawnGuard {
 /** User-facing denial: what happened, why it's blocked, how to proceed. */
 export function formatSpawnDenial(panic: GpuPanicRecord, cooldownMs: number): string {
   const hours = Math.max(1, Math.round(cooldownMs / (60 * 60 * 1000)));
-  return `Local on-device models are paused because macOS recorded a GPU kernel panic at ${panic.when.toISOString()} (${panic.signature}). This is an Apple GPU-driver bug that heavy local-model use can trigger — loading another model now risks crashing and rebooting your Mac again. gezel pauses new local engines for ${hours}h after a panic. To proceed at your own risk, set GEZEL_GPU_PANIC_GUARD=off; the real fix is a macOS update. Cloud providers are unaffected.`;
+  return `Local on-device models are paused because macOS recorded a GPU kernel panic at ${panic.when.toISOString()} (${panic.signature}). Heavy local-model use can trigger this kind of macOS GPU-driver panic, so loading another model now risks crashing and restarting your Mac again. Gezel pauses new local engines for ${hours}h after a panic; installing the latest macOS update is the best protection. Cloud providers are unaffected. (Advanced: setting GEZEL_GPU_PANIC_GUARD=off skips this pause at your own risk.)`;
 }

@@ -112,17 +112,20 @@ export function registerSecretCommands(
     .description('Save a provider credential in the service credential store')
     .option('--env <VARIABLE>', 'Read the value from this environment variable')
     .option('--stdin', 'Read the value from piped stdin')
-    .option(
-      '--use-for-search',
-      'Also select this Brave or Tavily credential as the web search provider',
-    )
+    .option('--use-for-search', 'Also select this Brave credential as the web search provider')
     .option('--json', 'Output status as JSON without the value')
     .action(async (name: string, options: SecretOptions) => {
       const key = credentialName(name);
-      const provider =
-        key === 'braveSearchApiKey' ? 'brave' : key === 'tavilyApiKey' ? 'tavily' : undefined;
+      // The service has no Tavily search backend yet: selecting it switched
+      // search to a provider that always answers "not yet implemented". The
+      // key itself can still be saved for when it lands.
+      if (options.useForSearch && key === 'tavilyApiKey')
+        throw new CliError(
+          'Tavily search is not available yet. Save the key without --use-for-search, and use braveSearchApiKey (or the built-in Wikipedia search) for now.',
+        );
+      const provider = key === 'braveSearchApiKey' ? 'brave' : undefined;
       if (options.useForSearch && !provider)
-        throw new CliError('--use-for-search requires braveSearchApiKey or tavilyApiKey.');
+        throw new CliError('--use-for-search requires braveSearchApiKey.');
       const value = await readSecretInput(options);
       const client = await connect();
       const patch: UpdateConfigRequest = { [key]: value };

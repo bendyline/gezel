@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
+import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
 import { PUBLISHED_PACKAGE_DIRS, publishedPackageNames } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -405,27 +406,35 @@ try {
   }
 
   step('auditing the npm consumer graph');
-  // critical matches every other vulnerability gate (quality.yml, the release
-  // workflows, and the daily report). Lower-severity advisories remain visible
-  // without failing an unrelated validate run.
-  const audit = runPackageManager(
-    'npm',
-    ['audit', '--omit=dev', '--audit-level=critical', '--json'],
-    {
-      cwd: consumer,
-    },
-  );
+  // Stricter than the workspace gates (critical), on purpose. This graph is
+  // the one npm resolves for a consumer: the workspace's pnpm overrides never
+  // reach it, and npm prints "N vulnerabilities (… high)" at the end of every
+  // `npm install @bendyline/gezel-cli`. At `critical`, a clean rehearsal
+  // shipped a high-severity adm-zip advisory (2026-09-26 npm ship audit), as
+  // it had shipped a deepmerge-ts one in August. Accepted advisories go in
+  // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
+  const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
+  let auditReport = null;
   try {
-    const parsed = JSON.parse(audit.stdout);
-    auditCounts = parsed?.metadata?.vulnerabilities ?? null;
+    auditReport = JSON.parse(audit.stdout);
+    auditCounts = auditReport?.metadata?.vulnerabilities ?? null;
   } catch {
     fail(`npm audit did not return valid JSON\n${audit.stdout}\n${audit.stderr}`);
   }
-  if (audit.status !== 0) {
-    fail(`npm audit found a critical-severity issue\n${audit.stdout}\n${audit.stderr}`);
-  } else {
-    ok('npm audit reports no critical-severity vulnerabilities');
+  if (auditReport) {
+    const blocking = blockingAdvisories(auditReport, readAuditAllowlist());
+    if (blocking.length > 0) {
+      fail(
+        `npm audit found high/critical advisories in the consumer graph:\n${blocking
+          .map((a) => `    ${a.severity.padEnd(8)} ${a.id}  ${a.pkg}  ${a.title}`)
+          .join(
+            '\n',
+          )}\n  Fix the dependency, or allowlist it with a reason and expiry in scripts/npm-consumer-audit-allowlist.json`,
+      );
+    } else {
+      ok('npm audit reports no un-allowlisted high or critical advisories');
+    }
   }
   if (auditCounts) {
     const summary = ['info', 'low', 'moderate', 'high', 'critical']
@@ -668,6 +677,75 @@ try {
       timeout: 60_000,
     });
     rmSync(cliWarmHome, { recursive: true, force: true });
+  }
+
+  // The newcomer path, with no mock provider. Every other CLI check here runs
+  // mocked, which is how a fresh-home `gezel run` shipped that answered "the
+  // engine is downloading, try again in a moment" forever: the cold run owns
+  // an in-process service, so exiting aborted the very download it started
+  // (2026-09-26 npm ship audit). On a platform with an on-device default, run
+  // must stop before any download and name the CLI commands that set it up.
+  // Empty native/shared-asset dirs keep a developer machine's installed Gezel
+  // from supplying an engine or model the clean runner would not have.
+  const onDevicePlatforms = [
+    'darwin-arm64',
+    'linux-x64',
+    'linux-arm64',
+    'win32-x64',
+    'win32-arm64',
+  ];
+  if (onDevicePlatforms.includes(`${process.platform}-${process.arch}`)) {
+    const newcomerHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-newcomer-'));
+    const emptyNativeDir = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-no-native-'));
+    const emptySharedDir = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-no-shared-'));
+    const { GEZEL_MOCK_PROVIDER: _mock, GEZEL_LOG_LEVEL: _level, ...inherited } = process.env;
+    try {
+      const result = run(
+        process.execPath,
+        [bin, '--home', newcomerHome, '--standalone', 'run', 'Say hello.'],
+        {
+          cwd: consumer,
+          env: {
+            ...inherited,
+            GEZEL_HOME: newcomerHome,
+            GEZEL_NATIVE_BIN_DIR: emptyNativeDir,
+            GEZEL_SHARED_ASSETS_DIR: emptySharedDir,
+            GEZEL_DISABLE_MACHINE_ENGINE: '1',
+            GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+            GEZEL_SECRETS_BACKEND: 'file',
+          },
+          timeout: 90_000,
+        },
+      );
+      const enginesDir = join(newcomerHome, 'engines');
+      const downloadedBytes = existsSync(enginesDir) ? logicalTreeBytes(enginesDir) : 0;
+      if (result.status !== 1 || result.stdout !== '') {
+        fail(
+          `fresh-home gezel run without a model should exit 1 with an empty stdout\nstatus: ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+        );
+      } else if (
+        !/Nothing was downloaded\./.test(result.stderr) ||
+        !/gezel model pull/.test(result.stderr)
+      ) {
+        fail(`fresh-home gezel run did not print the CLI setup guidance\nstderr: ${result.stderr}`);
+      } else if (/Settings →|try again in a moment/.test(result.stderr)) {
+        fail(
+          `fresh-home gezel run pointed at desktop settings or a retry loop\nstderr: ${result.stderr}`,
+        );
+      } else if (downloadedBytes > 1024 * 1024) {
+        fail(`fresh-home gezel run downloaded ${downloadedBytes} bytes into ${enginesDir}`);
+      } else if (result.stderr.split('\n').filter((line) => / INFO /.test(line)).length > 0) {
+        fail(
+          `fresh-home gezel run printed info-level service logs by default\nstderr: ${result.stderr}`,
+        );
+      } else {
+        ok('fresh-home gezel run stops before any download with CLI setup guidance');
+      }
+    } finally {
+      for (const dir of [newcomerHome, emptyNativeDir, emptySharedDir]) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   }
 
   // ── 6. Default install: boot without the optional PTY peer ─────────────

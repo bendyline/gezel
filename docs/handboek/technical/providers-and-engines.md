@@ -39,4 +39,4 @@ Providers are per-gezel, not all-or-nothing. A common setup: a local model for e
 
 ## Credentials
 
-The CLI providers store no credentials in gezel at all — auth stays with the CLI's own login. For the key-based providers, keys live in gezel's config file on your disk, are sent only to their own provider, and are never proxied through any gezel server — there isn't one.
+The CLI providers store no credentials in gezel at all — auth stays with the CLI's own login. For the key-based providers, keys live in your operating system's keychain (or, where there is none, in an encrypted file in gezel's folder), not in the settings file. They are sent only to their own provider and are never proxied through any gezel server — there isn't one.

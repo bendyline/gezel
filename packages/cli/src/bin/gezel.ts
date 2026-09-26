@@ -1,5 +1,12 @@
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
-import { GEZEL_VERSION, type StorageJob, getLogOutput, setLogOutput } from '@bendyline/gezel';
+import {
+  GEZEL_VERSION,
+  type StorageJob,
+  getLogLevel,
+  getLogOutput,
+  setLogLevel,
+  setLogOutput,
+} from '@bendyline/gezel';
 import {
   GezelApiError,
   type KnowledgeInstallEvent,
@@ -19,6 +26,7 @@ import {
 } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command } from 'commander';
+import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
   CliError,
   type CliGlobals,
@@ -53,8 +61,10 @@ import {
   formatNativeList,
   formatNativeStatus,
   installNativeToolkit,
+  parseNativeEngine,
   parseNativeVariant,
 } from '../native-command.js';
+import { checkRunReadiness } from '../run-readiness.js';
 import { registerSecretCommands } from '../secrets-command.js';
 import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
@@ -69,12 +79,13 @@ import {
   resolveRestoreSelection,
 } from '../storage-format.js';
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
+import { unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
 
 const program = new Command();
 program
   .name('gezel')
-  .description('Gezel — build a community of agents that do things.')
+  .description('Gezel — assemble a team of AI companions (gezels) and put them to work.')
   .version(GEZEL_VERSION)
   .option(
     '--connect <url>',
@@ -83,7 +94,7 @@ program
   .option('--token <token>', 'Bearer token for --connect (must have CLI access).')
   .option(
     '--standalone',
-    'Skip legacy full-product machine-service compatibility and use the per-user daemon.',
+    'Always use your own per-user Gezel service, even if an older machine-wide install is present.',
   )
   .option('--home <dir>', 'Use this user-owned Gezel home (default: $GEZEL_HOME or ~/.gezel).')
   .option(
@@ -112,6 +123,22 @@ program.hook('preAction', () => {
 // to authorize against the per-user daemon. Ink/React are lazily imported so
 // the other subcommands don't pay their load cost.
 program.action(async () => {
+  if (program.args.length > 0) {
+    const known = program.commands.flatMap((command) => [command.name(), ...command.aliases()]);
+    throw new CliError(unknownCommandMessage(program.args, known));
+  }
+  // Ink needs raw-mode stdin and a real screen; without them it crashes with
+  // a React stack trace on both streams. Piped, CI, and IDE output panes land
+  // here, so say what works instead.
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new CliError(
+      [
+        'The interactive Gezel terminal needs a terminal window, and this one is not interactive.',
+        'For a one-shot reply, use: gezel run "<prompt>"',
+        'Run `gezel --help` to see every command.',
+      ].join('\n'),
+    );
+  }
   const globals = cliGlobals();
   resolveDevHome(globals);
   const connection = await connectForTui(globals);
@@ -353,11 +380,12 @@ program
       return;
     }
     const alive = isProcessAlive(runtime.pid);
-    console.log(`gezeld pid=${runtime.pid} port=${runtime.port} alive=${alive}`);
     if (!alive) {
+      console.log(`gezeld is not running (stale runtime record for pid ${runtime.pid})`);
       process.exitCode = 1;
       return;
     }
+    console.log(`gezeld pid=${runtime.pid} port=${runtime.port} alive=${alive}`);
     const client = new GezelClient({
       baseUrl: runtime.baseUrl,
       // Health is intentionally unauthenticated; diagnostics do not need to
@@ -424,6 +452,33 @@ program
     }
   });
 
+/**
+ * A hard-stopped daemon (TerminateProcess on Windows) never runs its own
+ * cleanup, so its runtime files outlived it and `gezel status` kept reporting
+ * `pid=… alive=false`. Remove them only while they still name the process we
+ * just stopped, so a daemon that started in between keeps its files.
+ */
+async function clearStaleRuntime(stoppedPid: number): Promise<void> {
+  const { readFile, rm } = await import('node:fs/promises');
+  const { gezelPaths } = await import('@bendyline/gezel/paths');
+  const runtime = gezelPaths().runtime;
+  const recorded = Number.parseInt(
+    (await readFile(runtime.pid, 'utf8').catch(() => '')).trim(),
+    10,
+  );
+  if (recorded !== stoppedPid || isProcessAlive(stoppedPid)) return;
+  await Promise.all(
+    [
+      runtime.pid,
+      runtime.port,
+      runtime.token,
+      runtime.cert,
+      runtime.fingerprint,
+      runtime.webUiToken,
+    ].map((path) => rm(path, { force: true })),
+  );
+}
+
 async function stopUserDaemon(globals: CliGlobals): Promise<void> {
   if (globals.connect) {
     throw new CliError('gezel stop --daemon cannot stop an explicit remote service.');
@@ -442,6 +497,7 @@ async function stopUserDaemon(globals: CliGlobals): Promise<void> {
   }
   const stopped = await stopProcessByPid(runtime.pid);
   if (stopped) {
+    await clearStaleRuntime(runtime.pid);
     console.log(`stopped gezeld pid=${runtime.pid}`);
   } else {
     console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
@@ -490,6 +546,10 @@ program
     // previous logger behavior afterwards.
     const previousLogOutput = getLogOutput();
     setLogOutput('stderr');
+    // A one-shot reply should not arrive under a screen of service boot
+    // records. Keep warnings and errors; an explicit GEZEL_LOG_LEVEL wins.
+    const previousLogLevel = getLogLevel();
+    if (!process.env.GEZEL_LOG_LEVEL && previousLogLevel === 'info') setLogLevel('warn');
     let conn: Awaited<ReturnType<typeof connectForRun>> | undefined;
     let removeSignalCleanup: (() => void) | undefined;
     try {
@@ -504,6 +564,12 @@ program
       const { client } = conn;
       const projectId = await resolveRunProject(client, cliGlobals());
       const gezelId = opts.gezel ?? (await ensureCliProjectLead(client, projectId));
+      const readiness = await checkRunReadiness(client, gezelId);
+      if (!readiness.ready) {
+        console.error(readiness.message);
+        process.exitCode = 1;
+        return;
+      }
       const session = await client.createChatSession({ gezelId, projectId });
       await client.sendToChatSession(session.id, prompt);
       let printed = false;
@@ -535,6 +601,7 @@ program
         if (conn?.stop) await conn.stop();
       } finally {
         setLogOutput(previousLogOutput);
+        setLogLevel(previousLogLevel);
       }
     }
   });
@@ -675,7 +742,7 @@ async function printTaskWait(
   process.exitCode = result.exitCode;
 }
 
-const agent = program.command('agent').description('Manage agents');
+const agent = program.command('agent').description('Manage your gezels (your AI companions)');
 
 agent
   .command('output-limit <id> [tokens]')
@@ -712,7 +779,7 @@ agent
 
 agent
   .command('list')
-  .description('List agents')
+  .description('List your gezels')
   .action(async () => {
     const client = await connectOwned(cliGlobals());
     const res = await client.listGezels();
@@ -723,25 +790,32 @@ agent
 
 agent
   .command('create <name>')
-  .description('Create a new agent')
+  .description('Create a new gezel')
   .option('-d, --description <text>', 'description')
   .option('-m, --model <model>', 'model identifier')
   .action(async (name: string, opts: { description?: string; model?: string }) => {
     const client = await connectOwned(cliGlobals());
     const created = await client.createGezel({ name, ...opts });
-    console.log(`created agent ${created.id}`);
+    console.log(`created gezel ${created.id}`);
   });
 
 agent
   .command('show <id>')
-  .description('Show an agent')
+  .description('Show one gezel')
   .action(async (id: string) => {
     const client = await connectOwned(cliGlobals());
-    const a = await client.getGezel(id);
+    const a = await client.getGezel(id).catch((err: unknown) => {
+      throw isNotFound(err)
+        ? new CliError(`No gezel with id "${id}". Run \`gezel agent list\` to see your gezels.`)
+        : err;
+    });
     console.log(a.parsed.source);
   });
 
-const env = program.command('env').description('Manage projects');
+const env = program
+  .command('env')
+  .alias('project')
+  .description('Manage projects (also available as `gezel project`)');
 registerProjectSettingsCommands(
   env,
   () => connectOwned(cliGlobals()),
@@ -1485,7 +1559,11 @@ task
   .description('Show one task (format: projectId/num)')
   .action(async (ref: string) => {
     const client = await connectOwned(cliGlobals());
-    const t = await client.getTaskByRef(ref);
+    const t = await client.getTaskByRef(ref).catch((err: unknown) => {
+      throw isNotFound(err)
+        ? new CliError(`No task "${ref}". Run \`gezel task list\` to see task references.`)
+        : err;
+    });
     console.log(JSON.stringify(t, null, 2));
   });
 
@@ -1700,17 +1778,24 @@ const native = program.command('native').description('Manage native engine binar
 
 native
   .command('install')
-  .description('Download, verify, and activate the native inference toolkit')
+  .description(
+    'Download, verify, and activate the native inference toolkit (or one engine with --engine)',
+  )
   .option('--variant <backend>', 'llama.cpp backend: cuda | vulkan | metal | cpu')
-  .action(async (opts: { variant?: string }) => {
+  .option('--engine <name>', 'install only this engine, e.g. duckdb or llama-server')
+  .action(async (opts: { variant?: string; engine?: string }) => {
     // Validate before connecting so a typo never starts a daemon.
     const variant = parseNativeVariant(opts.variant);
+    const engine = parseNativeEngine(opts.engine);
     const client = await connectOwned(cliGlobals());
     const installed = await installNativeToolkit(client, {
       ...(variant ? { variant } : {}),
+      ...(engine ? { engines: [engine] } : {}),
       output: { writeProgress: (text) => process.stderr.write(text) },
     });
-    console.log(`native toolkit ready\n${formatNativeStatus(installed)}`);
+    console.log(
+      `${engine ? `${engine} ready` : 'native toolkit ready'}\n${formatNativeStatus(installed)}`,
+    );
   });
 
 native
@@ -2222,13 +2307,17 @@ async function pollStorageJob(
   }
 }
 
+// Operands reach the default action so a mistyped subcommand can be named
+// (and a close match suggested) instead of "too many arguments". Set last:
+// commander copies this setting into subcommands created after it.
+program.allowExcessArguments();
+
 program.parseAsync(process.argv).catch((err: unknown) => {
-  // CliError is a user-facing failure (e.g. a guest connection trying to run
-  // a management command) — print just the message, no stack. The name check
-  // covers lazily-loaded command chunks: with splitting disabled each chunk
-  // bundles its own copy of the class, so instanceof fails across chunks.
-  if (err instanceof CliError || (err instanceof Error && err.name === 'CliError')) {
-    console.error(err.message);
+  // CliError and service API errors are user-facing failures — print one
+  // actionable line, no stack. Anything else is a bug report and keeps it.
+  const friendly = formatCliFailure(err);
+  if (friendly !== null) {
+    console.error(friendly);
   } else {
     console.error(err);
   }
