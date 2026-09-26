@@ -1821,9 +1821,8 @@ function RenderedMarkdownPreview({
       </div>
     );
   }
-  // Files in the rail are working documents — reports, plans, notes — so they
-  // read as one: a left-aligned title, a compact heading scale, and the
-  // markdown's own lists and tables rather than Squisq's page art direction.
+  // Files in the rail are working documents — reports, plans, notes — rendered
+  // with the same theme as chat and the rail's own reading surface.
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
@@ -1832,7 +1831,6 @@ function RenderedMarkdownPreview({
         surface={surface}
         fenceRenderers={fenceRenderers}
         thinMargins={compact}
-        variant="document"
       />
     </div>
   );

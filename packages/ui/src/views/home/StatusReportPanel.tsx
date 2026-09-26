@@ -40,7 +40,6 @@ export function StatusReportPanel({
             theme={gezelChatTheme}
             thinMargins
             imageDisplayMode="thumbnail"
-            variant="document"
           />
         ) : (
           <p>{report.report}</p>

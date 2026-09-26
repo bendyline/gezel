@@ -31,7 +31,6 @@ export function TransformBeforeView({ markdown }: { markdown: string }) {
           theme={gezelChatTheme}
           surface={surface}
           thinMargins
-          variant="document"
         />
       ) : (
         <pre className="gz-transform-before-raw">{markdown}</pre>

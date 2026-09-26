@@ -126,7 +126,7 @@ export function DraftPlanCard({
         <span className="pending-question-context-status status-draft">draft</span>
       </div>
       <div className="pending-question-document-preview">
-        <RenderedMarkdown markdown={renderPlanDocument(task)} variant="document" />
+        <RenderedMarkdown markdown={renderPlanDocument(task)} />
       </div>
       {guards.length > 0 && (
         <p className="pending-question-error">
