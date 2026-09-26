@@ -1,10 +1,8 @@
 # Handboek content
 
-This tree is the hand-curated half of the **Handboek** — gezel's built-in documentation. It ships with the app (the service build copies it to`dist/handboek-content/`), is served through `/api/handboek`, rendered in the Handboek tab, exported as static HTML for gezel.com by `gezel handboek export`, and consulted by gezellen through the `how_do_i` tool.
+This tree is the hand-curated half of the **Handboek** — gezel's built-in documentation. It ships with the app (the service build copies it to `dist/handboek-content/`), is served through `/api/handboek`, rendered in the Handboek tab, exported as static HTML for gezel.com by `gezel handboek export`, and consulted by gezellen through the `how_do_i` tool.
 
-This README is the authoring contract. The engine lives in
-
-`packages/service/src/handboek/`.
+This README is the authoring contract. The engine lives in `packages/service/src/handboek/`.
 
 ## Layout
 
@@ -39,86 +37,33 @@ summary: The crew model, and why your data stays on your disk.
 Body prose…
 ```
 
-- `id` — stable article id. Optional; defaults to the filename stem. Use the
-
-  `role/<roleId>` form to shadow a generated role article with a curated one
-
-  (curated ids always win).
-
+- `id` — stable article id. Optional; defaults to the filename stem. Use the `role/<roleId>` form to shadow a generated role article with a curated one (curated ids always win).
 - `title` — TOC + tab title. Falls back to the first `#` heading.
 - `order` — sort key within the area, ascending (generated articles sit at 10).
 
-  `whats-new/` inverts this to get newest-first: a release article's order is
+  `whats-new/` inverts this to get newest-first: a release article's order is the negated calendar line, so `1.26224` carries `order: -26224`, and the section index sits at `-999999`. Nothing else needs touching when a release lands — the next article simply sorts above the last one, and the index picks it up through `::handboek-whats-new-list`.
 
-  the negated calendar line, so `1.26224` carries `order: -26224`, and the
-
-  section index sits at `-999999`. Nothing else needs touching when a release
-
-  lands — the next article simply sorts above the last one, and the index
-
-  picks it up through `::handboek-whats-new-list`.
-
-- `summary` — one line for the TOC. In `whats-new/` it is also the whole of
-
-  the release in the section's own list, so it is required there and capped
-
-  at 200 characters (enforced by the content lint in
-
-  `packages/service/src/handboek/engine.test.ts`).
-
-- `subcategory` — optional nested shelf within the article's area. Give every
-
-  article on the same shelf the same `id`, `title`, and `order`; the article's
-
-  own `order` sorts it inside that shelf. For example:
+- `summary` — one line for the TOC. In `whats-new/` it is also the whole of the release in the section's own list, so it is required there and capped at 200 characters (enforced by the content lint in `packages/service/src/handboek/engine.test.ts`).
+- `subcategory` — optional nested shelf within the article's area. Give every article on the same shelf the same `id`, `title`, and `order`; the article's own `order` sorts it inside that shelf. For example:
 
   ```yaml
-
   subcategory:
-
-```
-id: developer
-
-title: Developer
-
-order: 3
-```
-
+    id: developer
+    title: Developer
+    order: 3
   ```
 
-- `defaultDuration` — optional seconds-per-block override for the video
-
-  playback mode's timing.
-
+- `defaultDuration` — optional seconds-per-block override for the video playback mode's timing.
 - `siteVisible: false` — exclude the article from the gezel.com static export.
+- `ogHeadline` — the poster line on this page's social preview card. Optional, and the last word: it beats the distilled headline in `og-headlines.json`, which in turn beats falling back to the title. Keep it under 80 characters — it is set very large and is the only text on the card besides the small kicker. Set one when a distilled headline reads wrong and you would rather fix it than re-run the distiller.
 
-- `ogHeadline` — the poster line on this page's social preview card. Optional,
-
-  and the last word: it beats the distilled headline in
-
-  `og-headlines.json`, which in turn beats falling back to
-
-  the title. Keep it under 80 characters — it is set very large and is the only
-
-  text on the card besides the small kicker. Set one when a distilled headline
-
-  reads wrong and you would rather fix it than re-run the distiller.
-
-  `summary` is a different job: it stays the page's `<meta name="description">`
-
-  and `og:description`, and at up to 200 characters it is far too long to be a
-
-  headline. Refresh the distilled ones with `pnpm docs:og-headlines` (a model
-
-  call, so it is a deliberate occasional pass, never part of a docs build);
-
-  `pnpm docs:og-headlines --check` reports which are stale without writing.
+  `summary` is a different job: it stays the page's `<meta name="description">` and `og:description`, and at up to 200 characters it is far too long to be a headline. Refresh the distilled ones with `pnpm docs:og-headlines` (a model call, so it is a deliberate occasional pass, never part of a docs build); `pnpm docs:og-headlines --check` reports which are stale without writing.
 
 Plain markdown renders fine everywhere. Squisq heading annotations (`## Heading {[pullQuote]}`, `{[statHighlight]}`, …) are progressive enhancement for the video/social playback mode — see the squisq SquigglySquare docs for the template vocabulary.
 
 ## Autoannotation macros
 
-A macro is a leaf directive on its own line. The engine expands it into plain markdown **before** rendering, per mode (`app` = personalized for this install, `site` = generic for gezel.com, `agent` = compact for the `how_do_i`tool). An unexpanded macro silently disappears from the rendered doc — the`no-surviving-directives` test in `packages/service/src/handboek/` catches typos, so run `pnpm --filter @bendyline/gezel-service test` after editing.
+A macro is a leaf directive on its own line. The engine expands it into plain markdown **before** rendering, per mode (`app` = personalized for this install, `site` = generic for gezel.com, `agent` = compact for the `how_do_i` tool). An unexpanded macro silently disappears from the rendered doc — the `no-surviving-directives` test in `packages/service/src/handboek/` catches typos, so run `pnpm --filter @bendyline/gezel-service test` after editing.
 
 | Directive | What it expands to |
 | --- | --- |
@@ -132,6 +77,7 @@ A macro is a leaf directive on its own line. The engine expands it into plain ma
 | `::handboek-craftbook-list{role=…}` | Table of craftbooks (optionally the role's defaults). |
 | `::handboek-installed-models` | Models installed on this device with engine and tier. |
 | `::handboek-project-type-composition{id=…}` | What a project type sets up: crew, craftbooks, toolsets, schedules. |
+| `::handboek-model-scorecard{suites=core,productivity}` | Measured model results from the checked-in scorecard, grouped by test round (`suite=core` renders a single set). The site gets a filterable HTML version. |
 | `::handboek-whats-new-list{limit=12}` | Every release in `whats-new/`, newest first, each with its one-line summary. Identical in all three modes. |
 
 ## Conventions

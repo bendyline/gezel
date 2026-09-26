@@ -310,6 +310,14 @@ dialog and panel surfaces should follow the same shape: a small scoped
 block, sizes from the scale, `font-family` left to the global default except
 where a link needs forcing back to sans.
 
+**Section spacing in Settings.** A section that opens with its own heading
+("Download a model", "Installed catalogs") is a new subject and gets a 2rem
+gap above it; notices, errors, and progress boxes stay tight to the section
+they belong to. Stacked cards in a flat settings pane sit 2.5rem apart, since
+spacing is the only separator once the card chrome is stripped. Both rules
+live in [styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css);
+don't set a section's top margin inline.
+
 ## Foundation
 
 Gezel has one responsive product UX. Window width determines its layout; the
@@ -504,6 +512,25 @@ page's *New document* / *New folder* actions are ordinary keys, not a
 full-width primary slab. Squisq's stylesheet is bundled after ours, so a bridge
 rule wins by out-specifying the vendor rule (matching its `[data-theme]`), not
 by source order.
+
+**A working document reads as a document, not a web page.** Squisq's
+`LinearDocView` defaults to its page register: a centered cover hero set at
+display size, the first paragraph lifted into a subtitle, and headings
+auto-promoted into numbered bands and stat callouts by what their body looks
+like. That suits an article; it turned a one-screen review into four
+screens, with each `###` set at a different size depending on whether a
+table or a list sat under it. Anything a gezel wrote for someone to read and
+check (an artifact or file in the References rail, a task note, a night
+review, a status report, a plan or a report attached to a question, the text
+under transformation) renders with `variant="document"`. That gives a
+left-aligned title over a hairline, one heading scale that follows the
+markdown levels, a rule above each top-level section, the author's own lists
+and tables, and a 15px base that every size scales from in `em`. A surface
+that needs a smaller size sets one `font-size` on `.squisq-linear-content`
+(task notes use `--text-sm`), never per-element overrides. The page register
+stays where it is the point: Handboek and Knowledge articles and the Home
+intro (all `.gezel-article-view`), and chat replies, which keep Squisq's
+richer templates on purpose.
 
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq

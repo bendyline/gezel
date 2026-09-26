@@ -29,6 +29,7 @@ intermediate render.
 | `catalog-and-primitives.css` | Engine/model settings, catalog/toolsets, transformation flow, and base Radix primitives |
 | `project-surfaces.css` | Project output, remaining tab primitives, questions, creation galleries, mail, and connected project surfaces |
 | `../views/ProjectsView.css` | **On demand:** Responsive project master/detail and phone project controls |
+| `../views/ProjectToolsTab.css` | **On demand:** Project Tools tab — packages, scripts, and approvals (owned by `ProjectToolsTab`) |
 | `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
 | `github-and-growth.css` | GitHub workspace and gezel growth surfaces |

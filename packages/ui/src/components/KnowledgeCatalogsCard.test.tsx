@@ -147,20 +147,28 @@ describe('KnowledgeCatalogsCard', () => {
     expect(screen.getByRole('button', { name: 'Install' })).toBeVisible();
   });
 
-  it('lists installed catalogs with their state', async () => {
-    render(<KnowledgeCatalogsCard />);
+  it('lists installed catalogs, marking only machine-shared ones as shared', async () => {
+    const { unmount } = render(<KnowledgeCatalogsCard />);
     expect(await screen.findByText('Shop Notes')).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '4' })).toBeInTheDocument();
-    expect(screen.getByText('active')).toBeInTheDocument();
-    expect(screen.getByText('Only for you')).toBeInTheDocument();
+    expect(screen.queryByText('Shared', { selector: 'td' })).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
+      catalogs: [{ ...CATALOG, ref: { ...CATALOG.ref, storageScope: 'machine-shared' as const } }],
+    });
+    render(<KnowledgeCatalogsCard />);
+    expect(await screen.findByText('Shared', { selector: 'td' })).toBeInTheDocument();
   });
 
-  it('shows the quarantine reason verbatim', async () => {
+  it('shows an unavailable catalog as not available instead of a checkbox', async () => {
     vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
       catalogs: [{ ...CATALOG, enabled: false, mounted: false, disabledReason: 'sha mismatch' }],
     });
     render(<KnowledgeCatalogsCard />);
-    expect(await screen.findByText(/quarantined — sha mismatch/)).toBeInTheDocument();
+    expect(await screen.findByText('Not available')).toHaveAttribute('title', 'sha mismatch');
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/quarantine/i)).not.toBeInTheDocument();
   });
 
   it('starts a file install, follows its job stream and announces the inventory change', async () => {

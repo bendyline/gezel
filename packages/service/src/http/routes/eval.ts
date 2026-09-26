@@ -41,7 +41,7 @@ export function evalRoutes(ctx: ServiceContext): Hono {
       available: isEvalRunnerAvailable(),
       reason: isEvalRunnerAvailable()
         ? null
-        : 'eval harness not found on disk (packaged install). Run from the repo via `pnpm eval:run` for now.',
+        : 'In-app evals run only from a gezel source checkout; this install can show past results.',
     }),
   );
 

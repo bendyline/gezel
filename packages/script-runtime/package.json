@@ -1,13 +1,24 @@
 {
   "name": "@bendyline/gezel-script-runtime",
-  "version": "1.0.10",
+  "version": "0.1.0",
   "description": "Portable, capability-mediated script execution for Gezel.",
+  "keywords": ["gezel", "ai", "agents", "local-first", "scripts", "quickjs", "sandbox"],
   "license": "MIT",
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
   "homepage": "https://github.com/bendyline/gezel",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bendyline/gezel.git",
     "directory": "packages/script-runtime"
+  },
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "engines": {
+    "node": ">=24.0.0"
   },
   "publishConfig": {
     "access": "public",

@@ -33,7 +33,7 @@ who actually works here?
 Every task is checked the same way for every model, by a program rather than
 a person, so nobody's favourite gets the benefit of the doubt.
 
-## Two sets of jobs
+## Four sets of jobs
 
 **The core set** is general capability — writing a small working program,
 fixing a bug from a description of the symptoms, following a checklist and
@@ -55,22 +55,6 @@ reconciled summary.
 | Runbook anomaly (`ops-runbook-anomaly`) | Follow a maintenance checklist step by step, verify and record each action, and stop with a grounded report when a planted backup check fails. |
 | Plan and estimate (`plan-and-estimate`) | Produce an office-relocation plan with valid owners, correctly ordered dependencies, risks, and a checkable definition of done for every task. |
 | Conflict synthesis (`conflict-synthesis`) | Reconcile five documents that disagree about a launch date, budget, and owner; show each conflict and use the authoritative answer consistently. |
-
-**The engineering set** is developer work, and it is deliberately harder
-than the first two. A model has to pick the right recipe out of a library of
-several hundred when two of them look almost identical, find real defects in a
-change set without flagging code that is perfectly correct, and prove a fix by
-running the tests rather than by claiming it works.
-
-**The complex-workflow set** asks a model to build the recipe, not just follow
-one: write a reusable procedure with its own quality gates, run it twice against
-different inputs, repair one that is broken, and turn a job it just did by hand
-into something the crew can run again next quarter.
-
-Nobody should expect full marks on either. They exist because the best models
-now score close to full marks on the first two sets, and a column of near-perfect
-scores cannot tell you which model to choose. Low numbers here are headroom, not
-breakage.
 
 **The productivity set** is office work — a customer notice written to a hard
 word limit, a meeting turned into an action register, a research brief with
@@ -95,10 +79,27 @@ a Word document.
 | PowerPoint deck (`craftbook-powerpoint-deck`) | Acquire and cite source material, create an outline, make every slide match it, and save a real editable `.pptx` presentation. |
 | Wikipedia research brief (`wikipedia-research-brief`) | Use a closed local copy of Wikipedia to select the relevant sources and write a cited 700–1,500 word brief with correct chronology and careful treatment of a disputed claim. |
 
-A model gets a score on each set. They measure different things, and it is
-normal for a model to be strong on one and weak on the other. Plan and
-estimate and conflict synthesis deliberately appear in both sets because
-they test capabilities that matter to each.
+**The engineering set** (10 tests) is developer work, and it is deliberately
+harder than the first two. A model has to pick the right recipe out of a
+library of several hundred when two of them look almost identical, find real
+defects in a change set without flagging code that is perfectly correct, and
+prove a fix by running the tests rather than by claiming it works.
+
+**The complex-workflow set** (9 tests) asks a model to build the recipe, not
+just follow one: write a reusable procedure with its own quality gates, run it
+twice against different inputs, repair one that is broken, and turn a job it
+just did by hand into something the crew can run again next quarter.
+
+Nobody should expect full marks on either of these two. They exist because the
+best models now score close to full marks on the first two sets, and a column
+of near-perfect scores cannot tell you which model to choose. Low numbers here
+are headroom, not breakage. They are also run less often, so not every round
+in the scorecard includes them.
+
+A model gets a score on each set it was run on. The sets measure different
+things, and it is normal for a model to be strong on one and weak on another.
+Plan and estimate and conflict synthesis deliberately appear in both the core
+and productivity sets because they test capabilities that matter to each.
 
 ## What "passed" means
 

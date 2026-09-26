@@ -15,6 +15,7 @@ import type {
 import { Box, Text, useApp, useInput } from 'ink';
 import type { JSX, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { settledFirstRunConfig } from '../../run-readiness.js';
 import {
   type BootstrapAccessoryModel,
   type BootstrapChatModel,
@@ -625,16 +626,6 @@ function ProgressBar({ pct }: { pct: number | null }): JSX.Element {
   );
 }
 
-async function settledFirstRunConfig(client: GezelClient): Promise<ConfigResponse> {
-  let config = await client.getConfig();
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    if (config.firstRunCompleted || config.provider !== 'copilot') return config;
-    await delay(250);
-    config = await client.getConfig();
-  }
-  return config;
-}
-
 async function installNativeToolkit(
   client: GezelClient,
   status: NativeEngineStatusResponse,
@@ -820,8 +811,4 @@ function fitLabel(fit: BootstrapChatModel['fit']): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

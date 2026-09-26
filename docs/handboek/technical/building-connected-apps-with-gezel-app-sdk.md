@@ -19,7 +19,7 @@ If the experience should live inside a Gezel project as a custom crew, dashboard
 
 The [Connected apps](../conceptual/connected-apps.md) article explains what the user sees. This article covers the developer side.
 
-This article teaches the SDK. For what is promised rather than how to use it — which exports are stable, what cancellation guarantees, and what a store build must do differently — see the [App SDK surface](../../app-sdk-surface.md) contract.
+This article teaches the SDK. For what is promised rather than how to use it — which exports are stable, what cancellation guarantees, and what a store build must do differently — see the [App SDK surface](https://github.com/bendyline/gezel/blob/main/docs/app-sdk-surface.md) contract.
 
 ## Install and connect
 
