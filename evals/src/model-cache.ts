@@ -308,7 +308,12 @@ export async function staleInstall(opts: {
   if (
     expected.catalogVersion &&
     installed.catalogVersion &&
-    expected.catalogVersion !== installed.catalogVersion
+    expected.catalogVersion !== installed.catalogVersion &&
+    // A catalog release can change prompt/tuning metadata without changing
+    // the payload. When both sides carry the same cryptographic identity,
+    // the local bytes are current; deleting multi-gigabyte weights merely to
+    // refresh a version label is both destructive and network-dependent.
+    !(expected.sha256 && installed.sha256 && expected.sha256 === installed.sha256)
   ) {
     return {
       kind: 'weights-changed',
@@ -404,6 +409,8 @@ export async function ensureWarmModel(opts: {
   cacheRoot: string;
   engine: EngineKey;
   modelId: string;
+  /** Refuse every operation that could fetch or top up model files. */
+  offline?: boolean;
   /** llama-server binary, required for llama-cpp warming. */
   llamaBin?: string;
   /** sd-server binary, required for sd-cpp warming. */
@@ -435,6 +442,11 @@ export async function ensureWarmModel(opts: {
       log(`[cache] ${engine}/${modelId} already warm`);
       return;
     }
+    if (opts.offline) {
+      throw new Error(
+        `[cache] offline mode refuses to refresh stale ${engine}/${modelId} (${stale.reason})`,
+      );
+    }
     if (stale.kind === 'sidecar-missing') {
       log(
         `[cache] ${engine}/${modelId} is missing a catalog sidecar (${stale.reason}) — topping up in place; existing weights are reused, not refetched`,
@@ -450,6 +462,11 @@ export async function ensureWarmModel(opts: {
     (await adoptHistoricalLlamaCppAlias({ cacheRoot, modelId, log }))
   ) {
     return;
+  }
+  if (opts.offline) {
+    throw new Error(
+      `[cache] offline mode requires a complete current local install of ${engine}/${modelId}`,
+    );
   }
   await mkdir(cacheRoot, { recursive: true });
   // Heal a stale junction left over from a prior `~/.gezel-dev` link

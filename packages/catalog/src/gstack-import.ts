@@ -8,6 +8,7 @@ import {
   type NewCraftbookStep,
   NewCraftbookStepSchema,
   type SkillPersona,
+  normalizeStepGate,
   parseSkillDoc,
   skillToCraftbookDoc,
 } from '@bendyline/gezel';
@@ -113,13 +114,9 @@ export const QualityReviewSchema = z
     minReviewBytes: z.number().int().positive().optional(),
     criteria: z.array(z.string().min(1)).min(1),
     /**
-     * Make the review ENFORCEABLE (tactical fleet): the evaluate gate gains
-     * the `checkFixReview` standard script, so a well-formed REVISE verdict
-     * is rejected by the RUNTIME and routed back to `fixStepId` (default
-     * 'repair') with the findings as the prescriptive message — the model
-     * cannot advance to finish past a REVISE, and the default edge becomes
-     * the PASS path (`next: 'finish'`). Absent → the historical model-routed
-     * evaluate (gstack wave unchanged).
+     * Optional enforcement customization. Quality workflows always route the
+     * review verdict through `checkFixReview`; this object only changes the
+     * repair step or adds a machine-readable findings handoff.
      */
     enforce: z
       .object({
@@ -174,6 +171,70 @@ export const OverlaySchema = z
 export type Overlay = z.infer<typeof OverlaySchema>;
 
 const QUALITY_RESERVED_STEP_IDS = new Set(['evaluate', 'repair', 'finish', 'needs-user']);
+
+const REVIEW_FINDINGS_INSTRUCTION =
+  'List the findings as a markdown table with columns `| Severity | File | Line | Problem | Fix |` (severities: critical/major/minor/nit; empty table only on PASS).';
+
+function enforcedReviewRouting(fixStepId: string): string {
+  return `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. The gate ENFORCES the verdict: a well-formed REVISE is rejected and routed back to \`${fixStepId}\` automatically, carrying your findings — so list every finding in the table with a concrete fix. On PASS, call \`advance_task_step\`; the default edge is \`finish\`. Never write PASS while a criterion is unmet.`;
+}
+
+/**
+ * Upgrade a persisted/frozen quality workflow without regenerating its
+ * hand-owned phases. Review routing is runtime policy, not prose: PASS must
+ * default to finish and REVISE must be interpreted by checkFixReview.
+ */
+export function enforceQualityReviewRouting(
+  doc: CraftbookDoc,
+  workflow: QualityWorkflow,
+): CraftbookDoc {
+  const configured = workflow.review.enforce ?? {};
+  const fixStepId = configured.fixStepId ?? 'repair';
+  const maxReviewRounds = workflow.maxReviewRounds ?? 3;
+  return {
+    ...doc,
+    steps: doc.steps.map((step) => {
+      if (step.id !== 'evaluate') return step;
+      const gate = step.gate;
+      if (!gate) {
+        throw new Error('quality workflow evaluate step needs a declarative completion gate');
+      }
+      const normalizedGate = normalizeStepGate(gate);
+      if (normalizedGate.at !== 'completion') {
+        throw new Error('quality workflow evaluate step needs a declarative completion gate');
+      }
+      const historicalRouting = new RegExp(
+        'Give each criterion a PASS or FAIL[\\s\\S]*?Never route to finish while any criterion is unmet\\.',
+      );
+      const prompt = historicalRouting.test(step.prompt ?? '')
+        ? (step.prompt ?? '').replace(
+            historicalRouting,
+            `${REVIEW_FINDINGS_INSTRUCTION} ${enforcedReviewRouting(fixStepId)}`,
+          )
+        : `${step.prompt ?? ''}\n\n${REVIEW_FINDINGS_INSTRUCTION} ${enforcedReviewRouting(fixStepId)}`.trim();
+      const scripts = [
+        ...(normalizedGate.scripts ?? []).filter((script) => script.name !== 'checkFixReview'),
+        {
+          name: 'checkFixReview',
+          scope: 'standard' as const,
+          inputs: {
+            reviewPath: workflow.review.reviewPath,
+            fixStepId,
+            maxReviewRounds,
+            needsUserStepId: 'needs-user',
+            ...(configured.findingsPath ? { findingsPath: configured.findingsPath } : {}),
+          },
+        },
+      ];
+      return {
+        ...step,
+        prompt,
+        gate: { ...normalizedGate, scripts },
+        next: 'finish',
+      };
+    }),
+  };
+}
 
 /** Expand the compact overlay form into a complete, testable task graph. */
 export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookStep[] {
@@ -312,14 +373,10 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
     phaseOutputs.get(workflow.review.artifactPath) ??
     isAccessoryArtifactPath(workflow.review.artifactPath);
 
-  const enforce = workflow.review.enforce;
-  const enforcedFixStep = enforce?.fixStepId ?? 'repair';
-  const evaluateRouting = enforce
-    ? `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. The gate ENFORCES the verdict: a well-formed REVISE is rejected and routed back to \`${enforcedFixStep}\` automatically, carrying your findings — so list every finding in the table with a concrete fix. On PASS, \`advance_task_step\` to \`finish\`. Never write PASS while a criterion is unmet.`
-    : `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. Then use \`advance_task_step\` for the active task: PASS routes to \`finish\`; REVISE routes to \`repair\` for review rounds 1 through ${Math.max(1, maxReviewRounds - 1)}, and the ${maxReviewRounds}th REVISE routes to \`needs-user\`. Never route to finish while a criterion is unmet.`;
-  const evaluateFindingsInstruction = enforce
-    ? `\n\nList the findings as a markdown table with columns \`| Severity | File | Line | Problem | Fix |\` (severities: critical/major/minor/nit; empty table only on PASS).${enforce.findingsPath ? ` Also write the same findings as a JSON array to \`${enforce.findingsPath}\` with \`write_artifact\` — a fix step reads it as data.` : ''}`
-    : '';
+  const enforce = workflow.review.enforce ?? {};
+  const enforcedFixStep = enforce.fixStepId ?? 'repair';
+  const evaluateRouting = enforcedReviewRouting(enforcedFixStep);
+  const evaluateFindingsInstruction = `\n\n${REVIEW_FINDINGS_INSTRUCTION}${enforce.findingsPath ? ` Also write the same findings as a JSON array to \`${enforce.findingsPath}\` with \`write_artifact\` — a fix step reads it as data.` : ''}`;
 
   return [
     ...phases,
@@ -349,28 +406,25 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
             ...(reviewOutputIsArtifact ? { artifact: true } : {}),
           },
         ],
-        ...(enforce
-          ? {
-              scripts: [
-                {
-                  name: 'checkFixReview',
-                  scope: 'standard' as const,
-                  inputs: {
-                    reviewPath: workflow.review.reviewPath,
-                    fixStepId: enforcedFixStep,
-                    ...(enforce.findingsPath ? { findingsPath: enforce.findingsPath } : {}),
-                  },
-                },
-              ],
-            }
-          : {}),
+        scripts: [
+          {
+            name: 'checkFixReview',
+            scope: 'standard' as const,
+            inputs: {
+              reviewPath: workflow.review.reviewPath,
+              fixStepId: enforcedFixStep,
+              maxReviewRounds,
+              needsUserStepId: 'needs-user',
+              ...(enforce.findingsPath ? { findingsPath: enforce.findingsPath } : {}),
+            },
+          },
+        ],
         onReject: 'evaluate',
         maxAttempts: maxGateAttempts,
       },
-      // Enforced reviews own the REVISE routing at the gate, so the default
-      // edge is the PASS path; the historical shape keeps the model-routed
-      // repair edge.
-      next: enforce ? 'finish' : 'repair',
+      // The runtime owns REVISE routing at the gate, so the default edge is
+      // always the PASS path. Models no longer need to spell an optional next.
+      next: 'finish',
     },
     {
       id: 'repair',

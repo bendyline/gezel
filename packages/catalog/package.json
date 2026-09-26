@@ -46,6 +46,9 @@
     "lint-manifests": "tsx src/chat-model-manifest-lint.ts",
     "generate-craftbooks": "tsx scripts/generate-craftbooks.ts",
     "migrate-step-policies": "tsx scripts/migrate-craftbook-step-policies.ts",
+    "repair-craftbook-params": "tsx scripts/repair-craftbook-parameter-contracts.ts",
+    "repair-gstack-eval-paths": "tsx scripts/repair-gstack-eval-paths.ts",
+    "repair-gstack-review-routing": "tsx scripts/repair-gstack-review-routing.ts",
     "pin-revisions": "tsx scripts/pin-revisions.ts",
     "export-gilde-schemas": "tsx scripts/export-gilde-schemas.ts",
     "add-knowledge-catalog": "tsx scripts/add-knowledge-catalog.ts"

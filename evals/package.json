@@ -8,6 +8,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:craftbooks": "vitest run src/craftbooks",
     "run": "tsx src/bin/run.ts",
     "batch": "tsx src/bin/batch.ts",
     "ab-grammar": "tsx src/bin/ab-grammar.ts",

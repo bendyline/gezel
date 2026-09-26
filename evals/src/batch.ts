@@ -154,6 +154,7 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
       ...(opts.mlxSourceHome ? { mlxSourceHome: opts.mlxSourceHome } : {}),
       ...(opts.cacheRoot ? { cacheRoot: opts.cacheRoot } : {}),
       ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
+      ...(opts.offline ? { offline: true } : {}),
       // eslint-disable-next-line no-console
       log: (line) => console.log(line),
     });

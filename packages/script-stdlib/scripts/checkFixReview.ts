@@ -1,13 +1,15 @@
 import { type InferredInput, defineScript, gezel } from '@bendyline/gezel-sdk';
-import { gateResult } from '@bendyline/gezel-sdk/checks';
+import { type GateScriptResult, gateResult } from '@bendyline/gezel-sdk/checks';
 
 /**
  * Fix-review gate (the enforceable `evaluate` step of the tactical fleet):
  * the reviewer's artifact at `<task.dir>/review.md` is well-formed and its
  * verdict actually routes the loop. `Verdict: PASS` advances; a well-formed
  * `Verdict: REVISE` rejects WITH `goto` back to the fix step, carrying the
- * findings as the prescriptive message; a malformed report rejects in place
- * so the reviewer repairs the report rather than the fixer thrashing.
+ * findings as the prescriptive message until the revision budget is spent; a
+ * malformed report rejects in place so the reviewer repairs the report rather
+ * than the fixer thrashing. The budget is based on the evaluate step's durable
+ * activation count, so routing through a separate fix step cannot reset it.
  *
  * Anti-fabrication: every file the review cites must exist — probed by
  * reading each path (workspace, the task's diffpack overlay when drafting,
@@ -17,7 +19,7 @@ import { gateResult } from '@bendyline/gezel-sdk/checks';
 export const meta = defineScript({
   name: 'checkFixReview',
   description:
-    'Gate: a fix/improvement review artifact is well-formed — a `Verdict: PASS` or `Verdict: REVISE` line, severities from critical/major/minor/nit, every cited file exists (workspace, draft overlay, or artifacts), critical/major findings force REVISE — and a REVISE verdict routes the task back to the fix step with the findings as the message.',
+    'Gate: a fix/improvement review artifact is well-formed — a `Verdict: PASS` or `Verdict: REVISE` line, severities from critical/major/minor/nit, every cited file exists (workspace, draft overlay, or artifacts), critical/major findings force REVISE — and a REVISE verdict routes the task back to the fix step with the findings as the message, up to a bounded number of review rounds.',
   kind: 'gate',
   inputs: {
     taskRef: {
@@ -37,6 +39,19 @@ export const meta = defineScript({
     fixStepId: {
       type: 'string',
       description: "Step to route a REVISE verdict back to. Defaults to 'fix'.",
+    },
+    maxReviewRounds: {
+      type: 'number',
+      description:
+        'Maximum evaluate-step activations that may route REVISE back to the fixer. Defaults to 3.',
+      default: 3,
+      integer: true,
+      min: 1,
+    },
+    needsUserStepId: {
+      type: 'string',
+      description:
+        "Optional terminal escalation step used when the review budget is spent. When omitted, a terminal 'needs-user' step is discovered automatically; otherwise the gate rejects in place so its ordinary maxAttempts budget can pause the task.",
     },
   },
   outputs: {
@@ -60,6 +75,12 @@ interface TaskView {
   diffpackId?: string;
 }
 
+interface TaskStepView {
+  id: string;
+  attemptCount?: number;
+  terminal?: boolean;
+}
+
 const input = gezel.input as InferredInput<typeof meta>;
 
 /** Strip citation decoration so `./src/x.ts`, `a/src/x.ts`, `src/x.ts` compare equal. */
@@ -76,6 +97,52 @@ const task = (await gezel.task.get(input.taskRef ?? '').catch(() => null)) as Ta
 const taskDir = task?.artifactDir ?? (task?.num !== undefined ? `tasks/${task.num}` : undefined);
 const reviewPath = input.reviewPath ?? (taskDir ? `${taskDir}/review.md` : undefined);
 const fixStepId = input.fixStepId ?? 'fix';
+const maxReviewRounds = input.maxReviewRounds ?? 3;
+
+async function reviseDecision(message: string): Promise<GateScriptResult> {
+  const currentStep = (await gezel.task
+    .currentStep(input.taskRef ?? '')
+    .catch(() => null)) as TaskStepView | null;
+
+  // Fail closed if the durable counter cannot be read. Routing to the fixer
+  // without it would recreate the unbounded evaluate -> fix -> evaluate loop
+  // this budget exists to prevent. Rejecting in place leaves the gate's own
+  // maxAttempts counter intact, so the normal runtime pause remains available.
+  if (!currentStep) {
+    return gateResult(
+      false,
+      `${message}\n\nThe review needs revision, but the gate could not read the current step's review-round counter. It refused to start an unbounded repair loop; retry review or ask a user to intervene.`,
+    );
+  }
+
+  const reviewRound = Math.max(1, currentStep.attemptCount ?? 1);
+  if (reviewRound < maxReviewRounds) {
+    return {
+      decision: 'reject',
+      goto: fixStepId,
+      message: `${message}\n\nReview round ${reviewRound} of ${maxReviewRounds}; return to ${fixStepId} for another bounded repair pass.`,
+    };
+  }
+
+  const steps = (await gezel.task.steps(input.taskRef ?? '').catch(() => [])) as TaskStepView[];
+  const requestedEscalation = input.needsUserStepId?.trim();
+  const escalationStep = requestedEscalation
+    ? steps.find((step) => step.id === requestedEscalation && step.terminal)
+    : steps.find((step) => step.id === 'needs-user' && step.terminal);
+  const exhausted = `${message}\n\nReview budget exhausted after ${reviewRound} of ${maxReviewRounds} round(s). Stop the automatic repair loop and report DONE_WITH_CONCERNS with the unresolved findings.`;
+
+  if (escalationStep) {
+    return { decision: 'reject', goto: escalationStep.id, message: exhausted };
+  }
+
+  // No safe terminal route is present in older/custom books. Stay on the
+  // gated evaluate step instead of jumping to the fixer again. The gate's
+  // existing maxAttempts budget will then pause the task deterministically.
+  return gateResult(
+    false,
+    `${exhausted} No terminal escalation step is configured, so the gate is holding this evaluate step for user intervention.`,
+  );
+}
 
 /**
  * A cited path exists when it reads from ANY surface the review may talk
@@ -238,11 +305,11 @@ if (!reviewPath) {
             `- [${r.severity || 'finding'}] ${r.file}${r.problem ? ` — ${r.problem}` : ''}${r.fix ? ` → ${r.fix}` : ''}`,
         )
         .join('\n');
-      gezel.output({
-        decision: 'reject',
-        goto: fixStepId,
-        message: `Reviewer verdict: REVISE. Address these findings, then bring the work back through review:\n${summary}${rows.length > 6 ? `\n…and ${rows.length - 6} more in ${reviewPath}.` : ''}`,
-      });
+      gezel.output(
+        await reviseDecision(
+          `Reviewer verdict: REVISE. Address these findings, then bring the work back through review:\n${summary}${rows.length > 6 ? `\n…and ${rows.length - 6} more in ${reviewPath}.` : ''}`,
+        ),
+      );
     } else {
       gezel.output(
         gateResult(

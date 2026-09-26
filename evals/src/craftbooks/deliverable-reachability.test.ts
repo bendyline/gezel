@@ -64,6 +64,44 @@ describe('classifyDeliverableReachability', () => {
     expect(classifyDeliverableReachability(spec([{ path: 'Dockerfile' }]), book)).toBeNull();
   });
 
+  it('passes concrete eval paths declared through authored path variables', () => {
+    const dynamicBook = template([
+      {
+        id: 'build',
+        prompt:
+          'Write characters/<name>/sheet.json and posts/<created>-<slug>/variants/bluesky.md.',
+      },
+    ]);
+    expect(
+      classifyDeliverableReachability(
+        spec([
+          { path: 'characters/pip/sheet.json' },
+          { path: 'posts/2026-08-12-returns-desk/variants/bluesky.md' },
+        ]),
+        dynamicBook,
+      ),
+    ).toBeNull();
+  });
+
+  it('passes named children under a separately declared symbolic destination folder', () => {
+    const dynamicBook = template([
+      {
+        id: 'finalize',
+        prompt:
+          'Commit the draft to posts/<created>-<slug>/. Recreate post.md at the root and every variants/ file, including x.md.',
+      },
+    ]);
+    expect(
+      classifyDeliverableReachability(
+        spec([
+          { path: 'posts/2026-08-12-returns-desk/post.md' },
+          { path: 'posts/2026-08-12-returns-desk/variants/x.md' },
+        ]),
+        dynamicBook,
+      ),
+    ).toBeNull();
+  });
+
   it('flags a deliverable the book never names as unreachable', () => {
     // dockerize-app: the book writes Dockerfile, the eval grades src/solution.mjs.
     const finding = classifyDeliverableReachability(spec([{ path: 'src/solution.mjs' }]), book);

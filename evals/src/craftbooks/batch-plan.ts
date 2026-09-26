@@ -1,9 +1,12 @@
 import type {
   CraftbookAuditResult,
   CraftbookEvalMode,
+  CraftbookEvalSpec,
   CraftbookEvalValidationScope,
   CraftbookTemplateSummary,
 } from './types.ts';
+import type { CraftbookBoilerplateFinding } from './boilerplate.ts';
+import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
 
 export type CraftbookHarnessKind =
   | 'generic-file-gate'
@@ -30,10 +33,33 @@ export interface CraftbookBatchPlanItem {
   reason: string;
 }
 
+export type CraftbookPlanBlockerCode = 'unreachable' | 'folder-drift' | 'boilerplate';
+
+export interface CraftbookPlanBlocker {
+  code: CraftbookPlanBlockerCode;
+  detail: string;
+  paths?: string[];
+}
+
+export interface CraftbookRunnablePlanItem {
+  craftbookId: string;
+  scenarioId: string;
+  mode: CraftbookEvalMode;
+  priority: number;
+}
+
+export interface CraftbookExcludedPlanItem {
+  craftbookId: string;
+  scenarioId: string;
+  reasons: CraftbookPlanBlocker[];
+}
+
 export interface CraftbookBatchPlan {
   target: number;
   mode?: CraftbookEvalMode;
-  runnableNow: string[];
+  runnableNow: CraftbookRunnablePlanItem[];
+  scenarioCsv: string;
+  excluded: CraftbookExcludedPlanItem[];
   items: CraftbookBatchPlanItem[];
   harnessCounts: Record<CraftbookHarnessKind, number>;
 }
@@ -62,24 +88,55 @@ export function buildCraftbookBatchPlan(args: {
    * regex cascade below is only the fallback for books without tags.
    */
   tagsByCraftbookId?: ReadonlyMap<string, readonly string[]>;
+  specs?: readonly CraftbookEvalSpec[];
+  reachabilityFindings?: readonly DeliverableReachabilityFinding[];
+  boilerplateFindings?: readonly CraftbookBoilerplateFinding[];
 }): CraftbookBatchPlan {
   const byTemplate = new Map(args.templates.map((template) => [template.id, template]));
+  const specsById = new Map((args.specs ?? []).map((spec) => [spec.craftbookId, spec]));
+  const blockersById = buildBlockers(
+    args.reachabilityFindings ?? [],
+    args.boilerplateFindings ?? [],
+  );
   const candidateAudits = args.mode
     ? args.audits.filter((audit) => audit.evalMode === args.mode)
     : args.audits.filter((audit) => audit.evalMode !== 'none');
-  const runnableNow = candidateAudits
-    .filter((audit) => audit.evalStatus === 'implemented' || audit.evalStatus === 'validated')
-    .map((audit) => audit.craftbookId)
-    .sort();
-  const items = candidateAudits
+  const allItems = candidateAudits
     .map((audit) => {
       const template = byTemplate.get(audit.craftbookId);
       if (!template) return null;
       return planItem(template, audit, args.tagsByCraftbookId?.get(audit.craftbookId));
     })
     .filter((item): item is CraftbookBatchPlanItem => item !== null)
-    .sort((a, b) => b.priority - a.priority || a.craftbookId.localeCompare(b.craftbookId))
-    .slice(0, args.target);
+    .sort((a, b) => b.priority - a.priority || a.craftbookId.localeCompare(b.craftbookId));
+  const items = allItems.slice(0, args.target);
+  const byItem = new Map(allItems.map((item) => [item.craftbookId, item]));
+  const runnableNow = candidateAudits
+    .filter((audit) => audit.evalStatus === 'implemented' || audit.evalStatus === 'validated')
+    .filter((audit) => (blockersById.get(audit.craftbookId)?.length ?? 0) === 0)
+    .flatMap((audit): CraftbookRunnablePlanItem[] => {
+      const spec = specsById.get(audit.craftbookId);
+      const item = byItem.get(audit.craftbookId);
+      if (!spec || !item || audit.evalMode === 'none') return [];
+      return [
+        {
+          craftbookId: audit.craftbookId,
+          scenarioId: spec.scenarioId,
+          mode: audit.evalMode,
+          priority: item.priority,
+        },
+      ];
+    })
+    .sort((a, b) => b.priority - a.priority || a.scenarioId.localeCompare(b.scenarioId));
+  const excluded = candidateAudits
+    .filter((audit) => audit.evalStatus === 'implemented' || audit.evalStatus === 'validated')
+    .flatMap((audit): CraftbookExcludedPlanItem[] => {
+      const spec = specsById.get(audit.craftbookId);
+      const reasons = blockersById.get(audit.craftbookId) ?? [];
+      if (!spec || reasons.length === 0) return [];
+      return [{ craftbookId: audit.craftbookId, scenarioId: spec.scenarioId, reasons }];
+    })
+    .sort((a, b) => a.craftbookId.localeCompare(b.craftbookId));
 
   const harnessCounts = Object.fromEntries(HARNESS_KINDS.map((kind) => [kind, 0])) as Record<
     CraftbookHarnessKind,
@@ -92,9 +149,37 @@ export function buildCraftbookBatchPlan(args: {
     target: args.target,
     ...(args.mode ? { mode: args.mode } : {}),
     runnableNow,
+    scenarioCsv: runnableNow.map((item) => item.scenarioId).join(','),
+    excluded,
     items,
     harnessCounts,
   };
+}
+
+function buildBlockers(
+  reachability: readonly DeliverableReachabilityFinding[],
+  boilerplate: readonly CraftbookBoilerplateFinding[],
+): Map<string, CraftbookPlanBlocker[]> {
+  const out = new Map<string, CraftbookPlanBlocker[]>();
+  const add = (craftbookId: string, blocker: CraftbookPlanBlocker): void => {
+    const found = out.get(craftbookId);
+    if (found) found.push(blocker);
+    else out.set(craftbookId, [blocker]);
+  };
+  for (const finding of reachability) {
+    add(finding.craftbookId, {
+      code: finding.verdict,
+      detail: `eval grades ${finding.paths.join(', ')} but the craftbook does not write that path`,
+      paths: finding.paths,
+    });
+  }
+  for (const finding of boilerplate) {
+    add(finding.craftbookId, {
+      code: 'boilerplate',
+      detail: `prompt is shared with ${finding.sharedWith.length - 1} other books and no gate identifies ${finding.unmatchedSubjectTerms.join('/')}`,
+    });
+  }
+  return out;
 }
 
 function planItem(
@@ -124,12 +209,15 @@ function planItem(
   const missingEval = audit.evalStatus === 'missing' ? 35 : audit.evalStatus === 'planned' ? 20 : 0;
   const validationGap =
     audit.evalStatus === 'implemented' ? 20 : audit.validationScope === 'artifact-only' ? 10 : 0;
+  const workflowEvidenceBoost =
+    audit.evalMode === 'workflow' && audit.validationScope !== 'workflow' ? 100 : 0;
   const qualityGap = Math.max(0, 110 - audit.score);
   const simulatorBoost = harness.some((kind) => kind.startsWith('fake-')) ? 10 : 0;
   // A hook is executable policy, so keep at least one hook-backed workflow in
   // the representative batch even when its static quality score is high.
   const hookBoost = harness.includes('hook-runtime') ? 10 : 0;
-  const priority = missingEval + validationGap + qualityGap + simulatorBoost + hookBoost;
+  const priority =
+    workflowEvidenceBoost + missingEval + validationGap + qualityGap + simulatorBoost + hookBoost;
   return {
     craftbookId: template.id,
     name: template.name,

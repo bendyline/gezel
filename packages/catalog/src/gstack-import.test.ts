@@ -312,7 +312,13 @@ describe('shipped skill conversions — regen fidelity', () => {
         nonterminal.every((step) => normalizeStepGate(step.gate!).maxAttempts > 0),
         `${book.id}: every gate needs a bounded retry budget`,
       ).toBe(true);
-      expect(byId.get('evaluate')?.next).toBe('repair');
+      expect(byId.get('evaluate')?.next).toBe('finish');
+      expect(
+        normalizeStepGate(byId.get('evaluate')!.gate!).scripts?.some(
+          (script) => script.name === 'checkFixReview',
+        ),
+        `${book.id}: review verdict routing must be runtime-enforced`,
+      ).toBe(true);
       expect(byId.get('repair')?.next).toBe('evaluate');
       expect(byId.get('finish')?.terminal).toBe(true);
       expect(byId.get('needs-user')?.terminal).toBe(true);

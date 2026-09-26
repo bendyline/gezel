@@ -10,6 +10,7 @@
  *   pnpm --filter @bendyline/gezel-catalog migrate-step-policies -- --dry-run
  *   pnpm --filter @bendyline/gezel-catalog migrate-step-policies
  *   pnpm --filter @bendyline/gezel-catalog migrate-step-policies -- --only=powerpoint-deck
+ *   pnpm --filter @bendyline/gezel-catalog migrate-step-policies -- --released-at=2026-09-26T18:00:00Z
  */
 
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -26,7 +27,7 @@ import {
 } from '../src/craftbook-step-policy.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 
-const RELEASED_AT = '2026-09-05T03:30:00Z';
+const DEFAULT_RELEASED_AT = '2026-09-26T18:00:00Z';
 
 function compareSemver(a: string, b: string): number {
   const left = a.split('.').map(Number);
@@ -96,6 +97,11 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const verbose = args.includes('--verbose');
+  const releasedAtArg = args.find((arg) => arg.startsWith('--released-at='));
+  const releasedAt = releasedAtArg?.slice('--released-at='.length) || DEFAULT_RELEASED_AT;
+  if (Number.isNaN(Date.parse(releasedAt))) {
+    throw new Error(`invalid --released-at value: ${releasedAt}`);
+  }
   const onlyArg = args.find((arg) => arg.startsWith('--only='));
   const only = onlyArg
     ? new Set(
@@ -148,9 +154,9 @@ async function main(): Promise<void> {
     const migrated = applyDefaultCraftbookStepPolicies({
       ...parsed,
       version: targetVersion,
-      releasedAt: RELEASED_AT,
+      releasedAt,
     });
-    const runtime = craftbookFromDoc(migrated, { now: RELEASED_AT });
+    const runtime = craftbookFromDoc(migrated, { now: releasedAt });
     if (!runtime.ok) {
       throw new Error(
         `${id}: migrated doc failed validation:\n${formatCraftbookDocErrors(runtime.errors)}`,

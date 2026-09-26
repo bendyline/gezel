@@ -115,6 +115,49 @@ function seededFixturePaths(spec: CraftbookEvalSpec): Set<string> {
   return new Set((spec.setup?.files ?? []).map((file) => file.path));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Treat authored path variables such as `characters/<name>/sheet.json` and
+ * `posts/<created>-<slug>/post.md` as declarations of their concrete eval
+ * paths. These are not folder drift: the kickoff prompt supplies the name,
+ * page number, date, or slug that the procedure deliberately resolves.
+ */
+function documentNamesPathTemplate(document: string, path: string): boolean {
+  const filename = basename(path);
+  if (!document.includes(filename)) return false;
+  const candidatePattern = new RegExp(
+    `(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`,
+    'g',
+  );
+  for (const match of document.matchAll(candidatePattern)) {
+    const candidate = match[0];
+    if (!candidate.includes('<')) continue;
+    const expression = candidate
+      .split(/(<[^>]+>)/g)
+      .map((part) => (/^<[^>]+>$/.test(part) ? '[^/]+' : escapeRegExp(part)))
+      .join('');
+    if (new RegExp(`^${expression}$`).test(path)) return true;
+  }
+
+  // Some procedures declare the destination folder once, then enumerate
+  // children separately (for example "posts/<created>-<slug>/" followed by
+  // "post.md at the root" and "variants/ files"). A concrete child remains
+  // reachable when that symbolic folder is a prefix and its filename is named.
+  for (const match of document.matchAll(/(?:[A-Za-z0-9_.{}<>-]+\/)+/g)) {
+    const candidate = match[0];
+    if (!candidate.includes('<')) continue;
+    const expression = candidate
+      .split(/(<[^>]+>)/g)
+      .map((part) => (/^<[^>]+>$/.test(part) ? '[^/]+' : escapeRegExp(part)))
+      .join('');
+    if (new RegExp(`^${expression}`).test(path)) return true;
+  }
+  return false;
+}
+
 export function classifyDeliverableReachability(
   spec: CraftbookEvalSpec,
   template: CraftbookTemplateSummary,
@@ -129,7 +172,7 @@ export function classifyDeliverableReachability(
   const unreachable: string[] = [];
   const drifted: string[] = [];
   for (const path of graded) {
-    if (document.includes(path)) continue;
+    if (document.includes(path) || documentNamesPathTemplate(document, path)) continue;
     if (document.includes(basename(path))) drifted.push(path);
     else unreachable.push(path);
   }

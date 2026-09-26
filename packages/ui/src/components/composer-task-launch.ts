@@ -179,7 +179,7 @@ export function formatTaskLaunchPreview(
   const allProperties = (manifest?.paramSchema?.properties ?? {}) as Record<string, unknown>;
   const unasked = new Set(
     Object.entries(allProperties)
-      .filter(([, property]) => !paramAsksUser(property))
+      .filter(([key, property]) => !paramAsksUser(property, key))
       .map(([key]) => key),
   );
   const declared = Object.keys(properties);

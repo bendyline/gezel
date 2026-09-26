@@ -3,6 +3,7 @@
  *
  *   pnpm --filter @bendyline/gezel-catalog exec tsx scripts/import-gstack-skills.ts [--dry-run]
  *   pnpm --filter @bendyline/gezel-catalog exec tsx scripts/import-gstack-skills.ts --tests-only
+ *   pnpm --filter @bendyline/gezel-catalog exec tsx scripts/import-gstack-skills.ts --frozen-only
  *   pnpm --filter @bendyline/gezel-catalog run build-index
  *
  * Sources are the snapshot under
@@ -40,9 +41,10 @@
  * refuses overwrites.
  */
 
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  CraftbookDocSchema,
   craftbookFromDoc,
   formatCraftbookDocErrors,
   parseCraftbookTestSpec,
@@ -54,6 +56,7 @@ import {
   type Overlay,
   OverlaySchema,
   convertSnapshotSkill,
+  enforceQualityReviewRouting,
   mergeWaveIdentity,
 } from '../src/gstack-import.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
@@ -95,6 +98,29 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+function compareSemver(a: string, b: string): number {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let index = 0; index < 3; index++) {
+    const delta = (left[index] ?? 0) - (right[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+async function latestVersionBefore(versionsDir: string, target: string): Promise<string> {
+  const available = (await readdir(versionsDir, { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isDirectory() && /^\d+\.\d+\.\d+$/.test(entry.name) && entry.name !== target,
+    )
+    .map((entry) => entry.name)
+    .sort(compareSemver);
+  const latest = available.at(-1);
+  if (!latest) throw new Error(`no prior frozen version found under ${versionsDir}`);
+  return latest;
+}
+
 async function main(): Promise<void> {
   const gilde = requireGildeCheckout();
   const authoringRoot = gstackAuthoringDir(gilde.root);
@@ -106,6 +132,8 @@ async function main(): Promise<void> {
   const wave = readGstackWaveConfig(gilde.root);
   const dryRun = process.argv.includes('--dry-run');
   const testsOnly = process.argv.includes('--tests-only');
+  const frozenOnly = process.argv.includes('--frozen-only');
+  if (testsOnly && frozenOnly) throw new Error('--tests-only and --frozen-only are mutually exclusive');
   let written = 0;
   let skipped = 0;
   const personaDrafts: string[] = [];
@@ -115,8 +143,7 @@ async function main(): Promise<void> {
   // A craftbook version without its matching test.json is not a complete
   // catalog release.
   for (const book of wave.books) {
-    const overlay = await readOverlay(book.source, overlayRoot);
-    if (overlay.frozen) continue;
+    await readOverlay(book.source, overlayRoot);
     testBytes.set(book.source, await readTestSpecBytes(book.source, evalRoot));
   }
 
@@ -128,7 +155,7 @@ async function main(): Promise<void> {
     const collisions: string[] = [];
     for (const book of wave.books) {
       const overlay = await readOverlay(book.source, overlayRoot);
-      if (overlay.frozen) continue;
+      if (frozenOnly && !overlay.frozen) continue;
       const versionDir = join(
         dataRoot,
         book.id.slice(0, 2).toLowerCase(),
@@ -153,8 +180,7 @@ async function main(): Promise<void> {
   if (!dryRun && testsOnly) {
     const problems: string[] = [];
     for (const book of wave.books) {
-      const overlay = await readOverlay(book.source, overlayRoot);
-      if (overlay.frozen) continue;
+      await readOverlay(book.source, overlayRoot);
       const versionDir = join(
         dataRoot,
         book.id.slice(0, 2).toLowerCase(),
@@ -178,9 +204,48 @@ async function main(): Promise<void> {
 
   for (const book of wave.books) {
     const overlay = await readOverlay(book.source, overlayRoot);
-    if (overlay.frozen) {
+    if (frozenOnly && !overlay.frozen) {
       skipped++;
-      console.log(`  ~ ${book.id}: frozen overlay — hand-owned, skipping regen`);
+      continue;
+    }
+    if (overlay.frozen) {
+      const shard = book.id.slice(0, 2).toLowerCase();
+      const bookDir = join(dataRoot, shard, book.id);
+      const versionsDir = join(bookDir, 'versions');
+      const versionDir = join(versionsDir, wave.version);
+      const sourceVersion = await latestVersionBefore(versionsDir, wave.version);
+      const source = CraftbookDocSchema.parse(
+        JSON.parse(
+          await readFile(join(versionsDir, sourceVersion, 'craftbook.json'), 'utf8'),
+        ) as unknown,
+      );
+      const carriedBase = CraftbookDocSchema.parse({
+        ...source,
+        version: wave.version,
+        releasedAt: wave.releasedAt,
+      });
+      const carried = overlay.workflow
+        ? enforceQualityReviewRouting(carriedBase, overlay.workflow)
+        : carriedBase;
+      const runtime = craftbookFromDoc(carried, { now: wave.releasedAt });
+      if (!runtime.ok) {
+        throw new Error(
+          `${book.id}: frozen carry-forward failed validation:\n${formatCraftbookDocErrors(runtime.errors)}`,
+        );
+      }
+      if (dryRun) {
+        console.log(
+          `  ✓ ${book.id}: frozen hand-owned ${sourceVersion} -> ${wave.version} (content preserved)`,
+        );
+        continue;
+      }
+      await mkdir(versionDir, { recursive: true });
+      await writeFile(join(versionDir, 'craftbook.json'), serializeCraftbookDoc(carried, 'json'));
+      await writeFile(join(versionDir, 'test.json'), testBytes.get(book.source)!);
+      written++;
+      console.log(
+        `  ✓ ${book.id}: frozen hand-owned ${sourceVersion} -> ${wave.version} (content preserved)`,
+      );
       continue;
     }
 
@@ -255,7 +320,7 @@ async function main(): Promise<void> {
     console.log(`\npersona drafts (hand-review before shipping): ${personaDrafts.join(', ')}`);
   }
   console.log(
-    `\ndone: ${written} ${testsOnly ? 'test sidecar(s)' : 'version(s)'} written, ${skipped} frozen${dryRun ? ` (dry run for ${wave.version})` : ` at ${wave.version}`}`,
+    `\ndone: ${written} ${testsOnly ? 'test sidecar(s)' : 'version(s)'} written, ${skipped} skipped${dryRun ? ` (dry run for ${wave.version})` : ` at ${wave.version}`}`,
   );
   if (!dryRun) {
     console.log(
