@@ -6,7 +6,12 @@ import {
   installProcessErrorHandlers,
   writeProcessOutput,
 } from '@bendyline/gezel';
-import { startService } from '../service.js';
+// Self-reference, kept external in tsup.config.ts: the daemon runs from the
+// same dist/index.js bundle the embedded Electron path imports. Bundling
+// ../service.js here shipped a second ~7.5 MB copy of the whole daemon in
+// every tarball (2026-09-26 npm ship audit), and made two bundles whose
+// import.meta.url-relative asset probes both had to stay correct.
+import { startService } from '@bendyline/gezel-service';
 import { applyAutostartRuntimeArguments } from './runtime-args.js';
 
 let stopRunningService: (() => Promise<void>) | null = null;

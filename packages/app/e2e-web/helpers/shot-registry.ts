@@ -53,7 +53,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'ide-about',
     'ide-compact',
     'ide-overview',
-    'ide-approvals',
+    'ide-tools',
     'ide-village',
   ],
   gezels: ['list', 'detail', 'growth', 'memories'],

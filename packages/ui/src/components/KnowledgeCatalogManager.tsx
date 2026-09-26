@@ -70,18 +70,6 @@ function installErrorMessage(err: unknown): string {
   return `download failed: ${describe(err)}`;
 }
 
-function catalogStateLabel(c: KnowledgeCatalogStatus): string {
-  if (c.disabledReason) return `quarantined — ${c.disabledReason}`;
-  if (!c.enabled) return 'disabled';
-  if (!c.mounted) return 'enabled (not mounted)';
-  return c.vectorCompatible === false ? 'active · keyword search only' : 'active';
-}
-
-function searchModeLabel(c: KnowledgeCatalogStatus): string {
-  if (c.semanticSearch === 'keyword-only' || c.vectorCompatible === false) return 'Keyword only';
-  return 'Semantic';
-}
-
 function formatReleased(iso: string): string | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
@@ -626,11 +614,7 @@ export function KnowledgeCatalogManager() {
                   <th>Version</th>
                   <th>Documents</th>
                   <th>Size</th>
-                  <th title="Semantic search embeds your question with the catalog's own model; keyword-only catalogs match words">
-                    Search
-                  </th>
-                  <th>Storage</th>
-                  <th>Status</th>
+                  <th>Shared</th>
                   <th>Enabled</th>
                   <th />
                 </tr>
@@ -638,6 +622,7 @@ export function KnowledgeCatalogManager() {
               <tbody>
                 {catalogs.map((c) => {
                   const updating = installs.has(c.ref.catalogId);
+                  const shared = c.ref.storageScope === 'machine-shared';
                   return (
                     <tr key={c.ref.catalogId} data-testid={`knowledge-catalog-${c.ref.catalogId}`}>
                       <td className="model-name-table-cell">
@@ -660,28 +645,28 @@ export function KnowledgeCatalogManager() {
                       <td>v{c.ref.version}</td>
                       <td>{c.documents !== undefined ? c.documents.toLocaleString() : '—'}</td>
                       <td>{c.sizeBytes ? formatBytes(c.sizeBytes) : '—'}</td>
-                      <td>{c.mounted ? searchModeLabel(c) : '—'}</td>
                       <td
                         title={
-                          c.ref.storageScope === 'machine-shared'
+                          shared
                             ? 'Installed once for everyone on this device; removing it only drops it from your account.'
-                            : 'Stored in your own home folder.'
+                            : undefined
                         }
                       >
-                        {c.ref.storageScope === 'machine-shared'
-                          ? 'Shared on this device'
-                          : 'Only for you'}
-                      </td>
-                      <td className={c.disabledReason ? 'error' : undefined}>
-                        {catalogStateLabel(c)}
+                        {shared ? 'Shared' : ''}
                       </td>
                       <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Enable ${c.name ?? c.ref.catalogId}`}
-                          checked={c.enabled}
-                          onChange={(e) => void setEnabled(c.ref.catalogId, e.target.checked)}
-                        />
+                        {c.disabledReason ? (
+                          <span className="muted" title={c.disabledReason}>
+                            Not available
+                          </span>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            aria-label={`Enable ${c.name ?? c.ref.catalogId}`}
+                            checked={c.enabled}
+                            onChange={(e) => void setEnabled(c.ref.catalogId, e.target.checked)}
+                          />
+                        )}
                       </td>
                       <td className="model-actions-table-cell">
                         <div className="model-action-links">

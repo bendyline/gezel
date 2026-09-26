@@ -93,6 +93,12 @@ jobs:
       - name: Require immutable full-length action pins
         run: node scripts/check-workflow-action-pins.mjs
 
+      # Trusted publishing cannot create a package, so an unbootstrapped one
+      # fails mid-release after its dependents have shipped. Fail here, in
+      # seconds, instead (gezel-knowledge 2026-08, gezel-script-runtime 2026-09).
+      - name: Require every release package to exist on npm
+        run: node scripts/check-npm-bootstrap.mjs
+
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ env.NODE_VERSION }}

@@ -4249,29 +4249,11 @@ button.timeline-session-divider-child::before {
   margin-right: 0.4rem;
 }
 
+/* A note renders in Squisq's document register with thin margins, so it hugs
+   the list item and sizes every element in em from one base. LinearDocView
+   writes that base inline, hence the !important. */
 .chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content {
-  /* LinearDocView writes 16px inline, so the compact rail needs the same
-     targeted override used by chat bubbles with custom text scaling. */
   font-size: var(--text-sm) !important;
-  padding: 0;
-}
-
-.chat-rail-task-note .chat-rail-viewer-markdown .squisq-page-section-inner {
-  padding: 0;
-}
-
-.chat-rail-task-note .chat-rail-viewer-markdown :is(p, ul, ol, pre, blockquote) {
-  margin-block: 0.35rem;
-}
-
-.chat-rail-task-note .chat-rail-viewer-markdown > :first-child,
-.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :first-child {
-  margin-top: 0;
-}
-
-.chat-rail-task-note .chat-rail-viewer-markdown > :last-child,
-.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :last-child {
-  margin-bottom: 0;
 }
 
 .chat-rail-viewer {

@@ -275,8 +275,8 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   );
 });
 
-test('dependency security floors fix B3 while CI blocks only on critical advisories', async () => {
-  const [workspace, lockfile, quality, release, publish, scheduled, consumerCheck] =
+test('dependency security floors fix B3 and preserve the intended vulnerability gates', async () => {
+  const [workspace, lockfile, quality, release, publish, scheduled, consumerCheck, consumerAudit] =
     await Promise.all([
       readFile(join(root, 'pnpm-workspace.yaml'), 'utf8'),
       readFile(join(root, 'pnpm-lock.yaml'), 'utf8'),
@@ -285,6 +285,7 @@ test('dependency security floors fix B3 while CI blocks only on critical advisor
       readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
       readFile(join(root, '.github', 'workflows', 'supply-chain-audit.yml'), 'utf8'),
       readFile(join(root, 'scripts', 'check-package-consumers.mjs'), 'utf8'),
+      readFile(join(root, 'scripts', 'npm-consumer-audit.mjs'), 'utf8'),
     ]);
 
   for (const [name, source] of [
@@ -304,7 +305,21 @@ test('dependency security floors fix B3 while CI blocks only on critical advisor
       `${name} workflow must report but not fail on sub-critical advisories`,
     );
   }
-  assert.match(consumerCheck, /'--audit-level=critical'/);
+  assert.match(
+    consumerCheck,
+    /\['audit', '--omit=dev', '--json'\]/,
+    'npm consumer checks must inspect the complete production audit report',
+  );
+  assert.match(
+    consumerCheck,
+    /blockingAdvisories\(auditReport, readAuditAllowlist\(\)\)/,
+    'npm consumer checks must apply the high/critical allowlist gate',
+  );
+  assert.match(
+    consumerAudit,
+    /const BLOCKING = new Set\(\['high', 'critical'\]\)/,
+    'the clean npm consumer graph must reject high and critical advisories',
+  );
   assert.match(
     consumerCheck,
     /npm_config_cache: npmCache/,

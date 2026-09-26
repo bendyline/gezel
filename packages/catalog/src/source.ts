@@ -22,6 +22,7 @@ import {
   ToolsetVersionManifestSchema,
   VideoModelVersionManifestSchema,
   compareSemver,
+  createLogger,
   expandStepDeliverables,
   formatCraftbookDocErrors,
   isSemver,
@@ -33,16 +34,20 @@ import {
 import { sanitizePresentationSvg } from '@bendyline/gezel/svg';
 import { gildeDataDir } from './gilde-data.js';
 
+// Through the core logger, not console: a library that writes straight to
+// stderr cannot be silenced by GEZEL_LOG_LEVEL or routed by its host.
+const log = createLogger('catalog');
+
 /**
  * ─ CatalogSource ───────────────────────────────────────────────────
  *
- * Abstracts where catalog items live. Two implementations today:
+ * Abstracts where catalog items live. One implementation today:
  *
- *   - BundledSource:  reads the on-disk `data/` directory shipped with
- *                     this package. Always available, zero network.
- *   - RemoteSource:   (TODO) fetches a static index.json + per-item
- *                     manifests from an HTTP(S) URL. Stubbed until we
- *                     publish a public catalog repo.
+ *   - BundledSource:  reads the on-disk `data/` directory of the pinned
+ *                     `@bendyline/gilde` content package. Always available,
+ *                     zero network. Opt-in live content updates do not add
+ *                     a second source: the service's GildeUpdateManager
+ *                     swaps the directory this source reads.
  *
  * The CatalogService (see service.ts) composes multiple sources.
  *
@@ -252,12 +257,12 @@ export class BundledSource implements CatalogSource {
     try {
       parsed = JSON.parse(raw);
     } catch (err) {
-      console.warn(`[catalog] failed to parse ${indexPath}:`, err);
+      log.warn(`failed to parse ${indexPath}:`, err);
       return null;
     }
     const obj = parsed as { kind?: unknown; entries?: unknown };
     if (obj.kind !== kind || !Array.isArray(obj.entries)) {
-      console.warn(`[catalog] ${indexPath}: kind/entries mismatch — falling back to disk walk`);
+      log.warn(`${indexPath}: kind/entries mismatch — falling back to disk walk`);
       return null;
     }
     const items: CatalogItemSummary[] = [];
@@ -489,12 +494,12 @@ export class BundledSource implements CatalogSource {
     try {
       raw = JSON.parse(text);
     } catch {
-      console.warn(`[catalog] ${file}: test spec is not valid JSON`);
+      log.warn(`${file}: test spec is not valid JSON`);
       return null;
     }
     const parsed = parseCraftbookTestSpec(raw, { mode: 'tolerant' });
     if (!parsed.ok) {
-      console.warn(`[catalog] ${file}: invalid test spec — ${parsed.errors[0]}`);
+      log.warn(`${file}: invalid test spec — ${parsed.errors[0]}`);
       return null;
     }
     return { version: picked, spec: parsed.spec };
@@ -516,15 +521,13 @@ export class BundledSource implements CatalogSource {
     try {
       const parsed = CatalogItemIdentitySchema.parse(JSON.parse(raw));
       if (parsed.kind !== kind) {
-        console.warn(
-          `[catalog] ${file}: identity kind=${parsed.kind} doesn't match directory kind=${kind}, skipping`,
+        log.warn(
+          `${file}: identity kind=${parsed.kind} doesn't match directory kind=${kind}, skipping`,
         );
         return null;
       }
       if (parsed.id !== id) {
-        console.warn(
-          `[catalog] ${file}: identity id=${parsed.id} doesn't match directory id=${id}, skipping`,
-        );
+        log.warn(`${file}: identity id=${parsed.id} doesn't match directory id=${id}, skipping`);
         return null;
       }
       // An identity-level floor gates the whole item on older builds.
@@ -534,7 +537,7 @@ export class BundledSource implements CatalogSource {
       if (!this.floorSatisfied(parsed.minGezelVersion)) return null;
       return parsed;
     } catch (err) {
-      console.warn(`[catalog] invalid identity manifest ${file}:`, err);
+      log.warn(`invalid identity manifest ${file}:`, err);
       return null;
     }
   }
@@ -579,8 +582,8 @@ export class BundledSource implements CatalogSource {
           const releasedAt = typeof json.releasedAt === 'string' ? json.releasedAt : null;
           if (!version || !releasedAt) continue;
           if (version !== name) {
-            console.warn(
-              `[catalog] ${versionFile}: version=${version} doesn't match folder name=${name}, skipping`,
+            log.warn(
+              `${versionFile}: version=${version} doesn't match folder name=${name}, skipping`,
             );
             continue;
           }
@@ -649,7 +652,7 @@ export class BundledSource implements CatalogSource {
     const chosen = await this.pickVersion(kind, id, identity, version);
     if (!chosen) {
       if (version) {
-        console.warn(`[catalog] ${kind}/${id}: requested version ${version} not found on disk`);
+        log.warn(`${kind}/${id}: requested version ${version} not found on disk`);
       } else {
         // Tombstoned identities — every on-disk version is in
         // `yankedVersions` — are an expected steady state for entries
@@ -665,7 +668,7 @@ export class BundledSource implements CatalogSource {
           folders.length > 0 &&
           folders.every((f) => yanked.has(f.version) || !this.floorSatisfied(f.minGezelVersion));
         if (!everythingIneligible) {
-          console.warn(`[catalog] ${kind}/${id}: no eligible versions on disk`);
+          log.warn(`${kind}/${id}: no eligible versions on disk`);
         }
       }
       return null;
@@ -691,8 +694,8 @@ export class BundledSource implements CatalogSource {
       if (docText !== null) {
         const parsed = parseCraftbookDoc(docText, 'json');
         if (!parsed.ok) {
-          console.warn(
-            `[catalog] invalid craftbook document ${join(versionDir, 'craftbook.json')}:\n${formatCraftbookDocErrors(parsed.errors)}`,
+          log.warn(
+            `invalid craftbook document ${join(versionDir, 'craftbook.json')}:\n${formatCraftbookDocErrors(parsed.errors)}`,
           );
           return null;
         }
@@ -706,12 +709,12 @@ export class BundledSource implements CatalogSource {
     try {
       versionPayload = JSON.parse(await readFile(versionFile, 'utf8'));
     } catch (err) {
-      console.warn(`[catalog] failed to read ${versionFile}:`, err);
+      log.warn(`failed to read ${versionFile}:`, err);
       return null;
     }
     const parsedVersion = parseVersionPayload(kind, versionPayload);
     if (!parsedVersion) {
-      console.warn(`[catalog] invalid version manifest ${versionFile}`);
+      log.warn(`invalid version manifest ${versionFile}`);
       return null;
     }
     if (kind === 'chat-model') {
@@ -722,8 +725,8 @@ export class BundledSource implements CatalogSource {
         ds4?: unknown;
       };
       if (!v.ollama && !v.llamaCpp && !v.mlx && !v.ds4) {
-        console.warn(
-          `[catalog] ${versionFile}: chat-model version has no ollama / llamaCpp / mlx / ds4 source — skipping`,
+        log.warn(
+          `${versionFile}: chat-model version has no ollama / llamaCpp / mlx / ds4 source — skipping`,
         );
         return null;
       }
@@ -731,9 +734,7 @@ export class BundledSource implements CatalogSource {
     if (kind === 'video-model') {
       const v = parsedVersion as { source?: { files?: unknown[] } };
       if (!v.source || !Array.isArray(v.source.files) || v.source.files.length === 0) {
-        console.warn(
-          `[catalog] ${versionFile}: video-model version has no source files — skipping`,
-        );
+        log.warn(`${versionFile}: video-model version has no source files — skipping`);
         return null;
       }
     }
@@ -778,7 +779,7 @@ function craftbookManifestFromDoc(
   availableVersions: string[],
 ): CatalogItemManifest | null {
   if (!doc.releasedAt) {
-    console.warn(`[catalog] craftbook-template/${identity.id}@${version}: doc has no releasedAt`);
+    log.warn(`craftbook-template/${identity.id}@${version}: doc has no releasedAt`);
     return null;
   }
   const steps = expandStepDeliverables(doc.steps);

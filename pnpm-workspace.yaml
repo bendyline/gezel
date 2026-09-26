@@ -47,7 +47,7 @@ minimumReleaseAgeExclude:
   - "@bendyline/gilde"
   - "@bendyline/squisq-cli@2.8.8"
   - "@bendyline/squisq-calc@2.11.0"
-  - "@bendyline/squisq-editor-react@2.11.9"
+  - "@bendyline/squisq-editor-react@2.11.10"
   - "@bendyline/squisq-formats@2.6.8"
   - "@bendyline/squisq-grid-react@2.11.9"
   - "@bendyline/squisq-react@2.11.9"
@@ -59,7 +59,6 @@ minimumReleaseAgeExclude:
   - "@csstools/css-syntax-patches-for-csstree@1.1.7"
   - "@vitejs/plugin-react@6.0.4"
   - "dompurify@3.4.13"
-  - "hono@4.12.34"
   - js-yaml@3.15.1 || 4.3.1
   - "jose@6.2.4"
   - "mermaid@11.16.1"
@@ -86,7 +85,7 @@ overrides:
   # with the override-normalized lockfile importer and otherwise warns even
   # though a frozen install validates successfully.
   "@hono/node-server": "2.0.11"
-  "adm-zip": "0.6.0"
+  "adm-zip": "0.6.1"
   "axios": "1.18.1"
   # html-to-text 10.x still declares deepmerge-ts ^7.1.5. Force the patched
   # major until it widens that range (GHSA-ggr8-5vv4-36mx).
@@ -94,7 +93,7 @@ overrides:
   "dompurify@>=3 <4": "3.4.13"
   "fast-uri": "3.1.5"
   "form-data": "4.0.6"
-  "hono": "4.12.34"
+  "hono": "4.13.9"
   "ip-address": "10.3.1"
   "js-yaml@<4": "3.15.1"
   "js-yaml@>=4 <5": "4.3.1"

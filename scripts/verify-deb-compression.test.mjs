@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { zstdCompressSync } from 'node:zlib';
-import { inspectDeb } from './verify-deb-compression.mjs';
+import { constants, createZstdCompress, zstdCompressSync } from 'node:zlib';
+import { MIN_WINDOW_LOG, inspectDeb, zstdWindowLog } from './verify-deb-compression.mjs';
+
+/** The first bytes of a multi-segment zstd frame with the given window. */
+function zstdFrameHeader(windowLog) {
+  return Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, (windowLog - 10) << 3, 0, 0, 0, 0]);
+}
+
+/**
+ * Compress the way fpm does — tar piped into zstd, so the frame starts before
+ * the input size is known. Several writes keep libzstd from seeing the whole
+ * input in its first call, which would let it shrink the window to fit.
+ */
+function streamCompress(level) {
+  return new Promise((resolve, reject) => {
+    const z = createZstdCompress({ params: { [constants.ZSTD_c_compressionLevel]: level } });
+    const out = [];
+    z.on('data', (chunk) => out.push(chunk));
+    z.on('end', () => resolve(Buffer.concat(out)));
+    z.on('error', reject);
+    for (let i = 0; i < 4; i++) z.write(Buffer.alloc(64 * 1024, i));
+    z.end();
+  });
+}
 
 /** Minimal ustar header for a single small file. */
 function tarHeader(name, size) {
@@ -42,12 +64,11 @@ function arMember(name, size) {
   return h;
 }
 
-function buildDeb({ dataMember, dataBytes, installedKiB, controlMember = 'control.tar.zst' }) {
+function buildDeb({ dataMember, data, installedKiB, controlMember = 'control.tar.zst' }) {
   const ctl =
     controlMember === 'control.tar.zst'
       ? zstdCompressSync(controlTar(installedKiB))
       : controlTar(installedKiB);
-  const data = Buffer.alloc(dataBytes, 0);
   const parts = [
     Buffer.from('!<arch>\n', 'binary'),
     arMember('debian-binary', 4),
@@ -61,26 +82,55 @@ function buildDeb({ dataMember, dataBytes, installedKiB, controlMember = 'contro
   return Buffer.concat(parts);
 }
 
-test('reads the data member name and installed size from a zstd deb', () => {
-  const deb = buildDeb({ dataMember: 'data.tar.zst', dataBytes: 1000, installedKiB: 4 });
+test('reads the data member, window, and installed size from a zstd deb', () => {
+  const deb = buildDeb({ dataMember: 'data.tar.zst', data: zstdFrameHeader(21), installedKiB: 4 });
   const info = inspectDeb(deb);
   assert.equal(info.dataMember, 'data.tar.zst');
+  assert.equal(info.windowLog, 21);
   assert.equal(info.installedBytes, 4096);
 });
 
 test('reports an xz deb by its data member rather than failing to parse', () => {
   // The regression this catches first: `compression: zst` silently not taking
-  // effect. The control member is xz too, so the ratio is deliberately not
-  // computed — the member name is the clearer diagnosis.
+  // effect. The control member is xz too, so nothing else is decoded — the
+  // member name is the clearer diagnosis.
   const deb = buildDeb({
     dataMember: 'data.tar.xz',
-    dataBytes: 1000,
+    data: Buffer.alloc(1000, 0),
     installedKiB: 4,
     controlMember: 'control.tar.xz',
   });
   const info = inspectDeb(deb);
   assert.equal(info.dataMember, 'data.tar.xz');
+  assert.equal(info.windowLog, null);
   assert.equal(info.installedBytes, null);
+});
+
+test('rejects a data.tar.zst member that is not zstd', () => {
+  const deb = buildDeb({
+    dataMember: 'data.tar.zst',
+    data: Buffer.alloc(1000, 0),
+    installedKiB: 4,
+  });
+  assert.throws(() => inspectDeb(deb), /does not start with a zstd frame/);
+});
+
+test('reports a single-segment frame as having no window', () => {
+  const frame = zstdFrameHeader(21);
+  frame[4] = 0x20;
+  assert.equal(zstdWindowLog(frame), null);
+});
+
+test('libzstd still ties the level to the window the gate reads', async () => {
+  // The whole gate rests on this table. fpm's dash bug turns our `0` into -0,
+  // which is still the default level 3; a dropped `0` becomes -3, and a
+  // raised one becomes -9.
+  for (const level of [0, 3]) {
+    assert.ok(zstdWindowLog(await streamCompress(level)) >= MIN_WINDOW_LOG, `level ${level}`);
+  }
+  for (const level of [-9, -3, 1, 2]) {
+    assert.ok(zstdWindowLog(await streamCompress(level)) < MIN_WINDOW_LOG, `level ${level}`);
+  }
 });
 
 test('rejects a file that is not an ar archive', () => {
@@ -104,14 +154,14 @@ test('rejects an archive with no data member', () => {
 });
 
 test('surfaces a missing Installed-Size as null rather than NaN', () => {
-  // A control record without the field must not produce a NaN ratio, which
-  // would compare false against the floor and pass the gate silently.
+  // A control record without the field must leave the ratio out of the log,
+  // not print a NaN one.
   const body = Buffer.from('Package: gezel\nVersion: 9.9.9\n', 'utf8');
   const pad = Buffer.alloc(Math.ceil(body.length / 512) * 512 - body.length);
   const ctl = zstdCompressSync(
     Buffer.concat([tarHeader('./control', body.length), body, pad, Buffer.alloc(1024)]),
   );
-  const data = Buffer.alloc(1000, 0);
+  const data = zstdFrameHeader(21);
   const deb = Buffer.concat([
     Buffer.from('!<arch>\n', 'binary'),
     arMember('debian-binary', 4),
