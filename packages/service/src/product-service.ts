@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import {
   migrateInstalledModelIds,
@@ -8,7 +7,7 @@ import {
 import { recoverInterruptedScriptRuns } from './scripts/runs.js';
 
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
-import { basename, delimiter, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   GENERALIST_TEMPLATE_ID,
   type GezelConfig,
@@ -144,7 +143,10 @@ import { migrateLegacySystemModels } from './models/storage-roots.js';
 import { DuckRunner } from './observations/duck.js';
 import { runObservationNightly } from './observations/nightly.js';
 import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
-import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
+import {
+  discoverManagedScriptRuntimes,
+  ensureBundledNodeOnPath,
+} from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
@@ -229,36 +231,6 @@ const LIBRARY_REFRESH_DEBOUNCE_MS = 3_000;
  * {@link StartServiceOptions}), and writes the runtime files so clients
  * can find us.
  */
-/**
- * If the daemon was launched with `GEZEL_NODE_PATH` pointing at a
- * bundled Node binary, prepend its directory to `PATH`. Internal code
- * uses `GEZEL_NODE_PATH` directly (e.g. `sandbox/runner.ts`,
- * `resolvePnpmCommand`), so the daemon itself doesn't need this — but
- * spawned child processes that go through shell shims do.
- *
- * Concrete example: `pnpm exec playwright install chromium` invokes
- * `node_modules/.bin/playwright`, a `#!/bin/sh` shim that does
- * `exec node "$DIR/playwright/cli.js"`. The shim resolves `node` via
- * PATH, not via env vars we set. Under the LaunchDaemon on macOS (or
- * the systemd unit on Linux, or NSSM on Windows) the launcher hands
- * the daemon a minimal PATH that doesn't include the .app's bundled
- * binary dir, so without this the shim ENOENTs and surfaces in the UI
- * as "Runtime setup failed: playwright install chromium exited with
- * 127. … exec: node: not found".
- *
- * Idempotent: no-op when GEZEL_NODE_PATH is unset (dev / test) or its
- * directory is already on PATH.
- */
-function ensureBundledNodeOnPath(): void {
-  const nodePath = process.env.GEZEL_NODE_PATH;
-  if (!nodePath || !existsSync(nodePath)) return;
-  const dir = dirname(nodePath);
-  const current = process.env.PATH ?? '';
-  const parts = current.split(delimiter).filter(Boolean);
-  if (parts.includes(dir)) return;
-  process.env.PATH = current.length === 0 ? dir : `${dir}${delimiter}${current}`;
-}
-
 export async function startProductService(
   opts: StartServiceOptions & { role: 'user' | 'legacy-full' },
 ): Promise<RunningService> {
