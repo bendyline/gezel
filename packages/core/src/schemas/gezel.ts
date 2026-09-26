@@ -241,8 +241,9 @@ export const GezelFrontmatterSchema = z.object({
    *   - `acceptEdits`: auto-approve file edits; Bash + other side-effecting
    *     tools still gate. Sensible default for a chat-driven gezel.
    *   - `plan`: read-only — useful for review-style gezels.
-   *   - `bypassPermissions`: yolo — every tool call auto-approved including
-   *     Bash. Reserve for builder gezels you trust to run shell commands.
+   *   - `bypassPermissions`: no approvals at all — every tool call, including
+   *     Bash, runs unprompted. Reserve for builder gezels you trust to run
+   *     shell commands.
    * When unset, inherits the project override and then
    * `config.anthropicCli.defaultPermissionMode` (which itself defaults to
    * `acceptEdits`). Other providers: ignored.

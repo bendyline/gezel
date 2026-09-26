@@ -101,7 +101,7 @@ gezel secret set openaiApiKey --stdin < /path/to/private-key-file
 gezel secret remove openaiApiKey
 ```
 
-`--use-for-search` also selects Brave (or Tavily for `tavilyApiKey`) as the
+`--use-for-search` (with `braveSearchApiKey`) also selects Brave as the
 search provider while preserving its other settings. Without it, setting a
 credential leaves provider selection unchanged. `secret list` gives the supported
 names and whether each is configured; credentials are write-only and never
@@ -210,10 +210,12 @@ The CLI does not bundle model weights or native inference engines; those are
 downloaded only on demand when you opt into on-device models. Straight away
 you can use:
 
-- The interactive TUI (`gezel`) and one-shot prompts (`gezel run "…"`)
+- The interactive TUI (`gezel`), which walks you through choosing a model on
+  first use, and one-shot prompts (`gezel run "…"`) once a model is set up.
+  Until then `run` downloads nothing: it names the setup commands and exits.
 - Cloud providers — OpenAI, Anthropic, GitHub Copilot, and any
   OpenAI-compatible endpoint
-- Gezel and project management (`gezel agent`, `gezel env`, `gezel task`)
+- Gezel and project management (`gezel agent`, `gezel project`, `gezel task`)
 - Skills and handbook export (`gezel skills convert`, `gezel handboek export`) —
   these need no running daemon at all
 
@@ -261,14 +263,14 @@ Run `gezel --help` for the full list. The most-used ones:
 | `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
 | `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id or display name |
 | `gezel workflow <name-or-file> [args…]` | Run an explicitly trusted repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
-| `gezel secret list / set / remove` | Manage write-only provider credentials, including Brave and Tavily search keys |
+| `gezel secret list / set / remove` | Manage write-only provider credentials, including the Brave search key |
 | `gezel task wait <ref>` / `resume <ref>` | Follow a task to completion, or retry a paused task and follow it |
 | `gezel task notes <ref> --warnings` | Read task notes and runtime warnings from its recent sessions |
 | `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |
 | `gezel agent list\|create\|show` | Manage your gezels |
-| `gezel env list\|create\|install` | Manage projects and their packages |
+| `gezel project list\|create\|install` | Manage projects and their packages (`gezel env` is the same command) |
 | `gezel task list\|create\|show` | Manage tasks |
 | `gezel model list\|pull\|export` | Manage on-device chat models. `export <id> [file]` downloads the catalog model if needed, then writes a portable, checksum-verified `.gezmodel` you can move to another machine |
 | `gezel native install\|list\|status` | Manage native engine binaries |

@@ -12,7 +12,7 @@ subcategory:
 
 Giving AI hands means deciding, carefully, what those hands may touch.
 
-**It is important to note: gezel is still in early beta.** Undoubtedly there are still security flaws or broader design holes in the security regimen of gezel.
+**It is important to note: gezel is still in early beta.** Like any young project, it will have security bugs we haven't found yet, and we fix them as they are reported. If you find one, please report it privately as described in the project's [security policy](https://github.com/bendyline/gezel/blob/main/SECURITY.md) rather than in a public issue.
 
 **Our security model is not designed to be perfect.** In many places, the security design focuses on keeping honest models honest via layers of "defense in depth". This lets gezel still be useful without requiring you to make every fiddly technical security decision, and without requiring exotic and complicated isolation mechanisms (e.g., containers). Think of the security design like multiple 5-foot-tall chain-link fences: it keeps things corralled, but a determined attacker (a purpose-built malicious program already on your machine) could hop over them.
 

@@ -27,6 +27,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { isPathInside } from '../fs/safe-paths.js';
 
 const log = createLogger('eval-runner');
 
@@ -64,27 +65,37 @@ export interface TrialOutcome {
  * sync. Returns null when not found (packaged mode without evals on
  * disk).
  */
-function resolveEvalBinary(): {
+function resolveEvalBinary(): EvalBinary | null {
+  try {
+    // dist/ when built; src/ in dev. Either way, walking up to
+    // pnpm-workspace.yaml gets us the repo root.
+    return resolveEvalBinaryFrom(fileURLToPath(import.meta.url));
+  } catch {
+    return null;
+  }
+}
+
+interface EvalBinary {
   cmd: string;
   args: string[];
   cwd: string;
   binPath: string;
-} | null {
-  let dir = (() => {
-    try {
-      // Resolve via this file's URL — robust to monorepo layout.
-      // dist/ when built; src/ in dev. Either way, walking up to
-      // pnpm-workspace.yaml gets us the repo root.
-      return fileURLToPath(import.meta.url);
-    } catch {
-      return process.cwd();
-    }
-  })();
+}
+
+/** Exported for tests: the walk, from an explicit module path. */
+export function resolveEvalBinaryFrom(modulePath: string): EvalBinary | null {
+  let dir = modulePath;
   for (let i = 0; i < 12; i++) {
     const parent = resolve(dir, '..');
     if (parent === dir) break;
     dir = parent;
     if (existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+      // Only a source checkout of gezel itself qualifies: this module must
+      // live under that root's packages/service/. An npm install sits inside
+      // someone else's tree, and without this check any pnpm-workspace.yaml
+      // above it — including a planted one in a shared parent directory —
+      // would have its node_modules/.bin/tsx spawned with the daemon's env.
+      if (!isPathInside(modulePath, join(dir, 'packages', 'service'))) return null;
       const binPath = join(dir, 'evals', 'src', 'bin', 'run.ts');
       if (!existsSync(binPath)) return null;
       // Use the evals package's `tsx` via pnpm-managed node_modules.

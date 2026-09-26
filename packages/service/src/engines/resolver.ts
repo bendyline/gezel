@@ -184,7 +184,7 @@ async function* resolveVendoredDuckdb(
   const key = duckdbPlatformKey(process.platform, process.arch);
   if (!key) {
     yield* fail(
-      `DuckDB publishes no build for ${process.platform}/${process.arch} — install it yourself and set GEZEL_DUCKDB_BIN`,
+      `DuckDB publishes no build for ${process.platform}/${process.arch}. Install DuckDB with your package manager (https://install.duckdb.org) and set GEZEL_DUCKDB_BIN to its path.`,
     );
   }
   const platformKey = key as NonNullable<ReturnType<typeof duckdbPlatformKey>>;

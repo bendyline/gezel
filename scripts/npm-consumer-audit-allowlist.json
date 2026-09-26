@@ -1,0 +1,4 @@
+{
+  "$comment": "High/critical npm advisories accepted in the clean npm-consumer graph (scripts/check-package-consumers.mjs). Each entry needs the GHSA id, why it is unreachable or acceptable, and an expiry (YYYY-MM-DD) after which the gate fails again. Prefer fixing the dependency.",
+  "advisories": []
+}

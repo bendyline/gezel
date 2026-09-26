@@ -6,7 +6,7 @@ version line.
 
 ## What ships
 
-Thirteen packages, all under the `@bendyline` scope, all public API under semver:
+Fourteen packages, all under the `@bendyline` scope, all public API under semver:
 
 | Package | What it is |
 |---|---|
@@ -20,13 +20,14 @@ Thirteen packages, all under the `@bendyline` scope, all public API under semver
 | `@bendyline/gezel-knowledge` | The `.gezk` toolchain: compiler, verified archive reader, retrieval |
 | `@bendyline/gezel-connectors-spectral` | Spawned Prismatic component host |
 | `@bendyline/gezel-script-stdlib` | Standard gate-script library |
+| `@bendyline/gezel-script-runtime` | Portable, capability-mediated script execution: the `ScriptExecutor` contract and the QuickJS-WASM executor |
 | `@bendyline/gezel-mcp` | The stdio MCP server |
 | `@bendyline/gezel-service` | `gezeld`, plus the bundled web UI and handboek |
 | `@bendyline/gezel-cli` | The `gezel` command line |
 
 Three tiers, and the tier is a property of the manifest, not a list:
 
-- **Published** — the thirteen above.
+- **Published** — the fourteen above.
 - **Versioned but not published** — `packages/app` and `packages/vscode`.
   multi-semantic-release versions, tags and changelogs them, but they stay
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
@@ -193,18 +194,25 @@ They catch publishing-shape bugs no per-package suite can see:
 ### `pnpm check:packages`
 
 [`scripts/check-package-consumers.mjs`](../scripts/check-package-consumers.mjs)
-packs all thirteen packages, `npm install`s the tarballs into a throwaway
+packs every published package, `npm install`s the tarballs into a throwaway
 **non-pnpm, non-workspace** project, and then:
 
 1. asserts every package resolved from a candidate tarball rather than the
    registry,
 2. enforces an 800 MiB logical `node_modules` budget,
-3. runs `npm audit --omit=dev --audit-level=high`,
+3. runs `npm audit --omit=dev` and fails on any high or critical advisory
+   that [`scripts/npm-consumer-audit-allowlist.json`](../scripts/npm-consumer-audit-allowlist.json)
+   does not accept with a reason and an expiry — stricter than the
+   workspace gates, because workspace overrides never reach this graph and
+   npm prints the count at the end of every consumer install,
 4. proves a clean-install macOS `node-pty` can spawn a shell,
 5. imports every public subpath under plain node,
 6. resolves the runtime-resolved specifiers,
 7. runs the installed `gezel` binary, including `gezel run` against an
-   already-running daemon,
+   already-running daemon, and a fresh-home `gezel run` with **no** mock
+   provider, which must stop before any download and print CLI setup
+   guidance (every other check here runs mocked, which is how a newcomer
+   retry loop once shipped),
 8. boots the installed `gezeld` with the mock provider, probes `/api/health`,
    creates a gezel, and asserts the daemon found its bundled UI and handboek.
 
@@ -379,7 +387,11 @@ npm token. Three things make that work, and all three are load-bearing:
 ### First publish (one time per package)
 
 Trusted publishing can only be configured on a package that already exists, so
-the thirteen are bootstrapped by hand once. Two things about that hand-publish are
+every package is bootstrapped by hand once.
+[`scripts/check-npm-bootstrap.mjs`](../scripts/check-npm-bootstrap.mjs) runs
+first in the release workflow and fails in seconds when a registered package
+is not on npm yet — without it, the release fails inside
+multi-semantic-release after the packages that depend on it have shipped. Two things about that hand-publish are
 not obvious:
 
 - **It must use `--no-provenance`.** Every manifest sets
@@ -413,7 +425,7 @@ not obvious:
    `publish` runs. `gezk` leads because `core` depends on it — it is the one
    published package with no workspace dependency of its own.
 2. On npmjs.com, register a trusted publisher per package — npm's bulk
-   trusted-publisher configuration makes thirteen manageable:
+   trusted-publisher configuration makes that manageable:
    - repository: `bendyline/gezel`
    - workflow: `.github/workflows/publish-npm.yml`
    - environment: **none** (the release job configures none, so the trusted

@@ -96,6 +96,9 @@ export default defineConfig({
   // and fragile. `@xmldom/xmldom` backs the DOMParser polyfill the DOCX importer
   // needs under node (no browser DOMParser global).
   external: [
+    // bin/gezeld imports the daemon through the package's own name so it
+    // stays a thin launcher over dist/index.js instead of a second bundle.
+    '@bendyline/gezel-service',
     '@github/copilot-sdk',
     'typescript',
     'undici',
@@ -127,7 +130,14 @@ export default defineConfig({
     if (!existsSync(handboekSrc)) {
       throw new Error(`handboek content missing at ${handboekSrc} — docs/handboek must exist`);
     }
-    cpSync(handboekSrc, 'dist/handboek-content', { recursive: true });
+    // The root README.md is the authors' guide (skills, macros, conventions),
+    // not an article: the loader never reads it, so it stays out of the
+    // published package.
+    const authoringGuide = resolve(handboekSrc, 'README.md');
+    cpSync(handboekSrc, 'dist/handboek-content', {
+      recursive: true,
+      filter: (source) => resolve(source) !== authoringGuide,
+    });
     // The bundled diffusers video server (`gezel_video_server.py`),
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.

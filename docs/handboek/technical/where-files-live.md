@@ -15,7 +15,8 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
 
 ```
 ~/.gezel/
-  config.json         providers, default model, the current Meester
+  config.json         provider choice, default model, the current Meester
+                      (API keys go to your system keychain, not here)
   gezels/
     {gezel}/
       gezel.md        name, role, model choice
