@@ -5,6 +5,8 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { LibreOfficeSetupCard } from './LibreOfficeSetupCard.js';
+import { OfficeSetupCard } from './OfficeSetupCard.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
 import { PiSetupCard } from './PiSetupCard.js';
 import { VSCodeSetupCard } from './VSCodeSetupCard.js';
@@ -386,6 +388,10 @@ export function ConnectedAppsPanel() {
         endpointsEnabled={endpointsEnabled}
         onChanged={refresh}
       />
+
+      <OfficeSetupCard key={`office-${harnessSetupRefreshKey}`} onChanged={refresh} />
+
+      <LibreOfficeSetupCard key={`libreoffice-${harnessSetupRefreshKey}`} onChanged={refresh} />
 
       <div className="settings-subsection">
         <h3>Ollama emulation</h3>

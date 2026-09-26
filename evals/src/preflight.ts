@@ -362,7 +362,10 @@ function readdirNamesSync(dir: string): string[] {
 }
 
 export interface PreflightOptions
-  extends Pick<TrialOptions, 'modelId' | 'engine' | 'mlxSourceHome' | 'cacheRoot' | 'llamaBin'> {
+  extends Pick<
+    TrialOptions,
+    'modelId' | 'engine' | 'mlxSourceHome' | 'cacheRoot' | 'llamaBin' | 'offline'
+  > {
   /** Where preflight trial dirs + cached reports live. */
   preflightRunsDir?: string;
   minGenTokensPerSec?: number;
@@ -492,6 +495,7 @@ export function preflightPolicyFingerprint(opts: PreflightOptions): string {
     launch: launch ?? null,
     launchEnv,
     cacheRoot: opts.cacheRoot ?? null,
+    offline: opts.offline ?? false,
     mlxSourceHome: opts.mlxSourceHome ?? null,
     llamaBinary: binaryIdentity(effectiveLlamaBinaryPath(opts, engine)),
     runtimeEntries: {
@@ -535,6 +539,7 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
     ...(opts.mlxSourceHome ? { mlxSourceHome: opts.mlxSourceHome } : {}),
     ...(opts.cacheRoot ? { cacheRoot: opts.cacheRoot } : {}),
     ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
+    ...(opts.offline ? { offline: true } : {}),
   });
 
   // Captured after the probe, so the memory figures reflect the state the

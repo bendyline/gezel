@@ -76,6 +76,20 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     install: () => ipcRenderer.invoke('gezel:autostart:install'),
     uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
   },
+  // Word / Excel / PowerPoint add-ins. The renderer passes only which apps;
+  // certificates, manifests, and paths come from the daemon.
+  officeHost: {
+    verify: () => ipcRenderer.invoke('gezel:office-host:verify'),
+    enable: (apps) => ipcRenderer.invoke('gezel:office-host:enable', apps),
+    repair: () => ipcRenderer.invoke('gezel:office-host:repair'),
+    disable: () => ipcRenderer.invoke('gezel:office-host:disable'),
+    clearCache: () => ipcRenderer.invoke('gezel:office-host:clear-cache'),
+  },
+  libreoffice: {
+    verify: () => ipcRenderer.invoke('gezel:libreoffice:verify'),
+    enable: () => ipcRenderer.invoke('gezel:libreoffice:enable'),
+    disable: () => ipcRenderer.invoke('gezel:libreoffice:disable'),
+  },
   // Ambient display (wallpaper). The renderer never supplies paths — the
   // main process resolves everything from GEZEL_HOME.
   ambient: {

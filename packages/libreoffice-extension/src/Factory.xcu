@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:component-data xmlns:oor="http://openoffice.org/2001/registry"
+                    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                    oor:name="Factories" oor:package="org.openoffice.Office.UI">
+  <node oor:name="Registered">
+    <node oor:name="UIElementFactories">
+      <node oor:name="com.bendyline.gezel.PanelFactory" oor:op="replace">
+        <prop oor:name="Type"><value>toolpanel</value></prop>
+        <prop oor:name="Name"><value>GezelPanelFactory</value></prop>
+        <prop oor:name="Module"><value/></prop>
+        <prop oor:name="FactoryImplementation"><value>com.bendyline.gezel.PanelFactory</value></prop>
+      </node>
+    </node>
+  </node>
+</oor:component-data>

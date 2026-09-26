@@ -130,6 +130,12 @@ import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
 
+import {
+  OFFICE_PANE_CSP,
+  isOfficeListenerRequest,
+  officeStaticRoutes,
+} from '../office-host/static-routes.js';
+import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
@@ -172,7 +178,21 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
 
   app.use('*', async (c, next) => {
     await next();
-    if (!c.req.path.startsWith('/preview/')) {
+    // The Office task pane shows the chat by framing this UI's embedded page
+    // from its own origin. Only that page, only same-origin, and only on the
+    // Office listener: every other response keeps frame-ancestors 'none'.
+    const embeddedInOfficePane =
+      c.req.path === '/' &&
+      c.req.query('embedded') === 'chat' &&
+      isOfficeListenerRequest(
+        // HTTP/2 carries the authority in `c.req.url`, not a Host header (see host-guard.ts).
+        c.req.header('host') ?? urlAuthority(c.req.url),
+        ctx.officeHostOrigin?.() ?? null,
+      );
+    if (c.req.path.startsWith('/office/')) {
+      c.res.headers.set('content-security-policy', OFFICE_PANE_CSP);
+      c.res.headers.set('x-frame-options', 'DENY');
+    } else if (!c.req.path.startsWith('/preview/')) {
       c.res.headers.set(
         'content-security-policy',
         [
@@ -192,13 +212,13 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           "object-src 'none'",
           "base-uri 'none'",
           "frame-src 'self'",
-          "frame-ancestors 'none'",
+          embeddedInOfficePane ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
           "form-action 'self'",
           // Chromium does not yet implement the draft CSP `webrtc` directive.
           // An unknown directive only produces console noise; it is not a guard.
         ].join('; '),
       );
-      c.res.headers.set('x-frame-options', 'DENY');
+      c.res.headers.set('x-frame-options', embeddedInOfficePane ? 'SAMEORIGIN' : 'DENY');
     }
     c.res.headers.set('x-content-type-options', 'nosniff');
     c.res.headers.set('referrer-policy', 'no-referrer');
@@ -557,6 +577,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));
   app.route('/api/vscode-setup', vscodeSetupRoutes(ctx));
+  app.route('/api/office-setup', officeSetupRoutes(ctx));
+  app.route('/api/libreoffice-setup', libreofficeSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));
@@ -675,6 +697,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // relative assets inherit authority without exposing a UI/root credential.
   app.route('/preview', previewRoutes(ctx, previewCapabilities));
 
+  // Office task-pane pages. Mounted before the UI catch-all, which would
+  // otherwise answer `/office/...` with the SPA shell.
+  if (ctx.officeDir) app.route('/office', officeStaticRoutes(ctx.officeDir));
+
   // Static UI. If the service was built with a bundled @bendyline/gezel-ui bundle,
   // serve it at `/`. Otherwise return a friendly placeholder so browsers
   // hitting the daemon directly see something sensible.
@@ -757,4 +783,12 @@ export function buildPreviewApp(
   app.get('/*', (c) => c.json({ error: 'not found' }, 404));
 
   return app;
+}
+
+function urlAuthority(url: string): string | undefined {
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -495,6 +495,67 @@ describe('handoff seed wording', () => {
     expect((await store.readTask('p1', task.num))?.activeStepId).toBe('review');
   });
 
+  it('does not spend fixed-action retries while a command approval is awaiting its answer', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Verify an approved command',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [
+        {
+          id: 'verify',
+          name: 'Verify',
+          prompt: 'Run the approved test, then write_artifact to verification.md.',
+          terminal: true,
+          toolPolicy: { outputMedium: 'artifact', allowTools: ['write_artifact'] },
+          advanceWhen: { file: 'verification.md', artifact: true, minBytes: 20 },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'verification.md', artifact: true, bytes: 20 }],
+            onReject: 'verify',
+            maxAttempts: 3,
+          },
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    mock.scriptSendDelay(200);
+    mock.script('');
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'verify',
+      kind: 'entry',
+    });
+    await vi.waitFor(
+      () => expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1),
+      { timeout: 5000, interval: 10 },
+    );
+    await store.writeQuestion({
+      id: 'test-approval',
+      projectId: 'p1',
+      gezelId: 'worker',
+      sessionId,
+      prompt: 'Approve the test?',
+      choices: ['Approve', 'Decline'],
+      multiSelect: false,
+      createdAt: new Date().toISOString(),
+      intent: {
+        kind: 'command-approval',
+        scope: 'script',
+        name: 'test',
+        body: 'node test.mjs',
+      },
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+    expect(exhausted).not.toHaveBeenCalled();
+    expect((await store.readTask('p1', task.num))?.activeStepId).toBe('verify');
+  });
+
   it('keeps peer task steps under the task root while recording the immediate handoff', async () => {
     const meester = await store.createGezel({ name: 'Meester', role: 'Meester' });
     const koray = await store.createGezel({ name: 'Koray', role: 'Researcher' });

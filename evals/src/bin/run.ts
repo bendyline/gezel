@@ -13,6 +13,7 @@
  *                        preflight; a single trial has no probe to read).
  *   --runs-dir <path>    override `<repo>/evals/runs/`
  *   --cache-root <path>  override `~/.gezel-eval-cache`
+ *   --offline            refuse providers or model setup that could use the network
  *   --llama-bin <path>   override the auto-resolved llama-server binary
  *   --image-bin <path>   override the auto-resolved sd-server binary
  *   --list               list scenarios and exit
@@ -50,6 +51,7 @@ async function main() {
     'llm-judge',
     'mlx-source-home',
     'model',
+    'offline',
     'remove-behaviors',
     'runs-dir',
     'timeout',
@@ -118,6 +120,7 @@ async function main() {
       ...(decodeRateOverride !== undefined ? { decodeRateTokensPerSec: decodeRateOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
+      ...(args.flags.offline ? { offline: true } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
       ...(args.flags['image-bin'] ? { sdBin: String(args.flags['image-bin']) } : {}),
       signal: ac.signal,

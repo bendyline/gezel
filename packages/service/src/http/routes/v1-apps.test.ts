@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
-import { v1AppsRoutes } from './v1-apps.js';
+import { isOfficePaneRequest, v1AppsRoutes } from './v1-apps.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -130,6 +130,47 @@ describe('POST /v1/apps/register', () => {
     });
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'request_too_large' });
+  });
+
+  it('admits a same-origin registration from the Office task pane only', async () => {
+    const ownOrigin = 'https://localhost:45123';
+    // A text/plain body stops at the 415 check, which sits after the origin
+    // gate and before the per-minute registration limit this file is near.
+    // 415 therefore means "admitted by the origin gate" without spending a slot.
+    const register = (headers: Record<string, string>, appId: string) =>
+      httpFetch(`${baseUrl}/v1/apps/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain', ...headers },
+        body: JSON.stringify({ appId, appName: 'Microsoft Office', scopes: ['openai'] }),
+      });
+    const prior = svc.context.officeHostOrigin;
+    svc.context.officeHostOrigin = () => ownOrigin;
+    try {
+      const pane = await register(
+        { Origin: ownOrigin, 'Sec-Fetch-Site': 'same-origin' },
+        'office-pane-test',
+      );
+      expect(pane.status).toBe(415);
+
+      const otherPort = await register(
+        { Origin: 'https://localhost:45124', 'Sec-Fetch-Site': 'same-site' },
+        'office-other-port',
+      );
+      expect(otherPort.status).toBe(403);
+      const crossSite = await register(
+        { Origin: ownOrigin, 'Sec-Fetch-Site': 'cross-site' },
+        'office-cross-site',
+      );
+      expect(crossSite.status).toBe(403);
+    } finally {
+      svc.context.officeHostOrigin = prior;
+    }
+    // With the Office host off, the pane's origin is just another browser.
+    const off = await register(
+      { Origin: ownOrigin, 'Sec-Fetch-Site': 'same-origin' },
+      'office-off',
+    );
+    expect(off.status).toBe(403);
   });
 
   it('rejects browser-originated and form-shaped drive-by registrations', async () => {
@@ -488,5 +529,27 @@ describe('DELETE /v1/apps/:appId/token', () => {
     const list = await v1('GET', '/v1/apps', { token: uiToken });
     const body = (await list.json()) as { apps: Array<{ appId: string }> };
     expect(body.apps.map((a) => a.appId)).not.toContain('admin-revoke');
+  });
+});
+
+describe('isOfficePaneRequest', () => {
+  const ctx = { officeHostOrigin: () => 'https://localhost:4000' };
+  it.each([
+    ['https://localhost:4000', 'same-origin', true],
+    ['https://localhost:4000', undefined, true],
+    ['https://localhost:4000', 'same-site', false],
+    ['https://localhost:4001', 'same-origin', false],
+    ['https://127.0.0.1:4000', 'same-origin', false],
+    [undefined, 'same-origin', false],
+  ] as const)('origin %s, site %s → %s', (origin, site, expected) => {
+    expect(isOfficePaneRequest(origin, site, ctx)).toBe(expected);
+  });
+  it('admits nothing when the Office host is not listening', () => {
+    expect(
+      isOfficePaneRequest('https://localhost:4000', 'same-origin', {
+        officeHostOrigin: () => null,
+      }),
+    ).toBe(false);
+    expect(isOfficePaneRequest('https://localhost:4000', 'same-origin', {})).toBe(false);
   });
 });

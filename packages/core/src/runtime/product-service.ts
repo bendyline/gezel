@@ -43,6 +43,7 @@ import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { roleHasTeamScope } from '../tools/access.js';
+import type { NativeToolBinding } from '../tools/native-tools.js';
 import { ChatEventBus } from './chat-events.js';
 import type { PortableContent } from './content.js';
 import { portableConversationHistory } from './conversation-history.js';
@@ -78,7 +79,6 @@ import { evaluatePortableTaskGate } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
-  type NativeToolBinding,
   type PortableToolListing,
   type PortableToolSpec,
   runPortableToolLoop,

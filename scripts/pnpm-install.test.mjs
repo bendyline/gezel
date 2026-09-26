@@ -497,6 +497,21 @@ test('a failed fetch leaves node_modules untouched', async (t) => {
   assert.equal(installCalled, false);
 });
 
+test('an explicit offline install keeps the preparatory fetch offline', async (t) => {
+  const root = await fixture(t);
+  let fetchArgs;
+  await runPreparedFrozenInstall({
+    repoRoot: root,
+    args: ['--offline'],
+    runFetchFn: async ({ args }) => {
+      fetchArgs = args;
+      return 0;
+    },
+    runInstallFn: async () => 0,
+  });
+  assert.deepEqual(fetchArgs, ['--offline', '--frozen-lockfile']);
+});
+
 test('fetch uses disposable modules paths outside the live workspace tree', async (t) => {
   const root = await fixture(t);
   let invocation;

@@ -111,6 +111,10 @@ export interface StartServiceOptions {
   vscodeBridgePort?: number;
   /** Override VS Code's User/profile directory. Tests must never write to a real one. */
   vscodeUserDir?: string;
+  /** Office host listener port (`0` = ephemeral). Production derives a stable one from `home`. */
+  officeHostPort?: number;
+  /** Office task-pane pages. Defaults to `office/` beside `uiDir`, then the build/dev locations. */
+  officeDir?: string;
 }
 
 export interface RunningService<C extends EngineContext = ServiceContext> {

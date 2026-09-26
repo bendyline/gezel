@@ -63,6 +63,31 @@ describe('service bundled assets', () => {
     expect(existsSync(resolve(service.dist, 'ui/index.html'))).toBe(true);
   });
 
+  it('stages the Office task pane beside the UI', () => {
+    // The daemon serves these at /office/* on its Office listener, and the
+    // add-in manifests it writes name them; a missing page is a blank pane.
+    for (const f of [
+      'office/word/taskpane.html',
+      'office/excel/taskpane.html',
+      'office/powerpoint/taskpane.html',
+      'office/commands.html',
+      'office/history-guard.js',
+      'office/icons/icon-16.png',
+      'office/icons/icon-32.png',
+      'office/icons/icon-64.png',
+      'office/icons/icon-80.png',
+    ]) {
+      expect(existsSync(resolve(service.dist, f)), f).toBe(true);
+    }
+  });
+
+  it('stages the LibreOffice extension beside the UI', () => {
+    const oxt = resolve(service.dist, 'libreoffice/gezel.oxt');
+    expect(existsSync(oxt)).toBe(true);
+    // A zip, not an empty placeholder: `PK\x03\x04`.
+    expect(readFileSync(oxt).subarray(0, 4).toString('hex')).toBe('504b0304');
+  });
+
   it('stages the handboek content', () => {
     expect(existsSync(resolve(service.dist, 'handboek-content'))).toBe(true);
   });

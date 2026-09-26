@@ -1,4 +1,10 @@
-import { CHAT_PROVIDERS, type ChatProvider, isChatProvider, isLocalEngine } from '../providers.ts';
+import {
+  CHAT_PROVIDERS,
+  type ChatProvider,
+  isChatProvider,
+  isLocalEngine,
+  runsOnThisDevice,
+} from '../providers.ts';
 import type { EvalScenario } from '../types.ts';
 
 export interface ParsedArgs {
@@ -223,7 +229,7 @@ export function resolveKeurmeesterFlag(
     );
     process.exit(2);
   }
-  if (isLocalEngine(providerName)) {
+  if (runsOnThisDevice(providerName)) {
     console.error(
       `--keurmeester ${providerName} is a local engine — the supervisor must run on a non-local provider so it never queues behind the stuck local slot.`,
     );

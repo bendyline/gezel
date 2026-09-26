@@ -262,6 +262,23 @@ export interface CraftbookTemplateSummary {
   triggers: string[];
   steps: CraftbookTemplateStepSummary[];
   entryStepId: string;
+  /** Launcher parameter contract carried by the resolved catalog manifest. */
+  paramSchema?: Record<string, unknown>;
+  /** Runtime connector preparation may add interpolation parameters. */
+  connectors?: Array<{
+    typeId: string;
+    sourceId?: string;
+    optional?: boolean;
+    reason?: string;
+  }>;
+  /** Declarative per-item fanout whose child steps receive item-shaped context. */
+  spawn?: {
+    overFile: string;
+    overArtifact?: boolean;
+    itemsPath?: string;
+    entryStepId?: string;
+    steps: CraftbookTemplateStepSummary[];
+  };
   /** Runtime safety/automation hooks carried by the indexed craftbook. */
   hooks?: Array<{
     phase: string;
@@ -279,6 +296,9 @@ export interface CraftbookTemplateStepSummary {
   description?: string;
   prompt?: string;
   suggestedRole?: string;
+  onEnter?: unknown;
+  onExit?: unknown;
+  consumes?: Array<{ file: string; artifact?: boolean }>;
   advanceWhen?: unknown;
   gate?: unknown;
   next?: string;

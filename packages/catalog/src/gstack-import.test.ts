@@ -21,8 +21,10 @@ import {
 import {
   type Overlay,
   OverlaySchema,
+  applyFrozenOverlayPatches,
   applyOverlay,
   convertSnapshotSkill,
+  enforceQualityReviewRouting,
   mergeWaveIdentity,
 } from './gstack-import.js';
 import { CAREFUL_MODE, FREEZE_SCOPE } from './guardrail-books.js';
@@ -312,7 +314,13 @@ describe('shipped skill conversions — regen fidelity', () => {
         nonterminal.every((step) => normalizeStepGate(step.gate!).maxAttempts > 0),
         `${book.id}: every gate needs a bounded retry budget`,
       ).toBe(true);
-      expect(byId.get('evaluate')?.next).toBe('repair');
+      expect(byId.get('evaluate')?.next).toBe('finish');
+      expect(
+        normalizeStepGate(byId.get('evaluate')!.gate!).scripts?.some(
+          (script) => script.name === 'checkFixReview',
+        ),
+        `${book.id}: review verdict routing must be runtime-enforced`,
+      ).toBe(true);
       expect(byId.get('repair')?.next).toBe('evaluate');
       expect(byId.get('finish')?.terminal).toBe(true);
       expect(byId.get('needs-user')?.terminal).toBe(true);
@@ -440,6 +448,70 @@ describe('applyOverlay', () => {
     });
     expect(out.name).toBe('Renamed');
     expect(out.plan).toBe('Original plan.\n\nAppended guidance.');
+  });
+
+  it('applies explicit step patches to frozen books without regenerating their graph', () => {
+    const out = applyFrozenOverlayPatches(base, {
+      frozen: true,
+      steps: { a: { prompt: 'Use the package test runner and preserve its receipt.' } },
+    });
+    expect(out.plan).toBe('Original plan.');
+    expect(out.steps.map((step) => step.id)).toEqual(['a', 'b']);
+    expect(out.steps[0]?.prompt).toContain('package test runner');
+  });
+
+  it('keeps frozen review routing idempotent and aligned with migrated gate paths', () => {
+    const workflow = {
+      plan: 'Review the result.',
+      phases: [
+        {
+          id: 'build',
+          name: 'Build',
+          description: 'Build the result.',
+          suggestedRole: 'builder',
+          prompt: 'Write the result.',
+          output: { path: 'reports/result.md', minBytes: 100 },
+        },
+      ],
+      review: {
+        artifactPath: 'reports/result.md',
+        reviewPath: 'reviews/result-review.md',
+        criteria: ['The result is complete.'],
+      },
+    } satisfies NonNullable<Overlay['workflow']>;
+    const generated = applyOverlay(base, { workflow });
+    const migrated = CraftbookDocSchema.parse({
+      ...generated,
+      steps: generated.steps.map((step) =>
+        step.id === 'evaluate'
+          ? {
+              ...step,
+              gate: {
+                ...normalizeStepGate(step.gate!),
+                checks: normalizeStepGate(step.gate!).checks.map((check) =>
+                  'file' in check && check.file === workflow.review.reviewPath
+                    ? { ...check, file: `{{workPath}}/${check.file}` }
+                    : check,
+                ),
+              },
+            }
+          : step,
+      ),
+    });
+
+    const once = enforceQualityReviewRouting(migrated, workflow);
+    const twice = enforceQualityReviewRouting(once, workflow);
+    const evaluate = twice.steps.find((step) => step.id === 'evaluate')!;
+    const marker = 'List the findings as a markdown table';
+    expect(evaluate.prompt?.split(marker)).toHaveLength(2);
+    expect(normalizeStepGate(evaluate.gate!).scripts).toContainEqual(
+      expect.objectContaining({
+        name: 'checkFixReview',
+        inputs: expect.objectContaining({
+          reviewPath: '{{workPath}}/reviews/result-review.md',
+        }),
+      }),
+    );
   });
 
   it('planAppend on a plan-less doc becomes the plan', () => {

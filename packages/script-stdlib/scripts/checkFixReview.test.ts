@@ -10,6 +10,8 @@ const h = vi.hoisted(() => {
   const workspace = new Map<string, string>();
   const artifacts = new Map<string, string>();
   let task: Record<string, unknown> | null = null;
+  let currentStep: Record<string, unknown> | null = null;
+  let steps: Record<string, unknown>[] = [];
   let input: Record<string, unknown> = {};
   let output: unknown;
   let stamped = false;
@@ -19,6 +21,12 @@ const h = vi.hoisted(() => {
     artifacts,
     setTask(next: Record<string, unknown> | null) {
       task = next;
+    },
+    setCurrentStep(next: Record<string, unknown> | null) {
+      currentStep = next;
+    },
+    setSteps(next: Record<string, unknown>[]) {
+      steps = next;
     },
     begin(next: Record<string, unknown>) {
       input = next;
@@ -33,6 +41,8 @@ const h = vi.hoisted(() => {
       workspace.clear();
       artifacts.clear();
       task = null;
+      currentStep = null;
+      steps = [];
     },
     gezel: {
       get input() {
@@ -48,6 +58,13 @@ const h = vi.hoisted(() => {
         async get() {
           if (!task) throw new Error('task not found');
           return task;
+        },
+        async currentStep() {
+          if (!currentStep) throw new Error('current step not found');
+          return currentStep;
+        },
+        async steps() {
+          return steps;
         },
       },
       fs: {
@@ -108,6 +125,7 @@ function reviewDoc(opts: { verdict: string; rows?: string[] }): string {
 beforeEach(() => {
   h.reset();
   h.setTask({ num: 7, artifactDir: 'tasks/7' });
+  h.setCurrentStep({ id: 'evaluate', attemptCount: 1 });
 });
 
 describe('checkFixReview', () => {
@@ -184,6 +202,67 @@ describe('checkFixReview', () => {
     expect(res.goto).toBe('fix');
     expect(res.message).toContain('src/auth.js');
     expect(res.message).toContain('guard the branch');
+    expect(res.message).toContain('Review round 1 of 3');
+  });
+
+  it('bounds REVISE loops with the durable evaluate-step activation count', async () => {
+    h.workspace.set('src/auth.js', 'x');
+    h.artifacts.set(
+      REVIEW,
+      reviewDoc({
+        verdict: 'REVISE',
+        rows: ['| major | src/auth.js | 5 | check bypassed | guard the branch |'],
+      }),
+    );
+    h.setSteps([
+      { id: 'fix', terminal: false },
+      { id: 'evaluate', terminal: false },
+      { id: 'needs-user', terminal: true },
+    ]);
+
+    h.setCurrentStep({ id: 'evaluate', attemptCount: 1 });
+    expect((await run({})).goto).toBe('fix');
+    h.setCurrentStep({ id: 'evaluate', attemptCount: 2 });
+    expect((await run({})).goto).toBe('fix');
+    h.setCurrentStep({ id: 'evaluate', attemptCount: 3 });
+    const exhausted = await run({});
+    expect(exhausted.goto).toBe('needs-user');
+    expect(exhausted.message).toMatch(/budget exhausted.*3 of 3/i);
+    expect(exhausted.message).toContain('DONE_WITH_CONCERNS');
+  });
+
+  it('holds evaluate in place at budget exhaustion when no terminal escalation exists', async () => {
+    h.workspace.set('src/auth.js', 'x');
+    h.artifacts.set(
+      REVIEW,
+      reviewDoc({
+        verdict: 'REVISE',
+        rows: ['| major | src/auth.js | 5 | check bypassed | guard the branch |'],
+      }),
+    );
+    h.setCurrentStep({ id: 'evaluate', attemptCount: 2 });
+
+    const res = await run({ maxReviewRounds: 2 });
+    expect(res.decision).toBe('reject');
+    expect(res.goto).toBeUndefined();
+    expect(res.message).toMatch(/holding this evaluate step/i);
+  });
+
+  it('fails closed instead of routing when the review-round counter is unavailable', async () => {
+    h.workspace.set('src/auth.js', 'x');
+    h.artifacts.set(
+      REVIEW,
+      reviewDoc({
+        verdict: 'REVISE',
+        rows: ['| major | src/auth.js | 5 | check bypassed | guard the branch |'],
+      }),
+    );
+    h.setCurrentStep(null);
+
+    const res = await run({});
+    expect(res.decision).toBe('reject');
+    expect(res.goto).toBeUndefined();
+    expect(res.message).toMatch(/refused to start an unbounded repair loop/i);
   });
 
   it('REVISE with an empty findings table is not actionable', async () => {

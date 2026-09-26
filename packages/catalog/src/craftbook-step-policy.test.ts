@@ -105,6 +105,48 @@ describe('craftbook step policy defaults', () => {
     expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('workspace-fs-write');
   });
 
+  it('keeps source writing available for an implementation and regression-test phase', () => {
+    const doc: CraftbookDoc = {
+      name: 'Root cause investigation',
+      steps: [
+        {
+          name: 'Implement the smallest fix and verify it',
+          prompt:
+            'Implement the smallest maintainable change that breaks the documented causal chain. Add or strengthen a regression test that fails on the old behavior and passes with the fix. Write the completed report with write_artifact.',
+          advanceWhen: { file: 'reports/root-cause-investigation.md', artifact: true },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.outputMedium).toBe('artifact');
+    expect(step.toolPolicy?.additionalOutputMedia).toEqual(['workspace']);
+    expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('workspace-fs-write');
+  });
+
+  it('removes a stale generated workspace-write denial when newly inferred media requires it', () => {
+    const doc: CraftbookDoc = {
+      name: 'Root cause investigation',
+      steps: [
+        {
+          name: 'Implement the smallest fix and verify it',
+          prompt:
+            'Add or strengthen a regression test that fails on the old behavior. Write the report with write_artifact.',
+          advanceWhen: { file: 'reports/root-cause-investigation.md', artifact: true },
+          toolPolicy: {
+            outputMedium: 'artifact',
+            disallowBuiltinToolsets: ['workspace-fs-write', 'web'],
+          },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.additionalOutputMedia).toEqual(['workspace']);
+    expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('workspace-fs-write');
+    expect(step.toolPolicy?.disallowBuiltinToolsets).toContain('web');
+  });
+
   it('declares a task note as secondary output when an artifact step requires one', () => {
     const doc: CraftbookDoc = {
       name: 'Scope review',

@@ -28,6 +28,7 @@ import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
@@ -107,6 +108,7 @@ function readEmbeddedParams(): {
   bg: string | null;
   fg: string | null;
   fontFamily: string | null;
+  compact: boolean;
 } | null {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
@@ -122,10 +124,20 @@ function readEmbeddedParams(): {
     bg: params.get('bg'),
     fg: params.get('fg'),
     fontFamily: params.get('fontFamily'),
+    // Narrow hosts (the Office task pane) drop the chat's right rail.
+    compact: params.get('compact') === '1',
   };
 }
 
 const EMBEDDED_PARAMS = readEmbeddedParams();
+
+// A host that names a gezel opens the chat addressed to them. ProjectChat
+// reads this memory before its own lead/roster ranking.
+if (EMBEDDED_PARAMS?.gezelId) {
+  writeChatThreadSelection(projectRecipientKey(EMBEDDED_PARAMS.projectId), {
+    gezelId: EMBEDDED_PARAMS.gezelId,
+  });
+}
 
 export function App() {
   if (EMBEDDED_PARAMS) {
@@ -139,6 +151,7 @@ export function App() {
           bg={EMBEDDED_PARAMS.bg}
           fg={EMBEDDED_PARAMS.fg}
           fontFamily={EMBEDDED_PARAMS.fontFamily}
+          compact={EMBEDDED_PARAMS.compact}
         />
       </Suspense>
     );

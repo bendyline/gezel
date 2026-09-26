@@ -11,6 +11,7 @@
       "packages/knowledge/conformance/**",
       "**/dist/**",
       "**/dist-embedded/**",
+      "**/dist-office/**",
       "**/dist-e2e/**",
       "**/.build/**",
       "**/android/app/src/main/assets/**",

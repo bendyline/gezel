@@ -16,6 +16,7 @@
  *                        signature (default 3; env GEZEL_EVAL_TRIAGE_K).
  *                        Only fires at --parallel 1.
  *   --no-triage          disable auto-triage (equivalent to --triage-k 0).
+ *   --offline            refuse providers or model setup that could use the network.
  *
  * One positional  → today's behavior. Output at `evals/runs/batch-<ts>/`.
  * Two or more     → matrix mode. Output at `evals/runs/matrix-<ts>/<scenarioId>/`
@@ -53,6 +54,7 @@ async function main() {
     'mlx-source-home',
     'model',
     'no-triage',
+    'offline',
     'parallel',
     'runs-dir',
     'scenario',
@@ -133,6 +135,7 @@ async function main() {
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
+      ...(args.flags.offline ? { offline: true } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
       ...(args.flags['image-bin'] ? { sdBin: String(args.flags['image-bin']) } : {}),
       ...(args.flags['skip-preflight'] ? { skipPreflight: true } : {}),

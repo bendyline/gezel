@@ -391,6 +391,52 @@ remove_all_user_launch_agents() {
   done < <(/usr/bin/dscl . -list /Users UniqueID 2>/dev/null || true)
 }
 
+# Word, Excel and PowerPoint read Gezel's add-in manifest from a copy in each
+# app's sandbox container. Remove those copies for every account, as that
+# account (same symlink reasoning as the launch agents above).
+remove_all_user_office_addins() {
+  echo "[gezel uninstall] removing Gezel from Word, Excel, and PowerPoint"
+  while read -r username uid; do
+    [ -n "${username:-}" ] || continue
+    [[ "${uid:-}" =~ ^[0-9]+$ ]] || continue
+    [ "$uid" -gt 0 ] || continue
+    home=$(read_user_attribute "/Users/${username}" NFSHomeDirectory)
+    if ! is_safe_user_home "$home"; then
+      continue
+    fi
+    for container in com.microsoft.Word com.microsoft.Excel com.microsoft.Powerpoint; do
+      wef="${home}/Library/Containers/${container}/Data/Documents/wef"
+      [ -d "$wef" ] || continue
+      /usr/bin/sudo -H -u "$username" /usr/bin/find "$wef" -maxdepth 1 -type f \
+        -name 'gezel-*.xml' -delete 2>/dev/null || true
+    done
+  done < <(/usr/bin/dscl . -list /Users UniqueID 2>/dev/null || true)
+}
+
+# The Office add-in's certificate authority lives in the installing user's
+# login Keychain (Settings -> Connected Apps put it there). Only that user's
+# session can change their Keychain, so this covers the account running the
+# uninstall; another account removes its own from Settings before uninstalling.
+remove_target_user_office_certificate() {
+  [[ "${TARGET_USER_UID:-}" =~ ^[0-9]+$ ]] || return 0
+  target_username=$(user_for_uid "$TARGET_USER_UID") || return 0
+  target_home=$(read_user_attribute "/Users/${target_username}" NFSHomeDirectory)
+  is_safe_user_home "$target_home" || return 0
+  ca="${target_home}/.gezel/integrations/office/ca.pem"
+  [ -f "$ca" ] || return 0
+  keychain="${target_home}/Library/Keychains/login.keychain-db"
+  [ -f "$keychain" ] || keychain="${target_home}/Library/Keychains/login.keychain"
+  [ -f "$keychain" ] || return 0
+  sha1=$(/usr/bin/sudo -H -u "$target_username" /usr/bin/openssl x509 -noout -fingerprint -sha1 \
+    -in "$ca" 2>/dev/null | /usr/bin/sed 's/.*=//; s/://g')
+  [[ "$sha1" =~ ^[0-9A-Fa-f]{40}$ ]] || return 0
+  echo "[gezel uninstall] removing Gezel's Office certificate from ${target_username}'s Keychain"
+  if ! /bin/launchctl asuser "$TARGET_USER_UID" /usr/bin/sudo -H -u "$target_username" \
+    /usr/bin/security delete-certificate -Z "$sha1" "$keychain" >/dev/null 2>&1; then
+    echo "[gezel uninstall] warning: macOS did not allow Gezel's Office certificate to be removed" >&2
+  fi
+}
+
 stop_target_user_daemon() {
   runtime_pid_file="$1/.gezel/runtime/pid"
   [ -f "$runtime_pid_file" ] || return 0
@@ -486,6 +532,8 @@ echo "[gezel uninstall] clearing persistent launchd override"
 /bin/launchctl enable "system/${DAEMON_LABEL}" 2>/dev/null || true
 
 remove_all_user_launch_agents
+remove_all_user_office_addins
+remove_target_user_office_certificate
 
 echo "[gezel uninstall] removing LaunchDaemon plist"
 /bin/rm -f -- "$PLIST"

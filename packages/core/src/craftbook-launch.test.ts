@@ -3,6 +3,7 @@ import {
   MIN_TASK_DESCRIPTION_LENGTH,
   composeCraftbookLaunch,
   composeCraftbookTaskDescription,
+  craftbookReferenceSubject,
   fillMainContentParam,
   isRuntimeTemplateDefault,
   launchFormParamSchema,
@@ -92,6 +93,48 @@ describe('fillMainContentParam', () => {
   });
 });
 
+describe('craftbookReferenceSubject', () => {
+  it('is the main parameter when the launch brings no source of its own', () => {
+    expect(
+      craftbookReferenceSubject({ paramSchema: deckSchema, params: { topic: ' quiche ' } }),
+    ).toBe('quiche');
+  });
+
+  it('stands down when the launch supplies its own source', () => {
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche', sourcePath: 'brief.docx' },
+      }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche', content: 'Eggs, cream, lardons.' },
+      }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: deckSchema,
+        params: { topic: 'quiche' },
+        inputs: { notes: { from: 'workspace', path: 'notes' } },
+      }),
+    ).toBeNull();
+  });
+
+  it('is null with no main parameter or an empty one', () => {
+    expect(
+      craftbookReferenceSubject({ paramSchema: deckSchema, params: { topic: '' } }),
+    ).toBeNull();
+    expect(
+      craftbookReferenceSubject({
+        paramSchema: { properties: { workPath: { type: 'string' } } },
+        params: { workPath: '.' },
+      }),
+    ).toBeNull();
+  });
+});
+
 describe('composeCraftbookTaskDescription', () => {
   it('keeps a long enough message verbatim', () => {
     const message = 'Please build a short deck about the history of Delft for new hires.';
@@ -132,8 +175,11 @@ describe('stringifyCraftbookParamValues', () => {
         e: null,
         f: undefined,
         g: { nested: 1 },
+        h: ['bluesky', 'x'],
+        i: [],
+        j: [{ nested: 2 }],
       }),
-    ).toEqual({ a: 'x', b: '3', c: 'true' });
+    ).toEqual({ a: 'x', b: '3', c: 'true', h: 'bluesky,x' });
   });
 });
 
@@ -143,17 +189,21 @@ describe('paramAsksUser', () => {
     expect(paramAsksUser({ type: 'string' })).toBe(true);
   });
 
-  it('does not ask for a parameter whose default the daemon resolves', () => {
-    expect(paramAsksUser({ type: 'string', default: '{{task.dir}}' })).toBe(false);
-    expect(paramAsksUser({ type: 'string', default: 'pdf/task-{{ task.num }}/report.md' })).toBe(
-      false,
+  it('hides only the runtime-owned working folder', () => {
+    expect(paramAsksUser({ type: 'string', default: '{{task.dir}}' }, 'workPath')).toBe(false);
+    expect(
+      paramAsksUser({ type: 'string', default: 'pdf/task-{{ task.num }}/report.md' }, 'outputPath'),
+    ).toBe(true);
+    expect(paramAsksUser({ type: 'string', default: '{{outputDir}}/deck.pptx' }, 'outputPath')).toBe(
+      true,
     );
-    expect(paramAsksUser({ type: 'string', default: '{{outputDir}}/deck.pptx' })).toBe(false);
   });
 
   it('lets the askUser annotation win either way', () => {
     expect(paramAsksUser({ type: 'string', default: '', askUser: false })).toBe(false);
-    expect(paramAsksUser({ type: 'string', default: '{{task.dir}}', askUser: true })).toBe(true);
+    expect(paramAsksUser({ type: 'string', default: '{{task.dir}}', askUser: true }, 'workPath')).toBe(
+      true,
+    );
   });
 
   it('ignores a non-boolean annotation and malformed properties', () => {

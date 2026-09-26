@@ -1,4 +1,9 @@
-import type { CreateTaskRequest, Task } from '@bendyline/gezel';
+import {
+  type CreateTaskRequest,
+  type Task,
+  type TaskReferences,
+  craftbookReferenceSubject,
+} from '@bendyline/gezel';
 import { ConnectorPrepError } from '../connectors/task-prep.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
@@ -26,10 +31,19 @@ import type { TaskRunner } from './runner.js';
  * milliseconds and the durable check alone would let both through.
  */
 export interface TaskLaunchDeps {
-  tasks: Pick<TaskManager, 'create' | 'list'>;
+  tasks: Pick<TaskManager, 'create' | 'list' | 'describeCraftbook'>;
   store: Pick<Store, 'getProject' | 'getGezel'>;
   taskRunner: Pick<TaskRunner, 'enqueueHandoff'>;
   history?: Pick<HistoryManager, 'log'>;
+  /**
+   * Search the reference corpora for a craftbook launch's subject (see
+   * `gatherTaskReferences`). Unset → tasks launch without a reference list.
+   */
+  gatherReferences?: (args: {
+    projectId: string;
+    subject: string;
+    craftbookName: string;
+  }) => Promise<TaskReferences | null>;
 }
 
 export interface TaskLaunchOptions {
@@ -71,8 +85,9 @@ export class TaskLauncher {
       const inflightKey = `${projectId}:${key}`;
       const pending = this.inflight.get(inflightKey);
       if (pending) return { task: await pending, reused: true };
-      const create = this.deps.tasks.create(projectId, body, {
-        origin: { kind: 'craftbook-invocation', key },
+      const create = this.create(projectId, body, options, {
+        kind: 'craftbook-invocation',
+        key,
       });
       this.inflight.set(inflightKey, create);
       let task: Task;
@@ -83,8 +98,50 @@ export class TaskLauncher {
       }
       return this.finish(task, options);
     }
-    const task = await this.deps.tasks.create(projectId, body);
+    const task = await this.create(projectId, body, options);
     return this.finish(task, options);
+  }
+
+  /**
+   * Create the task, with its reference list when this is a book started
+   * from the get-go. Gathered before create so the list lands in the same
+   * write as the task and is in place before the entry step is dispatched;
+   * inside the coalesced create, so a repeated launch searches once.
+   */
+  private async create(
+    projectId: string,
+    body: TaskLaunchRequest,
+    options: TaskLaunchOptions,
+    origin?: Task['origin'],
+  ): Promise<Task> {
+    const references = options.dispatchEntry ? await this.referencesFor(projectId, body) : null;
+    return this.deps.tasks.create(projectId, body, {
+      ...(origin ? { origin } : {}),
+      ...(references ? { references } : {}),
+    });
+  }
+
+  private async referencesFor(
+    projectId: string,
+    body: TaskLaunchRequest,
+  ): Promise<TaskReferences | null> {
+    const gather = this.deps.gatherReferences;
+    if (!gather || !body.craftbookId || body.status === 'draft') return null;
+    if (body.cron || body.nightShift) return null;
+    const book = await this.deps.tasks
+      .describeCraftbook(projectId, body.craftbookId, {
+        ...(body.craftbookSourceId ? { sourceId: body.craftbookSourceId } : {}),
+        ...(body.craftbookVersion ? { version: body.craftbookVersion } : {}),
+      })
+      .catch(() => null);
+    if (!book) return null;
+    const subject = craftbookReferenceSubject({
+      paramSchema: book.paramSchema,
+      ...(body.craftbookParams ? { params: body.craftbookParams } : {}),
+      ...(body.inputs ? { inputs: body.inputs } : {}),
+    });
+    if (!subject) return null;
+    return gather({ projectId, subject, craftbookName: book.name }).catch(() => null);
   }
 
   /** A live task already carrying this invocation key, if any. */

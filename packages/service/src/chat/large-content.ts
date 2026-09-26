@@ -14,7 +14,7 @@
  * per-model numCtx through here is a deliberate follow-up seam.
  */
 
-const LOCAL_PROVIDERS = new Set(['llama-cpp', 'mlx', 'ollama']);
+const LOCAL_PROVIDERS = new Set(['llama-cpp', 'mlx', 'ollama', 'apple-foundation-models']);
 
 const DEFAULT_LOCAL_BUDGET_CHARS = 12_000;
 const DEFAULT_CLOUD_BUDGET_CHARS = 400_000;

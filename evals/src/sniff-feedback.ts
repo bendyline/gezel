@@ -810,8 +810,8 @@ export async function postSniffFeedback(
   const structuralRewriteRepair =
     structuralOrderRepairLine(filePath, sniff.failReason) !== undefined;
   const repeatLine = plateauDriven
-    ? sniffPlateauEscalationLine(filePath, sniff, stagedAttempts)
-    : sniffEscalationLine(filePath, sniff, stagedAttempts);
+    ? sniffPlateauEscalationLine(filePath, sniff, stagedAttempts, opts)
+    : sniffEscalationLine(filePath, sniff, stagedAttempts, opts);
   const text =
     appendOnlyRepair && stage > 0
       ? `${sniffAppendEscalationLine(filePath, sniff, stagedAttempts)}\n\n${formatNudge(filePath, sniff, opts)}`
@@ -1036,9 +1036,14 @@ function sniffPlateauEscalationLine(
   filePath: string,
   sniff: SniffResult,
   attempts: number,
+  opts: SniffFeedbackOptions,
 ): string {
   const score = typeof sniff.score === 'number' ? sniff.score : 0;
-  return `SCORE PLATEAU — ${attempts} completed repairs and the scenario score is still ${score}. Each repair fixed the previously named detail only for a DIFFERENT check to fail; you are patching symptoms one at a time from memory. First re-read \`${filePath}\` with your file-read tool (\`read_file({ path: ${JSON.stringify(filePath)} })\`, or your built-in \`Read\` when \`read_file\` is not in your tool list) to see the current content, then re-read the scenario prompt and mission objectives, and fix EVERY remaining gap in \`${filePath}\` in one pass — not just the failure named below.`;
+  const readInstruction =
+    opts.surface === 'artifacts'
+      ? `First re-read \`${filePath}\` from the artifacts drawer with \`read_artifact({ path: ${JSON.stringify(filePath)} })\` to see the current content`
+      : `First re-read \`${filePath}\` with your file-read tool (\`read_file({ path: ${JSON.stringify(filePath)} })\`, or your built-in \`Read\` when \`read_file\` is not in your tool list) to see the current content`;
+  return `SCORE PLATEAU — ${attempts} completed repairs and the scenario score is still ${score}. Each repair fixed the previously named detail only for a DIFFERENT check to fail; you are patching symptoms one at a time from memory. ${readInstruction}, then re-read the scenario prompt and mission objectives, and fix EVERY remaining gap in \`${filePath}\` in one pass — not just the failure named below.`;
 }
 
 /** Terminal reason for a plateau-driven exhaustion — names the shape honestly. */
@@ -1060,7 +1065,12 @@ function plateauExhaustedFailure(
   };
 }
 
-function sniffEscalationLine(filePath: string, sniff: SniffResult, attempts: number): string {
+function sniffEscalationLine(
+  filePath: string,
+  sniff: SniffResult,
+  attempts: number,
+  opts: SniffFeedbackOptions,
+): string {
   const missing = (sniff.missingRequiredSignals ?? []).join(', ');
   // The fresh-read requirement is load-bearing: a completed repair that
   // left the same check failing means the model's mental copy of the file
@@ -1068,6 +1078,9 @@ function sniffEscalationLine(filePath: string, sniff: SniffResult, attempts: num
   // land the way it believes. Wild-caught on qwen3.5-9b × schema-migration
   // (0/5): three rewrites of the checked file without sniff movement, each
   // patching from memory of a file that no longer said what it thought.
+  if (opts.surface === 'artifacts') {
+    return `REPEAT MISS — attempt ${attempts} on artifact \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Your last edit did not change what the checker reads, so first call \`read_artifact({ path: ${JSON.stringify(filePath)} })\` and find the exact section the failure below names in the CURRENT drawer copy. Then re-emit the full corrected artifact with \`write_artifact({ path: ${JSON.stringify(filePath)}, content: <full corrected content> })\`. Do not use \`read_file\`, \`write_file\`, or workspace patch tools for this drawer artifact, and do not reply that it is done without the tool call.`;
+  }
   return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Your last edit did not change what the check reads, so your mental copy of this file is stale — first re-read it with your file-read tool (\`read_file({ path: ${JSON.stringify(filePath)} })\`, or your built-in \`Read\` when \`read_file\` is not in your tool list) and find the exact section the failure below names in the CURRENT content. Do not rewrite the whole file and do not reply that it is done. Then make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
 }
 
@@ -1236,13 +1249,20 @@ function formatNudge(
             ? `This is a source-file quality miss, not a one-line patch. Replace \`${filePath}\` with one complete, more substantive version using \`write_file\`; target roughly 5-7 KB of real HTML/CSS/JS. Add actual gameplay/app behavior such as HUD details, health/lives, enemy behavior, collisions, restart/game-over state, or visual effects. Do not pad with comments or repeated no-op code. Do not use \`write_artifact\` for HTML/source deliverables; use workspace \`write_file\` with the path relative to the workspace root. Your next assistant action should be that \`write_file\` call, or if you lack workspace write access, make a blocking handoff to a Builder/Developer with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\`.`
             : isWorkingImageFailure(sniff)
               ? workingImageRepair
-              : [
-                  'The artifact exists but the trial-level checker is waiting for the missing signals above.',
-                  'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable.',
-                  'If this is a small edit, use `replace_in_file` or `replace_lines`; otherwise use `write_file` to re-emit the checked file.',
-                  `Your next assistant action should be a file-writing tool call for \`${filePath}\`, not a prose summary saying it is fixed.`,
-                  'If a signal name is unclear (e.g. `working-image` means an `<img src>` that actually resolves to a real file in the workspace — not just any `<img>` tag), think about what would make the page actually function the way the user asked for it.',
-                ].join(' ');
+              : opts.surface === 'artifacts'
+                ? [
+                    'The artifact exists but the trial-level checker is waiting for the missing signals above.',
+                    `Re-read the current drawer copy with \`read_artifact({ path: ${JSON.stringify(filePath)} })\`.`,
+                    'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, then re-emit the full corrected drawer copy with `write_artifact`.',
+                    `Your next assistant action should be \`write_artifact({ path: ${JSON.stringify(filePath)}, content: <full corrected content> })\`, not \`write_file\` and not a prose summary saying it is fixed.`,
+                  ].join(' ')
+                : [
+                    'The artifact exists but the trial-level checker is waiting for the missing signals above.',
+                    'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable.',
+                    'If this is a small edit, use `replace_in_file` or `replace_lines`; otherwise use `write_file` to re-emit the checked file.',
+                    `Your next assistant action should be a file-writing tool call for \`${filePath}\`, not a prose summary saying it is fixed.`,
+                    'If a signal name is unclear (e.g. `working-image` means an `<img src>` that actually resolves to a real file in the workspace — not just any `<img>` tag), think about what would make the page actually function the way the user asked for it.',
+                  ].join(' ');
 
   return [
     `[scenario check] I looked at \`${filePath}\` and the success criteria aren't met yet.`,

@@ -17,6 +17,7 @@ import {
   createTrustingFetch,
   discoverOrSpawn,
   electronNativeBinCandidates,
+  ensureProjectForFolder as ensureClientProjectForFolder,
   isProcessAlive,
   readRuntime,
   readSystemServiceEndpoint,
@@ -794,38 +795,25 @@ export function fileTokenStorage(storageKey: string): {
 }
 
 /**
- * Ensure a project bound to `folderPath` exists; return its id. Mirrors the
- * VS Code extension's `ensureProjectForWorkspace`: exact `workingDir` match
- * → adopt an orphan project by name → else create + bind.
+ * Ensure a project bound to `folderPath` exists; return its id. Uses the
+ * shared `ensureProjectForFolder` (exact `workingDir` match → adopt an orphan
+ * project by name → else create + bind), which the VS Code extension and the
+ * app SDK use too.
  */
 export async function ensureProjectForFolder(
   client: GezelClient,
   folderPath: string,
 ): Promise<string> {
   const wd = resolve(folderPath);
-  const eq = (a: string | undefined, b: string): boolean =>
-    !!a && (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-
-  const { projects } = await client.listProjects();
-  const exact = projects.find((p) => eq(p.workingDir, wd));
-  if (exact) return exact.id;
-
   const name = basename(wd) || 'workspace';
-  const orphan = projects.find((p) => !p.workingDir && p.name === name);
-  if (orphan) {
-    await client.setProjectWorkingDir(orphan.id, wd);
-    return orphan.id;
-  }
-
-  const created = await client.createProject({
-    name,
+  const result = await ensureClientProjectForFolder(client, wd, {
+    mode: 'solo',
+    source: 'cli',
     description: `CLI workspace at ${wd}`,
     about: `${name} — working directory ${wd}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
     missionObjectives: `${name} — fill in concrete success criteria for this project.`,
-    mode: 'solo',
-    workingDir: wd,
   });
-  return created.id;
+  return result.projectId;
 }
 
 /**

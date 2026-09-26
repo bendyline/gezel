@@ -501,10 +501,11 @@ function safeFrozenInstallArgs(args, allowPurge) {
 /** Fetch every locked package in isolation before pnpm may touch the live node_modules. */
 export async function runPreparedFrozenInstall(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
+  const requestedArgs = options.args ?? [];
   const fingerprintBefore = await dependencyInputsFingerprint(repoRoot);
   const fetchCode = await (options.runFetchFn ?? runPnpmFetchChild)({
     repoRoot,
-    args: ['--frozen-lockfile'],
+    args: [...(requestedArgs.includes('--offline') ? ['--offline'] : []), '--frozen-lockfile'],
     env: options.env,
     spawnPnpmFn: options.spawnPnpmFn,
     setChildPid: options.setChildPid,
@@ -522,7 +523,7 @@ export async function runPreparedFrozenInstall(options = {}) {
   }
   return (options.runInstallFn ?? runPnpmInstallChild)({
     repoRoot,
-    args: safeFrozenInstallArgs(options.args ?? [], options.allowPurge ?? false),
+    args: safeFrozenInstallArgs(requestedArgs, options.allowPurge ?? false),
     env: options.env,
     spawnPnpmFn: options.spawnPnpmFn,
     setChildPid: options.setChildPid,

@@ -7,49 +7,18 @@ import {
   type MobileProviderId,
   MobileProviderListSchema,
 } from '../schemas/mobile-provider.js';
+import type {
+  NativeTool,
+  NativeToolCall,
+  NativeToolReply,
+  NativeToolSchema,
+} from '../tools/native-tools.js';
 
-/**
- * A tool's arguments in the ordered shape a native tool-calling API is built
- * from. JSON Schema object keys reach native code unordered, and argument order
- * steers generation (`path` before `content`). `json` carries a free-form
- * object as JSON text, since a constrained decoder cannot express one.
- */
-export type MobileNativeToolSchema =
-  | { kind: 'string'; description?: string; choices?: string[] }
-  | { kind: 'integer' | 'number' | 'boolean' | 'json'; description?: string }
-  | {
-      kind: 'array';
-      description?: string;
-      items: MobileNativeToolSchema;
-      minItems?: number;
-      maxItems?: number;
-    }
-  | {
-      kind: 'object';
-      description?: string;
-      properties: Array<{ name: string; optional: boolean; schema: MobileNativeToolSchema }>;
-    }
-  | { kind: 'anyOf'; description?: string; choices: MobileNativeToolSchema[] };
-
-export interface MobileNativeTool {
-  name: string;
-  description: string;
-  parameters: MobileNativeToolSchema & { kind: 'object' };
-}
-
-/** A call the provider's own tool loop made mid-generation. `arguments` is JSON text. */
-export interface MobileNativeToolCall {
-  requestId: string;
-  callId: string;
-  name: string;
-  arguments: string;
-}
-
-/** `endTurn` stops generation after this result, e.g. once work was handed off. */
-export interface MobileNativeToolReply {
-  output: string;
-  endTurn?: boolean;
-}
+/** The bridge contract's names for the shared native-tool shapes (tools/native-tools.ts). */
+export type MobileNativeToolSchema = NativeToolSchema;
+export type MobileNativeTool = NativeTool;
+export type MobileNativeToolCall = NativeToolCall;
+export type MobileNativeToolReply = NativeToolReply;
 
 export interface PortableInference {
   providers(): Promise<MobileProvider[]>;

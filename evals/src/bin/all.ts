@@ -39,6 +39,7 @@
  *   --timeout <duration> override scenario.timeoutMs, e.g. `20m`, `300000`
  *   --runs-dir <path>    override the matrix root path
  *   --cache-root <path>  override `~/.gezel-eval-cache`
+ *   --offline            refuse providers or model setup that could use the network
  *   --llama-bin <path>   override the auto-resolved llama-server binary
  *   --image-bin <path>   override the auto-resolved sd-server binary
  *   --list               list scenarios and exit
@@ -86,6 +87,7 @@ async function main() {
     'mlx-source-home',
     'model',
     'no-triage',
+    'offline',
     'parallel',
     'remove-behaviors',
     'runs-dir',
@@ -262,6 +264,7 @@ async function main() {
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
+      ...(args.flags.offline ? { offline: true } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
       ...(args.flags['image-bin'] ? { sdBin: String(args.flags['image-bin']) } : {}),
       // Preflight's own exclusion message tells the operator to "pass

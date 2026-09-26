@@ -419,6 +419,11 @@ export interface TrialOptions {
   runsDir?: string;
   /** Shared model cache root. Defaults to `<HOME>/.gezel-eval-cache`. */
   cacheRoot?: string;
+  /**
+   * Fail closed when a model is absent or stale instead of downloading or
+   * topping it up. Non-device providers are also refused by the runner.
+   */
+  offline?: boolean;
   /** Override the resolved llama-server binary path. */
   llamaBin?: string;
   /** Override the resolved sd-server binary path. */

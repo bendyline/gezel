@@ -1,6 +1,8 @@
 import { auditCraftbookTemplates } from '../craftbooks/audit.ts';
 import { buildCraftbookBatchPlan } from '../craftbooks/batch-plan.ts';
+import { findBoilerplateEvalSpecs } from '../craftbooks/boilerplate.ts';
 import { loadCraftbookTemplates } from '../craftbooks/catalog.ts';
+import { auditDeliverableReachability } from '../craftbooks/deliverable-reachability.ts';
 import { CRAFTBOOK_EVAL_SPECS } from '../craftbooks/specs.ts';
 import type { CraftbookEvalMode } from '../craftbooks/types.ts';
 
@@ -24,11 +26,16 @@ async function main(): Promise<void> {
   const mode = modeValue as CraftbookEvalMode | undefined;
   const templates = await loadCraftbookTemplates();
   const { audits } = auditCraftbookTemplates(templates);
+  const reachability = auditDeliverableReachability(CRAFTBOOK_EVAL_SPECS, templates);
+  const boilerplate = findBoilerplateEvalSpecs(CRAFTBOOK_EVAL_SPECS);
   const plan = buildCraftbookBatchPlan({
     templates,
     audits,
     target: Number.isFinite(target) && target > 0 ? target : 50,
     ...(mode ? { mode } : {}),
+    specs: CRAFTBOOK_EVAL_SPECS,
+    reachabilityFindings: reachability.findings,
+    boilerplateFindings: boilerplate,
     // Declared test.json tags are the harness truth; regex is fallback.
     tagsByCraftbookId: new Map(
       CRAFTBOOK_EVAL_SPECS.filter((spec) => spec.tags && spec.tags.length > 0).map((spec) => [
@@ -38,6 +45,11 @@ async function main(): Promise<void> {
     ),
   });
 
+  if (hasFlag('--scenario-csv')) {
+    console.log(plan.scenarioCsv);
+    return;
+  }
+
   if (json) {
     console.log(JSON.stringify(plan, null, 2));
     return;
@@ -46,7 +58,9 @@ async function main(): Promise<void> {
   console.log(
     `Craftbook local-model batch plan (${plan.items.length}/${plan.target}, mode=${plan.mode ?? 'all'})`,
   );
-  console.log(`Runnable now: ${plan.runnableNow.join(', ') || '(none)'}`);
+  console.log(`Trustworthy runnable now: ${plan.runnableNow.length}`);
+  console.log(`Blocked implemented/validated evals: ${plan.excluded.length}`);
+  console.log(`Scenario CSV: ${plan.scenarioCsv || '(none)'}`);
   console.log('Harness counts:');
   for (const [kind, count] of Object.entries(plan.harnessCounts)) {
     if (count > 0) console.log(`  ${kind.padEnd(20)} ${count}`);
@@ -59,6 +73,13 @@ async function main(): Promise<void> {
       `  ${String(item.priority).padStart(3)} ${item.craftbookId.padEnd(28)} ${item.evalMode.padEnd(13)} ${item.harness.join('+')}${simulators}`,
     );
     console.log(`      ${item.reason}`);
+  }
+  if (plan.excluded.length > 0) {
+    console.log('\nRepair backlog:');
+    for (const item of plan.excluded) {
+      console.log(`  ${item.craftbookId} (${item.scenarioId})`);
+      for (const reason of item.reasons) console.log(`      ${reason.code}: ${reason.detail}`);
+    }
   }
 }
 

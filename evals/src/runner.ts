@@ -44,6 +44,7 @@ import {
 import { captureFingerprint, digestFingerprint } from './progress-fingerprint.ts';
 import {
   type ChatProvider,
+  appleFmHelperPath,
   buildProviderConfig,
   categorizeProvider,
   isLocalEngine,
@@ -281,6 +282,12 @@ export async function runTrial(
 ): Promise<TrialResult> {
   const scenario = withRepairPolicy(scenarioInput, opts.repairPolicy);
   const engine = opts.engine ?? 'llama-cpp';
+  const category = categorizeProvider(engine);
+  if (opts.offline && category !== 'local-engine' && category !== 'system-model') {
+    throw new Error(
+      `offline mode refuses provider "${engine}" (${category}); choose an on-device provider`,
+    );
+  }
   const evalLlamaSpecType = evalLlamaSpecTypeOverride();
   const evalLlamaKvCache = evalLlamaKvCacheOverride();
   // Capability tier of the model under test (Theme E / E1-B) — stamped
@@ -402,7 +409,6 @@ export async function runTrial(
 
   // `engine` was resolved at the top of the function so the trial id
   // can encode the provider; pull category here for the gates below.
-  const category = categorizeProvider(engine);
   log(`[trial] provider=${engine} category=${category}`);
 
   // Pre-flight auth probe for non-local providers. Catches "you forgot
@@ -429,6 +435,8 @@ export async function runTrial(
       client: null,
     });
   }
+  // The trial daemon inherits this env; point it at the helper the probe found.
+  if (engine === 'apple-foundation-models') process.env.GEZEL_APPLE_FM_BIN = appleFmHelperPath()!;
 
   let llamaBin: string | undefined;
   let sdBin: string | undefined;
@@ -500,6 +508,7 @@ export async function runTrial(
           engine: 'llama-cpp',
           modelId,
           llamaBin,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
@@ -510,6 +519,7 @@ export async function runTrial(
           cacheRoot,
           engine: 'ds4',
           modelId,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
@@ -574,6 +584,7 @@ export async function runTrial(
           modelId: imageModelId,
           ...(llamaBin ? { llamaBin } : {}),
           sdBin,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });

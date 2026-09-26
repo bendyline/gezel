@@ -158,6 +158,61 @@ describe('ensureWarmModel', () => {
     expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
   });
 
+  it('fails closed offline when the requested model is not installed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-offline-missing-'));
+    try {
+      await expect(
+        ensureWarmModel({
+          cacheRoot: root,
+          engine: 'llama-cpp',
+          modelId: 'offline-missing-model',
+          llamaBin: 'fake-llama-server',
+          offline: true,
+          log: () => {},
+        }),
+      ).rejects.toThrow('offline mode requires a complete current local install');
+      expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed offline without evicting a stale installed model', async () => {
+    const modelId = 'offline-stale-model';
+    useSyntheticIndex([
+      {
+        id: modelId,
+        name: 'Offline Stale Model',
+        version: '2.0.0',
+        llamaCpp: {
+          huggingfaceRepo: 'example/offline-stale-model',
+          filename: 'current.gguf',
+          sha256: 'a'.repeat(64),
+          approxSizeBytes: 7,
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-offline-stale-'));
+    const modelDir = writeInstall(root, modelId, { weightsFilename: 'old.gguf' });
+    const oldWeightsPath = join(modelDir, 'old.gguf');
+    try {
+      await expect(
+        ensureWarmModel({
+          cacheRoot: root,
+          engine: 'llama-cpp',
+          modelId,
+          llamaBin: 'fake-llama-server',
+          offline: true,
+          log: () => {},
+        }),
+      ).rejects.toThrow('offline mode refuses to refresh stale');
+      expect(existsSync(oldWeightsPath)).toBe(true);
+      expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('tops up a missing sidecar without evicting the weights already on disk', async () => {
     const modelId = 'glm-5.3-flash-320b-q2';
     useSyntheticIndex([
@@ -591,6 +646,15 @@ describe('staleInstallReason', () => {
     await expect(
       staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'm' }),
     ).resolves.toMatch(/catalogVersion 1\.0\.0 != catalog 2\.0\.0/);
+  });
+
+  it('accepts catalog-version drift when the precise payload hash still matches', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', { ...install, catalogVersion: '1.0.0' });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
   });
 
   it('never reports stale for a model the catalog does not index', async () => {

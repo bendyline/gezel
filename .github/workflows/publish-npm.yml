@@ -189,7 +189,7 @@ jobs:
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/mobile,packages/capacitor,packages/eval-viewer,packages/sharp-compat,packages/phonemizer-compat,packages/ml-runtime,evals)
+          args=(--ignore-packages=packages/ui,packages/mobile,packages/capacitor,packages/eval-viewer,packages/sharp-compat,packages/phonemizer-compat,packages/ml-runtime,packages/libreoffice-extension,evals)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi

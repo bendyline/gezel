@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { nativeToolSpecs } from '../tools/native-tools.js';
 import type { PortableInference } from './product-service.js';
 import { type PortableToolActions, portableToolSurface } from './product-tools.js';
 import { portableFixture } from './test-files.js';
 import {
   type PortableToolListing,
   type PortableToolSpec,
-  nativeToolSpecs,
   runPortableToolLoop,
   toolProtocol,
 } from './tool-loop.js';

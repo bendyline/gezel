@@ -17,13 +17,15 @@ enum AppleFoundationProvider {
     static let maximumOutputTokens = 1024
 
     static func availability() -> (reason: String?, contextTokens: Int) {
-        guard #available(iOS 26.0, *) else {
-            return ("Apple on-device AI requires iOS 26 or later.", 4096)
+        guard #available(iOS 26.0, macOS 26.0, *) else {
+            return ("Apple on-device AI requires iOS 26 or macOS 26 or later.", 4096)
         }
         // Explicitly choose the on-device model, including on SDKs that also
         // expose cloud models. Never substitute a different model/provider.
         let model = SystemLanguageModel.default
-        let reportedContext = min(4096, model.contextSize)
+        // Before OS 27 this is a fixed 4096; from 27 it is the model's real
+        // window (larger on newer devices), which every budget below follows.
+        let reportedContext = model.contextSize
         // An unavailable system model can report no context at all (including
         // on the simulator). Keep its descriptor valid for the shared provider
         // list; the availability reason still prevents inference.
@@ -40,25 +42,22 @@ enum AppleFoundationProvider {
             return ("Enable Apple Intelligence in Settings to use Apple on-device AI.", context)
         case .unavailable(.modelNotReady):
             // The SDK does not expose download progress or a download command.
-            return ("Apple's on-device model is not ready. iOS manages its download and preparation.", context)
+            return ("Apple's on-device model is not ready. The system manages its download and preparation.", context)
         case .unavailable:
             return ("Apple on-device AI is currently unavailable on this device.", context)
         }
     }
 
     static func requireContextBudget(promptTokens: Int, maxTokens: Int, contextSize: Int, modelContext: Int) throws {
-        let limit = min(contextSize, min(modelContext, 4096))
-        guard (512...4096).contains(contextSize), (1...maximumOutputTokens).contains(maxTokens),
+        let limit = min(contextSize, modelContext)
+        guard contextSize >= 512, contextSize <= modelContext, (1...maximumOutputTokens).contains(maxTokens),
               modelContext > 0, promptTokens >= 0, promptTokens <= limit - maxTokens - 256 else {
             throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.")
         }
     }
 
-    /// `tools` run inside Apple's own tool loop and call back through `invoke`,
-    /// where the app's shared tool loop records and executes each call. A tool
-    /// ending the turn (a handoff, a question) stops generation as a normal stop.
     /// Apple's generation errors carry no user-facing description ("error -1").
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     static func described(_ error: Error) -> Error {
         guard let error = error as? LanguageModelSession.GenerationError else { return error }
         NSLog("[GezelRuntime] Apple on-device generation failed: %@", String(describing: error))
@@ -70,7 +69,7 @@ enum AppleFoundationProvider {
         case .decodingFailure:
             return MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI produced a response or tool call it could not complete.")
         case .assetsUnavailable:
-            return MobileInferenceError(code: "UNAVAILABLE", message: "Apple's on-device model is not ready. iOS manages its download and preparation.")
+            return MobileInferenceError(code: "UNAVAILABLE", message: "Apple's on-device model is not ready. The system manages its download and preparation.")
         case .rateLimited, .concurrentRequests:
             return MobileInferenceError(code: "BUSY", message: "Apple on-device AI is busy. Try again in a moment.")
         case .unsupportedLanguageOrLocale:
@@ -80,17 +79,14 @@ enum AppleFoundationProvider {
         }
     }
 
-    @available(iOS 26.0, *)
-    static func generate(
-        turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
-        tools toolSpecs: [[String: Any]] = [],
-        invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply = { _, _ in throw CancellationError() },
-        onDelta: (String) throws -> Void
-    ) async throws -> String {
-        let readiness = availability()
-        if let reason = readiness.reason { throw MobileInferenceError(code: "UNAVAILABLE", message: reason) }
-        guard (1...maximumOutputTokens).contains(maxTokens), turns.count <= 64,
-              turns.reduce(0, { $0 + $1.content.utf8.count }) <= 32_768,
+    /// The request as a Foundation Models transcript: instructions (with tool
+    /// definitions) first, then the conversation; the last user turn is the prompt.
+    @available(iOS 26.0, macOS 26.0, *)
+    static func transcript(
+        turns: [MobileChatTurn], tools toolSpecs: [[String: Any]],
+        invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply
+    ) throws -> (entries: [Transcript.Entry], final: MobileChatTurn, tools: [AppleBridgedTool]) {
+        guard turns.count <= 64, turns.reduce(0, { $0 + $1.content.utf8.count }) <= 32_768,
               let final = turns.last, final.role == "user" else {
             throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation is too long for Apple on-device AI. Start a new conversation.")
         }
@@ -129,10 +125,37 @@ enum AppleFoundationProvider {
                 segments: instructions.isEmpty ? [] : [.text(.init(content: instructions.joined(separator: "\n\n")))],
                 toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) })), at: 0)
         }
+        return (entries, final, tools)
+    }
+
+    /// Exact prompt size, tool definitions included, for callers budgeting a request.
+    @available(iOS 26.4, macOS 26.4, *)
+    static func countTokens(turns: [MobileChatTurn], tools: [[String: Any]]) async throws -> Int {
+        let request = try transcript(turns: turns, tools: tools) { _, _ in throw CancellationError() }
+        let final = Transcript.Entry.prompt(.init(segments: [.text(.init(content: request.final.content))]))
+        return try await SystemLanguageModel.default.tokenCount(for: request.entries + [final])
+    }
+
+    /// `tools` run inside Apple's own tool loop and call back through `invoke`,
+    /// where the app's shared tool loop records and executes each call. A tool
+    /// ending the turn (a handoff, a question) stops generation as a normal stop.
+    @available(iOS 26.0, macOS 26.0, *)
+    static func generate(
+        turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
+        tools toolSpecs: [[String: Any]] = [],
+        invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply = { _, _ in throw CancellationError() },
+        onDelta: (String) throws -> Void
+    ) async throws -> String {
+        let readiness = availability()
+        if let reason = readiness.reason { throw MobileInferenceError(code: "UNAVAILABLE", message: reason) }
+        guard (1...maximumOutputTokens).contains(maxTokens) else {
+            throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation is too long for Apple on-device AI. Start a new conversation.")
+        }
+        let (entries, final, tools) = try transcript(turns: turns, tools: toolSpecs, invoke: invoke)
         let model = SystemLanguageModel.default
         let finalEntry = Transcript.Entry.prompt(.init(segments: [.text(.init(content: final.content))]))
         let promptTokens: Int
-        if #available(iOS 26.4, *) {
+        if #available(iOS 26.4, macOS 26.4, *) {
             // Counting the transcript includes the tool definitions it carries.
             promptTokens = try await model.tokenCount(for: entries + [finalEntry])
         } else {
@@ -169,7 +192,7 @@ enum AppleFoundationProvider {
                 let delta = String(next.dropFirst(text.count))
                 if !delta.isEmpty { try onDelta(delta) }
                 text = next
-                if #available(iOS 27.0, *) {
+                if #available(iOS 27.0, macOS 27.0, *) {
                     reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
                 }
             }

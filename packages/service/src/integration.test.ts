@@ -354,6 +354,48 @@ describe('gezels API', () => {
 });
 
 describe('projects API', () => {
+  it('infers a project for a path, and refuses what it must not create', async () => {
+    const bad = await api('POST', '/api/projects/infer-for-path', { path: 'relative/x.docx' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { code?: string }).code).toBe('invalid_path');
+
+    // A document in the temp dir never becomes a folder project.
+    const scratch = await realpath(await mkdtemp(join(tmpdir(), 'lv-infer-')));
+    try {
+      const doc = await api('POST', '/api/projects/infer-for-path', {
+        path: join(scratch, 'x.docx'),
+      });
+      expect(doc.status).toBe(200);
+      const body = (await doc.json()) as { matchedBy: string; project: { id: string } };
+      expect(body.matchedBy).toBe('default');
+      expect(body.project.id).toBe('default');
+
+      // Naming the folder is a choice, so a temp subfolder is allowed then.
+      const chosen = await api('POST', '/api/projects/infer-for-path', {
+        path: scratch,
+        kind: 'folder',
+        create: false,
+      });
+      expect(chosen.status).toBe(200);
+      expect(((await chosen.json()) as { matchedBy: string }).matchedBy).toBe('parent');
+
+      // The temp dir itself is too broad to be anyone's project.
+      const folder = await api('POST', '/api/projects/infer-for-path', {
+        path: await realpath(tmpdir()),
+        kind: 'folder',
+      });
+      expect(folder.status).toBe(403);
+      expect(((await folder.json()) as { code?: string }).code).toBe('forbidden_root');
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+
+    const known = await api('GET', '/api/projects/well-known-folders');
+    expect(known.status).toBe(200);
+    const { folders } = (await known.json()) as { folders: Array<{ kind: string }> };
+    expect(folders.some((f) => f.kind === 'documents')).toBe(true);
+  });
+
   it('default project exists from boot', async () => {
     const res = await api('GET', '/api/projects');
     const data = (await res.json()) as { projects: Array<{ id: string }> };

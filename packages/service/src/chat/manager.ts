@@ -179,6 +179,7 @@ import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/bu
 
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
+import { AppleFoundationModelsProvider } from '../providers/apple-foundation-models/provider.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -226,6 +227,7 @@ import {
 } from '../tasks/gate-escalation.js';
 import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
+import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
 import {
   discoverProjectMcpToolsets,
@@ -4609,7 +4611,29 @@ export class ChatManager extends LocalEngineRuntime {
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
+            const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            // Asking a question is a successful suspension point, not a
+            // failed fixed-action attempt. In particular,
+            // `run_package_script` raises a command-approval question and
+            // deliberately ends the provider turn; answering it injects a
+            // follow-up into this same session. Retrying here races that
+            // follow-up, consumes the bounded handoff budget, and can pause
+            // an otherwise healthy task before the approved command runs.
+            // Count questions created during this send even when the eval
+            // harness (or a very fast user) has already answered them.
+            const yieldedToQuestion = (
+              await this.store.listProjectQuestions(handoffSession.projectId).catch(() => [])
+            ).some(
+              (question) =>
+                question.sessionId === handoffSession.id && question.createdAt >= sendStartedAt,
+            );
+            if (yieldedToQuestion) {
+              log.info(
+                `[chat] ${args.taskRef}/${dispatchStepId}: handoff yielded to a question; waiting for its answer instead of spending a recovery attempt`,
+              );
+              break;
+            }
             if (requiresExactOutcome) {
               const parsed = parseTaskRef(args.taskRef);
               const afterSend = parsed
@@ -6379,11 +6403,13 @@ export class ChatManager extends LocalEngineRuntime {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     const at = nowIso();
+    const retrieval = taskReferencesAsRetrieval(args.task.references);
     const userMessage: ChatMessage = {
       role: 'user',
       content: args.userText,
       at,
       ...(args.draftId ? { draftId: args.draftId } : {}),
+      ...(retrieval ? { retrieval } : {}),
     };
     const craftbookName = args.task.craftbook.name;
     const card = craftbookStartCardForTask(args.task, {
@@ -12672,6 +12698,16 @@ export class ChatManager extends LocalEngineRuntime {
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
       });
+    } else if (name === 'apple-foundation-models') {
+      // Apple's own on-device model through the macOS helper. Before this
+      // branch existed the name validated and then silently became Ollama.
+      provider = new AppleFoundationModelsProvider();
+    } else if (name === 'android-mlkit') {
+      const error = new Error(
+        'Android on-device AI runs only in the Gezel mobile app.',
+      ) as Error & { isActionable?: boolean };
+      error.isActionable = true;
+      throw error;
     } else {
       provider = new OllamaProvider({
         baseUrl: config.ollamaBaseUrl,
@@ -14173,7 +14209,11 @@ export class ChatManager extends LocalEngineRuntime {
     // contextWindow is at/below MINIMAL_CONTEXT_MAX_WINDOW (talkie-1930 at
     // 2048), or when the manifest opts in via the behavior.
     const modelContextWindow = await resolveCatalogContextWindow(this.catalog, resolvedCatalogId);
+    // Apple's on-device model calls tools natively inside a 4K window: it
+    // always gets the minimal prompt, with its tool conduct and task step kept.
+    const nativeToolsMinimal = record.providerName === 'apple-foundation-models';
     const minimalContextActive =
+      nativeToolsMinimal ||
       profileHasBehavior(modelProfile, 'prompt.minimal-context') ||
       (typeof modelContextWindow === 'number' &&
         modelContextWindow > 0 &&
@@ -14723,6 +14763,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable ? { expectedDeliverable: record.expectedDeliverable } : {}),
       ...(executorContextTrimActive ? { trimExecutorContext: true } : {}),
       ...(minimalContextActive ? { minimalContext: true } : {}),
+      ...(nativeToolsMinimal ? { minimalContextNativeTools: true } : {}),
       ...(taskContext?.step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(workspaceGestalt ? { workspaceGestalt } : {}),

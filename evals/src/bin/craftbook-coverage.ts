@@ -2,6 +2,7 @@ import { auditCraftbookTemplates, validateCraftbookEvalSpecs } from '../craftboo
 import { findBoilerplateEvalSpecs } from '../craftbooks/boilerplate.ts';
 import { loadCraftbookTemplates } from '../craftbooks/catalog.ts';
 import { auditDeliverableReachability } from '../craftbooks/deliverable-reachability.ts';
+import { auditCraftbookParameterContracts } from '../craftbooks/parameter-contract.ts';
 import { CRAFTBOOK_EVAL_SPECS } from '../craftbooks/specs.ts';
 
 function hasFlag(name: string): boolean {
@@ -17,6 +18,7 @@ function flagValue(name: string): string | undefined {
 async function main(): Promise<void> {
   const json = hasFlag('--json');
   const strict = hasFlag('--strict');
+  const strictQuality = hasFlag('--strict-quality');
   const limit = Number(flagValue('--limit') ?? '20');
   const templates = await loadCraftbookTemplates();
   const specErrors = validateCraftbookEvalSpecs(templates);
@@ -24,10 +26,15 @@ async function main(): Promise<void> {
   const boilerplate = findBoilerplateEvalSpecs(CRAFTBOOK_EVAL_SPECS);
   const boilerplateValidated = boilerplate.filter((b) => b.coverageStatus === 'validated');
   const reach = auditDeliverableReachability(CRAFTBOOK_EVAL_SPECS, templates);
+  const parameterContracts = auditCraftbookParameterContracts(CRAFTBOOK_EVAL_SPECS, templates);
 
   if (json) {
     console.log(
-      JSON.stringify({ summary, specErrors, boilerplate, reachability: reach, audits }, null, 2),
+      JSON.stringify(
+        { summary, specErrors, boilerplate, reachability: reach, parameterContracts, audits },
+        null,
+        2,
+      ),
     );
   } else {
     console.log('Craftbook eval coverage');
@@ -66,6 +73,20 @@ async function main(): Promise<void> {
     console.log(
       `  deliverable reachability: reachable=${reach.reachable} folder-drift=${reach.folderDrift} unreachable=${reach.unreachable} (of ${reach.checked})`,
     );
+    console.log(
+      `  parameter contracts: clean=${parameterContracts.clean} affected=${parameterContracts.withFindings} failures=${parameterContracts.failures} warnings=${parameterContracts.warnings} (of ${parameterContracts.checked})`,
+    );
+    if (parameterContracts.findings.length > 0) {
+      const shown = parameterContracts.findings.slice(0, Number.isFinite(limit) ? limit : 20);
+      console.log(
+        `\n  parameter contract findings (${shown.length} of ${parameterContracts.findings.length})`,
+      );
+      for (const item of shown) {
+        console.log(
+          `    ${item.craftbookId.padEnd(30)} ${item.severity.padEnd(4)} ${item.code}: ${item.message}`,
+        );
+      }
+    }
     if (reach.unreachable > 0) {
       const shown = reach.findings
         .filter((f) => f.verdict === 'unreachable')
@@ -106,7 +127,19 @@ async function main(): Promise<void> {
     }
   }
 
-  if (strict && (specErrors.length > 0 || summary.byEvalStatus.missing > 0)) {
+  const graphFailures = audits.filter((audit) =>
+    audit.issues.some((issue) => issue.severity === 'fail'),
+  );
+  if (
+    (strict && (specErrors.length > 0 || summary.byEvalStatus.missing > 0)) ||
+    (strictQuality &&
+      (specErrors.length > 0 ||
+        summary.byEvalStatus.missing > 0 ||
+        reach.findings.length > 0 ||
+        parameterContracts.findings.length > 0 ||
+        boilerplate.length > 0 ||
+        graphFailures.length > 0))
+  ) {
     process.exit(1);
   }
 }

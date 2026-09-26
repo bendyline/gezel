@@ -49,7 +49,9 @@ export type NativeBinaryName =
   | 'whisper-server'
   | 'device-health'
   | 'uv'
-  | 'duckdb';
+  | 'duckdb'
+  /** macOS 26+ bridge to Apple's on-device model (native/helpers/apple-fm). */
+  | 'apple-fm';
 
 export interface DiscoverInput {
   /** GEZEL_HOME — backend cache file lives at `<home>/engines/llama-cpp/`. */
@@ -366,6 +368,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     { name: 'whisper-server' as const, envVar: 'GEZEL_WHISPER_SERVER_BIN' },
     { name: 'device-health' as const, envVar: 'GEZEL_DEVICE_HEALTH_BIN' },
     { name: 'uv' as const, envVar: 'GEZEL_UV_BIN' },
+    ...(platform === 'darwin' ? [{ name: 'apple-fm' as const, envVar: 'GEZEL_APPLE_FM_BIN' }] : []),
   ]) {
     if (process.env[envVar]) {
       binaries.push({ name, source: 'pre-set', path: process.env[envVar] });

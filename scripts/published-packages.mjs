@@ -76,6 +76,7 @@ export const RELEASE_IGNORED_PACKAGE_PATHS = [
   'packages/sharp-compat',
   'packages/phonemizer-compat',
   'packages/ml-runtime',
+  'packages/libreoffice-extension',
   'evals',
 ];
 

@@ -1,4 +1,4 @@
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
@@ -160,6 +160,28 @@ export default defineConfig({
     } else {
       console.warn(
         `[tsup] no UI bundle at ${uiSrc} — run \`pnpm --filter @bendyline/gezel-ui build\` before building the service to ship the browser UI (\`gezel start --web\`). The daemon still runs headless without it.`,
+      );
+    }
+    // The Office task pane (packages/ui vite.office.config.ts) and the
+    // LibreOffice extension, staged beside the UI: the daemon finds both as
+    // siblings of its UI directory (office-host/assets.ts). Best-effort like
+    // the UI; tests/published/bundledAssets.test.ts fails a tarball that
+    // lacks them.
+    const officeSrc = resolve(__dirname, '..', 'ui', 'dist-office');
+    if (existsSync(officeSrc)) {
+      cpSync(officeSrc, 'dist/office', { recursive: true });
+    } else {
+      console.warn(
+        `[tsup] no Office pane at ${officeSrc} — run \`pnpm --filter @bendyline/gezel-ui build:office\` to ship the Word/Excel/PowerPoint add-in.`,
+      );
+    }
+    const oxtSrc = resolve(__dirname, '..', 'libreoffice-extension', 'dist', 'gezel.oxt');
+    if (existsSync(oxtSrc)) {
+      mkdirSync('dist/libreoffice', { recursive: true });
+      cpSync(oxtSrc, 'dist/libreoffice/gezel.oxt');
+    } else {
+      console.warn(
+        `[tsup] no LibreOffice extension at ${oxtSrc} — run \`pnpm --filter @bendyline/gezel-libreoffice-extension build\` to ship it.`,
       );
     }
     // npm publishes this dist/ui copy independently of Electron's staged

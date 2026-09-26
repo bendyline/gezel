@@ -466,6 +466,15 @@ describe('sessionRouteGuard', () => {
     ).toBe(403);
     expect((await app.request('/api/projects/preview-about', jsonPost({}))).status).toBe(403);
     expect((await app.request('/api/projects/poisoned')).status).toBe(403);
+    // Folder inference creates projects for host paths: first-party only,
+    // even for a coordinator whose own project id would otherwise match.
+    expect(
+      (await app.request('/api/projects/infer-for-path', jsonPost({ path: '/Users/me/x.docx' })))
+        .status,
+    ).toBe(403);
+    expect((await app.request('/api/projects/well-known-folders')).status).toBe(403);
+    const own = sessionPolicyApp(session('infer-for-path', true));
+    expect((await own.request('/api/projects/infer-for-path', jsonPost({}))).status).toBe(403);
   });
 
   it('lets a session GET only its own record under /api/sessions', async () => {

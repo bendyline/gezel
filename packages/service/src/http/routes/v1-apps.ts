@@ -120,7 +120,17 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
       // API. Reject browser-shaped requests before parsing the body. This
       // closes drive-by registration via cross-origin fetch/forms while
       // leaving CLI, desktop, and service-to-service clients unchanged.
-      if (c.req.header('origin') || c.req.header('sec-fetch-site')) {
+      //
+      // One browser requester is admitted: the Office task pane, which the
+      // daemon itself serves on the Office listener's origin. A page cannot
+      // forge that Origin, DNS rebinding fails the host guard, and
+      // `/office/*` serves only files gezel ships, so no other content runs
+      // there. The verification code, not this check, is what protects a
+      // product grant: loopback is reachable by every local account.
+      if (
+        (c.req.header('origin') || c.req.header('sec-fetch-site')) &&
+        !isOfficePaneRequest(c.req.header('origin'), c.req.header('sec-fetch-site'), ctx)
+      ) {
         return c.json({ error: 'browser_registration_not_allowed' }, 403);
       }
       const mediaType = (c.req.header('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase();
@@ -480,4 +490,15 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
   });
 
   return app;
+}
+
+/** Same-origin request from the daemon's own Office task pane. */
+export function isOfficePaneRequest(
+  origin: string | undefined,
+  secFetchSite: string | undefined,
+  ctx: Pick<EngineContext, 'officeHostOrigin'>,
+): boolean {
+  const own = ctx.officeHostOrigin?.() ?? null;
+  if (!own || origin !== own) return false;
+  return secFetchSite === undefined || secFetchSite === 'same-origin';
 }

@@ -181,6 +181,11 @@ async function isSessionRouteAllowed(
   ) {
     return sessionDeny('project preview/status routes require a first-party client');
   }
+  // Folder inference creates projects for arbitrary host paths and lists the
+  // user's well-known folders: a first-party client decision, never a gezel's.
+  if (path === '/api/projects/infer-for-path' || path === '/api/projects/well-known-folders') {
+    return sessionDeny('folder inference routes require a first-party client');
+  }
 
   // Project item routes are the main MCP surface. Bind to the token's project
   // (coordinator sessions may intentionally cross projects), then remove UI-

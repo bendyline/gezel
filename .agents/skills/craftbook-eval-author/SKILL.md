@@ -41,8 +41,8 @@ Use this skill to turn one craftbook template into a measurable local-model eval
 6. Update tests:
 
    ```sh
-   pnpm --filter @bendyline/gezel-evals test -- craftbooks
-   pnpm --filter @bendyline/gezel-evals run craftbook:coverage
+   pnpm --filter @bendyline/gezel-evals run test:craftbooks
+   pnpm --filter @bendyline/gezel-evals run craftbook:coverage -- --strict-quality
    ```
 
 ## Spec Rules
