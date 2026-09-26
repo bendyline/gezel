@@ -191,8 +191,10 @@ export interface StepKit {
  * declared inputs and research corpus may live there. The WRITE verb is
  * separate: exposing both write channels is exactly what made models put a
  * gated workspace file in the drawer (or an artifact in the workspace).
+ * `applyStepToolPolicy` holds the same floor against a group-level
+ * `artifacts` denial.
  */
-const ARTIFACT_READ_TOOLS: readonly string[] = [
+export const ARTIFACT_READ_TOOLS: readonly string[] = [
   'list_artifacts',
   'read_artifact',
   'read_artifacts',

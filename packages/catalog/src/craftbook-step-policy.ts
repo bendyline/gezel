@@ -98,11 +98,13 @@ function builtinDisallows(
 
   // The output contract already removes individual wrong-drawer writers;
   // these group-level denials also keep broad custom role overrides lean.
+  // `artifacts` is never denied here: `write_artifact` already falls to the
+  // output contract, so the denial only ever removed reads, and an earlier
+  // step's working files (`{{workPath}}/scope.md`) are exactly what a later
+  // step reads without always naming the tool. This function also never
+  // withdraws a denial it made, so a lexical "no artifact mention" guess
+  // outlived the prompt edit that added one (powerpoint-deck 1.7.9 → 1.7.10).
   if (!media.has('workspace')) out.add('workspace-fs-write');
-  const consumesArtifact = step.consumes?.some((input) => input.artifact) === true;
-  const mentionsArtifact =
-    /\b(?:read_artifact|list_artifacts|grep_artifact|artifacts drawer)\b/i.test(text);
-  if (!media.has('artifact') && !consumesArtifact && !mentionsArtifact) out.add('artifacts');
 
   for (const [groupId, signal] of Object.entries(SPECIALIZED_GROUP_SIGNALS)) {
     if (groupId === 'web' && /research/i.test(step.suggestedRole ?? '')) continue;

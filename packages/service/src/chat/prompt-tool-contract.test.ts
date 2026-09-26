@@ -4,6 +4,7 @@ import {
   filterPromptToolDirectives,
   lintPromptToolContract,
   promptConditionallyReferencedTools,
+  promptInstructedTools,
   promptMandatedTools,
 } from './prompt-tool-contract.js';
 
@@ -75,6 +76,40 @@ describe('promptMandatedTools', () => {
     expect(promptMandatedTools('Call `apply_patch`, which is unavailable on this roster.')).toEqual(
       new Set(),
     );
+  });
+});
+
+describe('promptInstructedTools', () => {
+  // powerpoint-deck 1.7.12 publish: an instruction the directive grammar does
+  // not recognise, so the matrix could not see the book deny `read_artifact`.
+  const publishSentence =
+    'Read `tasks/20/outline.md` from the artifacts drawer with `read_artifact` and the approved `powerpoint/task-20/deck.md` from the workspace with `read_file`.';
+
+  it('counts a tool named as the instrument of an action', () => {
+    expect(promptMandatedTools(publishSentence)).toEqual(new Set());
+    expect([...promptInstructedTools(publishSentence)].sort()).toEqual([
+      'read_artifact',
+      'read_file',
+    ]);
+  });
+
+  it('ignores a descriptive mention', () => {
+    expect(
+      promptInstructedTools('| `delete_path` of a workspace path | permanent file loss |'),
+    ).toEqual(new Set());
+    expect(promptInstructedTools('Remove the stale file with `delete_path`.')).toEqual(
+      new Set(['delete_path']),
+    );
+  });
+
+  it('still excludes negative, conditional, and contrast mentions', () => {
+    expect(promptInstructedTools('Do not call `github_pr_comment`.')).toEqual(new Set());
+    expect(
+      promptInstructedTools('If `web_search` is available, confirm it with `web_search`.'),
+    ).toEqual(new Set());
+    expect([
+      ...promptInstructedTools('Read workspace paths with `read_file`, not `read_artifact`.'),
+    ]).toEqual(['read_file']);
   });
 });
 

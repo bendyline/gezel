@@ -10926,9 +10926,16 @@ server.tool(
         const callArguments = JSON.stringify(craftbook.invocation.arguments);
         return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`invoke_craftbook\` directly with arguments \`${callArguments}\`; otherwise ignore it.`;
       });
+      // A source that timed out is not a source with nothing on the topic. A
+      // researcher told "no match" records the corpus as empty and moves on,
+      // which is how a cold reference-catalog model read as "the food
+      // catalog has nothing on quiche".
+      const incomplete = res.sourcesIncomplete === true;
       const resultSummary = modelResults.length
-        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${res.truncated ? ' (truncated)' : ''}`
-        : 'No indexed project knowledge matched';
+        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}`
+        : incomplete
+          ? 'Nothing returned yet: some sources did not answer in time, so this is not evidence the topic is absent. Repeat the same search once before concluding there is no indexed material'
+          : 'No indexed project knowledge matched';
       const summary = res.craftbooks.length
         ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
         : `${resultSummary}.`;
@@ -10975,9 +10982,11 @@ server.tool(
           ...(nextCursor !== undefined ? { nextCursor } : {}),
           ...(hidden > 0
             ? { truncationReason: 'output' as const }
-            : res.truncated
-              ? { truncationReason: 'limit' as const }
-              : {}),
+            : incomplete
+              ? { truncationReason: 'incomplete' as const }
+              : res.truncated
+                ? { truncationReason: 'limit' as const }
+                : {}),
           engine: 'scoped-index',
           craftbooks: res.craftbooks,
         },

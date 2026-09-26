@@ -71,6 +71,22 @@ describe('craftbook step policy defaults', () => {
     expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('artifacts');
   });
 
+  it('never denies artifact reads, even to a step whose prose never names the drawer', () => {
+    const doc: CraftbookDoc = {
+      name: 'Evaluate',
+      steps: [
+        {
+          name: 'Evaluate',
+          deliverable: { path: 'index.html', kind: 'html-page' },
+          prompt: 'Open index.html and verify every criterion from {{workPath}}/scope.md.',
+        },
+      ],
+    };
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.outputMedium).toBe('workspace');
+    expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('artifacts');
+  });
+
   it('declares workspace edits as a secondary medium beside an artifact report', () => {
     const doc: CraftbookDoc = {
       name: 'Fix',

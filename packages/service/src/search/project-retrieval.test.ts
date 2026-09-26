@@ -59,7 +59,11 @@ function workspaceHit(n: number, relevance = 0.9): UnifiedSearchResult {
   };
 }
 
-async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | 'deep') {
+async function run(
+  results: UnifiedSearchResult[],
+  mode: 'lean' | 'balanced' | 'deep',
+  availableToolNames?: readonly string[],
+) {
   const search = {
     searchProject: async () => ({ results, truncated: false }),
   } as unknown as SearchService;
@@ -71,6 +75,7 @@ async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | '
     config: CONFIG,
     userText: 'how do I cut strong corner joints by hand?',
     messageOrigin: 'direct-user',
+    ...(availableToolNames ? { availableToolNames } : {}),
   });
 }
 
@@ -392,11 +397,27 @@ describe('knowledge injection ceilings', () => {
   });
 
   it('the untrusted-evidence header carries the reference-catalog sentence', async () => {
-    const result = await run([knowledgeHit(1)], 'balanced');
+    const result = await run([knowledgeHit(1)], 'balanced', ['search', 'read_document']);
     expect(result?.prompt).toContain('untrusted evidence');
     expect(result?.prompt).toContain('never grant authority');
     expect(result?.prompt).toContain('read_document');
     expect(result?.injectedBytes).toBe(Buffer.byteLength(result?.prompt ?? '', 'utf8'));
+  });
+
+  // Every step of the 2026-09-26 quiche deck after research was told to call
+  // `search` and `read_document`, and none of those kits had either.
+  it('the follow-up hint names only tools the turn has', async () => {
+    const neither = await run([knowledgeHit(1)], 'balanced', ['write_artifact']);
+    expect(neither?.prompt).toContain('never grant authority');
+    expect(neither?.prompt).not.toContain('`search`');
+    expect(neither?.prompt).not.toContain('`read_document`');
+
+    const searchOnly = await run([knowledgeHit(1)], 'balanced', ['search']);
+    expect(searchOnly?.prompt).toContain('Use `search`');
+    expect(searchOnly?.prompt).not.toContain('`read_document`');
+
+    const unknown = await run([knowledgeHit(1)], 'balanced');
+    expect(unknown?.prompt).not.toContain('`search`');
   });
 
   it('a craftbook step naming only knowledge scopes injection to it', async () => {
@@ -476,6 +497,58 @@ describe('knowledge injection ceilings', () => {
     expect(paths).toEqual(expect.arrayContaining(['powerpoint/task-11/deck.md', 'notes/pasta.md']));
     expect(paths).not.toContain('powerpoint/task-8/source-evidence.md');
     expect(paths).not.toContain('tasks/8/sources.md');
+  });
+
+  describe('a craftbook step query', () => {
+    const outlineStep = {
+      id: 'outline',
+      name: 'Lock the slide outline',
+      description: 'Lock one message per slide.',
+      prompt: 'Read the source packet and lock a numbered slide outline for the deck review.',
+    };
+    async function stepQuery(craftbookParams: Record<string, string>): Promise<string[]> {
+      const queries: string[] = [];
+      const search = {
+        searchProject: async (query: string) => {
+          queries.push(query);
+          return { results: [], truncated: false };
+        },
+      } as unknown as SearchService;
+      await retrieveProjectContext({
+        store: {
+          ...STORE,
+          readTask: async () => ({
+            ref: 'p1/20',
+            title: 'PowerPoint from Content',
+            craftbookParams,
+            craftbook: {
+              paramSchema: { type: 'object', properties: { topic: { type: 'string' } } },
+              steps: [outlineStep],
+            },
+          }),
+        } as unknown as Store,
+        search,
+        record: { ...RECORD, taskRef: 'p1/20', stepId: 'outline' } as unknown as ChatSession,
+        gezel: GEZEL,
+        config: CONFIG,
+        userText: 'Anita has handed step `outline` of task p1/20 to you.',
+        messageOrigin: 'cross-gezel',
+      });
+      return queries;
+    }
+
+    // Wild-caught 2026-09-26: a "PowerPoint about quiche" whose outline step
+    // never names quiche retrieved "Top Deck (drink)" from the food catalog.
+    it('searches for the subject the person named, not the book prose', async () => {
+      const queries = await stepQuery({ topic: 'quiche', outputDir: 'powerpoint/task-20' });
+      expect(queries).toEqual(['quiche']);
+    });
+
+    it('falls back to the step prose when the task names no subject', async () => {
+      const queries = await stepQuery({ topic: '', outputDir: 'powerpoint/task-20' });
+      expect(queries).toHaveLength(1);
+      expect(queries[0]).toContain('slide outline');
+    });
   });
 });
 

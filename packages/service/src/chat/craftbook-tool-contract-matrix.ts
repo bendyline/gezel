@@ -22,7 +22,11 @@ import {
   securityPolicyForLevel,
   tierAtLeast,
 } from '@bendyline/gezel';
-import { CatalogService, applyDefaultCraftbookStepPolicies } from '@bendyline/gezel-catalog';
+import {
+  BUILTIN_TOOLSETS,
+  CatalogService,
+  applyDefaultCraftbookStepPolicies,
+} from '@bendyline/gezel-catalog';
 import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contracts';
 import { resolveProfile } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
@@ -30,9 +34,11 @@ import { classifyModelTier } from './local-model-tier.js';
 import {
   lintPromptToolContract,
   promptConditionallyReferencedTools,
+  promptInstructedTools,
 } from './prompt-tool-contract.js';
 import { lintPromptToolSchemaContract } from './prompt-tool-schema-contract.js';
 import {
+  applyActiveStepToolPolicy,
   availableBuiltinToolsForAllowlist,
   resolveSessionToolSurface,
   taskStepContextualBuiltinTools,
@@ -61,6 +67,7 @@ export interface CraftbookToolContractFinding {
     | 'surface-missing-step-completion'
     | 'surface-unexpected-output-writer'
     | 'policy-missing-output-declaration'
+    | 'policy-denies-instructed-tool'
     | 'policy-missing-builtin-denial'
     | 'policy-missing-toolset-denial';
   craftbookId: string;
@@ -264,6 +271,39 @@ function addFinding(
   });
 }
 
+/**
+ * Tools the step's procedure tells the model to use that its own authored
+ * `toolPolicy` removes, each with the policy field responsible. Checked
+ * against the policy alone rather than a resolved surface, so no role kit,
+ * tier cap, or mandated-tool rescue can hide the contradiction.
+ */
+export function policyDeniedInstructedTools(
+  step: NonNullable<Parameters<typeof applyActiveStepToolPolicy>[1]>,
+): Array<{ tool: string; cause: string }> {
+  const instructed = promptInstructedTools(step.prompt ?? '');
+  if (instructed.size === 0 || !step.toolPolicy) return [];
+  const kept = applyActiveStepToolPolicy(new Set(instructed), step);
+  if (kept === null) return [];
+  const policy = step.toolPolicy;
+  const deniedGroups = new Set(policy.disallowBuiltinToolsets ?? []);
+  return [...instructed]
+    .filter((tool) => !kept.has(tool))
+    .sort()
+    .map((tool) => {
+      const groups = BUILTIN_TOOLSETS.filter(
+        (group) => deniedGroups.has(group.id) && group.tools.includes(tool),
+      ).map((group) => group.id);
+      const cause = policy.disallowTools?.includes(tool)
+        ? 'disallowTools'
+        : policy.allowTools && !policy.allowTools.includes(tool)
+          ? 'allowTools'
+          : groups.length > 0
+            ? `disallowBuiltinToolsets ${groups.join(', ')}`
+            : `outputMedium ${[policy.outputMedium, ...(policy.additionalOutputMedia ?? [])].filter(Boolean).join(', ')}`;
+      return { tool, cause };
+    });
+}
+
 function addPolicyFindings(
   findings: Map<string, CraftbookToolContractFinding>,
   entry: CraftbookStepEntry,
@@ -271,6 +311,21 @@ function addPolicyFindings(
 ): void {
   const role = entry.step.suggestedRole ?? 'Generalist';
   const actualPolicy = entry.step.toolPolicy;
+  for (const { tool, cause } of policyDeniedInstructedTools(entry.step)) {
+    addFinding(findings, {
+      severity: 'error',
+      rule: 'policy-denies-instructed-tool',
+      craftbookId: entry.craftbookId,
+      craftbookName: entry.craftbookName,
+      version: entry.version,
+      stepId: entry.stepId,
+      spawn: entry.spawn,
+      phase: 'policy',
+      role,
+      tool,
+      detail: `Procedure instructs ${tool}, but the step's own toolPolicy removes it (${cause}).`,
+    });
+  }
   const expectedMedia = outputMediaFromPolicy(expectedPolicy);
   const declaredMedia = outputMediaFromPolicy(actualPolicy);
   for (const medium of expectedMedia) {

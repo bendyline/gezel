@@ -309,11 +309,28 @@ function addFinding(
  * directive named, which stranded the turn with no way to comply.
  */
 export function promptMandatedTools(prompt: string): Set<string> {
-  const mandated = new Set<string>();
+  return positiveToolMentions(prompt, 'mandated');
+}
+
+/**
+ * {@link promptMandatedTools} plus tools named as the instrument of an action
+ * ("Read `x` from the artifacts drawer with `read_artifact`"), a form the
+ * directive grammar does not recognise. That gap let powerpoint-deck's
+ * publish step deny the one tool its procedure told it to read with, and no
+ * check noticed. Lint-only: the runtime surface still keys on mandates.
+ */
+export function promptInstructedTools(prompt: string): Set<string> {
+  return positiveToolMentions(prompt, 'instructed');
+}
+
+const INSTRUMENTAL_PREFIX = /\b(?:with|via|using|through)\s*`?\s*$/i;
+
+function positiveToolMentions(prompt: string, mode: 'mandated' | 'instructed'): Set<string> {
+  const mentioned = new Set<string>();
   for (const line of prompt.split('\n')) {
     for (const candidate of explicitToolCandidates(line)) {
       const { tool } = candidate;
-      if (mandated.has(tool)) continue;
+      if (mentioned.has(tool)) continue;
       if (!CANONICAL_TOOL_NAME_SET.has(tool)) continue;
       if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
       if (toolHasExplicitGlobalFallback(prompt, tool)) continue;
@@ -324,14 +341,18 @@ export function promptMandatedTools(prompt: string): Set<string> {
       if (negatesMention(line, candidate) || CONDITIONAL_CONTEXT.test(clause)) continue;
       const prefix = line.slice(Math.max(0, candidate.index - 48), candidate.index);
       if (/\b(?:not|without|for|from|returned by)\s*`?\s*$/i.test(prefix)) continue;
-      if (candidate.syntax === 'bare-directive' || candidate.syntax === 'named-tool') {
-        mandated.add(tool);
+      if (
+        candidate.syntax === 'bare-directive' ||
+        candidate.syntax === 'named-tool' ||
+        (mode === 'instructed' && INSTRUMENTAL_PREFIX.test(prefix))
+      ) {
+        mentioned.add(tool);
         continue;
       }
-      if (HARD_DIRECTIVE.test(clause) || SOFT_DIRECTIVE.test(clause)) mandated.add(tool);
+      if (HARD_DIRECTIVE.test(clause) || SOFT_DIRECTIVE.test(clause)) mentioned.add(tool);
     }
   }
-  return mandated;
+  return mentioned;
 }
 
 /**

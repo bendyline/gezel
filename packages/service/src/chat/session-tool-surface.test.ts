@@ -468,7 +468,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
-  it('keeps the tools that open a craftbook input, short of the book’s own step policy', async () => {
+  it('keeps the tools that open a craftbook input, short of an exact step-policy denial', async () => {
     const input = {
       drawer: 'artifacts' as const,
       kind: 'folder' as const,
@@ -491,7 +491,8 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       expect(allowlist!.has(name)).toBe(true);
     }
 
-    const { allowlist: authored } = await resolveSessionToolSurface({
+    // A group denial of `artifacts` withdraws the writer, never the reads.
+    const { allowlist: groupDenied } = await resolveSessionToolSurface({
       ...baseOpts,
       role: 'Developer',
       session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
@@ -503,7 +504,48 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       },
       taskInputs: [input],
     });
+    expect(groupDenied!.has('read_artifact')).toBe(true);
+    expect(groupDenied!.has('list_artifacts')).toBe(true);
+    expect(groupDenied!.has('write_artifact')).toBe(false);
+
+    const { allowlist: authored } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'build' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Build the ebook',
+        advanceWhen: { file: 'index.html', minBytes: 800 },
+        toolPolicy: { outputMedium: 'workspace', disallowTools: ['read_artifact'] },
+      },
+      taskInputs: [input],
+    });
     expect(authored!.has('read_artifact')).toBe(false);
+  });
+
+  it('keeps artifact reads for a Designer on powerpoint-deck publish (1.7.12 policy)', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Designer',
+      session: baseSession({ taskRef: 'default/20', stepId: 'publish' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Publish the PowerPoint',
+        prompt:
+          'Read `tasks/20/outline.md` from the artifacts drawer with `read_artifact` and the approved `powerpoint/task-20/deck.md` from the workspace with `read_file`.',
+        consumes: [{ file: 'powerpoint/task-20/deck.md' }],
+        advanceWhen: { file: 'powerpoint/task-20/deck.pptx', minBytes: 1 },
+        toolPolicy: {
+          outputMedium: 'workspace',
+          additionalOutputMedia: ['task-note'],
+          disallowBuiltinToolsets: ['artifacts', 'web', 'images'],
+        },
+      },
+    });
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('write_artifact')).toBe(false);
   });
 
   it('grants any assigned role its exact step kit through the hard ceiling', async () => {

@@ -8,7 +8,8 @@
  * EngagementBadge / QuotaMeter.
  *
  * Two visual states:
- *   1. **Idle** — muted "On-device · model-name" badge.
+ *   1. **Idle** — muted engine badge ("This Mac", "DwarfStar"). The
+ *      model is named only in the tooltip and the popover.
  *   2. **Busy** — animated dot + the current `engine_phase` label
  *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Generating",
  *      "Loading model") surfaced live from the SSE stream.
@@ -59,7 +60,6 @@ import {
   formatTokensPerSec,
 } from './engine-pill-stats.js';
 import { useHeaderDensity } from './header-density.js';
-import { shortModelName } from './model-display-name.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
 import {
   type LiveTurnState,
@@ -582,8 +582,8 @@ function EngineStatusPillForProvider({
   }, [onDeviceProvider]);
 
   // An in-flight session's runtime-selected model wins over the install default.
-  // This is what lets a secondary llama.cpp pill say "Talkie" while the
-  // default DwarfStar pill continues to show its own model. For an idle
+  // This is what lets a secondary llama.cpp pill's popover say "Talkie" while
+  // the default DwarfStar pill continues to report its own model. For an idle
   // provider, only honour the configured default when its weights are on
   // disk; otherwise mirror the supervisor's first-installed fallback.
   const installedDefault = configuredDefault
@@ -863,16 +863,6 @@ function EngineStatusPillForProvider({
   // hook applies to a detail-less event.
   const pillBusyLabel =
     stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : '');
-  // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
-  // model name. The engine pill already conveys "this Mac / on-device"
-  // context — repeating the runtime + quantization in the pill is
-  // redundant and just eats horizontal space. The popover and the
-  // tooltips keep the cleaned name too; the catalog manifest itself
-  // is unchanged.
-  // Suppress the chat model name while a media engine is active — the
-  // pill is showing "Video / Image", not the (paused) chat model.
-  const displayModelName = activeMedia ? undefined : shortModelName(modelName);
-  const modelSuffix = displayModelName ? ` · ${displayModelName}` : '';
   // Active tuning for the loaded model. Two independent layers can be in
   // play (see InstallModelTuningEditor): an install-wide preset
   // (`modelTuningProfile[id]`) and custom per-leaf overrides
@@ -895,11 +885,12 @@ function EngineStatusPillForProvider({
         : hasCustomTuning
           ? 'Custom tuning'
           : undefined;
-  // Tooltip surfaces the technical id (e.g. "gemma4-e4b") instead of
-  // the friendly catalog name shown on the pill itself — the pill
-  // already shows the friendly name, so the hover is the place to
-  // reveal the underlying model id for users who care.
-  const tooltipModelSuffix = activeMedia ? '' : modelId ? ` · ${modelId}` : modelSuffix;
+  // The pill itself never names the model — that is what the popover is
+  // for, under its full catalog name. The hover carries the technical id
+  // (e.g. "gemma4-e4b") for users who care. Suppressed while a media
+  // engine is active: the pill is then "Video" / "Image", not the paused
+  // chat model.
+  const tooltipModelSuffix = activeMedia || !modelId ? '' : ` · ${modelId}`;
   const showProgress = busy && typeof busyProgress === 'number';
   const progressPct = showProgress
     ? Math.max(0, Math.min(100, Math.round((busyProgress as number) * 100)))
@@ -971,22 +962,18 @@ function EngineStatusPillForProvider({
       : 'Image'
     : chatPillLabel;
   // Crowded titlebar: shed words rather than run off the bar. The machine
-  // name is the first to go — every local engine wears the same one, so it
-  // stops distinguishing anything the moment a second pill appears, and the
-  // model name below already tells the two apart. A named engine
+  // name is the first to go from a busy pill — every local engine wears the
+  // same one, so it stops distinguishing anything the moment a second pill
+  // appears. An idle pill keeps it: it is the only word that pill has, and
+  // dropping it would leave a bare dot naming nothing. A named engine
   // ("DwarfStar", "Video", "Image") is not a machine name and stays.
   const kindNamesTheMachine =
     !activeMedia &&
     (!onDeviceProvider || onDeviceProvider === 'llama-cpp' || onDeviceProvider === 'mlx');
-  const showKind = density === 'full' || !kindNamesTheMachine;
-  // Tighter still: the gezel's name goes, leaving engine + phase + model.
+  const showKind = density === 'full' || !kindNamesTheMachine || !busy;
+  // Tighter still: the gezel's name goes, leaving the phase and the clock.
   // Both stay in the pill's tooltip and in the popover's Status row.
   const showActor = density === 'full' || density === 'compact';
-  // Last of all the model name goes, leaving the phase and the clock. Held
-  // back until the label has something else to say: on an idle pill whose
-  // machine name already went, the model is the only word there is, and
-  // dropping it would leave a bare dot naming nothing.
-  const showModel = density !== 'minimal' || !(busy || showKind);
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
@@ -1018,10 +1005,10 @@ function EngineStatusPillForProvider({
                   This is essential when a gezel override runs llama.cpp
                   alongside an idle default DwarfStar engine: two anonymous
                   progress bars would recreate the same ambiguity. On a
-                  crowded bar the machine name drops out (see `showKind`)
-                  and the model name below takes over that duty — which it
-                  can, because two pills wearing "This Mac" were never told
-                  apart by the name in the first place. */}
+                  crowded bar the machine name drops out (see `showKind`):
+                  two pills wearing "This Mac" were never told apart by
+                  that name in the first place, and the gezel beside it
+                  still is. */}
               {showKind && <span className="engine-pill-kind">{platformPillLabel}</span>}
               {showActor && activeGezelName && (
                 <span className="engine-pill-actor">
@@ -1051,11 +1038,6 @@ function EngineStatusPillForProvider({
             </>
           ) : (
             showKind && platformPillLabel
-          )}
-          {displayModelName && showModel && (
-            // The separator belongs to whatever precedes the model name, so
-            // a compacted idle pill reads "Qwen 3.8", not "· Qwen 3.8".
-            <span className="engine-pill-model">{`${busy || showKind ? ' · ' : ''}${displayModelName}`}</span>
           )}
           {healthPresentation?.inline && (
             <>
@@ -1087,10 +1069,9 @@ function EngineStatusPillForProvider({
             {modelName && !activeMedia && (
               <>
                 <dt>Model</dt>
-                {/* The pill trims to the base name to save header width;
-                    the popover is the place for the specific build, so
-                    it keeps the full catalog name — e.g. "Gemma 4 (E4B)"
-                    rather than the trimmed "Gemma 4". */}
+                {/* The pill leaves the model out to save header width;
+                    the popover is the place for it, under the full
+                    catalog name — e.g. "Gemma 4 (E4B)". */}
                 <dd>{modelName}</dd>
               </>
             )}

@@ -1016,7 +1016,6 @@ button.search-palette-group-more:hover {
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-.engine-pill-model,
 .engine-pill-elapsed {
   opacity: 0.65;
 }

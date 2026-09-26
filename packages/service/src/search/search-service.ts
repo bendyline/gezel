@@ -48,6 +48,15 @@ const CATALOG_TTL_MS = 10_000;
 const FANOUT_CONCURRENCY = 8;
 /** Budget for a single project's (or gezel's) fan-out work before we drop it. */
 const PER_SCOPE_TIMEOUT_MS = 600;
+/**
+ * A catalog whose embedding profile is not the daemon's loads its own query
+ * model — lazily, and again after it idles out — which takes seconds. Waiting
+ * inside the per-scope budget meant the whole knowledge arm timed out and
+ * the catalog answered nothing at all, not even its keyword hits. Half the
+ * budget for the embed leaves the other half for the catalog search itself;
+ * the load keeps going in the background for the next query.
+ */
+const KNOWLEDGE_QUERY_EMBED_BUDGET_MS = Math.floor(PER_SCOPE_TIMEOUT_MS / 2);
 /** Hits requested from each per-project content source. */
 const PER_SOURCE_RESULTS = 5;
 /** Catalog cap on indexed artifact-corpus records per project. */
@@ -135,6 +144,11 @@ export interface KnowledgeSearchProvider {
       maxResults: number;
       /** The session project (scoped search) — resolves the project policy. */
       projectId?: string;
+      /**
+       * How long to wait for a catalog's own query embedder before searching
+       * it keyword-only. Omitted → wait for the model however long it takes.
+       */
+      queryEmbedBudgetMs?: number;
     },
   ): Promise<UnifiedSearchResult[]>;
 }
@@ -888,6 +902,7 @@ export class SearchService {
                 vector,
                 maxResults: Math.max(10, perSource * 2),
                 ...(scope?.primaryProjectId ? { projectId: scope.primaryProjectId } : {}),
+                queryEmbedBudgetMs: KNOWLEDGE_QUERY_EMBED_BUDGET_MS,
               }),
           );
           return hits ?? [];
