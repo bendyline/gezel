@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { gildePackageRoot } from './gilde-data.js';
 import { renderGildeSchemaFiles } from './gilde-schema-export.js';
@@ -80,7 +80,9 @@ function describeDrift(filename: string, generated: string, committed: string): 
 }
 
 describe('gilde schemas are current with core', () => {
-  const root = gildePackageRoot();
+  const root = process.env.GILDE_DIR?.trim()
+    ? resolve(process.env.GILDE_DIR.trim())
+    : gildePackageRoot();
   const schemasDir = join(root, 'schemas');
 
   it('the resolved gilde ships a schemas/ directory', () => {

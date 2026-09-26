@@ -55,6 +55,7 @@ import { gstackAuthoringDir, readGstackWaveConfig } from '../src/gstack-authorin
 import {
   type Overlay,
   OverlaySchema,
+  applyFrozenOverlayPatches,
   convertSnapshotSkill,
   enforceQualityReviewRouting,
   mergeWaveIdentity,
@@ -111,8 +112,7 @@ function compareSemver(a: string, b: string): number {
 async function latestVersionBefore(versionsDir: string, target: string): Promise<string> {
   const available = (await readdir(versionsDir, { withFileTypes: true }))
     .filter(
-      (entry) =>
-        entry.isDirectory() && /^\d+\.\d+\.\d+$/.test(entry.name) && entry.name !== target,
+      (entry) => entry.isDirectory() && /^\d+\.\d+\.\d+$/.test(entry.name) && entry.name !== target,
     )
     .map((entry) => entry.name)
     .sort(compareSemver);
@@ -133,7 +133,8 @@ async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
   const testsOnly = process.argv.includes('--tests-only');
   const frozenOnly = process.argv.includes('--frozen-only');
-  if (testsOnly && frozenOnly) throw new Error('--tests-only and --frozen-only are mutually exclusive');
+  if (testsOnly && frozenOnly)
+    throw new Error('--tests-only and --frozen-only are mutually exclusive');
   let written = 0;
   let skipped = 0;
   const personaDrafts: string[] = [];
@@ -224,9 +225,10 @@ async function main(): Promise<void> {
         version: wave.version,
         releasedAt: wave.releasedAt,
       });
+      const patched = applyFrozenOverlayPatches(carriedBase, overlay);
       const carried = overlay.workflow
-        ? enforceQualityReviewRouting(carriedBase, overlay.workflow)
-        : carriedBase;
+        ? enforceQualityReviewRouting(patched, overlay.workflow)
+        : patched;
       const runtime = craftbookFromDoc(carried, { now: wave.releasedAt });
       if (!runtime.ok) {
         throw new Error(

@@ -113,6 +113,33 @@ describe('structuralOrderRepairLine', () => {
 });
 
 describe('postSniffFeedback', () => {
+  it('routes existing artifact repairs through drawer tools', async () => {
+    const client = makeClient({
+      sessions: [
+        { id: 'sess-writer', gezelId: 'writer-1', lastActivityAt: '2026-09-26T05:00:00Z' },
+      ],
+    });
+    const ctx = makeCtx(client);
+    const sniff: SniffResult = {
+      ok: false,
+      signals: ['report-present'],
+      score: 1,
+      missingRequiredSignals: ['verification-result'],
+      failReason: 'The report does not record a passing verification command.',
+    };
+
+    await postSniffFeedback(ctx, 'tasks/1/report.md', sniff, {
+      surface: 'artifacts',
+      expectedDeliverable: null,
+    });
+
+    const [, body] = client.messageGezel.mock.calls[0]!;
+    expect(body.text).toContain('read_artifact({ path: "tasks/1/report.md" })');
+    expect(body.text).toContain('write_artifact({ path: "tasks/1/report.md"');
+    expect(body.text).not.toContain('use `replace_in_file`');
+    expect(body.text).not.toContain('use `write_file`');
+  });
+
   it('posts a from-meester message naming the missing signals (petshop working-image case)', async () => {
     const client = makeClient({
       sessions: [

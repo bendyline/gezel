@@ -2388,6 +2388,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         {
           projectId,
           ...taskStepOpts,
+          ...(repairDeliverable?.artifact ? { surface: 'artifacts' as const } : {}),
           repairDirective: repairDeliverable
             ? await craftbookExistingDeliverableRepairDirective(
                 ctx.client,

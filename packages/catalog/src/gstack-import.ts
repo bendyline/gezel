@@ -175,6 +175,9 @@ const QUALITY_RESERVED_STEP_IDS = new Set(['evaluate', 'repair', 'finish', 'need
 const REVIEW_FINDINGS_INSTRUCTION =
   'List the findings as a markdown table with columns `| Severity | File | Line | Problem | Fix |` (severities: critical/major/minor/nit; empty table only on PASS).';
 
+const ENFORCED_REVIEW_ROUTING_BLOCK =
+  /(?:\n{2})?List the findings as a markdown table with columns `[\s\S]*?Never write PASS while a criterion is unmet\./g;
+
 function enforcedReviewRouting(fixStepId: string): string {
   return `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. The gate ENFORCES the verdict: a well-formed REVISE is rejected and routed back to \`${fixStepId}\` automatically, carrying your findings — so list every finding in the table with a concrete fix. On PASS, call \`advance_task_step\`; the default edge is \`finish\`. Never write PASS while a criterion is unmet.`;
 }
@@ -203,22 +206,33 @@ export function enforceQualityReviewRouting(
       if (normalizedGate.at !== 'completion') {
         throw new Error('quality workflow evaluate step needs a declarative completion gate');
       }
-      const historicalRouting = new RegExp(
-        'Give each criterion a PASS or FAIL[\\s\\S]*?Never route to finish while any criterion is unmet\\.',
-      );
-      const prompt = historicalRouting.test(step.prompt ?? '')
-        ? (step.prompt ?? '').replace(
-            historicalRouting,
-            `${REVIEW_FINDINGS_INSTRUCTION} ${enforcedReviewRouting(fixStepId)}`,
-          )
-        : `${step.prompt ?? ''}\n\n${REVIEW_FINDINGS_INSTRUCTION} ${enforcedReviewRouting(fixStepId)}`.trim();
+      const historicalRouting =
+        /Give each criterion a PASS or FAIL[\s\S]*?Never route to finish while any criterion is unmet\./;
+      const promptBase = (step.prompt ?? '')
+        .replace(historicalRouting, '')
+        .replace(ENFORCED_REVIEW_ROUTING_BLOCK, '')
+        .trim();
+      const prompt =
+        `${promptBase}\n\n${REVIEW_FINDINGS_INSTRUCTION} ${enforcedReviewRouting(fixStepId)}`.trim();
+      const configuredReviewPath = workflow.review.reviewPath;
+      const reviewPath =
+        normalizedGate.checks
+          .map((check) => ('file' in check ? check.file : undefined))
+          .find(
+            (file): file is string =>
+              typeof file === 'string' &&
+              (file === configuredReviewPath || file.endsWith(`/${configuredReviewPath}`)),
+          ) ?? configuredReviewPath;
       const scripts = [
         ...(normalizedGate.scripts ?? []).filter((script) => script.name !== 'checkFixReview'),
         {
           name: 'checkFixReview',
           scope: 'standard' as const,
           inputs: {
-            reviewPath: workflow.review.reviewPath,
+            // Frozen Gstack books may already have had their artifact paths
+            // migrated under {{workPath}}. The declarative checks are the
+            // shipped source of truth; keep the script on that same path.
+            reviewPath,
             fixStepId,
             maxReviewRounds,
             needsUserStepId: 'needs-user',
@@ -499,6 +513,31 @@ function qualityOutputGate(
   return { at: 'completion', checks, onReject, maxAttempts };
 }
 
+function applyStepPatches(
+  steps: NewCraftbookStep[],
+  patches: Overlay['steps'],
+): NewCraftbookStep[] {
+  if (!patches) return steps;
+  return steps.flatMap((step) => {
+    const patch = patches[step.id ?? ''];
+    if (patch === null) return [];
+    if (patch === undefined) return [step];
+    return [{ ...step, ...patch } as NewCraftbookStep];
+  });
+}
+
+/**
+ * Frozen books stay hand-owned, but may opt into narrow, explicit per-step
+ * patches during an append-only release. This never regenerates their graph
+ * from the source snapshot or compact workflow.
+ */
+export function applyFrozenOverlayPatches(doc: CraftbookDoc, overlay: Overlay): CraftbookDoc {
+  return CraftbookDocSchema.parse({
+    ...doc,
+    steps: applyStepPatches(doc.steps, overlay.steps),
+  });
+}
+
 export function applyOverlay(doc: CraftbookDoc, overlay: Overlay): CraftbookDoc {
   const out: Record<string, unknown> = { ...doc, ...(overlay.set ?? {}) };
   if (overlay.planAppend) {
@@ -511,13 +550,7 @@ export function applyOverlay(doc: CraftbookDoc, overlay: Overlay): CraftbookDoc 
     out.steps = qualityWorkflowSteps(overlay.workflow);
   }
   if (overlay.steps) {
-    const steps = (out.steps as NewCraftbookStep[]).flatMap((step) => {
-      const patch = overlay.steps?.[step.id ?? ''];
-      if (patch === null) return [];
-      if (patch === undefined) return [step];
-      return [{ ...step, ...patch } as NewCraftbookStep];
-    });
-    out.steps = steps;
+    out.steps = applyStepPatches(out.steps as NewCraftbookStep[], overlay.steps);
   }
   if (overlay.scripts) {
     const scripts = { ...((out.scripts as Record<string, string>) ?? {}) };

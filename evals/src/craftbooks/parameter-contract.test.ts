@@ -252,15 +252,14 @@ describe('runtime interpolation surfaces', () => {
 });
 
 describe('against the bundled library', () => {
-  it('covers every active craftbook and preserves the known parameter-contract exemplars', async () => {
+  it('covers every active craftbook with no known parameter-contract defects', async () => {
     const templates = await loadCraftbookTemplates();
     const summary = auditCraftbookParameterContracts(CRAFTBOOK_EVAL_SPECS, templates);
     expect(summary.checked).toBeGreaterThan(280);
     expect(summary.clean + summary.withFindings).toBe(summary.checked);
-    // Ratchets, not targets: content fixes should move these down. Raising
-    // either bound requires reviewing the new launcher/runtime defect.
-    expect(summary.failures).toBeLessThanOrEqual(3);
-    expect(summary.warnings).toBeLessThanOrEqual(11);
+    expect(summary.failures).toBe(0);
+    expect(summary.warnings).toBe(0);
+    expect(summary.withFindings).toBe(0);
 
     const byBook = new Map<string, Set<string>>();
     for (const item of summary.findings) {
@@ -269,8 +268,8 @@ describe('against the bundled library', () => {
       byBook.set(item.craftbookId, codes);
     }
     expect(byBook.get('draft-social-post')).toBeUndefined();
-    expect(byBook.get('executive-level-review')).toContain('test.undeclared-param');
-    expect(byBook.get('security-architecture-review')).toContain('test.undeclared-param');
+    expect(byBook.get('executive-level-review')).toBeUndefined();
+    expect(byBook.get('security-architecture-review')).toBeUndefined();
     expect(byBook.get('powerpoint-deck')).toBeUndefined();
     expect(byBook.get('pull-request-review')).toBeUndefined();
   });

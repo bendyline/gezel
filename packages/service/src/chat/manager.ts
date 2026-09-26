@@ -4611,7 +4611,29 @@ export class ChatManager extends LocalEngineRuntime {
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
+            const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            // Asking a question is a successful suspension point, not a
+            // failed fixed-action attempt. In particular,
+            // `run_package_script` raises a command-approval question and
+            // deliberately ends the provider turn; answering it injects a
+            // follow-up into this same session. Retrying here races that
+            // follow-up, consumes the bounded handoff budget, and can pause
+            // an otherwise healthy task before the approved command runs.
+            // Count questions created during this send even when the eval
+            // harness (or a very fast user) has already answered them.
+            const yieldedToQuestion = (
+              await this.store.listProjectQuestions(handoffSession.projectId).catch(() => [])
+            ).some(
+              (question) =>
+                question.sessionId === handoffSession.id && question.createdAt >= sendStartedAt,
+            );
+            if (yieldedToQuestion) {
+              log.info(
+                `[chat] ${args.taskRef}/${dispatchStepId}: handoff yielded to a question; waiting for its answer instead of spending a recovery attempt`,
+              );
+              break;
+            }
             if (requiresExactOutcome) {
               const parsed = parseTaskRef(args.taskRef);
               const afterSend = parsed
