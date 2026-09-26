@@ -308,9 +308,10 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minSuccessful: z.number().int().positive().optional(),
     externalOptional: z.boolean().optional(),
   }),
-  /** Require actual image delivery for each {path} in a workspace JSON manifest. */
+  /** Require image delivery for each {path}; artifact selects the manifest and image surface. */
   z.object({
     kind: z.literal('imageEvidence'),
+    artifact: z.boolean().optional(),
     file: z.string().min(1),
     imagesKey: z.string().min(1).default('images'),
     baseDir: z.string().min(1),

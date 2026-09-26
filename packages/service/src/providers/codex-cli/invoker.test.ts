@@ -2,7 +2,8 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SessionResumeError } from '../types.js';
+import { artifactReadSlices } from '../../chat/artifact-read-evidence.js';
+import { SessionResumeError, type ToolCallEvent } from '../types.js';
 import {
   buildCodexArgs,
   classifyError,
@@ -426,6 +427,72 @@ describe('runCodexTurn — happy path', () => {
       },
     ]);
   });
+
+  it.each(['structured_content', 'structuredContent'])(
+    'preserves MCP read receipts from %s and reports nested tool errors',
+    async (structuredKey) => {
+      const receipt = { resolvedPath: 'pilot/input.json', startLine: 1, endLine: 3, totalLines: 3 };
+      const item = (id: string, result: Record<string, unknown>) => ({
+        type: 'item.completed',
+        item: {
+          id,
+          type: 'mcp_tool_call',
+          server: 'gezel',
+          tool: 'read_artifact',
+          status: 'completed',
+          arguments: { path: 'input.json' },
+          result,
+        },
+      });
+      const ndjson = `${[
+        { type: 'thread.started', thread_id: 'thr-receipts' },
+        item('ok', {
+          [structuredKey]: receipt,
+          content: [
+            { type: 'text', text: 'Read body' },
+            { type: 'image', data: 'DO_NOT_LOG_IMAGE' },
+          ],
+        }),
+        item('error', {
+          [structuredKey]: receipt,
+          isError: true,
+          content: [{ type: 'text', text: 'Read denied' }],
+        }),
+        item('error-snake', { is_error: true }),
+        item('no-receipt', { content: [{ type: 'text', text: 'Only prose' }] }),
+        { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n')}\n`;
+      const codex = await makeFakeCodex(ndjson);
+      const calls: ToolCallEvent[] = [];
+      await runCodexTurn({
+        binaryPath: codex,
+        cwd: dir,
+        codexHome: join(dir, 'codex-home'),
+        baseEnv: { ...process.env, CODEX_API_KEY: 'fake' },
+        model: 'gpt-5.5',
+        permissionMode: 'acceptEdits',
+        prompt: 'hi',
+        hooks: {
+          emitDelta: () => {},
+          emitIntent: () => {},
+          emitHeartbeat: () => {},
+          emitUsage: () => {},
+          emitWarning: () => {},
+          onToolCall: (ev) => {
+            calls.push(ev);
+          },
+        },
+      });
+      expect(calls[0]?.structuredContent).toMatchObject(receipt);
+      expect(artifactReadSlices(calls[0]!.name, calls[0]!.structuredContent)).toHaveLength(1);
+      expect(calls[0]?.resultText).toBe('Read body');
+      expect(JSON.stringify(calls)).not.toContain('DO_NOT_LOG_IMAGE');
+      expect(calls.map((call) => call.success)).toEqual([true, false, false, true]);
+      expect(artifactReadSlices(calls[3]!.name, calls[3]!.structuredContent)).toEqual([]);
+    },
+  );
 
   it('surfaces concrete MCP names as live status and one named tool row', async () => {
     const ndjson = [

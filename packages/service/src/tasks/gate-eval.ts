@@ -238,7 +238,7 @@ export interface GateCheckResult {
  */
 export interface GateEvalDeps {
   /** Successful scoped image reads in this task, step and activation. */
-  imageEvidence?: () => Promise<{ observable: boolean; paths: string[] }>;
+  imageEvidence?: (artifact?: boolean) => Promise<{ observable: boolean; paths: string[] }>;
   sandboxExec?: (
     file: string,
     timeoutMs: number,
@@ -750,7 +750,7 @@ async function evalCheckInner(
       const normalize = (path: string) =>
         posix.normalize(path.replaceAll('\\', '/').replace(/^workspace\//, ''));
       const expected = [...new Set(items.map((i) => normalize(posix.join(c.baseDir, i.path))))];
-      const observed = await deps.imageEvidence();
+      const observed = await deps.imageEvidence(c.artifact === true);
       if (!observed.observable)
         return { ok: false, detail: 'Image delivery telemetry is unavailable (fail-closed).' };
       const seen = new Set(observed.paths.map(normalize));

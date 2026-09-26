@@ -230,11 +230,29 @@ const EXIF_TAGS = {
   model: 0x0110,
   orientation: 0x0112,
   software: 0x0131,
+  dateTimeModified: 0x0132,
+  artist: 0x013b,
+  copyright: 0x8298,
   exifIfd: 0x8769,
   gpsIfd: 0x8825,
 } as const;
 
-const EXIF_SUB_TAGS = { dateTimeOriginal: 0x9003, lensModel: 0xa434 } as const;
+const EXIF_SUB_TAGS = {
+  dateTimeOriginal: 0x9003,
+  dateTimeDigitized: 0x9004,
+  offsetTimeOriginal: 0x9011,
+  lensModel: 0xa434,
+} as const;
+const EXIF_NUMERIC_TAGS = {
+  exposureTime: 0x829a,
+  fNumber: 0x829d,
+  iso: 0x8827,
+  focalLength: 0x920a,
+  focalLengthIn35mmFilm: 0xa405,
+  flash: 0x9209,
+  whiteBalance: 0xa403,
+  exposureProgram: 0x8822,
+} as const;
 const GPS_TAGS = { latRef: 0x0001, lat: 0x0002, lonRef: 0x0003, lon: 0x0004 } as const;
 
 interface TiffCursor {
@@ -261,7 +279,8 @@ function readJpegExif(buf: Buffer): { exif: ImageExif; gps?: { lat: number; lon:
     const len = buf.readUInt16BE(off + 2);
     if (len < 2) break;
     if (marker === 0xe1 && buf.toString('ascii', off + 4, off + 10) === 'Exif\0\0') {
-      return parseTiff(buf, off + 10);
+      if (off + 2 + len > buf.length) return null;
+      return parseTiff(buf.subarray(off + 10, off + 2 + len), 0);
     }
     off += 2 + len;
   }
@@ -290,6 +309,9 @@ function parseTiff(
   exif.make = str(entries, EXIF_TAGS.make);
   exif.model = str(entries, EXIF_TAGS.model);
   exif.software = str(entries, EXIF_TAGS.software);
+  exif.dateTimeModified = str(entries, EXIF_TAGS.dateTimeModified);
+  exif.artist = str(entries, EXIF_TAGS.artist);
+  exif.copyright = str(entries, EXIF_TAGS.copyright);
   const orientation = entries.get(EXIF_TAGS.orientation);
   if (typeof orientation === 'number' && orientation >= 1 && orientation <= 8) {
     exif.orientation = orientation;
@@ -297,10 +319,24 @@ function parseTiff(
 
   const exifPtr = entries.get(EXIF_TAGS.exifIfd);
   if (typeof exifPtr === 'number') {
-    const sub = readIfd(cur, base + exifPtr);
+    const sub = readIfd(cur, base + exifPtr, true);
     if (sub) {
-      exif.dateTimeOriginal = str(sub, EXIF_SUB_TAGS.dateTimeOriginal);
-      exif.lensModel = str(sub, EXIF_SUB_TAGS.lensModel);
+      for (const [key, tag] of Object.entries(EXIF_SUB_TAGS)) {
+        const value = str(sub, tag);
+        if (value !== undefined) exif[key as keyof typeof EXIF_SUB_TAGS] = value;
+      }
+      for (const [key, tag] of Object.entries(EXIF_NUMERIC_TAGS)) {
+        const raw = sub.get(tag);
+        const value = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
+        const permitsZero = ['flash', 'whiteBalance', 'exposureProgram'].includes(key);
+        if (
+          typeof value === 'number' &&
+          Number.isFinite(value) &&
+          (permitsZero ? Number.isInteger(value) && value >= 0 : value > 0)
+        ) {
+          exif[key as keyof typeof EXIF_NUMERIC_TAGS] = value;
+        }
+      }
     }
   }
   for (const k of Object.keys(exif) as (keyof ImageExif)[]) {
@@ -363,7 +399,7 @@ function readIfd(
     const type = readU16(cur, e + 2);
     const num = readU32(cur, e + 4);
     const size = tiffTypeSize(type);
-    if (size === 0) continue;
+    if (size === 0 || num === 0) continue;
     const bytes = size * num;
     const valueAt = bytes <= 4 ? e + 8 : cur.base + readU32(cur, e + 8);
     if (valueAt < 0 || valueAt + bytes > buf.length) continue;
@@ -378,7 +414,7 @@ function readIfd(
       const vals: number[] = [];
       for (let r = 0; r < num; r++) {
         const den = readU32(cur, valueAt + r * 8 + 4);
-        vals.push(den === 0 ? 0 : readU32(cur, valueAt + r * 8) / den);
+        vals.push(den === 0 ? Number.NaN : readU32(cur, valueAt + r * 8) / den);
       }
       out.set(tag, vals);
     }

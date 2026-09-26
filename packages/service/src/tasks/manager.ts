@@ -3039,7 +3039,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
-        imageEvidence: async () => {
+        imageEvidence: async (artifact = false) => {
           if (!this.history) return { observable: false, paths: [] };
           const events = await this.history.listEvents({
             projectId,
@@ -3050,7 +3050,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             const d = event.details;
             return d?.success === true &&
               d.name === 'read_image_as_base64' &&
-              d.imageArtifact === false &&
+              d.imageArtifact === artifact &&
               d.taskRef === task.ref &&
               // Generalist sessions survive graph transitions; their bridge's
               // step tag can name the previous step after a repair back-edge.
