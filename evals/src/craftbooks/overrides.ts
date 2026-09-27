@@ -20,6 +20,12 @@ export interface CraftbookEvalOverride {
    * validation recorded" default stands.
    */
   coverage?: CraftbookEvalSpec['coverage'];
+  /**
+   * Exact catalog craftbook/test version the recorded validation exercised.
+   * Required for sidecars that explicitly declare their eval mode: changing
+   * one of those sidecars invalidates older pass notes automatically.
+   */
+  validatedSpecVersion?: string;
   gaps?: string[];
   /** Override the default artifact-task mode for a real workflow run. */
   mode?: CraftbookEvalMode;
@@ -2308,13 +2314,20 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   'translate-content': {
     mode: 'workflow',
     timeoutMs: 30 * 60_000,
-    progressTimeoutMs: 12 * 60_000,
+    // The local Gemma 4 12B CPU pilot was still making steady llama.cpp
+    // prefill progress at 72% when the old 12-minute watchdog fired. Keep
+    // this long enough to judge the workflow rather than the host's prefill
+    // rate; the ordinary trial ceiling remains the runaway backstop.
+    progressTimeoutMs: 20 * 60_000,
+    validatedSpecVersion: '1.1.5',
     coverage: {
-      status: 'implemented',
+      status: 'validated',
+      validatedMode: 'workflow',
+      localModels: ['gemma4-12b-q4'],
       notes:
-        'Upgraded to a real craftbook-task scenario. The 1.1 workflow has a completion gate over mirrored translation files and the artifact run note; the eval requires craftbook attribution, source preservation, and an approving task.step.gated History event. Needs a local-model run.',
+        '2026-09-26 local offline workflow pass with gemma4-12b-q4 (llama.cpp CPU, stepwise, count=1): translate-content@1.1.5 passed all 4 deterministic checks, preserved the source fixtures, reached the terminal step with one approving gate event, and wrote all mirrored translations plus the artifact run note. Trial craftbook-translate-content-gemma4-12b-q4-2026-09-26T21-07-31-688Z-9u0z.',
     },
-    gaps: ['Run the new workflow-backed scenario across the local model tiers.'],
+    gaps: ['Run the workflow-backed scenario across additional local model tiers.'],
   },
   'transcribe-audio': {
     coverage: {

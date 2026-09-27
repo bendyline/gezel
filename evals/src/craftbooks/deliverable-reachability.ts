@@ -128,10 +128,7 @@ function escapeRegExp(value: string): string {
 function documentNamesPathTemplate(document: string, path: string): boolean {
   const filename = basename(path);
   if (!document.includes(filename)) return false;
-  const candidatePattern = new RegExp(
-    `(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`,
-    'g',
-  );
+  const candidatePattern = new RegExp(`(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`, 'g');
   for (const match of document.matchAll(candidatePattern)) {
     const candidate = match[0];
     if (!candidate.includes('<')) continue;
@@ -168,6 +165,22 @@ export function classifyDeliverableReachability(
     .filter((path) => path && !seeded.has(path));
   if (graded.length === 0) return null;
 
+  const gatedPaths = craftbookGatedPaths(template);
+  // Guardrail and generic orchestration books intentionally do not own a
+  // static output filename: the user's kickoff supplies the concrete path,
+  // while the value of the book is its hook or review/release sequence. That
+  // is a valid workflow eval only when the sidecar proves both attribution
+  // and terminal progress. Without those two invariants it remains the old
+  // false-positive shape (a freehand worker can write anything and pass).
+  if (
+    gatedPaths.length === 0 &&
+    spec.mode === 'workflow' &&
+    spec.success.taskGraph?.requireCraftbookTask === true &&
+    spec.success.taskGraph.requireTerminalStep === true
+  ) {
+    return null;
+  }
+
   const document = resolveBookDocument(spec, template);
   const unreachable: string[] = [];
   const drifted: string[] = [];
@@ -183,7 +196,7 @@ export function classifyDeliverableReachability(
     scenarioId: spec.scenarioId,
     verdict: unreachable.length > 0 ? 'unreachable' : 'folder-drift',
     paths: unreachable.length > 0 ? unreachable : drifted,
-    bookGatedPaths: craftbookGatedPaths(template),
+    bookGatedPaths: gatedPaths,
   };
 }
 

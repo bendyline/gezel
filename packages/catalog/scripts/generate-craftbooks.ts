@@ -24,6 +24,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { CraftbookDocSchema, parseCraftbookTestSpec } from '@bendyline/gezel';
 import type { ArchetypeSpec } from '../src/archetype.js';
 import { archetypeToFiles } from '../src/archetype.js';
 import { SEED_ARCHETYPES } from './craftbook-archetypes.js';
@@ -84,16 +85,8 @@ function compareSemver(a: string, b: string): number {
  * This prevents catalog-wide compiler migrations from silently dropping
  * evaluation coverage.
  */
-async function inheritLatestTestSidecar(bookDir: string, targetVersion: string): Promise<void> {
+async function latestTestSidecar(bookDir: string, targetVersion: string): Promise<Buffer | null> {
   const versionsDir = join(bookDir, 'versions');
-  const target = join(versionsDir, targetVersion, 'test.json');
-  try {
-    await readFile(target);
-    return;
-  } catch {
-    // Expected for a new immutable release.
-  }
-
   let versions: string[];
   try {
     versions = (await readdir(versionsDir, { withFileTypes: true }))
@@ -103,17 +96,77 @@ async function inheritLatestTestSidecar(bookDir: string, targetVersion: string):
       .sort(compareSemver)
       .reverse();
   } catch {
-    return;
+    return null;
   }
 
   for (const version of versions) {
     try {
-      const bytes = await readFile(join(versionsDir, version, 'test.json'));
-      await writeFile(target, bytes);
-      return;
+      return await readFile(join(versionsDir, version, 'test.json'));
     } catch {
       // Keep looking for the newest release that carries an eval sidecar.
     }
+  }
+  return null;
+}
+
+function resolveWorkflowDocument(
+  craftbookJson: string,
+  craftbookParams: Record<string, string> | undefined,
+): string {
+  const doc = CraftbookDocSchema.parse(JSON.parse(craftbookJson) as unknown);
+  const schema = doc.paramSchema as
+    | { properties?: Record<string, { default?: unknown }> }
+    | undefined;
+  const params: Record<string, string> = { workPath: '{{task.dir}}' };
+  for (const [key, property] of Object.entries(schema?.properties ?? {})) {
+    if (typeof property.default === 'string') params[key] = property.default;
+  }
+  Object.assign(params, craftbookParams ?? {});
+  let document = JSON.stringify(doc);
+  for (let pass = 0; pass < 6; pass++) {
+    const next = document.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, key: string) =>
+      params[key] !== undefined ? params[key] : whole,
+    );
+    if (next === document) break;
+    document = next;
+  }
+  return document;
+}
+
+/**
+ * Explicit workflow sidecars are a release contract, not inert baggage. A
+ * generated craftbook version may inherit one only when it still proves task
+ * attribution/terminal progress and every non-fixture deliverable remains
+ * named by the newly generated document. This turns generator output drift
+ * into a pre-write failure instead of another silently inverted eval.
+ */
+function validateInheritedWorkflowSidecar(
+  id: string,
+  craftbookJson: string,
+  testBytes: Buffer,
+): void {
+  const parsed = parseCraftbookTestSpec(JSON.parse(testBytes.toString('utf8')) as unknown, {
+    mode: 'strict',
+  });
+  if (!parsed.ok) throw new Error(`${id}: inherited test.json is invalid: ${parsed.errors[0]}`);
+  if (parsed.spec.mode !== 'workflow') return;
+  if (
+    parsed.spec.success.taskGraph?.requireCraftbookTask !== true ||
+    parsed.spec.success.taskGraph.requireTerminalStep !== true
+  ) {
+    throw new Error(
+      `${id}: explicit workflow test must require craftbook task + terminal progress`,
+    );
+  }
+  const document = resolveWorkflowDocument(craftbookJson, parsed.spec.setup.craftbookParams);
+  const seeded = new Set(parsed.spec.setup.files.map((file) => file.path));
+  const drifted = (parsed.spec.success.deliverables ?? [])
+    .map((deliverable) => deliverable.path)
+    .filter((path) => !seeded.has(path) && !document.includes(path));
+  if (drifted.length > 0) {
+    throw new Error(
+      `${id}: refusing to inherit workflow test with output drift (${drifted.join(', ')}); author a sidecar for the new release`,
+    );
   }
 }
 
@@ -210,6 +263,7 @@ async function main(): Promise<void> {
     bookDir: string;
     version: string;
     targetExists: boolean;
+    testSidecar: Buffer | null;
   }> = [];
   const failures: { id: string; error: string }[] = [];
   for (const spec of selected) {
@@ -236,7 +290,10 @@ async function main(): Promise<void> {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'ENOENT') throw error;
       }
-      plans.push({ spec, generated, bookDir, version, targetExists });
+      const testSidecar = targetExists ? null : await latestTestSidecar(bookDir, version);
+      if (testSidecar)
+        validateInheritedWorkflowSidecar(generated.id, versionFile.content, testSidecar);
+      plans.push({ spec, generated, bookDir, version, targetExists, testSidecar });
     } catch (err) {
       // One malformed agent-authored spec must not block the other ~200.
       failures.push({ id: spec?.id ?? '<no-id>', error: (err as Error).message });
@@ -269,7 +326,12 @@ async function main(): Promise<void> {
         await mkdir(dirname(dest), { recursive: true });
         await writeFile(dest, file.content, 'utf8');
       }
-      await inheritLatestTestSidecar(plan.bookDir, plan.version);
+      if (plan.testSidecar) {
+        await writeFile(
+          join(plan.bookDir, 'versions', plan.version, 'test.json'),
+          plan.testSidecar,
+        );
+      }
     }
   }
 

@@ -1,3 +1,5 @@
+import type { CraftbookBoilerplateFinding } from './boilerplate.ts';
+import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
 import type {
   CraftbookAuditResult,
   CraftbookEvalMode,
@@ -5,8 +7,6 @@ import type {
   CraftbookEvalValidationScope,
   CraftbookTemplateSummary,
 } from './types.ts';
-import type { CraftbookBoilerplateFinding } from './boilerplate.ts';
-import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
 
 export type CraftbookHarnessKind =
   | 'generic-file-gate'
@@ -121,7 +121,10 @@ export function buildCraftbookBatchPlan(args: {
       return [
         {
           craftbookId: audit.craftbookId,
-          scenarioId: spec.scenarioId,
+          // Linked hand-authored scenarios are the executable matrix target;
+          // the generic craftbook id is intentionally not registered for
+          // those specs.
+          scenarioId: spec.existingScenarioId ?? spec.scenarioId,
           mode: audit.evalMode,
           priority: item.priority,
         },
@@ -134,9 +137,22 @@ export function buildCraftbookBatchPlan(args: {
       const spec = specsById.get(audit.craftbookId);
       const reasons = blockersById.get(audit.craftbookId) ?? [];
       if (!spec || reasons.length === 0) return [];
-      return [{ craftbookId: audit.craftbookId, scenarioId: spec.scenarioId, reasons }];
+      return [
+        {
+          craftbookId: audit.craftbookId,
+          scenarioId: spec.existingScenarioId ?? spec.scenarioId,
+          reasons,
+        },
+      ];
     })
     .sort((a, b) => a.craftbookId.localeCompare(b.craftbookId));
+  const runnableByCraftbookId = new Map(
+    runnableNow.map((item) => [item.craftbookId, item] as const),
+  );
+  const selectedRunnable = items.flatMap((item) => {
+    const runnable = runnableByCraftbookId.get(item.craftbookId);
+    return runnable ? [runnable] : [];
+  });
 
   const harnessCounts = Object.fromEntries(HARNESS_KINDS.map((kind) => [kind, 0])) as Record<
     CraftbookHarnessKind,
@@ -149,7 +165,7 @@ export function buildCraftbookBatchPlan(args: {
     target: args.target,
     ...(args.mode ? { mode: args.mode } : {}),
     runnableNow,
-    scenarioCsv: runnableNow.map((item) => item.scenarioId).join(','),
+    scenarioCsv: selectedRunnable.map((item) => item.scenarioId).join(','),
     excluded,
     items,
     harnessCounts,

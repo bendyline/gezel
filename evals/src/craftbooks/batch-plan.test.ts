@@ -4,19 +4,26 @@ import { buildCraftbookBatchPlan } from './batch-plan.ts';
 import { findBoilerplateEvalSpecs } from './boilerplate.ts';
 import { loadCraftbookTemplates } from './catalog.ts';
 import { auditDeliverableReachability } from './deliverable-reachability.ts';
-import { CRAFTBOOK_EVAL_SPECS } from './specs.ts';
 import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
+import { CRAFTBOOK_EVAL_SPECS } from './specs.ts';
+
+const SCENARIO_ID_BY_CRAFTBOOK_ID = new Map(
+  CRAFTBOOK_EVAL_SPECS.map(
+    (spec) => [spec.craftbookId, spec.existingScenarioId ?? spec.scenarioId] as const,
+  ),
+);
 
 async function corpusPlan(
   mode?: 'workflow' | 'artifact-task',
   reachabilityFindings?: DeliverableReachabilityFinding[],
+  target = 50,
 ) {
   const templates = await loadCraftbookTemplates();
   const { audits } = auditCraftbookTemplates(templates);
   return buildCraftbookBatchPlan({
     templates,
     audits,
-    target: 50,
+    target,
     ...(mode ? { mode } : {}),
     specs: CRAFTBOOK_EVAL_SPECS,
     reachabilityFindings:
@@ -37,6 +44,10 @@ describe('craftbook batch plan', () => {
     expect(plan.harnessCounts['html-playwright']).toBeGreaterThan(0);
     expect(plan.harnessCounts['hook-runtime']).toBeGreaterThan(0);
     expect(plan.items.some((item) => item.simulatorIds.length > 0)).toBe(true);
+    expect(plan.scenarioCsv.split(',')).toHaveLength(50);
+    expect(plan.scenarioCsv.split(',')).toEqual(
+      plan.items.map((item) => SCENARIO_ID_BY_CRAFTBOOK_ID.get(item.craftbookId)),
+    );
   });
 
   it('can produce a workflow-only matrix plan', async () => {
@@ -49,23 +60,24 @@ describe('craftbook batch plan', () => {
     expect(plan.runnableNow.every((item) => item.mode === 'workflow')).toBe(true);
   });
 
-  it('excludes inverted and boilerplate evals while accepting symbolic output paths', async () => {
+  it('keeps repaired exemplars runnable and preserves stable scenario ids', async () => {
     const plan = await corpusPlan();
     const runnable = new Set(plan.runnableNow.map((item) => item.craftbookId));
     const excluded = new Map(plan.excluded.map((item) => [item.craftbookId, item.reasons]));
 
-    expect(runnable.has('db-index-tuning')).toBe(false);
-    expect(excluded.get('db-index-tuning')?.some((reason) => reason.code === 'unreachable')).toBe(
-      true,
-    );
-    expect(runnable.has('email-template')).toBe(false);
-    expect(excluded.get('email-template')?.some((reason) => reason.code === 'unreachable')).toBe(
-      true,
-    );
+    expect(runnable.has('db-index-tuning')).toBe(true);
+    expect(excluded.has('db-index-tuning')).toBe(false);
+    expect(runnable.has('email-template')).toBe(true);
+    expect(excluded.has('email-template')).toBe(false);
     expect(runnable.has('character-sheet')).toBe(true);
-    expect(runnable.has('audio-ad-spot')).toBe(false);
-    expect(excluded.get('audio-ad-spot')?.some((reason) => reason.code === 'boilerplate')).toBe(true);
-    expect(plan.scenarioCsv.split(',')).toEqual(plan.runnableNow.map((item) => item.scenarioId));
+    expect(runnable.has('audio-ad-spot')).toBe(true);
+    expect(excluded.has('audio-ad-spot')).toBe(false);
+    expect(
+      plan.runnableNow.find((item) => item.craftbookId === 'pull-request-review')?.scenarioId,
+    ).toBe('pull-request-review-workflow');
+    expect(plan.scenarioCsv.split(',')).toEqual(
+      plan.items.map((item) => SCENARIO_ID_BY_CRAFTBOOK_ID.get(item.craftbookId)),
+    );
   });
 
   it('keeps a detected folder drift in the repair backlog', async () => {
@@ -87,7 +99,7 @@ describe('craftbook batch plan', () => {
   });
 
   it('puts unproven workflow evals ahead of artifact-only work', async () => {
-    const plan = await corpusPlan();
+    const plan = await corpusPlan(undefined, undefined, CRAFTBOOK_EVAL_SPECS.length);
     const firstArtifact = plan.items.findIndex((item) => item.evalMode === 'artifact-task');
     const lastUnprovenWorkflow = plan.items.reduce(
       (last, item, index) =>

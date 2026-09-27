@@ -414,6 +414,15 @@ export type CraftbookTestRubric = z.infer<typeof CraftbookTestRubricSchema>;
 export const CraftbookTestSpecSchema = z
   .object({
     schemaVersion: z.literal(CRAFTBOOK_TEST_SCHEMA_VERSION),
+    /**
+     * Which harness rail this sidecar is designed to exercise.
+     *
+     * Legacy sidecars omit this and retain the adapter's historical
+     * artifact-task default. New processability specs should say `workflow`
+     * explicitly: that makes task attribution + terminal progress part of
+     * the portable catalog contract instead of a Gezel-repo-only override.
+     */
+    mode: z.enum(['artifact-task', 'workflow']).optional(),
     title: z.string().min(1),
     objective: z.string().min(1),
     /**
