@@ -66,6 +66,15 @@ community catalog is a second tier loaded by `CommunitySource` (see
 hand-curated. Batch the resulting gilde diff into a
 `community-refresh/YYYY-MM-DD` PR.
 
+The registry vets nothing, so every entry also passes gilde's community
+content policy (`tools/lib/community-policy.mjs` in the gilde checkout,
+loaded at run time — never vendored here): honeypots and injection demos,
+adult content, gambling, tools that ask for a wallet's private key,
+template/example servers, and garbled text are counted as
+`rejected-content-policy` and never written. Gilde's `npm run fix` prunes
+any match already on disk and its validate fails CI on one that remains, so
+tighten the policy there, not here.
+
 ### Run
 
 ```sh

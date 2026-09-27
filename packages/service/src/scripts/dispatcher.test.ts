@@ -369,6 +369,24 @@ describe('dispatcher: task mutations', () => {
     expect(create).toHaveBeenCalledWith('p1', req);
   });
 
+  // cliTrustedScriptHashes lets a recipe's scripts run where denyNet has no
+  // OS boundary. A script may have been written by a gezel, so it cannot
+  // grant that — not even in a run the user started.
+  it('task.create refuses to trust custom scripts', async () => {
+    const create = vi.fn().mockResolvedValue({ num: 9 });
+    const { dispatch } = makeDispatcher({ tasks: { create } as unknown as TaskManager });
+    for (const trustScripts of [true, 1, 'yes']) {
+      await expect(
+        dispatch(ctx(['tasks.write']), 'task.create', { req: { title: 'T', trustScripts } }),
+      ).rejects.toThrow(/cannot trust custom scripts/);
+    }
+    expect(create).not.toHaveBeenCalled();
+    await dispatch(ctx(['tasks.write']), 'task.create', {
+      req: { title: 'T', trustScripts: false },
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it('task.writeNotes appends a note with phaseId mapped to stepId', async () => {
     const appendTaskNote = vi.fn().mockResolvedValue(undefined);
     const { dispatch } = makeDispatcher({ store: { appendTaskNote } as unknown as Store });

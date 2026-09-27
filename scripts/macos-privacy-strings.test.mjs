@@ -50,6 +50,13 @@ const CAPTURE_APIS = [
     key: 'NSBluetoothAlwaysUsageDescription',
     api: 'Web Bluetooth',
   },
+  {
+    // Scripting another application is an Apple Event TCC gates on the
+    // sender. `do shell script` alone targets no application and needs no key.
+    pattern: /\btell application\b/,
+    key: 'NSAppleEventsUsageDescription',
+    api: 'Apple Events (AppleScript `tell application`)',
+  },
 ];
 
 /** Stock electron-builder copy — never acceptable in a shipped build. */

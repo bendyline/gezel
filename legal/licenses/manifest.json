@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "texts": {
+    "LICENSE-onnxruntime-MIT.txt": {
+      "source": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.24.3/LICENSE",
+      "upstreamSha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    },
+    "NOTICE-onnxruntime-v1.24.3-ThirdPartyNotices.txt": {
+      "source": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.24.3/ThirdPartyNotices.txt",
+      "upstreamSha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
+      "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2"
+    },
+    "NOTICE-onnxruntime-89f8206b-ThirdPartyNotices.txt": {
+      "source": "https://raw.githubusercontent.com/microsoft/onnxruntime/89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0/ThirdPartyNotices.txt",
+      "upstreamSha256": "e9e90971a8e75a9a8ac0c6412e29c1202d079998389915aa485f46c816c3b4cc",
+      "sha256": "e9e90971a8e75a9a8ac0c6412e29c1202d079998389915aa485f46c816c3b4cc"
+    },
+    "LICENSE-directml.txt": {
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
+      "sourceSha256": "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9",
+      "member": "LICENSE.txt",
+      "upstreamSha256": "a05138e3a085ff60a44881eedfa58dccb03ecc1d7b1f6ae888418e8c2fec4b8d",
+      "normalized": "UTF-8 byte order mark removed, CRLF converted to LF, final newline added",
+      "sha256": "d1c4da7fca4b95ac69736e59e7c61363371ba27c12b6696a9e78e6a514138b20"
+    },
+    "NOTICE-directml-ThirdPartyNotices.txt": {
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
+      "sourceSha256": "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9",
+      "member": "ThirdPartyNotices.txt",
+      "upstreamSha256": "2c95795c13ff48a58b6ed916f37901c23d964b5d9d601af422f17ad2172e7950",
+      "normalized": "CRLF converted to LF",
+      "sha256": "93fa06040ce5557126783ac6f3481a5472043f76dbfe213e1c6d17be3db643da"
+    },
+    "LICENSE-directx-shader-compiler-NCSA.txt": {
+      "source": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2502/dxc_2025_02_20.zip",
+      "sourceSha256": "70b1913a1bfce4a3e1a5311d16246f4ecdf3a3e613abec8aa529e57668426f85",
+      "member": "LICENSE-LLVM.txt",
+      "upstreamSha256": "729615317e28dd03907e46f0fc3b5e88f7853cee61d1a1471d2749335516b46f",
+      "normalized": "CRLF converted to LF",
+      "sha256": "b2551288a0381a79527d63c1590ae8bac98de4dafa1afd0702625d6e82524b85"
+    },
+    "NOTICE-directx-shader-compiler-ThirdPartyNotices.txt": {
+      "source": "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/v1.8.2502/ThirdPartyNotices.txt",
+      "upstreamSha256": "19512a5d0a015ef16d167272c164da49a604614a786206212a80ad486ed0be6d",
+      "sha256": "19512a5d0a015ef16d167272c164da49a604614a786206212a80ad486ed0be6d"
+    },
+    "LICENSE-elevate-MIT.txt": {
+      "source": "https://raw.githubusercontent.com/jpassing/elevate/d5cfc93d1ce06844a39d1a334a7a8081d26b6204/LICENSE.md",
+      "upstreamSha256": "9f72cd8204854a7c5049209eb4ae1552613f3116d97dd2e737f94c21c80d3fdf",
+      "normalized": "final newline added",
+      "sha256": "11a2e1dd5fa4166a59aeda2acad19eca3c5709c8106ed4f2de896282ab7c32df"
+    }
+  },
+  "npmPackages": {
+    "@huggingface/transformers": {
+      "version": "3.8.1",
+      "components": [
+        {
+          "id": "onnxruntime",
+          "name": "ONNX Runtime Web",
+          "version": "1.22.0-dev.20250409-89f8206ba4",
+          "supplier": "Microsoft Corporation",
+          "license": "MIT",
+          "purl": "pkg:github/microsoft/onnxruntime@89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0",
+          "source": "https://github.com/microsoft/onnxruntime/tree/89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0",
+          "note": "Transformers.js copies onnxruntime-web's JSEP WebAssembly build into its own dist; the bytes are identical to onnxruntime-web 1.22.0-dev.20250409-89f8206ba4.",
+          "binaries": [{ "path": "dist/ort-wasm-simd-threaded.jsep.wasm", "target": "all" }],
+          "texts": [
+            "LICENSE-onnxruntime-MIT.txt",
+            "NOTICE-onnxruntime-89f8206b-ThirdPartyNotices.txt"
+          ]
+        }
+      ]
+    },
+    "onnxruntime-node": {
+      "version": "1.24.3",
+      "components": [
+        {
+          "id": "onnxruntime",
+          "name": "ONNX Runtime",
+          "version": "1.24.3",
+          "supplier": "Microsoft Corporation",
+          "license": "MIT",
+          "purl": "pkg:github/microsoft/onnxruntime@v1.24.3",
+          "source": "https://github.com/microsoft/onnxruntime/tree/v1.24.3",
+          "note": "The npm package declares MIT but publishes neither its LICENSE nor the ThirdPartyNotices covering the libraries compiled into the native runtime.",
+          "binaries": [
+            {
+              "path": "bin/napi-v6/darwin/arm64/libonnxruntime.1.24.3.dylib",
+              "target": "darwin-arm64"
+            },
+            { "path": "bin/napi-v6/linux/arm64/libonnxruntime.so.1", "target": "linux-arm64" },
+            { "path": "bin/napi-v6/linux/x64/libonnxruntime.so.1", "target": "linux-x64" },
+            { "path": "bin/napi-v6/win32/arm64/onnxruntime.dll", "target": "win32-arm64" },
+            { "path": "bin/napi-v6/win32/x64/onnxruntime.dll", "target": "win32-x64" }
+          ],
+          "texts": [
+            "LICENSE-onnxruntime-MIT.txt",
+            "NOTICE-onnxruntime-v1.24.3-ThirdPartyNotices.txt"
+          ]
+        },
+        {
+          "id": "onnxruntime-gpu-providers",
+          "name": "ONNX Runtime CUDA and TensorRT execution providers",
+          "version": "1.24.3",
+          "supplier": "Microsoft Corporation",
+          "license": "MIT",
+          "purl": "pkg:nuget/Microsoft.ML.OnnxRuntime.Gpu.Linux@1.24.3",
+          "source": "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.Gpu.Linux/1.24.3",
+          "note": "Not in the npm tarball: onnxruntime-node's install script downloads them from this NuGet package on linux-x64 hosts only, so they are optional here. The v1.26270.77 amd64 .deb carries all three. The package's LICENSE and ThirdPartyNotices.txt match ONNX Runtime v1.24.3's apart from line endings.",
+          "binaries": [
+            {
+              "path": "bin/napi-v6/linux/x64/libonnxruntime_providers_cuda.so",
+              "target": "linux-x64",
+              "optional": true
+            },
+            {
+              "path": "bin/napi-v6/linux/x64/libonnxruntime_providers_shared.so",
+              "target": "linux-x64",
+              "optional": true
+            },
+            {
+              "path": "bin/napi-v6/linux/x64/libonnxruntime_providers_tensorrt.so",
+              "target": "linux-x64",
+              "optional": true
+            }
+          ],
+          "texts": [
+            "LICENSE-onnxruntime-MIT.txt",
+            "NOTICE-onnxruntime-v1.24.3-ThirdPartyNotices.txt"
+          ]
+        },
+        {
+          "id": "directml",
+          "name": "DirectML",
+          "version": "1.15.4",
+          "supplier": "Microsoft Corporation",
+          "license": "Microsoft Software License Terms - Microsoft DirectX Machine Learning (DirectML)",
+          "proprietary": true,
+          "purl": "pkg:nuget/Microsoft.AI.DirectML@1.15.4",
+          "source": "https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4",
+          "note": "DirectML.dll reports product version 1.15.4+241025-1615.1.dml-1.15.fac7597, the build published as the Microsoft.AI.DirectML 1.15.4 redistributable.",
+          "binaries": [
+            { "path": "bin/napi-v6/win32/arm64/DirectML.dll", "target": "win32-arm64" },
+            { "path": "bin/napi-v6/win32/x64/DirectML.dll", "target": "win32-x64" }
+          ],
+          "texts": ["LICENSE-directml.txt", "NOTICE-directml-ThirdPartyNotices.txt"]
+        },
+        {
+          "id": "directx-shader-compiler",
+          "name": "DirectX Shader Compiler",
+          "version": "1.8.2502",
+          "supplier": "Microsoft Corporation",
+          "license": "NCSA",
+          "purl": "pkg:github/microsoft/DirectXShaderCompiler@v1.8.2502",
+          "source": "https://github.com/microsoft/DirectXShaderCompiler/tree/v1.8.2502",
+          "note": "dxcompiler.dll and dxil.dll report 1.8.2502.8 (b4711839e). From v1.8.2502 the release notes assign LICENSE-LLVM.txt to every file but d3d12shader.h; v1.8.2407 and earlier put dxil.dll under the proprietary LICENSE-MS.txt, so an older compiler needs a new review.",
+          "binaries": [
+            { "path": "bin/napi-v6/win32/arm64/dxcompiler.dll", "target": "win32-arm64" },
+            { "path": "bin/napi-v6/win32/arm64/dxil.dll", "target": "win32-arm64" },
+            { "path": "bin/napi-v6/win32/x64/dxcompiler.dll", "target": "win32-x64" },
+            { "path": "bin/napi-v6/win32/x64/dxil.dll", "target": "win32-x64" }
+          ],
+          "texts": [
+            "LICENSE-directx-shader-compiler-NCSA.txt",
+            "NOTICE-directx-shader-compiler-ThirdPartyNotices.txt"
+          ]
+        }
+      ]
+    },
+    "onnxruntime-web": {
+      "version": "1.22.0-dev.20250409-89f8206ba4",
+      "components": [
+        {
+          "id": "onnxruntime",
+          "name": "ONNX Runtime Web",
+          "version": "1.22.0-dev.20250409-89f8206ba4",
+          "supplier": "Microsoft Corporation",
+          "license": "MIT",
+          "purl": "pkg:github/microsoft/onnxruntime@89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0",
+          "source": "https://github.com/microsoft/onnxruntime/tree/89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0",
+          "note": "Transformers.js depends on it; its WebAssembly builds compile in the same third-party libraries as the native runtime. The package's __commit.txt names the source commit.",
+          "binaries": [
+            { "path": "dist/ort-wasm-simd-threaded.jsep.wasm", "target": "all" },
+            { "path": "dist/ort-wasm-simd-threaded.wasm", "target": "all" }
+          ],
+          "texts": [
+            "LICENSE-onnxruntime-MIT.txt",
+            "NOTICE-onnxruntime-89f8206b-ThirdPartyNotices.txt"
+          ]
+        }
+      ]
+    }
+  },
+  "installerBinaries": {
+    "elevate": {
+      "name": "Elevate",
+      "version": "1.0.0.2894",
+      "supplier": "Johannes Passing",
+      "license": "MIT",
+      "source": "https://github.com/jpassing/elevate",
+      "path": "resources/elevate.exe",
+      "targets": ["win32-x64"],
+      "carrier": "electron-builder NSIS toolset nsis-3.0.4.1",
+      "note": "electron-builder copies it into every per-machine NSIS build; electron-updater uses it to re-run an update elevated.",
+      "texts": ["LICENSE-elevate-MIT.txt"]
+    }
+  }
+}

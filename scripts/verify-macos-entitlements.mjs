@@ -21,6 +21,14 @@ export const REVIEWED_ENTITLEMENTS = new Map([
     'com.apple.security.cs.disable-library-validation',
     'vendor-signed Mach-Os and native addons loaded by Electron hosts',
   ],
+  [
+    'com.apple.security.device.audio-input',
+    'Narrate microphone capture; hardened runtime denies it without a prompt otherwise',
+  ],
+  [
+    'com.apple.security.automation.apple-events',
+    'the ambient wallpaper asking System Events (via osascript) to set the desktop picture',
+  ],
 ]);
 
 /**

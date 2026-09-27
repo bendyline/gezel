@@ -38,6 +38,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { deployMlRuntime } from './deploy-ml-runtime.mjs';
 import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
+import { packDeployedGildeCommunity, verifyPackedGildeCommunity } from './pack-gilde-community.mjs';
 import { runIsolatedPnpmDeploy } from './pnpm-deploy.mjs';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
 import {
@@ -117,6 +118,11 @@ async function main() {
     );
   }
 
+  // Over half the bundle's files are gilde's community tier, and each one is
+  // an extraction (plus a Defender scan on Windows) on every per-account
+  // unpack. Ship it as one content pack the catalog loader reads in place.
+  await packDeployedGildeCommunity(target, { label: 'build-service-bundle' });
+
   // `pnpm deploy` can leave a few bookkeeping symlinks under
   // `.pnpm/node_modules/` that point back up to the workspace source (e.g.
   // the deployed package itself re-linked to `packages/service/`). Nothing
@@ -179,6 +185,7 @@ async function verifyBundleRuntime(root) {
   if (!existsSync(join(root, 'dist', 'handboek.gezk'))) {
     throw new Error('[build-service-bundle] extracted runtime is missing dist/handboek.gezk');
   }
+  await verifyPackedGildeCommunity(root, { label: 'build-service-bundle' });
   // Importing the service module resolves its eager dependency graph. We
   // spawn a throwaway node process, let it import
   // `index.js` (which exports `startService` without *calling* it — so no

@@ -101,7 +101,14 @@ function pnpmSpawnTarget(invocation: PnpmInvocation): {
   return winShellSafe(invocation.command, invocation.args, invocation.shell);
 }
 
-export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide' | 'detached'>;
+export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide' | 'detached'> & {
+  /**
+   * POSIX: lead a new process group, so `killProcessTree` also reaches what
+   * pnpm spawned. Ignored on Windows, where detaching would open a console
+   * and `taskkill /T` finds the tree without it.
+   */
+  processGroup?: boolean;
+};
 
 /**
  * The only supported way to spawn a resolved pnpm invocation from the
@@ -120,9 +127,11 @@ export function spawnPnpm(
   spawnImpl: typeof spawn = spawn,
 ): ChildProcess {
   const target = pnpmSpawnTarget(invocation);
+  const { processGroup, ...spawnOptions } = options;
   return spawnImpl(target.command, target.args, {
-    ...options,
+    ...spawnOptions,
     shell: invocation.shell,
+    ...(processGroup && process.platform !== 'win32' ? { detached: true } : {}),
     ...windowsHeadlessSpawnOptions(),
   });
 }

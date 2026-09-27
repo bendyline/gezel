@@ -1,11 +1,13 @@
-import { execFileSync } from 'node:child_process';
+import { type SpawnSyncReturns, execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -90,9 +92,12 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(macPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
     expect(macPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
-    expect(macPostinstall).toContain('find -x "$ASSETS_DIR" \\');
-    expect(macPostinstall).toContain('-exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +');
-    expect(macPostinstall).toContain(
+    expect(privateRepair).toContain('\\( -type f -links +1 \\) -prune -o');
+    const assets = shellFunction(macPostinstall, 'harden_shared_assets', 'brace');
+    expect(assets).toContain('find -x "$ASSETS_DIR" \\');
+    expect(assets).toContain('\\( -type f -links +1 \\) -prune -o');
+    expect(assets).toContain('-exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +');
+    expect(assets).toContain(
       '\\( -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} + \\)',
     );
     expect(macPostinstall).toContain('--source="$DATA_DIR"');
@@ -484,24 +489,28 @@ describe('Linux machine-service filesystem security', () => {
 
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(linuxPostinstall).toContain('umask 077');
-    expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o \\\n  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +',
+    // One walk definition for every private-state pass, so none of them can
+    // drift back into the shared tree, the service tree, or a hard link.
+    const walk = shellFunction(linuxPostinstall, 'private_state_find', 'brace');
+    expect(walk).toContain('find "$DATA_DIR" -xdev');
+    expect(walk).toContain(
+      '\\( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" -o -path "$SERVICE_TREE.previous" -o -path "$SERVICE_TREE.staging-*" \\) -prune -o',
+    );
+    expect(walk).toContain('\\( -type f -links +1 \\) -prune -o');
+    const harden = shellFunction(linuxPostinstall, 'harden_private_state', 'brace');
+    expect(harden).toContain(
+      'private_state_find -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +',
     );
     expect(linuxPostinstall).not.toContain('chown -R');
-    expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o ! -type l -exec setfacl -b -- {} +',
-    );
-    expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o -type d -exec setfacl -k -- {} +',
-    );
-    expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev \\( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" \\) -prune -o \\\n  ! -type l -exec chmod go-rwx {} +',
-    );
-    expect(linuxPostinstall).toContain('chmod 711 "$DATA_DIR"');
-    expect(linuxPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
-    expect(linuxPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
-    expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +');
-    expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +');
+    expect(harden).toContain('private_state_find ! -type l -exec setfacl -b -- {} +');
+    expect(harden).toContain('private_state_find -type d -exec setfacl -k -- {} +');
+    expect(harden).toContain('private_state_find ! -type l -exec chmod go-rwx {} +');
+    expect(harden.match(/^\s*find "\$DATA_DIR"/gm) ?? []).toEqual([]);
+    expect(harden).toContain('chmod 711 "$DATA_DIR"');
+    expect(harden).toContain('chmod 755 "$DATA_DIR/runtime"');
+    expect(harden).toContain('chmod 700 "$DATA_DIR/logs"');
+    expect(harden).toContain('find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +');
+    expect(harden).toContain('find "$ASSETS_DIR" -xdev -type f -links 1 -exec chmod 644 {} +');
     expect(linuxPostinstall).toContain('--source="$DATA_DIR"');
     expect(linuxPostinstall).toContain('--dest="$SHARED_DIR"');
     expect(linuxPostinstall).toContain('chmod 3777 "$SHARED_DIR"');
@@ -548,22 +557,29 @@ describe('Linux machine-service filesystem security', () => {
       expect(script).not.toContain('chmod go+w');
       expect(script).not.toContain('chmod a+w');
     }
-    expect(linuxPostinstall).toContain(
-      'find "$SERVICE_TREE" -xdev \\\n  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} + \\\n  ! -type l -exec chmod go=u-w {} +',
+    // Root's, not the service account's: every account's daemon executes this
+    // tree, and the service account parses untrusted model files.
+    const linuxPublish = shellFunction(linuxPostinstall, 'publish_service_tree', 'brace');
+    expect(linuxPublish).toContain(
+      'find "$SERVICE_TREE" -xdev \\\n    -exec chown --no-dereference root:root -- {} + \\\n    ! -type l -exec setfacl -b -- {} + \\\n    -exec chmod go=u-w {} +',
     );
-    const macPublishStart = position(macPostinstall, 'find -x "$SERVICE_TREE" \\');
-    const macPublishEnd = position(macPostinstall, 'service tree published in');
-    const macPublish = macPostinstall.slice(macPublishStart, macPublishEnd);
-    expect(macPublish).toContain('-exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +');
+    const macPublish = shellFunction(macPostinstall, 'publish_service_tree', 'brace');
+    expect(macPublish).toContain('find -x "$SERVICE_TREE" \\');
+    expect(macPublish).toContain('-exec chown -h root:wheel {} +');
+    for (const publish of [linuxPublish, macPublish]) {
+      expect(publish).not.toContain('GEZEL_USER');
+      expect(publish).not.toContain('DAEMON_USER');
+    }
     // macOS inherited ACLs survive a mode change, so they must be stripped
     // before the tree is published rather than after.
     expect(macPublish).toContain('! -type l -exec chmod -N {} +');
     expect(macPublish.indexOf('chmod -N {} +')).toBeLessThan(
       macPublish.indexOf('chmod go=u-w {} +'),
     );
+    expect(linuxUnit).toContain('ReadOnlyPaths=/var/lib/gezel/service');
     // The private-state sweeps must not run over it: they would both undo the
     // publication and traverse ~33k files that step 2b is about to replace.
-    expect(linuxPostinstall).toContain('-path "$SERVICE_TREE" -prune');
+    expect(linuxPostinstall).toContain('-path "$SERVICE_TREE" -o');
     expect(macPostinstall).toContain('-path "$SERVICE_TREE" -o');
     // Publication happens after extraction, never before — otherwise the modes
     // would apply to the tree being thrown away.
@@ -748,5 +764,458 @@ fi
     expect(linuxPostremove).toContain('apparmor_parser --remove "$APPARMOR_PROFILE_TARGET"');
     expect(linuxPostremove).toContain('rm -f "$APPARMOR_PROFILE_TARGET"');
     expect(linuxPostremove).toContain('refresh_desktop_caches');
+  });
+});
+
+/**
+ * Both hooks run as root on every install and upgrade. A root chown, chmod, or
+ * setfacl by path over a tree another account can write can be steered onto a
+ * system file: through a hard link that account made to a file it does not
+ * own, or a symlink swapped in between the check and the change.
+ */
+describe('root permission passes over writable trees', () => {
+  const hooks = [
+    { name: 'linux', script: linuxPostinstall, stoppedAfter: 'while service_still_active; do' },
+    { name: 'macos', script: macPostinstall, stoppedAfter: 'remained loaded after bootout' },
+  ] as const;
+
+  it('stops everything running as the service account before the first root pass', () => {
+    for (const { name, script, stoppedAfter } of hooks) {
+      const stop = position(script, '\nstop_service_account_processes\n');
+      expect(position(script, stoppedAfter), name).toBeLessThan(stop);
+      for (const pass of [
+        'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"',
+        '\nharden_private_state\n',
+        '\npublish_shared_data\n',
+        '\npublish_service_tree\n',
+      ]) {
+        expect(stop, `${name}: ${pass.trim()}`).toBeLessThan(position(script, pass));
+      }
+    }
+    expect(shellFunction(linuxPostinstall, 'stop_service_account_processes', 'brace')).toContain(
+      'kill -KILL $account_pids',
+    );
+    const macStop = shellFunction(macPostinstall, 'stop_service_account_processes', 'brace');
+    expect(macStop).toContain('/usr/bin/pkill -KILL -U "$DAEMON_USER"');
+    expect(macStop).toContain('/usr/bin/pkill -KILL -u "$DAEMON_USER"');
+    // An unreadable process list must not read as an empty one.
+    expect(shellFunction(macPostinstall, 'service_account_running', 'brace')).toContain(
+      'cannot list processes running as ${DAEMON_USER}',
+    );
+  });
+
+  it('refuses a shared root that root did not create, before migrating into it', () => {
+    for (const { name, script } of hooks) {
+      const refusal = position(script, 'is not a root-owned directory; refusing to migrate into');
+      expect(refusal, name).toBeLessThan(
+        position(script, 'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"'),
+      );
+    }
+    expect(linuxPostinstall).toContain('[ "$(stat -c %u -- "$SHARED_DIR")" != 0 ]');
+    expect(macPostinstall).toContain('[ "$(stat -f %u "$SHARED_DIR")" != 0 ]');
+  });
+
+  it('never walks the collaborative shared tree as root', () => {
+    for (const { name, script } of hooks) {
+      expect(script, name).not.toMatch(/find (-x )?"\$SHARED_DIR"/);
+      expect(script, name).not.toMatch(/find (-x )?"\$scope_dir"/);
+      const publish = shellFunction(script, 'publish_migrated_entity');
+      expect(publish).toContain('cd -P -- "$scope_dir/$name"');
+      expect(publish).toContain(
+        '[ "$(pwd -P)" = "$shared_physical/${scope_dir##*/}/$name" ] || exit 0',
+      );
+      expect(publish).toContain('case $2 in *00) ;; *) exit 0 ;; esac');
+      expect(publish).toMatch(/find (-x )?\. (-xdev )?-mindepth 1/);
+      // Once the walk is done, only `.` — the pinned directory — changes.
+      const afterWalk = publish.slice(publish.lastIndexOf('{} +'));
+      const tail = afterWalk.split('\n').slice(1, -1);
+      expect(tail.length, name).toBeGreaterThan(0);
+      for (const line of tail) expect(line.trim(), name).toMatch(/ \.$/);
+    }
+  });
+
+  it('skips hard-linked files in every pass over service-account state', () => {
+    expect(shellFunction(linuxPostinstall, 'private_state_find', 'brace')).toContain(
+      '\\( -type f -links +1 \\) -prune -o',
+    );
+    expect(shellFunction(linuxPostinstall, 'harden_private_state', 'brace')).toContain(
+      '-type f -links 1 -exec chmod 644 {} +',
+    );
+    for (const name of ['harden_private_state', 'harden_shared_assets']) {
+      expect(shellFunction(macPostinstall, name, 'brace')).toContain(
+        '\\( -type f -links +1 \\) -prune -o',
+      );
+    }
+  });
+});
+
+const linuxOnly = process.platform === 'linux' ? it : it.skip;
+const darwinOnly = process.platform === 'darwin' ? it : it.skip;
+
+interface InstallerProbe {
+  root: string;
+  /** One line per argument each logged chown/setfacl call received. */
+  privileged(): string[];
+  run(shell: string, script: string, env: Record<string, string>): SpawnSyncReturns<string>;
+  cleanup(): void;
+}
+
+/**
+ * A scratch tree for running installer functions as the test account.
+ *
+ * `chown` and `setfacl` are logged rather than run: the account running the
+ * suite cannot give files to root, and ACL tooling is not installed
+ * everywhere. `stat` reports the fixture's own files as root's, which is what
+ * the hooks see on a real machine. `chmod`, `find`, and `cd` are real, so a
+ * pass that follows a link changes the linked file and the test sees it.
+ */
+function installerProbe(): InstallerProbe {
+  const root = mkdtempSync(join(tmpdir(), 'gezel-installer-probe-'));
+  const bin = join(root, 'shim-bin');
+  const log = join(root, 'privileged.log');
+  mkdirSync(bin);
+  writeFileSync(log, '');
+  for (const command of ['chown', 'setfacl']) {
+    writeFileSync(
+      join(bin, command),
+      `#!/bin/sh\nfor arg in "$@"; do printf '%s %s\\n' '${command}' "$arg"; done >> "$PROBE_LOG"\n`,
+      { mode: 0o755 },
+    );
+  }
+  const realStat = execFileSync('/bin/sh', ['-c', 'command -v stat'], { encoding: 'utf8' }).trim();
+  writeFileSync(
+    join(bin, 'stat'),
+    `#!/bin/sh\nout=$('${realStat}' "$@") || exit $?\nprintf '%s\\n' "$out" | awk -v uid="$FIXTURE_UID" '$1 == uid { $1 = 0 } { print }'\n`,
+    { mode: 0o755 },
+  );
+  return {
+    root,
+    privileged: () => readFileSync(log, 'utf8').split('\n').filter(Boolean),
+    run: (shell, script, env) =>
+      spawnSync(shell, ['-c', script], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:/usr/sbin:/usr/bin:/sbin:/bin`,
+          PROBE_LOG: log,
+          FIXTURE_UID: String(process.getuid?.() ?? 0),
+          ...env,
+        },
+      }),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+function file(path: string, mode: number): string {
+  writeFileSync(path, `${path}\n`);
+  chmodSync(path, mode);
+  return path;
+}
+
+function dir(path: string, mode: number): string {
+  mkdirSync(path, { recursive: true });
+  chmodSync(path, mode);
+  return path;
+}
+
+function modeOf(path: string): number {
+  return statSync(path).mode & 0o7777;
+}
+
+function assignment(source: string, name: string): string {
+  const match = source.match(new RegExp(`^${name}=.*$`, 'm'));
+  expect(match, `missing installer assignment: ${name}`).not.toBeNull();
+  return match?.[0] ?? '';
+}
+
+describe('Linux root permission passes, live', () => {
+  linuxOnly('repairs service-account state without acting through links', () => {
+    const probe = installerProbe();
+    try {
+      const outside = dir(join(probe.root, 'outside'), 0o755);
+      const linked = file(join(outside, 'linked'), 0o644);
+      const target = file(join(outside, 'target'), 0o644);
+      const asset = file(join(outside, 'asset'), 0o600);
+      const data = dir(join(probe.root, 'data'), 0o755);
+      for (const sub of ['runtime', 'logs', 'assets/models', 'private'])
+        dir(join(data, sub), 0o755);
+      const privateFile = file(join(data, 'private', 'file'), 0o644);
+      linkSync(linked, join(data, 'private', 'hard'));
+      symlinkSync(target, join(data, 'private', 'sym'));
+      const model = file(join(data, 'assets', 'models', 'model.bin'), 0o600);
+      linkSync(asset, join(data, 'assets', 'models', 'hard.bin'));
+      const untouched = ['shared', 'service', 'service.previous', 'service.staging-1-x'].map(
+        (sub) => file(join(dir(join(data, sub), 0o755), 'kept'), 0o644),
+      );
+
+      const result = probe.run(
+        '/bin/sh',
+        `set -eu
+${shellFunction(linuxPostinstall, 'private_state_find', 'brace')}
+${shellFunction(linuxPostinstall, 'harden_private_state', 'brace')}
+harden_private_state
+`,
+        {
+          DATA_DIR: data,
+          SHARED_DIR: join(data, 'shared'),
+          SERVICE_TREE: join(data, 'service'),
+          ASSETS_DIR: join(data, 'assets'),
+          GEZEL_USER: '4242',
+        },
+      );
+
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(modeOf(linked)).toBe(0o644);
+      expect(modeOf(target)).toBe(0o644);
+      expect(modeOf(asset)).toBe(0o600);
+      expect(modeOf(privateFile)).toBe(0o600);
+      expect(modeOf(model)).toBe(0o644);
+      expect(modeOf(data)).toBe(0o711);
+      expect(modeOf(join(data, 'runtime'))).toBe(0o755);
+      expect(modeOf(join(data, 'logs'))).toBe(0o700);
+      for (const kept of untouched) expect(modeOf(kept), kept).toBe(0o644);
+      const privileged = probe.privileged();
+      expect(privileged.some((line) => line.endsWith('/private/file'))).toBe(true);
+      for (const line of privileged) {
+        expect(line).not.toMatch(/\/hard(\.bin)?$/);
+        expect(line).not.toMatch(/\/(shared|service[^/]*)\//);
+        if (line.startsWith('setfacl')) expect(line).not.toMatch(/\/sym$/);
+      }
+    } finally {
+      probe.cleanup();
+    }
+  });
+
+  linuxOnly('publishes only the private entities root placed, anchored to each directory', () => {
+    const probe = installerProbe();
+    try {
+      const outside = dir(join(probe.root, 'outside'), 0o755);
+      const target = file(join(outside, 'target'), 0o644);
+      const privateDir = dir(join(outside, 'private-dir'), 0o700);
+      const secret = file(join(privateDir, 'secret'), 0o600);
+      const shared = dir(join(probe.root, 'shared'), 0o700);
+      const marker = file(join(shared, '.gezel-machine-shared-v1.json'), 0o600);
+      const projects = dir(join(shared, 'projects'), 0o700);
+      // Freshly migrated: private, and root's (or the service account's).
+      const legacy = dir(join(projects, 'legacy'), 0o700);
+      const legacyFile = file(join(legacy, 'a.txt'), 0o600);
+      const legacySub = dir(join(legacy, 'sub'), 0o700);
+      const legacyScript = file(join(legacySub, 'run.sh'), 0o700);
+      linkSync(target, join(legacy, 'hard'));
+      symlinkSync(target, join(legacy, 'sym'));
+      // Already published: any account may have put anything in it.
+      const published = dir(join(projects, 'published'), 0o777);
+      const mine = file(join(published, 'mine.txt'), 0o600);
+      symlinkSync(target, join(published, 'evil'));
+      // An entity name another account pointed at a private directory.
+      symlinkSync(privateDir, join(projects, 'swapped'));
+      const oddName = dir(join(projects, 'bad name'), 0o700);
+      const oddFile = file(join(oddName, 'x.txt'), 0o600);
+      const isRoot = process.getuid?.() === 0;
+      const foreign = isRoot ? dir(join(projects, 'foreign'), 0o700) : null;
+      const foreignFile = foreign ? file(join(foreign, 'x.txt'), 0o600) : null;
+      if (foreign && foreignFile) {
+        for (const path of [foreign, foreignFile]) execFileSync('chown', ['4343:4343', path]);
+      }
+
+      const result = probe.run(
+        '/bin/sh',
+        `set -eu
+${assignment(linuxPostinstall, 'SHARED_DEFAULT_ACL')}
+${shellFunction(linuxPostinstall, 'publish_migrated_entity')}
+${shellFunction(linuxPostinstall, 'publish_shared_data', 'brace')}
+publish_shared_data
+`,
+        { SHARED_DIR: shared, GEZEL_USER: '4242', account_uid: '4242' },
+      );
+
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(result.stdout).toContain('publishing migrated shared entity projects/legacy');
+      expect(result.stdout).not.toContain('projects/published');
+      expect(result.stderr).toContain('hard-linked files in projects/legacy stay private');
+      expect(modeOf(target)).toBe(0o644);
+      expect(modeOf(privateDir)).toBe(0o700);
+      expect(modeOf(secret)).toBe(0o600);
+      expect(modeOf(shared)).toBe(0o3777);
+      expect(modeOf(projects)).toBe(0o2777);
+      expect(modeOf(legacy)).toBe(0o2777);
+      expect(modeOf(legacyFile)).toBe(0o666);
+      expect(modeOf(legacySub)).toBe(0o2777);
+      expect(modeOf(legacyScript)).toBe(0o777);
+      expect(modeOf(mine)).toBe(0o600);
+      expect(modeOf(oddName)).toBe(0o700);
+      expect(modeOf(oddFile)).toBe(0o600);
+      if (foreign && foreignFile) {
+        expect(modeOf(foreign)).toBe(0o700);
+        expect(modeOf(foreignFile)).toBe(0o600);
+      }
+      expect(modeOf(marker)).toBe(0o644);
+      for (const line of probe.privileged()) {
+        expect(line).not.toMatch(/outside|published|swapped|bad name|foreign|\/hard$/);
+      }
+    } finally {
+      probe.cleanup();
+    }
+  });
+
+  linuxOnly('refuses to re-own a shared marker that is not a plain root file', () => {
+    const probe = installerProbe();
+    try {
+      const target = file(join(probe.root, 'target'), 0o600);
+      const shared = dir(join(probe.root, 'shared'), 0o700);
+      symlinkSync(target, join(shared, '.gezel-machine-shared-v1.json'));
+
+      const result = probe.run(
+        '/bin/sh',
+        `set -eu
+${assignment(linuxPostinstall, 'SHARED_DEFAULT_ACL')}
+${shellFunction(linuxPostinstall, 'publish_migrated_entity')}
+${shellFunction(linuxPostinstall, 'publish_shared_data', 'brace')}
+publish_shared_data
+`,
+        { SHARED_DIR: shared, GEZEL_USER: '4242', account_uid: '4242' },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('is not a root-owned regular file');
+      expect(modeOf(target)).toBe(0o600);
+    } finally {
+      probe.cleanup();
+    }
+  });
+
+  linuxOnly('publishes the service tree as root without following its links', () => {
+    const probe = installerProbe();
+    try {
+      const target = file(join(probe.root, 'target'), 0o600);
+      const tree = dir(join(probe.root, 'service'), 0o700);
+      const bin = dir(join(tree, 'dist', 'bin'), 0o700);
+      const entry = file(join(bin, 'gezeld.js'), 0o700);
+      symlinkSync(target, join(tree, 'dist', 'link'));
+
+      const result = probe.run(
+        '/bin/sh',
+        `set -eu
+${shellFunction(linuxPostinstall, 'publish_service_tree', 'brace')}
+publish_service_tree
+`,
+        { SERVICE_TREE: tree },
+      );
+
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(modeOf(tree)).toBe(0o755);
+      expect(modeOf(bin)).toBe(0o755);
+      expect(modeOf(entry)).toBe(0o755);
+      expect(modeOf(target)).toBe(0o600);
+      expect(probe.privileged()).toContain('chown root:root');
+      expect(probe.privileged().filter((line) => line.startsWith('setfacl'))).not.toContain(
+        `setfacl ${join(tree, 'dist', 'link')}`,
+      );
+    } finally {
+      probe.cleanup();
+    }
+  });
+
+  linuxOnly('finds every live process of the service account', async () => {
+    const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+    try {
+      const output = execFileSync(
+        '/bin/sh',
+        [
+          '-c',
+          `${shellFunction(linuxPostinstall, 'service_account_pids', 'brace')}\nservice_account_pids`,
+        ],
+        { encoding: 'utf8', env: { ...process.env, account_uid: String(process.getuid?.()) } },
+      );
+      expect(output.split('\n')).toContain(String(child.pid));
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  (process.platform === 'linux' && process.getuid?.() === 0 ? it : it.skip)(
+    'kills every process of the service account before returning (root only)',
+    async () => {
+      const child = spawn(
+        'setpriv',
+        ['--reuid=4242', '--regid=4242', '--clear-groups', 'sleep', '60'],
+        { stdio: 'ignore' },
+      );
+      const exited = new Promise<NodeJS.Signals | null>((resolve) =>
+        child.on('exit', (_code, signal) => resolve(signal)),
+      );
+      try {
+        // Wait until the helper has dropped to the account before asking.
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          const uid = readFileSync(`/proc/${child.pid}/status`, 'utf8').match(/^Uid:\s+(\d+)/m);
+          if (uid?.[1] === '4242') break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const result = spawnSync(
+          '/bin/sh',
+          [
+            '-c',
+            `set -eu
+${shellFunction(linuxPostinstall, 'service_account_pids', 'brace')}
+${shellFunction(linuxPostinstall, 'stop_service_account_processes', 'brace')}
+stop_service_account_processes
+`,
+          ],
+          { encoding: 'utf8', env: { ...process.env, account_uid: '4242', GEZEL_USER: 'gezel' } },
+        );
+        expect(result.status, String(result.stderr)).toBe(0);
+        expect(await exited).toBe('SIGKILL');
+      } finally {
+        child.kill('SIGKILL');
+      }
+    },
+  );
+});
+
+describe('macOS root permission passes, live', () => {
+  darwinOnly('publishes only the private entities root placed, anchored to each directory', () => {
+    const probe = installerProbe();
+    try {
+      const outside = dir(join(probe.root, 'outside'), 0o755);
+      const target = file(join(outside, 'target'), 0o644);
+      const privateDir = dir(join(outside, 'private-dir'), 0o700);
+      const shared = dir(join(probe.root, 'shared'), 0o700);
+      const marker = file(join(shared, '.gezel-machine-shared-v1.json'), 0o600);
+      const projects = dir(join(shared, 'projects'), 0o700);
+      const legacy = dir(join(projects, 'legacy'), 0o700);
+      const legacyFile = file(join(legacy, 'a.txt'), 0o600);
+      const legacyScript = file(join(dir(join(legacy, 'sub'), 0o700), 'run.sh'), 0o700);
+      linkSync(target, join(legacy, 'hard'));
+      symlinkSync(target, join(legacy, 'sym'));
+      const published = dir(join(projects, 'published'), 0o777);
+      const mine = file(join(published, 'mine.txt'), 0o600);
+      symlinkSync(privateDir, join(projects, 'swapped'));
+
+      const result = probe.run(
+        '/bin/bash',
+        `set -eu
+${assignment(macPostinstall, 'SHARED_EVERYONE_ACE')}
+${shellFunction(macPostinstall, 'publish_migrated_entity')}
+${shellFunction(macPostinstall, 'publish_shared_data', 'brace')}
+publish_shared_data
+`,
+        { SHARED_DIR: shared, DAEMON_USER: 'nobody', daemon_uid: '4242' },
+      );
+
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(result.stdout).toContain('publishing migrated shared entity projects/legacy');
+      expect(modeOf(target)).toBe(0o644);
+      expect(modeOf(privateDir)).toBe(0o700);
+      expect(modeOf(shared)).toBe(0o1777);
+      expect(modeOf(legacy)).toBe(0o777);
+      expect(modeOf(legacyFile)).toBe(0o666);
+      expect(modeOf(legacyScript)).toBe(0o777);
+      expect(modeOf(mine)).toBe(0o600);
+      expect(modeOf(marker)).toBe(0o644);
+      expect(probe.privileged()).toContain('chown root:wheel');
+    } finally {
+      probe.cleanup();
+    }
   });
 });

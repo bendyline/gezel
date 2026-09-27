@@ -1,7 +1,17 @@
-import { randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream, createWriteStream, constants as fsConstants } from 'node:fs';
+import {
+  access,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
   BACKUP_RESTORABLE_CONFIG_KEYS,
@@ -17,6 +27,7 @@ import {
   backupEntryPrefix,
   createLogger,
   isSafeEntityId,
+  isSyncJunkPath,
 } from '@bendyline/gezel';
 import {
   daemonTransactionsRoot,
@@ -25,7 +36,7 @@ import {
   projectStorageDir,
 } from '@bendyline/gezel/paths';
 import * as yauzl from 'yauzl';
-import { safeJoin } from '../fs/safe-paths.js';
+import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { StorageJobManager } from './job-manager.js';
 import { invalidateStorageSummary } from './summary.js';
@@ -102,6 +113,22 @@ export async function scanRestore(deps: RestoreDeps, archivePath: string): Promi
   if (items.some((i) => i.conflict === 'exists')) {
     warnings.push('Some items already exist here. Choose which ones to replace.');
   }
+  if (
+    manifest.excludedWorkspaces &&
+    items.some((i) => i.kind === 'project' && i.conflict === 'exists')
+  ) {
+    warnings.push(
+      'This backup was made without project working files. Replacing a project keeps the working files it has here.',
+    );
+  }
+  if (
+    items.some((i) => i.kind === 'document-root') &&
+    (await hasEntries(gezelPaths(deps.home, deps.store.externalFolders).documents))
+  ) {
+    warnings.push(
+      `Shared documents are added to the ones already here, and nothing there is removed or replaced. Where the backup has a different version of a document you have, it is saved beside yours with “(from backup ${backupDay(manifest)})” in its name.`,
+    );
+  }
 
   const review: RestoreReview = {
     restoreId: randomUUID(),
@@ -140,7 +167,9 @@ export async function cancelRestore(home: string, restoreId: string): Promise<vo
  * Extract the chosen items into staging, then publish each one by renaming
  * it into place. An existing item is parked alongside first and only deleted
  * once its replacement has landed, so a failure mid-restore leaves the
- * original where it was rather than nothing at all.
+ * original where it was rather than nothing at all. Shared documents are the
+ * exception: they are merged in file by file, never swapped (see
+ * {@link mergeDocuments}).
  */
 export async function runRestore(
   deps: RestoreDeps,
@@ -169,6 +198,7 @@ export async function runRestore(
   const stage = join(restoresRoot(deps.home), review.restoreId, 'stage');
 
   try {
+    const manifest = await readManifest(review.archivePath);
     jobs.setPhase(job.id, 'extract');
     await extractSelected(review.archivePath, stage, planned, confirm.settings === true);
     // Read before anything is published, so unusable settings stop the
@@ -179,12 +209,22 @@ export async function runRestore(
 
     jobs.setPhase(job.id, 'publish');
     let restored = 0;
+    const unwritten: string[] = [];
     for (const item of planned) {
       jobs.setPhase(job.id, 'publish', item.label);
       const target = targetPathFor(deps, item.kind, item.id);
       if (!target) continue;
       const staged = join(stage, ...backupEntryPrefix(item).split('/'));
-      await publish(staged, target);
+      if (item.kind === 'document-root') {
+        unwritten.push(...(await mergeDocuments(staged, target, backupDay(manifest))));
+      } else {
+        // A backup that carries none of a project's working files was made
+        // without them; replacing the project must not delete the ones here.
+        const keepWorkspace =
+          item.kind === 'project' &&
+          (manifest.excludedWorkspaces === true || !(await pathExists(join(staged, 'workspace'))));
+        await publish(staged, target, keepWorkspace ? 'workspace' : undefined);
+      }
       restored += 1;
       jobs.update(job.id, { itemsDone: restored, bytesDone: item.bytes });
     }
@@ -196,7 +236,7 @@ export async function runRestore(
     // The Store caches records in memory, and a restored gezel arriving
     // underneath it will not appear until that cache is rebuilt.
     jobs.update(job.id, { restartRequired: true });
-    jobs.finish(job.id, {});
+    jobs.finish(job.id, unwritten.length > 0 ? { error: unwrittenMessage(unwritten) } : {});
     await cancelRestore(deps.home, review.restoreId);
     log.info(`[restore] restored ${restored} item(s) from ${review.archivePath}`);
     return { restored, skipped: review.items.length - restored };
@@ -223,7 +263,12 @@ function targetPathFor(
   return null; // settings files are merged, not swapped wholesale
 }
 
-async function publish(staged: string, target: string): Promise<void> {
+/**
+ * Swap `staged` in for `target`. `keepLive` names a subtree of the item as it
+ * stands here that survives the swap — a project's working files, when the
+ * backup was made without them.
+ */
+async function publish(staged: string, target: string, keepLive?: string): Promise<void> {
   const parked = `${target}.restore-parked-${randomUUID().slice(0, 8)}`;
   let didPark = false;
   await mkdir(dirname(target), { recursive: true });
@@ -239,7 +284,159 @@ async function publish(staged: string, target: string): Promise<void> {
     if (didPark) await rename(parked, target).catch(() => {});
     throw err;
   }
-  if (didPark) await rm(parked, { recursive: true, force: true }).catch(() => {});
+  if (!didPark) return;
+  if (keepLive) {
+    const from = join(parked, keepLive);
+    const to = join(target, keepLive);
+    try {
+      if (await pathExists(from)) {
+        await rm(to, { recursive: true, force: true });
+        await rename(from, to);
+      }
+    } catch (err) {
+      // An open file can pin the folder on Windows. Put the item back as it
+      // was rather than leave its working files parked under another name.
+      const rejected = `${target}.restore-rejected-${randomUUID().slice(0, 8)}`;
+      try {
+        await rename(target, rejected);
+        await rename(parked, target);
+        await rm(rejected, { recursive: true, force: true }).catch(() => {});
+      } catch {
+        log.error(`[restore] could not put ${target} back; what was there is at ${parked}`);
+      }
+      throw err;
+    }
+  }
+  await rm(parked, { recursive: true, force: true }).catch(() => {});
+}
+
+/**
+ * Add a backup's documents to the live library, one file at a time.
+ *
+ * The library is the person's own folder, often cloud-synced, holding
+ * whatever they filed after the backup was made. Swapping the folder for the
+ * backup's copy deleted all of that, and on a synced folder the deletion
+ * reached every device. So nothing here is removed or overwritten: a document
+ * the library lacks is added, an identical one is left alone, and where both
+ * hold different versions the live one keeps its name and the backup's is
+ * saved beside it. Keeping the newer of the two was the alternative, but sync
+ * clients rewrite modification times, and a fresh install's starter document
+ * is always "newer" than the person's own edit of it.
+ *
+ * Returns the documents that could not be written; the rest still land.
+ */
+async function mergeDocuments(staged: string, root: string, day: string): Promise<string[]> {
+  const unwritten: string[] = [];
+  await mkdir(root, { recursive: true });
+  for (const rel of await stagedFiles(staged)) {
+    if (isSyncJunkPath(rel)) continue;
+    try {
+      await mergeDocument(join(staged, ...rel.split('/')), root, rel, day);
+    } catch (err) {
+      log.warn(
+        `[restore] could not restore document ${rel}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      unwritten.push(rel);
+    }
+  }
+  return unwritten;
+}
+
+async function mergeDocument(
+  source: string,
+  root: string,
+  rel: string,
+  day: string,
+): Promise<void> {
+  const destination = safeJoin(root, rel);
+  if (!destination) throw new Error('its name is not a safe path here');
+  // A link inside the library must not carry a restored file, or the folders
+  // made for it, somewhere else.
+  if (!(await realpathContained(root, dirname(destination)))) {
+    throw new Error('its folder leads outside the documents folder');
+  }
+  await mkdir(dirname(destination), { recursive: true });
+  if (await placeIfAbsent(source, destination)) return;
+  if (await sameContent(source, destination)) return;
+  const ext = extname(destination);
+  const stem = basename(destination, ext);
+  for (let n = 1; n <= 20; n++) {
+    const label = n === 1 ? `from backup ${day}` : `from backup ${day} ${n}`;
+    const beside = join(dirname(destination), `${stem} (${label})${ext}`);
+    if (await placeIfAbsent(source, beside)) return;
+    if (await sameContent(source, beside)) return;
+  }
+  throw new Error('too many restored copies already sit beside it');
+}
+
+/** Copy without ever replacing anything; false when the name is taken. */
+async function placeIfAbsent(source: string, destination: string): Promise<boolean> {
+  if (
+    await lstat(destination).then(
+      () => true,
+      () => false,
+    )
+  )
+    return false;
+  try {
+    await copyFile(source, destination, fsConstants.COPYFILE_EXCL);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    // The name was free a moment ago, so a partial copy is ours to remove.
+    await rm(destination, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+async function sameContent(a: string, b: string): Promise<boolean> {
+  const [infoA, infoB] = await Promise.all([lstat(a), lstat(b).catch(() => null)]);
+  if (!infoB?.isFile() || infoA.size !== infoB.size) return false;
+  const [hashA, hashB] = await Promise.all([sha256(a), sha256(b)]);
+  return hashA === hashB;
+}
+
+async function sha256(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return hash.digest('hex');
+}
+
+/** Regular files under an extracted item, as '/'-joined relative paths. */
+async function stagedFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  const visit = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) out.push(relative(root, path).split(sep).join('/'));
+    }
+  };
+  await visit(root);
+  return out.sort();
+}
+
+function unwrittenMessage(paths: string[]): string {
+  const shown = paths.slice(0, 5).join(', ');
+  const more = paths.length > 5 ? ` and ${paths.length - 5} more` : '';
+  return `Everything else was restored, but ${paths.length} shared document(s) could not be written: ${shown}${more}.`;
+}
+
+/** The backup's date, as it appears in the name of a document kept beside yours. */
+function backupDay(manifest: BackupManifest): string {
+  const day = manifest.createdAt.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : 'restore';
+}
+
+function pathExists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+async function hasEntries(dir: string): Promise<boolean> {
+  return (await readdir(dir).catch(() => [])).length > 0;
 }
 
 /**

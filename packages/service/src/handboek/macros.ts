@@ -13,6 +13,7 @@ import type {
   ModelTier,
   RoleId,
   ScorecardDataset,
+  ScorecardMemoryCoverage,
   ScorecardRun,
 } from '@bendyline/gezel';
 import {
@@ -28,6 +29,7 @@ import {
   scoreModel,
   scorecardHardwareKey,
   scorecardHardwareLabel,
+  scorecardMemoryCoverage,
   scorecardModelFamilyId,
   toolsetGroupsForRole,
 } from '@bendyline/gezel';
@@ -637,8 +639,11 @@ export function renderScorecardMarkdown(
       board.scores.map((s) => s.result.engine),
     )}**`,
   );
+  const headlineCoverage = scorecardMemoryCoverage(board.run);
+  const headlineNote = memoryCoverageNote(headlineCoverage, publishable);
+  if (headlineNote) lines.push('', headlineNote);
   lines.push('');
-  lines.push(...scoreTable(publishable, opts.breakLabels ?? false));
+  lines.push(...scoreTable(publishable, opts.breakLabels ?? false, headlineCoverage));
 
   if (withheld.length > 0) {
     lines.push('');
@@ -672,8 +677,11 @@ export function renderScorecardMarkdown(
         scores.map((s) => s.result.engine),
       )}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
+    const coverage = scorecardMemoryCoverage(run);
+    const note = memoryCoverageNote(coverage, scores);
+    if (note) lines.push('', note);
     lines.push('');
-    lines.push(...scoreTable(scores, opts.breakLabels ?? false));
+    lines.push(...scoreTable(scores, opts.breakLabels ?? false, coverage));
   }
 
   if (opts.includeTaskCount) {
@@ -773,6 +781,12 @@ export function renderScorecardRunsMarkdown(
     lines.push(
       `**${describeProvenance(entry.run, engines)}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
+    const coverage = scorecardMemoryCoverage(entry.run);
+    const note = memoryCoverageNote(
+      coverage,
+      entry.suites.flatMap((suite) => suite.scores),
+    );
+    if (note) lines.push('', note);
 
     for (const suite of entry.suites) {
       const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
@@ -780,7 +794,7 @@ export function renderScorecardRunsMarkdown(
       lines.push('');
       lines.push(`#### ${SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId}`);
       lines.push('');
-      lines.push(...scoreTable(publishable, opts.breakLabels ?? false));
+      lines.push(...scoreTable(publishable, opts.breakLabels ?? false, coverage));
 
       if (withheld.length > 0) {
         lines.push('');
@@ -884,6 +898,12 @@ export function renderScorecardFilterHtml(
         why.length > 0 ? ` — ${esc(why.join(', '))}` : ''
       }</p>`,
     );
+    const coverage = scorecardMemoryCoverage(run);
+    const note = memoryCoverageNote(
+      coverage,
+      entry.suites.flatMap((suite) => suite.scores),
+    );
+    if (note) parts.push(`<p class="hb-scorecard-memory-note">${esc(note)}</p>`);
 
     for (const suite of entry.suites) {
       const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
@@ -894,7 +914,7 @@ export function renderScorecardFilterHtml(
           SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
         )}</h5>`,
       );
-      parts.push(scoreTableHtml(publishable));
+      parts.push(scoreTableHtml(publishable, coverage));
       if (withheld.length > 0) {
         const names = withheld
           .map(
@@ -957,15 +977,16 @@ function roundLabels(runs: readonly ScorecardRun[]): Map<string, string> {
  * a model-family and tier stamp on every row, so the filter can hide a row
  * without knowing anything about what it says.
  */
-function scoreTableHtml(scores: ModelScore[]): string {
+function scoreTableHtml(scores: ModelScore[], coverage: ScorecardMemoryCoverage): string {
   const attr = SCORECARD_DATA_ATTRS;
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
   cols.push('Performance');
-  if (anyRuntime) cols.push('Context', 'Memory used');
+  if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
     const kvCacheType = score.result.runtime?.kvCacheType;
@@ -988,10 +1009,10 @@ function scoreTableHtml(scores: ModelScore[]): string {
     );
     if (anyRuntime) {
       const runtime = score.result.runtime;
-      cells.push(
-        runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—',
-        runtime ? esc(`${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB`) : '—',
-      );
+      cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');
+      if (memoryHeading) {
+        cells.push(runtime ? esc(`${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB`) : '—');
+      }
     }
     const stamp = `${attr.model}="${esc(scorecardModelFamilyId(score.result.modelId))}" ${attr.tier}="${esc(score.result.tier)}"`;
     return `<tr ${stamp}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
@@ -1025,6 +1046,33 @@ const PRIOR_ROUNDS_SHOWN = 2;
 const NB = '\u00a0';
 
 /**
+ * The memory column's heading for what the round actually measured, or null
+ * to drop the column. An `incomplete` figure is dropped rather than labelled:
+ * a DGX Spark round showed a 180B model at 5.4 GB, and no caption beside a
+ * number that wrong stops a reader from sizing their own machine by it.
+ */
+const MEMORY_COLUMN_HEADINGS: Record<ScorecardMemoryCoverage, string | null> = {
+  full: 'Memory used',
+  'system-only': 'System memory',
+  incomplete: null,
+};
+
+/** One line under a round's stamp explaining a memory column that is not a full footprint. */
+function memoryCoverageNote(
+  coverage: ScorecardMemoryCoverage,
+  scores: readonly ModelScore[],
+): string | null {
+  if (!scores.some((score) => !!score.result.runtime)) return null;
+  if (coverage === 'system-only') {
+    return "System memory counts this computer's own memory only. What the model keeps on the separate graphics card isn't included.";
+  }
+  if (coverage === 'incomplete') {
+    return "Memory isn't shown for this round. This machine's graphics chip shares the computer's memory in a way our measurement can't see, so the number would read far below what the model really uses.";
+  }
+  return null;
+}
+
+/**
  * Split a model label between its family and its size/quantization, so the
  * Model column claims the width of `35b-a3b-q4` rather than the width of
  * `qwen3.6-35b-a3b-q4`. This table is seven columns of numbers inside the
@@ -1047,14 +1095,19 @@ export function breakModelLabel(label: string): string {
  * scorecard dimension, and keeping its column visible lets an older round say
  * honestly that its throughput probe was not recorded.
  */
-function scoreTable(scores: ReturnType<typeof scoreModel>[], breakLabels: boolean): string[] {
+function scoreTable(
+  scores: ReturnType<typeof scoreModel>[],
+  breakLabels: boolean,
+  coverage: ScorecardMemoryCoverage,
+): string[] {
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
   cols.push('Performance');
-  if (anyRuntime) cols.push('Context', 'Memory used');
+  if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
     const kvCacheType = score.result.runtime?.kvCacheType;
@@ -1079,10 +1132,10 @@ function scoreTable(scores: ReturnType<typeof scoreModel>[], breakLabels: boolea
     );
     if (anyRuntime) {
       const runtime = score.result.runtime;
-      cells.push(
-        runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—',
-        runtime ? `${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB` : '—',
-      );
+      cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');
+      if (memoryHeading) {
+        cells.push(runtime ? `${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB` : '—');
+      }
     }
     return `| ${cells.join(' | ')} |`;
   });

@@ -23,6 +23,19 @@ export function openTabAction(detail: RecentTabInput): NavAction {
 }
 
 /**
+ * Open one Handboek article. The Handboek lives in the Knowledge area as its
+ * built-in `handboek` catalog, so the article is a knowledge document there.
+ */
+export function openHandboekArticleActions(articleId: string): NavAction[] {
+  const intent: OpenKnowledgeIntent = { catalogId: 'handboek', documentId: articleId };
+  return [
+    { kind: 'open-knowledge', intent },
+    openTabAction({ kind: 'area', area: 'knowledge' }),
+    { kind: 'event', type: 'gezel:open-knowledge-document', detail: intent },
+  ];
+}
+
+/**
  * Fire a single tab navigation — the common one-liner case. Going through
  * `RecentTabInput` is the point: a hand-built `gezel:open-tab` detail with a
  * wrong shape fails silently (App's listener just returns), so the type is

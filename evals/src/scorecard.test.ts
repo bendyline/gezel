@@ -233,6 +233,18 @@ describe('mergeScorecard', () => {
     expect(reingested.runs[0]!.note).toBe('Vulkan backend; no NVIDIA driver');
   });
 
+  it('re-ingesting keeps a hand-recorded memory coverage', () => {
+    const corrected = {
+      ...run('r1', '2026-08-01T00:00:00Z'),
+      memoryCoverage: 'incomplete' as const,
+    };
+    const first = mergeScorecard(empty, corrected, [result('a', 'r1', 3)]);
+    const reingested = mergeScorecard(first, run('r1', '2026-08-01T00:00:00Z'), [
+      result('a', 'r1', 3),
+    ]);
+    expect(reingested.runs[0]!.memoryCoverage).toBe('incomplete');
+  });
+
   it('lets an explicit note replace the recorded one', () => {
     const noted = { ...run('r1', '2026-08-01T00:00:00Z'), note: 'first' };
     const first = mergeScorecard(empty, noted, [result('a', 'r1', 3)]);

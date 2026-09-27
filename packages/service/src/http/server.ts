@@ -308,6 +308,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     log: (m) => sessionRouteLog.warn(m),
     isProjectLinked,
     isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
+    taskStatus: async (projectId, num) =>
+      (await ctx.store.readTask(projectId, num))?.status ?? null,
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);

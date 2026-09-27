@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,12 +27,42 @@ describe('resolveSharedServiceTree', () => {
 
   async function seedTree(sha: string | null): Promise<void> {
     await mkdir(join(treeDir, 'dist', 'bin'), { recursive: true });
+    await mkdir(join(treeDir, 'node_modules'), { recursive: true });
+    await writeFile(join(treeDir, 'package.json'), '{"version":"1.2.3"}\n');
     await writeFile(join(treeDir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
     if (sha) await writeFile(join(treeDir, '.gezel-bundle.sha256'), `${sha}\n`);
     // What the installer hooks leave behind: readable, not writable by anyone
-    // but the service account.
+    // but the installer that owns it.
     await chmod(serviceHome, 0o711);
     await chmod(treeDir, 0o755);
+  }
+
+  /**
+   * The fixture is necessarily owned by the account running Vitest. Model the
+   * production relationship instead: that account stands in for the installer
+   * (root), and the desktop user asking is a different account.
+   */
+  async function resolveAsDesktop(
+    overrides: Partial<Parameters<typeof resolveSharedServiceTree>[0]> = {},
+  ): Promise<{ adopted: string | null; warnings: string[] }> {
+    const fixtureOwnerUid = process.getuid?.();
+    if (fixtureOwnerUid === undefined) throw new Error('POSIX test requires process.getuid');
+    const desktopUid = fixtureOwnerUid === 1 ? 2 : 1;
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(desktopUid);
+    const warnings: string[] = [];
+    try {
+      const adopted = await resolveSharedServiceTree({
+        metaPath,
+        serviceHome,
+        platform: 'linux',
+        publisherUid: fixtureOwnerUid,
+        logger: { warn: (m) => warnings.push(m) },
+        ...overrides,
+      });
+      return { adopted, warnings };
+    } finally {
+      getuid.mockRestore();
+    }
   }
 
   beforeEach(async () => {
@@ -51,21 +81,50 @@ describe('resolveSharedServiceTree', () => {
     await seedMeta();
     await seedTree(SHIPPED_SHA);
 
-    // The fixture is necessarily owned by the account running Vitest. Model
-    // the production relationship instead: the desktop user is distinct from
-    // the installer/service account that owns the shared tree.
-    const fixtureOwnerUid = process.getuid?.();
-    if (fixtureOwnerUid === undefined) throw new Error('POSIX test requires process.getuid');
-    const desktopUid = fixtureOwnerUid === 1 ? 2 : 1;
-    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(desktopUid);
+    expect(await resolveAsDesktop()).toEqual({ adopted: treeDir, warnings: [] });
+  });
 
-    try {
-      expect(await resolveSharedServiceTree({ metaPath, serviceHome, platform: 'linux' })).toBe(
-        treeDir,
-      );
-    } finally {
-      getuid.mockRestore();
-    }
+  posixOnly('declines a tree owned by any account other than the installer', async () => {
+    // The service account owned the published tree before, and it parses
+    // untrusted model files: a tree it owns is one it could rewrite under every
+    // account's daemon. Only root's publication is adoptable.
+    await seedMeta();
+    await seedTree(SHIPPED_SHA);
+
+    const serviceAccountUid = process.getuid?.() ?? 0;
+    const { adopted, warnings } = await resolveAsDesktop({ publisherUid: serviceAccountUid + 1 });
+
+    expect(adopted).toBeNull();
+    expect(warnings.join('\n')).toMatch(
+      new RegExp(`belongs to uid ${serviceAccountUid}, not the installer`),
+    );
+  });
+
+  posixOnly('declines when a directory holding the entry point is writable by others', async () => {
+    // Owning `dist` is what stops anyone renaming `dist/bin` out from under the
+    // entry point, so it is checked, not just the entry point itself.
+    await seedMeta();
+    await seedTree(SHIPPED_SHA);
+    await chmod(join(treeDir, 'dist'), 0o777);
+
+    const { adopted, warnings } = await resolveAsDesktop();
+
+    expect(adopted).toBeNull();
+    expect(warnings.join('\n')).toMatch(/dist is group- or world-writable/);
+  });
+
+  posixOnly('declines when a checked entry inside the tree is a symlink', async () => {
+    await seedMeta();
+    await seedTree(SHIPPED_SHA);
+    const elsewhere = join(root, 'elsewhere-modules');
+    await mkdir(elsewhere);
+    await rm(join(treeDir, 'node_modules'), { recursive: true });
+    await symlink(elsewhere, join(treeDir, 'node_modules'));
+
+    const { adopted, warnings } = await resolveAsDesktop();
+
+    expect(adopted).toBeNull();
+    expect(warnings.join('\n')).toMatch(/node_modules is a symlink/);
   });
 
   posixOnly('declines a tree built from a different bundle', async () => {
@@ -101,7 +160,10 @@ describe('resolveSharedServiceTree', () => {
     await seedTree(SHIPPED_SHA);
     await chmod(treeDir, 0o777);
 
-    expect(await resolveSharedServiceTree({ metaPath, serviceHome, platform: 'linux' })).toBeNull();
+    const { adopted, warnings } = await resolveAsDesktop();
+
+    expect(adopted).toBeNull();
+    expect(warnings.join('\n')).toMatch(/service is group- or world-writable/);
   });
 
   posixOnly('declines when the tree parent is world-writable', async () => {
@@ -110,7 +172,10 @@ describe('resolveSharedServiceTree', () => {
     await seedTree(SHIPPED_SHA);
     await chmod(serviceHome, 0o777);
 
-    expect(await resolveSharedServiceTree({ metaPath, serviceHome, platform: 'linux' })).toBeNull();
+    const { adopted, warnings } = await resolveAsDesktop();
+
+    expect(adopted).toBeNull();
+    expect(warnings.join('\n')).toMatch(/system-home is group- or world-writable/);
   });
 
   posixOnly('declines when there is no machine service home', async () => {

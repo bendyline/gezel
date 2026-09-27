@@ -189,7 +189,7 @@ import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { DEFAULT_PORT, type RunningService, type StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
-import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
+import { runSystemBootstrap, stopSystemBootstraps } from './system-toolsets/bootstrap.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
@@ -3037,6 +3037,10 @@ export async function startProductService(
       stopSuspendMonitor();
       scheduler.stop();
       nightShift.stop();
+      // Issued first: an owning supervisor force-stops this process a few
+      // seconds into shutdown, and a first-run Chromium download must not
+      // outlive it as an orphan.
+      const systemBootstrapsStopped = stopSystemBootstraps();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
@@ -3073,6 +3077,7 @@ export async function startProductService(
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();
+      await shutdownStep('system toolsets', () => systemBootstrapsStopped);
       await shutdownStep('image provider', () => imageProvider.shutdown());
       await shutdownStep('video provider', () => videoProvider.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());

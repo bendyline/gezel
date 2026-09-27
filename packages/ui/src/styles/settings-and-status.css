@@ -278,6 +278,19 @@
 .settings-panel .gz-link-button {
   font-family: var(--font-ui);
 }
+/* Settings → About → Legal and privacy: a short stack of links, sized like
+   the rest of the panel's controls. */
+.settings-legal-links {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+.settings-legal-links a {
+  color: var(--accent-text, var(--accent));
+}
 /* A checkbox row's <label>/<span> is neither `p` nor a form control, so it
    escaped the two rules above and rendered at the inherited body size —
    visibly larger than the helper line directly beneath it. */

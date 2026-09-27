@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpStatusError, retryTransient } from '@bendyline/gezel';
+import { collapseToContentPack } from '../content-pack.js';
 import {
   DEFAULT_NPM_REGISTRY,
   downloadTarball,
@@ -162,6 +163,11 @@ export function isGildeReleaseVersion(v: string): boolean {
  * Refuses when the registry metadata carries no usable integrity hash. The
  * tarball is removed either way; the caller owns `stagingDir` cleanup on
  * error.
+ *
+ * The community tier is collapsed into a content pack before the caller
+ * validates or publishes it, matching the packaged bundle: ~30k tiny files
+ * cost a Defender scan each on Windows and slow every later prune of the
+ * version directory.
  */
 export async function stageGildeVersion(opts: {
   release: GildeReleaseInfo;
@@ -185,6 +191,15 @@ export async function stageGildeVersion(opts: {
       expectedName: GILDE_PACKAGE_NAME,
       expectedVersion: release.version,
     });
+    const community = join(packageDir, 'data', 'community');
+    if (
+      await stat(community).then(
+        (st) => st.isDirectory(),
+        () => false,
+      )
+    ) {
+      await collapseToContentPack(community);
+    }
     return { packageDir };
   } finally {
     await rm(tarballPath, { force: true }).catch(() => {});

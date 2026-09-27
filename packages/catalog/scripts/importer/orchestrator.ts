@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { CommunityPolicy } from './community-policy.js';
 import { classify, pickNpmStdioPackage } from './filter.js';
 import { formatPathsViaBiome } from './fs-utils.js';
 import { LicenseResolver, isPermissive } from './license-resolver.js';
@@ -82,6 +83,13 @@ export interface OrchestratorOptions {
    * sweep it makes no use of.
    */
   retainOnly?: boolean;
+  /**
+   * Gilde's community content policy (honeypots, adult content, gambling,
+   * wallet private keys, placeholders, garbled text). A match is never
+   * written. Unset = no content filtering, which is what a gilde checkout
+   * without the policy module gets.
+   */
+  contentPolicy?: CommunityPolicy;
 }
 
 export interface RunSummary {
@@ -143,6 +151,7 @@ export class Orchestrator {
       'rejected-license-not-permissive': 0,
       'rejected-mapping-failed': 0,
       'rejected-npm-resolution-failed': 0,
+      'rejected-content-policy': 0,
       'integrity-violation': 0,
     };
     const bump = (key: string) => {
@@ -266,6 +275,23 @@ export class Orchestrator {
             reason: 'mapping-failed',
             detail: (err as Error).message,
           });
+          continue;
+        }
+
+        const violation = this.opts.contentPolicy?.({
+          identity: mapped.identity,
+          versions: [mapped.version],
+        });
+        if (violation) {
+          bump('rejected-content-policy');
+          rejections.push({
+            name: server.name,
+            reason: 'content-policy',
+            detail: `${violation.rule}: ${violation.detail}`,
+          });
+          if (this.opts.verbose) {
+            console.log(`drop ${server.name}: ${violation.rule} (${violation.detail})`);
+          }
           continue;
         }
 

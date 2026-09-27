@@ -27,7 +27,8 @@ const log = createLogger('http');
  * `userInitiated` to the workspace write gate. That is deliberate and it is
  * the whole feature: the gezel drafted into artifacts because it holds no
  * write grant on the user's folder, so the authenticated click here — not the
- * gezel — is what performs the write. Nothing model-reachable can call it.
+ * gezel — is what performs the write. Nothing model-reachable can call it:
+ * `sessionRouteGuard` refuses apply and dismiss to every session token.
  */
 export function diffpackRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();

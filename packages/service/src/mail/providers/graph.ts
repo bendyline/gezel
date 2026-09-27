@@ -6,9 +6,9 @@
  */
 
 import { HttpStatusError, createLogger } from '@bendyline/gezel';
-import { extractEmail } from '../../connectors/consent.js';
 import { parseRawMessage } from '../mime.js';
 import { type OAuthCredential, isExpired, refreshAccessToken } from '../oauth.js';
+import { canonicalRecipients } from '../recipient.js';
 import type {
   FolderChanges,
   MailCursor,
@@ -63,7 +63,7 @@ interface GraphDeltaResponse {
 }
 
 function recipients(addrs: string[] | undefined) {
-  return (addrs ?? []).map((a) => ({ emailAddress: { address: extractEmail(a) } }));
+  return canonicalRecipients(addrs ?? []).map((address) => ({ emailAddress: { address } }));
 }
 
 export class GraphMailProvider implements MailProvider {

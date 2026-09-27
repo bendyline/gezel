@@ -355,6 +355,14 @@ export function buildDispatcher(deps: DispatcherDeps): {
       handler: async (ctx, params) => {
         if (!deps.tasks) throw new Error('task.create is not available (no task manager wired)');
         const req = requireParam<Record<string, unknown>>(params, 'req');
+        // Trust is the owner's or the CLI's word about a recipe's scripts. A
+        // script cannot give it, even in a run the user started: the script
+        // may be one a gezel wrote.
+        if (req.trustScripts) {
+          throw new Error(
+            'task.create cannot trust custom scripts; launch from the app or the CLI',
+          );
+        }
         return deps.tasks.create(ctx.projectId, req as CreateTaskRequest);
       },
     },

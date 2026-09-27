@@ -49,7 +49,7 @@ CLI can be used instead. See **Downloaded on first boot or on demand** below.
 | [mailparser](https://github.com/nodemailer/mailparser) | MIT | nodemailer/mailparser |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | MIT | microsoft/monaco-editor |
 | [nodemailer](https://nodemailer.com) | MIT-0 | nodemailer/nodemailer |
-| [onnxruntime-node](https://github.com/microsoft/onnxruntime) | MIT | microsoft/onnxruntime |
+| [onnxruntime-node](https://github.com/microsoft/onnxruntime) | MIT; its Windows build carries Microsoft's proprietary DirectML (see **Binaries carried inside dependencies and the installer**) | microsoft/onnxruntime |
 | [openai](https://github.com/openai/openai-node) | Apache-2.0 | openai/openai-node |
 | [pino](https://getpino.io) | MIT | getpino.io |
 | [react](https://react.dev) | MIT | react.dev |
@@ -69,7 +69,7 @@ attribution file is taken from the exact Electron distribution being packaged.
 |---|---|---|---|
 | **Electron** | `43.7.5` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
 | **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
-| **pnpm** | `11.15.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
+| **pnpm** | `11.27.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 | **DuckDB** | `1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
 
 ### pnpm embedded dependency graph
@@ -96,14 +96,14 @@ published installer are intentionally omitted.
 | `isexe` | `4.0.0` | BlueOak-1.0.0 | all released targets |
 | `minipass` | `7.1.3` | BlueOak-1.0.0 | all released targets |
 | `minizlib` | `3.1.0` | MIT | all released targets |
-| `node-gyp` | `12.4.0` | MIT | all released targets |
+| `node-gyp` | `12.3.0` | MIT | all released targets |
 | `nopt` | `9.0.0` | ISC | all released targets |
-| `picomatch` | `4.0.5` | MIT | all released targets |
+| `picomatch` | `4.0.7` | MIT | all released targets |
 | `proc-log` | `6.1.0` | ISC | all released targets |
 | `semver` | `7.8.5` | ISC | all released targets |
-| `tar` | `7.5.20` | BlueOak-1.0.0 | all released targets |
+| `tar` | `7.5.22` | BlueOak-1.0.0 | all released targets |
 | `tinyglobby` | `0.2.17` | MIT | all released targets |
-| `undici` | `6.27.0` | MIT | all released targets |
+| `undici` | `6.28.1` | MIT | all released targets |
 | `v8-compile-cache` | `2.4.0` | MIT | all released targets |
 | `which` | `6.0.1` | ISC | all released targets |
 | `yallist` | `5.0.0` | BlueOak-1.0.0 | all released targets |
@@ -311,6 +311,29 @@ sentencepiece and the tokenizer data.
 The DeepSeek-V4 model **weights** ds4 runs are not bundled — they are
 downloaded on demand from Hugging Face (`antirez/deepseek-v4-gguf`, MIT) and
 carry their own license; see **Catalog models** below.
+
+---
+
+## Binaries carried inside dependencies and the installer
+
+These binaries arrive inside an npm package, or are added by the installer
+build, under terms the carrying package's metadata does not state. Their
+license and notice texts are copied into the installed
+`resources/licenses/standards/` directory and attached to the carrying
+package's entry in the license manifest. The texts, their upstream sources, and
+the exact package versions they were reviewed for are recorded in
+[`legal/licenses/manifest.json`](legal/licenses/manifest.json); packaging fails
+when a production package carries one of these binaries without a reviewed
+entry.
+
+| Binary | Carried by | Version | License |
+|---|---|---|---|
+| **ONNX Runtime** (`onnxruntime.dll`, `libonnxruntime.*`) | `onnxruntime-node` | `1.24.3` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime CUDA and TensorRT execution providers** (`libonnxruntime_providers_*.so`, Linux x64 only; fetched by `onnxruntime-node`'s install script) | `onnxruntime-node` | `1.24.3` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime Web** (`ort-wasm-simd-threaded*.wasm`) | `onnxruntime-web`, `@huggingface/transformers` | commit `89f8206b` | MIT, with ONNX Runtime's third-party notices |
+| **DirectML** (`DirectML.dll`, Windows only) | `onnxruntime-node` | `1.15.4` | **Proprietary** — Microsoft DirectML license terms |
+| **DirectX Shader Compiler** (`dxcompiler.dll`, `dxil.dll`, Windows only) | `onnxruntime-node` | `1.8.2502` | NCSA |
+| **Elevate** (`resources/elevate.exe`, Windows installer only) | electron-builder's NSIS toolset | `1.0.0.2894` | MIT |
 
 ---
 
@@ -531,7 +554,7 @@ project, [Hochschule für Gestaltung Schwäbisch Gmünd](https://www.hfg-gmuend.
 
 Most of Gezel's own **code** dependencies (npm packages and native engines) are
 permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed resvg
-component redistribution is documented above. Two proprietary
+component redistribution is documented above. Three proprietary
 components are redistributed:
 
 - **NVIDIA CUDA runtime** (`libcudart`, `libcublas`, `libcublasLt` on Linux;
@@ -568,6 +591,18 @@ components are redistributed:
   self-extracting executable whose terms live in the Visual Studio licence
   rather than as a text file beside the binaries. The link above is the
   authoritative text. macOS and Linux builds do not carry it.
+
+- **Microsoft DirectML** (`DirectML.dll` 1.15.4) ships inside the
+  `onnxruntime-node` package in the **Windows** build only, where ONNX Runtime
+  can use it for GPU execution. It is Microsoft-proprietary, redistributed
+  under the Microsoft DirectML license terms, which permit distributing it in
+  applications built with machine-learning frameworks for Windows. Its license
+  and third-party notices are installed as
+  `resources/licenses/standards/LICENSE-directml.txt` and
+  `NOTICE-directml-ThirdPartyNotices.txt`. The DirectX Shader Compiler DLLs
+  beside it are not proprietary at the shipped version: from v1.8.2502 its
+  release assigns `dxil.dll` to the NCSA license too. macOS and Linux builds do
+  not carry either.
 
 Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
 platform-specific binary siblings, pulled in transitively by
@@ -653,6 +688,10 @@ components live in the pnpm lockfile:
   first-party helper gains `THIRD_PARTY_NOTICES.md`. The notice gate reconciles
   that helper-local disclosure, the central license text, its `NOTICE.md` row,
   and the exact installer platforms carrying the affected code.
+- Binaries carried inside dependencies: update the table together with
+  `legal/licenses/manifest.json` when a carrying package changes version.
+  Packaging scans every production package for these binaries and fails when
+  one is not covered for the exact installed version.
 - Vendored connector components: update the "Vendored connector components
   (Prismatic)" table when a new component slice is added under
   `packages/connectors-spectral/vendor/`. The authoritative list — with
