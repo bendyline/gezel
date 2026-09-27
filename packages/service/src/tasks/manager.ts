@@ -1165,7 +1165,14 @@ export class TaskManager {
       craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
-    const requestedExecutionMode = input.executionMode ?? 'auto';
+    // A system job's step is a control surface the service runs itself; no
+    // model ever takes it. Under `auto` the resolver still minted the
+    // Generalist and pinned it on that step, and a pinned step is one the
+    // stuck-step sweep re-drives and then pauses. The 1.26270 release
+    // candidate paused the Boekwachter's indexing job 34 minutes after first
+    // boot that way (2026-09-26).
+    const requestedExecutionMode =
+      extras?.origin?.kind === 'system-job' ? 'stepwise' : (input.executionMode ?? 'auto');
     // A draft resolves nothing yet (like roles) — `activate()` does, reading
     // an explicit request back off the stamp. Everything else resolves now.
     let executionMode: TaskExecutionMode | undefined =

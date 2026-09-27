@@ -1409,7 +1409,9 @@ export function ChatComposer({
       return;
     }
     try {
-      await api.cancelChatSessionTurn(sid);
+      // The person's Stop: if this thread is working a task step, the task
+      // pauses too, so nothing picks the step back up behind their back.
+      await api.cancelChatSessionTurn(sid, { stopTask: true });
       setServerInflight(false);
       setError(null);
     } catch (err) {

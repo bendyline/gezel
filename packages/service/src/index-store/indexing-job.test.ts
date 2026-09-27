@@ -44,6 +44,56 @@ describe('indexing job task', () => {
     });
   });
 
+  it('stays unpinned when generalist mode would otherwise claim it', async () => {
+    // Mirrors the real resolver: `auto` on a hosted provider mints the
+    // Generalist, an explicit request is honored as-is. A pinned job step
+    // was re-driven by the stuck-step sweep and paused 34 minutes after boot.
+    const requests: string[] = [];
+    tasks.setExecutionModeResolver(async ({ requested }) => {
+      requests.push(requested);
+      return requested === 'auto'
+        ? { mode: 'generalist', ownerGezelId: 'keiko' }
+        : { mode: requested };
+    });
+    await ensureIndexingJobTask(store, tasks);
+    const job = (await store.listProjectTasks('default')).find(
+      (t) => t.title === INDEXING_JOB_TITLE,
+    )!;
+    expect(requests).toEqual(['stepwise']);
+    expect(job.executionMode).toBe('stepwise');
+    expect(job.assignee).toEqual({ kind: 'user' });
+    for (const step of job.craftbook.steps) {
+      expect(step.assignee).toBeUndefined();
+      expect(step.suggestedGezelId).toBeUndefined();
+    }
+  });
+
+  it('unpins a job step an older build pinned to the Generalist', async () => {
+    await ensureIndexingJobTask(store, tasks);
+    const job = (await store.listProjectTasks('default')).find(
+      (t) => t.title === INDEXING_JOB_TITLE,
+    )!;
+    await store.writeTask({
+      ...job,
+      executionMode: 'generalist',
+      craftbook: {
+        ...job.craftbook,
+        steps: job.craftbook.steps.map((s) => ({
+          ...s,
+          assignee: { kind: 'gezel' as const, gezelId: 'keiko' },
+        })),
+      },
+    });
+    await ensureIndexingJobTask(store, tasks);
+    const repaired = await store.readTask('default', job.num);
+    expect(repaired?.executionMode).toBe('stepwise');
+    expect(repaired?.status).toBe('active');
+    for (const step of repaired!.craftbook.steps) {
+      expect(step.assignee).toBeUndefined();
+      expect(step.suggestedGezelId).toBeUndefined();
+    }
+  });
+
   it('homes a fresh install in the shared library project, never Default', async () => {
     // A brand-new Default project's task list must not lead with a system
     // job (2026-09-02 UX review) — the boekwachter's control surface lives

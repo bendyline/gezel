@@ -391,6 +391,82 @@ describe('handoff seed wording', () => {
     });
   });
 
+  it('leaves a task active for the next boot when shutdown interrupts its handoff', async () => {
+    // Shutdown cancels the live turn and refuses every later send. Counting
+    // those as failed attempts spent the bounded retries and paused the task
+    // with "Handoff failed — paused for help" on every quit, restart, or
+    // update, and a paused task is not rehydrated on the next boot.
+    const task = await tasks.create('p1', {
+      title: 'Review a patch when the app quits',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    mock.scriptStreamThenHang('Reading the patch record');
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    const sends = () => mock.calls.filter((call) => call.kind === 'send').length;
+    // Wait until the provider is mid-generation, not merely preparing the turn.
+    for (let i = 0; i < 300 && sends() === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(manager.isSessionTurnPending(sessionId)).toBe(true);
+
+    await manager.beginShutdown();
+    await manager.drainBackground();
+
+    expect(sends()).toBe(1);
+    expect(exhausted).not.toHaveBeenCalled();
+    const after = await store.readTask('p1', task.num);
+    expect(after?.status).toBe('active');
+    expect(after?.activeStepId).toBe('review');
+  });
+
+  it.each(['user-stop', 'user-interrupt', 'emergency-stop', 'task-superseded'] as const)(
+    'does not re-send a step whose turn was ended on purpose (%s)',
+    async (reason) => {
+      // The bounded retry read a deliberate cancel as a failed turn, reset the
+      // session, and sent the step again: pressing Stop restarted the work,
+      // and a superseded dispatch fought the one that replaced it.
+      const task = await tasks.create('p1', {
+        title: 'Review a patch the user stops',
+        assignee: { kind: 'gezel', gezelId: 'worker' },
+        steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+        createdBy: { kind: 'user' },
+      });
+      mock.scriptStreamThenHang('Reading the patch record');
+      const exhausted = vi.fn(async () => {});
+      manager.setHandoffExhaustedHandler(exhausted);
+
+      const { sessionId } = await manager.startHandoffSession({
+        gezelId: 'worker',
+        projectId: 'p1',
+        taskRef: task.ref,
+        stepId: 'review',
+        kind: 'entry',
+      });
+      const sends = () => mock.calls.filter((call) => call.kind === 'send').length;
+      for (let i = 0; i < 300 && sends() === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(sends()).toBe(1);
+
+      await manager.cancelInflight(sessionId, reason);
+      await manager.drainBackground();
+
+      expect(sends()).toBe(1);
+      expect(exhausted).not.toHaveBeenCalled();
+    },
+  );
+
   it('sends one continuation when a local write-bail closes the turn with the step still active', async () => {
     const task = await tasks.create('p1', {
       title: 'Write a story',

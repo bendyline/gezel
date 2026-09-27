@@ -1578,6 +1578,61 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
   });
 
+  it('never re-drives or pauses a system job or a schedule host, even with a gezel on the step', async () => {
+    // A system job's step is a control surface; a schedule host's step is a
+    // placeholder its child runs replace. Re-driving either spent three model
+    // turns and then paused it: the RC for 1.26270 paused the Boekwachter's
+    // indexing job 34 minutes after first boot, and a paused host stops its
+    // schedule for good.
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const stale = new Date(now.getTime() - 60 * 60_000).toISOString();
+    const job = await tasks.create(
+      'cron',
+      {
+        title: 'Indexing job',
+        assignee: { kind: 'user' },
+        steps: [{ id: 'index', name: 'Index', next: 'index' }],
+        entryStepId: 'index',
+      },
+      { origin: { kind: 'system-job', jobId: 'boekwachter-indexing' } },
+    );
+    const host = await tasks.create('cron', {
+      title: 'Weekly digest',
+      assignee: { kind: 'gezel', gezelId: 'leo' },
+      steps: [{ id: 'wait', name: 'Wait' }],
+      entryStepId: 'wait',
+      cron: { expression: '0 9 * * 1' },
+    });
+    for (const created of [job, host]) {
+      const rec = await store.readTask('cron', created.num);
+      await store.writeTask({
+        ...rec!,
+        craftbook: {
+          ...rec!.craftbook,
+          steps: rec!.craftbook.steps.map((s) => ({
+            ...s,
+            assignee: { kind: 'gezel' as const, gezelId: 'freja' },
+            lastActivatedAt: stale,
+            // A spent budget: the next rung would pause the task.
+            redriveCount: 3,
+          })),
+        },
+      });
+    }
+    const control = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+
+    const touched = [...chat.delivered.map((d) => d.taskRef), ...chat.nudged.map((n) => n.taskRef)];
+    expect(touched).toEqual([`cron/${control.num}`]);
+    for (const created of [job, host]) {
+      const rec = await store.readTask('cron', created.num);
+      expect(rec!.status).toBe('active');
+      expect(rec!.craftbook.steps[0]!.redriveCount).toBe(3);
+    }
+  });
+
   it('does not re-drive a step whose handoff the runner already holds', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setProjectVoorman('leo');

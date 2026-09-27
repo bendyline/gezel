@@ -1000,7 +1000,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 
@@ -1013,7 +1013,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 

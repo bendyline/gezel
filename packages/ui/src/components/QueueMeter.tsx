@@ -836,7 +836,7 @@ function QueueMeterPanel({
     async (sessionId: string) => {
       setStoppingSessionIds((current) => new Set(current).add(sessionId));
       try {
-        const result = await api.cancelChatSessionTurn(sessionId);
+        const result = await api.cancelChatSessionTurn(sessionId, { stopTask: true });
         if (!result.cancelled) {
           setStoppingSessionIds((current) => {
             const next = new Set(current);

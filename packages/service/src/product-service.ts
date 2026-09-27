@@ -209,6 +209,10 @@ import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
 import { extractSpawnItems } from './tasks/spawn-items.js';
 import { evaluateStepGate } from './tasks/step-gate.js';
+import {
+  type TaskStepRef,
+  pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
+} from './tasks/step-pause.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
@@ -757,47 +761,10 @@ export async function startProductService(
   // Late-bound: IndexEnrichmentManager is constructed after the runner; the
   // closure reads through this ref so night dispatch can hold on catch-up.
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
-  // One exit for a handoff the runtime could not carry: the runner reaches it
-  // when the dispatch itself rejects, the chat manager when the detached sends
-  // spend their bounded retries. Both re-check the step is still the live one
-  // so a task that moved on (or was paused by a person) is left alone.
-  const pauseTaskAfterFailedHandoff = async ({
-    projectId,
-    num,
-    stepId,
-    taskRef,
-    detail,
-  }: {
-    projectId: string;
-    num: number;
-    stepId: string;
-    taskRef: string;
-    detail: string;
-  }): Promise<void> => {
-    const current = await tasks.get(projectId, num);
-    if (!current || current.status !== 'active' || current.activeStepId !== stepId) return;
-    await tasks
-      .appendNote(projectId, num, {
-        text: `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`,
-        author: { kind: 'user' },
-        stepId,
-      })
-      .catch(() => {});
-    await tasks.setStatus(projectId, num, 'paused');
-    const paused = await tasks.get(projectId, num);
-    if (paused) {
-      await tasks.emitNeedsHelp({
-        projectId,
-        task: paused,
-        stepId,
-        reason: 'step_stalled',
-        detail: `Handoff for step "${stepId}" failed after bounded retries: ${detail}`,
-      });
-    }
-    log.warn(
-      `[tasks] ${taskRef} step "${stepId}": handoff failed after bounded retries — paused for help`,
-    );
-  };
+  // Set first thing in `stop()`; see pauseTaskAfterFailedHandoff.
+  let stopping = false;
+  const pauseTaskAfterFailedHandoff = (args: TaskStepRef & { detail: string }) =>
+    pauseAfterFailedHandoff(tasks, args, () => stopping);
   chat.setHandoffExhaustedHandler(async ({ taskRef, stepId, detail }) => {
     const [projectId, numText] = taskRef.split('/');
     const num = Number(numText);
@@ -3062,6 +3029,7 @@ export async function startProductService(
         }
       : {}),
     async stop() {
+      stopping = true;
       const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
         observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
       log.info('[service] shutdown started');

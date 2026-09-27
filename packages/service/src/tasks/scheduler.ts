@@ -282,6 +282,14 @@ export class TaskScheduler {
     if (!task.activeStepId) return;
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     if (!step) return;
+    // Two kinds of task sit active on a step no model is meant to finish: a
+    // system job (its work runs inside the service) and a schedule host (its
+    // placeholder step never completes; each run is a child task, which this
+    // sweep does supervise). Re-driving either spends model turns on nothing
+    // and then pauses it, which for a host silently ends the schedule. The
+    // sweep's old self-owned early return hid this for Meester- and
+    // voorman-owned hosts; dropping it for Default work exposed them.
+    if (task.origin?.kind === 'system-job' || task.cron) return;
     // A terminal step used to bail here, which left "active on the last step"
     // with NO recovery at all: no idle auto-advance (a terminal step may not
     // carry `advanceWhen` — the graph validator rejects it), no re-drive, no
