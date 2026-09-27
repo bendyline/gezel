@@ -344,6 +344,7 @@ body.hb {
 .hb-article .hb-scorecard-suite-title { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; }
 .hb-scorecard-stamp { font-size: 0.85rem; margin: 0 0 0.75rem; }
 .hb-article .hb-scorecard-withheld,
+.hb-article .hb-scorecard-memory-note,
 .hb-article .hb-scorecard-taskcount {
   font-size: 0.82rem;
   color: var(--hb-ink-muted);

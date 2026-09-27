@@ -77,7 +77,8 @@ env:
   # macOS 26 from the runner and therefore could not load on otherwise-
   # supported Macs. ggml's Accelerate backend uses the ILP64 BLAS/LAPACK
   # interface introduced in macOS 13.3, so engines target 13.3. The complete
-  # Electron product declares 13.5 because the pinned Node runtime requires it.
+  # Electron product declares 14.0 because the service tree's sqlite-vec and
+  # ONNX Runtime prebuilds require it (see docs/native-runtime-requirements.md).
   MACOSX_DEPLOYMENT_TARGET: '13.3'
   # Current LunarG SDK on both platforms. The tarball/installer ships the
   # SPIRV-Headers CMake config required by ggml-vulkan, and LunarG keeps the

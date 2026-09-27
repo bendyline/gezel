@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SCORECARD } from './index.js';
 import {
   buildSuiteScoreboard,
   describeProvenance,
@@ -6,8 +7,9 @@ import {
   hardwareSummary,
   provenanceDifferences,
   scoreModel,
+  scorecardMemoryCoverage,
 } from './report.js';
-import { type ScorecardDataset, ScorecardDatasetSchema } from './schema.js';
+import { type ScorecardDataset, ScorecardDatasetSchema, ScorecardRunSchema } from './schema.js';
 
 function run(id: string, over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -229,6 +231,76 @@ describe('provenance', () => {
         cpuModel: 'unknown',
       }),
     ).toBe('linux · unknown · 100 GB');
+  });
+});
+
+describe('scorecardMemoryCoverage', () => {
+  const runOn = (device: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ScorecardRunSchema.parse({
+      ...run('r1'),
+      provenance: {
+        ...run('r1').provenance,
+        device: { label: 'x', platform: 'linux', arch: 'x64', ...device },
+      },
+      ...extra,
+    });
+  const coverageOf = (device: Record<string, unknown>) => scorecardMemoryCoverage(runOn(device));
+
+  it('trusts Apple Silicon, where Metal buffers count against the process', () => {
+    expect(
+      coverageOf({ platform: 'darwin', arch: 'arm64', gpuModel: 'Apple M2 (integrated GPU)' }),
+    ).toBe('full');
+  });
+
+  it('hides DGX Spark rounds, including the first one recorded without a GPU name', () => {
+    expect(coverageOf({ label: 'DGX Spark Class', arch: 'arm64', gpuModel: 'NVIDIA GB10' })).toBe(
+      'incomplete',
+    );
+    expect(
+      coverageOf({ label: 'linux · unknown', arch: 'arm64', memoryGb: 122, cpuModel: 'unknown' }),
+    ).toBe('incomplete');
+  });
+
+  it('marks a discrete graphics card as system memory only', () => {
+    expect(coverageOf({ platform: 'win32', gpuModel: 'AMD Radeon AI PRO R9700' })).toBe(
+      'system-only',
+    );
+    expect(
+      coverageOf({ platform: 'win32', gpuModel: 'NVIDIA GeForce RTX 5070 Ti Laptop GPU' }),
+    ).toBe('system-only');
+  });
+
+  it('treats PC integrated graphics as shared memory the probe cannot see', () => {
+    expect(coverageOf({ platform: 'win32', gpuModel: 'AMD Radeon 8060S Graphics' })).toBe(
+      'incomplete',
+    );
+  });
+
+  it('counts a machine with no graphics card as the whole footprint', () => {
+    expect(coverageOf({})).toBe('full');
+  });
+
+  it('lets an explicit value on the run win over the derivation', () => {
+    const explicit = runOn(
+      { platform: 'win32', gpuModel: 'AMD Radeon AI PRO R9700' },
+      { memoryCoverage: 'full' },
+    );
+    expect(scorecardMemoryCoverage(explicit)).toBe('full');
+  });
+
+  it('classifies every checked-in round the way its numbers demand', () => {
+    for (const entry of SCORECARD.runs) {
+      const { device } = entry.provenance;
+      const coverage = scorecardMemoryCoverage(entry);
+      if (device.platform === 'darwin') expect(coverage, entry.id).toBe('full');
+      else if (device.platform === 'linux' && device.arch === 'arm64') {
+        expect(coverage, entry.id).toBe('incomplete');
+      } else if (device.gpuModel) expect(coverage, entry.id).toBe('system-only');
+    }
+    // The finding that motivated this: a 180B model shown at single-digit GB.
+    const spark = SCORECARD.runs.filter((entry) => /dgx|gb10/.test(entry.id));
+    expect(spark.length).toBeGreaterThan(0);
+    for (const entry of spark) expect(scorecardMemoryCoverage(entry), entry.id).toBe('incomplete');
   });
 });
 

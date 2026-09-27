@@ -42,6 +42,7 @@ export function BackupRestoreDialog() {
   const [review, setReview] = useState<RestoreReview | null>(null);
   const [replace, setReplace] = useState<Set<string>>(new Set());
   const [restoreSettings, setRestoreSettings] = useState(false);
+  const [skipDocuments, setSkipDocuments] = useState(false);
   const [excludeWorkspaces, setExcludeWorkspaces] = useState(false);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<StorageJob | null>(null);
@@ -64,6 +65,7 @@ export function BackupRestoreDialog() {
     setReview(null);
     setReplace(new Set());
     setRestoreSettings(false);
+    setSkipDocuments(false);
     setJob(null);
     setError(null);
     setDone(null);
@@ -175,6 +177,9 @@ export function BackupRestoreDialog() {
       const next = await api.scanRestore({ path: picked.path });
       pendingReview.current = next.restoreId;
       setReview(next);
+      setReplace(new Set());
+      setRestoreSettings(false);
+      setSkipDocuments(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -197,6 +202,7 @@ export function BackupRestoreDialog() {
       setReview(next);
       setReplace(new Set());
       setRestoreSettings(false);
+      setSkipDocuments(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -210,10 +216,15 @@ export function BackupRestoreDialog() {
   const settingsItems = review?.items.filter((i) => i.kind === 'settings-file') ?? [];
   const contentItems = review?.items.filter((i) => i.kind !== 'settings-file') ?? [];
   const conflicts = contentItems.filter((i) => i.conflict === 'exists');
+  // Shared documents land in the person's own, often cloud-synced, folder, so
+  // they can be left out even when nothing there would be replaced.
+  const optionalDocuments = (item: RestoreReview['items'][number]) =>
+    item.kind === 'document-root' && item.conflict === 'none';
+  const addable = contentItems.filter(
+    (i) => i.conflict === 'none' && !(skipDocuments && optionalDocuments(i)),
+  );
   const restorable =
-    contentItems.filter((i) => i.conflict === 'none').length +
-    replace.size +
-    (restoreSettings && settingsItems.length > 0 ? 1 : 0);
+    addable.length + replace.size + (restoreSettings && settingsItems.length > 0 ? 1 : 0);
 
   const startRestore = async () => {
     if (busy || !review) return;
@@ -222,7 +233,7 @@ export function BackupRestoreDialog() {
     try {
       const items = [
         ...contentItems.filter(
-          (item) => item.conflict === 'none' || replace.has(`${item.kind}:${item.id}`),
+          (item) => addable.includes(item) || replace.has(`${item.kind}:${item.id}`),
         ),
         ...(restoreSettings ? settingsItems : []),
       ].map((item) => ({
@@ -245,6 +256,9 @@ export function BackupRestoreDialog() {
       });
       poll(jobId, (finished) => {
         if (finished.status === 'done') setDone(`Restored ${count} item(s).`);
+        else if (finished.status === 'error') {
+          setError(finished.error ?? 'The restore did not finish.');
+        }
       });
     } catch (e) {
       setBusy(false);
@@ -392,6 +406,19 @@ export function BackupRestoreDialog() {
                                   }
                                 />
                                 <span>replace the one already here</span>
+                              </label>
+                            )}
+                            {optionalDocuments(item) && (
+                              <label className="gz-backup-replace">
+                                <input
+                                  type="checkbox"
+                                  checked={!skipDocuments}
+                                  disabled={busy}
+                                  onChange={(e) => setSkipDocuments(!e.target.checked)}
+                                />
+                                <span>
+                                  add to your documents; nothing there is removed or replaced
+                                </span>
                               </label>
                             )}
                           </span>

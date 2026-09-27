@@ -1,4 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   CRAFTBOOK_TEST_FILENAME,
@@ -32,6 +31,7 @@ import {
   satisfiesMinGezelVersion,
 } from '@bendyline/gezel';
 import { sanitizePresentationSvg } from '@bendyline/gezel/svg';
+import { type ContentTree, openContentTree } from './content-tree.js';
 import { gildeDataDir } from './gilde-data.js';
 
 // Through the core logger, not console: a library that writes straight to
@@ -62,6 +62,10 @@ const log = createLogger('catalog');
  * prose inlined as `description`, scripts inlined as the `scripts` map).
  * The legacy layout is still read as a fallback — user/community roots
  * may carry it.
+ *
+ * Any root may instead hold a single `content.pack` (see content-pack.ts)
+ * carrying that same tree verbatim; packaged builds ship the community tier
+ * that way. Reads go through `ContentTree`, so both forms behave identically.
  */
 export interface CatalogSource {
   readonly id: string;
@@ -197,6 +201,7 @@ export class BundledSource implements CatalogSource {
   private readonly rootProvider: () => string;
   private readonly useIndex: boolean;
   private readonly gezelVersion: string;
+  private tree: { root: string; tree: Promise<ContentTree> } | null = null;
 
   constructor(options: BundledSourceOptions | string = {}) {
     // Back-compat: old positional `root: string` signature.
@@ -216,6 +221,25 @@ export class BundledSource implements CatalogSource {
 
   private get root(): string {
     return this.rootProvider();
+  }
+
+  /** The reader for the current root, re-resolved when the provider flips. */
+  private contentTree(): Promise<ContentTree> {
+    const root = this.root;
+    if (this.tree?.root !== root) this.tree = { root, tree: openContentTree(root) };
+    return this.tree.tree;
+  }
+
+  private async readBytes(path: string): Promise<Buffer> {
+    return (await this.contentTree()).readFile(path);
+  }
+
+  private async readText(path: string): Promise<string> {
+    return (await this.readBytes(path)).toString('utf8');
+  }
+
+  private async listDir(path: string): Promise<string[]> {
+    return (await this.contentTree()).readdir(path);
   }
 
   /** True when this build satisfies a content `minGezelVersion` floor. */
@@ -249,7 +273,7 @@ export class BundledSource implements CatalogSource {
     const indexPath = join(this.root, KIND_DIR[kind], 'index.json');
     let raw: string;
     try {
-      raw = await readFile(indexPath, 'utf8');
+      raw = await this.readText(indexPath);
     } catch {
       return null;
     }
@@ -302,7 +326,7 @@ export class BundledSource implements CatalogSource {
     const base = join(this.root, KIND_DIR[kind]);
     let shards: string[] = [];
     try {
-      shards = await readdir(base);
+      shards = await this.listDir(base);
     } catch (err) {
       if (isAbsentDir(err)) return [];
       throw err;
@@ -314,7 +338,7 @@ export class BundledSource implements CatalogSource {
       if (shard === 'index.json') continue;
       let ids: string[] = [];
       try {
-        ids = await readdir(join(base, shard));
+        ids = await this.listDir(join(base, shard));
       } catch (err) {
         if (isAbsentDir(err)) continue;
         throw err;
@@ -404,7 +428,7 @@ export class BundledSource implements CatalogSource {
       if (!isSemver(version)) return null;
       const versioned = join(itemDir, 'versions', version, relPath);
       try {
-        return await readFile(versioned);
+        return await this.readBytes(versioned);
       } catch {
         // Single-document craftbooks (V2) carry their scripts inline in
         // `craftbook.json` — serve `scripts/{name}.ts` reads from the doc
@@ -422,7 +446,7 @@ export class BundledSource implements CatalogSource {
       }
     }
     try {
-      return await readFile(join(itemDir, relPath));
+      return await this.readBytes(join(itemDir, relPath));
     } catch {
       return null;
     }
@@ -438,21 +462,11 @@ export class BundledSource implements CatalogSource {
    */
   async listItemFiles(kind: CatalogKind, id: string): Promise<string[]> {
     const dir = this.itemDir(kind, id);
-    let entries: Array<{ parentPath?: string; path?: string; name: string; isFile(): boolean }>;
+    let out: string[];
     try {
-      entries = (await readdir(dir, { recursive: true, withFileTypes: true })) as never;
+      out = await (await this.contentTree()).listFiles(dir);
     } catch {
       return [];
-    }
-    const out: string[] = [];
-    for (const e of entries) {
-      if (!e.isFile()) continue;
-      // Node's Dirent under `recursive` carries the containing dir in
-      // `parentPath` (Node 20.12+) or the older `path`; join + relativize.
-      const parent = e.parentPath ?? e.path ?? dir;
-      const abs = join(parent, e.name);
-      const rel = abs.startsWith(dir) ? abs.slice(dir.length).replace(/^[/\\]+/, '') : e.name;
-      out.push(rel.split('\\').join('/'));
     }
     out.sort();
     return out;
@@ -514,7 +528,7 @@ export class BundledSource implements CatalogSource {
     const file = join(this.itemDir(kind, id), 'manifest.json');
     let raw: string;
     try {
-      raw = await readFile(file, 'utf8');
+      raw = await this.readText(file);
     } catch {
       return null;
     }
@@ -550,7 +564,7 @@ export class BundledSource implements CatalogSource {
     const versionsDir = join(this.itemDir(kind, id), 'versions');
     let names: string[];
     try {
-      names = await readdir(versionsDir);
+      names = await this.listDir(versionsDir);
     } catch {
       return [];
     }
@@ -568,7 +582,7 @@ export class BundledSource implements CatalogSource {
         const versionFile = join(versionsDir, name, filename);
         let raw: string;
         try {
-          raw = await readFile(versionFile, 'utf8');
+          raw = await this.readText(versionFile);
         } catch {
           continue;
         }
@@ -707,7 +721,7 @@ export class BundledSource implements CatalogSource {
     const versionFile = join(versionDir, 'manifest.json');
     let versionPayload: unknown;
     try {
-      versionPayload = JSON.parse(await readFile(versionFile, 'utf8'));
+      versionPayload = JSON.parse(await this.readText(versionFile));
     } catch (err) {
       log.warn(`failed to read ${versionFile}:`, err);
       return null;
@@ -743,7 +757,7 @@ export class BundledSource implements CatalogSource {
 
   private async readOptional(path: string): Promise<string | null> {
     try {
-      return await readFile(path, 'utf8');
+      return await this.readText(path);
     } catch {
       return null;
     }

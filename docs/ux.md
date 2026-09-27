@@ -883,6 +883,25 @@ and must remain recognizable in the 44px gallery crop. Catalog image renderers
 must replace missing or failed assets with the surface's category glyph or
 initial; never expose the browser's native broken-image placeholder.
 
+**Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
+entries Gezel ships and reviews with thousands imported automatically from
+the public MCP registry, and the two must never look like more of the same.
+A community-tier item (`sourceId === 'community'`) carries a small uppercase
+`community` badge after its name — the neutral badge recipe shared with
+search's `related` and chat's `automatic`, never a warning colour, because
+an unvetted entry is usually fine and the badge is provenance, not alarm —
+plus a "Shared by *maintainer*" line, since "install only what you trust"
+is meaningless without a name to trust. Three rules travel with it. Reviewed
+entries rank ahead of community ones in every list
+(`reviewedBeforeCommunity`), while community entries stay searchable. The
+explanation is visible text, not only a tooltip: any list showing a
+community entry carries one muted line saying what the badge means. And the
+moment a community toolset asks for keys — its config form — repeats the
+caution as a `warning` line, because that is where a wallet tool would ask
+for a private key. The helpers and copy live in
+[catalog-provenance.ts](../packages/ui/src/components/catalog-provenance.ts);
+`CommunityBadge` is the one rendering of the badge.
+
 **Embedded Handboek pages.** When a surface needs explanatory copy that
 also belongs in the documentation, don't hardcode the prose — embed the
 Handboek article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,

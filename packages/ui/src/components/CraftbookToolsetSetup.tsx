@@ -2,6 +2,7 @@ import type { CatalogItemDetail, CraftbookToolsetNeed, ToolsetManifest } from '@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { ToolsetConfigForm, type ToolsetConfigFormValue } from './ToolsetConfigForm.js';
+import { COMMUNITY_SECRETS_WARNING, isCommunityCatalogItem } from './catalog-provenance.js';
 
 interface Props {
   /** The required toolsets a craftbook declares that aren't installed yet. */
@@ -26,6 +27,7 @@ export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Pro
   const [error, setError] = useState<string | null>(null);
   // The toolset currently collecting config before install (null = none).
   const [configTarget, setConfigTarget] = useState<ToolsetManifest | null>(null);
+  const [configTargetIsCommunity, setConfigTargetIsCommunity] = useState(false);
 
   const markInstalled = (id: string) => {
     const next = new Set(installed);
@@ -51,6 +53,7 @@ export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Pro
         });
         markInstalled(toolsetId);
       } else {
+        setConfigTargetIsCommunity(isCommunityCatalogItem(detail));
         setConfigTarget(manifest);
       }
     } catch (err) {
@@ -84,6 +87,7 @@ export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Pro
     return (
       <div className="craftbook-toolset-setup">
         <h4 className="small">Configure {configTarget.name}</h4>
+        {configTargetIsCommunity && <p className="warning small">{COMMUNITY_SECRETS_WARNING}</p>}
         <ToolsetConfigForm
           fields={configTarget.config ?? []}
           submitLabel="Install"

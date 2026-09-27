@@ -6,6 +6,7 @@ import {
   type SaveScriptSourceResponse,
   type ScriptMeta,
   ScriptNameSchema,
+  type ScriptRunTrigger,
 } from '@bendyline/gezel';
 import { projectScriptFile } from '@bendyline/gezel/paths';
 import {
@@ -30,6 +31,28 @@ import {
   writeScriptSource,
 } from '../../scripts/source.js';
 import type { ServiceContext } from '../context.js';
+
+/**
+ * Who a run acts for is read from the bearer, never from the request. A
+ * gezel's `run_installed_script` arrives with its session token, and a
+ * `manual` label would let it pass the security policy's script switch and
+ * the gezel-only artifact denials, which both key on the trigger.
+ */
+export function scriptRunTrigger(
+  auth: { appId: string; scopes: readonly string[]; gezelId?: string } | undefined,
+): ScriptRunTrigger {
+  if (auth?.scopes.includes('session')) {
+    if (!auth.appId.startsWith('session:') || !auth.gezelId) {
+      throw new Error('session token has no session binding');
+    }
+    return {
+      kind: 'chat',
+      sessionId: auth.appId.slice('session:'.length),
+      gezelId: auth.gezelId,
+    };
+  }
+  return { kind: 'manual', userInitiated: true };
+}
 
 /**
  * Scripts API.
@@ -119,7 +142,7 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
         scriptName: body.name,
         ...(body.scope ? { scope: body.scope } : {}),
         ...(body.input ? { inputs: body.input } : {}),
-        trigger: { kind: 'manual', userInitiated: true },
+        trigger: scriptRunTrigger(c.get('auth')),
       });
     } catch (err) {
       // Unknown script name → an actionable 404 naming what IS runnable,

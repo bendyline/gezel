@@ -3,8 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GetScriptSourceResponse, SaveScriptSourceResponse } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Hono } from 'hono';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
+import type { ServiceContext } from '../context.js';
+import { scriptRoutes, scriptRunTrigger } from './scripts.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -174,6 +177,59 @@ describe('script source endpoints', () => {
     expect(res.status).toBe(200);
     const gone = await api('DELETE', `/api/projects/${projectId}/scripts/source?name=broken-meta`);
     expect(gone.status).toBe(404);
+  });
+});
+
+describe('POST /scripts/run trigger', () => {
+  // `manual` skips the security policy's script switch and the gezel-only
+  // artifact denials. A gezel's run_installed_script reaches this route with
+  // its session token, so the label must come from the bearer.
+  async function triggerFor(auth: {
+    appId: string;
+    scopes: string[];
+    projectId?: string;
+    gezelId?: string;
+  }): Promise<unknown> {
+    const run = vi.fn(async () => ({ id: 'run-1', status: 'ok', calls: [], logs: '' }));
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('auth', auth);
+      await next();
+    });
+    app.route('/', scriptRoutes({ scriptRunner: { run } } as unknown as ServiceContext));
+    const res = await app.request('/p1/scripts/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'hello-script' }),
+    });
+    expect(res.status).toBe(200);
+    return (run.mock.calls[0] as unknown as [{ trigger: unknown }])[0].trigger;
+  }
+
+  it('labels a session-token run as the gezel’s chat run', async () => {
+    expect(
+      await triggerFor({
+        appId: 'session:sess-9',
+        scopes: ['session'],
+        projectId: 'p1',
+        gezelId: 'gz-1',
+      }),
+    ).toEqual({ kind: 'chat', sessionId: 'sess-9', gezelId: 'gz-1' });
+  });
+
+  it('keeps first-party and CLI runs manual', async () => {
+    for (const scopes of [['root'], ['ui'], ['cli']]) {
+      expect(await triggerFor({ appId: 'desktop-client', scopes })).toEqual({
+        kind: 'manual',
+        userInitiated: true,
+      });
+    }
+  });
+
+  it('refuses a session scope without a session binding', () => {
+    expect(() => scriptRunTrigger({ appId: 'root', scopes: ['session'] })).toThrow(
+      /no session binding/,
+    );
   });
 });
 

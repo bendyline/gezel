@@ -278,6 +278,54 @@ describe('BackupRestoreDialog — restoring', () => {
     );
   });
 
+  it('adds shared documents by default and lets them be left out', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.scanRestore).mockResolvedValue(
+      review({
+        items: [
+          ...review().items,
+          {
+            kind: 'document-root',
+            id: 'documents',
+            label: 'Shared documents',
+            bytes: 2048,
+            fileCount: 3,
+            conflict: 'none',
+          },
+        ],
+      }),
+    );
+    await open({ tab: 'restore' });
+    await user.click(await screen.findByRole('button', { name: /Choose a backup file/ }));
+
+    const box = await screen.findByRole('checkbox', {
+      name: /nothing there is removed or replaced/,
+    });
+    expect(box).toBeChecked();
+    expect(screen.getByRole('button', { name: /Restore 2 item/ })).toBeEnabled();
+
+    await user.click(box);
+    await user.click(screen.getByRole('button', { name: /Restore 1 item/ }));
+
+    await waitFor(() =>
+      expect(vi.mocked(api.confirmRestore)).toHaveBeenLastCalledWith('restore-1', {
+        items: [{ kind: 'gezel', id: 'tamsin', action: 'add' }],
+      }),
+    );
+  });
+
+  it('says why a restore stopped', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getStorageJob).mockResolvedValue(
+      job({ kind: 'restore', status: 'error', error: '1 shared document(s) could not be written' }),
+    );
+    await open({ tab: 'restore' });
+    await user.click(await screen.findByRole('button', { name: /Choose a backup file/ }));
+    await user.click(await screen.findByRole('button', { name: /Restore 1 item/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be written/);
+  });
+
   it('asks for a restart when the daemon says one is needed', async () => {
     const user = userEvent.setup();
     vi.mocked(api.getStorageJob).mockResolvedValue(job({ kind: 'restore', restartRequired: true }));

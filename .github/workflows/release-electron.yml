@@ -409,6 +409,11 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
+      # `electronFuses` in electron-builder.yml is only intent; the wire in
+      # the signed binary is what ships.
+      - name: Verify Electron fuses (Windows)
+        run: node scripts/verify-electron-fuses.mjs packages/app/dist/installers/win-unpacked/gezel.exe
+
       # Exercise the artifact users actually run, including the elevated NSIS
       # hook, bundled-Node migration/extraction, ProgramData ACLs, SCM
       # registration, LocalService startup, and the install breadcrumb. The
@@ -859,6 +864,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           UV_THREADPOOL_SIZE: 16
 
+      # Installed releases decide whether to offer this update with
+      # electron-updater, which skips a feed whose minimumSystemVersion is
+      # above the running Darwin release. electron-builder does not write it.
+      - name: Stamp the macOS floor into the update feed
+        run: node scripts/stamp-mac-update-floor.mjs packages/app/dist/installers/latest-mac.yml
+
       - name: Verify macOS signing and notarization
         run: |
           set -euo pipefail
@@ -878,7 +889,8 @@ jobs:
           test -n "$app"
           codesign --verify --strict --deep --verbose=2 "$app"
           node scripts/verify-macos-entitlements.mjs "$app"
-          node scripts/verify-macos-version-floor.mjs "$app" 13.5
+          node scripts/verify-electron-fuses.mjs "$app"
+          node scripts/verify-macos-version-floor.mjs "$app" 14.0
           # electron-builder hardcodes a blanket NSAllowsArbitraryLoads that
           # `mac.extendInfo` cannot override; an afterPack hook narrows it just
           # before codesign. Dropping that hook still packs, signs and
@@ -1145,6 +1157,10 @@ jobs:
             echo "::error::$metadata does not reference $(basename "$zip")"
             exit 1
           fi
+          if ! grep -Eq "^minimumSystemVersion: '[0-9]+\.[0-9]+\.[0-9]+'$" "$metadata"; then
+            echo "::error::$metadata has no minimumSystemVersion; Macs below the floor would be offered this update"
+            exit 1
+          fi
           echo "verified PKG first-install artifact and ZIP-based macOS update feed"
 
       - name: Verify macOS installer legal payload
@@ -1265,6 +1281,13 @@ jobs:
 
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
+
+      - name: Verify Electron fuses (Linux)
+        run: |
+          set -euo pipefail
+          executable=$(find packages/app/dist/installers -mindepth 2 -maxdepth 2 -type f -path '*-unpacked/gezel' -print -quit)
+          test -n "$executable"
+          node scripts/verify-electron-fuses.mjs "$executable"
 
       # Asserted rather than assumed, because every way of getting deb
       # compression wrong looks correct in electron-builder.yml. fpm passes

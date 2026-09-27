@@ -47,6 +47,7 @@ import {
 import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsLegalSection } from './SettingsLegal.js';
 import {
   AutostartToggle,
   BackgroundServiceStatus,
@@ -4194,6 +4195,7 @@ function DaemonSettingsView() {
                   />
                 </p>
               </section>
+              <SettingsLegalSection />
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Updates</h3>
                 <p className="muted" style={{ marginTop: 0 }}>

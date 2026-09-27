@@ -95,6 +95,17 @@ There are no external runtime requirements beyond that OS floor. Metal is part
 of the OS, the engines link only system frameworks plus their own bundled
 dylibs, and AppleClang links no OpenMP runtime.
 
+The engines' 13.3 is not the product floor. Gezel as a whole requires
+**macOS 14 Sonoma or newer** (`mac.minimumSystemVersion` in
+`packages/app/electron-builder.yml`), because the service tree ships
+prebuilt sqlite-vec and ONNX Runtime Mach-Os, which back memory and
+embeddings and declare 14.0. The same value becomes the app's
+`LSMinimumSystemVersion`, the PKG's `allowed-os-versions`, and the
+`minimumSystemVersion` stamped into `latest-mac.yml`, which is what stops an
+installed Gezel on an older macOS from being offered the update.
+`scripts/verify-macos-version-floor.mjs` fails the release when any Mach-O in
+the app, including those inside `service-bundle.tar.gz`, needs a newer macOS.
+
 ## What we deliberately do not depend on
 
 - **OpenMP** — engines build with `-DGGML_OPENMP=OFF`, so nothing needs

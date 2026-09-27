@@ -59,7 +59,6 @@ minimumReleaseAgeExclude:
   - "@csstools/css-syntax-patches-for-csstree@1.1.7"
   - "@vitejs/plugin-react@6.0.4"
   - "dompurify@3.4.13"
-  - js-yaml@3.15.1 || 4.3.1
   - "jose@6.2.4"
   - "mermaid@11.16.1"
   - "postcss@8.5.22"
@@ -85,19 +84,24 @@ overrides:
   # with the override-normalized lockfile importer and otherwise warns even
   # though a frozen install validates successfully.
   "@hono/node-server": "2.0.11"
+  # plist (electron-builder) still resolves the 0.8 line.
+  "@xmldom/xmldom@<0.9": "0.8.15"
   "adm-zip": "0.6.1"
   "axios": "1.18.1"
   # html-to-text 10.x still declares deepmerge-ts ^7.1.5. Force the patched
   # major until it widens that range (GHSA-ggr8-5vv4-36mx).
   "deepmerge-ts": "8.0.1"
   "dompurify@>=3 <4": "3.4.13"
-  "fast-uri": "3.1.5"
+  "fast-uri": "3.1.6"
   "form-data": "4.0.6"
   "hono": "4.13.9"
   "ip-address": "10.3.1"
-  "js-yaml@<4": "3.15.1"
-  "js-yaml@>=4 <5": "4.3.1"
+  "js-yaml@<4": "3.15.2"
+  "js-yaml@>=4 <5": "4.3.2"
   "mermaid@>=11 <12": "11.16.1"
+  # mailparser and imapflow pin nodemailer 9.0.3 exactly; inbound mail reaches
+  # its DoS (fixed in 9.1.1).
+  "nodemailer": "9.1.1"
   # Keep the single Transformers.js 3.x line on the reviewed native runtime;
   # the matching adm-zip override closes its transitive advisory.
   "onnxruntime-node": "1.24.3"

@@ -35,6 +35,7 @@
 import { join } from 'node:path';
 import process from 'node:process';
 import { requireGildeCheckout } from './gilde-checkout.js';
+import { COMMUNITY_POLICY_MODULE, loadCommunityPolicy } from './importer/community-policy.js';
 import {
   Orchestrator,
   type OrchestratorOptions,
@@ -211,11 +212,20 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  const gilde = requireGildeCheckout();
+  const contentPolicy = await loadCommunityPolicy(gilde.root);
+  if (!contentPolicy) {
+    console.warn(
+      `[importer] no ${COMMUNITY_POLICY_MODULE} in ${gilde.root} — importing without the community content policy`,
+    );
+  }
+
   const opts: OrchestratorOptions = {
     // catalogRoot anchors operator state (.import-state/.import-cache) in
     // gezel; the imported CONTENT lands in the sibling gilde checkout.
     catalogRoot: defaultCatalogRoot(),
-    communityRoot: join(requireGildeCheckout().dataDir, 'community'),
+    communityRoot: join(gilde.dataDir, 'community'),
+    ...(contentPolicy ? { contentPolicy } : {}),
     full: args.full,
     prune: args.prune,
     pruneOnly: args.pruneOnly,

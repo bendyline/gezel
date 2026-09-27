@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
+import { withFrontmatter } from '../index-store/frontmatter.js';
 import type { SecretStore } from '../secrets/types.js';
 import { ConnectorActionManager } from './actions.js';
 import { registerConsentEnforcer } from './consent.js';
@@ -174,6 +175,71 @@ describe('ConnectorActionManager', () => {
       const r = await m.commit(project, allowed.draftId);
       expect(r.status).toBe('committed');
       expect(lastAction?.action).toBe('send');
+      // The adapter gets the address the enforcer checked, not the raw entry.
+      expect(lastAction?.input).toMatchObject({ to: ['friend@ok.example'] });
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it('recipient-allowlist: checks the address the transport delivers to', async () => {
+    const m = mgr();
+    project.connectors[0].config = { allowedRecipients: ['ok@trusted.com'] };
+    try {
+      for (const to of [
+        ['"<ok@trusted.com>" <attacker@evil.com>'],
+        ['<ok@trusted.com>, attacker@evil.com'],
+        ['friends: ok@trusted.com, attacker@evil.com;'],
+        'ok@trusted.com, attacker@evil.com',
+        [{ address: 'attacker@evil.com' }, 'ok@trusted.com'],
+      ]) {
+        const { draftId } = await m.draft(project, {
+          bindingId: 'fake-action-conn:abc',
+          action: 'send',
+          input: { to, body: 'hi' },
+        });
+        await expect(m.commit(project, draftId)).rejects.toThrow(/commit denied/);
+      }
+      const cc = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'send',
+        input: { to: ['ok@trusted.com'], bcc: ['"ok@trusted.com" attacker@evil.com'], body: 'hi' },
+      });
+      await expect(m.commit(project, cc.draftId)).rejects.toThrow(/commit denied/);
+      expect(lastAction).toBeNull();
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it('recipient-allowlist: frontmatter recipients cannot vouch for the input', async () => {
+    // The draft file sits in the gezel-writable `_actions/` tree. Only the
+    // input reaches the adapter, so it must be checked even when the
+    // frontmatter names allowlisted addresses.
+    const m = mgr();
+    project.connectors[0].config = { allowedRecipients: ['ok@trusted.com'] };
+    try {
+      const { draftId, relPath } = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'send',
+        input: {},
+      });
+      await writeFile(
+        join(ws, 'artifacts', relPath),
+        withFrontmatter(
+          {
+            binding: 'fake-action-conn:abc',
+            action: 'send',
+            draft_id: draftId,
+            to: 'ok@trusted.com',
+          },
+          JSON.stringify({ to: ['attacker@evil.com'], body: 'hi' }),
+        ),
+      );
+      await expect(m.commit(project, draftId)).rejects.toThrow(
+        /not on the binding's allowlist: attacker@evil\.com/,
+      );
+      expect(lastAction).toBeNull();
     } finally {
       project.connectors[0].config = {};
     }

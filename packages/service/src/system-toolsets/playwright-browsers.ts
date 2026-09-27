@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PNPM_HOISTED_NODE_LINKER } from '@bendyline/gezel';
+import { PNPM_HOISTED_NODE_LINKER, type PnpmInvocation } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
+import { killProcessTree } from '../utils/kill-process-tree.js';
 import type { SystemStatusBus } from './status-bus.js';
 
 /**
@@ -22,7 +23,16 @@ export async function ensureChromiumInstalled(args: {
   playwrightInstallPath: string;
   statusBus: SystemStatusBus;
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
-}): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * Stops the download and kills the installer's whole process tree. The
+   * browser is then left without Playwright's completion marker, so the next
+   * run installs it again from the start.
+   */
+  signal?: AbortSignal;
+  /** Test seam: the pnpm launch to run in place of `playwright install chromium`. */
+  invocation?: PnpmInvocation;
+}): Promise<{ ok: boolean; error?: string; cancelled?: boolean }> {
+  if (args.signal?.aborted) return { ok: false, cancelled: true, error: 'install was cancelled' };
   const browsersDir = playwrightBrowsersDir(args.home);
 
   // If a chromium-* subdir already has Playwright's completion marker,
@@ -51,15 +61,17 @@ export async function ensureChromiumInstalled(args: {
   // MCP toolset's own node_modules, so there's no global Playwright dep.
   // The linker flag must match the install-time config or pnpm rebuilds
   // the tree before exec'ing (see PNPM_HOISTED_NODE_LINKER).
-  const pnpm = resolvePnpmCommand([
-    PNPM_HOISTED_NODE_LINKER,
-    '--dir',
-    args.playwrightInstallPath,
-    'exec',
-    'playwright',
-    'install',
-    'chromium',
-  ]);
+  const pnpm =
+    args.invocation ??
+    resolvePnpmCommand([
+      PNPM_HOISTED_NODE_LINKER,
+      '--dir',
+      args.playwrightInstallPath,
+      'exec',
+      'playwright',
+      'install',
+      'chromium',
+    ]);
   return new Promise((resolve) => {
     const child = spawnPnpm(pnpm, {
       cwd: args.playwrightInstallPath,
@@ -68,7 +80,20 @@ export async function ensureChromiumInstalled(args: {
         PLAYWRIGHT_BROWSERS_PATH: browsersDir,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      processGroup: true,
     });
+    // pnpm exits on a signal without its children, which left Playwright's
+    // downloader running as an orphan after the app quit.
+    const onAbort = () => killProcessTree(child);
+    args.signal?.addEventListener('abort', onAbort, { once: true });
+    const settle = (result: { ok: boolean; error?: string; cancelled?: boolean }) => {
+      args.signal?.removeEventListener('abort', onAbort);
+      resolve(
+        args.signal?.aborted
+          ? { ok: false, cancelled: true, error: 'install was cancelled' }
+          : result,
+      );
+    };
     let stderrTail = '';
     const onChunk = (chunk: Buffer) => {
       const text = chunk.toString('utf8');
@@ -84,12 +109,12 @@ export async function ensureChromiumInstalled(args: {
     child.stderr?.on('data', onChunk);
     child.on('error', (err) => {
       args.logger?.warn?.(`[system-toolsets] playwright install error: ${err.message}`);
-      resolve({ ok: false, error: err.message });
+      settle({ ok: false, error: err.message });
     });
     child.on('close', (code) => {
-      if (code === 0) resolve({ ok: true });
+      if (code === 0) settle({ ok: true });
       else
-        resolve({
+        settle({
           ok: false,
           error: `playwright install chromium exited with ${code}: ${stderrTail.trim()}`,
         });

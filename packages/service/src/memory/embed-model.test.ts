@@ -7,12 +7,14 @@ import {
   MULTILINGUAL_E5_SMALL_2,
 } from '@bendyline/gezel-knowledge';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ModelFileDownloadError } from '../transformers-cache.js';
 import {
   PipelineLoadError,
   daemonEmbedderPin,
   daemonEmbedderVerified,
   embedModelId,
   embedProfileId,
+  isFreshDownloadFailure,
   isRetryablePipelineLoadFailure,
   queryInstruction,
   resetDaemonEmbedderVerification,
@@ -126,6 +128,23 @@ describe('embedding model-load failure classification', () => {
     expect(isRetryablePipelineLoadFailure(new Error('ERR_DLOPEN_FAILED'))).toBe(false);
     expect(isRetryablePipelineLoadFailure(new Error('Cannot find module sharp'))).toBe(false);
     expect(new PipelineLoadError('invalid model').retryable).toBe(false);
+  });
+
+  it('gives a graph that failed right after its own download another chance', () => {
+    // Wild-caught on first run over a slow connection: "Protobuf parsing
+    // failed" twice, then vector memory off until the next launch, although
+    // the file finished whole moments later.
+    const parse = new Error('Load model failed', { cause: new Error('Protobuf parsing failed') });
+    expect(isFreshDownloadFailure(parse, false)).toBe(true);
+    expect(
+      isFreshDownloadFailure(new ModelFileDownloadError('stopped at 10 of 20 bytes'), true),
+    ).toBe(true);
+  });
+
+  it('does not retry a graph proven against its pin that still will not parse', () => {
+    const parse = new Error('Protobuf parsing failed');
+    expect(isFreshDownloadFailure(parse, true)).toBe(false);
+    expect(isFreshDownloadFailure(new Error('Unknown model id'), false)).toBe(false);
   });
 });
 

@@ -9,7 +9,7 @@ if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
   exit 1
 fi
 
-# The app's floor is macOS 13.5; the model needs macOS 26. Build for the
+# The app's floor is macOS 14.0; the model needs macOS 26. Build for the
 # shared native floor and weak-link FoundationModels so older systems still
 # launch the helper and are told the model is unavailable.
 # The shared adapter reads Foundation Models' OS 27 stream usage behind a

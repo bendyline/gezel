@@ -15,9 +15,10 @@
  * the model loader reads `cacheDir` from at download time.
  */
 
-import { createHash } from 'node:crypto';
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { isPathInside } from './fs/safe-paths.js';
 
@@ -77,14 +78,41 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return errorCode(err) !== 'ESRCH';
+  }
+}
+
+async function lockOwnerPid(lockDir: string): Promise<number | null> {
+  try {
+    const owner = JSON.parse(await readFile(join(lockDir, 'owner.json'), 'utf8')) as {
+      pid?: unknown;
+    };
+    return typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0
+      ? owner.pid
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function staleOrMissing(lockDir: string, staleMs: number): Promise<boolean> {
   try {
     const info = await stat(lockDir);
-    return Date.now() - info.mtimeMs > staleMs;
+    if (Date.now() - info.mtimeMs > staleMs) return true;
   } catch (err) {
     if (errorCode(err) === 'ENOENT') return true;
     throw err;
   }
+  // A holder killed mid-download (a quit during first run) never reaches its
+  // `finally`. Waiting out the age limit would keep semantic memory off for
+  // hours after the relaunch, so a lock whose owner is gone is stale now.
+  const pid = await lockOwnerPid(lockDir);
+  return pid !== null && !processAlive(pid);
 }
 
 /**
@@ -176,6 +204,200 @@ export async function loadTransformersModelWithCacheRecovery<T>(
       return await load();
     }
   });
+}
+
+/**
+ * A model file gezel downloaded itself did not arrive whole or did not match
+ * its pin. Nothing was written to the cache path, so a later attempt starts
+ * clean.
+ */
+export class ModelFileDownloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ModelFileDownloadError';
+  }
+}
+
+/** One repository file whose exact bytes are pinned. */
+export interface PinnedModelFile {
+  /** Repo-relative path, e.g. `onnx/model.onnx`. */
+  file: string;
+  /** `sha256:<hex>` the bytes must hash to. */
+  digest: string;
+  /** Revision the bytes are fetched from. The cache path is `main`'s, as transformers reads it. */
+  revision: string;
+}
+
+/** Where transformers.js would download from (`env.remoteHost` / `env.remotePathTemplate`). */
+export interface ModelFileSource {
+  remoteHost: string;
+  remotePathTemplate: string;
+  fetchImpl?: typeof fetch;
+}
+
+const VERIFIED_MARKER_SUFFIX = '.gezel-verified';
+const PARTIAL_DOWNLOAD_INFIX = '.download-';
+
+function cacheFilePath(cacheDir: string, modelId: string, file: string): string {
+  const parts = file.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) {
+    throw new Error(`refusing unsafe model file path: ${file}`);
+  }
+  const repo = cacheModelDir(cacheDir, modelId);
+  const target = resolve(repo, ...parts);
+  if (!isPathInside(target, repo)) {
+    throw new Error(`refusing model file path outside ${repo}: ${file}`);
+  }
+  return target;
+}
+
+function remoteFileUrl(source: ModelFileSource, modelId: string, pinned: PinnedModelFile): string {
+  const host = source.remoteHost.endsWith('/') ? source.remoteHost : `${source.remoteHost}/`;
+  const template = source.remotePathTemplate
+    .replaceAll('{model}', modelId)
+    .replaceAll('{revision}', encodeURIComponent(pinned.revision));
+  const path = template.endsWith('/') ? template : `${template}/`;
+  return `${host}${path.replace(/^\/+/, '')}${pinned.file}`;
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return `sha256:${hash.digest('hex')}`;
+}
+
+interface VerifiedMarker {
+  digest: string;
+  size: number;
+  mtimeMs: number;
+}
+
+async function markerVouches(marker: string, target: string, digest: string): Promise<boolean> {
+  try {
+    const recorded = JSON.parse(await readFile(marker, 'utf8')) as Partial<VerifiedMarker>;
+    const info = await stat(target);
+    return (
+      recorded.digest === digest && recorded.size === info.size && recorded.mtimeMs === info.mtimeMs
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function writeMarker(marker: string, target: string, digest: string): Promise<void> {
+  const info = await stat(target);
+  const record: VerifiedMarker = { digest, size: info.size, mtimeMs: info.mtimeMs };
+  await writeFile(marker, `${JSON.stringify(record)}\n`);
+}
+
+/** Leftovers of a download that died with its process; only safe while holding the model lock. */
+async function sweepPartialDownloads(target: string): Promise<void> {
+  const prefix = `${basename(target)}${PARTIAL_DOWNLOAD_INFIX}`;
+  const names = await readdir(dirname(target)).catch(() => [] as string[]);
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => rm(join(dirname(target), name), { force: true }).catch(() => {})),
+  );
+}
+
+async function downloadVerified(
+  url: string,
+  target: string,
+  pinned: PinnedModelFile,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const partial = `${target}${PARTIAL_DOWNLOAD_INFIX}${process.pid}-${randomUUID().slice(0, 8)}`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    const response = await fetchImpl(url);
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status} downloading ${pinned.file}`);
+    }
+    const encoding = response.headers.get('content-encoding');
+    const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+    const expected = !encoding || encoding === 'identity' ? declared : Number.NaN;
+    handle = await open(partial, 'wx');
+    const hash = createHash('sha256');
+    let received = 0;
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      hash.update(chunk);
+      received += chunk.byteLength;
+      let offset = 0;
+      while (offset < chunk.byteLength) {
+        const { bytesWritten } = await handle.write(chunk, offset, chunk.byteLength - offset);
+        offset += bytesWritten;
+      }
+    }
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    if (Number.isFinite(expected) && received !== expected) {
+      throw new ModelFileDownloadError(
+        `download of ${pinned.file} stopped at ${received} of ${expected} bytes`,
+      );
+    }
+    const actual = `sha256:${hash.digest('hex')}`;
+    if (actual !== pinned.digest) {
+      throw new ModelFileDownloadError(
+        `download of ${pinned.file} does not match its pin (got ${actual})`,
+      );
+    }
+    await rename(partial, target);
+  } catch (err) {
+    await handle?.close().catch(() => {});
+    await rm(partial, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Make sure a pinned model file sits in the transformers cache whole.
+ *
+ * transformers.js streams a download straight into its final cache path and
+ * hands that path to onnxruntime, so a reader that arrives mid-write parses
+ * part of a protobuf. The failure was wild-caught on first-run installs over
+ * slower connections: two "Protobuf parsing failed" loads, then vector memory
+ * off for the whole session, while the file finished correctly moments later.
+ * Here the bytes land in a sibling temp file, are checked against the pin,
+ * and appear at the cache path only by an atomic rename, so transformers
+ * finds a complete file and never downloads it. Call it under
+ * {@link withTransformersModelCacheLock}.
+ */
+export async function ensureVerifiedModelFile(
+  cacheDir: string,
+  modelId: string,
+  pinned: PinnedModelFile,
+  source: ModelFileSource,
+): Promise<'cached' | 'downloaded'> {
+  const target = cacheFilePath(cacheDir, modelId, pinned.file);
+  const marker = `${target}${VERIFIED_MARKER_SUFFIX}`;
+  await mkdir(dirname(target), { recursive: true });
+  await sweepPartialDownloads(target);
+
+  const present = await stat(target).then(
+    (info) => info.isFile(),
+    () => false,
+  );
+  if (present) {
+    if (await markerVouches(marker, target, pinned.digest)) return 'cached';
+    // Hashed once per file; the marker spares every later boot the read.
+    if ((await sha256File(target)) === pinned.digest) {
+      await writeMarker(marker, target, pinned.digest);
+      return 'cached';
+    }
+    log.warn(`[models] cached ${modelId}/${pinned.file} is incomplete or altered; downloading it`);
+  }
+  await rm(marker, { force: true });
+  await rm(target, { force: true });
+  await downloadVerified(
+    remoteFileUrl(source, modelId, pinned),
+    target,
+    pinned,
+    source.fetchImpl ?? fetch,
+  );
+  await writeMarker(marker, target, pinned.digest);
+  return 'downloaded';
 }
 
 /**

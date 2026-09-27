@@ -12,6 +12,11 @@ import { Dialog, Tabs } from '../primitives/index.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ToolsetConfigForm, type ToolsetConfigFormValue } from './ToolsetConfigForm.js';
+import {
+  COMMUNITY_BADGE_LABEL,
+  COMMUNITY_SECRETS_WARNING,
+  isCommunityCatalogItem,
+} from './catalog-provenance.js';
 
 interface ToolsetsEditorProps {
   scope: ToolsetsScope;
@@ -23,6 +28,8 @@ interface ToolsetsEditorProps {
 
 interface InstallTarget {
   manifest: ToolsetManifest;
+  /** Unreviewed community entry — the config form is where it would get a secret. */
+  community: boolean;
 }
 
 interface ConfigureTarget {
@@ -249,7 +256,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
         await refresh();
         setShowPicker(false);
       } else {
-        setInstallTarget({ manifest });
+        setInstallTarget({ manifest, community: isCommunityCatalogItem(detail) });
       }
     } catch (err) {
       setError((err as Error).message);
@@ -415,6 +422,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
     return catalogById.get(entry.toolsetId)?.logoUrl;
   };
   const tileCaptionFor = (entry: InstalledToolset): string | undefined => {
+    if (isCommunityCatalogItem(entry)) return `${COMMUNITY_BADGE_LABEL} · not reviewed by Gezel`;
     if (entry.runtime.kind !== 'custom-mcp') return undefined;
     if (entry.runtime.source.kind === 'project-file') {
       return `Project config · ${entry.runtime.source.relativePath}`;
@@ -658,6 +666,9 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
               Values configured here apply globally — every gezel that installs this toolset shares
               the same configuration.
             </p>
+            {installTarget?.community && (
+              <p className="warning small">{COMMUNITY_SECRETS_WARNING}</p>
+            )}
             {installTarget && (
               <ToolsetConfigForm
                 fields={installTarget.manifest.config ?? []}

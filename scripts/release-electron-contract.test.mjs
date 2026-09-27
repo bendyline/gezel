@@ -133,7 +133,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'the Linux release smoke must exercise Chromium sandbox startup',
   );
 
-  assert.match(builder, /minimumSystemVersion: '13\.5'/);
+  assert.match(builder, /minimumSystemVersion: '14\.0'/);
   assert.match(
     builder,
     /^\s+- '!dist\/\*\.map'$/m,
@@ -342,8 +342,8 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const dependencyFloor of [
     /"dompurify@>=3 <4": "3\.4\.13"/,
-    /"js-yaml@<4": "3\.15\.1"/,
-    /"js-yaml@>=4 <5": "4\.3\.1"/,
+    /"js-yaml@<4": "3\.15\.2"/,
+    /"js-yaml@>=4 <5": "4\.3\.2"/,
     /"mermaid@>=11 <12": "11\.16\.1"/,
   ]) {
     assert.match(workspace, dependencyFloor);
@@ -351,15 +351,15 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const patchedResolution of [
     /dompurify@3\.4\.13:/,
-    /js-yaml@3\.15\.1:/,
-    /js-yaml@4\.3\.1:/,
+    /js-yaml@3\.15\.2:/,
+    /js-yaml@4\.3\.2:/,
     /mermaid@11\.16\.1:/,
   ]) {
     assert.match(lockfile, patchedResolution);
   }
   assert.doesNotMatch(
     lockfile,
-    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.0|4\.3\.0)|mermaid@11\.16\.0):/,
+    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.[01]|4\.3\.[01])|mermaid@11\.16\.0):/,
     'the lockfile must not reintroduce a B3-vulnerable resolution',
   );
 });
