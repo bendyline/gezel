@@ -128,13 +128,20 @@ export function computeHostEnvironment(
     variables.set('GEZEL_DISTRIBUTION_PROFILE', opts.distributionProfile);
   }
 
-  const nodePath = resolveNodePath(opts, env);
-  variables.set('GEZEL_NODE_PATH', nodePath);
-  // The daemon resolves some children by name, so the bundled Node has to be
-  // findable on PATH as well as by absolute path.
-  const nodeDir = dirname(nodePath);
-  if (nodeDir && !(env.PATH ?? '').split(delimiter).includes(nodeDir)) {
-    variables.set('PATH', env.PATH ? `${nodeDir}${delimiter}${env.PATH}` : nodeDir);
+  const needsNode = opts.mode !== 'in-process' || opts.inferenceOnly !== true;
+  const nodePath = needsNode
+    ? resolveNodePath(opts, env)
+    : (opts.nodePath ?? env.GEZEL_NODE_PATH?.trim() ?? null);
+  if (nodePath) {
+    variables.set('GEZEL_NODE_PATH', nodePath);
+    // The daemon resolves some children by name, so the bundled Node has to be
+    // findable on PATH as well as by absolute path.
+    const nodeDir = dirname(nodePath);
+    if (nodeDir && !(env.PATH ?? '').split(delimiter).includes(nodeDir)) {
+      variables.set('PATH', env.PATH ? `${nodeDir}${delimiter}${env.PATH}` : nodeDir);
+    }
+  } else {
+    variables.set('GEZEL_NODE_PATH', undefined);
   }
   if (opts.nativeBinDir) variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
 

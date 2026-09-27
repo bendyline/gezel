@@ -47,6 +47,11 @@ export async function ensureModel(
     if (opts.bundle) {
       await importBundle(deps.client, opts.bundle, emit);
       source = 'bundle';
+    } else if (opts.allowWeightDownload === false) {
+      throw new GezelSdkError(
+        `Model "${opts.model}" is not installed. Download it from an explicit user action, or ship it as a .gezmodel bundle.`,
+        { code: 'model_download_required' },
+      );
     } else {
       await downloadModel(deps.app, engine, opts.model, emit, opts.signal);
       source = 'download';

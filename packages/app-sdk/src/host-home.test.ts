@@ -172,6 +172,22 @@ describe('computeHostEnvironment', () => {
     const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
     expect(variables.get('GEZEL_PORT')).toBe('0');
   });
+
+  it('does not require a separate Node runtime for inference-only in-process hosting', () => {
+    const versions = process.versions as { electron?: string };
+    versions.electron = '43.0.0';
+    try {
+      const { variables } = computeHostEnvironment(
+        'qualla',
+        { mode: 'in-process', inferenceOnly: true },
+        { PATH: '/usr/bin' },
+      );
+      expect(variables.get('GEZEL_NODE_PATH')).toBeUndefined();
+      expect(variables.get('PATH')).toBeUndefined();
+    } finally {
+      delete versions.electron;
+    }
+  });
 });
 
 describe('childHostEnvironment', () => {

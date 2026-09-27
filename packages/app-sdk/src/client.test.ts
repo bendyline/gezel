@@ -168,13 +168,25 @@ describe('GezelApp.models', () => {
     const { fetch, calls } = recordingFetch(
       jsonResponse(200, {
         object: 'list',
-        data: [{ id: 'copilot:mock-fast', object: 'model', created: 1, owned_by: 'copilot' }],
+        data: [
+          { id: 'copilot:mock-fast', object: 'model', created: 1, owned_by: 'copilot' },
+          {
+            id: 'llama-cpp:small-writer',
+            object: 'model',
+            created: 1,
+            owned_by: 'llama-cpp',
+            availability: 'download-required',
+            locality: 'on-device',
+            download_bytes: 2_147_483_648,
+          },
+        ],
       }),
     );
     const app = new GezelApp({ baseUrl: 'http://x', token: 'tk', fetch });
     const res = await app.models();
     expect(res.object).toBe('list');
     expect(res.data.map((m) => m.id)).toContain('copilot:mock-fast');
+    expect(res.data[1]?.download_bytes).toBe(2_147_483_648);
     expect(calls[0]?.url).toBe('http://x/v1/models');
   });
 });
