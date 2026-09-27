@@ -400,8 +400,9 @@ export async function runPortableToolLoop(options: {
             const visible = extractReasoning(buffered).visible;
             if (!prose) {
               const lead = visible.trimStart();
-              // A possible tool call (bare or fenced) stays off screen until parsed.
-              if (!lead || /^[{`]/.test(lead)) return;
+              // A possible tool call (JSON, fenced, or Python-style) stays
+              // off screen until parsed.
+              if (!lead || /^(?:[{`[]|<\|)/.test(lead)) return;
               prose = true;
             } else if (!visible.startsWith(emitted)) return;
             if (visible.length > emitted.length) options.delta(visible.slice(emitted.length));

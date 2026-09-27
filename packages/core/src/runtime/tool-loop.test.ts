@@ -255,6 +255,44 @@ describe('reasoning blocks from local models', () => {
     expect(result.text).toBe('Saved n.md.');
     expect(delta.mock.calls.map(([text]) => text).join('')).toBe('Saved n.md.');
   });
+
+  it('runs an LFM-style Python call and keeps it off the stream', async () => {
+    const { store, session, inventory } = await fixture();
+    const replies = [
+      "<|tool_call_start|>[write_artifact(path='n.md', content='Hi')]<|tool_call_end|>",
+      'Saved n.md.',
+    ];
+    const delta = vi.fn();
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: {
+        providers: async () => [],
+        generate: async (request, onDelta) => {
+          const text = replies.shift()!;
+          for (const chunk of text.match(/.{1,3}/gs) ?? [])
+            onDelta({ requestId: request.requestId, delta: chunk });
+          return { text, stopReason: 'stop' };
+        },
+        cancel: async () => {},
+      },
+      requestId: 'req',
+      providerId: 'llama-cpp',
+      modelId: 'fixture',
+      contextSize: 8192,
+      maxTokens: 256,
+      messages: [{ role: 'user', content: 'Write it.' }],
+      tools: { inventory },
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta,
+    });
+    expect(result.message?.toolCalls?.[0]).toMatchObject({ name: 'write_artifact', success: true });
+    expect(await store.readFile('artifacts', 'default', 'n.md')).toBe('Hi');
+    expect(delta.mock.calls.map(([text]) => text).join('')).toBe('Saved n.md.');
+  });
 });
 
 describe('native tool calling', () => {

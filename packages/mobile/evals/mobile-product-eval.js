@@ -294,9 +294,12 @@
       assertion(
         t,
         'facts-preserved',
-        ['18 October 2026', 'Maple Hall', '240', 'Noor', 'lamps', 'appliances', 'adult'].every(
-          (s) => text.toLowerCase().includes(s.toLowerCase()),
-        ),
+        // The date may be written in any common order; Gemini Nano wrote
+        // "October 18, 2026" and a literal match failed an exact announcement.
+        /18(?:th)? october,? 2026|october 18(?:th)?,? 2026|2026-10-18/i.test(text) &&
+          ['Maple Hall', '240', 'Noor', 'lamps', 'appliances', 'adult'].every((s) =>
+            text.toLowerCase().includes(s.toLowerCase()),
+          ),
         text,
       );
       assertion(

@@ -233,7 +233,9 @@ public final class GezelNativeRuntime {
                     case FeatureStatus.AVAILABLE: availability = "available"; break;
                     case FeatureStatus.DOWNLOADABLE: availability = "download-required"; break;
                     case FeatureStatus.DOWNLOADING: availability = "downloading"; break;
-                    default: reason = "Android's on-device AI is not supported or enabled on this device";
+                    // ML Kit reports a Play Store stub of AICore (a new Galaxy S26,
+                    // 2026-09-26) exactly like an unsupported phone.
+                    default: reason = "Android's on-device AI is unavailable. On supported phones, update AICore in the Play Store and try again.";
                 }
             } catch (Exception | LinkageError error) { reason = "Android's on-device AI is unavailable: " + failureMessage(error); }
             call.resolve(providerPayload(availability, reason, context));

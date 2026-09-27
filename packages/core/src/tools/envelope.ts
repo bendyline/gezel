@@ -1,3 +1,5 @@
+import { parsePythonicToolCall } from './pythonic-call.js';
+
 /** Strict completion-only protocol for text engines. Never execute JSON embedded
  * in prose, fenced examples, quoted documents, partial streams, or output cut off
  * by its token limit. */
@@ -58,7 +60,7 @@ function parseWholeEnvelope(text: string): ToolEnvelope | null {
   const exact = parseExactToolEnvelope(text);
   if (exact) return exact;
   const closed = closeUnbalanced(text.trim());
-  return closed ? parseExactToolEnvelope(closed) : null;
+  return (closed ? parseExactToolEnvelope(closed) : null) ?? parsePythonicToolCall(text);
 }
 
 /**
