@@ -28,7 +28,7 @@ export const SECURITY_LEVEL_PRESETS: ReadonlyArray<SecurityLevelPreset> = [
     id: 'lockdown',
     label: 'Lockdown',
     description:
-      'A posture for trusted work. Edit files directly, run scripts, use cloud chat providers, and do GitHub read/write.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors, that you can use to pass data locally to your gezellen, are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
+      'A posture for trusted work. Edit files directly, run scripts, use cloud chat providers, and do GitHub read/write.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors that you can use to pass data locally to your gezellen are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
     recommended: true,
   },
   {

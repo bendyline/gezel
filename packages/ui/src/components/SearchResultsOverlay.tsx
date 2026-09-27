@@ -1,6 +1,7 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { Dialog } from '../primitives/index.js';
 import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdownSnippet.js';
 import { highlightTokens } from './highlight-tokens.js';
 import { runNavActions } from './nav-actions.js';
@@ -57,20 +58,7 @@ export function SearchResultsOverlay() {
     return () => window.removeEventListener(OPEN_EVENT, onOpen);
   }, [runSearch]);
 
-  useEffect(() => {
-    if (query !== null) inputRef.current?.focus();
-  }, [query]);
-
   const close = useCallback(() => setQuery(null), []);
-
-  useEffect(() => {
-    if (query === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [query, close]);
 
   if (query === null) return null;
 
@@ -81,74 +69,89 @@ export function SearchResultsOverlay() {
   };
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a native <dialog> demands showModal() plumbing this event-opened overlay doesn't have; Escape/backdrop close and focus land in the input.
-    <div className="search-results-overlay" role="dialog" aria-label="Search results">
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-close; Escape handles keyboard */}
-      <div className="search-results-backdrop" onClick={close} />
-      <div className="search-results-panel">
-        <header className="search-results-header">
-          <input
-            ref={inputRef}
-            type="search"
-            value={draft}
-            aria-label="Search everything"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && draft.trim()) {
-                setQuery(draft.trim());
-                void runSearch(draft.trim());
-              }
-            }}
-          />
-          <span className="search-results-count muted">
-            {loading ? 'Searching…' : `${total} result${total === 1 ? '' : 's'}`}
-          </span>
-          <button type="button" className="search-results-close" onClick={close} aria-label="Close">
-            ✕
-          </button>
-        </header>
-        {incomplete && !loading && (
-          <p className="search-results-note muted">
-            Some sources didn't answer in time — results may be partial.
-          </p>
-        )}
-        <div className="search-results-body">
-          {!loading && total === 0 && <p className="placeholder">No results.</p>}
-          {groups.map((group) => (
-            <section key={group.kind} className="search-results-group">
-              <h3 className="search-results-group-title">
-                {group.label} <span className="muted">({group.items.length})</span>
-              </h3>
-              <ul className="search-results-list">
-                {group.items.map((item) => (
-                  <li key={item.id}>
-                    <button type="button" className="search-results-row" onClick={() => pick(item)}>
-                      <span className="search-results-title">
-                        {highlightTokens(item.title, query)}
-                      </span>
-                      {item.subtitle && (
-                        <span className="search-results-subtitle muted">{item.subtitle}</span>
-                      )}
-                      {item.snippet && (
-                        <span className="search-results-snippet">
-                          <SearchMarkdownSnippet
-                            markdown={item.snippet}
-                            query={query}
-                            formatMarkdown={searchSnippetIsMarkdown(
-                              item.kind,
-                              item.path ?? item.title,
-                            )}
-                          />
+    <Dialog.Root open onOpenChange={(open) => !open && close()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="search-results-backdrop" />
+        <Dialog.Content
+          className="search-results-panel"
+          aria-modal="true"
+          aria-describedby={undefined}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            inputRef.current?.focus();
+          }}
+        >
+          <Dialog.Title className="sr-only">Search results</Dialog.Title>
+          <header className="search-results-header">
+            <input
+              ref={inputRef}
+              type="search"
+              value={draft}
+              aria-label="Search everything"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && draft.trim()) {
+                  setQuery(draft.trim());
+                  void runSearch(draft.trim());
+                }
+              }}
+            />
+            <span className="search-results-count muted">
+              {loading ? 'Searching…' : `${total} result${total === 1 ? '' : 's'}`}
+            </span>
+            <Dialog.Close asChild>
+              <button type="button" className="search-results-close" aria-label="Close">
+                ✕
+              </button>
+            </Dialog.Close>
+          </header>
+          {incomplete && !loading && (
+            <p className="search-results-note muted">
+              Some sources didn't answer in time — results may be partial.
+            </p>
+          )}
+          <div className="search-results-body">
+            {!loading && total === 0 && <p className="placeholder">No results.</p>}
+            {groups.map((group) => (
+              <section key={group.kind} className="search-results-group">
+                <h3 className="search-results-group-title">
+                  {group.label} <span className="muted">({group.items.length})</span>
+                </h3>
+                <ul className="search-results-list">
+                  {group.items.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className="search-results-row"
+                        onClick={() => pick(item)}
+                      >
+                        <span className="search-results-title">
+                          {highlightTokens(item.title, query)}
                         </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      </div>
-    </div>
+                        {item.subtitle && (
+                          <span className="search-results-subtitle muted">{item.subtitle}</span>
+                        )}
+                        {item.snippet && (
+                          <span className="search-results-snippet">
+                            <SearchMarkdownSnippet
+                              markdown={item.snippet}
+                              query={query}
+                              formatMarkdown={searchSnippetIsMarkdown(
+                                item.kind,
+                                item.path ?? item.title,
+                              )}
+                            />
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

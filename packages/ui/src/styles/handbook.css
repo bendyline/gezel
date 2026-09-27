@@ -91,7 +91,7 @@
 .handboek-toc-caret {
   display: inline-block;
   flex: 0 0 0.55rem;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.95rem;
   line-height: 1;
   text-align: center;
@@ -162,7 +162,7 @@
 .handboek-toc-entry-active,
 .handboek-toc-entry-active:hover {
   background: var(--panel);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -207,7 +207,7 @@
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--danger);
   border-radius: var(--radius-md);
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: var(--text-sm);
 }
 

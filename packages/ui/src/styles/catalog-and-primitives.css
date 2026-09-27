@@ -2,7 +2,7 @@
 
 .gz-link-button {
   background: transparent;
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
   border: none;
   padding: 0;
   cursor: pointer;
@@ -937,7 +937,7 @@
 
 /* Inline "may exceed this machine" fit hint in the model spec row. */
 .catalog-ollama-warn {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .catalog-ollama-pills {
@@ -978,7 +978,7 @@
   font-weight: 600;
   padding: 0.2rem 0.55rem;
   border-radius: 10px;
-  color: var(--accent);
+  color: var(--accent-text);
   background: rgba(176, 114, 76, 0.12);
   border: 1px solid rgba(176, 114, 76, 0.3);
   white-space: nowrap;
@@ -999,19 +999,19 @@ a.license-button:hover {
 }
 
 .license-button--open {
-  color: var(--success);
+  color: var(--success-text);
   border-color: color-mix(in srgb, var(--success) 45%, transparent);
   background: var(--success-bg);
 }
 
 .license-button--commercial-restricted {
-  color: var(--warning);
+  color: var(--warning-text);
   border-color: color-mix(in srgb, var(--warning) 45%, transparent);
   background: var(--warning-bg);
 }
 
 .license-button--custom-restricted {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
@@ -1442,7 +1442,7 @@ a.license-button:hover {
 }
 
 .gz-dialog-error {
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
   font-size: 0.85rem;
   margin: 0;
 }
@@ -1549,7 +1549,7 @@ a.license-button:hover {
   white-space: pre-wrap;
 }
 .gz-transform-error {
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
   font-size: var(--text-sm);
   margin: 0;
 }
@@ -1620,7 +1620,7 @@ a.license-button:hover {
   overflow: hidden;
 }
 .gz-transform-diff-error {
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
   font-size: var(--text-sm);
   margin: 0;
 }
@@ -1667,7 +1667,7 @@ a.license-button:hover {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid var(--accent);
   border-radius: 3px;
   padding: 0.05rem 0.35rem;
@@ -1835,7 +1835,7 @@ a.license-button:hover {
 .gz-uninstall-warning {
   padding: 0.5rem 0.65rem;
   border-left: 3px solid var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
 }
 

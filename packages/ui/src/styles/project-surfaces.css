@@ -29,7 +29,7 @@
 .output-toggle.is-active {
   align-self: stretch;
   background: var(--panel);
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: var(--border);
   border-bottom-color: transparent;
   border-radius: 4px 4px 0 0;
@@ -238,7 +238,7 @@
   border-top: 1px solid var(--border);
 }
 .project-output-debugbar-error {
-  color: var(--danger, #d9534f);
+  color: var(--danger-text, #d9534f);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -247,7 +247,7 @@
 .project-output-script-error-label {
   min-width: 0;
   overflow: hidden;
-  color: var(--warning);
+  color: var(--warning-text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -452,7 +452,7 @@
   margin-left: auto;
   font-size: 0.8rem;
   font-family: var(--font-ui);
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
   background: transparent;
   border: none;
@@ -1446,7 +1446,7 @@
 
 .gz-npd-rail-item svg {
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 0.85;
 }
 
@@ -1573,7 +1573,7 @@
   box-sizing: border-box;
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 13%, var(--panel));
-  color: var(--accent);
+  color: var(--accent-text);
   overflow: hidden;
 }
 
@@ -1625,7 +1625,7 @@
   border: 1.5px solid color-mix(in srgb, var(--accent) 70%, var(--border));
   border-radius: 3px;
   background: color-mix(in srgb, var(--accent) 5%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.6rem;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -1701,7 +1701,7 @@
       color-mix(in srgb, var(--accent) 18%, transparent),
       transparent 75%
     ), color-mix(in srgb, var(--accent) 10%, var(--panel));
-  color: var(--accent);
+  color: var(--accent-text);
   overflow: hidden;
 }
 
@@ -1811,7 +1811,7 @@
 }
 
 .gz-npd-crew-voorman {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.6rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1836,7 +1836,7 @@
 
 .gz-npd-give-rows li svg {
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 0.8;
 }
 
@@ -1944,7 +1944,7 @@
 }
 
 .gz-ntd-based-on a {
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: var(--font-ui);
   font-weight: 600;
 }
@@ -2352,7 +2352,7 @@
       color-mix(in srgb, var(--accent) 18%, transparent),
       transparent 75%
     ), color-mix(in srgb, var(--accent) 10%, var(--panel));
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .gz-npd-detail-art img,
@@ -2796,7 +2796,7 @@
   height: 2.3rem;
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 13%, var(--panel));
-  color: var(--accent);
+  color: var(--accent-text);
   overflow: hidden;
 }
 
@@ -3241,7 +3241,7 @@ button.gz-npd-repo-cancel {
 
 .gz-github-chip.signed-out {
   cursor: pointer;
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
   border-color: rgba(176, 114, 76, 0.4);
 }
 

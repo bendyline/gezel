@@ -39,7 +39,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Home sits above the collapsible groups, so its house occupies the same
@@ -206,7 +206,7 @@
 
 .app-sidebar-add:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .app-sidebar-list {

@@ -1,7 +1,7 @@
 diff --git a/out/targets/pkg.js b/out/targets/pkg.js
 --- a/out/targets/pkg.js
 +++ b/out/targets/pkg.js
-@@ -219,15 +219,12 @@ class PkgTarget extends core_1.Target {
+@@ -219,16 +219,27 @@ class PkgTarget extends core_1.Target {
          args.push("--version", pkgVersion);
          const scriptsDir = resolveScriptsDir(this.packager.info.buildResourcesDir, options.scripts);
          if (scriptsDir && ((_a = (await (0, builder_util_1.statOrNull)(scriptsDir))) === null || _a === void 0 ? void 0 : _a.isDirectory())) {
@@ -12,14 +12,29 @@ diff --git a/out/targets/pkg.js b/out/targets/pkg.js
 -                }
 -                else if (name.includes("postinstall")) {
 -                    packageInfo.BundlePostInstallScriptPath = name;
--                }
++            // Patched (gezel): a package-scoped script gets pkgbuild's fixed
++            // 10-minute timeout. Stage the scripts under non-reserved names
++            // and register them on the app component instead, where
++            // BundleInstallScriptTimeout is honored on macOS 15 and newer.
++            // Keeping the source directory untouched matters because it is a
++            // checked-in build resource shared by every target in this run.
++            const componentScriptsDir = await this.packager.info.tempDirManager.getTempDir({ prefix: "pkg-component-scripts" });
++            (0, fs_1.cpSync)(scriptsDir, componentScriptsDir, { recursive: true });
++            for (const [scriptName, propertyName] of [
++                ["preinstall", "BundlePreInstallScriptPath"],
++                ["postinstall", "BundlePostInstallScriptPath"],
++            ]) {
++                const source = path.join(componentScriptsDir, scriptName);
++                if ((0, fs_1.existsSync)(source)) {
++                    const componentName = `component-${scriptName}`;
++                    (0, fs_1.renameSync)(source, path.join(componentScriptsDir, componentName));
++                    packageInfo[propertyName] = componentName;
+                 }
 -            });
-+            // Patched (gezel): upstream registers scripts via both
-+            // BundlePre/PostInstallScriptPath on the component plist AND
-+            // `--scripts`, so pkgbuild writes two <postinstall> entries into
-+            // PackageInfo and installd runs the script twice. Drop the
-+            // component-plist mutation; `--scripts` alone is sufficient and
-+            // produces a single, package-scoped invocation.
-             args.push("--scripts", scriptsDir);
+-            args.push("--scripts", scriptsDir);
++            }
++            packageInfo.BundleInstallScriptTimeout = 1800;
++            args.push("--scripts", componentScriptsDir);
          }
          if (plistInfo.length > 0) {
+             await (0, plist_1.savePlistFile)(propertyListOutputFile, plistInfo);

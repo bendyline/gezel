@@ -52,7 +52,7 @@
 }
 
 .collapsed-create-symbol {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-xl);
   font-weight: 600;
   line-height: 0.9;
@@ -135,7 +135,7 @@ button.secondary {
 
 button.danger {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-text);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
@@ -530,7 +530,7 @@ button.danger {
 }
 
 .autosave-status-error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .autosave-status .link-btn {
@@ -763,7 +763,7 @@ button.danger {
 }
 
 .project-autonomous-role-active .suggested-work-glyph {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .suggested-work-actions {
@@ -860,14 +860,14 @@ button.danger {
 }
 
 .report-action-target {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .report-action-changed {
   padding: 0.05rem 0.35rem;
   border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
   border-radius: var(--radius-sm);
-  color: var(--warning);
+  color: var(--warning-text);
   text-transform: none;
 }
 
@@ -908,7 +908,7 @@ button.danger {
 
 .report-action-applied {
   margin: 0;
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .report-action-edits {
@@ -937,12 +937,12 @@ button.danger {
 }
 
 .report-action-edit-ok {
-  color: var(--success);
+  color: var(--success-text);
   font-size: var(--text-xs);
 }
 
 .report-action-edit-err {
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: var(--text-xs);
 }
 
@@ -964,7 +964,7 @@ button.danger {
 }
 
 .app-nightshift-report:hover .app-nightshift-task-title {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .home-workshop-night-summary {
@@ -1572,7 +1572,7 @@ button.danger {
 
 .writes-op-mkdir {
   background: rgba(176, 114, 76, 0.12);
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
 }
 
 .writes-op-rename {
@@ -1690,7 +1690,7 @@ button.danger {
   padding: 0.5rem 0.75rem;
   margin: 0.2rem 0 0.6rem 0;
   border-radius: 6px;
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   font-size: 0.85rem;
@@ -1993,7 +1993,7 @@ button.danger {
   border-bottom: 1px solid var(--border);
 }
 .html-preview-log-bar strong {
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
   font-size: 0.85rem;
 }
 .html-preview-log-toggle {
@@ -2023,7 +2023,7 @@ button.danger {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
 }
 .html-preview-log-message {
   white-space: pre-wrap;
@@ -2144,7 +2144,7 @@ button.danger {
 }
 
 .tree-icon-folder {
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
 }
 
 .tree-label {
@@ -2172,7 +2172,7 @@ button.danger {
    owns the interaction; this mark only explains why an older file remains in
    the compact Documents list. */
 .document-pin-marker {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.72rem;
   line-height: 1;
   transform: rotate(-18deg);
@@ -2259,7 +2259,7 @@ button.tree-row-trailing-select {
 .workspace-index-pane-eyebrow {
   display: block;
   margin-bottom: 0.15rem;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -2358,7 +2358,7 @@ button.tree-row-trailing-select {
 }
 
 .workspace-index-health-score {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 1.55rem;
   font-weight: 700;
   line-height: 1;
@@ -2485,7 +2485,7 @@ button.tree-row-trailing-select {
 /* Fix is the row's one consequential action — it creates a task — so it
    carries the accent ink while the triage keys stay in body ink. */
 .workspace-index-issue-fix.gz-key {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Keeps the ref visible: the toolbar's glyphs can't name the task the row
@@ -2539,7 +2539,7 @@ button.tree-row-trailing-select {
 
 .workspace-issue-fix-missing {
   margin: -0.2rem 0 0;
-  color: var(--warning);
+  color: var(--warning-text);
   font-size: var(--text-xs);
   line-height: 1.4;
 }
@@ -2578,13 +2578,13 @@ button.tree-row-trailing-select {
 }
 
 .workspace-index-issue-meta .workspace-index-issue-ref {
-  color: var(--accent);
+  color: var(--accent-text);
   font-variant-numeric: tabular-nums;
   text-transform: uppercase;
 }
 
 .workspace-index-issue-meta .workspace-index-issue-unread {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .workspace-index-issue-error {
@@ -2831,7 +2831,7 @@ button.tree-row-trailing-select {
 }
 
 .file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-header-icon {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-title {

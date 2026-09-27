@@ -162,13 +162,13 @@
   /* Brand accent so the disclosure triangle is clearly visible on the
      dark UI. (The previous `var(--muted, …)` resolved to a near-black
      fallback because `--muted` is never defined.) */
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
 }
 .settings-nav-group-toggle:hover {
-  color: var(--accent-hover);
+  color: var(--accent-text-hover);
 }
 /* A single chevron that points right when collapsed and rotates down when
    expanded — same glyph in both states, so it reads consistently and animates. */
@@ -368,7 +368,7 @@
 
 .llama-advanced-caret {
   display: inline-block;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 1rem;
   line-height: 1;
   transition: transform 0.15s ease;
@@ -575,14 +575,14 @@
 }
 
 .harness-setup-state--configured {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .harness-setup-state--update-needed,
 .harness-setup-state--conflict,
 .harness-setup-state--unavailable,
 .harness-setup-caution {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .harness-setup-model-row,
@@ -680,7 +680,7 @@
 }
 
 .connected-apps-caution {
-  color: var(--warning);
+  color: var(--warning-text);
   max-width: 60ch;
 }
 
@@ -809,7 +809,7 @@
   border: 1px solid var(--danger);
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--danger);
+  color: var(--danger-text);
   font-weight: 600;
   line-height: 1.2;
 }
@@ -1047,7 +1047,7 @@
 .ff-row-badge {
   margin-left: 0.35rem;
   font-size: 0.85em;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: help;
 }
 
@@ -1079,7 +1079,7 @@
 
 .gz-badge-passthrough {
   background: rgba(79, 125, 255, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid rgba(79, 125, 255, 0.3);
 }
 
@@ -1187,7 +1187,7 @@
 .name-chip-active {
   background: rgba(79, 125, 255, 0.15);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* "Add an image-generator gezel" card inside the image-engine
@@ -1241,7 +1241,7 @@
 }
 
 .provider-connection-state[data-tone="danger"] {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .provider-connection-callout {
@@ -1480,7 +1480,7 @@
 
 .project-git-branch-item.is-current {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .project-git-branch-divider {
@@ -1490,7 +1490,7 @@
 }
 
 .project-git-new-branch-trigger {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .project-git-new-branch-form {
@@ -1530,12 +1530,12 @@
 }
 
 .project-git-status-chip.has-attention {
-  color: var(--warning);
+  color: var(--warning-text);
   background: var(--warning-bg);
 }
 
 .project-git-status-chip.has-conflict {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
 }
 
@@ -1806,7 +1806,7 @@
 /* Semantic-search-down notice: degraded search is a warning, not chatter. */
 .project-index-panel-warning {
   margin: 0;
-  color: var(--warning);
+  color: var(--warning-text);
   font-size: var(--text-xs);
 }
 
@@ -1925,7 +1925,7 @@
 }
 
 .project-index-panel-error {
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: var(--text-xs);
 }
 
