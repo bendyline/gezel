@@ -33,6 +33,11 @@ export const DEFAULT_PORT = 6228;
 
 export interface StartServiceOptions {
   /**
+   * Embedded apps that need only OpenAI-compatible inference and model
+   * management set this to skip standalone-product background systems.
+   */
+  embeddedInferenceOnly?: boolean;
+  /**
    * Responsibility of this daemon. Installed machine services use
    * `machine-engine`; Electron-owned daemons use `user`. `legacy-full` exists
    * only so a new supervisor can safely coexist with an older installation.
@@ -144,6 +149,10 @@ export interface RunningService<C extends EngineContext = ServiceContext> {
    * CLI to compose the printed browser URL.
    */
   webUiToken: string | null;
+  /** The product surface that was actually started. */
+  profile?: 'full' | 'embedded-inference';
+  /** Direct request transport for in-process embedders. */
+  fetch?: typeof fetch;
   stop: () => Promise<void>;
 }
 export type RunningEngineService = RunningService<EngineContext>;

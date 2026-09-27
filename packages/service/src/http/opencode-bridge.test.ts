@@ -58,6 +58,9 @@ function context(
             }
           : null,
     },
+    catalog: {
+      list: async () => [],
+    },
     chat: {
       listModelsForProvider: async () => [],
       getProviderForModel: async () => opts.provider!,

@@ -122,4 +122,27 @@ describe('ensureModel', () => {
       source: 'download',
     });
   });
+
+  it('can prepare the engine without starting a model-weight download', async () => {
+    const client = {
+      getNativeEngineStatus: vi.fn().mockResolvedValue({
+        pinned: true,
+        llamaBackend: 'metal',
+        engines: [],
+      }),
+      ensureNativeEngine: vi.fn().mockResolvedValue(undefined),
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+    } as unknown as GezelClient;
+    const app = { ensureModel: vi.fn() } as unknown as GezelApp;
+
+    await expect(
+      ensureModel(
+        { client, app, owned: true, platform: 'linux', arch: 'x64' },
+        { model: 'new-model', allowWeightDownload: false },
+      ),
+    ).rejects.toMatchObject({ code: 'model_download_required' });
+
+    expect(client.ensureNativeEngine).toHaveBeenCalledOnce();
+    expect(app.ensureModel).not.toHaveBeenCalled();
+  });
 });

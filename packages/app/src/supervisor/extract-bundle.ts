@@ -392,6 +392,9 @@ async function installTarball(
       source.on('error', fail);
       source.pipe(extractor);
     });
+    logger?.info?.(
+      `[supervisor] service bundle archive unpacked (${extractedFileCount}/${meta.fileCount} files); verifying`,
+    );
   } catch (err) {
     await rm(staging, { recursive: true, force: true });
     throw err;
@@ -442,6 +445,7 @@ async function installTarball(
       );
     }
     await writeShaSentinel(staging, meta.sha256.toLowerCase());
+    logger?.info?.('[supervisor] service bundle staging tree verified; publishing');
   } catch (err) {
     await rm(staging, { recursive: true, force: true });
     throw err;
@@ -449,7 +453,10 @@ async function installTarball(
 
   // Commit only after the staged tree is complete and executable. Keep the
   // prior install available for rollback until the final rename succeeds.
-  if (existsSync(backup)) await rm(backup, { recursive: true, force: true });
+  if (existsSync(backup)) {
+    logger?.info?.('[supervisor] removing a previous interrupted service backup');
+    await rm(backup, { recursive: true, force: true });
+  }
   const hadLiveInstall = existsSync(dest);
   if (hadLiveInstall) await rename(dest, backup);
   try {
@@ -461,7 +468,11 @@ async function installTarball(
     await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
-  if (existsSync(backup)) await rm(backup, { recursive: true, force: true });
+  logger?.info?.('[supervisor] service bundle staging tree published');
+  if (existsSync(backup)) {
+    logger?.info?.('[supervisor] removing the replaced service tree');
+    await rm(backup, { recursive: true, force: true });
+  }
   return extractedFileCount;
 }
 

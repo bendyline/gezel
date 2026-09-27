@@ -78,17 +78,17 @@
 }
 
 .dp-status-ready {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .dp-status-applied {
-  color: var(--success);
+  color: var(--success-text);
   border-color: color-mix(in srgb, var(--success) 40%, transparent);
 }
 
 .dp-status-failed {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
@@ -100,7 +100,7 @@
 }
 
 .dp-flag-drift {
-  color: var(--warning);
+  color: var(--warning-text);
   border-color: color-mix(in srgb, var(--warning) 40%, transparent);
 }
 
@@ -176,7 +176,7 @@
 }
 
 .dp-key-apply:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 @media (max-width: 860px) {

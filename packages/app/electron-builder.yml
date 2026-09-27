@@ -385,9 +385,9 @@ pkg:
   # lets PackageKit discover another copy of Gezel.app — including the packed
   # build tree in CI — and install over that copy instead of /Applications.
   isRelocatable: false
-  # The postinstall script registers the LaunchDaemon. electron-builder
-  # finds `preinstall`, `postinstall` files in this directory and wraps
-  # them into the PKG payload.
+  # The postinstall script registers the LaunchDaemon. Our app-builder-lib
+  # patch stages this as a component script with a 30-minute timeout; leaving
+  # it package-scoped would make PackageKit enforce its fixed 10-minute limit.
   #
   # IMPORTANT: this path is resolved by electron-builder via
   # `path.resolve(directories.buildResources, pkg.scripts)` — i.e.

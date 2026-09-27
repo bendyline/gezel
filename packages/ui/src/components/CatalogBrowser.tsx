@@ -225,7 +225,12 @@ export function CatalogBrowser({
   return (
     <div className={`catalog-browser${isModelCatalog ? ' catalog-browser--models' : ''}`}>
       <div className="catalog-filter">
-        <input placeholder="Filter…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input
+          placeholder="Filter…"
+          aria-label="Filter catalog"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <button type="button" onClick={() => void refresh()}>
           Refresh
         </button>

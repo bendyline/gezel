@@ -1,5 +1,6 @@
+import { delimiter, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { discoverManagedScriptRuntimes } from './managed-runtimes.js';
+import { discoverManagedScriptRuntimes, ensureBundledNodeOnPath } from './managed-runtimes.js';
 
 describe('discoverManagedScriptRuntimes', () => {
   it('restores both managed paths when Task Scheduler launched the bundled Node', () => {
@@ -27,5 +28,31 @@ describe('discoverManagedScriptRuntimes', () => {
     });
     expect(env.GEZEL_NODE_PATH).toBe('/explicit/node');
     expect(env.GEZEL_PNPM_PATH).toBe('/explicit/pnpm');
+  });
+});
+
+describe('ensureBundledNodeOnPath', () => {
+  it('prepends the bundled Node directory once', () => {
+    const nodePath = join('managed', 'bin', process.platform === 'win32' ? 'node.exe' : 'node');
+    const nodeDir = dirname(nodePath);
+    const env: NodeJS.ProcessEnv = {
+      GEZEL_NODE_PATH: nodePath,
+      PATH: join('system', 'bin'),
+    };
+
+    ensureBundledNodeOnPath({ env, exists: () => true });
+    expect(env.PATH).toBe(`${nodeDir}${delimiter}${join('system', 'bin')}`);
+
+    ensureBundledNodeOnPath({ env, exists: () => true });
+    expect(env.PATH).toBe(`${nodeDir}${delimiter}${join('system', 'bin')}`);
+  });
+
+  it('leaves PATH alone when the configured Node does not exist', () => {
+    const env: NodeJS.ProcessEnv = {
+      GEZEL_NODE_PATH: join('missing', 'bin', 'node'),
+      PATH: join('system', 'bin'),
+    };
+    ensureBundledNodeOnPath({ env, exists: () => false });
+    expect(env.PATH).toBe(join('system', 'bin'));
   });
 });

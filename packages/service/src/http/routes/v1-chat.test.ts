@@ -538,7 +538,14 @@ describe('GET /v1/models', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       object: string;
-      data: Array<{ id: string; object: string; owned_by: string }>;
+      data: Array<{
+        id: string;
+        object: string;
+        owned_by: string;
+        availability?: string;
+        locality?: string;
+        download_bytes?: number;
+      }>;
     };
     expect(body.object).toBe('list');
     const ids = body.data.map((m) => m.id);
@@ -549,5 +556,12 @@ describe('GET /v1/models', () => {
     const fast = body.data.find((m) => m.id === 'copilot:mock-fast');
     expect(fast?.object).toBe('model');
     expect(fast?.owned_by).toBe('copilot');
+    const downloadable = body.data.find((model) => model.availability === 'download-required');
+    expect(downloadable).toMatchObject({
+      object: 'model',
+      locality: 'on-device',
+    });
+    expect(downloadable?.id).toMatch(/^(llama-cpp|mlx|ds4):/u);
+    expect(downloadable?.download_bytes).toBeGreaterThan(0);
   });
 });

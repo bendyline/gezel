@@ -14,7 +14,8 @@
  * Windows, cannot spawn `pnpm.cmd` outside a pnpm script.
  */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,12 @@ import {
   pnpmPackageMatchesTarget,
   shippedPnpmRuntimePackages,
 } from './pnpm-runtime-inventory.mjs';
+import { PACKAGED_WORKSPACE_ROOTS } from './production-dependency-inventory.mjs';
+import {
+  buildPnpmSbomGraph,
+  finalizeSbomDependencyGraph,
+  npmPurl,
+} from './sbom-dependency-graph.mjs';
 import { verifyPnpmComponentInventory } from './verify-packaged-licenses.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -53,9 +60,183 @@ test('the generator sources every non-npm component kind', async () => {
   // platforms; losing it would make the superset look authoritative.
   assert.match(generator, /gezel:npm-platform/);
   assert.match(generator, /gezel:native-platforms/);
+  assert.match(generator, /gezel:dependency-root-refs/);
+  assert.match(generator, /gezel:native-inventory-refs/);
   assert.match(generator, /superset-across-platforms/);
   assert.match(generator, /notice\.pnpmRuntime/);
-  assert.match(generator, /dependencies: pnpmDependencies/);
+  assert.match(generator, /readPackagedProductionDependencyTree/);
+  assert.match(generator, /buildPnpmSbomGraph/);
+  assert.match(generator, /finalizeSbomDependencyGraph/);
+  assert.match(generator, /dependencies,/);
+});
+
+test('the packaged workspace graph emits roots, resolved edges, leaves, and native inventory', () => {
+  const workspace = (name, version, path, dependencies = {}) => ({
+    name,
+    version,
+    path,
+    dependencies,
+  });
+  const dependency = (name, version, dependencies = {}) => ({
+    from: name,
+    version,
+    dependencies,
+  });
+  const app = workspace('@bendyline/gezel-app', '1.2.3', '/fixture/app', {
+    '@bendyline/gezel-client': {
+      from: '@bendyline/gezel-client',
+      version: 'link:../client',
+      path: '/fixture/client',
+      dependencies: { undici: dependency('undici', '8.9.0') },
+    },
+  });
+  const service = workspace('@bendyline/gezel-service', '1.2.3', '/fixture/service', {
+    hono: dependency('hono', '4.13.9', { cookie: dependency('cookie', '1.0.2') }),
+  });
+  const ui = workspace('@bendyline/gezel-ui', '0.0.0', '/fixture/ui');
+  const ml = workspace('@bendyline/internal-ml-runtime', '0.0.0', '/fixture/ml');
+  const client = workspace('@bendyline/gezel-client', '1.2.3', '/fixture/client', {
+    undici: dependency('undici', '8.9.0'),
+  });
+  const components = ['undici@8.9.0', 'hono@4.13.9', 'cookie@1.0.2'].map((identity) => {
+    const separator = identity.lastIndexOf('@');
+    const name = identity.slice(0, separator);
+    const version = identity.slice(separator + 1);
+    const purl = npmPurl(name, version);
+    return { type: 'library', 'bom-ref': purl, name, version, purl };
+  });
+  const graph = buildPnpmSbomGraph({
+    projects: [app, service, ui, ml, client],
+    components,
+    entryWorkspaceNames: PACKAGED_WORKSPACE_ROOTS,
+    repoRoot: '/fixture',
+  });
+  const nativeRef = 'gezel:native/example@1';
+  components.push({
+    type: 'application',
+    'bom-ref': nativeRef,
+    name: 'example-native',
+    version: '1',
+    properties: [{ name: 'gezel:component-kind', value: 'native-engine' }],
+  });
+  const rootRef = npmPurl('gezel', '1.2.3');
+  const dependencies = finalizeSbomDependencyGraph({
+    rootRef,
+    rootDependsOn: [...graph.entryRefs, nativeRef],
+    components,
+    dependencyGroups: [graph.dependencies],
+  });
+
+  assert.equal(graph.entryRefs.length, PACKAGED_WORKSPACE_ROOTS.length);
+  assert.deepEqual(
+    dependencies.find((entry) => entry.ref === rootRef)?.dependsOn,
+    [...graph.entryRefs, nativeRef].sort(),
+  );
+  assert.deepEqual(
+    dependencies.find((entry) => entry.ref === npmPurl('@bendyline/gezel-service', '1.2.3'))
+      ?.dependsOn,
+    [npmPurl('hono', '4.13.9')],
+  );
+  assert.deepEqual(
+    dependencies.find((entry) => entry.ref === npmPurl('hono', '4.13.9'))?.dependsOn,
+    [npmPurl('cookie', '1.0.2')],
+  );
+  assert.ok(dependencies.some((entry) => entry.ref === nativeRef));
+  assert.equal(
+    dependencies.length,
+    components.length + 1,
+    'every component plus the root has a node',
+  );
+});
+
+test('dependency finalization rejects an inventoried component outside the graph', () => {
+  assert.throws(
+    () =>
+      finalizeSbomDependencyGraph({
+        rootRef: 'pkg:npm/gezel@1',
+        rootDependsOn: [],
+        components: [{ type: 'library', 'bom-ref': 'pkg:npm/orphan@1', name: 'orphan' }],
+        dependencyGroups: [],
+      }),
+    /outside the dependency graph/,
+  );
+  assert.throws(
+    () =>
+      finalizeSbomDependencyGraph({
+        rootRef: 'pkg:npm/gezel@1',
+        rootDependsOn: ['pkg:npm/duplicate@1'],
+        components: [
+          { type: 'library', 'bom-ref': 'pkg:npm/duplicate@1', name: 'duplicate' },
+          { type: 'library', 'bom-ref': 'pkg:npm/duplicate@1', name: 'duplicate-again' },
+        ],
+        dependencyGroups: [],
+      }),
+    /bom-refs must be unique/,
+  );
+});
+
+test('the graph omits uninstalled platform optionals and discovers override workspaces', async (t) => {
+  const fixture = await mkdtemp(join(tmpdir(), 'gezel-sbom-graph-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const rootPath = join(fixture, 'root');
+  const compatibilityPath = join(fixture, 'packages', 'compatibility');
+  await mkdir(rootPath, { recursive: true });
+  await mkdir(compatibilityPath, { recursive: true });
+  await writeFile(
+    join(rootPath, 'package.json'),
+    JSON.stringify({
+      name: '@example/root',
+      version: '1.0.0',
+      license: 'MIT',
+      optionalDependencies: { '@example/foreign-binary': '1.0.0' },
+    }),
+  );
+  await writeFile(
+    join(compatibilityPath, 'package.json'),
+    JSON.stringify({ name: '@example/compatibility', version: '1.0.0', license: 'MIT' }),
+  );
+  const components = [];
+  const graph = buildPnpmSbomGraph({
+    projects: [
+      {
+        name: '@example/root',
+        version: '1.0.0',
+        path: rootPath,
+        dependencies: {
+          '@example/compatibility': {
+            from: '@example/compatibility',
+            version: 'link:../packages/compatibility',
+            path: compatibilityPath,
+          },
+          '@example/foreign-binary': {
+            from: '@example/foreign-binary',
+            version: '1.0.0',
+          },
+        },
+      },
+    ],
+    components,
+    entryWorkspaceNames: ['@example/root'],
+    repoRoot: fixture,
+  });
+
+  assert.ok(
+    components.some(
+      (component) => component['bom-ref'] === npmPurl('@example/compatibility', '1.0.0'),
+    ),
+    'workspace substitutions must be components even when pnpm does not return them as roots',
+  );
+  assert.equal(
+    components.some(
+      (component) => component['bom-ref'] === npmPurl('@example/foreign-binary', '1.0.0'),
+    ),
+    false,
+    'foreign platform optionals absent from the installed inventory must stay out of this host SBOM',
+  );
+  assert.deepEqual(
+    graph.dependencies.find((entry) => entry.ref === npmPurl('@example/root', '1.0.0'))?.dependsOn,
+    [npmPurl('@example/compatibility', '1.0.0')],
+  );
 });
 
 test('the pin-bound pnpm graph covers every released target without @reflink or foreign addons', async () => {

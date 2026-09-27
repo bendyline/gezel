@@ -1,5 +1,6 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -73,8 +74,40 @@ describe('SearchResultsOverlay', () => {
         maxResults: 100,
       }),
     );
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Search results' })).toBeNull();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Search results' })).toBeNull(),
+    );
+  });
+
+  it('traps keyboard focus and returns it to the launcher when closed', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button" onClick={() => openSearchResults('space')}>
+          See all results
+        </button>
+        <button type="button">Outside action</button>
+        <SearchResultsOverlay />
+      </>,
+    );
+
+    const launcher = screen.getByRole('button', { name: 'See all results' });
+    const outsideAction = screen.getByRole('button', { name: 'Outside action' });
+    await user.click(launcher);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Search results' });
+    const input = screen.getByRole('searchbox', { name: 'Search everything' });
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(outsideAction.closest('[aria-hidden="true"]')).not.toBeNull();
+
+    await user.tab({ shift: true });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    expect(outsideAction).not.toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(launcher).toHaveFocus());
   });
 
   it('distinguishes an incomplete response from an empty successful search', async () => {
