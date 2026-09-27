@@ -175,7 +175,10 @@ one Python-style call, `[read_file(path='brief.md')]`, also runs
 ([tools/pythonic-call.ts](../packages/core/src/tools/pythonic-call.ts)): LFM2 models
 call tools that way whatever the prompt says, and none of LFM2.5's calls ran on a
 Galaxy S26+ until it was accepted. Keyword arguments and Python literals only;
-prose around the call, or a second call, is still not a call. Reasoning blocks
+prose around the call, or a second call, is still not a call. Gemma 4's own
+format, `<|tool_call>call:list_dir{}<tool_call|>` with `<|"|>`-delimited strings,
+runs under the same whole-reply rule ([tools/gemma-call.ts](../packages/core/src/tools/gemma-call.ts));
+Gemma 4 E4B switched between it and the JSON envelope within one run. Reasoning blocks
 (`<think>…</think>`) are stripped before the envelope is parsed, and are held off screen
 while they stream.
 
