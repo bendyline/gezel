@@ -139,6 +139,92 @@ describe('the host port', () => {
   });
 });
 
+describe('call-heavy runs', () => {
+  // A folder-per-record store's `list`: one directory listing, one read per record.
+  const listRecords = (records: number) => async (options: ScriptExecutionOptions) => {
+    await options.onRequest('fs.list', { path: 'records' });
+    for (let index = 0; index < records; index += 1)
+      await options.onRequest('fs.read', { path: `records/r${index}/record.json` });
+    return undefined;
+  };
+
+  it('lets a record-store script make more than 1,000 host calls', async () => {
+    const { host, runner } = setup(listRecords(1_500));
+    const run = await runner.run(request);
+    expect(run.status).toBe('ok');
+    expect(host.dispatch).toHaveBeenCalledTimes(1_501);
+    expect(run.calls).toHaveLength(1_501);
+  });
+
+  it('caps authored scripts, and bounds first-party ones only by their timeout', async () => {
+    const limits = { maxHostCalls: 10 };
+    const authored = setup(listRecords(50), { limits });
+    expect((await authored.runner.run(request)).error).toContain('call limit');
+    const standard = setup(listRecords(50), { limits });
+    expect(await standard.runner.run({ ...request, scope: 'standard' })).toMatchObject({
+      status: 'ok',
+    });
+    const catalog = setup(listRecords(50), {
+      limits,
+      resolve: async (_name, scope) => ({ meta, source: '', scope, provenanceTrusted: true }),
+    });
+    expect(await catalog.runner.run(request)).toMatchObject({ status: 'ok' });
+    const capped = setup(listRecords(50), { limits: { maxTrustedHostCalls: 10 } });
+    expect((await capped.runner.run({ ...request, scope: 'standard' })).error).toContain(
+      'call limit',
+    );
+  });
+
+  it('does not rewrite the run record for every host call', async () => {
+    const { host, saved, runner } = setup(listRecords(500), { checkpointIntervalMs: 60_000 });
+    const run = await runner.run(request);
+    expect(run.status).toBe('ok');
+    // Admission, the first call's intent ahead of its effect, and the final record.
+    expect(host.persistRun).toHaveBeenCalledTimes(3);
+    expect(saved[0]).toMatchObject({ status: 'running', calls: [] });
+    expect(saved[1]).toMatchObject({ status: 'running' });
+    expect(saved[1]?.calls[0]?.error).toContain('Host operation started');
+    expect(saved.at(-1)).toEqual(run);
+  });
+
+  it('coalesces progress under the default interval', async () => {
+    const { host, runner } = setup(listRecords(2_000));
+    expect(await runner.run(request)).toMatchObject({ status: 'ok' });
+    // Twice per call was 4,003 writes; this is one per second of run time.
+    expect(vi.mocked(host.persistRun).mock.calls.length).toBeLessThan(20);
+  });
+
+  it('writes coalesced progress within the interval, and a sparse call’s intent first', async () => {
+    let intentBeforeEffect: string | undefined;
+    const { saved, runner } = setup(
+      async (options) => {
+        await options.onRequest('fs.read', { path: 'a' });
+        await options.onRequest('fs.read', { path: 'b' });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await options.onRequest('fs.read', { path: 'c' });
+        return undefined;
+      },
+      {
+        checkpointIntervalMs: 20,
+        dispatch: vi.fn(async (_context, _method, params) => {
+          if ((params as { path: string }).path === 'c')
+            intentBeforeEffect = saved.at(-1)?.calls[2]?.error;
+          return null;
+        }),
+      },
+    );
+    expect(await runner.run(request)).toMatchObject({ status: 'ok' });
+    const progress = saved.find(
+      (snapshot) =>
+        snapshot.status === 'running' &&
+        snapshot.calls.length === 2 &&
+        snapshot.calls.every((call) => call.error === undefined),
+    );
+    expect(progress).toBeDefined();
+    expect(intentBeforeEffect).toContain('Host operation started');
+  });
+});
+
 describe('effects that outlive the guest', () => {
   it('records the outcome of a host call that settles after the guest ended', async () => {
     let release!: () => void;

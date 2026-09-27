@@ -182,18 +182,19 @@ describe('runRestore', () => {
     expect(await readFile(join(home, 'documents', 'mission.md'), 'utf8')).toContain('# Mission');
   });
 
-  it('never applies another machine’s folder locations', async () => {
-    // The dangerous direction: a backup made on a machine that kept its
-    // gezels on an external drive. Applying that path here would send this
-    // install looking for its content somewhere that does not exist.
-    const foreignPath = join(out, 'machine-a-external-drive');
+  it('brings back house roles, never this device’s providers, folders or security', async () => {
+    // A config names engines, listeners and the security level. A backup
+    // from another machine, or a crafted one, must not be able to set them.
+    const meester = await store.createGezel({ name: 'Meester' });
     await store.writeConfig({
       provider: 'llama-cpp',
-      externalFolders: { gezels: foreignPath },
+      externalFolders: { gezels: join(out, 'machine-a-external-drive') },
+      mlxPackageSpec: 'mlx-lm @ https://example.invalid/evil.whl',
+      meesterGezelId: meester.id,
+      roleBasedNameOnlyMode: true,
     });
     const file = await makeBackup();
 
-    // A different install: same content, no external folders of its own.
     const targetHome = await mkdtemp(join(tmpdir(), 'gezel-restore-target-'));
     try {
       const targetStore = new Store({ home: targetHome });
@@ -206,11 +207,46 @@ describe('runRestore', () => {
 
       const config = (await targetStore.readConfig()) as Record<string, unknown>;
       expect(config.externalFolders).toBeUndefined();
-      // The rest of the settings still come across.
-      expect(config.provider).toBe('llama-cpp');
+      expect(config.provider).toBeUndefined();
+      expect(config.mlxPackageSpec).toBeUndefined();
+      expect(config.meesterGezelId).toBe(meester.id);
+      expect(config.roleBasedNameOnlyMode).toBe(true);
     } finally {
       await rm(targetHome, { recursive: true, force: true });
     }
+  });
+
+  it('drops a role pointing at a gezel the restore did not bring', async () => {
+    const meester = await store.createGezel({ name: 'Meester' });
+    const other = await store.createGezel({ name: 'Other' });
+    await store.writeConfig({ meesterGezelId: meester.id });
+    const file = await makeBackup();
+    await store.writeConfig({ meesterGezelId: other.id });
+    await store.deleteGezel(meester.id);
+
+    const review = await scanRestore(deps(), file);
+    const content = review.items.filter((i) => i.kind === 'settings-file');
+    await restore(review, {
+      items: content.map((i) => ({ kind: i.kind, id: i.id, action: 'add' as const })),
+      settings: true,
+    });
+
+    expect((await store.readConfig()).meesterGezelId).toBe(other.id);
+  });
+
+  it('stops before changing anything when the settings cannot be used', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const configPath = join(home, 'config.json');
+    await writeFile(configPath, JSON.stringify({ roleBasedNameOnlyMode: 'yes' }));
+    const file = await makeBackup();
+    await rm(configPath);
+    await store.deleteGezel(gezel.id);
+
+    const review = await scanRestore(deps(), file);
+    await expect(restore(review, { ...addAll(review), settings: true })).rejects.toThrow(
+      /not valid/,
+    );
+    expect(await exists(join(home, 'gezels', gezel.id))).toBe(false);
   });
 
   it('clears its staging once the restore lands', async () => {

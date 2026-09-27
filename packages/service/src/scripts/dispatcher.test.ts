@@ -8,6 +8,7 @@ import {
   type DispatcherContext,
   type DispatcherDeps,
   buildDispatcher,
+  scriptRunActsForGezel,
 } from './dispatcher.js';
 
 /**
@@ -66,6 +67,43 @@ describe('dispatcher: fs mutations', () => {
     await expect(dispatch(ctx([]), 'fs.rm', { path: 'a' })).rejects.toBeInstanceOf(
       CapabilityDeniedError,
     );
+  });
+});
+
+describe('dispatcher: artifact mutations', () => {
+  it('passes a gezel run through the gezel-only artifact denials', async () => {
+    // Without the flag a chat script could rewrite a task's inputs and
+    // pass its own gate, which write_artifact already refuses.
+    const writeProjectArtifact = vi.fn().mockResolvedValue(undefined);
+    const deleteProjectArtifact = vi.fn().mockResolvedValue(undefined);
+    const { dispatch } = makeDispatcher({
+      store: { writeProjectArtifact, deleteProjectArtifact } as unknown as Store,
+    });
+    const gezelRun = { ...ctx(['artifacts.write']), initiatedByGezel: true };
+    await dispatch(gezelRun, 'artifact.write', { path: 'tasks/5/inputs/a.md', content: 'x' });
+    await dispatch(gezelRun, 'artifact.delete', { path: 'tasks/5/inputs/a.md' });
+    expect(writeProjectArtifact).toHaveBeenCalledWith('p1', 'tasks/5/inputs/a.md', 'x', {
+      initiatedByGezel: true,
+    });
+    expect(deleteProjectArtifact).toHaveBeenCalledWith('p1', 'tasks/5/inputs/a.md', {
+      initiatedByGezel: true,
+    });
+
+    await dispatch(ctx(['artifacts.write']), 'artifact.write', { path: 'a.md', content: 'y' });
+    expect(writeProjectArtifact).toHaveBeenLastCalledWith('p1', 'a.md', 'y', {
+      initiatedByGezel: false,
+    });
+  });
+
+  it('counts chat, step and nested runs as acting for a gezel', () => {
+    expect(scriptRunActsForGezel({ kind: 'chat', sessionId: 's', gezelId: 'g' })).toBe(true);
+    expect(
+      scriptRunActsForGezel({ kind: 'step', taskRef: 'p/1', stepId: 'a', moment: 'gate' }),
+    ).toBe(true);
+    expect(scriptRunActsForGezel({ kind: 'nested', parentRunId: 'r' })).toBe(true);
+    expect(scriptRunActsForGezel({ kind: 'manual', userInitiated: true })).toBe(false);
+    expect(scriptRunActsForGezel({ kind: 'page', tool: 't' })).toBe(false);
+    expect(scriptRunActsForGezel({ kind: 'connector', typeId: 't', bindingId: 'b' })).toBe(false);
   });
 });
 

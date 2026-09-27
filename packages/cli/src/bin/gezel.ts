@@ -2218,7 +2218,10 @@ program
     'Restore just these items, by id (repeatable, e.g. --only tamsin roof-survey)',
   )
   .option('--replace', 'Overwrite items that already exist here')
-  .option('--settings', 'Also restore preferences from the backup')
+  .option(
+    '--settings',
+    'Also restore which gezels hold roles such as the meester (never providers, folders or security)',
+  )
   .action(
     async (
       file: string,

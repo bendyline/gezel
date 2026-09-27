@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  BACKUP_RESTORABLE_CONFIG_KEYS,
+  BACKUP_ROLE_CONFIG_KEYS,
   backupEntryPrefix,
   backupSettingsTarget,
   isBackupDerivedPath,
@@ -41,14 +43,8 @@ const WARNINGS = [
   'Model files, credentials, device paths, and security permissions are not transferred.',
   'Portable backups support up to 5,000 files, 16 MiB per file, and 64 MiB of content.',
 ];
-const ConfigKeys = [
-  'meesterGezelId',
-  'klerkGezelId',
-  'boekwachterGezelId',
-  'keurmeesterGezelId',
-  'sharedProjectId',
-  'roleBasedNameOnlyMode',
-] as const;
+// sharedProjectId travels only so sessions can be re-pointed at this device's library.
+const ConfigKeys = [...BACKUP_RESTORABLE_CONFIG_KEYS, 'sharedProjectId'] as const;
 function portableConfig(config: GezelConfig): GezelConfig {
   return GezelConfigSchema.parse(
     Object.fromEntries(
@@ -444,12 +440,7 @@ export async function confirmRestore(
     // Preserve every device capability, provider, secret, path and permission.
     const preferences = { ...importedConfig };
     delete preferences.sharedProjectId;
-    for (const key of [
-      'meesterGezelId',
-      'klerkGezelId',
-      'boekwachterGezelId',
-      'keurmeesterGezelId',
-    ] as const)
+    for (const key of BACKUP_ROLE_CONFIG_KEYS)
       if (
         preferences[key] &&
         !writes.has(`gezels/${preferences[key]}/gezel.md`) &&

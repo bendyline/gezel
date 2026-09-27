@@ -24,7 +24,7 @@ import type {
 } from '@bendyline/gezel-script-runtime';
 import { projectScriptFile, userScriptFile } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import type { buildDispatcher } from './dispatcher.js';
+import { type buildDispatcher, scriptRunActsForGezel } from './dispatcher.js';
 import { parseScriptMeta } from './meta.js';
 import { writeProjectScriptRun } from './runs.js';
 import { scriptSourceHash } from './source.js';
@@ -138,6 +138,7 @@ export class NodeScriptHost {
         strippedCapabilities: new Map(context.capabilities.stripped),
         // The same set, so a secret a handler resolves reaches the runner's redaction.
         knownSecretValues: context.secrets,
+        initiatedByGezel: scriptRunActsForGezel(context.trigger),
       },
       method,
       params,

@@ -66,8 +66,18 @@ export interface PortableScriptRunnerLimits {
   defaultTimeoutMs?: number;
   /** Default 30 minutes. */
   maxTimeoutMs?: number;
-  /** Default 1,000. */
+  /**
+   * Host calls one run may make: a runaway-loop backstop, not a quota.
+   * Default 250,000 — record workloads make a call or two per record, and
+   * tens of thousands of records must fit.
+   */
   maxHostCalls?: number;
+  /**
+   * The same backstop for first-party bytes (standard scope or provenance
+   * trusted), whose call count grows with the user's data rather than with
+   * an author's loop. Default: none; the run's timeout bounds them.
+   */
+  maxTrustedHostCalls?: number;
 }
 
 export interface PortableScriptRunnerOptions {
@@ -83,6 +93,15 @@ export interface PortableScriptRunnerOptions {
   dispatch(context: PortableScriptContext, method: string, params: unknown): Promise<unknown>;
   /** Must atomically save the ordinary ScriptRun record; failure prevents the next effect. */
   persistRun(run: ScriptRun): Promise<void>;
+  /**
+   * Least time between two in-progress snapshots of a run. Default 1,000 ms.
+   * Admission and the final record are always written and awaited; between
+   * them a call's intent is written ahead of its effect only when no snapshot
+   * was written within this interval, and the rest coalesce into one trailing
+   * write. A call-heavy run rewrites its growing record once per interval,
+   * not twice per call.
+   */
+  checkpointIntervalMs?: number;
   /** The error line for a non-zero or timed-out execution. Default: stderr, else the exit code. */
   describeFailure?(result: ScriptExecutionResult): string;
   limits?: PortableScriptRunnerLimits;
@@ -106,6 +125,10 @@ export interface RunPortableScriptOptions {
 const MAX_LOG_CHARS = 64_000;
 /** Largest audit record a host will store. Exported for its own tests. */
 export const MAX_RUN_CHARS = 2_000_000;
+export const DEFAULT_MAX_HOST_CALLS = 250_000;
+const DEFAULT_CHECKPOINT_INTERVAL_MS = 1_000;
+export const MISSING_OUTPUT_WARNING =
+  '[gezel] warning: this script declares outputs but finished without calling gezel.output(), so it returned no output.\n';
 interface ActiveScript {
   projectId: string;
   depth: number;
@@ -204,6 +227,10 @@ export class PortableScriptRunner {
       }
     };
     await narrowCapabilities(config);
+    const trusted = scope === 'standard' || definition.provenanceTrusted === true;
+    const maxHostCalls = trusted
+      ? (limits.maxTrustedHostCalls ?? Number.POSITIVE_INFINITY)
+      : (limits.maxHostCalls ?? DEFAULT_MAX_HOST_CALLS);
     const run: ScriptRun = {
       id: host.createId?.() ?? crypto.randomUUID(),
       projectId: options.projectId,
@@ -240,21 +267,22 @@ export class PortableScriptRunner {
     let accepting = true;
     // Set once every effect has settled: nothing may change the audit after this.
     let finalized = false;
+    let hostCalls = 0;
     let outputSeen = false;
     let output: unknown;
     let persistFailure: unknown;
     // A snapshot is captured before queuing; later mutations cannot change what was audited.
     let persistence = Promise.resolve();
     const persist = () => {
-      // An audit that cannot be written is worse than an abridged one. persist()
-      // runs after every host call, so throwing here left the durable record
-      // stuck at `running` and made every later write fail as well. The verdict
-      // — status, output, error — matters more than the full history.
+      // An audit that cannot be written is worse than an abridged one. Throwing
+      // here left the durable record stuck at `running` and made every later
+      // write fail as well. The verdict — status, output, error — matters more
+      // than the full history.
       abridgeRun(run);
       const serialized = JSON.stringify(run);
       const snapshot = ScriptRunSchema.parse(JSON.parse(serialized));
       // A secret seen by a handler must not reach disk in any snapshot, and
-      // snapshots are written after every call, so this cannot wait for the end.
+      // snapshots are written while the run is live, so this cannot wait for the end.
       redactScriptRun(snapshot, context.secrets);
       persistence = persistence.then(() => host.persistRun(snapshot));
       persistence.catch((error: unknown) => {
@@ -262,6 +290,29 @@ export class PortableScriptRunner {
         controller.abort();
       });
       return persistence;
+    };
+    // Every snapshot serializes, parses and rewrites the whole growing record,
+    // so one per host call made a call-heavy run quadratic in I/O. Crash
+    // recovery needs only the admission record (`running`) and the final one;
+    // progress between them is coalesced. A failed background write still
+    // stops the next effect through checkActive().
+    const checkpointIntervalMs = host.checkpointIntervalMs ?? DEFAULT_CHECKPOINT_INTERVAL_MS;
+    let lastCheckpoint = Number.NEGATIVE_INFINITY;
+    let checkpointTimer: ReturnType<typeof setTimeout> | undefined;
+    const checkpoint = (): Promise<void> | undefined => {
+      if (finalized) return undefined;
+      const wait = lastCheckpoint + checkpointIntervalMs - performance.now();
+      if (wait > 0) {
+        checkpointTimer ??= setTimeout(() => {
+          checkpointTimer = undefined;
+          void checkpoint();
+        }, wait);
+        return undefined;
+      }
+      clearTimeout(checkpointTimer);
+      checkpointTimer = undefined;
+      lastCheckpoint = performance.now();
+      return persist();
     };
     const checkActive = () => {
       if (!accepting || controller.signal.aborted) throw new Error('Script execution has ended');
@@ -365,13 +416,17 @@ export class PortableScriptRunner {
           engagementFlags: { llmAllowed: isEngagementAllowed(config) },
         },
         signal: controller.signal,
-        provenanceTrusted: scope === 'standard' || definition.provenanceTrusted === true,
+        provenanceTrusted: trusted,
         trustedReadOnlyStandard:
           scope === 'standard' && [...allowed].every((cap) => cap.endsWith('.read')),
         onRequest: async (method, params) => {
           checkActive();
-          if (run.calls.length >= (limits.maxHostCalls ?? 1_000))
-            throw new Error('Script host call limit exceeded');
+          // Counted apart from run.calls, which abridgeRun trims on a large audit.
+          if (hostCalls >= maxHostCalls)
+            throw new Error(
+              `Script host call limit exceeded: ${maxHostCalls} calls in one run. A loop that never ends?`,
+            );
+          hostCalls += 1;
           const start = now();
           const call: ScriptRunCall = {
             at: new Date(start).toISOString(),
@@ -385,7 +440,7 @@ export class PortableScriptRunner {
             assertScriptMethodAllowed(method, allowed, stripped);
             call.error =
               'Host operation started; if interrupted, its outcome must be checked before retrying';
-            await persist();
+            await checkpoint();
             checkActive();
             // Admission is a ceiling, never a lasting grant: policy may change while
             // the worker runs or while its durable call intent is being saved.
@@ -418,7 +473,7 @@ export class PortableScriptRunner {
             pending.delete(call);
             if (!finalized) {
               call.durationMs = Math.max(0, now() - start);
-              await persist();
+              await checkpoint();
             }
           }
         },
@@ -452,8 +507,17 @@ export class PortableScriptRunner {
           host.describeFailure?.(result) ??
             (result.stderr || `script exited with code ${result.exitCode}`),
         );
-      if (meta.outputs && !outputSeen)
-        throw new Error('Script finished without declaring its output');
+      if (meta.outputs && !outputSeen) {
+        // A gate's output is its verdict, so a gate without one has failed.
+        // Anything else keeps the pre-portable contract: ok with no output,
+        // since existing scripts relied on it and every caller that reads
+        // output already handles its absence.
+        const gate =
+          meta.kind === 'gate' ||
+          (options.trigger.kind === 'step' && options.trigger.moment === 'gate');
+        if (gate) throw new Error('Gate script finished without calling gezel.output()');
+        log(MISSING_OUTPUT_WARNING);
+      }
       if (outputSeen) run.output = validateScriptOutput(meta, output);
       run.status = 'ok';
     } catch (error) {
@@ -473,6 +537,7 @@ export class PortableScriptRunner {
           'Script execution ended while this host operation was pending; it may still complete. Check its outcome before retrying.';
       }
       finalized = true;
+      clearTimeout(checkpointTimer);
       run.finishedAt = new Date(now()).toISOString();
     }
     // Persistence failures are surfaced; never claim completion with only an in-memory audit.

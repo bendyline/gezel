@@ -1,17 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
+  BACKUP_RESTORABLE_CONFIG_KEYS,
+  BACKUP_ROLE_CONFIG_KEYS,
   type BackupManifest,
   BackupManifestSchema,
+  type GezelConfig,
+  GezelConfigSchema,
   type RestoreConfirm,
   type RestoreReview,
   type RestoreReviewItem,
   type StorageJob,
   backupEntryPrefix,
   createLogger,
+  isSafeEntityId,
 } from '@bendyline/gezel';
 import {
   daemonTransactionsRoot,
@@ -166,6 +171,11 @@ export async function runRestore(
   try {
     jobs.setPhase(job.id, 'extract');
     await extractSelected(review.archivePath, stage, planned, confirm.settings === true);
+    // Read before anything is published, so unusable settings stop the
+    // restore instead of reporting success over a half-applied one.
+    const settings = confirm.settings
+      ? await readRestorableSettings(join(stage, 'settings'))
+      : null;
 
     jobs.setPhase(job.id, 'publish');
     let restored = 0;
@@ -179,7 +189,7 @@ export async function runRestore(
       jobs.update(job.id, { itemsDone: restored, bytesDone: item.bytes });
     }
 
-    if (confirm.settings) await mergeSettings(deps, join(stage, 'settings'));
+    if (settings) await applySettings(deps, settings);
 
     await deps.store.ensureLayout();
     invalidateStorageSummary();
@@ -233,21 +243,51 @@ async function publish(staged: string, target: string): Promise<void> {
 }
 
 /**
- * Merge the archive's config over the live one. Machine-specific keys are
- * dropped: another install's folder locations point at directories that do
- * not exist here, and applying them would send this install looking for its
- * content somewhere empty.
+ * The archive's settings, cut down to what a restore may apply: which gezel
+ * holds each house role, and the name-display preference. A config also names
+ * providers, engine paths and arguments, listeners, folders and the security
+ * level, and none of those may come from a file — the same restore on another
+ * machine points at things that are not there, and a crafted one could turn
+ * Lockdown off. The portable restore keeps the same list.
  */
-async function mergeSettings(deps: RestoreDeps, settingsDir: string): Promise<void> {
-  const configPath = join(settingsDir, 'config.json');
+async function readRestorableSettings(settingsDir: string): Promise<Partial<GezelConfig>> {
+  let incoming: unknown;
   try {
-    const incoming = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
-    delete incoming.externalFolders;
-    delete incoming.service;
-    await deps.store.writeConfig(incoming);
+    incoming = JSON.parse(await readFile(join(settingsDir, 'config.json'), 'utf8'));
   } catch {
-    // No config in the archive, or unreadable — the rest of the restore stands.
+    throw new Error('This backup holds no settings that can be read. Restore it without them.');
   }
+  const record =
+    incoming && typeof incoming === 'object' ? (incoming as Record<string, unknown>) : {};
+  const picked = Object.fromEntries(
+    BACKUP_RESTORABLE_CONFIG_KEYS.flatMap((key) =>
+      record[key] === undefined ? [] : [[key, record[key]]],
+    ),
+  );
+  const parsed = GezelConfigSchema.safeParse(picked);
+  if (!parsed.success) {
+    throw new Error('The settings in this backup are not valid. Restore it without them.');
+  }
+  return parsed.data;
+}
+
+async function applySettings(deps: RestoreDeps, settings: Partial<GezelConfig>): Promise<void> {
+  const next: Record<string, unknown> = { ...settings };
+  const external = deps.store.externalFolders;
+  for (const key of BACKUP_ROLE_CONFIG_KEYS) {
+    const id = next[key];
+    if (id === undefined) continue;
+    // A role pointing at a gezel this install does not have would leave it
+    // with no Meester; boot then picks one, which is the better outcome.
+    const present =
+      isSafeEntityId(id) &&
+      (await access(join(gezelDir(deps.home, id, external), 'gezel.md')).then(
+        () => true,
+        () => false,
+      ));
+    if (!present) delete next[key];
+  }
+  if (Object.keys(next).length > 0) await deps.store.writeConfig(next);
 }
 
 /** A backup of a heavy install is legitimately large; these bound the absurd. */

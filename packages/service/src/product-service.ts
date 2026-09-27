@@ -356,8 +356,8 @@ export async function startProductService(
   const store = new Store({ home, history, external, serviceRole, privateUserHome });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();
-  // The runner persists after every host call, so a daemon that died mid-run
-  // leaves records saying `running`. Settle them; never replay them.
+  // Settle the runs a dead daemon left `running`, found by in-flight marker
+  // alone (never a history scan), before any new run can start; never replay.
   await recoverInterruptedScriptRuns(
     home,
     (await store.listProjects()).map((p) => p.id),

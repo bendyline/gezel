@@ -219,6 +219,16 @@ async function isSessionRouteAllowed(
           : 'restarting a paused task requires a first-party client',
       );
     }
+    // Canceling cannot be undone, so it is the user's move in the same way:
+    // a coordinator cancels only inside a turn the user started, never on its
+    // own initiative. Pausing stays open to everyone, and a worker's own
+    // set_task_status is unchanged.
+    if (auth.team && method === 'POST' && /^\/tasks\/[^/]+\/status\/?$/.test(rest)) {
+      const body = (await c.req.json().catch(() => null)) as { status?: unknown } | null;
+      if (body?.status === 'canceled' && !isUserDirectedTurn?.(sessionId(auth))) {
+        return sessionDeny('canceling a task needs the user to ask for it in this turn');
+      }
+    }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }

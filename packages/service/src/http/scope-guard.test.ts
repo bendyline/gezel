@@ -551,6 +551,24 @@ describe('sessionRouteGuard', () => {
     expect((await worker.request(retry, jsonPost({}))).status).toBe(403);
   });
 
+  // Canceling cannot be undone, so the Meester's manage_task may do it only
+  // when the user asked this turn. Pausing, the honest exit, stays open.
+  it('lets a coordinator cancel a task only inside a user-started turn', async () => {
+    const status = '/api/projects/default/tasks/11/status';
+    const userTurn = sessionPolicyApp(session('default', true), undefined, () => true);
+    expect((await userTurn.request(status, jsonPost({ status: 'canceled' }))).status).toBe(200);
+
+    const ownInitiative = sessionPolicyApp(session('default', true), undefined, () => false);
+    expect((await ownInitiative.request(status, jsonPost({ status: 'canceled' }))).status).toBe(
+      403,
+    );
+    expect((await ownInitiative.request(status, jsonPost({ status: 'paused' }))).status).toBe(200);
+
+    // A worker's own status writes are unchanged.
+    const worker = sessionPolicyApp(session('default'), undefined, () => false);
+    expect((await worker.request(status, jsonPost({ status: 'canceled' }))).status).toBe(200);
+  });
+
   it('keeps shared documents available without the foreign-project fallback', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/documents/read?path=guidelines%2Fcoding.md')).status).toBe(200);

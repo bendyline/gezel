@@ -9409,7 +9409,18 @@ server.tool(
 
     if (action === 'cancel') {
       if (settled) return done(`${taskRef} is already ${current.status}.`);
-      const updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'canceled');
+      let updated: Awaited<ReturnType<typeof api.setTaskStatus>>;
+      try {
+        updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'canceled');
+      } catch (err) {
+        if (/\b403\b/.test(err instanceof Error ? err.message : String(err))) {
+          return errorResult(
+            `Only the user can cancel ${taskRef}, and canceling cannot be undone. Ask them first — "should I cancel it?" — and cancel it when they say so. Pause it instead if it needs to stop now.`,
+            { code: 'needs_user', retryable: false },
+          );
+        }
+        throw err;
+      }
       await leaveNote('Canceled');
       return done(`Canceled ${taskRef}.`, updated);
     }

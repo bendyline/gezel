@@ -8,9 +8,12 @@ import {
   inputAccepts,
   inputSourceFromParamValue,
   isInputJunkName,
+  isSafeInputKey,
   isTaskInputArtifactPath,
   normalizeInputPath,
   paramInputSpec,
+  taskInputArtifactDir,
+  taskInputManifestPath,
   taskInputReadTools,
   touchesTaskInputArtifactPath,
   withoutInputParams,
@@ -42,6 +45,27 @@ describe('craftbookInputParams', () => {
         spec: { kind: 'folder', accept: ['.md', '.docx'] },
       },
     ]);
+  });
+
+  it('does not treat a key that cannot be a folder name as an input', () => {
+    const schema = {
+      properties: {
+        '../../notes': { type: 'string', input: { kind: 'folder' } },
+        'a/../../4/inputs/b': { type: 'string', input: { kind: 'folder' } },
+        con: { type: 'string', input: { kind: 'folder' } },
+        'source.v2': { type: 'string', input: { kind: 'folder' } },
+      },
+    };
+    expect(craftbookInputParams(schema).map((i) => i.key)).toEqual(['source.v2']);
+    // Left in the form as a plain field, so the value still reaches the book.
+    const rest = withoutInputParams(schema) as { properties: Record<string, unknown> };
+    expect(Object.keys(rest.properties)).toEqual(['../../notes', 'a/../../4/inputs/b', 'con']);
+    expect(isSafeInputKey('source')).toBe(true);
+    expect(isSafeInputKey('trailing.')).toBe(false);
+    expect(isSafeInputKey('')).toBe(false);
+    expect(() => taskInputArtifactDir('tasks/5', '../../notes')).toThrow();
+    expect(() => taskInputManifestPath('tasks/5', 'a/b')).toThrow();
+    expect(taskInputManifestPath('tasks/5', 'source')).toBe('tasks/5/inputs/source.json');
   });
 
   it('ignores a malformed annotation rather than inventing an input', () => {
@@ -127,6 +151,23 @@ describe('task input paths', () => {
     expect(touchesTaskInputArtifactPath('tasks/12')).toBe(true);
     expect(touchesTaskInputArtifactPath('tasks/12/inputs/source')).toBe(true);
     expect(touchesTaskInputArtifactPath('tasks/12/outline.md')).toBe(false);
+  });
+
+  it('sees through dot segments and names Windows would rewrite', () => {
+    // Each of these opens tasks/12/inputs/... on disk.
+    for (const path of [
+      'tasks/12/./inputs/a.md',
+      'tasks/./12/inputs/a.md',
+      'notes/../tasks/12/inputs/a.md',
+      'tasks\\12\\inputs\\a.md',
+      'tasks/12/inputs./a.md',
+      'tasks/12/inputs /a.md',
+    ]) {
+      expect(isTaskInputArtifactPath(path), path).toBe(true);
+    }
+    expect(touchesTaskInputArtifactPath('tasks/12/.')).toBe(true);
+    expect(touchesTaskInputArtifactPath('tasks/12/x/../inputs')).toBe(true);
+    expect(isTaskInputArtifactPath('tasks/12/inputs/../outline.md')).toBe(false);
   });
 
   it('names the reading tools of the drawer that holds the input', () => {

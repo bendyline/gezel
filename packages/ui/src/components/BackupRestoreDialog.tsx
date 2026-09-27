@@ -41,6 +41,7 @@ export function BackupRestoreDialog() {
   const [plan, setPlan] = useState<BackupPlan | null>(null);
   const [review, setReview] = useState<RestoreReview | null>(null);
   const [replace, setReplace] = useState<Set<string>>(new Set());
+  const [restoreSettings, setRestoreSettings] = useState(false);
   const [excludeWorkspaces, setExcludeWorkspaces] = useState(false);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<StorageJob | null>(null);
@@ -62,6 +63,7 @@ export function BackupRestoreDialog() {
     setPlan(null);
     setReview(null);
     setReplace(new Set());
+    setRestoreSettings(false);
     setJob(null);
     setError(null);
     setDone(null);
@@ -194,6 +196,7 @@ export function BackupRestoreDialog() {
       pendingReview.current = next.restoreId;
       setReview(next);
       setReplace(new Set());
+      setRestoreSettings(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -202,19 +205,33 @@ export function BackupRestoreDialog() {
     }
   };
 
+  // Settings are a separate, unticked choice: a restore that quietly brought
+  // back last month's roles would surprise the person who changed them since.
+  const settingsItems = review?.items.filter((i) => i.kind === 'settings-file') ?? [];
+  const contentItems = review?.items.filter((i) => i.kind !== 'settings-file') ?? [];
+  const conflicts = contentItems.filter((i) => i.conflict === 'exists');
+  const restorable =
+    contentItems.filter((i) => i.conflict === 'none').length +
+    replace.size +
+    (restoreSettings && settingsItems.length > 0 ? 1 : 0);
+
   const startRestore = async () => {
     if (busy || !review) return;
     setBusy(true);
     setError(null);
     try {
-      const items = review.items
-        .filter((item) => item.conflict === 'none' || replace.has(`${item.kind}:${item.id}`))
-        .map((item) => ({
-          kind: item.kind,
-          id: item.id,
-          action: item.conflict === 'exists' ? ('replace' as const) : ('add' as const),
-        }));
-      const settings = items.some((item) => item.kind === 'settings-file');
+      const items = [
+        ...contentItems.filter(
+          (item) => item.conflict === 'none' || replace.has(`${item.kind}:${item.id}`),
+        ),
+        ...(restoreSettings ? settingsItems : []),
+      ].map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        action: item.conflict === 'exists' ? ('replace' as const) : ('add' as const),
+      }));
+      const settings = restoreSettings;
+      const count = restorable;
       if (portable) {
         const result = await api.confirmPortableRestore(review.restoreId, { items, settings });
         pendingReview.current = null;
@@ -227,17 +244,13 @@ export function BackupRestoreDialog() {
         ...(settings ? { settings: true } : {}),
       });
       poll(jobId, (finished) => {
-        if (finished.status === 'done') setDone(`Restored ${items.length} item(s).`);
+        if (finished.status === 'done') setDone(`Restored ${count} item(s).`);
       });
     } catch (e) {
       setBusy(false);
       setError(e instanceof Error ? e.message : String(e));
     }
   };
-
-  const conflicts = review?.items.filter((i) => i.conflict === 'exists') ?? [];
-  const restorable =
-    (review?.items.filter((i) => i.conflict === 'none').length ?? 0) + replace.size;
 
   return (
     <AlertDialog.Root
@@ -359,7 +372,7 @@ export function BackupRestoreDialog() {
                 {review && (
                   <>
                     <ul className="storage-list">
-                      {review.items.map((item) => (
+                      {contentItems.map((item) => (
                         <li key={`${item.kind}:${item.id}`}>
                           <span className="storage-list-label">
                             {item.label}
@@ -386,6 +399,20 @@ export function BackupRestoreDialog() {
                         </li>
                       ))}
                     </ul>
+                    {settingsItems.length > 0 && (
+                      <label className="gz-backup-exclude">
+                        <input
+                          type="checkbox"
+                          checked={restoreSettings}
+                          disabled={busy}
+                          onChange={(e) => setRestoreSettings(e.target.checked)}
+                        />
+                        <span>
+                          Also restore settings: which gezels hold roles such as your Meester. Your
+                          AI providers, models, folders and security level stay as they are.
+                        </span>
+                      </label>
+                    )}
                     {conflicts.length > 0 && (
                       <p className="gz-cleanup-warning small" role="alert">
                         {conflicts.length} item(s) already exist here. They are left alone unless

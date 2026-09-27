@@ -234,3 +234,4 @@ packages/catalog/scripts/harvested-auth/
 /packages/app/e2e-visual/snapshots
 /.tmp-storyify
 /.tmp-qualla-batch
+/.release-audit

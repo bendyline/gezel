@@ -8,13 +8,17 @@ import {
 /**
  * Normalize an artifacts-relative path to its collapsed segment list so
  * `./shadow/x`, `shadow\\x`, and `docs/../shadow/x` all compare equal. Shared
- * by every reserved-subtree predicate below.
+ * by every reserved-subtree predicate, here and in craftbook-inputs.
+ *
+ * Trailing dots and spaces are dropped from each name because Windows drops
+ * them when it opens the path: `shadow./x` is written to `shadow/x`.
  */
-function artifactSegments(path: string): string[] {
+export function artifactSegments(path: string): string[] {
   const segments = path
     .replaceAll('\\', '/')
     .split('/')
-    .filter((segment) => segment !== '' && segment !== '.');
+    .map((segment) => (segment === '..' ? segment : segment.replace(/[. ]+$/, '')))
+    .filter((segment) => segment !== '');
   const collapsed: string[] = [];
   for (const segment of segments) {
     if (segment === '..') collapsed.pop();
