@@ -1,6 +1,8 @@
 # Handboek content
 
-This tree is the hand-curated half of the **Handboek** — gezel's built-in documentation. It ships with the app (the service build copies it to `dist/handboek-content/`), is served through `/api/handboek`, rendered in the Handboek tab, exported as static HTML for gezel.com by `gezel handboek export`, and consulted by gezellen through the `how_do_i` tool.
+This tree is the hand-curated half of the **Handboek** — gezel's built-in documentation. The service build copies it to `dist/handboek-content/` for the static HTML exporter and compatibility API. The in-app Handboek is the bundled `handboek.gezk` catalog in Knowledge; gezellen retrieve and cite it through the normal knowledge search path. `gezel handboek export` still generates the website's HTML from this tree and the generated articles.
+
+After changing this tree or the generated Gilde-backed pages, rebuild the bundled catalog with `pnpm --filter @bendyline/gezel-service build:handboek-gezk` and commit `packages/service/assets/handboek/handboek.gezk` with the source change. The builder freezes device-neutral `site` rendering, preserving Markdown formatting, article links, and images. It uses the pinned BGE embedding profile and may download that model on first use. Bump the service version when publishing changed catalog content; startup replaces the installed bundle when its archive digest changes and preserves the user's enabled setting.
 
 This README is the authoring contract. The engine lives in `packages/service/src/handboek/`.
 

@@ -19,6 +19,13 @@ import { type HandboekCatalog, expandMacros } from './macros.js';
 
 export type { CuratedArticle, ReleaseNoteEntry } from './content.js';
 export {
+  HANDBOEK_KNOWLEDGE_CATALOG,
+  HANDBOEK_KNOWLEDGE_PUBLISHER,
+  handboekKnowledgeFingerprint,
+  handboekKnowledgeSource,
+  rewriteHandboekKnowledgeLinks,
+} from './knowledge-source.js';
+export {
   HANDBOEK_AREAS,
   HANDBOEK_AREA_TITLES,
   WHATS_NEW_INDEX_ID,

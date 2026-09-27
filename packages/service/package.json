@@ -63,6 +63,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:handboek-gezk": "tsx scripts/build-handboek-gezk.ts",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

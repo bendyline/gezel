@@ -112,7 +112,7 @@ export const KnowledgeStorageScopeSchema = z.enum(['machine-shared', 'user']);
 export type KnowledgeStorageScope = z.infer<typeof KnowledgeStorageScopeSchema>;
 
 /** How a catalog reached this user's registry: a gilde entry, a local file, or a URL. */
-export const KnowledgeInstallSourceKindSchema = z.enum(['gilde', 'file', 'url']);
+export const KnowledgeInstallSourceKindSchema = z.enum(['bundled', 'gilde', 'file', 'url']);
 export type KnowledgeInstallSourceKind = z.infer<typeof KnowledgeInstallSourceKindSchema>;
 
 /** The full immutable identity a user registry entry pins. */

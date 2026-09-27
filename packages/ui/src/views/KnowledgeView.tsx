@@ -50,9 +50,10 @@ function foldTopics(topics: KnowledgeTopicNode[]): TopicTreeNode[] {
  * Document selection stays internal to the view: encyclopedia articles
  * never flood the global navigation model.
  */
-export function KnowledgeView() {
+export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string } = {}) {
   const [catalogs, setCatalogs] = useState<KnowledgeCatalogStatus[] | null>(null);
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(() => {
+    if (initialCatalogId) return initialCatalogId;
     try {
       return window.localStorage.getItem(CATALOG_KEY);
     } catch {
@@ -65,12 +66,17 @@ export function KnowledgeView() {
   const [documentsTotal, setDocumentsTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
+    if (initialCatalogId === 'handboek') return 'welcome';
     try {
       return window.localStorage.getItem(DOCUMENT_KEY);
     } catch {
       return null;
     }
   });
+  const [mobilePane, setMobilePane] = useState<'topics' | 'list' | 'reader'>(
+    selectedDocId ? 'reader' : 'topics',
+  );
+  const lastCatalogRef = useRef<string | null>(null);
   const [doc, setDoc] = useState<KnowledgeDocumentRead | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
@@ -89,7 +95,10 @@ export function KnowledgeView() {
     const intent = consumeOpenKnowledge();
     if (intent) {
       setSelectedCatalogId(intent.catalogId);
-      if (intent.documentId) setSelectedDocId(intent.documentId);
+      if (intent.documentId) {
+        setSelectedDocId(intent.documentId);
+        setMobilePane('reader');
+      }
     }
     const refresh = () => {
       api
@@ -98,12 +107,6 @@ export function KnowledgeView() {
           if (!alive) return;
           const mounted = r.catalogs.filter((c) => c.mounted);
           setCatalogs(mounted);
-          setSelectedCatalogId(
-            (prev) =>
-              (prev && mounted.some((c) => c.ref.catalogId === prev) ? prev : null) ??
-              mounted[0]?.ref.catalogId ??
-              null,
-          );
         })
         .catch(() => {
           if (alive) setCatalogs([]);
@@ -118,7 +121,10 @@ export function KnowledgeView() {
       const detail = (e as CustomEvent<{ catalogId?: string; documentId?: string }>).detail;
       if (!detail?.catalogId) return;
       setSelectedCatalogId(detail.catalogId);
-      if (detail.documentId) setSelectedDocId(detail.documentId);
+      if (detail.documentId) {
+        setSelectedDocId(detail.documentId);
+        setMobilePane('reader');
+      }
     };
     window.addEventListener('gezel:open-knowledge-document', onOpenDocument);
     return () => {
@@ -129,12 +135,31 @@ export function KnowledgeView() {
   }, []);
 
   useEffect(() => {
+    if (!catalogs || catalogs.some((catalog) => catalog.ref.catalogId === selectedCatalogId))
+      return;
+    const next = catalogs[0]?.ref.catalogId ?? null;
+    if (next === selectedCatalogId) return;
+    setSelectedCatalogId(next);
+    setSelectedDocId(null);
+    setMobilePane('topics');
+  }, [catalogs, selectedCatalogId]);
+
+  useEffect(() => {
     try {
       if (selectedCatalogId) window.localStorage.setItem(CATALOG_KEY, selectedCatalogId);
     } catch {
       /* private mode */
     }
   }, [selectedCatalogId]);
+
+  useEffect(() => {
+    if (selectedCatalogId === lastCatalogRef.current) return;
+    lastCatalogRef.current = selectedCatalogId;
+    if (selectedCatalogId === 'handboek' && !selectedDocId) {
+      setSelectedDocId('welcome');
+      setMobilePane('reader');
+    }
+  }, [selectedCatalogId, selectedDocId]);
 
   // Topic tree per catalog.
   useEffect(() => {
@@ -276,6 +301,7 @@ export function KnowledgeView() {
       event.stopPropagation();
       if (target.catalogId === selectedCatalogId) {
         setSelectedDocId(target.documentId);
+        setMobilePane('reader');
         return;
       }
       const installed = catalogs?.find(
@@ -284,6 +310,7 @@ export function KnowledgeView() {
       if (installed) {
         setSelectedCatalogId(installed.ref.catalogId);
         setSelectedDocId(target.documentId);
+        setMobilePane('reader');
       }
     },
     [catalogs, selectedCatalogId],
@@ -353,6 +380,7 @@ export function KnowledgeView() {
         onClick={() => {
           setSelectedTopicId((prev) => (prev === node.id ? null : node.id));
           setQuery('');
+          setMobilePane('list');
         }}
       >
         <span>{node.name}</span>
@@ -365,7 +393,7 @@ export function KnowledgeView() {
   );
 
   return (
-    <div className="knowledge-view" data-testid="knowledge-view">
+    <div className={`knowledge-view knowledge-view--${mobilePane}`} data-testid="knowledge-view">
       <nav className="knowledge-rail" aria-label="Knowledge catalogs and topics">
         {catalogs && catalogs.length > 1 && (
           <select
@@ -374,6 +402,7 @@ export function KnowledgeView() {
             onChange={(e) => {
               setSelectedCatalogId(e.target.value);
               setSelectedDocId(null);
+              setMobilePane('topics');
             }}
           >
             {catalogs.map((c) => (
@@ -398,12 +427,33 @@ export function KnowledgeView() {
           placeholder="Search this catalog…"
           aria-label="Search knowledge"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (e.target.value.trim()) setMobilePane('list');
+          }}
         />
+        <button
+          type="button"
+          className="knowledge-topic-row knowledge-mobile-all"
+          onClick={() => {
+            setSelectedTopicId(null);
+            setQuery('');
+            setMobilePane('list');
+          }}
+        >
+          All documents
+        </button>
         <ul className="knowledge-topics">{topicTree.map((node) => renderTopic(node, 0))}</ul>
       </nav>
 
       <section className="knowledge-list" aria-label="Documents">
+        <button
+          type="button"
+          className="knowledge-nav-back knowledge-mobile-topics"
+          onClick={() => setMobilePane('topics')}
+        >
+          ← Topics
+        </button>
         {query.trim() ? (
           <>
             <div className="knowledge-list-header">Search results</div>
@@ -425,7 +475,10 @@ export function KnowledgeView() {
                     className="knowledge-doc-row"
                     aria-current={r.documentId === selectedDocId ? 'true' : undefined}
                     onClick={() => {
-                      if (r.documentId) setSelectedDocId(r.documentId);
+                      if (r.documentId) {
+                        setSelectedDocId(r.documentId);
+                        setMobilePane('reader');
+                      }
                     }}
                   >
                     <span className="knowledge-doc-title">{r.title}</span>
@@ -452,7 +505,10 @@ export function KnowledgeView() {
                     type="button"
                     className="knowledge-doc-row"
                     aria-current={d.id === selectedDocId ? 'true' : undefined}
-                    onClick={() => setSelectedDocId(d.id)}
+                    onClick={() => {
+                      setSelectedDocId(d.id);
+                      setMobilePane('reader');
+                    }}
                   >
                     <span className="knowledge-doc-title">{d.title}</span>
                     {d.summary && <span className="knowledge-doc-summary">{d.summary}</span>}
@@ -478,6 +534,16 @@ export function KnowledgeView() {
       </section>
 
       <section className="knowledge-reader" aria-label="Article">
+        <button
+          type="button"
+          className="knowledge-nav-back"
+          onClick={() => {
+            setSelectedDocId(null);
+            setMobilePane('list');
+          }}
+        >
+          ← Documents
+        </button>
         {doc ? (
           <>
             <header className="knowledge-reader-header">
@@ -497,6 +563,7 @@ export function KnowledgeView() {
                     {...(surface ? { surface } : {})}
                     imageDisplayMode="inline"
                     showCover={false}
+                    linkSchemes={['knowledge']}
                   />
                 </MediaContext.Provider>
               ) : (

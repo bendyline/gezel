@@ -652,7 +652,7 @@ export function KnowledgeCatalogManager() {
                             : undefined
                         }
                       >
-                        {shared ? 'Shared' : ''}
+                        {c.source === 'bundled' ? 'Bundled' : shared ? 'Shared' : ''}
                       </td>
                       <td>
                         {c.disabledReason ? (
@@ -680,14 +680,16 @@ export function KnowledgeCatalogManager() {
                               Update
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className="gz-link-button danger"
-                            disabled={updating}
-                            onClick={() => setConfirmRemove(c.ref.catalogId)}
-                          >
-                            Remove
-                          </button>
+                          {c.source !== 'bundled' && (
+                            <button
+                              type="button"
+                              className="gz-link-button danger"
+                              disabled={updating}
+                              onClick={() => setConfirmRemove(c.ref.catalogId)}
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

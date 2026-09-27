@@ -5,25 +5,18 @@ export const WELCOME_ARTICLE = {
   body: 'is Dutch for a companion journeyman.',
 };
 
-/** The rail, selected article, parsed prose, and inline assets must all be ready. */
+/** The bundled catalog, selected article, parsed prose, and inline assets are ready. */
 export async function expectHandboekArticle(page: Page, article = WELCOME_ARTICLE): Promise<void> {
-  const view = page.getByTestId('handboek-view');
+  const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
-  await expect(
-    view.getByRole('navigation', { name: 'Handboek contents' }).getByRole('button', {
-      name: article.title,
-      exact: true,
-    }),
-  ).toHaveAttribute('aria-current', 'page');
+  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Handboek');
   await expect(
     view.getByRole('heading', { name: article.title, exact: true }).first(),
   ).toBeVisible();
-  const doc = view.getByTestId('handboek-doc');
+  const doc = view.locator('.knowledge-reader-body');
   await expect(doc).toBeVisible();
   await expect(doc).toContainText(article.body);
-  await expect(
-    view.locator('.handboek-error, .handboek-loading, .handboek-toc-loading'),
-  ).toHaveCount(0);
+  await expect(view.locator('.error')).toHaveCount(0);
   await expect
     .poll(
       () =>

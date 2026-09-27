@@ -1,25 +1,32 @@
 import { expect, test } from '../e2e-web/fixtures/test.js';
 import { setTheme } from '../e2e-web/helpers/determinism.js';
 import { expectHandboekArticle } from '../e2e-web/helpers/handboek.js';
-import { gotoHome, openArea } from '../e2e-web/helpers/nav.js';
+import { gotoHome, openAreaView } from '../e2e-web/helpers/nav.js';
 import { shot } from '../e2e-web/helpers/shot.js';
 
 test('Handboek renders its article in both themes', async ({ page }) => {
-  await gotoHome(page);
-  if (page.viewportSize()!.width < 700) {
-    await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
-  }
-  await openArea(page, 'handboek');
+  await page.goto('/');
+  await expect(page.getByTestId('sidebar-area-knowledge')).toBeAttached();
+  await openAreaView(page, 'knowledge');
   await expectHandboekArticle(page);
-  const view = page.getByTestId('handboek-view');
+  const view = page.getByTestId('knowledge-view');
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
-    await shot(page, 'home', {
-      area: 'handboek',
-      theme,
-      clip: view,
-      description: 'Handboek with loaded navigation, welcome prose, and illustration',
+    await test.info().attach(`handboek-knowledge-${theme}`, {
+      body: await view.screenshot(),
+      contentType: 'image/png',
     });
+  }
+  const viewport = page.viewportSize();
+  if (viewport && viewport.width <= 650) {
+    await view.getByRole('button', { name: '← Documents' }).click();
+    await expect(view.getByRole('region', { name: 'Documents' })).toBeVisible();
+    await view.getByRole('button', { name: '← Topics' }).click();
+    await expect(
+      view.getByRole('navigation', { name: 'Knowledge catalogs and topics' }),
+    ).toBeVisible();
+    await view.getByRole('button', { name: 'All documents' }).click();
+    await expect(view.getByRole('region', { name: 'Documents' })).toBeVisible();
   }
 });
 

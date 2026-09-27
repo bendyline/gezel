@@ -194,7 +194,6 @@ test('08 - remaining areas render their views', async () => {
     { area: 'scripts', testid: 'scripts-view', file: '15-scripts.png' },
     { area: 'history', testid: 'history-view', file: '16-history.png' },
     { area: 'knowledge', testid: 'knowledge-view', file: '17-knowledge.png' },
-    { area: 'handboek', testid: 'handboek-view', file: '18-handboek.png' },
   ];
   for (const stop of stops) {
     await openArea(stop.area);

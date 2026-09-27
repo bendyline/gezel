@@ -142,6 +142,13 @@ export default defineConfig({
       recursive: true,
       filter: (source) => resolve(source) !== authoringGuide,
     });
+    const handboekGezk = resolve(__dirname, 'assets', 'handboek', 'handboek.gezk');
+    if (!existsSync(handboekGezk)) {
+      throw new Error(
+        `bundled Handboek knowledge catalog missing at ${handboekGezk} — run pnpm --filter @bendyline/gezel-service build:handboek-gezk`,
+      );
+    }
+    cpSync(handboekGezk, 'dist/handboek.gezk');
     // The bundled diffusers video server (`gezel_video_server.py`),
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.
