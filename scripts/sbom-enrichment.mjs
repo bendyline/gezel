@@ -680,12 +680,14 @@ export async function runtimeArtifacts({ repoRoot, versions }) {
         hashes: [sha256Hash(duckdbArchives[target])],
       };
     }),
-    components: targets.map((target) => {
-      if (!duckdbBinaries[target]) throw new Error(`duckdb-pin.ts pins no binary for ${target}`);
+    components: targets.map((platform) => {
+      if (!duckdbBinaries[platform]) {
+        throw new Error(`duckdb-pin.ts pins no binary for ${platform}`);
+      }
       return fileComponent(
-        target.startsWith('win32-') ? 'duckdb.exe' : 'duckdb',
-        duckdbBinaries[target],
-        platformKeysForTarget(target),
+        platform.startsWith('win32-') ? 'duckdb.exe' : 'duckdb',
+        duckdbBinaries[platform],
+        platformKeysForTarget(platform),
       );
     }),
   };

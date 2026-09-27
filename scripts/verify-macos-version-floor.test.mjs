@@ -96,7 +96,10 @@ test('reads LC_BUILD_VERSION and LC_VERSION_MIN_MACOSX minimums', () => {
 });
 
 test('reads every slice of a fat binary', () => {
-  const universal = fatMachO([thinMachO([buildVersion('13.0')]), thinMachO([buildVersion('14.2')])]);
+  const universal = fatMachO([
+    thinMachO([buildVersion('13.0')]),
+    thinMachO([buildVersion('14.2')]),
+  ]);
   assert.deepEqual(machOMacMinimums(universal), { minima: ['13.0', '14.2'], versioned: true });
   assert.throws(
     () => assertWithinFloor([{ path: 'universal.node', ...machOMacMinimums(universal) }], '14.0'),
@@ -156,13 +159,10 @@ test('finds the Mach-Os inside a gzipped service tarball and enforces the floor'
     await tar.c({ gzip: true, file: tarball, cwd: tree, portable: true }, ['.']);
 
     const found = await scanTarballMachOs(tarball);
-    assert.deepEqual(
-      found.map(({ path, minima }) => [path.replace(/^\.\//, ''), minima]).sort(),
-      [
-        ['node_modules/onnxruntime-node/bin/onnxruntime_binding.node', ['11.0', '12.0']],
-        ['node_modules/sqlite-vec-darwin-arm64/vec0.dylib', ['14.0']],
-      ],
-    );
+    assert.deepEqual(found.map(({ path, minima }) => [path.replace(/^\.\//, ''), minima]).sort(), [
+      ['node_modules/onnxruntime-node/bin/onnxruntime_binding.node', ['11.0', '12.0']],
+      ['node_modules/sqlite-vec-darwin-arm64/vec0.dylib', ['14.0']],
+    ]);
     assert.throws(
       () => assertWithinFloor(found, '13.5'),
       /vec0\.dylib requires macOS 14\.0, newer than app floor 13\.5/,

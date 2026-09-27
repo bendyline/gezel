@@ -133,7 +133,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'the Linux release smoke must exercise Chromium sandbox startup',
   );
 
-  assert.match(builder, /minimumSystemVersion: '13\.5'/);
+  assert.match(builder, /minimumSystemVersion: '14\.0'/);
   assert.match(
     builder,
     /^\s+- '!dist\/\*\.map'$/m,

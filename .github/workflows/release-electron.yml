@@ -864,6 +864,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           UV_THREADPOOL_SIZE: 16
 
+      # Installed releases decide whether to offer this update with
+      # electron-updater, which skips a feed whose minimumSystemVersion is
+      # above the running Darwin release. electron-builder does not write it.
+      - name: Stamp the macOS floor into the update feed
+        run: node scripts/stamp-mac-update-floor.mjs packages/app/dist/installers/latest-mac.yml
+
       - name: Verify macOS signing and notarization
         run: |
           set -euo pipefail
@@ -1121,6 +1127,10 @@ jobs:
           test -f "$metadata"
           if ! grep -Fq "$(basename "$zip")" "$metadata"; then
             echo "::error::$metadata does not reference $(basename "$zip")"
+            exit 1
+          fi
+          if ! grep -Eq "^minimumSystemVersion: '[0-9]+\.[0-9]+\.[0-9]+'$" "$metadata"; then
+            echo "::error::$metadata has no minimumSystemVersion; Macs below the floor would be offered this update"
             exit 1
           fi
           echo "verified PKG first-install artifact and ZIP-based macOS update feed"

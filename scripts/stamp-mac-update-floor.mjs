@@ -68,9 +68,7 @@ export function withMinimumSystemVersion(feed, darwinRelease) {
 
 /** The stamped Darwin release, or null when the feed has none. */
 export function feedMinimumSystemVersion(feed) {
-  return (
-    feed.match(/^minimumSystemVersion:\s*['"]?(\d+\.\d+\.\d+)['"]?\s*$/m)?.[1] ?? null
-  );
+  return feed.match(/^minimumSystemVersion:\s*['"]?(\d+\.\d+\.\d+)['"]?\s*$/m)?.[1] ?? null;
 }
 
 export async function stampMacUpdateFloor(feedPath, macosFloor) {

@@ -314,8 +314,7 @@ export async function verifyMacosVersionFloor(appPath, expectedFloor) {
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const appPath = process.argv[2] ? resolve(process.argv[2]) : null;
-  const expectedFloor =
-    process.argv[3] ?? declaredMacFloor(await readFile(BUILDER_CONFIG, 'utf8'));
+  const expectedFloor = process.argv[3] ?? declaredMacFloor(await readFile(BUILDER_CONFIG, 'utf8'));
   if (!appPath || !/^\d+(?:\.\d+){1,2}$/.test(expectedFloor)) {
     console.error(
       'usage: node scripts/verify-macos-version-floor.mjs <Gezel.app> [major.minor[.patch]]',
