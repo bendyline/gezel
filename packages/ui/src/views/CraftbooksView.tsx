@@ -340,6 +340,7 @@ function NewCraftbookDialog({
                 type="text"
                 className="craftbook-search"
                 placeholder="Search craftbooks…"
+                aria-label="Search base craftbooks"
                 value={baseQuery}
                 onChange={(e) => setBaseQuery(e.target.value)}
                 disabled={busy}

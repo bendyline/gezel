@@ -56,6 +56,7 @@ const INTEGRATION_SUITES = [
   // ChatManager-driven suites (mock provider + MCP bridge subprocess).
   'src/chat/keurmeester-intervention.test.ts',
   'src/chat/manager*.test.ts',
+  'src/chat/band-prefix-gating.test.ts',
   'src/chat/prefix-layering.test.ts',
   'src/chat/questions.test.ts',
   'src/chat/session-token-rotation.test.ts',

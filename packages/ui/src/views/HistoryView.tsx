@@ -296,6 +296,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
           </Select.Root>
           <input
             placeholder="Search…"
+            aria-label="Search history"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             style={{ flex: 1 }}

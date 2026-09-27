@@ -250,7 +250,7 @@
 
 .terminal-file-link:hover,
 .terminal-file-link:focus-visible {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration-style: solid;
 }
 
@@ -1282,7 +1282,7 @@
  * (`#6cf`) and pale `#999` muted both clash with the warm cream
  * palette. Warm sigil + slightly darker muted reads naturally. */
 [data-theme="light"] .terminal-prompt-sigil {
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
 }
 [data-theme="light"] .terminal-group-header,
 [data-theme="light"] .terminal-duration,
@@ -1324,7 +1324,7 @@
     background: #ece3cf;
   }
   :root:not([data-theme="dark"]) .terminal-prompt-sigil {
-    color: var(--accent, #b0724c);
+    color: var(--accent-text, #b0724c);
   }
   :root:not([data-theme="dark"]) .terminal-group-header,
   :root:not([data-theme="dark"]) .terminal-duration,

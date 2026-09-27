@@ -80,7 +80,30 @@ const NON_SHIPPING_PROJECTS = ['@bendyline/gezel-evals', '@bendyline/gezel-eval-
  * `tests/published/bundledAssets.test.ts` guards that the ffmpeg runtime stays
  * absent.
  */
-const DECLARED_BUT_NOT_SHIPPED = new Set(['@ffmpeg/core']);
+export const DECLARED_BUT_NOT_SHIPPED = new Set(['@ffmpeg/core']);
+
+/**
+ * Workspace entry points whose production payload is redistributed by the
+ * desktop installer. The app shell and service are Node graphs, the UI is
+ * compiled into the service bundle, and the ML runtime is deployed separately
+ * before its node_modules tree is merged into that bundle.
+ *
+ * Keep this list aligned with packages/app's packaged build and
+ * build-service-bundle.mjs. Using explicit positive roots prevents the release
+ * SBOM from quietly absorbing unrelated deliverables such as the VS Code or
+ * Capacitor packages merely because they share this pnpm workspace.
+ */
+export const PACKAGED_WORKSPACE_ROOTS = Object.freeze([
+  '@bendyline/gezel-app',
+  '@bendyline/gezel-service',
+  '@bendyline/gezel-ui',
+  '@bendyline/internal-ml-runtime',
+]);
+
+/** Select each packaged root and its complete workspace dependency closure. */
+export function packagedWorkspaceFilters(roots = PACKAGED_WORKSPACE_ROOTS) {
+  return roots.map((name) => `${name}...`);
+}
 
 /** Read pnpm's exact production package/version/license inventory. */
 export function readProductionLicenseInventory({ filters, storeDir } = {}) {
@@ -108,6 +131,40 @@ export function readProductionLicenseInventory({ filters, storeDir } = {}) {
     if (inventory[license].length === 0) delete inventory[license];
   }
   return inventory;
+}
+
+/**
+ * Read pnpm's resolved production graph for every packaged workspace root.
+ * Unlike `licenses list`, this preserves parent/child relationships and local
+ * workspace nodes. `unsavedDependencies` is intentionally ignored later: it
+ * describes incidental material in the shared development node_modules tree,
+ * not the frozen-lockfile production deployments shipped to users.
+ */
+export function readPackagedProductionDependencyTree({
+  roots = PACKAGED_WORKSPACE_ROOTS,
+  storeDir,
+} = {}) {
+  const raw = runPnpm(
+    [
+      'list',
+      '--prod',
+      '--json',
+      '--depth=Infinity',
+      ...packagedWorkspaceFilters(roots).map((name) => `--filter=${name}`),
+    ],
+    storeDir,
+  );
+  const projects = JSON.parse(raw);
+  if (!Array.isArray(projects)) {
+    throw new Error('pnpm returned an invalid production dependency graph');
+  }
+  const returnedRoots = new Set(projects.map((project) => project?.name).filter(Boolean));
+  for (const root of roots) {
+    if (!returnedRoots.has(root)) {
+      throw new Error(`pnpm production dependency graph omitted packaged workspace root ${root}`);
+    }
+  }
+  return projects;
 }
 
 /** Convert the license grouping to the npm bulk-advisory request shape. */

@@ -296,7 +296,7 @@
   border-radius: 9px;
   font-weight: 500;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
   white-space: nowrap;
 }
 
@@ -418,7 +418,7 @@
      a shared baseline. */
   align-items: center;
   gap: 0.4rem;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -628,7 +628,7 @@
 
 .external-conversation-label {
   flex-shrink: 0;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 

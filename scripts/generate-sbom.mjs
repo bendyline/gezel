@@ -2,9 +2,10 @@
 /**
  * Generate a CycloneDX inventory of everything a Gezel installer redistributes.
  *
- * Four sources, because no single one sees the whole payload:
+ * Five sources, because no single one sees the whole payload:
  *
- *   - pnpm's production license graph — the npm dependency tree;
+ *   - pnpm's production license inventory — npm identities and licences;
+ *   - pnpm's resolved production trees — workspace roots and dependency edges;
  *   - the pin-bound inventory of pnpm's own vendored `dist/node_modules`;
  *   - NOTICE.md's native-engine, native-helper-source, and bundled-runtime
  *     rows, read through check-notice.mjs so the pins and legal texts are the
@@ -30,14 +31,27 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { allPlatformKeys, platformKeysForEngine } from './native-payload.mjs';
 import { mergePnpmRuntimeSbomComponents } from './pnpm-runtime-inventory.mjs';
-import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
+import {
+  DECLARED_BUT_NOT_SHIPPED,
+  PACKAGED_WORKSPACE_ROOTS,
+  packagedWorkspaceFilters,
+  readPackagedProductionDependencyTree,
+  readProductionLicenseInventory,
+} from './production-dependency-inventory.mjs';
+import {
+  buildPnpmSbomGraph,
+  finalizeSbomDependencyGraph,
+  npmPurl,
+} from './sbom-dependency-graph.mjs';
 
 const output = resolve(process.argv[2] ?? 'artifacts/gezel.cdx.json');
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-const byLicense = readProductionLicenseInventory();
+const byLicense = readProductionLicenseInventory({ filters: packagedWorkspaceFilters() });
+const packagedProjects = readPackagedProductionDependencyTree();
 const notice = await verifyNoticeInventory();
 const components = [];
 
@@ -59,6 +73,14 @@ for (const [license, packages] of Object.entries(byLicense)) {
     }
   }
 }
+
+const pnpmWorkspaceGraph = buildPnpmSbomGraph({
+  projects: packagedProjects,
+  components,
+  entryWorkspaceNames: PACKAGED_WORKSPACE_ROOTS,
+  repoRoot: fileURLToPath(new URL('..', import.meta.url)),
+  excludedPackageNames: DECLARED_BUT_NOT_SHIPPED,
+});
 // Native engines — compiled from pinned upstream sources by build-native.yml
 // and staged under `packages/app/native-bin/<platform-key>/`.
 for (const engine of notice.native.components) {
@@ -221,6 +243,26 @@ components.push({
 components.sort((a, b) => a['bom-ref'].localeCompare(b['bom-ref']));
 
 const rootPurl = npmPurl(rootPackage.name, rootPackage.version);
+const directPayloadRefs = components
+  .filter((component) =>
+    component.properties?.some(
+      (property) =>
+        property.name === 'gezel:component-kind' &&
+        [
+          'native-engine',
+          'native-helper-derived-source',
+          'bundled-runtime',
+          'native-redistributable',
+        ].includes(property.value),
+    ),
+  )
+  .map((component) => component['bom-ref']);
+const dependencies = finalizeSbomDependencyGraph({
+  rootRef: rootPurl,
+  rootDependsOn: [...pnpmWorkspaceGraph.entryRefs, ...directPayloadRefs],
+  components,
+  dependencyGroups: [pnpmWorkspaceGraph.dependencies, pnpmDependencies],
+});
 const bom = {
   $schema: 'https://cyclonedx.org/schema/bom-1.6.schema.json',
   bomFormat: 'CycloneDX',
@@ -235,7 +277,7 @@ const bom = {
           type: 'application',
           author: 'Bendyline',
           name: 'gezel-sbom-generator',
-          version: '3',
+          version: '4',
         },
       ],
     },
@@ -255,15 +297,19 @@ const bom = {
       { name: 'gezel:scope', value: 'superset-across-platforms' },
       { name: 'gezel:npm-platform', value: `${process.platform}-${process.arch}` },
       { name: 'gezel:native-platforms', value: allPlatformKeys().join(',') },
+      { name: 'gezel:dependency-root-refs', value: pnpmWorkspaceGraph.entryRefs.join(',') },
+      { name: 'gezel:native-inventory-refs', value: directPayloadRefs.join(',') },
     ],
   },
   components,
-  dependencies: pnpmDependencies,
+  dependencies,
 };
 
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, `${JSON.stringify(bom, null, 2)}\n`, { mode: 0o600 });
-console.log(`✓ wrote CycloneDX SBOM with ${components.length} components to ${output}`);
+console.log(
+  `✓ wrote CycloneDX SBOM with ${components.length} components and ${dependencies.length} dependency nodes to ${output}`,
+);
 
 /**
  * A CycloneDX licence entry. SPDX expressions ("Apache-2.0 OR MIT") belong in
@@ -283,12 +329,4 @@ function githubPurl(sourceUrl, version) {
   if (!match || !version) return null;
   const [, owner, repo] = match;
   return `pkg:github/${encodeURIComponent(owner)}/${encodeURIComponent(repo.replace(/\.git$/, ''))}@${encodeURIComponent(version)}`;
-}
-
-function npmPurl(name, version) {
-  if (name.startsWith('@')) {
-    const [scope, packageName] = name.slice(1).split('/');
-    return `pkg:npm/%40${encodeURIComponent(scope)}/${encodeURIComponent(packageName)}@${encodeURIComponent(version)}`;
-  }
-  return `pkg:npm/${encodeURIComponent(name)}@${encodeURIComponent(version)}`;
 }

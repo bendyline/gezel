@@ -28,7 +28,7 @@
 
 .settings-notice summary {
   width: fit-content;
-  color: var(--accent-hover);
+  color: var(--accent-text-hover);
   cursor: pointer;
 }
 
@@ -69,7 +69,7 @@
 }
 
 .update-status-success {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .update-status-ready {
@@ -141,7 +141,7 @@
   margin: 0;
   padding: 0.5rem 0.65rem;
   overflow: auto;
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -188,7 +188,7 @@
 
 .app-fallback-banner summary {
   width: fit-content;
-  color: var(--accent-hover);
+  color: var(--accent-text-hover);
   cursor: pointer;
 }
 
@@ -578,35 +578,36 @@
   cursor: pointer;
 }
 
-/* Full search surface behind the palette's "See all results" — a centered
-   panel over a dimmed backdrop; the palette stays the fast path, this is the
-   research view (grouped sections, highlighting, no result cap pressure). */
-.search-results-overlay {
+/* Full search surface behind the palette's "See all results". The shared
+   Radix dialog owns modal semantics, focus containment, Escape, and return
+   focus; these rules retain the established search-specific presentation. */
+.gz-overlay.search-results-backdrop {
   position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 6vh 16px 16px;
-}
-
-.search-results-backdrop {
-  position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
 }
 
-.search-results-panel {
-  position: relative;
-  width: min(760px, 100%);
+.gz-dialog.search-results-panel {
+  top: 6vh;
+  left: 50%;
+  transform: translateX(-50%);
+  /* The shared centered-dialog keyframes end at translateY(-50%), which
+     would pull this deliberately top-aligned search surface off position. */
+  animation: none;
+  width: min(760px, calc(100% - 32px));
+  min-width: 0;
   max-height: 84vh;
-  display: flex;
-  flex-direction: column;
+  padding: 0;
+  gap: 0;
   background: var(--panel, var(--bg, #fff));
   border: 1px solid var(--border, #4443);
   border-radius: 6px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.gz-dialog.search-results-panel[data-state="open"],
+.gz-dialog.search-results-panel[data-state="closed"] {
+  animation: none;
 }
 
 .search-results-header {
@@ -1035,7 +1036,7 @@ button.search-palette-group-more:hover {
   opacity: 1;
 }
 .engine-pill-health-danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .engine-pill-health-muted {
   opacity: 0.58;
@@ -1577,7 +1578,7 @@ button.machine-memory-unload-button {
   color: var(--text-muted);
 }
 .engine-pill-health-policy-error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .engine-pill-emergency-stop {
   display: grid;
@@ -1612,10 +1613,10 @@ button.machine-memory-unload-button {
 }
 .engine-pill-emergency-notice {
   grid-column: 1 / -1;
-  color: var(--success);
+  color: var(--success-text);
 }
 .engine-pill-emergency-error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .engine-pill-empty {
   margin: 0.5rem 0 0 0;
@@ -2057,7 +2058,7 @@ button.machine-memory-unload-button {
   white-space: nowrap;
 }
 .queue-meter-panel-action-stop:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
 }
@@ -2292,7 +2293,7 @@ button.machine-memory-unload-button {
   text-align: center;
 }
 .document-drop-overlay i {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 1.35rem;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -3005,7 +3006,7 @@ button.machine-memory-unload-button {
 .project-rail-mark {
   width: 1.5rem;
   height: 1.5rem;
-  color: var(--accent);
+  color: var(--accent-text);
   /* The 18px glyph is centered inside this 24px alignment box. Offset that
      built-in 3px inset so the visible mark sits on the row's leading edge,
      then lower it by the same amount for optical alignment with the label. */
@@ -3030,7 +3031,7 @@ button.machine-memory-unload-button {
   border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .project-rail-row > .project-actions-trigger {
   position: absolute;
@@ -3095,7 +3096,7 @@ button.machine-memory-unload-button {
 }
 
 .app-nav-menu-item.danger {
-  color: var(--danger, #d9534f);
+  color: var(--danger-text, #d9534f);
 }
 .app-nav-menu-item.danger[data-disabled] {
   opacity: 0.5;
@@ -3171,7 +3172,7 @@ button.machine-memory-unload-button {
 .gezel-delete-error {
   display: block;
   margin-top: 0.7rem;
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Delete-confirmation extras: the internal-workspace opt-out checkbox and
@@ -3189,7 +3190,7 @@ button.machine-memory-unload-button {
 .project-delete-error {
   display: block;
   margin-top: 0.6rem;
-  color: var(--danger, #d9534f);
+  color: var(--danger-text, #d9534f);
 }
 
 /* Popup that resolves a project's pending questions (sidebar affordance).
@@ -3244,7 +3245,7 @@ button.machine-memory-unload-button {
 }
 
 .app-sidebar-document-drop-overlay i {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .app-sidebar-document-drop-status {
@@ -3457,7 +3458,7 @@ button.machine-memory-unload-button {
 }
 
 .app-sidebar-group-header.active .app-sidebar-group-toggle {
-  color: var(--accent);
+  color: var(--accent-text);
   background: transparent;
   border: none;
   border-radius: 0;
@@ -3492,7 +3493,7 @@ button.machine-memory-unload-button {
 
 .app-sidebar-collapse-toggle:hover {
   background: rgba(176, 114, 76, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Resize grip on the right edge (mirrors .chat-rail-grip). */
