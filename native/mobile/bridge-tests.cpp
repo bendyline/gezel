@@ -228,6 +228,13 @@ static void bridge_tests(const char * path) {
     load.max_model_bytes = 1024 * 1024;
     write_fixture(path, "custom-unsupported-template");
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_UNSUPPORTED);
+    // Gemma 4's template is Jinja the built-in renderer does not know; the
+    // bridge renders its turn format itself.
+    write_fixture(path, "{{ bos_token }}{% for m in messages %}<|turn>{{ m.role }}\n{{ m.content }}<turn|>\n{% endfor %}");
+    CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_OK);
+    text.clear();
+    CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+    CHECK(text == "aaaaaaaa");
     write_fixture(path, "chatml", 2);
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_UNSUPPORTED);
     write_fixture(path);

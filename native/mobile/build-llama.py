@@ -253,7 +253,7 @@ def main():
     (output / "manifest.json").write_text(json.dumps({
         "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": [], "gezelABIVersion": 1,
         "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in
-                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "CMakeLists.txt")},
+                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "chat_formats.h", "CMakeLists.txt")},
         "toolchains": toolchains, "settings": settings, "files": checksums,
         "verification": {"linkSmoke": "passed", "deviceInference": "not-run", "hostContractTests": "passed" if args.target == "host" else "not-run"},
     }, indent=2) + "\n")

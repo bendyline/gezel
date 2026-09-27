@@ -143,10 +143,19 @@ failure or cancellation, the context is cleared before it can be reused.
 A request whose transcript starts the way the previous one did keeps that prefix
 instead of decoding it again, which is what makes a multi-step tool loop usable
 on a phone. Plain attention models drop the rest of their KV cache and continue.
-Recurrent and hybrid models (Qwen 3.5, LFM2, Granite 4) cannot drop a suffix, so
-the engine keeps one checkpoint of their non-attention state, taken one token
-before the end of each prompt, and resumes from it when the next transcript
-extends that prompt. It is 19 MiB for Qwen 3.5 2B whatever the prompt length.
+Recurrent and hybrid models (Qwen 3.5, LFM2, Granite 4) cannot drop a suffix, and
+a sliding window (Gemma) has already evicted the positions a longer prompt needs,
+so the engine keeps one checkpoint of the state attention memory cannot rebuild,
+taken one token before the end of each prompt, and resumes from it when the next
+transcript extends that prompt. It is 19 MiB for Qwen 3.5 2B whatever the prompt
+length.
+
+Prompts are formatted with llama.cpp's built-in chat templates. A template it
+does not know is refused, except Gemma 4's turn format (`<|turn>role … <turn|>`),
+which [chat_formats.h](chat_formats.h) renders for the text-only transcripts the
+bridge accepts. It matches the model's own Jinja template byte for byte on
+system, user and assistant turns, thinking stripped from replies, and
+consecutive assistant turns.
 Reused output can differ from a fresh prefill only where two tokens are nearly
 tied, because single-token and batched kernels round differently. A failed
 load releases the previously loaded model once admitted; validation/BUSY errors

@@ -27,7 +27,7 @@ async function fixture(run) {
         .join('\n'),
     );
     const bridgeSources = {};
-    for (const name of ['gezel_llama.h', 'gezel_llama.cpp', 'utf8_stream.h', 'CMakeLists.txt']) {
+    for (const name of ['gezel_llama.h', 'gezel_llama.cpp', 'utf8_stream.h', 'chat_formats.h', 'CMakeLists.txt']) {
       await writeFile(path.join(repo, 'native/mobile', name), name);
       bridgeSources[name] = hash(name);
     }

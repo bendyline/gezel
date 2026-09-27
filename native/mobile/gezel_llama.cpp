@@ -1,5 +1,6 @@
 #include "gezel_llama.h"
 #include "utf8_stream.h"
+#include "chat_formats.h"
 #include "llama.h"
 #include "gguf.h"
 
@@ -33,18 +34,21 @@ struct gezel_llama_engine {
     uint32_t batch_tokens = 0;
     uint32_t context_tokens = 0;
     std::string chat_template;
+    bool gemma4_turns = false;
     // Tokens held in the context's memory, in position order. Only a request
     // that finished cleanly leaves this set; everything else starts empty.
     std::vector<llama_token> cached;
     // Plain attention memory can drop a suffix and keep the rest exactly.
     // Recurrent and hybrid states (Qwen 3.5, LFM2, Granite 4) cannot: their
     // rollback snapshots serve speculative decoding, and reusing them changed
-    // greedy output (2026-09-26). They resume from a checkpoint instead.
+    // greedy output (2026-09-26). A sliding window (Gemma) has already evicted
+    // the positions a longer prompt's prefix needs. Both resume from a
+    // checkpoint instead.
     bool reusable_memory = false;
     // For those models, a copy of the state attention memory cannot rebuild,
     // taken one token before the end of the last prompt, and the tokens it
-    // covers. Every model a 6 GB phone can hold is hybrid, so without this
-    // each tool step re-reads the whole prompt. Qwen 3.5 2B's is 19 MiB at any
+    // covers. Every model a 6 GB phone can hold is hybrid or windowed, so
+    // without this each tool step re-reads the whole prompt. Qwen 3.5 2B's is 19 MiB at any
     // prompt length; its turn 2 fell from 10.9 s to 0.6 s with identical output.
     std::vector<uint8_t> checkpoint;
     std::vector<llama_token> checkpoint_tokens;
@@ -162,7 +166,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     if (strnlen(chat, max_prompt_bytes + 1) > max_prompt_bytes)
         return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Model chat template exceeds the byte limit");
     const llama_chat_message probe[] = {{"user", "Hello"}};
-    if (llama_chat_apply_template(chat, probe, 1, true, nullptr, 0) < 0)
+    engine.gemma4_turns = gezel_mobile::chat_formats::is_gemma4(chat);
+    if (!engine.gemma4_turns && llama_chat_apply_template(chat, probe, 1, true, nullptr, 0) < 0)
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Model chat template requires an unsupported Jinja renderer");
     engine.chat_template = chat;
     auto context = llama_context_default_params();
@@ -181,7 +186,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     if (!llama_get_memory(engine.context))
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Model does not support the required decoder memory");
     engine.context_tokens = std::min(options.context_tokens, llama_n_ctx(engine.context));
-    engine.reusable_memory = !llama_model_is_recurrent(engine.model) && !llama_model_is_hybrid(engine.model);
+    engine.reusable_memory = !llama_model_is_recurrent(engine.model) && !llama_model_is_hybrid(engine.model) &&
+        llama_model_n_swa(engine.model) == 0;
     engine.batch_tokens = options.batch_tokens;
     return GEZEL_LLAMA_OK;
 }
@@ -211,13 +217,24 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
     }
     if (std::strcmp(messages[count - 1].role, "user") != 0)
         return fail(error, GEZEL_LLAMA_INVALID_ARGUMENT, "Transcript must end with a user message");
-    const auto size = llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, nullptr, 0);
-    if (size < 0) return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Chat template cannot format this transcript");
-    if (size == 0 || static_cast<size_t>(size) > max_prompt_bytes)
-        return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
-    std::vector<char> prompt(static_cast<size_t>(size) + 1);
-    if (llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, prompt.data(), prompt.size()) != size)
-        return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Chat template size changed unexpectedly");
+    std::vector<char> prompt;
+    int32_t size;
+    if (engine.gemma4_turns) {
+        const auto text = gezel_mobile::chat_formats::gemma4(chat);
+        if (text.size() > max_prompt_bytes)
+            return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
+        prompt.assign(text.begin(), text.end());
+        prompt.push_back('\0');
+        size = static_cast<int32_t>(text.size());
+    } else {
+        size = llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, nullptr, 0);
+        if (size < 0) return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Chat template cannot format this transcript");
+        if (size == 0 || static_cast<size_t>(size) > max_prompt_bytes)
+            return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
+        prompt.resize(static_cast<size_t>(size) + 1);
+        if (llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, prompt.data(), prompt.size()) != size)
+            return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Chat template size changed unexpectedly");
+    }
     const llama_vocab * vocab = llama_model_get_vocab(engine.model);
     const auto required = llama_tokenize(vocab, prompt.data(), size, nullptr, 0, true, true);
     if (required == INT32_MIN || required >= 0)
