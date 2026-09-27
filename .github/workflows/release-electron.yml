@@ -951,6 +951,8 @@ jobs:
           runtime_dir="$data_dir/runtime"
           uninstaller="/Applications/Gezel.app/Contents/Resources/uninstall.sh"
           user_agent="$HOME/Library/LaunchAgents/com.bendyline.gezel.plist"
+          port_blocker_pid=""
+          port_blocker_log=$(mktemp)
 
           dump_pkg_diagnostics() {
             set +e
@@ -998,6 +1000,11 @@ jobs:
 
           cleanup() {
             set +e
+            if [[ -n "$port_blocker_pid" ]]; then
+              kill "$port_blocker_pid" 2>/dev/null || true
+              wait "$port_blocker_pid" 2>/dev/null || true
+            fi
+            rm -f "$port_blocker_log"
             if [[ -f "$uninstaller" ]]; then
               sudo /bin/bash "$uninstaller" --remove-machine-data --remove-shared-data
             else
@@ -1053,8 +1060,27 @@ jobs:
             return 1
           }
 
-          install_pkg "installing PKG from a clean machine state"
+          # A user's daemon can own 6228 while the machine broker is stopped
+          # during an upgrade. Exercise the actual shipped plist + portfile
+          # discovery with that port unavailable through both install passes.
+          node -e 'require("node:net").createServer().listen(6228, "127.0.0.1", () => console.log("ready"))' >"$port_blocker_log" 2>&1 &
+          port_blocker_pid=$!
+          for attempt in {1..30}; do
+            grep -q '^ready$' "$port_blocker_log" && break
+            kill -0 "$port_blocker_pid"
+            sleep 1
+          done
+          grep -q '^ready$' "$port_blocker_log"
+
+          install_pkg "installing PKG with the canonical port occupied"
           assert_installed_health
+          [[ "$port" -ne 6228 ]]
+          kill -0 "$port_blocker_pid"
+          # The extractor must publish root-owned, non-group/world-writable
+          # code directly; user adoption cannot depend on a later repair walk.
+          test -r "$data_dir/service/.gezel-bundle.shared-readonly-v1"
+          unsafe_code=$(sudo find -x "$data_dir/service" ! -type l \( ! -user root -o -perm -002 -o -perm -020 \) -print -quit)
+          [[ -z "$unsafe_code" ]]
 
           abandoned_staging="$data_dir/service.staging-999999999-11111111-2222-3333-4444-555555555555"
           echo "seeding an abandoned partial extraction to exercise retry cleanup"
@@ -1062,6 +1088,8 @@ jobs:
           sudo touch "$abandoned_staging/node_modules/partial/incomplete.js"
           install_pkg "reinstalling the same PKG to prove idempotency"
           assert_installed_health
+          [[ "$port" -ne 6228 ]]
+          kill -0 "$port_blocker_pid"
           [[ ! -e "$abandoned_staging" ]]
 
           echo "persistently disabling the service to exercise recovery"

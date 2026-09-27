@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import {
+  chmod,
   lstat,
   mkdir,
   readFile,
@@ -13,6 +15,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import * as tar from 'tar';
 
 /**
@@ -23,6 +26,7 @@ import * as tar from 'tar';
  * rebuilds with the same `package.json` version).
  */
 const SHA_SENTINEL = '.gezel-bundle.sha256';
+const SHARED_MODE_SENTINEL = '.gezel-bundle.shared-readonly-v1';
 
 /**
  * What `installTarball` appends to the install dir to name a staging tree:
@@ -108,6 +112,13 @@ export interface ExtractOptions {
    * for nothing.
    */
   force?: boolean;
+  /**
+   * Installer-only POSIX policy: create product code as 0644/0755, owned by
+   * the extracting account (root), without restoring archive owners/mtimes.
+   * The standalone CLI supplies umask 022; never change the daemon's umask.
+   * This avoids a second chown/ACL/chmod walk over ~52k extracted files.
+   */
+  sharedReadOnly?: boolean;
 }
 
 export interface ExtractResult {
@@ -202,7 +213,10 @@ export async function readBundleMeta(metaPath: string): Promise<BundleMeta | nul
  *         tarball had been completely rebuilt with new deps.
  */
 export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<ExtractResult> {
-  const { installDir, tarballPath, metaPath, logger, force } = opts;
+  const { installDir, tarballPath, metaPath, logger, force, sharedReadOnly = false } = opts;
+  if (sharedReadOnly && (process.platform === 'win32' || (process.umask() & 0o755) !== 0)) {
+    throw new Error('Shared read-only extraction requires POSIX and umask 022 (installer CLI)');
+  }
   const startedAt = Date.now();
   const done = (
     action: ExtractResult['action'],
@@ -244,9 +258,19 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
   const installedVersion = existsSync(join(installDir, 'package.json'))
     ? await readPackageVersion(join(installDir, 'package.json'))
     : null;
+  // An older extraction can have the right bytes but private modes. Require
+  // a policy marker committed with the tree before skipping permission work.
+  const permissionsMatch =
+    !sharedReadOnly ||
+    (await readFile(join(installDir, SHARED_MODE_SENTINEL), 'utf8').catch(() => null)) ===
+      `${shippedSha}\n`;
 
   if (force) {
-    if (installedVersion !== null && (await readShaSentinel(installDir)) === shippedSha) {
+    if (
+      installedVersion !== null &&
+      permissionsMatch &&
+      (await readShaSentinel(installDir)) === shippedSha
+    ) {
       logger?.info?.(
         `[supervisor] service bundle v${shippedVersion} is already extracted at ${installDir}`,
       );
@@ -255,18 +279,18 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
     logger?.info?.(
       `[supervisor] force-extracting service bundle v${shippedVersion} to ${installDir}`,
     );
-    const files = await installTarball(tarballPath, installDir, meta, logger);
+    const files = await installTarball(tarballPath, installDir, meta, logger, sharedReadOnly);
     return done('forced', shippedVersion, shippedVersion, files);
   }
 
   if (installedVersion === null) {
     logger?.info?.(`[supervisor] extracting service bundle v${shippedVersion} to ${installDir}`);
-    const files = await installTarball(tarballPath, installDir, meta, logger);
+    const files = await installTarball(tarballPath, installDir, meta, logger, sharedReadOnly);
     return done('fresh-install', shippedVersion, shippedVersion, files);
   }
 
   const installedSha = await readShaSentinel(installDir);
-  if (installedSha !== null && installedSha === shippedSha) {
+  if (permissionsMatch && installedSha !== null && installedSha === shippedSha) {
     return done('up-to-date', installedVersion, shippedVersion, null);
   }
 
@@ -295,7 +319,7 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
       `[supervisor] re-extracting service bundle v${shippedVersion} (content drift: shipped sha=${shippedSha.slice(0, 12)} installed sha=${installedSha.slice(0, 12)})`,
     );
   }
-  const files = await installTarball(tarballPath, installDir, meta, logger);
+  const files = await installTarball(tarballPath, installDir, meta, logger, sharedReadOnly);
   return done('upgraded', shippedVersion, shippedVersion, files);
 }
 
@@ -326,6 +350,7 @@ async function installTarball(
   dest: string,
   meta: BundleMeta,
   logger?: ExtractOptions['logger'],
+  sharedReadOnly = false,
 ): Promise<number> {
   const tarballStat = await stat(tarballPath);
   if (tarballStat.size !== meta.sizeBytes) {
@@ -336,18 +361,34 @@ async function installTarball(
   const staging = `${dest}.staging-${process.pid}-${randomUUID()}`;
   const backup = `${dest}.previous`;
   await mkdir(dirname(dest), { recursive: true });
-  await mkdir(staging, { recursive: true });
+  await mkdir(staging, { mode: 0o700 });
 
   const hash = createHash('sha256');
   let extractedFileCount = 0;
   let bytesRead = 0;
   let loggedPercent = 0;
   try {
+    if (sharedReadOnly && process.platform === 'darwin') {
+      // Remove inherited ACLs once, before any descendants exist. node-tar
+      // writes modes, not ACLs; no per-file ACL repair is needed afterward.
+      await promisify(execFile)('/bin/chmod', ['-N', staging]);
+    }
     const extractor = tar.extract({
       cwd: staging,
       strict: true,
       preservePaths: false,
+      ...(sharedReadOnly ? { preserveOwner: false, noMtime: true, dmode: 0o755 } : {}),
       onentry: (entry) => {
+        if (sharedReadOnly) {
+          // Do not restore CI uid/gid, writable/special bits, or private
+          // archive modes. Keep the staging root private until verification.
+          entry.mode =
+            resolve(staging, entry.path) === staging
+              ? 0o700
+              : entry.type === 'Directory' || ((entry.mode ?? 0) & 0o111) !== 0
+                ? 0o755
+                : 0o644;
+        }
         // Directories are the one entry kind that leaves nothing countable
         // behind — the same rule `inventoryBundleArchivePaths` applies when
         // the release build computes `meta.fileCount`, so the two agree by
@@ -428,7 +469,6 @@ async function installTarball(
     const gezeldBin = join(staging, 'dist', 'bin', 'gezeld.js');
     if (existsSync(gezeldBin)) {
       try {
-        const { chmod } = await import('node:fs/promises');
         await chmod(gezeldBin, 0o755);
       } catch {
         /* best-effort */
@@ -445,6 +485,12 @@ async function installTarball(
       );
     }
     await writeShaSentinel(staging, meta.sha256.toLowerCase());
+    if (sharedReadOnly) {
+      await writeFile(join(staging, SHARED_MODE_SENTINEL), `${meta.sha256.toLowerCase()}\n`, {
+        mode: 0o644,
+      });
+      await chmod(staging, 0o755);
+    }
     logger?.info?.('[supervisor] service bundle staging tree verified; publishing');
   } catch (err) {
     await rm(staging, { recursive: true, force: true });

@@ -157,7 +157,9 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('awk -v key="$2" \'$1 ~ "(^|:)" key ":$" { print $2 }\'');
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
-    expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>6228<\/string>/);
+    // A user daemon may have acquired 6228 while the machine service was down.
+    // An unset override preserves the daemon's prefer-canonical + fallback path.
+    expect(macPlist).not.toContain('<key>GEZEL_PORT</key>');
     expect(macPlist).toMatch(/<key>GEZEL_SERVICE_ROLE<\/key>\s*<string>machine-engine<\/string>/);
     expect(macPlist).not.toContain('<key>GEZEL_UI_DIR</key>');
     expect(macPlist).toMatch(
@@ -177,6 +179,11 @@ describe('macOS machine-service filesystem security', () => {
     expect(identityValidation).toBeLessThan(enable);
     expect(enable).toBeLessThan(bootstrap);
     expect(bootstrap).toBeLessThan(health);
+    expect(macPostinstall).toContain('SERVICE_HEALTH_TIMEOUT=180');
+    expect(macPostinstall).toContain('SECONDS + SERVICE_HEALTH_TIMEOUT');
+    expect(macPostinstall).toContain('waiting for service health');
+    expect(macPostinstall).toContain('launchctl kickstart "system/${DAEMON_LABEL}"');
+    expect(macPostinstall).not.toContain('launchctl kickstart -k');
     expect(macPostinstall).toContain('--cacert "$RUNTIME_CERT"');
     expect(macPostinstall).toContain('"https://127.0.0.1:${runtime_port}/api/health"');
     expect(macPostinstall).toContain('grep -Eq \'"ok"[[:space:]]*:[[:space:]]*true\'');
@@ -544,23 +551,16 @@ describe('Linux machine-service filesystem security', () => {
     // supervisor/shared-service-tree.ts independently refuses to adopt a tree
     // that fails this at runtime, but the installer must not produce one.
     for (const script of [linuxPostinstall, macPostinstall]) {
-      expect(script).toContain('chmod go=u-w {} +');
       expect(script).not.toContain('chmod go+w');
       expect(script).not.toContain('chmod a+w');
     }
     expect(linuxPostinstall).toContain(
       'find "$SERVICE_TREE" -xdev \\\n  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} + \\\n  ! -type l -exec chmod go=u-w {} +',
     );
-    const macPublishStart = position(macPostinstall, 'find -x "$SERVICE_TREE" \\');
-    const macPublishEnd = position(macPostinstall, 'service tree published in');
-    const macPublish = macPostinstall.slice(macPublishStart, macPublishEnd);
-    expect(macPublish).toContain('-exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +');
-    // macOS inherited ACLs survive a mode change, so they must be stripped
-    // before the tree is published rather than after.
-    expect(macPublish).toContain('! -type l -exec chmod -N {} +');
-    expect(macPublish.indexOf('chmod -N {} +')).toBeLessThan(
-      macPublish.indexOf('chmod go=u-w {} +'),
-    );
+    // macOS now normalizes modes and clears inherited ACLs in the extractor,
+    // before publishing, without a second per-file metadata mutation pass.
+    expect(macPostinstall).toContain('--force \\\n  --shared-readonly');
+    expect(macPostinstall).not.toContain('find -x "$SERVICE_TREE"');
     // The private-state sweeps must not run over it: they would both undo the
     // publication and traverse ~33k files that step 2b is about to replace.
     expect(linuxPostinstall).toContain('-path "$SERVICE_TREE" -prune');
@@ -569,9 +569,6 @@ describe('Linux machine-service filesystem security', () => {
     // would apply to the tree being thrown away.
     expect(position(linuxPostinstall, '--dest="$SERVICE_TREE"')).toBeLessThan(
       position(linuxPostinstall, 'chmod go=u-w {} +'),
-    );
-    expect(position(macPostinstall, '--dest="$SERVICE_TREE"')).toBeLessThan(
-      position(macPostinstall, 'chmod go=u-w {} +'),
     );
   });
 

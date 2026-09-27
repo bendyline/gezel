@@ -510,6 +510,11 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /sudo dscl \. -read \/Users\/_gezeld/);
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
+  assert.match(macPkgSmoke, /createServer\(\)\.listen\(6228, "127\.0\.0\.1"/);
+  assert.match(macPkgSmoke, /\[\[ "\$port" -ne 6228 \]\]/);
+  assert.match(macPkgSmoke, /kill -0 "\$port_blocker_pid"/);
+  assert.match(macPkgSmoke, /\.gezel-bundle\.shared-readonly-v1/);
+  assert.match(macPkgSmoke, /! -user root -o -perm -002 -o -perm -020/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
   assert.match(macPkgSmoke, /service\.staging-999999999-/);
   assert.match(macPkgSmoke, /\[\[ ! -e "\$abandoned_staging" \]\]/);

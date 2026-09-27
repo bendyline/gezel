@@ -37,6 +37,7 @@ RUNTIME_PORT="${DATA_DIR}/runtime/port"
 RUNTIME_CERT="${DATA_DIR}/runtime/cert.pem"
 SERVICE_STDOUT="${DATA_DIR}/logs/service-stdout.log"
 SERVICE_STDERR="${DATA_DIR}/logs/service-stderr.log"
+SERVICE_HEALTH_TIMEOUT=180
 
 report_unhandled_error() {
   status="$1"
@@ -84,7 +85,8 @@ dump_service_diagnostics() {
 }
 
 wait_for_service_health() {
-  health_deadline=$((SECONDS + 60))
+  health_deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT))
+  health_report_at=$((SECONDS + 15))
   while [ "$SECONDS" -lt "$health_deadline" ]; do
     if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1 && \
        [ -s "$RUNTIME_PORT" ] && [ -s "$RUNTIME_CERT" ]; then
@@ -111,10 +113,14 @@ wait_for_service_health() {
         fi
       fi
     fi
+    if [ "$SECONDS" -ge "$health_report_at" ]; then
+      echo "[gezel postinstall] waiting for service health ($((health_deadline - SECONDS))s remaining)"
+      health_report_at=$((SECONDS + 15))
+    fi
     sleep 1
   done
 
-  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} did not become healthy within 60 seconds" >&2
+  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} did not become healthy within ${SERVICE_HEALTH_TIMEOUT} seconds" >&2
   dump_service_diagnostics
   return 1
 }
@@ -319,7 +325,8 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
   --tarball="$BUNDLE_TARBALL" \
   --meta="$BUNDLE_META" \
   --dest="$SERVICE_TREE" \
-  --force
+  --force \
+  --shared-readonly
 echo "[gezel postinstall] service bundle ready in $((SECONDS - extract_started))s"
 
 # Upgrade migration: remove legacy world/group permissions without following
@@ -329,7 +336,7 @@ echo "[gezel postinstall] service bundle ready in $((SECONDS - extract_started))
 #
 # Product code, interrupted product-code staging trees, and public assets are
 # pruned from this private-state pass. The service family is replaced or
-# reclaimed above and published below; assets have their own public-mode pass.
+# reclaimed/published above; assets have their own public-mode pass.
 # Keeping the actions in one find traversal matters on inode-heavy upgrades.
 echo "[gezel postinstall] hardening private machine state"
 private_hardening_started=$SECONDS
@@ -387,26 +394,10 @@ rm -f \
   "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
-# Readable, not private. This tree is the only thing under $DATA_DIR that is not
-# the daemon's private state: it is product code, the exact bytes of the
-# world-readable tarball inside /Applications/Gezel.app that produced it.
-# Publishing it lets each account's user daemon execute this copy instead of
-# unpacking a byte-identical second one into its own home — one ~33k-file
-# extraction per machine rather than one per account (see
-# supervisor/shared-service-tree.ts). $DATA_DIR stays 0711, so the directory is
-# reachable by path but not listable.
-#
-# `go=u-w` grants group/other exactly what the owner has, minus write, so
-# executables keep their exec bits and write access stays the daemon account's
-# alone. That last part is the property that matters: the supervisor refuses to
-# adopt a tree the calling account could rewrite.
-echo "[gezel postinstall] publishing service tree"
-service_publish_started=$SECONDS
-find -x "$SERVICE_TREE" \
-  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
-  ! -type l -exec chmod -N {} + \
-  -exec chmod go=u-w {} +
-echo "[gezel postinstall] service tree published in $((SECONDS - service_publish_started))s"
+# Product code was published root-owned and readable (0644/0755) by the
+# extractor. Do not walk it again: three metadata mutations on every file
+# cost over seven minutes on a real upgrade. Only this public-code extraction
+# uses umask 022; all private machine state retains the policy above.
 
 # 3. Install the LaunchDaemon plist (root:wheel 644 — Apple convention).
 if [ ! -f "$PLIST_SRC" ]; then
@@ -449,7 +440,9 @@ bootstrap_err=$(launchctl bootstrap system "$PLIST_DST" 2>&1) || {
   fi
 }
 
-kickstart_err=$(launchctl kickstart -k "system/${DAEMON_LABEL}" 2>&1) || {
+# bootstrap + RunAtLoad already starts it. Never use -k here: that kills the
+# just-started process and doubles cold-start work before our health wait.
+kickstart_err=$(launchctl kickstart "system/${DAEMON_LABEL}" 2>&1) || {
   echo "[gezel postinstall] kickstart reported '${kickstart_err}'; waiting for health" >&2
 }
 wait_for_service_health

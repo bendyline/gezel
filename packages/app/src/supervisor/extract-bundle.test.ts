@@ -1,6 +1,17 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import * as tar from 'tar';
@@ -32,7 +43,8 @@ interface SeedOptions {
   version: string;
   /** Override the sha256 baked into the meta. Defaults to a stable per-version sha. */
   sha256?: string;
-  extraFile?: { path: string; content: string };
+  extraFile?: { path: string; content: string; mode?: number };
+  modes?: { file: number; directory: number; bin: number };
 }
 
 function fakeSha(seed: string): string {
@@ -64,6 +76,14 @@ async function seedTarballBundle(
   if (opts.extraFile) {
     await mkdir(join(staging, opts.extraFile.path, '..'), { recursive: true });
     await writeFile(join(staging, opts.extraFile.path), opts.extraFile.content);
+    if (opts.extraFile.mode !== undefined) {
+      await chmod(join(staging, opts.extraFile.path), opts.extraFile.mode);
+    }
+  }
+  if (opts.modes) {
+    await chmod(join(staging, 'package.json'), opts.modes.file);
+    await chmod(join(staging, 'dist'), opts.modes.directory);
+    await chmod(join(staging, 'dist', 'bin', 'gezeld.js'), opts.modes.bin);
   }
   await tar.create({ gzip: true, file: tarballPath, cwd: staging }, ['.']);
   // Compute the REAL tarball sha for the meta: extractBundleIfNeeded now
@@ -207,6 +227,70 @@ describe('extractBundleIfNeeded', () => {
     metaPath = join(root, 'service-bundle.meta.json');
     installDir = join(root, 'install');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'publishes shared code with final safe modes, not archive modes',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, {
+        version: '1.2.3',
+        modes: { file: 0o666, directory: 0o777, bin: 0o777 },
+        extraFile: { path: 'native-helper', content: '#!/bin/sh\n', mode: 0o6777 },
+      });
+      const opts = { installDir, tarballPath, metaPath, force: true, sharedReadOnly: true };
+      const result = await extractBundleIfNeeded(opts);
+      expect(result.action).toBe('forced');
+      for (const path of ['', 'dist', 'dist/bin', 'dist/bin/gezeld.js', 'native-helper']) {
+        expect((await stat(join(installDir, path))).mode & 0o7777).toBe(0o755);
+      }
+      for (const path of [
+        'package.json',
+        '.gezel-bundle.sha256',
+        '.gezel-bundle.shared-readonly-v1',
+      ]) {
+        expect((await stat(join(installDir, path))).mode & 0o7777).toBe(0o644);
+      }
+      expect((await extractBundleIfNeeded(opts)).action).toBe('up-to-date');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'repairs same-sha private extractions once before taking the fast path',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, {
+        version: '1.2.3',
+        modes: { file: 0o600, directory: 0o700, bin: 0o700 },
+      });
+      const opts = { installDir, tarballPath, metaPath, force: true };
+      await extractBundleIfNeeded(opts);
+      expect((await stat(join(installDir, 'package.json'))).mode & 0o777).toBe(0o600);
+      expect((await extractBundleIfNeeded({ ...opts, sharedReadOnly: true })).action).toBe(
+        'forced',
+      );
+      expect((await stat(join(installDir, 'package.json'))).mode & 0o777).toBe(0o644);
+      expect((await stat(join(installDir, 'dist'))).mode & 0o777).toBe(0o755);
+      expect((await extractBundleIfNeeded({ ...opts, sharedReadOnly: true })).action).toBe(
+        'up-to-date',
+      );
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    'strips inherited macOS ACLs before creating shared code',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, { version: '1.2.3' });
+      execFileSync('/bin/chmod', [
+        '+a',
+        'everyone allow write,append,file_inherit,directory_inherit',
+        root,
+      ]);
+      await extractBundleIfNeeded({ installDir, tarballPath, metaPath, sharedReadOnly: true });
+      for (const path of ['', 'dist', 'package.json', 'dist/bin/gezeld.js']) {
+        expect(
+          execFileSync('/bin/ls', ['-lde', join(installDir, path)], { encoding: 'utf8' }),
+        ).not.toContain('everyone allow');
+      }
+    },
+  );
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
